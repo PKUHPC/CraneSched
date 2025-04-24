@@ -890,8 +890,10 @@ void CreateFolders() {
 int StartServer() {
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
-    CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
-    std::exit(1);
+    CRANE_WARN(
+        "Unable to set file descriptor limits to {}. Please increase the hard "
+        "limit if needed.",
+        file_max);
   }
   util::os::CheckProxyEnvironmentVariable();
 

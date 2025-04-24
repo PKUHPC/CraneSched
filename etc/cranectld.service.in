@@ -3,7 +3,8 @@ Description=CraneCtld
 After=network.target nss-lookup.target
 
 [Service]
-User=root
+User=crane
+Group=crane
 ExecStart=@CMAKE_INSTALL_PREFIX@/bin/cranectld
 
 [Install]
