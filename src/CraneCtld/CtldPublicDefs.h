@@ -562,6 +562,7 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
     requested_node_res_view = static_cast<ResourceView>(val.req_resources());
+
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
@@ -682,6 +683,7 @@ struct TaskInCtld {
 
     *task_info->mutable_req_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
+
     task_info->set_exit_code(runtime_attr.exit_code());
     task_info->set_priority(cached_priority);
 
