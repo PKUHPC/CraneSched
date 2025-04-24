@@ -296,11 +296,11 @@ bool MongodbClient::FetchJobRecords(
 
   // 0  task_id         task_db_id     mod_time       deleted       account
   // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx      partition_name
-  // 15 priority        time_eligible  time_start     time_end      time_suspended
+  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
+  // priority        time_eligible  time_start     time_end      time_suspended
   // 20 script          state          timelimit      time_submit   work_dir
   // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive     cpus_alloc_total
+  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
   // 35 mem_alloc_total device_map
 
   try {
@@ -918,11 +918,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   // 0  task_id         task_db_id     mod_time       deleted       account
   // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx      partition_name
-  // 15 priority        time_eligible  time_start     time_end      time_suspended
+  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
+  // priority        time_eligible  time_start     time_end      time_suspended
   // 20 script          state          timelimit      time_submit   work_dir
   // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive     cpus_alloc_total
+  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
   // 35 mem_alloc_total device_map
 
   // clang-format off
@@ -1008,11 +1008,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   // 0  task_id         task_db_id     mod_time       deleted       account
   // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx      partition_name
-  // 15 priority        time_eligible  time_start     time_end      time_suspended
+  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
+  // priority        time_eligible  time_start     time_end      time_suspended
   // 20 script          state          timelimit      time_submit   work_dir
   // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive     cpus_alloc_total
+  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
   // 35 mem_alloc_total device_map
 
   // clang-format off
