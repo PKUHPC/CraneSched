@@ -23,13 +23,13 @@ demo_admin): [CraneSched-Demo](https://hpc.pku.edu.cn/demo/cranesched)
 
 # Design Philosophy #
 
-**Powerful**: Supports both high-performance and intelligent computing job modes
-**Resource-Efficient**: Handles over 100,000 job schedules per second with fast job-resource matching
-**Highly Scalable**: Capable of managing clusters with millions of cores
-**User-Friendly**: Simple user and admin commands
-**Secure**: RBAC access control and encrypted communication
-**Highly Fault-Tolerant**: Automatic job recovery, no single point of failure, rapid system state recovery
-**Fully Open Source**: All source code is open and available
+- **Powerful**: Supports both high-performance and intelligent computing job modes
+- **Resource-Efficient**: Handles over 100,000 job schedules per second with fast job-resource matching
+- **Highly Scalable**: Capable of managing clusters with millions of cores
+- **User-Friendly**: Simple user and admin commands
+- **Secure**: RBAC access control and encrypted communication
+- **Highly Fault-Tolerant**: Automatic job recovery, no single point of failure, rapid system state recovery
+- **Fully Open Source**: All source code is open and available
 
 # Architecture #
 
