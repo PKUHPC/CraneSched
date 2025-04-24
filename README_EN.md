@@ -1,13 +1,13 @@
 # CraneSched Introduction #
 
-[中文](./README.md) | ENG
+[[中文](./README.md) | ENG]
 
-**CraneSched** is a **distributed intelligent scheduling system** independently developed by the High-Performance
-Computing (HPC) Public Platform at Peking University. Drawing on nearly six years of management and maintenance
-experience, the team designed CraneSched to meet the fundamental needs of HPC job scheduling: resource management,
-resource monitoring, job submission, job querying, and resource isolation. By integrating scenarios from both HPC and AI
-job scheduling, and using C++ and Go for development, CraneSched is a **fully open-source system** that merges
-high-performance and intelligent computing scheduling into one unified platform.
+**CraneSched** is a **distributed intelligent scheduling system** independently developed by the
+High-PerformanceComputing (HPC) Public Platform at Peking University. Drawing on nearly six years of management and
+maintenance experience, the team designed CraneSched to meet the fundamental needs of HPC job scheduling: resource
+management, resource monitoring, job submission, job querying, and resource isolation. By integrating scenarios from
+both HPC and AIjob scheduling, and using C++ and Go for development, CraneSched is a **fully open-source system** that
+merges high-performance and intelligent computing scheduling into one unified platform.
 
 CraneSched consists of a frontend (mainly developed in Go) and a backend (mainly developed in C++). We welcome
 developers to join and contribute!
