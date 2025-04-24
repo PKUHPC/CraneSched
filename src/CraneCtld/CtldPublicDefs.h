@@ -165,13 +165,17 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
+};
 
+struct RunTimeStatus {
   std::atomic_bool Ready{false};
 };
 
 }  // namespace Ctld
 
 inline Ctld::Config g_config{};
+
+inline Ctld::RunTimeStatus g_runtime_status{};
 
 namespace Ctld {
 

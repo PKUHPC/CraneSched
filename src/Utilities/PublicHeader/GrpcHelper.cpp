@@ -20,7 +20,7 @@
 
 #include "crane/Network.h"
 
-std::string GrpcConnectivityStateName(grpc_connectivity_state state) {
+std::string_view GrpcConnectivityStateName(grpc_connectivity_state state) {
   switch (state) {
   case GRPC_CHANNEL_IDLE:
     return "IDLE";

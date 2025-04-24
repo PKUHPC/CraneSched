@@ -30,7 +30,7 @@ struct TlsCertificates {
   std::string ServerKeyContent;
 };
 
-std::string GrpcConnectivityStateName(grpc_connectivity_state state);
+std::string_view GrpcConnectivityStateName(grpc_connectivity_state state);
 
 template <typename T>
 google::protobuf::Timestamp ToProtoTimestamp(

@@ -47,6 +47,8 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   // g_task_scheduler->QueryJobOfNode(craned_id, &request);
   google::protobuf::Empty reply;
   ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
   auto status = m_stub_->Configure(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
