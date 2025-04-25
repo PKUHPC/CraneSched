@@ -562,3 +562,8 @@ message CranedRemoteMeta {
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
 }
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
+}

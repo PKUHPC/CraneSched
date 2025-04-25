@@ -17,30 +17,14 @@
  */
 
 #pragma once
+#include <pmix_common.h>
 
-#include <list>
-
-#include "PmixColl.h"
-#include "crane/Lock.h"
-#include "parallel_hashmap/phmap.h"
+#include <string>
 
 namespace pmix {
 
-void PmixLibModexInvoke(pmix_modex_cbfunc_t mdx_fn, bool result, const char *data, size_t ndata,
-                        void *cbdata, void *rel_fn, void *rel_data);
+bool PmixDModexGet(const std::string& pmix_namespace, int rank, pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
-class PmixState {
- public:
-  PmixState() = default;
-
-  void Init();
-
-  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& ranges,
-                         size_t nranges);
- private:
-
-  util::rw_mutex m_mutex_;
-  std::list<std::shared_ptr<Coll>> m_coll_list_;
-};
+int PmixProcessRequest(const pmix_proc_t& pmix_proc, const std::string& send_nspace, bool status);
 
 } // namespace pmix

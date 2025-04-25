@@ -28,6 +28,8 @@ add_executable(craned
         Pmix/PmixCollTree.cpp
         Pmix/ReverseTree.cpp
         Pmix/ReverseTree.h
+        Pmix/PmixDModex.cpp
+        Pmix/PmixDModex.h
 
         CranedPreCompiledHeader.h
 

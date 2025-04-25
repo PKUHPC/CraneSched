@@ -18,7 +18,7 @@
 
 #include "Pmix.h"
 
-#include "TaskManager.h"
+#include "PmixDModex.h"
 #include "TaskManager.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
@@ -121,7 +121,7 @@ class PMIxServerModule {
          type = CollType::FENCE_RING;
      }
 
-     auto coll = g_pmix_state_ptr->PmixStateCollGet(type, procs, nprocs);
+     auto coll = g_pmix_server->GetPmixState()->PmixStateCollGet(type, procs, nprocs);
 
      if (coll == nullptr) return PMIX_ERROR;
 
@@ -135,6 +135,11 @@ class PMIxServerModule {
                                   const pmix_info_t info[], size_t ninfo,
                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      CRANE_DEBUG("DmodexFn is called");
+
+     auto rc = PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
+
+     if (rc) return PMIX_ERROR;
+
      return PMIX_SUCCESS;
    }
 
@@ -374,7 +379,8 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
   pmix_proc_t proc;
   PMIX_LOAD_NSPACE(proc.nspace, m_nspace_.c_str());
   for (uint32_t rank = 0; rank < m_ntasks_per_node_; rank++) {
-    proc.rank = rank;
+    uint32_t gloabl_rank = m_ntasks_per_node_ * m_node_id_ + rank;
+    proc.rank = gloabl_rank;
     {
       absl::BlockingCounter bc(1);
       if (PMIX_SUCCESS != PMIx_server_register_client(&proc, m_uid_, m_gid_, nullptr, OpCb, &bc)) {
@@ -445,14 +451,6 @@ void PmixTaskInstance::InfoSet_(const crane::grpc::TaskToD& task,  const std::un
   auto it = std::find(m_node_list_.begin(), m_node_list_.end(), m_hostname_);
   if (it != m_node_list_.end())
     m_node_id_ = std::distance(m_node_list_.begin(), it);
-
-  g_pmix_state_ptr->AddNameSpace(PmixNameSpace{
-    .m_namespace_ = m_nspace_,
-    .m_node_num_ = m_node_num_,
-    .m_task_num_ = m_task_num_,
-    .m_hostlist_ = m_node_list_
-  });
-
 }
 
 template <typename T>
@@ -472,13 +470,14 @@ pmix_info_t PmixTaskInstance::InfoLoad_(const std::string& key, const T& val, pm
 }
 
 PmixServer::~PmixServer() {
+
   if (!m_is_init_) return ;
+
+  util::os::DeleteFolder(m_server_tmpdir_);
 
   int rc = PMIx_server_finalize();
   if (rc != PMIX_SUCCESS)
     CRANE_ERROR("Failed to finalize PMIx server: {}", PMIx_Error_string(rc));
-
-  util::os::DeleteFolder(m_server_tmpdir_);
 
   CRANE_TRACE("Finalize PmixServer.");
 }
@@ -503,19 +502,43 @@ bool PmixServer::Init(const std::string& server_base_dir) {
     return false;
   }
 
-  CRANE_TRACE("Crane Pmix Server Initialized, dir: {}.", m_server_tmpdir_);
+  std::string hostname;
+  hostname.resize(256); // Resize to ensure enough space for the hostname
+  if (gethostname(hostname.data(), hostname.size()) == 0) {
+    hostname.resize(strlen(hostname.c_str())); // Resize to actual length of hostname
+  } else {
+    CRANE_ERROR("Failed to get hostname");
+    hostname = "unknown"; // Set a default value if gethostname fails
+  }
+  m_hostname_ = hostname;
 
-  g_pmix_state_ptr = std::make_unique<PmixState>();
-  g_pmix_state_ptr->Init(Craned::g_config.CranedIdOfThisNode);
+  CRANE_TRACE("Crane Pmix Server Initialized, dir: {}.", m_server_tmpdir_);
 
   return true;
 }
 
-bool PmixServer::RegisterTask(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map) {
-  task_id_t task_id = task.task_id();
 
+
+bool PmixServer::RegisterTask(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map) {
+  std::lock_guard<std::mutex> lock(m_mutex_);
+  task_id_t task_id = task.task_id();
   std::unique_ptr<PmixTaskInstance> pmix_task = std::make_unique<PmixTaskInstance>();
   if (!pmix_task->Init(task, env_map)) return false;
+
+  std::vector<uint32_t> task_map;
+  for (uint32_t rank = 0; rank < task.node_num()*task.ntasks_per_node(); rank++) {
+    task_map.emplace_back(rank / task.ntasks_per_node());
+  }
+
+  PmixNameSpace pmix_name_space{
+    .m_namespace_ = pmix_task->m_nspace_,
+    .m_node_num_ = pmix_task->m_node_num_,
+    .m_task_num_ = pmix_task->m_task_num_,
+    .m_task_map_ = std::move(task_map),
+    .m_hostlist_ = pmix_task->m_node_list_,
+  };
+
+  m_namespace_map_.emplace(pmix_task->m_nspace_, std::move(pmix_name_space));
 
   m_task_instances_.emplace(task_id, std::move(pmix_task));
 
@@ -531,7 +554,6 @@ std::optional<std::unordered_map<std::string, std::string>> PmixServer::SetupFor
     CRANE_ERROR("The task {} has not registered with the PMIx server.", task_id);
     return std::nullopt;
   }
-
   return iter->second->Setup(rank);
 }
 
@@ -542,8 +564,31 @@ void PmixServer::DeregisterTask(task_id_t task_id) {
     CRANE_ERROR("The task {} has not registered with the PMIx server.", task_id);
     return;
   }
-
   m_task_instances_.erase(iter);
+}
+
+
+std::optional<PmixNameSpace> PmixServer::PmixNamespaceGet(
+    const std::string& pmix_namespace) {
+
+  PmixNameSpace result;
+
+  bool found = false;
+  m_namespace_map_.modify_if(
+    pmix_namespace, [&](std::pair<const std::string, PmixNameSpace>& pair) {
+      result = pair.second;
+      found = true;
+    });
+
+  if (!found) return std::nullopt;
+
+  return std::move(result);
+}
+
+std::string PmixServer::GetHostname() { return m_hostname_; }
+
+PmixState *PmixServer::GetPmixState() {
+  return &m_pmix_state_;
 }
 
 }  // namespace pmix

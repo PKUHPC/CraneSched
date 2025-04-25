@@ -35,6 +35,18 @@
 
 namespace pmix {
 
+class PmixServer;
+
+struct PmixNameSpace {
+  std::string m_namespace_;
+  uint32_t m_node_num_ = 0; /* number of nodes in this namespace */
+  uint32_t m_task_num_ = 0; /* total number of tasks in this namespace */
+  // std::vector<uint32_t> m_task_cnts_; /* Number of tasks on each node of namespace */
+  // std::string m_task_map_packed_; /* Packed task mapping information */
+  std::vector<uint32_t> m_task_map_; /* i'th task is located on task_map[i] node */
+  std::vector<std::string> m_hostlist_;
+};
+
 class PmixTaskInstance {
  public:
   PmixTaskInstance() = default;
@@ -62,6 +74,8 @@ class PmixTaskInstance {
   uint32_t m_ncpus_{};  /* total possible number of cpus in job */
   std::string m_cli_tmpdir_;
 
+  friend PmixServer;
+
   void InfoSet_(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 
   template <typename T>
@@ -82,13 +96,35 @@ class PmixServer {
 
   void DeregisterTask(task_id_t task_id);
 
+  std::optional<PmixNameSpace> PmixNamespaceGet(const std::string& pmix_namespace);
+
+  std::string GetHostNameByRank(const PmixNameSpace& pmix_namespace, uint32_t rank);
+
+  std::string GetHostname();
+
+  PmixState* GetPmixState();
+
 private:
   std::string m_server_tmpdir_;
-  //todo: Parallel
+  std::string m_hostname_;
+
   std::mutex m_mutex_;
   std::unordered_map<task_id_t, std::unique_ptr<PmixTaskInstance>> m_task_instances_;
+
+  using NamespaceMap = phmap::parallel_flat_hash_map<
+    std::string,  // nspace
+    PmixNameSpace, phmap::priv::hash_default_hash<std::string>,
+    phmap::priv::hash_default_eq<std::string>,
+    std::allocator<std::pair<const std::string, PmixNameSpace>>, 4,
+    std::shared_mutex>;
+
+  NamespaceMap m_namespace_map_;
+
+  PmixState m_pmix_state_;
+
   bool m_is_init_{false};
 };
 
-
 } // namespace pmix
+
+inline std::unique_ptr<pmix::PmixServer> g_pmix_server;
