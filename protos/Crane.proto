@@ -864,6 +864,7 @@ message PmixDModexReq {
 message PmixDModexReply {
   bool ok = 1;
   int32 code = 2;
+  bytes data = 3;
 };
 
 

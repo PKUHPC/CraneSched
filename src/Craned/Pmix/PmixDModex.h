@@ -25,6 +25,6 @@ namespace pmix {
 
 bool PmixDModexGet(const std::string& pmix_namespace, int rank, pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
-int PmixProcessRequest(const pmix_proc_t& pmix_proc, const std::string& send_nspace, bool status);
+std::expected<std::string, int> PmixProcessRequest(const pmix_proc_t& pmix_proc, const std::string& send_nspace, bool status);
 
 } // namespace pmix
