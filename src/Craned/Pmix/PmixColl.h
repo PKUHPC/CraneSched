@@ -82,6 +82,10 @@ class Coll {
 
   bool PmixCollContribLocal(CollType type, char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
+  bool ProcessRingRequest(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+                          const std::vector<pmix_proc_t>& procs,
+                          const std::string& msg);
+
   size_t get_nprocs() const { return m_pset_.m_nprocs_; }
   const pmix_proc_t& get_procs(size_t index) const {
     if (index >= m_pset_.m_procs_.size())
@@ -135,6 +139,7 @@ class Coll {
     std::list<std::string> m_all_chldrn_hl_;
     std::string m_chldrn_str_;
     std::list<int> m_chldrn_ids_;
+    std::vector<std::string> m_childrn_hosts_;
   };
 
   /* tree coll functions */
@@ -147,20 +152,21 @@ class Coll {
   bool ProgressUpFwdWpc_();
   bool ProgressDownFwd_();
 
+  // TODO: 函数名clang-format
   void ResetCollTree();
   void ResetCollTreeUpFwd();
   void ResetCollTreeDownFwd();
 
   /* ring coll functions */
   bool PmixCollRingInit_(std::set<std::string> hostset);
-  bool PmixCollRingLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfunc,
-                          void* cbdata);
+  bool PmixCollRingLocal_(const std::string& data, size_t size,
+                          pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
   std::shared_ptr<Coll::CollRingCtx> CollRingCtxNew();
 
-  bool CollRingContrib(std::shared_ptr<CollRingCtx> coll_ring_ctx,
-                       int contrib_id, uint32_t hop_seq, char* data,
-                       size_t size);
+  bool CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx,
+                       int contrib_id, uint32_t hop_seq,
+                       const std::string& data, size_t size);
 
   void ProgressCollectRing_(std::shared_ptr<CollRingCtx> coll_ring_ctx);
 
@@ -168,7 +174,7 @@ class Coll {
 
   void ResetCollRing(std::shared_ptr<CollRingCtx> coll_ring_ctx);
 
-  bool PmixCollRingNeighbor(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
+  bool PmixCollRingNeighbor_(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
 
   std::mutex m_lock_;
   uint32_t m_seq_;
@@ -183,8 +189,8 @@ class Coll {
   void* m_cbdata_;
   time_t m_ts_, m_ts_next_;
 
-  CollTree m_tree_;
-  CollRing m_ring_;
+  std::shared_ptr<CollTree> m_tree_;
+  std::shared_ptr<CollRing> m_ring_;
 };
 
 } // namespace pmix

@@ -846,11 +846,6 @@ message SendPmixRingMsgReq {
     uint32 msgsize = 6;
   };
 
-  message PmixProc {
-    string nspace = 1;
-    uint32 rank = 2;
-  }
-
   PmixRingMsgHdr pmix_ring_msg_hdr = 1;
   repeated PmixProc pmix_procs = 2;
   string msg = 3;
@@ -858,6 +853,17 @@ message SendPmixRingMsgReq {
 
 message SendPmixRingMsgReply {
   bool ok = 1;
+};
+
+message PmixDModexReq {
+  PmixProc pmix_proc = 1;
+  string local_namespace = 2;
+  bool status = 3;
+};
+
+message PmixDModexReply {
+  bool ok = 1;
+  int32 code = 2;
 };
 
 
@@ -946,7 +952,9 @@ service Craned {
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
 
+  /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
   rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
+  rpc PmixDModex(PmixDModexReq) returns (PmixDModexReply);
 }
 
 service CraneForeD {
