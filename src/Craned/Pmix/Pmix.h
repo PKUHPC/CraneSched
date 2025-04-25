@@ -35,6 +35,9 @@
 
 namespace pmix {
 
+void PmixLibModexInvoke(pmix_modex_cbfunc_t mdx_fn, int status, const char *data, size_t ndata,
+                        void *cbdata, void *rel_fn, void *rel_data);
+
 class PmixServer;
 
 struct PmixNameSpace {

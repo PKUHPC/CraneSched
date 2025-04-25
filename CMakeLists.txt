@@ -309,8 +309,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
 # TODO: optimize
 add_library(libpmix SHARED IMPORTED)
-set_target_properties(libpmix PROPERTIES IMPORTED_LOCATION /usr/local/pmix-2.2.5/lib/libpmix.so.2)
-set_target_properties(libpmix PROPERTIES INTERFACE_INCLUDE_DIRECTORIES /usr/local/pmix-2.2.5/include)
+set_target_properties(libpmix PROPERTIES IMPORTED_LOCATION /usr/local/lib/libpmix.so.2)
+set_target_properties(libpmix PROPERTIES INTERFACE_INCLUDE_DIRECTORIES /usr/local/include)
 set_target_properties(libpmix PROPERTIES LINK_FLAGS "-levent_pthreads -levent -lm -lutil -lz -ldl")
 
 if (ENABLE_BERKELEY_DB)

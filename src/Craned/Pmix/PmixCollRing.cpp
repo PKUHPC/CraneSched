@@ -26,24 +26,22 @@
 namespace pmix {
 
 bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
-  std::shared_ptr<CollRing> ring = this->m_ring_;
-
   bool is_next = false;
   for (const auto& host : hostset) {
     if (is_next) {
-      ring->m_next_craned_id_ = host;
+      m_ring_.m_next_craned_id_ = host;
       break;
     }
     if (host == g_pmix_server->GetHostname()) {
       is_next = true;
-      ring->m_next_craned_id_ = host;
+      m_ring_.m_next_craned_id_ = host;
     }
   }
 
-  ring->m_ctx_array_.resize(PMIX_COLL_RING_CTX_NUM);
+  m_ring_.m_ctx_array_.resize(PMIX_COLL_RING_CTX_NUM);
   for (int i = 0; i<PMIX_COLL_RING_CTX_NUM; i++) {
-    ring->m_ctx_array_[i] = std::make_shared<CollRingCtx>();
-    auto coll_ctx = ring->m_ctx_array_[i];
+    m_ring_.m_ctx_array_[i] = std::make_shared<CollRingCtx>();
+    auto coll_ctx = m_ring_.m_ctx_array_[i];
     coll_ctx->m_in_use_ = false;
     coll_ctx->m_seq_ = m_seq_;
     coll_ctx->m_contrib_local_ = false;
@@ -79,13 +77,12 @@ bool Coll::PmixCollRingLocal_(const std::string& data, size_t size,
 }
 
 std::shared_ptr<Coll::CollRingCtx> Coll::CollRingCtxNew() {
-  std::shared_ptr<CollRing> ring = this->m_ring_;
   uint32_t seq = this->m_seq_;
   std::shared_ptr<CollRingCtx> res_ctx = nullptr, free_ring_ctx = nullptr,
               coll_ring_ctx = nullptr;
 
   for (int i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
-    coll_ring_ctx = ring->m_ctx_array_[i];
+    coll_ring_ctx = m_ring_.m_ctx_array_[i];
 
     if (coll_ring_ctx->m_in_use_) {
       switch (coll_ring_ctx->m_state_) {
@@ -126,7 +123,7 @@ bool Coll::CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx, in
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(size);
-    pmix_ring_msg_hdr->set_craned_id(m_ring_->m_next_craned_id_);
+    pmix_ring_msg_hdr->set_craned_id(m_ring_.m_next_craned_id_);
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx->m_seq_);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);
@@ -140,7 +137,7 @@ bool Coll::CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx, in
 
     request.set_msg(coll_ring_ctx->m_ring_buf_);
 
-    bool result = g_craned_client->GetCranedStub(m_ring_->m_next_craned_id_)->SendPmixRingMsg(request);
+    bool result = g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(std::move(request));
     if (!result) {
       CRANE_ERROR("Cannot forward ring data");
       return false;
@@ -193,7 +190,7 @@ void Coll::InvokeCallBackRing(std::shared_ptr<CollRingCtx> coll_ring_ctx) {
   if (!m_cbfunc_)
       return ;
 
-  PmixLibModexInvoke(m_cbfunc_, true, coll_ring_ctx->m_ring_buf_.c_str(),
+  PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, coll_ring_ctx->m_ring_buf_.c_str(),
           coll_ring_ctx->m_ring_buf_.size(), m_cbdata_, nullptr, nullptr);
 
   m_cbfunc_ = nullptr;
@@ -231,7 +228,7 @@ bool Coll::PmixCollRingNeighbor_(
   std::shared_ptr<CollRingCtx> coll_ring_ctx = nullptr;
 
   for (size_t i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
-    auto ctx = this->m_ring_->m_ctx_array_[i];
+    auto ctx = this->m_ring_.m_ctx_array_[i];
     if (ctx->m_in_use_ && ctx->m_seq_ == hdr.seq()) {
        coll_ring_ctx = ctx;
     } else if (!ctx->m_in_use_) {
