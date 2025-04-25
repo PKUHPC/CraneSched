@@ -223,8 +223,8 @@ TaskManager::TaskManager() {
     m_uvw_loop_->run();
   });
 
-  m_pmix_server_ = std::make_unique<pmix::PmixServer>();
-  m_pmix_server_->Init(g_config.CraneBaseDir);
+  g_pmix_server = std::make_unique<pmix::PmixServer>();
+  g_pmix_server->Init(g_config.CraneBaseDir);
 }
 
 TaskManager::~TaskManager() {
@@ -396,7 +396,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     uint32_t task_id = instance->task.task_id();
 
     if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix")
-      m_pmix_server_->DeregisterTask(instance->task.task_id());
+      g_pmix_server->DeregisterTask(instance->task.task_id());
 
     // Remove indexes from pid to ProcessInstance*
     m_pid_proc_map_.erase(proc_iter);
@@ -1008,7 +1008,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix") {
       // Each task currently supports only one thread.
-      auto result = m_pmix_server_->SetupFork(instance->task.task_id(), instance->processes.size());
+      auto result = g_pmix_server->SetupFork(instance->task.task_id(), instance->processes.size());
 
       if (!result) {
         fmt::print(stderr, "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
@@ -1165,7 +1165,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Currently, only one type of PMIx is supported.
   if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix") {
       auto env_map = instance->GetTaskEnvMap();
-      if (!m_pmix_server_->RegisterTask(instance->task, env_map)) {
+      if (!g_pmix_server->RegisterTask(instance->task, env_map)) {
         CRANE_ERROR("Failed to initialize mpi server for task #{}", task_id);
         ActivateTaskStatusChangeAsync_(
           task_id, crane::grpc::TaskStatus::Failed,

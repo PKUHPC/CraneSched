@@ -552,3 +552,8 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp system_boot_time = 5;
   repeated uint32 nonexistent_jobs = 6;
 }
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
+}

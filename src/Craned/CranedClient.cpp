@@ -41,6 +41,19 @@ bool CranedStub::SendPmixRingMsg(const crane::grpc::SendPmixRingMsgReq& request)
   return true;
 }
 
+bool CranedStub::PmixDModex(const crane::grpc::PmixDModexReq& request) {
+  using crane::grpc::PmixDModexReply;
+
+  PmixDModexReply reply;
+  grpc::ClientContext context;
+  grpc::Status status;
+
+  status = m_stub_->PmixDModex(&context, request, &reply);
+  if (!status.ok()) return false;
+
+  return true;
+}
+
 void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
   int node_id = 0;
   for (const auto& craned_id : craned_id_list) {

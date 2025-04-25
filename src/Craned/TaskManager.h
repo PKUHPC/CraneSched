@@ -452,8 +452,6 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   static inline TaskManager* m_instance_ptr_;
-
-  std::unique_ptr<pmix::PmixServer> m_pmix_server_;
 };
 }  // namespace Craned
 
