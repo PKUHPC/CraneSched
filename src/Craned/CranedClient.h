@@ -34,9 +34,9 @@ class CranedStub {
 
   ~CranedStub() = default;
 
-  bool SendPmixRingMsg(const crane::grpc::SendPmixRingMsgReq& request);
+  bool SendPmixRingMsg( crane::grpc::SendPmixRingMsgReq request);
 
-  bool PmixDModex(const crane::grpc::PmixDModexReq& request);
+  std::expected<std::string, int> PmixDModex(crane::grpc::PmixDModexReq request);
 
  private:
 

@@ -28,7 +28,7 @@ CranedStub::CranedStub(CranedClient *craned_client)
 
 }
 
-bool CranedStub::SendPmixRingMsg(const crane::grpc::SendPmixRingMsgReq& request) {
+bool CranedStub::SendPmixRingMsg(crane::grpc::SendPmixRingMsgReq request) {
   using crane::grpc::SendPmixRingMsgReply;
 
   SendPmixRingMsgReply reply;
@@ -41,7 +41,7 @@ bool CranedStub::SendPmixRingMsg(const crane::grpc::SendPmixRingMsgReq& request)
   return true;
 }
 
-bool CranedStub::PmixDModex(const crane::grpc::PmixDModexReq& request) {
+std::expected<std::string, int> CranedStub::PmixDModex(crane::grpc::PmixDModexReq request) {
   using crane::grpc::PmixDModexReply;
 
   PmixDModexReply reply;
@@ -49,9 +49,9 @@ bool CranedStub::PmixDModex(const crane::grpc::PmixDModexReq& request) {
   grpc::Status status;
 
   status = m_stub_->PmixDModex(&context, request, &reply);
-  if (!status.ok()) return false;
+  if (!status.ok() || !reply.ok()) return std::unexpected(reply.code());
 
-  return true;
+  return reply.data();
 }
 
 void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
