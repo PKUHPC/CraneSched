@@ -20,19 +20,6 @@
 
 namespace pmix {
 
-void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, bool result,
-                        const char* data, size_t ndata, void* cbdata,
-                        void* rel_fn, void* rel_data) {
-  pmix_status_t rc = PMIX_SUCCESS;
-  pmix_release_cbfunc_t release_fn = (pmix_release_cbfunc_t)rel_fn;
-
-  // Currently, CraneSched only focuses on these two scenarios.
-  if (result) rc = PMIX_SUCCESS;
-  else rc = PMIX_ERROR;
-
-  cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
-}
-
 void PmixState::Init() {}
 
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(

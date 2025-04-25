@@ -27,6 +27,33 @@
 
 namespace pmix {
 
+void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
+                        const char* data, size_t ndata, void* cbdata,
+                        void* rel_fn, void* rel_data) {
+  pmix_status_t rc = PMIX_SUCCESS;
+  pmix_release_cbfunc_t release_fn = (pmix_release_cbfunc_t)rel_fn;
+
+  // Currently, CraneSched only focuses on these two scenarios.
+  switch (status) {
+  case PMIX_SUCCESS:
+    rc = PMIX_SUCCESS;
+    break;
+  case PMIX_ERR_INVALID_NAMESPACE:
+    rc = PMIX_ERR_INVALID_NAMESPACE;
+    break;
+  case PMIX_ERR_BAD_PARAM:
+    rc = PMIX_ERR_BAD_PARAM;
+    break;
+  case PMIX_ERR_TIMEOUT:
+    rc = PMIX_ERR_TIMEOUT;
+    break;
+  default:
+    rc = PMIX_ERROR;
+  }
+
+  cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
+}
+
 class PMIxServerModule {
   public:
    static int ClientConnectedCb(const pmix_proc_t *proc, void *server_object,
@@ -93,6 +120,7 @@ class PMIxServerModule {
      //   cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
      // }
 
+     // return PMIX_SUCCESS;
 
      std::vector<pmix_proc_t> procs;
      bool collect = false;
@@ -138,7 +166,7 @@ class PMIxServerModule {
 
      auto rc = PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 
-     if (rc) return PMIX_ERROR;
+     if (!rc) return PMIX_ERROR;
 
      return PMIX_SUCCESS;
    }
@@ -492,7 +520,7 @@ bool PmixServer::Init(const std::string& server_base_dir) {
   pmix_status_t rc;
 
   pmix_info_t *server_info;
-  PMIX_INFO_CREATE(server_info, 0);
+  PMIX_INFO_CREATE(server_info, 1);
   PMIX_INFO_LOAD(&server_info[0], PMIX_SERVER_TMPDIR, m_server_tmpdir_.c_str(), PMIX_STRING);
 
   rc = PMIx_server_init(&g_k_crane_pmix_cb, server_info, 1);

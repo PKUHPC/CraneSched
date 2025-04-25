@@ -190,7 +190,7 @@ class Coll {
   time_t m_ts_, m_ts_next_;
 
   std::shared_ptr<CollTree> m_tree_;
-  std::shared_ptr<CollRing> m_ring_;
+  CollRing m_ring_;
 };
 
 } // namespace pmix
