@@ -590,3 +590,8 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
 }
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
+}

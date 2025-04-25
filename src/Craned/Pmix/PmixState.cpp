@@ -33,9 +33,7 @@ void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, bool result,
   cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
 }
 
-void PmixState::Init(const std::string& hostname) {
-  m_hostname_ = hostname;
-}
+void PmixState::Init() {}
 
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
@@ -61,20 +59,6 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   m_coll_list_.emplace_back(coll);
 
   return coll;
-}
-
-std::optional<PmixNameSpace> PmixState::PmixNamespaceGet(
-    const std::string& pmix_namespace) {
-  auto iter = m_namespace_map_.find(pmix_namespace);
-  if (iter == m_namespace_map_.end()) return std::nullopt;
-
-  return iter->second;
-}
-
-std::string PmixState::GetHostname() { return m_hostname_; }
-
-void PmixState::AddNameSpace(const PmixNameSpace& pmix_namespace) {
-  m_namespace_map_.emplace(pmix_namespace.m_namespace_, pmix_namespace);
 }
 
 };

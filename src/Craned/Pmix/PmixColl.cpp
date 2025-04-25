@@ -18,6 +18,7 @@
 
 #include "PmixColl.h"
 
+#include "Pmix.h"
 #include "PmixState.h"
 #include "crane/Logger.h"
 
@@ -33,7 +34,7 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
   std::set<std::string> hostname_set;
 
   for (const auto& proc : procs) {
-    auto pmix_namespace = g_pmix_state_ptr->PmixNamespaceGet(proc.nspace);
+    auto pmix_namespace = g_pmix_server->PmixNamespaceGet(proc.nspace);
     if (!pmix_namespace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
@@ -51,7 +52,7 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
     return false;
   }
 
-  auto it = hostname_set.find(g_pmix_state_ptr->GetHostname());
+  auto it = hostname_set.find(g_pmix_server->GetHostname());
   if (it != hostname_set.end())
     m_peerid_ = std::distance(hostname_set.begin(), it);
 
