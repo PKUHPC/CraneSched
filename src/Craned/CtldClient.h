@@ -32,6 +32,15 @@ using grpc::Status;
 
 class CtldClient {
  public:
+  enum CtldClientState : uint8_t {
+    DISCONNECTED = 0,
+    NOTIFY_SENDING,
+    NOTIFY_SENT,
+    CONFIGURING,
+    REGISTER_SENDING,
+    ESTABLISHED,
+  };
+
   CtldClient() = default;
 
   ~CtldClient();
@@ -58,32 +67,21 @@ class CtldClient {
     m_on_ctld_disconnected_cb_ = std::move(cb);
   }
 
-  void StartNotifyConnected() {
+  void SetState(CtldClientState new_state) {
     absl::MutexLock lk(&m_register_mutex_);
-    m_notify_ctld_connected_ = true;
-  }
-
-  void StopNotifyConnected() {
-    absl::MutexLock lk(&m_register_mutex_);
-    m_notify_ctld_connected_ = false;
+    if (new_state == NOTIFY_SENDING) {
+      m_last_operation_time_.reset();
+    }
+    m_state_ = new_state;
   }
 
   void StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
                      const RegToken& token) {
     absl::MutexLock lk(&m_register_mutex_);
-    m_registering_ = true;
+    m_state_ = REGISTER_SENDING;
+    m_last_operation_time_.reset();
     m_nonexistent_jobs_ = nonexistent_jobs;
     m_token_ = token;
-  }
-
-  void StopRegister() {
-    absl::MutexLock lk(&m_register_mutex_);
-    m_registering_ = false;
-  };
-
-  void CranedUp() {
-    absl::MutexLock lk(&m_register_mutex_);
-    m_up_lined_ = true;
   }
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
@@ -120,14 +118,14 @@ class CtldClient {
 
   // Register status
   absl::Mutex m_register_mutex_;
-  bool m_notify_ctld_connected_{false} ABSL_GUARDED_BY(m_register_mutex_);
-  bool m_registering_{false} ABSL_GUARDED_BY(m_register_mutex_);
-  bool m_up_lined_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  CtldClientState m_state_{DISCONNECTED} ABSL_GUARDED_BY(m_register_mutex_);
+  std::optional<std::chrono::time_point<std::chrono::steady_clock>>
+      m_last_operation_time_{std::nullopt} ABSL_GUARDED_BY(m_register_mutex_);
   std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
-  RegToken m_token_ ABSL_GUARDED_BY(m_register_mutex_);
+  std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
   void NotifyCranedConnected_() const;
-  void CranedReady_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
+  bool CranedRegister_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
 };
 
 }  // namespace Craned

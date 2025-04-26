@@ -83,7 +83,7 @@ void CtldClient::NotifyCranedConnected_() const {
   CRANE_DEBUG("Notify Ctld CranedConnected.");
   crane::grpc::CranedConnectedCtldNotify req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
-  *req.mutable_token() = g_server->GetRegisterToken();
+  *req.mutable_token() = g_server->GetNextRegisterToken();
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
@@ -94,11 +94,12 @@ void CtldClient::NotifyCranedConnected_() const {
   }
 }
 
-void CtldClient::CranedReady_() {
-  CRANE_DEBUG("Sending CranedReady.");
+bool CtldClient::CranedRegister_() {
+  CRANE_DEBUG("Sending CranedRegister.");
   crane::grpc::CranedReadyRequest ready_request;
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
-  *ready_request.mutable_token() = m_token_;
+  *ready_request.mutable_token() = m_token_.value();
+  m_token_.reset();
   auto* grpc_meta = ready_request.mutable_remote_meta();
   auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
 
@@ -127,16 +128,16 @@ void CtldClient::CranedReady_() {
                        std::chrono::seconds(1));
   auto status = m_stub_->CranedReady(&context, ready_request, &ready_reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedReady failed: {}, retry later.", status.error_message());
-    return;
+    CRANE_DEBUG("CranedRegister failed: {}", status.error_message());
+    return false;
   }
   if (ready_reply.ok()) {
     g_server->SetReady(true);
-    m_registering_ = false;
-    m_up_lined_ = true;
     CRANE_INFO("Craned successfully Up.");
+    return true;
   } else {
-    CRANE_WARN("Craned ready get reply of false.");
+    CRANE_WARN("Craned register get reply of false.");
+    return false;
   }
 }
 
@@ -150,10 +151,13 @@ void CtldClient::AsyncSendThread_() {
         return !queue->empty();
       },
       &m_task_status_change_list_);
+  const auto reset_notify_sending = [this] {
+    m_last_operation_time_.reset();
+    m_state_ = NOTIFY_SENDING;
+  };
 
   bool prev_conn_state = false;
   uint retry_attempt = 0;
-  uint rpc_attempt = 0;
   while (true) {
     if (m_thread_stop_) break;
 
@@ -183,28 +187,33 @@ void CtldClient::AsyncSendThread_() {
 
     if (!prev_conn_state && connected) {
       CRANE_TRACE("Channel to CraneCtlD is connected.");
-      absl::MutexLock lk(&m_cb_mutex_);
-      if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
+      {
+        absl::MutexLock lk(&m_cb_mutex_);
+        if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
+      }
       retry_attempt = 0;
-      rpc_attempt = 0;
-    } else if (!connected && prev_conn_state) {
-      CRANE_TRACE("Channel to CraneCtlD is disconnected.");
       {
         absl::MutexLock lk(&m_register_mutex_);
-        m_up_lined_ = false;
+        m_state_ = NOTIFY_SENDING;
       }
+    } else if (!connected && prev_conn_state) {
+      CRANE_TRACE("Channel to CraneCtlD is disconnected.");
       {
         absl::MutexLock lk(&m_cb_mutex_);
         if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
       }
-      this->StopRegister();
-      this->StartNotifyConnected();
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        m_state_ = DISCONNECTED;
+      }
     }
 
     prev_conn_state = connected;
 
     if (!connected) {
-      uint64_t delay_time = retry_attempt >= 10 ? 10'000 : rpc_attempt * 1'000;
+      uint64_t delay_time =
+          retry_attempt >= 10 ? 10'000 : retry_attempt * 1'000;
+
       CRANE_INFO(
           "Channel to CraneCtlD is not connected. Reconnecting after {} "
           "seconds.",
@@ -212,36 +221,41 @@ void CtldClient::AsyncSendThread_() {
       retry_attempt++;
       std::this_thread::sleep_for(std::chrono::milliseconds(delay_time));
       continue;
-    } else {
-      bool notify_ctld_connected = false;
-      {
-        absl::MutexLock lk(&m_register_mutex_);
-        notify_ctld_connected = m_notify_ctld_connected_;
-      }
-
-      if (notify_ctld_connected) {
-        NotifyCranedConnected_();
-        rpc_attempt++;
-      }
-
-      bool send_register{false};
-      {
-        absl::MutexLock lk(&m_register_mutex_);
-        send_register = m_registering_;
-      }
-      if (send_register) {
-        CranedReady_();
-        rpc_attempt++;
-      }
     }
-    if (!m_up_lined_) {
-      uint sleep_time = rpc_attempt >= 10 ? 10'000 : rpc_attempt * 1'000;
-      CRANE_TRACE(
-          "Ctld client connected but not up yet, sleep for {} seconds and try "
-          "to up.",
-          sleep_time / 1000);
-      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
-      continue;
+    // Connected
+    {
+      absl::MutexLock lk(&m_register_mutex_);
+      auto now = std::chrono::steady_clock::now();
+
+      if (m_last_operation_time_.has_value() &&
+          now - m_last_operation_time_.value() <=
+              std::chrono::milliseconds(kRegisterOperationTimeoutMs)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100 /*MS*/));
+        continue;
+      }
+
+      {
+        // If any step timeout we start from notify.
+
+        if (m_state_ == NOTIFY_SENT) {
+          // Register never timeout.
+          CRANE_DEBUG("Last operation of notify. Start form notify.");
+          reset_notify_sending();
+        }
+
+        if (m_state_ == NOTIFY_SENDING) {
+          m_last_operation_time_ = now;
+          NotifyCranedConnected_();
+          m_state_ = NOTIFY_SENT;
+        } else if (m_state_ == REGISTER_SENDING) {
+          m_last_operation_time_ = now;
+          if (CranedRegister_()) {
+            m_state_ = ESTABLISHED;
+          } else {
+            reset_notify_sending();
+          }
+        }
+      }
     }
 
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(

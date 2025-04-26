@@ -30,9 +30,9 @@ grpc::Status CranedServiceImpl::Configure(
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
   CRANE_TRACE("Receive ConfigureCraned RPC from CraneCtld.");
-  g_ctld_client->StopNotifyConnected();
+  g_ctld_client->SetState(CtldClient::CONFIGURING);
   if (!g_server->ReceiveConfigure(request))
-    g_ctld_client->StartNotifyConnected();
+    g_ctld_client->SetState(CtldClient::NOTIFY_SENDING);
   return Status::OK;
 }
 
@@ -597,13 +597,15 @@ CranedServer::CranedServer(
   });
 }
 
-RegToken CranedServer::GetRegisterToken() {
+RegToken CranedServer::GetNextRegisterToken() {
   absl::MutexLock lk(&m_register_mutex_);
-  if (!m_register_token_.has_value()) {
-    m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
-    CRANE_TRACE("New register token: {}",
+  if (m_register_token_.has_value())
+    CRANE_TRACE("Register token {} deprecated.",
                 ProtoTimestampToString(m_register_token_.value()));
-  }
+
+  m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
+  CRANE_TRACE("New register token: {}",
+              ProtoTimestampToString(m_register_token_.value()));
   return m_register_token_.value();
 }
 

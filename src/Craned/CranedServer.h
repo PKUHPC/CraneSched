@@ -120,7 +120,7 @@ class CranedServer {
 
   void Wait() { m_server_->Wait(); }
 
-  [[nodiscard]] RegToken GetRegisterToken();
+  [[nodiscard]] RegToken GetNextRegisterToken();
 
   bool ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request);
 

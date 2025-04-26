@@ -658,7 +658,6 @@ void StartServer() {
                                                     std::move(init_promise));
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-  g_ctld_client->StartNotifyConnected();
   g_ctld_client->StartConnectingCtld();
   // Use config form ctld to init here
   {
