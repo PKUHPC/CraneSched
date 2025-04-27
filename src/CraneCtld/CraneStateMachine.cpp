@@ -15,6 +15,13 @@ CraneStateMachine::~CraneStateMachine() {
     if (!result)
       CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
   }
+
+  if (m_resv_db_) {
+    auto result = m_resv_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of reservation data!");
+  }
 }
 
 std::shared_ptr<buffer> CraneStateMachine::enc_log(CraneCtldOpType type,
@@ -95,6 +102,7 @@ bool CraneStateMachine::init(const std::string &db_path,
 #ifdef CRANE_HAVE_UNQLITE
     m_variable_db_ = std::make_unique<UnqliteDb>();
     m_fixed_db_ = std::make_unique<UnqliteDb>();
+    m_resv_db_ = std::make_unique<UnqliteDb>();
 #else
     CRANE_ERROR(
         "Select unqlite as the embedded db but it's not been compiled.");
@@ -105,6 +113,7 @@ bool CraneStateMachine::init(const std::string &db_path,
 #ifdef CRANE_HAVE_BERKELEY_DB
     m_variable_db_ = std::make_unique<BerkeleyDb>();
     m_fixed_db_ = std::make_unique<BerkeleyDb>();
+    m_resv_db_ = std::make_unique<BerkeleyDb>();
 #else
     CRANE_ERROR(
         "Select Berkeley DB as the embedded db but it's not been compiled.");
@@ -120,6 +129,8 @@ bool CraneStateMachine::init(const std::string &db_path,
   auto result = m_variable_db_->Init(db_path + "var_raft");
   if (!result) return false;
   result = m_fixed_db_->Init(db_path + "fix_raft");
+  if (!result) return false;
+  result = m_resv_db_->Init(db_path + "resv_raft");
   if (!result) return false;
 
   RestoreFromDB();
@@ -177,8 +188,8 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     buffer_serializer bs(data_out);
     bs.put_u8(OP_UNKNOWN);
     is_last_obj = false;
-  } else if (obj_id % 2 == 1) {
-    // Object ID = 1: start read var_value_map_
+  } else if (obj_id % 3 == 1) {
+    // Object ID %= 1: start read var_value_map_
     if (*it == var_value_map_.end()) {
       *it = fix_value_map_.begin();  // switch value map
       data_out = enc_log(OP_FIX_STORE, "", nullptr, 0);
@@ -190,15 +201,28 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
                        (*it)->second.size());
     is_last_obj = false;
     ++(*it);
-  } else if (obj_id % 2 == 0) {
-    // Object ID = 2: start read fix_value_map_
+  } else if (obj_id % 3 == 2) {
+    // Object ID %= 2: start read fix_value_map_
     if (*it == fix_value_map_.end()) {
-      data_out = enc_log(OP_FIX_STORE, "", nullptr, 0);
-      is_last_obj = true;
+      *it = resv_value_map_.begin();  // switch value map
+      data_out = enc_log(OP_RESV_STORE, "", nullptr, 0);
+      is_last_obj = false;
       return 0;
     }
 
     data_out = enc_log(OP_FIX_STORE, (*it)->first, (*it)->second.data(),
+                       (*it)->second.size());
+    is_last_obj = false;
+    ++(*it);
+  } else if (obj_id % 3 == 0) {
+    // Object ID %= 3: start read resv_value_map_
+    if (*it == resv_value_map_.end()) {
+      data_out = enc_log(OP_RESV_STORE, "", nullptr, 0);
+      is_last_obj = true;
+      return 0;
+    }
+
+    data_out = enc_log(OP_RESV_STORE, (*it)->first, (*it)->second.data(),
                        (*it)->second.size());
     is_last_obj = false;
     ++(*it);
@@ -218,8 +242,8 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
     auto ss_ptr = snapshot::deserialize(*snp_buf);
     m_snapshot_ = std::make_unique<snapshot_ctx>(ss_ptr, s.get_last_log_idx());
     obj_id = 1;
-  } else if (obj_id % 2 == 1) {
-    // Object ID = 1: start write var_value_map_
+  } else if (obj_id % 3 == 1) {
+    // Object ID %= 1: start write var_value_map_
     CraneCtldOpType type;
     std::string key;
     std::vector<uint8_t> value;
@@ -230,9 +254,22 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
       return;
     }
     var_value_map_[key] = std::move(value);
-    obj_id += 2;
-  } else if (obj_id % 2 == 0) {
-    // Object ID = 2: start write fix_value_map_
+    obj_id += 3;
+  } else if (obj_id % 3 == 2) {
+    // Object ID %= 2: start write fix_value_map_
+    CraneCtldOpType type;
+    std::string key;
+    std::vector<uint8_t> value;
+
+    dec_log(data, &type, &key, &value);
+    if (type == OP_RESV_STORE) {
+      obj_id = 3;
+      return;
+    }
+    fix_value_map_[key] = std::move(value);
+    obj_id += 3;
+  } else if (obj_id % 3 == 0) {
+    // Object ID = 3: start write resv_value_map_
     if (is_last_obj) {
       std::shared_ptr<buffer> snp_buf = s.serialize();
       auto ss_ptr = snapshot::deserialize(*snp_buf);
@@ -250,8 +287,8 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
     std::vector<uint8_t> value;
 
     dec_log(data, &type, &key, &value);
-    fix_value_map_[key] = std::move(value);
-    obj_id += 2;
+    resv_value_map_[key] = std::move(value);
+    obj_id += 3;
   }
 }
 
@@ -290,6 +327,8 @@ CraneStateMachine::ValueMapType *CraneStateMachine::GetValueMapInstance(
     return &var_value_map_;
   else if (db_index == 1)
     return &fix_value_map_;
+  else if (db_index == 2)
+    return &resv_value_map_;
   else
     return nullptr;
 }
@@ -300,7 +339,7 @@ bool CraneStateMachine::RestoreFromDB() {
                                             &last_committed_idx_, &size);
 
   if (fetch_result) {
-    CRANE_TRACE("Found last_committed_idx_ = {}", last_committed_idx_);
+    CRANE_TRACE("Found last_committed_idx_ = {}", last_committed_idx_.load());
   } else if (fetch_result.error() == crane::Internal::DbErrorCode::kNotFound) {
     CRANE_TRACE(
         "last_committed_idx_ not found in embedded db. Initialize it with "
@@ -333,6 +372,17 @@ bool CraneStateMachine::RestoreFromDB() {
     CRANE_ERROR("Failed to apply snapshots from fixed data!");
     return false;
   }
+
+  result = m_resv_db_->IterateAllKv(
+      [&](std::string &&key, std::vector<uint8_t> &&value) {
+        resv_value_map_[key] = std::move(value);
+        return true;
+      });
+
+  if (!result) {
+    CRANE_ERROR("Failed to apply snapshots from fixed data!");
+    return false;
+  }
   return true;
 }
 
@@ -354,6 +404,12 @@ void CraneStateMachine::Apply_(buffer &data) {
     break;
   case OP_FIX_DELETE:
     OnDelete(fix_value_map_, key);
+    break;
+  case OP_RESV_STORE:
+    OnStore(resv_value_map_, key, std::move(value));
+    break;
+  case OP_RESV_DELETE:
+    OnDelete(resv_value_map_, key);
     break;
   default:
     break;
@@ -385,7 +441,7 @@ void CraneStateMachine::create_snapshot_internal(std::shared_ptr<snapshot> ss) {
   util::lock_guard lg(snapshots_lock_);
   m_snapshot_ = std::make_unique<snapshot_ctx>(ss, ss->get_last_log_idx());
 
-  txn_id_t var_txn_id, fix_txn_id;
+  txn_id_t var_txn_id, fix_txn_id, resv_txn_id;
 
   g_embedded_db_client->BeginDbTransaction(m_variable_db_.get(), &var_txn_id);
   m_variable_db_->Clear(var_txn_id);
@@ -400,6 +456,13 @@ void CraneStateMachine::create_snapshot_internal(std::shared_ptr<snapshot> ss) {
     m_fixed_db_->Store(fix_txn_id, k, v.data(), v.size());
   }
   g_embedded_db_client->CommitDbTransaction(m_fixed_db_.get(), fix_txn_id);
+
+  g_embedded_db_client->BeginDbTransaction(m_resv_db_.get(), &resv_txn_id);
+  m_resv_db_->Clear(resv_txn_id);
+  for (const auto &[k, v] : resv_value_map_) {
+    m_resv_db_->Store(resv_txn_id, k, v.data(), v.size());
+  }
+  g_embedded_db_client->CommitDbTransaction(m_resv_db_.get(), resv_txn_id);
 }
 
 void CraneStateMachine::create_snapshot_sync(

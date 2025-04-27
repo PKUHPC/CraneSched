@@ -539,7 +539,7 @@ void CtldClient::AsyncSendThread_() {
       } else {
         CRANE_TRACE(
             "TaskStatusChange for task #{} sent to server #{}. reply.ok={}",
-            status_change.task_id, m_cur_leader_id_, reply.ok());
+            status_change.task_id, m_cur_leader_id_.load(), reply.ok());
         if (!reply.ok()) {
           // try again
           if (reply.cur_leader_id() != -2) {
