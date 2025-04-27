@@ -183,10 +183,9 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryLeaderInfoRequest *request,
       crane::grpc::QueryLeaderInfoReply *response) override;
 
-  grpc::Status AddFollower(
-      grpc::ServerContext *context,
-      const crane::grpc::AddFollowerRequest *request,
-      crane::grpc::AddFollowerReply *response) override;
+  grpc::Status AddFollower(grpc::ServerContext *context,
+                           const crane::grpc::AddFollowerRequest *request,
+                           crane::grpc::AddFollowerReply *response) override;
 
   grpc::Status RemoveFollower(
       grpc::ServerContext *context,

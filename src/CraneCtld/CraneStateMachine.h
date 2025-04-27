@@ -32,6 +32,8 @@ class CraneStateMachine : public state_machine {
     OP_VAR_DELETE = 2,
     OP_FIX_STORE = 3,
     OP_FIX_DELETE = 4,
+    OP_RESV_STORE = 5,
+    OP_RESV_DELETE = 6,
   };
 
   explicit CraneStateMachine(bool async_snapshot = false)
@@ -98,9 +100,9 @@ class CraneStateMachine : public state_machine {
 
  private:
   struct snapshot_ctx {
-    snapshot_ctx(){};
+    snapshot_ctx() {};
     snapshot_ctx(std::shared_ptr<nuraft::snapshot> &s, uint64_t i)
-        : snapshot(s), log_index(i){};
+        : snapshot(s), log_index(i) {};
     uint64_t log_index;
     std::shared_ptr<nuraft::snapshot> snapshot;
   };
@@ -139,8 +141,9 @@ class CraneStateMachine : public state_machine {
   // If `true`, snapshot will be created asynchronously.
   bool async_snapshot_;
 
-  ValueMapType var_value_map_, fix_value_map_;
-  std::unique_ptr<crane::Internal::IEmbeddedDb> m_variable_db_, m_fixed_db_;
+  ValueMapType var_value_map_, fix_value_map_, resv_value_map_;
+  std::unique_ptr<crane::Internal::IEmbeddedDb> m_variable_db_, m_fixed_db_,
+      m_resv_db_;
 };
 
 };  // namespace Ctld

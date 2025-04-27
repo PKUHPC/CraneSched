@@ -181,7 +181,7 @@ bool TaskScheduler::Init() {
   // Reservation should be recovered after creating m_resv_clean_thread_ thread.
   std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
       resv_req_map;
-  ok = g_embedded_db_client->RetrieveReservationInfo(&resv_req_map);
+  bool ok = g_embedded_db_client->RetrieveReservationInfo(&resv_req_map);
   if (!ok) {
     CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
     return false;

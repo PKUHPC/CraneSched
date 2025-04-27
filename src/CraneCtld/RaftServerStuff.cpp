@@ -110,7 +110,8 @@ bool RaftServerStuff::AddServerAsync(int server_id,
       m_raft_instance_->add_srv(srv_conf);
   if (!ret->get_accepted()) {
     CRANE_ERROR("Add Server failed: ret: {}, reason: {}.",
-                ret->get_result_code(), ret->get_result_str());
+                static_cast<int32_t>(ret->get_result_code()),
+                ret->get_result_str());
     return false;
   } else {
     CRANE_TRACE("Server #{} {} joining request submit success.", server_id,
@@ -174,7 +175,8 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
       // Something went wrong.
       // This means committing this log failed,
       // but the log itself is still in the log store.
-      CRANE_ERROR("Append log failed: {},{}", ret->get_result_code(),
+      CRANE_ERROR("Append log failed: {},{}",
+                  static_cast<int>(ret->get_result_code()),
                   ret->get_result_str());
       return false;
     }
@@ -280,18 +282,16 @@ void RaftServerStuff::GetNodeStatus(
     crane::grpc::QueryLeaderInfoReply *response) {
   std::vector<std::shared_ptr<srv_config>> configs;
   m_raft_instance_->get_srv_config_all(configs);
-  std::ranges::sort(configs,
-            [](const std::shared_ptr<srv_config> &a,
-               const std::shared_ptr<srv_config> &b) {
-              return a->get_id() < b->get_id();
-            });
+  std::ranges::sort(configs, [](const std::shared_ptr<srv_config> &a,
+                                const std::shared_ptr<srv_config> &b) {
+    return a->get_id() < b->get_id();
+  });
 
   std::vector<raft_server::peer_info> peers =
       m_raft_instance_->get_peer_info_all();
   std::ranges::sort(
-      peers,
-            [](const raft_server::peer_info &a,
-               const raft_server::peer_info &b) { return a.id_ < b.id_; });
+      peers, [](const raft_server::peer_info &a,
+                const raft_server::peer_info &b) { return a.id_ < b.id_; });
 
   int leader_id = m_raft_instance_->get_leader();
 

@@ -98,8 +98,8 @@ class NuRaftLogStore : public log_store {
     auto result = m_logs_db_->Fetch(0, key, nullptr, &n_bytes);
     if (!result) {
       if (result.error() != kNotFound) {
-        CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
-                    key);
+        CRANE_ERROR(
+            "Unexpected error when fetching the size of string key '{}'", key);
       }
       return nullptr;
     }
@@ -116,7 +116,7 @@ class NuRaftLogStore : public log_store {
     return buf;
   }
 
-  bool HasServersRun() const { return m_has_servers_run_;}
+  bool HasServersRun() const { return m_has_servers_run_; }
 
   void get_all_keys() {
     std::cout << "keys" << std::endl;
