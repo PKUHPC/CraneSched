@@ -136,7 +136,7 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
 grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedReadyReply *response) {
+    crane::grpc::CranedRegisterReply *response) {
   CRANE_TRACE("Craned {} trying to register.", request->craned_id());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     CRANE_WARN("Reject register request from unknown node {}",

@@ -201,7 +201,7 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
 
   grpc::Status CranedRegister(grpc::ServerContext *context,
                               const crane::grpc::CranedRegisterRequest *request,
-                              crane::grpc::CranedReadyReply *response);
+                              crane::grpc::CranedRegisterReply *response);
 
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,

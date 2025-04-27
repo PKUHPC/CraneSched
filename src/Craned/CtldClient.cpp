@@ -124,7 +124,7 @@ bool CtldClient::CranedRegister_() {
   grpc_meta->mutable_nonexistent_jobs()->Assign(m_nonexistent_jobs_.begin(),
                                                 m_nonexistent_jobs_.end());
 
-  crane::grpc::CranedReadyReply ready_reply;
+  crane::grpc::CranedRegisterReply ready_reply;
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
