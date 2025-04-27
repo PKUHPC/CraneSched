@@ -19,6 +19,8 @@
 
 #include "CranedClient.h"
 
+#include <pmix_common.h>
+
 #include "CranedPublicDefs.h"
 
 namespace Craned {
@@ -49,6 +51,7 @@ std::expected<std::string, int> CranedStub::PmixDModex(crane::grpc::PmixDModexRe
   grpc::Status status;
 
   status = m_stub_->PmixDModex(&context, request, &reply);
+  if (!status.ok()) return std::unexpected(PMIX_ERROR);
   if (!status.ok() || !reply.ok()) return std::unexpected(reply.code());
 
   return reply.data();
