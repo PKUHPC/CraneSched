@@ -423,7 +423,7 @@ install(FILES
         COMPONENT cranedc
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
-# Install configuration files
+# Install configuration files (644)
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         RENAME config.yaml.sample
@@ -440,11 +440,6 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
 install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         DESTINATION /etc/crane/
         RENAME database.yaml.sample
-        COMPONENT cranectldc
-        PERMISSIONS OWNER_READ OWNER_WRITE)
-
-install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
-        DESTINATION /etc/crane/
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE)
 
@@ -486,22 +481,22 @@ if ! id -u crane &>/dev/null; then
     useradd -r -s /sbin/nologin crane
 fi
 
-# Base Directory
+# Base Directory (755)
 mkdir -p /var/crane
 chown -R crane:crane /var/crane
-chmod 750 /var/crane
+chmod 755 /var/crane
 
-# Config Directory
+# Config Directory (755)
 mkdir -p /etc/crane
 chown -R crane:crane /etc/crane
-chmod 750 /etc/crane
+chmod 755 /etc/crane
 
 # Handle configuration files
 if [ ! -f /etc/crane/config.yaml ]; then
     if [ -f /etc/crane/config.yaml.sample ]; then
         cp /etc/crane/config.yaml.sample /etc/crane/config.yaml
         chown crane:crane /etc/crane/config.yaml
-        chmod 640 /etc/crane/config.yaml
+        chmod 644 /etc/crane/config.yaml
         echo \"Created new configuration file: /etc/crane/config.yaml\"
     fi
 fi
