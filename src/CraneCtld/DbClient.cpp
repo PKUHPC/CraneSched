@@ -861,7 +861,8 @@ DeviceMap MongodbClient::JsonStringToDeviceMap(
 
       bsoncxx::document::view type_map_view =
           device_doc["type_map"].get_document().view();
-      std::unordered_map<std::string, uint64_t> type_map = ParseTypeMap(type_map_view);
+      std::unordered_map<std::string, uint64_t> type_map =
+          ParseTypeMap(type_map_view);
 
       device_map[device_name] = {untyped_req_count, type_map};
     }
