@@ -31,6 +31,8 @@ std::expected<void, DbErrorCode> NuRaftMemoryDb::Store(txn_id_t txn_id,
     type = CraneStateMachine::OP_VAR_STORE;
   } else if (db_index_ == 1) {
     type = CraneStateMachine::OP_FIX_STORE;
+  } else if (db_index_ == 2) {
+    type = CraneStateMachine::OP_RESV_STORE;
   } else {
     return std::unexpected(DbErrorCode::kOther);
   }
@@ -67,6 +69,8 @@ std::expected<void, DbErrorCode> NuRaftMemoryDb::Delete(
     type = CraneStateMachine::OP_VAR_DELETE;
   } else if (db_index_ == 1) {
     type = CraneStateMachine::OP_FIX_DELETE;
+  } else if (db_index_ == 2) {
+    type = CraneStateMachine::OP_RESV_DELETE;
   } else {
     return std::unexpected(DbErrorCode::kOther);
   }
@@ -102,12 +106,20 @@ EmbeddedDbClient::~EmbeddedDbClient() {
     if (!result)
       CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
   }
+
+  if (m_resv_db_) {
+    auto result = m_resv_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of reservation data!");
+  }
 }
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
 #ifdef CRANE_WITH_RAFT
   m_variable_db_ = std::make_unique<NuRaftMemoryDb>(0);
   m_fixed_db_ = std::make_unique<NuRaftMemoryDb>(1);
+  m_resv_db_ = std::make_unique<NuRaftMemoryDb>(2);
 #else
 
   if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
