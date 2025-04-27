@@ -1455,8 +1455,10 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderInfo(
     const crane::grpc::QueryLeaderInfoRequest *request,
     crane::grpc::QueryLeaderInfoReply *response) {
 #ifdef CRANE_WITH_RAFT
-  if (g_raft_server->IsLeader()) g_raft_server->GetNodeStatus(response);
-  else return grpc::Status::CANCELLED;
+  if (g_raft_server->IsLeader())
+    g_raft_server->GetNodeStatus(response);
+  else
+    return grpc::Status::CANCELLED;
 #endif
   return grpc::Status::OK;
 }
@@ -1557,7 +1559,8 @@ grpc::Status CraneCtldServiceImpl::RemoveFollower(
 
   if (server_id == g_raft_server->GetLeaderId()) {
     response->set_ok(false);
-    response->set_reason("Follower cannot be removed because it is the leader.");
+    response->set_reason(
+        "Follower cannot be removed because it is the leader.");
     return grpc::Status::OK;
   }
 
