@@ -86,6 +86,9 @@ class Coll {
                           const std::vector<pmix_proc_t>& procs,
                           const std::string& msg);
 
+  bool PmixCollTreeChild(const CranedId& peer_host, const std::string& data);
+  bool PmixCollTreeParent(const CranedId& peer_host, const std::string& data);
+
   size_t get_nprocs() const { return m_pset_.m_nprocs_; }
   const pmix_proc_t& get_procs(size_t index) const {
     if (index >= m_pset_.m_procs_.size())
@@ -124,7 +127,7 @@ class Coll {
     CollTreeState m_state_;
     bool m_contrib_local_;
     uint32_t m_contrib_children_;
-    std::list<bool> m_contrib_child_;
+    std::vector<bool> m_contrib_child_;
     CollTreeSndState m_upfwd_status_;
     bool m_contrib_prnt_;
     uint32_t m_downfwd_cb_cnt_, m_downfwd_cb_wait_;
@@ -146,6 +149,7 @@ class Coll {
   bool PmixCollTreeInit_(std::set<std::string> hostset);
   bool PmixCollTreeLocal_(char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
+  void ProgressCollectTree_();
   bool ProgressCollect_();
   bool ProgressUpFwd_();
   bool ProgressUpFwdWsc_();
@@ -156,6 +160,8 @@ class Coll {
   void ResetCollTree();
   void ResetCollTreeUpFwd();
   void ResetCollTreeDownFwd();
+
+  void PmixCollLocalCbNodata(int status);
 
   /* ring coll functions */
   bool PmixCollRingInit_(std::set<std::string> hostset);
