@@ -189,7 +189,7 @@ class Coll {
   void* m_cbdata_;
   time_t m_ts_, m_ts_next_;
 
-  std::shared_ptr<CollTree> m_tree_;
+  CollTree m_tree_;
   CollRing m_ring_;
 };
 
