@@ -36,10 +36,35 @@ class CranedKeeper;
 class CranedStub {
  public:
   explicit CranedStub(CranedKeeper *craned_keeper);
+  CranedStub(const CranedStub &) = delete;
+
+  CranedStub &operator=(const CranedStub &) = delete;
 
   ~CranedStub();
 
+  void SetRegToken(const RegToken &token) {
+    absl::MutexLock l(&m_lock_);
+    m_token_ = token;
+  }
+
+  [[nodiscard]] bool CheckToken(const RegToken &token) {
+    absl::MutexLock l(&m_lock_);
+    bool ret = m_token_.has_value() && m_token_.value() == token;
+    if (!ret) {
+      CRANE_DEBUG("Token for {} mismatch, resetting token.", m_craned_id_);
+      m_token_.reset();
+    }
+    return ret;
+  }
+
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
+
+  void SetReady() {
+    CRANE_TRACE("Craned {} stub ready.", m_craned_id_);
+    m_ready_.store(true, std::memory_order_release);
+    absl::MutexLock l(&m_lock_);
+    m_token_.reset();
+  }
 
   static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequests(
       const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
@@ -62,7 +87,10 @@ class CranedStub {
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  bool Invalid() const { return m_invalid_.load(std::memory_order_acquire); }
+  bool Invalid() const {
+    return m_disconnected_.load(std::memory_order_acquire) ||
+           !m_ready_.load(std::memory_order_acquire);
+  }
 
  private:
   void HandleGrpcErrorCode_(grpc::StatusCode code);
@@ -75,12 +103,16 @@ class CranedStub {
   std::unique_ptr<crane::grpc::Craned::Stub> m_stub_;
 
   // Set if underlying gRPC is down.
-  std::atomic_bool m_invalid_;
+  std::atomic_bool m_disconnected_;
+  std::atomic_bool m_ready_{false};
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;
+
+  absl::Mutex m_lock_;
+  std::optional<RegToken> m_token_{std::nullopt} ABSL_GUARDED_BY(m_lock_);
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.

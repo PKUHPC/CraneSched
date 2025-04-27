@@ -28,7 +28,8 @@ using grpc::Status;
 CranedStub::CranedStub(CranedKeeper *craned_keeper)
     : m_craned_keeper_(craned_keeper),
       m_failure_retry_times_(0),
-      m_invalid_(true) {
+      m_disconnected_(true),
+      m_ready_(false) {
   // The most part of jobs are done in CranedKeeper::RegisterCraneds().
 }
 
@@ -40,7 +41,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
                                  const RegToken &token) {
   CRANE_TRACE("Configuring craned {} with token {}:{}", craned_id,
               token.seconds(), token.nanos());
-
+  this->SetRegToken(token);
   crane::grpc::ConfigureCranedRequest request;
   *request.mutable_token() = token;
   // For Supervisor recovery.
@@ -52,8 +53,11 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   auto status = m_stub_->Configure(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
-        "ConfigureCraned RPC for Node {} returned with status not ok: {}",
+        "ConfigureCraned RPC for Node {} returned with status not ok: {}. "
+        "Resetting token.",
         craned_id, status.error_message());
+    absl::MutexLock lock(&m_lock_);
+    m_token_.reset();
   }
 }
 
@@ -486,7 +490,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
       WriterLock lock(&m_connected_craned_mtx_);
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
-      craned->m_invalid_ = false;
+      craned->m_disconnected_ = false;
     }
     RegToken token;
     {
@@ -587,7 +591,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // READY -> IDLE (the only edge)
 
     // CRANE_TRACE("READY -> IDLE");
-    craned->m_invalid_ = true;
+    craned->m_disconnected_ = true;
+    craned->m_ready_ = false;
 
     next_tag_type = CqTag::kEstablishedCraned;
     break;
@@ -607,7 +612,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    craned->m_invalid_ = true;
+    craned->m_disconnected_ = true;
+    craned->m_ready_ = false;
 
     next_tag_type = std::nullopt;
     break;

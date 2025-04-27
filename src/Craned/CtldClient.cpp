@@ -96,7 +96,7 @@ void CtldClient::NotifyCranedConnected_() const {
 
 bool CtldClient::CranedRegister_() {
   CRANE_DEBUG("Sending CranedRegister.");
-  crane::grpc::CranedReadyRequest ready_request;
+  crane::grpc::CranedRegisterRequest ready_request;
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
   *ready_request.mutable_token() = m_token_.value();
   m_token_.reset();
@@ -126,7 +126,7 @@ bool CtldClient::CranedRegister_() {
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
-  auto status = m_stub_->CranedReady(&context, ready_request, &ready_reply);
+  auto status = m_stub_->CranedRegister(&context, ready_request, &ready_reply);
   if (!status.ok()) {
     CRANE_DEBUG("CranedRegister failed: {}", status.error_message());
     return false;

@@ -119,7 +119,11 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     // Before configure, craned should be connected but not online
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub != nullptr) stub->ConfigureCraned(craned_id, request->token());
+      if (stub != nullptr)
+        g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
+          stub->SetRegToken(token);
+          stub->ConfigureCraned(craned_id, token);
+        });
     } else {
       CRANE_TRACE("Already online craned {} notify craned connected.",
                   craned_id);
@@ -129,9 +133,9 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CranedReady(
+grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
-    const crane::grpc::CranedReadyRequest *request,
+    const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedReadyReply *response) {
   CRANE_TRACE("Craned {} trying to register.", request->craned_id());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
@@ -158,6 +162,21 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     response->set_ok(false);
     return grpc::Status::OK;
   }
+
+  auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
+  if (stub == nullptr) {
+    CRANE_WARN("Craned {} to be ready is not connected.", request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  if (!stub->CheckToken(request->token())) {
+    CRANE_WARN("Reject register request from node {} with invalid token.",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  stub->SetReady();
+
   g_meta_container->CranedUp(request);
   response->set_ok(true);
   return grpc::Status::OK;

@@ -24,7 +24,8 @@
 
 namespace Ctld {
 
-void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
+void CranedMetaContainer::CranedUp(
+    const crane::grpc::CranedRegisterRequest* req) {
   auto remote_meta = static_cast<CranedRemoteMeta>(req->remote_meta());
   const auto& craned_id = req->craned_id();
 

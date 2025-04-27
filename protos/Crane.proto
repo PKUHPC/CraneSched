@@ -49,7 +49,7 @@ message ConfigureCranedRequest {
   google.protobuf.Timestamp token = 4;
 }
 
-message CranedReadyRequest {
+message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
   google.protobuf.Timestamp token = 3;
@@ -844,7 +844,7 @@ service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
   rpc CranedConnectedCtld(CranedConnectedCtldNotify) returns (google.protobuf.Empty);
-  rpc CranedReady(CranedReadyRequest) returns (CranedReadyReply);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedReadyReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
