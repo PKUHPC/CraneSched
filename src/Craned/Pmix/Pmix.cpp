@@ -153,8 +153,10 @@ class PMIxServerModule {
 
      if (coll == nullptr) return PMIX_ERROR;
 
-     if (!coll->PmixCollContribLocal(type, data, ndata, cbfunc, cbdata))
+     if (!coll->PmixCollContribLocal(type, data, ndata, cbfunc, cbdata)) {
+       cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
+     }
 
      return PMIX_SUCCESS;
    }

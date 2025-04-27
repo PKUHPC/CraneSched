@@ -27,15 +27,17 @@ namespace pmix {
 
 bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
   bool is_next = false;
-  for (const auto& host : hostset) {
-    if (is_next) {
-      m_ring_.m_next_craned_id_ = host;
-      break;
+
+  auto iter = hostset.find(g_pmix_server->GetHostname());
+  if (iter != hostset.end()) {
+    auto next_iter = std::next(iter);
+    if (next_iter == hostset.end()) {
+      next_iter = hostset.begin();
     }
-    if (host == g_pmix_server->GetHostname()) {
-      is_next = true;
-      m_ring_.m_next_craned_id_ = host;
-    }
+    m_ring_.m_next_craned_id_ = *next_iter;
+  } else {
+    CRANE_ERROR("cannot find hostname: {}", g_pmix_server->GetHostname());
+    return false;
   }
 
   m_ring_.m_ctx_array_.resize(PMIX_COLL_RING_CTX_NUM);
