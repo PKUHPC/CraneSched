@@ -111,7 +111,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
 }
 
 bool MongodbClient::InsertRecoveredJob(
-    crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db) {
+    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
   document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
@@ -849,18 +849,19 @@ DeviceMap MongodbClient::JsonStringToDeviceMap(
     return device_map;
   }
   try {
-    auto bson_doc = bsoncxx::from_json(device_map_str);
-    auto bson_view = bson_doc.view();
+    bsoncxx::document::value bson_doc = bsoncxx::from_json(device_map_str);
+    bsoncxx::document::view bson_view = bson_doc.view();
 
     for (const auto& device_entry : bson_view) {
       const std::string device_name = std::string(device_entry.key());
-      auto device_doc = device_entry.get_document().view();
+      bsoncxx::document::view device_doc = device_entry.get_document().view();
 
       uint64_t untyped_req_count =
           device_doc["untyped_req_count"].get_int64().value;
 
-      auto type_map_view = device_doc["type_map"].get_document().view();
-      auto type_map = ParseTypeMap(type_map_view);
+      bsoncxx::document::view type_map_view =
+          device_doc["type_map"].get_document().view();
+      std::unordered_map<std::string, uint64_t> type_map = ParseTypeMap(type_map_view);
 
       device_map[device_name] = {untyped_req_count, type_map};
     }

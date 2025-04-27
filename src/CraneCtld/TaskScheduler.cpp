@@ -2446,7 +2446,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   task->allocated_res_view.SetToZero();
 
   absl::Time earliest_end_time = now + task->time_limit;
-  std::unordered_map<CranedId, ResourceView> allocated_node_res_view_map;
+  ResourceView requested_node_res_view;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
@@ -2530,12 +2530,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 
     if (task->TaskToCtld().exclusive()) {
-      ResourceView& allocated_node_res_view =
-          allocated_node_res_view_map[craned_index];
-      allocated_node_res_view.SetToZero();
-      allocated_node_res_view += craned_meta->res_total;
+      requested_node_res_view.SetToZero();
+      requested_node_res_view += craned_meta->res_total;
     } else {
-      allocated_node_res_view_map[craned_index] = task->requested_node_res_view;
+      requested_node_res_view = task->requested_node_res_view;
     }
 
     if constexpr (kAlgoRedundantNode) {
@@ -2551,9 +2549,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // Find all possible nodes that can run the task now.
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
-      bool ok =
-          allocated_node_res_view_map[craned_index].GetFeasibleResourceInNode(
-              craned_meta->res_avail, &feasible_res);
+      bool ok = requested_node_res_view.GetFeasibleResourceInNode(
+          craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
         for (const auto& [time, res] : time_avail_res_map) {
@@ -2589,10 +2586,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok = allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
+    bool ok = requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok = allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
+      ok = requested_node_res_view.GetFeasibleResourceInNode(
           craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
