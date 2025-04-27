@@ -124,7 +124,7 @@ class CtldClient {
   std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
-  void NotifyCranedConnected_() const;
+  bool NotifyCranedConnected_();
   bool CranedRegister_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
 };
 

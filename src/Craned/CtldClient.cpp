@@ -79,7 +79,7 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
   return num_removed >= 1;
 }
 
-void CtldClient::NotifyCranedConnected_() const {
+bool CtldClient::NotifyCranedConnected_() {
   CRANE_DEBUG("Notify Ctld CranedConnected.");
   crane::grpc::CranedConnectedCtldNotify req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
@@ -91,7 +91,9 @@ void CtldClient::NotifyCranedConnected_() const {
   grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+    return false;
   }
+  return true;
 }
 
 bool CtldClient::CranedRegister_() {
@@ -157,7 +159,7 @@ void CtldClient::AsyncSendThread_() {
   };
 
   bool prev_conn_state = false;
-  uint retry_attempt = 0;
+  uint retry_attempt = 1;
   while (true) {
     if (m_thread_stop_) break;
 
@@ -191,7 +193,7 @@ void CtldClient::AsyncSendThread_() {
         absl::MutexLock lk(&m_cb_mutex_);
         if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
       }
-      retry_attempt = 0;
+      retry_attempt = 1;
       {
         absl::MutexLock lk(&m_register_mutex_);
         m_state_ = NOTIFY_SENDING;
@@ -245,8 +247,10 @@ void CtldClient::AsyncSendThread_() {
 
         if (m_state_ == NOTIFY_SENDING) {
           m_last_operation_time_ = now;
-          NotifyCranedConnected_();
-          m_state_ = NOTIFY_SENT;
+          if (NotifyCranedConnected_())
+            m_state_ = NOTIFY_SENT;
+          else
+            m_last_operation_time_.reset();
         } else if (m_state_ == REGISTER_SENDING) {
           m_last_operation_time_ = now;
           if (CranedRegister_()) {
