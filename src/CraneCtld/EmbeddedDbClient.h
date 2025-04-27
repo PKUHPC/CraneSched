@@ -146,11 +146,11 @@ class EmbeddedDbClient {
   }
 
   bool BeginReservationDbTransaction(txn_id_t* txn_id) {
-    return BeginDbTransaction_(m_resv_db_.get(), txn_id);
+    return BeginDbTransaction(m_resv_db_.get(), txn_id);
   }
 
   bool CommitReservationDbTransaction(txn_id_t txn_id) {
-    return CommitDbTransaction_(m_resv_db_.get(), txn_id);
+    return CommitDbTransaction(m_resv_db_.get(), txn_id);
   }
 
   // Note: All operations in transaction will abort or rollback automatically if
