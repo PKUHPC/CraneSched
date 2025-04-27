@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "CranedClient.h"
 #include "Pmix.h"
 #include "PmixColl.h"
 #include "PmixState.h"
@@ -69,26 +70,27 @@ bool Coll::PmixCollTreeInit_(std::set<std::string> hostset) {
     m_tree_.m_all_chldrn_hl_.clear();
     m_tree_.m_chldrn_str_.clear();
   }
-  // TODO: hostlist
-  auto it = hostset.begin();
+
+  auto iter = hostset.begin();
   if (m_tree_.m_childrn_cnt_ >= static_cast<std::ptrdiff_t>(hostset.size())) {
     CRANE_ERROR("m_childrn_cnt_ indicates that the host does not exist.");
     return false;
   }
   for (size_t i = 0; i < m_tree_.m_childrn_cnt_; i++) {
-
+    m_tree_.m_childrn_hosts_.emplace_back(*iter);
+    ++iter;
   }
-  //
-  // ResetCollTreeUpFwd();
-  // ResetCollTreeDownFwd();
+
+  ResetCollTreeUpFwd();
+  ResetCollTreeDownFwd();
   m_cbdata_ = nullptr;
   m_cbfunc_ = nullptr;
 
   return true;
 }
 
-bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfunc,
-                              void* cbdata) {
+bool Coll::PmixCollTreeLocal_(char* data, size_t size,
+                              pmix_modex_cbfunc_t cbfunc, void* cbdata) {
   std::lock_guard<std::mutex> lock_guard(this->m_lock_);
 
   switch (m_tree_.m_state_) {
@@ -101,7 +103,7 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WPC:
   case CollTreeState::UPFWD_WSC:
-    return true;
+    return false;
   default:
     m_tree_.m_state_ = CollTreeState::SYNC;
     // TODO: 发送关闭作业通知
@@ -122,6 +124,12 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
   this->m_cbfunc_ = cbfunc;
   this->m_cbdata_ = cbdata;
 
+  ProgressCollectTree_();
+
+  return true;
+}
+
+void Coll::ProgressCollectTree_() {
   bool result = false;
   do {
     switch (m_tree_.m_state_) {
@@ -151,11 +159,9 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
       break;
     default:
       // CRANE_ERROR("unknown state {}", m_tree_.m_state_);
-        break;
+      break;
     }
   } while (result);
-
-  return true;
 }
 
 bool Coll::ProgressCollect_() {
@@ -176,12 +182,19 @@ bool Coll::ProgressCollect_() {
   if (!m_tree_.m_parent_host_.empty()) {
     m_tree_.m_upfwd_status_ = CollTreeSndState::ACTIVE;
 
-    // TODO: 向父节点消息发送
-    // rc = pmixp_server_send_nb(&ep, PMIXP_MSG_FAN_IN, coll->seq,m_tree_.ufwd_buf,_ufwd_sent_cb, cbdata);
-    // 设置消息头部
+    crane::grpc::PmixTreeUpwardForwardReq request{};
 
-    // 发送成功
-    m_tree_.m_upfwd_status_ = CollTreeSndState::DONE;
+    for (size_t i = 0; i < m_pset_.m_nprocs_; i++) {
+      auto proc = m_pset_.m_procs_[i];
+      auto* pmix_procs = request.mutable_pmix_procs()->Add();
+      pmix_procs->set_nspace(proc.nspace);
+      pmix_procs->set_rank(proc.rank);
+    }
+    request.set_peer_host(g_pmix_server->GetHostname());
+    request.set_msg(m_tree_.m_upfwd_buf_);
+    auto result = g_craned_client->GetCranedStub(m_tree_.m_parent_host_)->PmixTreeUpwardForward(std::move(request));
+    if (!result)
+      m_tree_.m_upfwd_status_ = CollTreeSndState::FAILED;
   } else {
     //  /* move data from input buffer to the output */
     m_tree_.m_downfwd_buf_.append(m_tree_.m_upfwd_buf_);
@@ -198,6 +211,11 @@ bool Coll::ProgressUpFwd_() {
   switch (m_tree_.m_upfwd_status_) {
     case CollTreeSndState::FAILED:
       // TODO：Upward forwarding failed, notify libpmix and abort the collective communication.
+      if (m_cbfunc_)
+        PmixLibModexInvoke(m_cbfunc_, PMIX_ERROR, nullptr, 0, m_cbdata_, nullptr, nullptr);
+      m_cbfunc_ = nullptr;
+      m_cbdata_ = nullptr;
+      ResetCollTree();
       return false;
     case CollTreeSndState::ACTIVE:
       /* still waiting for the send completion */
@@ -214,15 +232,41 @@ bool Coll::ProgressUpFwd_() {
     return false;
   }
 
+  ResetCollTreeUpFwd();
+
   m_tree_.m_state_ = CollTreeState::DOWNFWD;
   m_tree_.m_downfwd_status_ = CollTreeSndState::ACTIVE;
 
+  // TODO: 异步回调
+  m_tree_.m_downfwd_cb_wait_ = m_tree_.m_childrn_cnt_;
 
-  // TODO: ep 通信
-  for (int i = 0; i < m_tree_.m_childrn_cnt_; i++) {
-    // ep[i].type = PMIXP_EP_NOIDEID; // 设置端点类型为节点ID
-    // ep[i].ep.nodeid = m_tree_.chldrn_ids[i]; // 设置子节点的节点ID
-    // ep_cnt++; // 增加端点计数
+  for (const auto& host : m_tree_.m_childrn_hosts_) {
+    crane::grpc::PmixTreeDownwardForwardReq request{};
+
+    for (size_t i = 0; i < m_pset_.m_nprocs_; i++) {
+      auto proc = m_pset_.m_procs_[i];
+      auto* pmix_procs = request.mutable_pmix_procs()->Add();
+      pmix_procs->set_nspace(proc.nspace);
+      pmix_procs->set_rank(proc.rank);
+    }
+    request.set_peer_host(g_pmix_server->GetHostname());
+    request.set_msg(m_tree_.m_downfwd_buf_);
+
+    auto result = g_craned_client->GetCranedStub(host)
+                    ->PmixTreeDownwardForward(std::move(request));
+    if (!result) {
+      CRANE_ERROR("Cannot send data (size = {}) to {}", m_tree_.m_downfwd_buf_.size(), host);
+      m_tree_.m_downfwd_status_ = CollTreeSndState::FAILED;
+    }
+
+    CRANE_DEBUG("fwd to {}, size = {}", host, m_tree_.m_downfwd_buf_.size());
+  }
+
+  if (m_cbfunc_) {
+    m_tree_.m_downfwd_cb_wait_++;
+    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, m_tree_.m_downfwd_buf_.c_str(), m_tree_.m_downfwd_buf_.size(), m_cbdata_, nullptr, nullptr);
+    m_cbfunc_ = nullptr;
+    m_cbdata_ = nullptr;
   }
 
   return true;
@@ -239,7 +283,6 @@ bool Coll::ProgressUpFwdWsc_() {
     m_cbfunc_ = nullptr;
     m_cbdata_ = nullptr;
     ResetCollTree();
-
     return false;
   case CollTreeSndState::ACTIVE:
     /* still waiting for the send completion */
@@ -286,15 +329,16 @@ bool Coll::ProgressUpFwdWpc_() {
 
   /* local delivery */
   if (this->m_cbfunc_) {
-    // pmixp_coll_cbdata_t *cbdata;
-    // TODO:
+    PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS,m_tree_.m_downfwd_buf_.c_str(), m_tree_.m_downfwd_buf_.size(), m_cbdata_, nullptr, nullptr );
+    m_tree_.m_downfwd_cb_wait_++;
+    m_cbfunc_ = nullptr;
+    m_cbdata_ = nullptr;
   }
 
   return true;
 }
 
 bool Coll::ProgressDownFwd_() {
-
   /* if all children + local callbacks was invoked */
   if (m_tree_.m_downfwd_cb_wait_ == m_tree_.m_downfwd_cb_cnt_)
     m_tree_.m_downfwd_status_ = CollTreeSndState::DONE;
@@ -303,8 +347,8 @@ bool Coll::ProgressDownFwd_() {
   case CollTreeSndState::ACTIVE:
     return false;
   case CollTreeSndState::FAILED:
-    // TODO：down forwarding failed, notify libpmix and abort the collective
-    // communication.
+    PmixCollLocalCbNodata(PMIX_ERROR);
+    ResetCollTree();
     return false;
   case CollTreeSndState::DONE:
     break;
@@ -314,8 +358,99 @@ bool Coll::ProgressDownFwd_() {
     return false;
   }
 
+  ResetCollTree();
+
   return true;
 }
+bool Coll::PmixCollTreeChild(const CranedId& peer_host,
+                              const std::string& data) {
+  int child_id = -1;
+  auto it = std::find(m_tree_.m_childrn_hosts_.begin(),
+                      m_tree_.m_childrn_hosts_.end(), peer_host);
+
+  if (it == m_tree_.m_childrn_hosts_.end()) {
+    CRANE_DEBUG("contribution from the non-child node {}", peer_host);
+  } else {
+    child_id = std::distance(m_tree_.m_childrn_hosts_.begin(), it);
+  }
+
+  switch (m_tree_.m_state_) {
+  case CollTreeState::SYNC:
+    m_ts_ = time(nullptr);
+  case CollTreeState::COLLECT:
+    break;
+  case CollTreeState::UPFWD:
+  case CollTreeState::UPFWD_WSC:
+    // TODO: kill job
+    return false;
+  case CollTreeState::UPFWD_WPC:
+  case CollTreeState::DOWNFWD:
+    break;
+  default:
+    m_tree_.m_state_ = CollTreeState::SYNC;
+    // TODO: kill job
+    return false;
+  }
+
+  if (m_tree_.m_contrib_child_[child_id]) {
+    CRANE_DEBUG("multiple contribs from {}:(x:{})", peer_host, child_id);
+    ProgressCollectTree_();
+    return true;
+  }
+
+  m_tree_.m_upfwd_buf_.append(data);
+
+  m_tree_.m_contrib_child_[child_id] = true;
+  m_tree_.m_contrib_children_++;
+
+  ProgressCollectTree_();
+
+  CRANE_DEBUG("finish nodeid={}, child={}", peer_host, child_id);
+
+  return true;
+}
+bool Coll::PmixCollTreeParent(const CranedId& peer_host,
+                               const std::string& data) {
+  std::string expected_host = m_tree_.m_parent_host_;
+
+  if (expected_host != peer_host) {
+    ProgressCollectTree_();
+    return true;
+  }
+
+  switch (m_tree_.m_state_) {
+  case CollTreeState::SYNC:
+  case CollTreeState::COLLECT:
+    ProgressCollectTree_();
+    return true;
+  case CollTreeState::UPFWD_WSC:
+    // TODO: kill job
+    return false;
+  case CollTreeState::UPFWD:
+  case CollTreeState::UPFWD_WPC:
+    break;
+  case CollTreeState::DOWNFWD:
+    ProgressCollectTree_();
+    return true;
+  default:
+    m_tree_.m_state_ = CollTreeState::SYNC;
+    // TODO: kill job
+    return false;
+  }
+
+  if (m_tree_.m_contrib_prnt_) {
+    ProgressCollectTree_();
+    return true;
+  }
+
+  m_tree_.m_contrib_prnt_ = true;
+  m_tree_.m_downfwd_buf_.append(data);
+
+  ProgressCollectTree_();
+
+  return true;
+}
+
 void Coll::ResetCollTree() {
 
   switch (m_tree_.m_state_) {
@@ -352,28 +487,26 @@ void Coll::ResetCollTreeUpFwd() {
 
   m_tree_.m_contrib_children_ = 0;
   m_tree_.m_contrib_local_ = false;
-  m_tree_.m_contrib_child_.resize(m_tree_.m_childrn_cnt_);
-  // TODO: ep operator
-  // m_tree_.serv_offs = pmixp_server_buf_reset(m_tree_.ufwd_buf);
-  // if (SLURM_SUCCESS != _pack_coll_info(coll, m_tree_.ufwd_buf)) {
-  //   PMIXP_ERROR("Cannot pack ranges to message header!");
-  // }
-  // m_tree_.ufwd_offset = get_buf_offset(m_tree_.ufwd_buf);
-
+  m_tree_.m_contrib_child_.resize(m_tree_.m_childrn_cnt_, false);
+  m_tree_.m_upfwd_buf_ = "";
   m_tree_.m_upfwd_status_ = CollTreeSndState::DONE;
 }
 
 void Coll::ResetCollTreeDownFwd() {
   /* downwards status */
-  // TODO: buffer reset
 
+  m_tree_.m_downfwd_buf_ = "";
   m_tree_.m_downfwd_cb_cnt_ = 0;
   m_tree_.m_downfwd_cb_wait_ = 0;
   m_tree_.m_downfwd_status_ = CollTreeSndState::DONE;
   m_tree_.m_contrib_prnt_ = false;
-  /* Save the toal service offset */
-  // this->state.m_tree_.dfwd_offset = get_buf_offset(
-  //         coll->state.tree->dfwd_buf);
+}
+void Coll::PmixCollLocalCbNodata(int status) {
+  if (m_cbfunc_) {
+    PmixLibModexInvoke(m_cbfunc_, status, nullptr, 0, m_cbdata_, nullptr, nullptr);
+    m_cbfunc_ = nullptr;
+    m_cbdata_ = nullptr;
+  }
 }
 
 } // namespace pmix

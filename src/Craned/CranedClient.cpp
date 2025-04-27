@@ -42,6 +42,32 @@ bool CranedStub::SendPmixRingMsg(crane::grpc::SendPmixRingMsgReq request) {
 
   return true;
 }
+bool CranedStub::PmixTreeUpwardForward(
+    crane::grpc::PmixTreeUpwardForwardReq request) {
+  using crane::grpc::PmixTreeUpwardForwardReply;
+
+  PmixTreeUpwardForwardReply reply;
+  grpc::ClientContext context;
+  grpc::Status status;
+
+  status = m_stub_->PmixTreeUpwardForward(&context, request, &reply);
+  if (!status.ok() || !reply.ok()) return false;
+
+  return true;
+}
+bool CranedStub::PmixTreeDownwardForward(
+    crane::grpc::PmixTreeDownwardForwardReq request) {
+  using crane::grpc::PmixTreeDownwardForwardReply;
+
+  PmixTreeDownwardForwardReply reply;
+  grpc::ClientContext context;
+  grpc::Status status;
+
+  status = m_stub_->PmixTreeDownwardForward(&context, request, &reply);
+  if (!status.ok() || !reply.ok()) return false;
+
+  return true;
+}
 
 std::expected<std::string, int> CranedStub::PmixDModex(crane::grpc::PmixDModexReq request) {
   using crane::grpc::PmixDModexReply;
