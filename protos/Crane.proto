@@ -856,6 +856,26 @@ message SendPmixRingMsgReply {
   bool ok = 1;
 };
 
+message PmixTreeUpwardForwardReq {
+  repeated PmixProc pmix_procs = 1;
+  string peer_host = 2;
+  string msg = 3;
+}
+
+message PmixTreeUpwardForwardReply {
+  bool ok = 1;
+}
+
+message PmixTreeDownwardForwardReq {
+  repeated PmixProc pmix_procs = 1;
+  string peer_host = 2;
+  string msg = 3;
+}
+
+message PmixTreeDownwardForwardReply {
+  bool ok = 1;
+}
+
 message PmixDModexReq {
   PmixProc pmix_proc = 1;
   string local_namespace = 2;
@@ -955,6 +975,8 @@ service Craned {
 
   /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
   rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
+  rpc PmixTreeUpwardForward(PmixTreeUpwardForwardReq) returns (PmixTreeUpwardForwardReply);
+  rpc PmixTreeDownwardForward(PmixTreeDownwardForwardReq) returns (PmixTreeDownwardForwardReply);
   rpc PmixDModex(PmixDModexReq) returns (PmixDModexReply);
 }
 

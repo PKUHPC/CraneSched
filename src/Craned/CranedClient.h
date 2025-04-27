@@ -36,6 +36,10 @@ class CranedStub {
 
   bool SendPmixRingMsg( crane::grpc::SendPmixRingMsgReq request);
 
+  bool PmixTreeUpwardForward(crane::grpc::PmixTreeUpwardForwardReq request);
+
+  bool PmixTreeDownwardForward(crane::grpc::PmixTreeDownwardForwardReq request);
+
   std::expected<std::string, int> PmixDModex(crane::grpc::PmixDModexReq request);
 
  private:
