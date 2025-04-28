@@ -2514,6 +2514,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
           !(task->requested_node_res_view <= iter->second.res_total) ||
+          (task->TaskToCtld().exclusive() &&
+           !(craned_meta->res_total <= iter->second.res_total)) ||
           now + task->time_limit > iter->second.end_time) {
         continue;
       }
