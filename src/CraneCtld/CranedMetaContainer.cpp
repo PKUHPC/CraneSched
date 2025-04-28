@@ -45,7 +45,7 @@ void CranedMetaContainer::CranedUp(
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = true;
 
-  node_meta->remote_meta = std::move(remote_meta);
+  node_meta->remote_meta = CranedRemoteMeta(remote_meta);
 
   node_meta->res_total.allocatable_res +=
       node_meta->static_meta.res.allocatable_res;
@@ -65,7 +65,8 @@ void CranedMetaContainer::CranedUp(
 
     part_global_meta.alive_craned_cnt++;
   }
-  CRANE_INFO("Craned {} is up now.", req->craned_id());
+
+  CRANE_INFO("Craned {} is up now.", craned_id);
 }
 
 void CranedMetaContainer::CranedDown(const CranedId& craned_id) {

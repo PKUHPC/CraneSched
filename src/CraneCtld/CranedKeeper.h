@@ -112,7 +112,7 @@ class CranedStub {
   CranedId m_craned_id_;
 
   absl::Mutex m_lock_;
-  std::optional<RegToken> m_token_{std::nullopt} ABSL_GUARDED_BY(m_lock_);
+  std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_lock_){std::nullopt};
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.
