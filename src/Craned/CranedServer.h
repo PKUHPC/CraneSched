@@ -160,7 +160,7 @@ class CranedServer {
       m_configure_promise_;
   std::atomic_bool m_grpc_srv_ready_{false};
 
-  /*When supervisor ready, init with false*/
+  /* When supervisor ready, init with false */
   std::atomic_bool m_supervisor_recovered_{true};
 
   // Craned Register status

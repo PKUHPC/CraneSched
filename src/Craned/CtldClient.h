@@ -30,6 +30,41 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
+class CtldClientStateMachine {
+ public:
+  enum class State : uint8_t {
+    DISCONNECTED = 0,
+    REQUESTING_CONFIG,
+    CONFIGURING,
+    READY,
+  };
+
+  // State Actions:
+  void ActionRequestConfig();
+  void ActionConfigure();
+  void ActionReady();
+  void ActionDisconnected();
+
+  void SetActionRequestConfigCb(std::function<void()>&& cb);
+  void SetActionConfigureCb(std::function<void()>&& cb);
+  void SetActionReadyCb(std::function<void()>&& cb);
+  void SetActionDisconnectedCb(std::function<void>&& cb);
+
+  // Events:
+  void EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
+  void EvGetConfigReply();
+  void EvGrpcConnected();
+  void EvGrpcConnectionFailed();
+
+ private:
+  std::function<void()> m_action_request_config_cb_;
+  std::function<void()> m_action_configure_cb_;
+  std::function<void()> m_action_ready_cb_;
+  std::function<void()> m_action_disconnected_cb_;
+
+  std::optional<RegToken> m_register_token_;
+};
+
 class CtldClient {
  public:
   enum CtldClientState : uint8_t {
@@ -42,8 +77,13 @@ class CtldClient {
   };
 
   CtldClient() = default;
-
   ~CtldClient();
+
+  CtldClient(CtldClient const&) = delete;
+  CtldClient(CtldClient&&) = delete;
+
+  CtldClient& operator=(CtldClient const&) = delete;
+  CtldClient& operator=(CtldClient&&) = delete;
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
@@ -57,15 +97,9 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
-  void SetCtldConnectedCb(std::function<void()> cb) {
-    absl::MutexLock lk(&m_cb_mutex_);
-    m_on_ctld_connected_cb_ = std::move(cb);
-  }
+  void AddCtldConnectedCb(std::function<void()> cb);
 
-  void SetCtldDisconnectedCb(std::function<void()> cb) {
-    absl::MutexLock lk(&m_cb_mutex_);
-    m_on_ctld_disconnected_cb_ = std::move(cb);
-  }
+  void AddCtldDisconnectedCb(std::function<void()> cb);
 
   void SetState(CtldClientState new_state)
       ABSL_EXCLUSIVE_LOCK_FUNCTION(m_register_mutex_);
@@ -100,9 +134,9 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
-  absl::Mutex m_cb_mutex_;
-  std::function<void()> m_on_ctld_connected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
-  std::function<void()> m_on_ctld_disconnected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
+  std::atomic<bool> m_has_initialized_;
+  std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;
+  std::vector<std::function<void()>> m_on_ctld_disconnected_cb_chain_;
 
   absl::Notification m_start_connecting_notification_;
 

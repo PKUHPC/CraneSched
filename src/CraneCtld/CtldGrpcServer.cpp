@@ -115,6 +115,7 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
                request->craned_id());
     return grpc::Status::OK;
   }
+
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     CRANE_TRACE("Put craned {} into unavail.", craned_id);
     g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());

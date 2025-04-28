@@ -76,11 +76,11 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
+  auto raw_part_metas_map = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids) {
-    auto& raw_part_meta = raw_part_metas_map_->at(part_id);
+    auto& raw_part_meta = raw_part_metas_map->at(part_id);
     part_meta_ptrs.emplace_back(raw_part_meta.GetExclusivePtr());
   }
 
@@ -108,16 +108,17 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
-  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
-  return node_meta->alive;
+  auto craned_meta_ptr = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  CRANE_ASSERT(craned_meta_ptr);
+
+  return craned_meta_ptr->alive;
 }
 
 int CranedMetaContainer::GetOnlineCranedCount() {
   int count = 0;
   auto map_ptr = craned_meta_map_.GetMapConstSharedPtr();
-  for (auto& v : *map_ptr | std::ranges::views::values)
-    count += v.GetExclusivePtr()->alive;
+  for (const auto& v : *map_ptr | std::ranges::views::values)
+    if (v.GetExclusivePtr()->alive) count++;
   return count;
 }
 

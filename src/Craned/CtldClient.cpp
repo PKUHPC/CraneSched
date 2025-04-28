@@ -31,6 +31,8 @@ CtldClient::~CtldClient() {
 }
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
+  m_has_initialized_.store(true, std::memory_order::release);
+
   grpc::ChannelArguments channel_args;
   SetGrpcClientKeepAliveChannelArgs(&channel_args);
 
@@ -49,6 +51,24 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
+}
+
+void CtldClient::AddCtldConnectedCb(std::function<void()> cb) {
+  if (m_has_initialized_.load(std::memory_order::acquire)) {
+    CRANE_ERROR("CtldClient has been initialized, cannot add callback.");
+    return;
+  }
+
+  m_on_ctld_connected_cb_chain_.push_back(std::move(cb));
+}
+
+void CtldClient::AddCtldDisconnectedCb(std::function<void()> cb) {
+  if (m_has_initialized_.load(std::memory_order::acquire)) {
+    CRANE_ERROR("CtldClient has been initialized, cannot add callback.");
+    return;
+  }
+
+  m_on_ctld_disconnected_cb_chain_.push_back(std::move(cb));
 }
 
 void CtldClient::SetState(CtldClientState new_state) {
@@ -210,10 +230,8 @@ void CtldClient::AsyncSendThread_() {
     bool connected = (cur_grpc_state == GRPC_CHANNEL_READY);
     if (!prev_connected && connected) {
       CRANE_TRACE("Channel to CraneCtlD is connected.");
-      {
-        absl::MutexLock lk(&m_cb_mutex_);
-        if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
-      }
+      for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();
+
       retry_attempt = 1;
       {
         absl::MutexLock lk(&m_register_mutex_);
@@ -221,10 +239,9 @@ void CtldClient::AsyncSendThread_() {
       }
     } else if (!connected && prev_connected) {
       CRANE_TRACE("Channel to CraneCtlD is disconnected.");
-      {
-        absl::MutexLock lk(&m_cb_mutex_);
-        if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
-      }
+
+      for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
+
       {
         absl::MutexLock lk(&m_register_mutex_);
         m_state_ = DISCONNECTED;
