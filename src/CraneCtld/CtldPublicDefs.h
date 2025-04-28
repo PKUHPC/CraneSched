@@ -168,7 +168,7 @@ struct Config {
 };
 
 struct RunTimeStatus {
-  std::atomic_bool Ready{false};
+  std::atomic_bool srv_ready{false};
 };
 
 }  // namespace Ctld
