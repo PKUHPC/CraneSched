@@ -108,9 +108,9 @@ class CtldClient {
 
   // Register status
   absl::Mutex m_register_mutex_;
-  CtldClientState m_state_{DISCONNECTED} ABSL_GUARDED_BY(m_register_mutex_);
+  CtldClientState m_state_ ABSL_GUARDED_BY(m_register_mutex_){DISCONNECTED};
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
-      m_last_operation_time_{std::nullopt} ABSL_GUARDED_BY(m_register_mutex_);
+      m_last_operation_time_ ABSL_GUARDED_BY(m_register_mutex_){std::nullopt};
   std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
