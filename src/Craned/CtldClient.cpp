@@ -156,7 +156,7 @@ bool CtldClient::CranedRegister_() {
   }
 
   if (ready_reply.ok()) {
-    g_server->SetReady(true);
+    g_server->SetGrpcSrvReady(true);
     CRANE_INFO("Craned successfully Up.");
     return true;
   } else {

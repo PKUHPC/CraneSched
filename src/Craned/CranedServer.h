@@ -122,7 +122,8 @@ class CranedServer {
 
   [[nodiscard]] RegToken GetNextRegisterToken();
 
-  bool ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request);
+  bool HandleConfigReqFromCtld(
+      const crane::grpc::ConfigureCranedRequest *request);
 
   void PostRecvConfig(const crane::grpc::ConfigureCranedRequest &request,
                       const std::vector<task_id_t> &nonexistent_jobs);
@@ -133,22 +134,22 @@ class CranedServer {
     m_configure_promise_ = std::move(promise);
   };
 
-  void SetReady(bool ready) {
-    m_ready_.store(ready, std::memory_order_release);
+  void SetGrpcSrvReady(bool ready) {
+    m_grpc_srv_ready_.store(ready, std::memory_order_release);
   }
 
   [[nodiscard]] bool ReadyFor(RequestSource request_source) const {
-    if (!m_recovered_.load(std::memory_order_acquire)) return false;
-    if (request_source == RequestSource::CTLD) {
-      return m_ready_.load(std::memory_order_acquire);
-    } else {
-      return true;
-    }
+    if (!m_supervisor_recovered_.load(std::memory_order_acquire)) return false;
+
+    if (request_source == RequestSource::CTLD)
+      return m_grpc_srv_ready_.load(std::memory_order_acquire);
+
+    return true;
   }
 
   void FinishRecover() {
     CRANE_DEBUG("Craned finished recover.");
-    m_recovered_.store(true, std::memory_order_release);
+    m_supervisor_recovered_.store(true, std::memory_order_release);
   }
 
  private:
@@ -157,9 +158,10 @@ class CranedServer {
   absl::Mutex m_configure_promise_mtx_;
   std::optional<std::promise<crane::grpc::ConfigureCranedRequest>>
       m_configure_promise_;
-  std::atomic_bool m_ready_{false};
+  std::atomic_bool m_grpc_srv_ready_{false};
+
   /*When supervisor ready, init with false*/
-  std::atomic_bool m_recovered_{true};
+  std::atomic_bool m_supervisor_recovered_{true};
 
   // Craned Register status
   absl::Mutex m_register_mutex_ ABSL_ACQUIRED_BEFORE(m_configure_promise_);

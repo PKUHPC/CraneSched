@@ -30,9 +30,12 @@ grpc::Status CranedServiceImpl::Configure(
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
   CRANE_TRACE("Receive ConfigureCraned RPC from CraneCtld.");
+
   g_ctld_client->SetState(CtldClient::CONFIGURING);
-  if (!g_server->ReceiveConfigure(request))
+
+  if (!g_server->HandleConfigReqFromCtld(request))
     g_ctld_client->SetState(CtldClient::NOTIFY_SENDING);
+
   return Status::OK;
 }
 
@@ -46,6 +49,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
       response->add_failed_task_id_list(task_to_d.task_id());
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
@@ -538,6 +542,7 @@ grpc::Status CranedServiceImpl::CheckTaskStatus(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+
   bool exist = g_task_mgr->CheckTaskStatusAsync(request->task_id(), &status);
   response->set_ok(exist);
   response->set_status(status);
@@ -554,6 +559,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+
   bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
@@ -609,26 +615,26 @@ RegToken CranedServer::GetNextRegisterToken() {
   return m_register_token_.value();
 }
 
-bool CranedServer::ReceiveConfigure(
+bool CranedServer::HandleConfigReqFromCtld(
     const crane::grpc::ConfigureCranedRequest *request) {
   {
     absl::MutexLock reg_lk(&m_register_mutex_);
-    if (m_register_token_.has_value()) {
-      if (m_register_token_.value() != request->token()) {
-        CRANE_DEBUG(
-            "ConfigureCraned failed. Expected to receive token:{} but got "
-            "{}",
-            ProtoTimestampToString(m_register_token_.value()),
-            ProtoTimestampToString(request->token()));
-        return false;
-      } else {
-        m_register_token_.reset();
-      }
-    } else {
+    if (!m_register_token_.has_value()) {
       CRANE_WARN("Receive configure request but craned dose not have token.");
       return false;
     }
+
+    if (m_register_token_.value() != request->token()) {
+      CRANE_DEBUG(
+          "ConfigureCraned failed. Expected to recv token:{} but got {}",
+          ProtoTimestampToString(m_register_token_.value()),
+          ProtoTimestampToString(request->token()));
+      return false;
+    }
+
+    m_register_token_.reset();
   }
+
   absl::MutexLock lk(&m_configure_promise_mtx_);
   if (m_configure_promise_.has_value()) {
     // Receiver should call StartRegister;
