@@ -611,21 +611,23 @@ RegToken CranedServer::GetNextRegisterToken() {
 
 bool CranedServer::ReceiveConfigure(
     const crane::grpc::ConfigureCranedRequest *request) {
-  absl::MutexLock reg_lk(&m_register_mutex_);
-  if (m_register_token_.has_value()) {
-    if (m_register_token_.value() != request->token()) {
-      CRANE_DEBUG(
-          "ConfigureCraned failed. Expected to receive token:{} but got "
-          "{}",
-          ProtoTimestampToString(m_register_token_.value()),
-          ProtoTimestampToString(request->token()));
-      return false;
+  {
+    absl::MutexLock reg_lk(&m_register_mutex_);
+    if (m_register_token_.has_value()) {
+      if (m_register_token_.value() != request->token()) {
+        CRANE_DEBUG(
+            "ConfigureCraned failed. Expected to receive token:{} but got "
+            "{}",
+            ProtoTimestampToString(m_register_token_.value()),
+            ProtoTimestampToString(request->token()));
+        return false;
+      } else {
+        m_register_token_.reset();
+      }
     } else {
-      m_register_token_.reset();
+      CRANE_WARN("Receive configure request but craned dose not have token.");
+      return false;
     }
-  } else {
-    CRANE_WARN("Receive configure request but craned dose not have token.");
-    return false;
   }
   absl::MutexLock lk(&m_configure_promise_mtx_);
   if (m_configure_promise_.has_value()) {

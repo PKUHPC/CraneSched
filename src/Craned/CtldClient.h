@@ -67,22 +67,12 @@ class CtldClient {
     m_on_ctld_disconnected_cb_ = std::move(cb);
   }
 
-  void SetState(CtldClientState new_state) {
-    absl::MutexLock lk(&m_register_mutex_);
-    if (new_state == NOTIFY_SENDING) {
-      m_last_operation_time_.reset();
-    }
-    m_state_ = new_state;
-  }
+  void SetState(CtldClientState new_state)
+      ABSL_EXCLUSIVE_LOCK_FUNCTION(m_register_mutex_);
 
   void StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
-                     const RegToken& token) {
-    absl::MutexLock lk(&m_register_mutex_);
-    m_state_ = REGISTER_SENDING;
-    m_last_operation_time_.reset();
-    m_nonexistent_jobs_ = nonexistent_jobs;
-    m_token_ = token;
-  }
+                     const RegToken& token)
+      ABSL_EXCLUSIVE_LOCK_FUNCTION(m_register_mutex_);
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 

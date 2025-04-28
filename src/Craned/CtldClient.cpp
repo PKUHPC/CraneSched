@@ -51,6 +51,21 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
+void CtldClient::SetState(CtldClientState new_state) {
+  absl::MutexLock lk(&m_register_mutex_);
+  m_last_operation_time_ = std::chrono::steady_clock::now();
+  m_state_ = new_state;
+}
+
+void CtldClient::StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
+                               const RegToken& token) {
+  absl::MutexLock lk(&m_register_mutex_);
+  m_state_ = REGISTER_SENDING;
+  m_last_operation_time_.reset();
+  m_nonexistent_jobs_ = nonexistent_jobs;
+  m_token_ = token;
+}
+
 void CtldClient::TaskStatusChangeAsync(
     TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
@@ -236,12 +251,11 @@ void CtldClient::AsyncSendThread_() {
         continue;
       }
 
-      {
+      if (m_state_ != ESTABLISHED) {
         // If any step timeout we start from notify.
-
-        if (m_state_ == NOTIFY_SENT) {
+        if (m_last_operation_time_.has_value()) {
           // Register never timeout.
-          CRANE_DEBUG("Last operation of notify. Start form notify.");
+          CRANE_DEBUG("Last operation of notify timeout. Start form notify.");
           reset_notify_sending();
         }
 

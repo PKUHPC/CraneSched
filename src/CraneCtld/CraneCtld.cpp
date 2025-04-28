@@ -811,6 +811,7 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
+    // No need to worry disconnect before task scheduler init
     g_meta_container->CranedDown(craned_id);
     g_task_scheduler->TerminateTasksOnCraned(craned_id,
                                              ExitCode::kExitCodeCranedDown);
