@@ -57,23 +57,25 @@ bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
 
 bool Coll::PmixCollRingLocal_(const std::string& data, size_t size,
                               pmix_modex_cbfunc_t cbfunc, void* cbdata) {
-  std::lock_guard<std::mutex> lock_guard(this->m_lock_);
+  std::lock_guard lock_guard(this->m_lock_);
 
   /* setup callback info */
   this->m_cbfunc_ = cbfunc;
   this->m_cbdata_ = cbdata;
 
-  std::shared_ptr<CollRingCtx> collCtx = this->CollRingCtxNew();
-  if (!collCtx) {
+  std::shared_ptr<CollRingCtx> coll_ctx = this->CollRingCtxNew();
+  if (!coll_ctx) {
     CRANE_ERROR("Can not get new ring collective context, seq= {}",
                 this->m_seq_);
     return false;
   }
 
-  if (!CollRingContrib(collCtx, m_peerid_, 0, data, size)) return false;
+  // CRANE_DEBUG("contrib/loc: seq_num={}, state={}, size={}", coll_ctx->m_seq_, coll_ctx->m_state_, size);
 
-  collCtx->m_contrib_local_ = true;
-  this->ProgressCollectRing_(collCtx);
+  if (!CollRingContrib(coll_ctx, m_peerid_, 0, data, size)) return false;
+
+  coll_ctx->m_contrib_local_ = true;
+  this->ProgressCollectRing_(coll_ctx);
 
   return true;
 }
@@ -139,11 +141,22 @@ bool Coll::CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx, in
 
     request.set_msg(coll_ring_ctx->m_ring_buf_);
 
-    bool result = g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(std::move(request));
-    if (!result) {
-      CRANE_ERROR("Cannot forward ring data");
-      return false;
-    }
+    g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(std::move(request),
+      [seq = coll_ring_ctx->m_seq_, coll_ring_ctx, buf = coll_ring_ctx->m_ring_buf_, this](grpc::Status status) {
+      if (!status.ok()) {
+        CRANE_ERROR("Cannot forward ring data");
+        return ;
+      }
+        std::lock_guard lock_guard(this->m_lock_);
+        CRANE_DEBUG("called {}", coll_ring_ctx->m_seq_);
+        if (seq != coll_ring_ctx->m_seq_) {
+          CRANE_DEBUG("collective was reset!");
+          return ;
+        }
+
+        coll_ring_ctx->m_forward_cnt_++;
+        this->ProgressCollectRing_(coll_ring_ctx);
+    });
 
     coll_ring_ctx->m_forward_cnt_++;
     ProgressCollectRing_(coll_ring_ctx);
@@ -154,6 +167,8 @@ bool Coll::CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx, in
 
 void Coll::ProgressCollectRing_(const std::shared_ptr<CollRingCtx> coll_ring_ctx) {
   bool result = false;
+
+  assert(coll_ring_ctx->m_in_use_);
 
   do {
     result = false;
@@ -215,6 +230,16 @@ bool Coll::ProcessRingRequest(
     const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::vector<pmix_proc_t>& procs, const std::string& msg) {
 
+  if ((m_seq_-1) == hdr.seq()) {
+    return false;
+  } else if (m_seq_ != hdr.seq() && (m_seq_+1) != hdr.seq()) {
+    /* this is an unacceptable event: either something went
+     * really wrong or the state machine is incorrect.
+     * This will 100% lead to application hang.
+     */
+    // TODO: kill job
+    return false;
+  }
 
   if (!PmixCollRingNeighbor_(hdr, msg)) return false;
 
@@ -225,7 +250,7 @@ bool Coll::PmixCollRingNeighbor_(
     const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::string& msg) {
 
-  std::lock_guard<std::mutex> lock_guard(this->m_lock_);
+  std::lock_guard lock_guard(this->m_lock_);
 
   std::shared_ptr<CollRingCtx> coll_ring_ctx = nullptr;
 
@@ -249,6 +274,10 @@ bool Coll::PmixCollRingNeighbor_(
     CRANE_ERROR("Can not get ring collective context, seq={}", hdr.seq());
     return false;
   }
+
+  // CRANE_DEBUG("contrib/nbr: seqnum={}, state={}, nodeid={}, contrib={}, seq={}, size={}",
+  //                 coll_ring_ctx->m_seq_, coll_ring_ctx->m_state_, hdr.craned_id(),
+  //                 hdr.contrib_id(), hdr.hop_seq(), hdr.msgsize());
 
   /* compute the actual hops of ring: (src - dst + size) % size */
   uint32_t hop_seq = (m_peerid_ + m_peers_cnt_ - hdr.contrib_id()) % m_peers_cnt_ - 1;

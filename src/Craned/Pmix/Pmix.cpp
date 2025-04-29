@@ -166,7 +166,7 @@ class PMIxServerModule {
                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      CRANE_DEBUG("DmodexFn is called");
 
-     auto rc = PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
+     auto rc = g_dmodex_req_manager->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 
      if (!rc) return PMIX_ERROR;
 
@@ -541,6 +541,8 @@ bool PmixServer::Init(const std::string& server_base_dir) {
     hostname = "unknown"; // Set a default value if gethostname fails
   }
   m_hostname_ = hostname;
+
+  g_dmodex_req_manager = std::unique_ptr<PmixDModexReqManager>();
 
   CRANE_TRACE("Crane Pmix Server Initialized, dir: {}.", m_server_tmpdir_);
 

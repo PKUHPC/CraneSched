@@ -13,6 +13,8 @@ add_executable(craned
         DeviceManager.h
         CranedServer.h
         CranedServer.cpp
+        CranedASyncServer.h
+        CranedASyncServer.cpp
         CranedClient.h
         CranedClient.cpp
         CranedPublicDefs.h
