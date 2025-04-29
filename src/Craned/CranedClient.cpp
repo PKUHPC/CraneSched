@@ -30,14 +30,9 @@ CranedStub::CranedStub(CranedClient *craned_client)
 
 }
 
-void CranedStub::SendPmixRingMsg(crane::grpc::SendPmixRingMsgReq request, AsyncGrpcCallback callback) {
-  using crane::grpc::SendPmixRingMsgReply;
+void CranedStub::SendPmixRingMsg(grpc::ClientContext* context, crane::grpc::SendPmixRingMsgReq request, crane::grpc::SendPmixRingMsgReply* reply, AsyncGrpcCallback callback) {
 
-  SendPmixRingMsgReply reply;
-  grpc::ClientContext context;
-
-
-  m_stub_->async()->SendPmixRingMsg(&context, &request, &reply, std::move(callback));
+  m_stub_->async()->SendPmixRingMsg(context, &request, reply, std::move(callback));
 }
 
 bool CranedStub::PmixTreeUpwardForward(
@@ -68,23 +63,15 @@ bool CranedStub::PmixTreeDownwardForward(
   return true;
 }
 
-void CranedStub::PmixDModexRequest(crane::grpc::PmixDModexRequestReq request, AsyncGrpcCallback callback) {
-  using crane::grpc::PmixDModexRequestReply;
+void CranedStub::PmixDModexRequest(grpc::ClientContext* context, crane::grpc::PmixDModexRequestReq request, crane::grpc::PmixDModexRequestReply* reply, AsyncGrpcCallback callback) {
 
-  PmixDModexRequestReply reply;
-  grpc::ClientContext context;
-
-  m_stub_->async()->PmixDModexRequest(&context, &request, &reply, std::move(callback));
+  m_stub_->async()->PmixDModexRequest(context, &request, reply, std::move(callback));
 }
 
-void CranedStub::PmixDModexResponse(
-    crane::grpc::PmixDModexResponseReq request, AsyncGrpcCallback callback) {
-  using crane::grpc::PmixDModexResponseReply;
+void CranedStub::PmixDModexResponse(grpc::ClientContext* context,
+    crane::grpc::PmixDModexResponseReq request, crane::grpc::PmixDModexResponseReply* reply, AsyncGrpcCallback callback) {
 
-  PmixDModexResponseReply reply;
-  grpc::ClientContext context;
-
-  m_stub_->async()->PmixDModexResponse(&context, &request, &reply, std::move(callback));
+  m_stub_->async()->PmixDModexResponse(context, &request, reply, std::move(callback));
 
 }
 

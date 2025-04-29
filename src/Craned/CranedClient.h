@@ -36,15 +36,24 @@ class CranedStub {
 
   ~CranedStub() = default;
 
-  void SendPmixRingMsg( crane::grpc::SendPmixRingMsgReq request, AsyncGrpcCallback callback);
+  void SendPmixRingMsg(grpc::ClientContext *context,
+                       crane::grpc::SendPmixRingMsgReq request,
+                       crane::grpc::SendPmixRingMsgReply *reply,
+                       AsyncGrpcCallback callback);
 
   bool PmixTreeUpwardForward(crane::grpc::PmixTreeUpwardForwardReq request);
 
   bool PmixTreeDownwardForward(crane::grpc::PmixTreeDownwardForwardReq request);
 
-  void PmixDModexRequest(crane::grpc::PmixDModexRequestReq request, AsyncGrpcCallback callback);
+  void PmixDModexRequest(grpc::ClientContext *context,
+                         crane::grpc::PmixDModexRequestReq request,
+                         crane::grpc::PmixDModexRequestReply *reply,
+                         AsyncGrpcCallback callback);
 
-  void PmixDModexResponse(crane::grpc::PmixDModexResponseReq request, AsyncGrpcCallback callback);
+  void PmixDModexResponse(grpc::ClientContext *context,
+                          crane::grpc::PmixDModexResponseReq request,
+                          crane::grpc::PmixDModexResponseReply *reply,
+                          AsyncGrpcCallback callback);
 
  private:
 

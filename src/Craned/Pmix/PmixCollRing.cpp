@@ -139,22 +139,27 @@ bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
 
     request.set_msg(coll_ring_ctx.m_ring_buf_);
 
-    g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(std::move(request),
-      [seq = coll_ring_ctx.m_seq_, &coll_ring_ctx, buf = coll_ring_ctx.m_ring_buf_, this](grpc::Status status) {
-      if (!status.ok()) {
-        CRANE_ERROR("Cannot forward ring data");
-        return ;
-      }
-        std::lock_guard lock_guard(this->m_lock_);
-        CRANE_DEBUG("called {}", coll_ring_ctx.m_seq_);
-        if (seq != coll_ring_ctx.m_seq_) {
-          CRANE_DEBUG("collective was reset!");
-          return ;
-        }
+    auto context = std::make_shared<grpc::ClientContext>();
+    auto reply = std::make_shared<crane::grpc::SendPmixRingMsgReply>();
 
-        coll_ring_ctx.m_forward_cnt_++;
-        this->ProgressCollectRing_(coll_ring_ctx);
-    });
+    g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(
+            context.get(), std::move(request), reply.get(),
+            [context, reply, seq = coll_ring_ctx.m_seq_, &coll_ring_ctx,
+             buf = coll_ring_ctx.m_ring_buf_, this](grpc::Status status) {
+              if (!status.ok()) {
+                CRANE_ERROR("Cannot forward ring data");
+                return;
+              }
+              std::lock_guard lock_guard(this->m_lock_);
+              CRANE_DEBUG("called {}", coll_ring_ctx.m_seq_);
+              if (seq != coll_ring_ctx.m_seq_) {
+                CRANE_DEBUG("collective was reset!");
+                return;
+              }
+
+              coll_ring_ctx.m_forward_cnt_++;
+              this->ProgressCollectRing_(coll_ring_ctx);
+            });
 
   }
 
