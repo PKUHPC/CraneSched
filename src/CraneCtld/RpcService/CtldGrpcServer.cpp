@@ -1174,7 +1174,6 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   }
 #endif
   *response = g_meta_container->QueryClusterInfo(*request);
-  //  g_raft_server->get_all_keys();
   return grpc::Status::OK;
 }
 
@@ -1388,13 +1387,13 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
 
   if (!found) {
     response->set_ok(false);
-    response->set_reason("Follower not found in config file");
+    response->set_reason("Follower not found in config file.");
     return grpc::Status::OK;
   }
 
   if (g_raft_server->CheckServerNodeExist(server_id)) {
     response->set_ok(false);
-    response->set_reason("Follower already exists in the Raft cluster");
+    response->set_reason("Follower already exists in the Raft cluster.");
     return grpc::Status::OK;
   }
 
@@ -1440,7 +1439,7 @@ grpc::Status CraneCtldServiceImpl::RemoveFollower(
 
   if (!found) {
     response->set_ok(false);
-    response->set_reason("Follower not found in config file");
+    response->set_reason("Follower not found in config file.");
     return grpc::Status::OK;
   }
 

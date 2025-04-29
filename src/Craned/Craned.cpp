@@ -237,7 +237,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["ControlMachine"].begin();
              it != config["ControlMachine"].end(); ++it) {
           auto node = it->as<YAML::Node>();
-          Craned::Config::ServerEndPoint server_node;
+          Craned::Config::ServerEndPoint server_node{};
 
           if (node["hostname"])
             server_node.HostName = node["hostname"].as<std::string>();
