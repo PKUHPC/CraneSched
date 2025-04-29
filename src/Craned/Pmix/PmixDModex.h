@@ -28,7 +28,7 @@ namespace pmix {
 
 struct DModexCbData {
   uint32_t seq_num;
-  std::string craned_id;
+  CranedId craned_id;
   std::string nspace;
   uint32_t rank;
 };
