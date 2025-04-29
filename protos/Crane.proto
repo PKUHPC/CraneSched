@@ -864,17 +864,29 @@ message PmixTreeDownwardForwardReply {
   bool ok = 1;
 }
 
-message PmixDModexReq {
-  PmixProc pmix_proc = 1;
-  string local_namespace = 2;
-  bool status = 3;
+message PmixDModexRequestReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  PmixProc pmix_proc = 3;
+  string local_namespace = 4;
+  int32 status = 5;
 };
 
-message PmixDModexReply {
-  bool ok = 1;
-  int32 code = 2;
-  bytes data = 3;
+message PmixDModexRequestReply {
+
 };
+
+message PmixDModexResponseReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  int32 code = 3;
+  bytes data = 4;
+  int32 status = 5;
+}
+
+message PmixDModexResponseReply {
+
+}
 
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
@@ -963,7 +975,8 @@ service Craned {
   rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
   rpc PmixTreeUpwardForward(PmixTreeUpwardForwardReq) returns (PmixTreeUpwardForwardReply);
   rpc PmixTreeDownwardForward(PmixTreeDownwardForwardReq) returns (PmixTreeDownwardForwardReply);
-  rpc PmixDModex(PmixDModexReq) returns (PmixDModexReply);
+  rpc PmixDModexRequest(PmixDModexRequestReq) returns (PmixDModexRequestReply);
+  rpc PmixDModexResponse(PmixDModexResponseReq) returns (PmixDModexResponseReply);
 }
 
 service CraneForeD {

@@ -27,6 +27,7 @@
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
+#include "CranedASyncServer.h"
 #include "CranedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
@@ -635,6 +636,10 @@ void StartServer() {
   g_ctld_client->StartGrpcCtldConnection();
 
   g_server->Wait();
+
+  g_a_sync_server = std::make_unique<Craned::CranedASyncServer>(g_config.ListenConf);
+  g_a_sync_server->Wait();
+  g_a_sync_server.reset();
 
   // Free global variables
   g_task_mgr->Wait();
