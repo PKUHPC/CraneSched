@@ -26,32 +26,30 @@
 
 namespace pmix {
 
-struct DModexCbData {
-  absl::BlockingCounter bc;
-  std::string data;
-};
-
 namespace {
 
-void DmodexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
-  auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData *>(cbdata);
-  dmo_modex_cb_data->bc.DecrementCount();
-  dmo_modex_cb_data->data = std::string(data, sz);
-  CRANE_DEBUG("dmodex callback is called with status={}: {}", status,
-              PMIx_Error_string(status));
+void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
+  auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData*>(cbdata);
+
+  crane::grpc::PmixDModexResponseReq request{};
+  request.set_seq_num(dmo_modex_cb_data->seq_num);
+  request.set_code(PMIX_SUCCESS);
+  request.set_data(data, sz);
+
+  g_craned_client->GetCranedStub(dmo_modex_cb_data->craned_id)->PmixDModexResponse(std::move(request), [craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
+    if (!status.ok()) {
+      CRANE_ERROR("Cannot send direct modex response to {}", craned_id);
+    }
+  });
+
+  delete dmo_modex_cb_data;
 }
 
 }  // namespace
 
-bool PmixDModexGet(const std::string &pmix_namespace, int rank,
+bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int rank,
                    pmix_modex_cbfunc_t cbfunc, void *cbdata) {
-  crane::grpc::PmixDModexReq request{};
 
-  auto *pmix_proc = request.mutable_pmix_proc();
-  pmix_proc->set_nspace(pmix_namespace);
-  pmix_proc->set_rank(rank);
-
-  request.set_local_namespace(pmix_namespace);
 
   // Find the node host corresponding to the nspace-rank.
   auto pmix_nspace = g_pmix_server->PmixNamespaceGet(pmix_namespace);
@@ -62,49 +60,102 @@ bool PmixDModexGet(const std::string &pmix_namespace, int rank,
 
   CranedId craned_id = pmix_nspace->m_hostlist_[pmix_nspace->m_task_map_[rank]];
 
-  auto result = g_craned_client->GetCranedStub(craned_id)->PmixDModex(std::move(request));
-  if (!result) {
-    CRANE_ERROR("Cannot send direct modex request to {}, status: {}", craned_id,
-                PMIx_Error_string(result.error()));
-    PmixLibModexInvoke(cbfunc, result.error(), nullptr, 0, cbdata, nullptr,
-                       nullptr);
-  } else {
-    std::string data = result.value();
-    PmixLibModexInvoke(cbfunc, PMIX_SUCCESS, data.c_str(), data.size(), cbdata,
-                       nullptr, nullptr);
+  crane::grpc::PmixDModexRequestReq request{};
+
+
+  {
+    util::lock_guard lock(m_dmodex_mutex_);
+    m_pmix_dmodex_req_list_.emplace_back(
+      PmixDModexReq{
+        .m_seq_num_ = dmdx_seq_num_++,
+        .m_ts_ = time(nullptr),
+        .m_cb_func_ = cbfunc,
+        .m_cb_data_ = cbdata
+      });
+    request.set_seq_num(dmdx_seq_num_);
   }
+
+  auto *pmix_proc = request.mutable_pmix_proc();
+  pmix_proc->set_nspace(pmix_namespace);
+  pmix_proc->set_rank(rank);
+
+  request.set_local_namespace(pmix_namespace);
+  request.set_craned_id(craned_id);
+
+  g_craned_client->GetCranedStub(craned_id)->PmixDModexRequest(std::move(request), [cbfunc, cbdata](grpc::Status status) {
+    if (!status.ok()) {
+      CRANE_ERROR("PmixDModex rpc failed.");
+      // TODO: Is it needed?
+      PmixLibModexInvoke(cbfunc, PMIX_ERROR, nullptr, 0, cbdata, nullptr,
+                       nullptr);
+    }
+  });
 
   return true;
 }
 
-std::expected<std::string, int> PmixProcessRequest(
-    const pmix_proc_t &pmix_proc, const std::string &send_nspace, bool status) {
+void PmixDModexReqManager::PmixProcessRequest(
+    uint32_t seq_num, CranedId craned_id, const pmix_proc_t &pmix_proc,
+    const std::string &send_nspace) {
+
   auto pmix_nspace = g_pmix_server->PmixNamespaceGet(pmix_proc.nspace);
   if (!pmix_nspace) {
-    // CRANE_ERROR("Bad request from {}: asked for nspace = {}, mine is {}", );
-    return std::unexpected(PMIX_ERR_INVALID_NAMESPACE);
+    CRANE_ERROR("Bad request from {}: asked for nspace = {}", craned_id, send_nspace);
+    ResponseWithError_(seq_num, craned_id, send_nspace, PMIX_ERR_INVALID_NAMESPACE);
+    return;
   }
 
   if (pmix_nspace->m_task_num_ <= pmix_proc.rank) {
-    return std::unexpected(PMIX_ERR_BAD_PARAM);
+    CRANE_ERROR("Bad request from {}: nspace {} has only {} ranks, asked for {}", craned_id, pmix_proc.nspace, pmix_nspace->m_task_num_, pmix_proc.rank);
+    ResponseWithError_(seq_num, craned_id, send_nspace, PMIX_ERR_BAD_PARAM);
   }
 
-  std::string result = "";
+  DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num, .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank = pmix_proc.rank};
+  auto rc =
+        PMIx_server_dmodex_request(&pmix_proc, DModexOpCb, &dmo_modex_cb_data);
+  if (rc != PMIX_SUCCESS) {
+    CRANE_ERROR("Error: PMIx_server_dmodex_request. {}",
+                  PMIx_Error_string(rc));
+    ResponseWithError_(seq_num, craned_id, send_nspace, rc);
+  }
+}
+
+void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num, const CranedId& craned_id, const std::string& data, int status) {
+
+  PmixDModexReq  pmix_dmodex_req;
 
   {
-    DModexCbData dmo_modex_cb_data{.bc = absl::BlockingCounter(1), .data = ""};
-    auto rc =
-        PMIx_server_dmodex_request(&pmix_proc, DmodexOpCb, &dmo_modex_cb_data);
-    if (rc != PMIX_SUCCESS) {
-      CRANE_ERROR("Error: PMIx_server_dmodex_request. {}",
-                  PMIx_Error_string(rc));
-      return std::unexpected(rc);
+    util::lock_guard lock(m_dmodex_mutex_);
+    auto it = std::find_if(
+       m_pmix_dmodex_req_list_.begin(),
+       m_pmix_dmodex_req_list_.end(),
+       [seq_num](const auto& req) {
+         return req.m_seq_num_ == seq_num;
+       }
+   );
+    if (it != m_pmix_dmodex_req_list_.end()) {
+      pmix_dmodex_req = std::move(*it);
+      m_pmix_dmodex_req_list_.erase(it);
+    } else {
+      CRANE_ERROR("Cannot find request with seq_num {}", seq_num);
+      return;
     }
-    dmo_modex_cb_data.bc.Wait();
-    result = dmo_modex_cb_data.data;
   }
 
-  return result;
+  PmixLibModexInvoke(pmix_dmodex_req.m_cb_func_, PMIX_SUCCESS, data.data(), data.size(), pmix_dmodex_req.m_cb_data_, nullptr, nullptr);
+}
+
+void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::string& craned_id, const std::string& sender_ns, int status) {
+  crane::grpc::PmixDModexResponseReq request{};
+
+  request.set_code(status);
+  request.set_seq_num(seq_num);
+
+  g_craned_client->GetCranedStub(craned_id)->PmixDModexResponse(std::move(request), [craned_id](grpc::Status status) {
+    if (!status.ok()) {
+      CRANE_ERROR("Cannot send direct modex error response to {}", craned_id);
+    }
+  });
 }
 
 }  // namespace pmix

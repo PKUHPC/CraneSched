@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "PmixColl.h"
+#include "PmixDModex.h"
 #include "PmixState.h"
 #include "absl/strings/str_join.h"
 #include "crane/Logger.h"
@@ -123,6 +124,7 @@ private:
 
   NamespaceMap m_namespace_map_;
 
+  // TODO: g_pmix_state?
   PmixState m_pmix_state_;
 
   bool m_is_init_{false};

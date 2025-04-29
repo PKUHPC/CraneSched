@@ -26,6 +26,8 @@
 
 namespace Craned {
 
+using AsyncGrpcCallback = std::function<void(grpc::Status)>;
+
 class CranedClient;
 
 class CranedStub {
@@ -34,13 +36,15 @@ class CranedStub {
 
   ~CranedStub() = default;
 
-  bool SendPmixRingMsg( crane::grpc::SendPmixRingMsgReq request);
+  void SendPmixRingMsg( crane::grpc::SendPmixRingMsgReq request, AsyncGrpcCallback callback);
 
   bool PmixTreeUpwardForward(crane::grpc::PmixTreeUpwardForwardReq request);
 
   bool PmixTreeDownwardForward(crane::grpc::PmixTreeDownwardForwardReq request);
 
-  std::expected<std::string, int> PmixDModex(crane::grpc::PmixDModexReq request);
+  void PmixDModexRequest(crane::grpc::PmixDModexRequestReq request, AsyncGrpcCallback callback);
+
+  void PmixDModexResponse(crane::grpc::PmixDModexResponseReq request, AsyncGrpcCallback callback);
 
  private:
 
