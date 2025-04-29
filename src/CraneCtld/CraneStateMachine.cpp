@@ -29,8 +29,10 @@ std::shared_ptr<buffer> CraneStateMachine::enc_log(CraneCtldOpType type,
                                                    const void *data,
                                                    size_t len) {
   // Encode from op_payload to Raft log.
-  size_t total_size =
-      sizeof(CraneCtldOpType) + key.capacity() + sizeof(uint64_t) + len;
+  size_t total_size = sizeof(CraneCtldOpType) /*type seat*/ +
+                      sizeof(uint32_t) /*key len seat*/ +
+                      key.size() /*key seat*/ +
+                      sizeof(uint64_t) /*value len seat*/ + len /*value seat*/;
   std::shared_ptr<buffer> ret = buffer::alloc(total_size);
   buffer_serializer bs(ret);
 
