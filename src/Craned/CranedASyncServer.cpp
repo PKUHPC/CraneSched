@@ -174,9 +174,9 @@ CranedASyncServer::CranedASyncServer(const Config::CranedListenConf &listen_conf
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  // CRANE_INFO("Craned is listening on [{}, {}:{}]",
-  //            listen_conf.UnixSocketListenAddr, craned_listen_addr,
-  //            listen_conf.CranedListenPort);
+  CRANE_INFO("CranedASync is listening on [{}, {}:{}]",
+             listen_conf.UnixSocketListenAddr, craned_listen_addr,
+             "10015");
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
