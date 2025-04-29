@@ -38,7 +38,6 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexResponseReply>();
-
   g_craned_client->GetCranedStub(dmo_modex_cb_data->craned_id)->PmixDModexResponse(
           context.get(), std::move(request), reply.get(),
           [context, reply, craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
@@ -72,12 +71,12 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
     util::lock_guard lock(m_dmodex_mutex_);
     m_pmix_dmodex_req_list_.emplace_back(
       PmixDModexReq{
-        .m_seq_num_ = dmdx_seq_num_++,
+        .m_seq_num_ = dmdx_seq_num_,
         .m_ts_ = time(nullptr),
         .m_cb_func_ = cbfunc,
         .m_cb_data_ = cbdata
       });
-    request.set_seq_num(dmdx_seq_num_);
+    request.set_seq_num(dmdx_seq_num_++);
   }
 
   auto *pmix_proc = request.mutable_pmix_proc();
@@ -85,7 +84,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
   pmix_proc->set_rank(rank);
 
   request.set_local_namespace(pmix_namespace);
-  request.set_craned_id(craned_id);
+  request.set_craned_id(g_pmix_server->GetHostname());
 
 
   auto context = std::make_shared<grpc::ClientContext>();
@@ -104,6 +103,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
   return true;
 }
 
+// TODO: const CranedId&
 void PmixDModexReqManager::PmixProcessRequest(
     uint32_t seq_num, CranedId craned_id, const pmix_proc_t &pmix_proc,
     const std::string &send_nspace) {
@@ -122,7 +122,7 @@ void PmixDModexReqManager::PmixProcessRequest(
 
   DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num, .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank = pmix_proc.rank};
   auto rc =
-        PMIx_server_dmodex_request(&pmix_proc, DModexOpCb, &dmo_modex_cb_data);
+        PMIx_server_dmodex_request(&pmix_proc, DModexOpCb, dmo_modex_cb_data);
   if (rc != PMIX_SUCCESS) {
     CRANE_ERROR("Error: PMIx_server_dmodex_request. {}",
                   PMIx_Error_string(rc));
