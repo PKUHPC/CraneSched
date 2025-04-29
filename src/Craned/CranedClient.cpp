@@ -30,18 +30,16 @@ CranedStub::CranedStub(CranedClient *craned_client)
 
 }
 
-bool CranedStub::SendPmixRingMsg(crane::grpc::SendPmixRingMsgReq request) {
+void CranedStub::SendPmixRingMsg(crane::grpc::SendPmixRingMsgReq request, AsyncGrpcCallback callback) {
   using crane::grpc::SendPmixRingMsgReply;
 
   SendPmixRingMsgReply reply;
   grpc::ClientContext context;
-  grpc::Status status;
 
-  status = m_stub_->SendPmixRingMsg(&context, request, &reply);
-  if (!status.ok()) return false;
 
-  return true;
+  m_stub_->async()->SendPmixRingMsg(&context, &request, &reply, std::move(callback));
 }
+
 bool CranedStub::PmixTreeUpwardForward(
     crane::grpc::PmixTreeUpwardForwardReq request) {
   using crane::grpc::PmixTreeUpwardForwardReply;
@@ -55,6 +53,7 @@ bool CranedStub::PmixTreeUpwardForward(
 
   return true;
 }
+
 bool CranedStub::PmixTreeDownwardForward(
     crane::grpc::PmixTreeDownwardForwardReq request) {
   using crane::grpc::PmixTreeDownwardForwardReply;
@@ -69,18 +68,24 @@ bool CranedStub::PmixTreeDownwardForward(
   return true;
 }
 
-std::expected<std::string, int> CranedStub::PmixDModex(crane::grpc::PmixDModexReq request) {
-  using crane::grpc::PmixDModexReply;
+void CranedStub::PmixDModexRequest(crane::grpc::PmixDModexRequestReq request, AsyncGrpcCallback callback) {
+  using crane::grpc::PmixDModexRequestReply;
 
-  PmixDModexReply reply;
+  PmixDModexRequestReply reply;
   grpc::ClientContext context;
-  grpc::Status status;
 
-  status = m_stub_->PmixDModex(&context, request, &reply);
-  if (!status.ok()) return std::unexpected(PMIX_ERROR);
-  if (!status.ok() || !reply.ok()) return std::unexpected(reply.code());
+  m_stub_->async()->PmixDModexRequest(&context, &request, &reply, std::move(callback));
+}
 
-  return reply.data();
+void CranedStub::PmixDModexResponse(
+    crane::grpc::PmixDModexResponseReq request, AsyncGrpcCallback callback) {
+  using crane::grpc::PmixDModexResponseReply;
+
+  PmixDModexResponseReply reply;
+  grpc::ClientContext context;
+
+  m_stub_->async()->PmixDModexResponse(&context, &request, &reply, std::move(callback));
+
 }
 
 void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
@@ -110,14 +115,14 @@ void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
       channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
     CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
-                ip_addr, g_config.ListenConf.CranedListenPort,
+                ip_addr, "10015",
                 m_channel_count_.fetch_add(1) + 1);
 
     if (g_config.ListenConf.UseTls) {
       // TODO: tls
     } else
       craned->m_channel_ = CreateTcpInsecureCustomChannel(
-          ip_addr, g_config.ListenConf.CranedListenPort, channel_args);
+          ip_addr, "10015", channel_args);
 
     craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
