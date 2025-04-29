@@ -118,7 +118,7 @@ class Coll {
   struct CollRing {
     int m_next_peerid_;
     CranedId m_next_craned_id_;
-    std::vector<std::shared_ptr<CollRingCtx>> m_ctx_array_;
+    CollRingCtx m_ctx_array_[PMIX_COLL_RING_CTX_NUM];
     std::string m_fwrd_buf_pool_;
     std::string m_ring_buf_pool_;
   };
@@ -168,17 +168,17 @@ class Coll {
   bool PmixCollRingLocal_(const std::string& data, size_t size,
                           pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
-  std::shared_ptr<Coll::CollRingCtx> CollRingCtxNew();
+  CollRingCtx* CollRingCtxNew();
 
-  bool CollRingContrib(const std::shared_ptr<CollRingCtx>& coll_ring_ctx,
+  bool CollRingContrib(CollRingCtx& coll_ring_ctx,
                        int contrib_id, uint32_t hop_seq,
                        const std::string& data, size_t size);
 
-  void ProgressCollectRing_(std::shared_ptr<CollRingCtx> coll_ring_ctx);
+  void ProgressCollectRing_(CollRingCtx& coll_ring_ctx);
 
-  void InvokeCallBackRing(std::shared_ptr<CollRingCtx> coll_ring_ctx);
+  void InvokeCallBackRing(CollRingCtx& coll_ring_ctx);
 
-  void ResetCollRing(std::shared_ptr<CollRingCtx> coll_ring_ctx);
+  void ResetCollRing(CollRingCtx& coll_ring_ctx);
 
   bool PmixCollRingNeighbor_(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
 
