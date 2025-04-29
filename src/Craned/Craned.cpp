@@ -653,10 +653,14 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
-  std::promise<crane::grpc::ConfigureCranedRequest> init_promise;
-  auto config_future = init_promise.get_future();
+
+  // Supervisor.Init();
+  // Supervisor.WaitInitFinish();
+
+  std::promise<crane::grpc::ConfigureCranedRequest> config_prom;
+  auto config_future = config_prom.get_future();
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf,
-                                                    std::move(init_promise));
+                                                    std::move(config_prom));
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   g_ctld_client->StartConnectingCtld();

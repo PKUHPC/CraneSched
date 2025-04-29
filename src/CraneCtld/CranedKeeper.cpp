@@ -29,7 +29,7 @@ CranedStub::CranedStub(CranedKeeper *craned_keeper)
     : m_craned_keeper_(craned_keeper),
       m_failure_retry_times_(0),
       m_disconnected_(true),
-      m_ready_(false) {
+      m_registered_(false) {
   // The most part of jobs are done in CranedKeeper::RegisterCraneds().
 }
 
@@ -592,7 +592,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 
     // CRANE_TRACE("READY -> IDLE");
     craned->m_disconnected_ = true;
-    craned->m_ready_ = false;
+    craned->m_registered_ = false;
 
     next_tag_type = CqTag::kEstablishedCraned;
     break;
@@ -613,7 +613,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 
   case GRPC_CHANNEL_SHUTDOWN: {
     craned->m_disconnected_ = true;
-    craned->m_ready_ = false;
+    craned->m_registered_ = false;
 
     next_tag_type = std::nullopt;
     break;

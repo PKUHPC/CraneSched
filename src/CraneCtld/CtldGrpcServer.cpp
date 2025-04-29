@@ -141,24 +141,7 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
-  CRANE_TRACE("Craned {} trying to register.", request->craned_id());
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
-    // Be careful! Ctld to craned channel disconnected during craned
-    // configuration. Now we don't care about this.
-    g_craned_keeper->PutNodeIntoUnavailSet(request->craned_id(),
-                                           request->token());
-    CRANE_DEBUG("Craned {} to be ready is not connected.",
-                request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
+  CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
 
   if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
@@ -173,6 +156,7 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     response->set_ok(false);
     return grpc::Status::OK;
   }
+
   if (!stub->CheckToken(request->token())) {
     CRANE_WARN("Reject register request from node {} with invalid token.",
                request->craned_id());

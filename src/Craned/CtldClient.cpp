@@ -18,10 +18,83 @@
 
 #include "CtldClient.h"
 
+#include "../../cmake-build-debug/_deps/gtest-src/googlemock/include/gmock/gmock-actions.h"
 #include "CranedServer.h"
 #include "crane/GrpcHelper.h"
 
 namespace Craned {
+
+void CtldClientStateMachine::EvRecvConfigFromCtld(
+    const crane::grpc::ConfigureCranedRequest& request) {
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
+
+  if (m_state_ != State::REQUESTING_CONFIG) {
+    CRANE_WARN(
+        "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
+        static_cast<int>(m_state_));
+    return;
+  }
+
+  if (request.ok() && request.has_token() && request.token() == m_reg_token_) {
+    m_state_ = State::CONFIGURING;
+    ActionConfigure_();
+  } else {
+    CRANE_WARN("ConfigureCranedRequest failed from Ctld.");
+    m_state_ = State::REQUESTING_CONFIG;
+    ActionRequestConfig_();
+  }
+}
+
+void CtldClientStateMachine::EvGetRegisterReply(
+    const crane::grpc::CranedRegisterReply& reply) {
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
+
+  if (m_state_ != State::CONFIGURING) {
+    CRANE_WARN("EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
+               static_cast<int>(m_state_));
+    return;
+  }
+
+  if (reply.ok()) {
+    m_state_ = State::READY;
+    ActionReady_();
+  } else {
+    m_state_ = State::REQUESTING_CONFIG;
+    ActionRequestConfig_();
+  }
+}
+
+void CtldClientStateMachine::EvGrpcConnected() {
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
+
+  m_state_ = State::REQUESTING_CONFIG;
+  ActionRequestConfig_();
+}
+
+void CtldClientStateMachine::EvGrpcConnectionFailed() {
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
+
+  m_state_ = State::DISCONNECTED;
+  ActionDisconnected_();
+}
+
+void CtldClientStateMachine::EvGrpcTimeout() {
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
+
+  if (m_state_ != State::REQUESTING_CONFIG && m_state_ != State::CONFIGURING) {
+    CRANE_WARN("EvGrpcTimeout triggered at incorrect state {}. Ignoring.",
+               static_cast<int>(m_state_));
+    return;
+  }
+
+  m_state_ = State::REQUESTING_CONFIG;
+  ActionRequestConfig_();
+}
 
 CtldClient::~CtldClient() {
   m_thread_stop_ = true;
@@ -114,8 +187,8 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
   return num_removed >= 1;
 }
 
-bool CtldClient::NotifyCranedConnected_() {
-  CRANE_DEBUG("Notify Ctld CranedConnected.");
+bool CtldClient::RequestConfigFromCtld_() {
+  CRANE_DEBUG("Requesting config from CraneCtld...");
 
   crane::grpc::CranedConnectedCtldNotify req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
@@ -135,7 +208,7 @@ bool CtldClient::NotifyCranedConnected_() {
   return true;
 }
 
-bool CtldClient::CranedRegister_() {
+bool CtldClient::RegisterOnCtld_() {
   CRANE_DEBUG("Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
@@ -285,13 +358,13 @@ void CtldClient::AsyncSendThread_() {
 
         if (m_state_ == NOTIFY_SENDING) {
           m_last_operation_time_ = now;
-          if (NotifyCranedConnected_())
+          if (RequestConfigFromCtld_())
             m_state_ = NOTIFY_SENT;
           else
             m_last_operation_time_.reset();
         } else if (m_state_ == REGISTER_SENDING) {
           m_last_operation_time_ = now;
-          if (CranedRegister_()) {
+          if (RegisterOnCtld_()) {
             m_state_ = ESTABLISHED;
           } else {
             reset_notify_sending();

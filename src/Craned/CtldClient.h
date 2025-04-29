@@ -39,12 +39,6 @@ class CtldClientStateMachine {
     READY,
   };
 
-  // State Actions:
-  void ActionRequestConfig();
-  void ActionConfigure();
-  void ActionReady();
-  void ActionDisconnected();
-
   void SetActionRequestConfigCb(std::function<void()>&& cb);
   void SetActionConfigureCb(std::function<void()>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
@@ -52,17 +46,31 @@ class CtldClientStateMachine {
 
   // Events:
   void EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
-  void EvGetConfigReply();
+  void EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
   void EvGrpcConnected();
   void EvGrpcConnectionFailed();
+  void EvGrpcTimeout();
 
  private:
+  // State Actions:
+  void ActionRequestConfig_();
+  void ActionConfigure_();
+  void ActionReady_();
+  void ActionDisconnected_();
+
   std::function<void()> m_action_request_config_cb_;
   std::function<void()> m_action_configure_cb_;
   std::function<void()> m_action_ready_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
-  std::optional<RegToken> m_register_token_;
+  State m_state_ = State::DISCONNECTED;
+
+  std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
+  std::optional<std::chrono::time_point<std::chrono::steady_clock>>
+      m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
+  std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_mtx_);
+
+  absl::Mutex m_mtx_;
 };
 
 class CtldClient {
@@ -148,8 +156,8 @@ class CtldClient {
   std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
-  bool NotifyCranedConnected_();
-  bool CranedRegister_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
+  bool RequestConfigFromCtld_();
+  bool RegisterOnCtld_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
 };
 
 }  // namespace Craned

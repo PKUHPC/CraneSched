@@ -61,7 +61,8 @@ class CranedStub {
 
   void SetReady() {
     CRANE_TRACE("Craned {} stub ready.", m_craned_id_);
-    m_ready_.store(true, std::memory_order_release);
+    m_registered_.store(true, std::memory_order_release);
+
     absl::MutexLock l(&m_lock_);
     m_token_.reset();
   }
@@ -89,7 +90,7 @@ class CranedStub {
 
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
-           !m_ready_.load(std::memory_order_acquire);
+           !m_registered_.load(std::memory_order_acquire);
   }
 
  private:
@@ -104,7 +105,7 @@ class CranedStub {
 
   // Set if underlying gRPC is down.
   std::atomic_bool m_disconnected_;
-  std::atomic_bool m_ready_{false};
+  std::atomic_bool m_registered_{false};
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
