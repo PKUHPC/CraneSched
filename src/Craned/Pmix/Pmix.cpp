@@ -542,7 +542,7 @@ bool PmixServer::Init(const std::string& server_base_dir) {
   }
   m_hostname_ = hostname;
 
-  g_dmodex_req_manager = std::unique_ptr<PmixDModexReqManager>();
+  g_dmodex_req_manager = std::make_unique<PmixDModexReqManager>();
 
   CRANE_TRACE("Crane Pmix Server Initialized, dir: {}.", m_server_tmpdir_);
 
