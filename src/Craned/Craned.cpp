@@ -639,7 +639,6 @@ void StartServer() {
 
   g_a_sync_server = std::make_unique<Craned::CranedASyncServer>(g_config.ListenConf);
   g_a_sync_server->Wait();
-  g_a_sync_server.reset();
 
   // Free global variables
   g_task_mgr->Wait();
@@ -651,6 +650,8 @@ void StartServer() {
   g_job_mgr.reset();
   g_cg_mgr.reset();
   g_ctld_client_sm.reset();
+
+  g_a_sync_server.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
