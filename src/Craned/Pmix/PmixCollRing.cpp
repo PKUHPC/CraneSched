@@ -53,7 +53,7 @@ bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
   return true;
 }
 
-bool Coll::PmixCollRingLocal_(const std::string& data, size_t size,
+bool Coll::PmixCollRingLocal_(const std::string& data,
                               pmix_modex_cbfunc_t cbfunc, void* cbdata) {
   std::lock_guard lock_guard(this->m_lock_);
 
@@ -70,7 +70,7 @@ bool Coll::PmixCollRingLocal_(const std::string& data, size_t size,
 
   // CRANE_DEBUG("contrib/loc: seq_num={}, state={}, size={}", coll_ctx->m_seq_, coll_ctx->m_state_, size);
 
-  CollRingContrib(*coll_ctx, m_peerid_, 0, data.data(), size);
+  CollRingContrib(*coll_ctx, m_peerid_, 0, data);
 
   coll_ctx->m_contrib_local_ = true;
   this->ProgressCollectRing_(*coll_ctx);
@@ -113,10 +113,10 @@ Coll::CollRingCtx* Coll::CollRingCtxNew() {
 }
 
 bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
-                           uint32_t hop_seq, const std::string& data, size_t size) {
+                           uint32_t hop_seq, const std::string& data) {
 
   m_ts_ = time(nullptr);
-  coll_ring_ctx.m_ring_buf_.append(data.data());
+  coll_ring_ctx.m_ring_buf_.append(data);
 
   /* check for ring is complete */
   if (contrib_id != (m_peerid_+1) % m_peers_cnt_) {
@@ -124,7 +124,7 @@ bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
     crane::grpc::SendPmixRingMsgReq request{};
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
-    pmix_ring_msg_hdr->set_msgsize(size);
+    pmix_ring_msg_hdr->set_msgsize(data.size());
     pmix_ring_msg_hdr->set_craned_id(m_ring_.m_next_craned_id_);
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx.m_seq_);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
@@ -297,8 +297,7 @@ bool Coll::PmixCollRingNeighbor_(
 
   coll_ring_ctx->m_contrib_map_[hdr.contrib_id()] = true;
 
-  CollRingContrib(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq(), msg.data(),
-                       msg.size());
+  CollRingContrib(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq(), msg);
 
   coll_ring_ctx->m_contrib_prev_++;
 

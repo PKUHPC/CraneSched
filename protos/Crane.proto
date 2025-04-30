@@ -837,7 +837,7 @@ message SendPmixRingMsgReq {
 
   PmixRingMsgHdr pmix_ring_msg_hdr = 1;
   repeated PmixProc pmix_procs = 2;
-  string msg = 3;
+  bytes msg = 3;
 };
 
 message SendPmixRingMsgReply {
