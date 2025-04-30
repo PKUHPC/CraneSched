@@ -31,6 +31,15 @@ namespace {
 void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   auto *dmo_modex_cb_data = reinterpret_cast<DModexCbData*>(cbdata);
 
+  CRANE_DEBUG("DmodexFn is called");
+
+  // std::cout << "DmodexFn data received, size: " << sz << std::endl;
+  // std::cout << "DmodexFn Raw data (hex): ";
+  // for (size_t i = 0; i < sz; ++i) {
+  //   printf("%02x ", (unsigned char)data[i]);
+  // }
+  // printf("\n");
+
   crane::grpc::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
   request.set_code(PMIX_SUCCESS);
