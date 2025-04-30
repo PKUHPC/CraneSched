@@ -80,7 +80,8 @@ class Coll {
 
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs);
 
-  bool PmixCollContribLocal(CollType type, char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+  bool PmixCollContribLocal(CollType type, const std::string& data,
+                            pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
   bool ProcessRingRequest(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
                           const std::vector<pmix_proc_t>& procs,
@@ -165,14 +166,13 @@ class Coll {
 
   /* ring coll functions */
   bool PmixCollRingInit_(std::set<std::string> hostset);
-  bool PmixCollRingLocal_(const std::string& data, size_t size,
-                          pmix_modex_cbfunc_t cbfunc, void* cbdata);
+  bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
+                          void* cbdata);
 
   CollRingCtx* CollRingCtxNew();
 
-  bool CollRingContrib(CollRingCtx& coll_ring_ctx,
-                       int contrib_id, uint32_t hop_seq,
-                       const std::string& data, size_t size);
+  bool CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
+                       uint32_t hop_seq, const std::string& data);
 
   void ProgressCollectRing_(CollRingCtx& coll_ring_ctx);
 
