@@ -51,13 +51,6 @@ void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
     rc = PMIX_ERROR;
   }
 
-  std::cout << "data received, size: " << ndata << std::endl;
-  std::cout << "Raw data (hex): ";
-  for (size_t i = 0; i < ndata; ++i) {
-    printf("%02x ", (unsigned char)data[i]);
-  }
-  printf("\n");
-
   cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
 }
 
@@ -123,12 +116,12 @@ class PMIxServerModule {
      CRANE_DEBUG(" FencenbFn is called");
      /* pass the provided data back to each participating proc */
 
-     std::cout << "data received, size: " << ndata << std::endl;
-     std::cout << "Raw data (hex): ";
-     for (size_t i = 0; i < ndata; ++i) {
-     printf("%02x ", (unsigned char)data[i]);
-     }
-     printf("\n");
+     // std::cout << "fence data received, size: " << ndata << std::endl;
+     // std::cout << "Raw data (hex): ";
+     // for (size_t i = 0; i < ndata; ++i) {
+     // printf("%02x ", (unsigned char)data[i]);
+     // }
+     // printf("\n");
 
      //if (nullptr != cbfunc) {
      //  cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
@@ -178,7 +171,6 @@ class PMIxServerModule {
    static pmix_status_t DmodexFn(const pmix_proc_t *proc,
                                   const pmix_info_t info[], size_t ninfo,
                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
-     CRANE_DEBUG("DmodexFn is called");
 
      auto rc = g_dmodex_req_manager->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 

@@ -26,7 +26,6 @@
 namespace pmix {
 
 bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
-  bool is_next = false;
 
   auto iter = hostset.find(g_pmix_server->GetHostname());
   if (iter != hostset.end()) {
@@ -63,13 +62,14 @@ bool Coll::PmixCollRingLocal_(const std::string& data,
 
   CollRingCtx* coll_ctx = this->CollRingCtxNew();
   if (!coll_ctx) {
-    CRANE_ERROR("Can not get new ring collective context, seq= {}",
-                this->m_seq_);
+    CRANE_ERROR("{:p}: Can not get new ring collective context, seq= {}",
+                static_cast<void*>(this), this->m_seq_);
     return false;
   }
 
-  // CRANE_DEBUG("contrib/loc: seq_num={}, state={}, size={}", coll_ctx->m_seq_, coll_ctx->m_state_, size);
+  CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(coll_ctx), coll_ctx->m_seq_, static_cast<int>(coll_ctx->m_state_), data.size());
 
+  // contrib peer node
   CollRingContrib(*coll_ctx, m_peerid_, 0, data);
 
   coll_ctx->m_contrib_local_ = true;
@@ -106,7 +106,7 @@ Coll::CollRingCtx* Coll::CollRingCtxNew() {
     res_ctx = free_ring_ctx;
     res_ctx->m_in_use_ = true;
     res_ctx->m_seq_ = seq;
-    res_ctx->m_ring_buf_ = "";
+    res_ctx->m_ring_buf_.clear();
   }
 
   return res_ctx;
@@ -119,13 +119,13 @@ bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
   coll_ring_ctx.m_ring_buf_.append(data);
 
   /* check for ring is complete */
-  if (contrib_id != (m_peerid_+1) % m_peers_cnt_) {
+  if (contrib_id != ((m_peerid_+1) % m_peers_cnt_)) {
     // forward data to the next node
     crane::grpc::SendPmixRingMsgReq request{};
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(data.size());
-    pmix_ring_msg_hdr->set_craned_id(m_ring_.m_next_craned_id_);
+    pmix_ring_msg_hdr->set_craned_id(g_pmix_server->GetHostname());
     pmix_ring_msg_hdr->set_seq(coll_ring_ctx.m_seq_);
     pmix_ring_msg_hdr->set_contrib_id(contrib_id);
     pmix_ring_msg_hdr->set_hop_seq(hop_seq);
@@ -139,28 +139,32 @@ bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
 
     request.set_msg(coll_ring_ctx.m_ring_buf_);
 
+    CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}", static_cast<void*>(&coll_ring_ctx), m_ring_.m_next_craned_id_, coll_ring_ctx.m_seq_, hop_seq, data.size(), contrib_id);
+
     auto context = std::make_shared<grpc::ClientContext>();
     auto reply = std::make_shared<crane::grpc::SendPmixRingMsgReply>();
 
     g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(
             context.get(), std::move(request), reply.get(),
-            [context, reply, seq = coll_ring_ctx.m_seq_, &coll_ring_ctx,
-             buf = coll_ring_ctx.m_ring_buf_, this](grpc::Status status) {
+            [context, reply, seq = coll_ring_ctx.m_seq_, &coll_ring_ctx, this](grpc::Status status) {
+              std::lock_guard lock_guard(this->m_lock_);
               if (!status.ok()) {
-                CRANE_ERROR("Cannot forward ring data");
+                CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
+                coll_ring_ctx.m_ring_buf_.clear();
                 return;
               }
-              std::lock_guard lock_guard(this->m_lock_);
-              CRANE_DEBUG("called {}", coll_ring_ctx.m_seq_);
+
+              CRANE_DEBUG("{:p}: called {}" ,static_cast<void*>(&coll_ring_ctx), coll_ring_ctx.m_seq_);
               if (seq != coll_ring_ctx.m_seq_) {
-                CRANE_DEBUG("collective was reset!");
+                CRANE_DEBUG("{:p}: collective was reset!", static_cast<void*>(&coll_ring_ctx));
+                coll_ring_ctx.m_ring_buf_.clear();
                 return;
               }
 
               coll_ring_ctx.m_forward_cnt_++;
               this->ProgressCollectRing_(coll_ring_ctx);
+              coll_ring_ctx.m_ring_buf_.clear();
             });
-
   }
 
   return true;
@@ -182,8 +186,8 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
       break;
     case CollRingState::PROGRESS:
       /* check for all data is collected and forwarded */
-      if (!m_peers_cnt_ -
-          (coll_ring_ctx.m_contrib_prev_ + coll_ring_ctx.m_contrib_local_)) {
+        if (!(m_peers_cnt_ -
+            (coll_ring_ctx.m_contrib_prev_ + coll_ring_ctx.m_contrib_local_))) {
         coll_ring_ctx.m_state_ = CollRingState::FINALIZE;
         InvokeCallBackRing(coll_ring_ctx);
         result = true;
@@ -191,7 +195,8 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
       break;
     case CollRingState::FINALIZE:
       if (!(m_peers_cnt_ - coll_ring_ctx.m_forward_cnt_ - 1)) {
-        this->m_seq_++;
+        CRANE_DEBUG("{:p}: seq={} is DONE", static_cast<void*>(this), m_seq_);
+        this->m_seq_++; // Only when the sequence is done, the coll sequence is incremented by 1.
         ResetCollRing(coll_ring_ctx);
         result = true;
       }
@@ -203,17 +208,29 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   } while (result);
 }
 
+void Coll::ReleaseFn(void* rel_data) {
+  auto* cb_data = static_cast<CbData*>(rel_data);
+
+  std::lock_guard lock_guard(cb_data->coll->m_lock_);
+  cb_data->coll_ring_ctx->m_ring_buf_.clear();
+
+  delete cb_data;
+}
+
 void Coll::InvokeCallBackRing(CollRingCtx& coll_ring_ctx) {
 
   if (!m_cbfunc_)
       return ;
 
+  auto cb_data = std::make_unique<CbData>();
+  cb_data->coll = this;
+  cb_data->coll_ring_ctx = &coll_ring_ctx;
+
   PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, coll_ring_ctx.m_ring_buf_.data(),
-          coll_ring_ctx.m_ring_buf_.size(), m_cbdata_, nullptr, nullptr);
+          coll_ring_ctx.m_ring_buf_.size(), m_cbdata_, (void*)(Coll::ReleaseFn), cb_data.release());
 
   m_cbfunc_ = nullptr;
   m_cbdata_ = nullptr;
-
 }
 
 void Coll::ResetCollRing(CollRingCtx& coll_ring_ctx) {
@@ -223,21 +240,27 @@ void Coll::ResetCollRing(CollRingCtx& coll_ring_ctx) {
   coll_ring_ctx.m_contrib_prev_ = 0;
   coll_ring_ctx.m_forward_cnt_ = 0;
   m_ts_ = time(nullptr);
-  coll_ring_ctx.m_contrib_map_.resize(m_peers_cnt_, false);
-  coll_ring_ctx.m_ring_buf_ = "";
+  coll_ring_ctx.m_contrib_map_.assign(m_peers_cnt_, false);
+  coll_ring_ctx.m_ring_buf_.clear();
 }
 
 bool Coll::ProcessRingRequest(
     const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::vector<pmix_proc_t>& procs, const std::string& msg) {
 
+  CRANE_DEBUG("collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}", hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(), hdr.msgsize());
+
+  std::lock_guard lock_guard(this->m_lock_);
+
   if ((m_seq_-1) == hdr.seq()) {
+    CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
     return false;
   } else if (m_seq_ != hdr.seq() && (m_seq_+1) != hdr.seq()) {
     /* this is an unacceptable event: either something went
      * really wrong or the state machine is incorrect.
      * This will 100% lead to application hang.
      */
+    CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
     // TODO: kill job
     return false;
   }
@@ -251,15 +274,15 @@ bool Coll::PmixCollRingNeighbor_(
     const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::string& msg) {
 
-  std::lock_guard lock_guard(this->m_lock_);
-
   CollRingCtx *coll_ring_ctx = nullptr;
 
   for (size_t i = 0; i < PMIX_COLL_RING_CTX_NUM; i++) {
     CollRingCtx &ctx = this->m_ring_.m_ctx_array_[i];
     if (ctx.m_in_use_ && ctx.m_seq_ == hdr.seq()) {
        coll_ring_ctx = &ctx;
-    } else if (!ctx.m_in_use_) {
+       break;
+    }
+    if (!ctx.m_in_use_) {
       coll_ring_ctx = &ctx;
       continue;
     }
@@ -268,36 +291,37 @@ bool Coll::PmixCollRingNeighbor_(
   if (coll_ring_ctx && !coll_ring_ctx->m_in_use_) {
     coll_ring_ctx->m_in_use_ = true;
     coll_ring_ctx->m_seq_ = hdr.seq();
-    coll_ring_ctx->m_ring_buf_ = "";
+    coll_ring_ctx->m_ring_buf_.clear();
   }
 
   if (!coll_ring_ctx) {
-    CRANE_ERROR("Can not get ring collective context, seq={}", hdr.seq());
+    CRANE_ERROR("{:p}: Can not get ring collective context, seq={}", static_cast<void*>(this), hdr.seq());
     return false;
   }
 
-  // CRANE_DEBUG("contrib/nbr: seqnum={}, state={}, nodeid={}, contrib={}, seq={}, size={}",
-  //                 coll_ring_ctx->m_seq_, coll_ring_ctx->m_state_, hdr.craned_id(),
-  //                 hdr.contrib_id(), hdr.hop_seq(), hdr.msgsize());
+  CRANE_DEBUG("{:p}: contrib/nbr: seq_num={}, state={}, nodeid={}, contrib={}, hop_seq={}, size={}",
+                  static_cast<void*>(&coll_ring_ctx),
+                  coll_ring_ctx->m_seq_, static_cast<int>(coll_ring_ctx->m_state_), hdr.craned_id(),
+                  hdr.contrib_id(), hdr.hop_seq(), hdr.msgsize());
 
   /* compute the actual hops of ring: (src - dst + size) % size */
   uint32_t hop_seq = (m_peerid_ + m_peers_cnt_ - hdr.contrib_id()) % m_peers_cnt_ - 1;
   if (hop_seq != hdr.hop_seq()) {
-    CRANE_DEBUG("unexpected ring seq number={}, expect={}, coll seq={}", hdr.hop_seq(), hop_seq, hdr.seq(), m_seq_);
+    CRANE_DEBUG("{:p}: unexpected ring seq number={}, expect={}, coll seq={}", static_cast<void*>(this), hdr.hop_seq(), hop_seq, hdr.seq(), m_seq_);
     return false;
   }
 
   if (hdr.contrib_id() >= m_peers_cnt_) return false;
 
   if (coll_ring_ctx->m_contrib_map_[hdr.contrib_id()]) {
-    CRANE_DEBUG("double receiving was detected from {}, "
-                            "local seq={}, seq={}, rejected", hdr.contrib_id(), m_seq_, hdr.seq());
+    CRANE_DEBUG("coll {:p}: double receiving was detected from {}, "
+                            "local seq={}, seq={}, rejected", static_cast<void*>(this), hdr.contrib_id(), m_seq_, hdr.seq());
     return false;
   }
 
   coll_ring_ctx->m_contrib_map_[hdr.contrib_id()] = true;
 
-  CollRingContrib(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq(), msg);
+  CollRingContrib(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq()+1, msg);
 
   coll_ring_ctx->m_contrib_prev_++;
 
