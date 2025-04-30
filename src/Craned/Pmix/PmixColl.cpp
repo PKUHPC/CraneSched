@@ -70,17 +70,17 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
   return true;
 }
 
-bool Coll::PmixCollContribLocal(CollType type, char* data, size_t size,
+bool Coll::PmixCollContribLocal(CollType type, const std::string& data,
                                 pmix_modex_cbfunc_t cbfunc, void* cbdata) {
   bool result = true;
 
   switch (type) {
   case CollType::FENCE_RING:
-    result = PmixCollRingLocal_(data, size, cbfunc, cbdata);
+    result = PmixCollRingLocal_(data, cbfunc, cbdata);
     break;
-  case CollType::FENCE_TREE:
-    result = PmixCollTreeLocal_(data, size, cbfunc, cbdata);
-    break;
+  // case CollType::FENCE_TREE:
+  //   result = PmixCollTreeLocal_(data, size, cbfunc, cbdata);
+  //   break;
   default:
     result = false;
     break;

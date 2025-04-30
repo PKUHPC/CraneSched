@@ -51,6 +51,13 @@ void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
     rc = PMIX_ERROR;
   }
 
+  std::cout << "data received, size: " << ndata << std::endl;
+  std::cout << "Raw data (hex): ";
+  for (size_t i = 0; i < ndata; ++i) {
+    printf("%02x ", (unsigned char)data[i]);
+  }
+  printf("\n");
+
   cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
 }
 
@@ -116,11 +123,18 @@ class PMIxServerModule {
      CRANE_DEBUG(" FencenbFn is called");
      /* pass the provided data back to each participating proc */
 
-     if (nullptr != cbfunc) {
-       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
+     std::cout << "data received, size: " << ndata << std::endl;
+     std::cout << "Raw data (hex): ";
+     for (size_t i = 0; i < ndata; ++i) {
+     printf("%02x ", (unsigned char)data[i]);
      }
+     printf("\n");
 
-     return PMIX_SUCCESS;
+     //if (nullptr != cbfunc) {
+     //  cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
+     //}
+
+     //return PMIX_SUCCESS;
 
      std::vector<pmix_proc_t> procs;
      bool collect = false;
@@ -153,7 +167,7 @@ class PMIxServerModule {
 
      if (coll == nullptr) return PMIX_ERROR;
 
-     if (!coll->PmixCollContribLocal(type, data, ndata, cbfunc, cbdata)) {
+     if (!coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
      }
