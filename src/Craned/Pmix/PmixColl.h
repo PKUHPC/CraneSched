@@ -101,6 +101,8 @@ class Coll {
   const std::vector<pmix_proc_t>& get_procs() const { return m_pset_.m_procs_; }
   CollType get_type() const { return m_type_; }
 
+  static void ReleaseFn(void* rel_dedata);
+
  private:
   /* coll states */
   struct CollRingCtx {
@@ -144,6 +146,11 @@ class Coll {
     std::string m_chldrn_str_;
     std::list<int> m_chldrn_ids_;
     std::vector<std::string> m_childrn_hosts_;
+  };
+
+  struct CbData {
+    Coll* coll;
+    CollRingCtx* coll_ring_ctx;
   };
 
   /* tree coll functions */
