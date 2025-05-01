@@ -624,12 +624,14 @@ void GlobalVariableInit() {
 
   g_task_mgr = std::make_unique<Craned::TaskManager>();
 
+  g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
+
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-  g_ctld_client->AddCtldDisconnectedCb(
+  g_ctld_client->AddGrpcCtldDisconnectedCb(
       [] { g_server->SetGrpcSrvReady(false); });
 
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+  g_ctld_client->InitGrpcChannel(g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
@@ -657,19 +659,12 @@ void StartServer() {
   // Supervisor.Init();
   // Supervisor.WaitInitFinish();
 
-  std::promise<crane::grpc::ConfigureCranedRequest> config_prom;
-  auto config_future = config_prom.get_future();
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf,
-                                                    std::move(config_prom));
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+  g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
-  g_ctld_client->StartConnectingCtld();
-  // Use config form ctld to init here
-  {
-    config_future.wait();
-    auto req = config_future.get();
-    g_server->PostRecvConfig(req, {});
-  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  g_ctld_client->StartGrpcCtldConnection();
+
   g_server->Wait();
 
   // Free global variables

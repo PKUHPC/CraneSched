@@ -112,27 +112,11 @@ class CranedServiceImpl : public Craned::Service {
 
 class CranedServer {
  public:
-  explicit CranedServer(
-      const Config::CranedListenConf &listen_conf,
-      std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise);
+  explicit CranedServer(const Config::CranedListenConf &listen_conf);
 
   void Shutdown() { m_server_->Shutdown(); }
 
   void Wait() { m_server_->Wait(); }
-
-  [[nodiscard]] RegToken GetNextRegisterToken();
-
-  bool HandleConfigReqFromCtld(
-      const crane::grpc::ConfigureCranedRequest *request);
-
-  void PostRecvConfig(const crane::grpc::ConfigureCranedRequest &request,
-                      const std::vector<task_id_t> &nonexistent_jobs);
-
-  void SetConfigurePromise(
-      std::promise<crane::grpc::ConfigureCranedRequest> &&promise) {
-    absl::MutexLock lk(&m_configure_promise_mtx_);
-    m_configure_promise_ = std::move(promise);
-  };
 
   void SetGrpcSrvReady(bool ready) {
     m_grpc_srv_ready_.store(ready, std::memory_order_release);
@@ -147,7 +131,7 @@ class CranedServer {
     return true;
   }
 
-  void FinishRecover() {
+  void FinishSupervisorRecovery() {
     CRANE_DEBUG("Craned finished recover.");
     m_supervisor_recovered_.store(true, std::memory_order_release);
   }
@@ -155,17 +139,11 @@ class CranedServer {
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
-  absl::Mutex m_configure_promise_mtx_;
-  std::optional<std::promise<crane::grpc::ConfigureCranedRequest>>
-      m_configure_promise_;
+
   std::atomic_bool m_grpc_srv_ready_{false};
 
   /* When supervisor ready, init with false */
   std::atomic_bool m_supervisor_recovered_{true};
-
-  // Craned Register status
-  absl::Mutex m_register_mutex_ ABSL_ACQUIRED_BEFORE(m_configure_promise_);
-  std::optional<RegToken> m_register_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
   friend class CranedServiceImpl;
 };

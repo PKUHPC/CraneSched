@@ -29,13 +29,9 @@ grpc::Status CranedServiceImpl::Configure(
     grpc::ServerContext *context,
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
-  CRANE_TRACE("Receive ConfigureCraned RPC from CraneCtld.");
+  bool ok = g_ctld_client_sm->EvRecvConfigFromCtld(*request);
 
-  g_ctld_client->SetState(CtldClient::CONFIGURING);
-
-  if (!g_server->HandleConfigReqFromCtld(request))
-    g_ctld_client->SetState(CtldClient::NOTIFY_SENDING);
-
+  CRANE_TRACE("Recv Configure RPC from Ctld. Configuration result: {}", ok);
   return Status::OK;
 }
 
@@ -45,9 +41,10 @@ grpc::Status CranedServiceImpl::ExecuteTask(
     crane::grpc::ExecuteTasksReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
+
     for (auto const &task_to_d : request->tasks())
       response->add_failed_task_id_list(task_to_d.task_id());
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
@@ -567,10 +564,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-CranedServer::CranedServer(
-    const Config::CranedListenConf &listen_conf,
-    std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise)
-    : m_configure_promise_(std::move(init_promise)) {
+CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
@@ -601,57 +595,6 @@ CranedServer::CranedServer(
     p_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
-}
-
-RegToken CranedServer::GetNextRegisterToken() {
-  absl::MutexLock lk(&m_register_mutex_);
-  if (m_register_token_.has_value())
-    CRANE_TRACE("Register token {} deprecated.",
-                ProtoTimestampToString(m_register_token_.value()));
-
-  m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
-  CRANE_TRACE("New register token: {}",
-              ProtoTimestampToString(m_register_token_.value()));
-  return m_register_token_.value();
-}
-
-bool CranedServer::HandleConfigReqFromCtld(
-    const crane::grpc::ConfigureCranedRequest *request) {
-  {
-    absl::MutexLock reg_lk(&m_register_mutex_);
-    if (!m_register_token_.has_value()) {
-      CRANE_WARN("Receive configure request but craned dose not have token.");
-      return false;
-    }
-
-    if (m_register_token_.value() != request->token()) {
-      CRANE_DEBUG(
-          "ConfigureCraned failed. Expected to recv token:{} but got {}",
-          ProtoTimestampToString(m_register_token_.value()),
-          ProtoTimestampToString(request->token()));
-      return false;
-    }
-
-    m_register_token_.reset();
-  }
-
-  absl::MutexLock lk(&m_configure_promise_mtx_);
-  if (m_configure_promise_.has_value()) {
-    // Receiver should call StartRegister;
-    m_configure_promise_.value().set_value(*request);
-    m_configure_promise_.reset();
-  } else {
-    g_ctld_client->StartRegister({}, request->token());
-  }
-  CRANE_DEBUG("Receive configure request successfully.");
-
-  return true;
-}
-
-void CranedServer::PostRecvConfig(
-    const crane::grpc::ConfigureCranedRequest &request,
-    const std::vector<task_id_t> &nonexistent_jobs) {
-  g_ctld_client->StartRegister(nonexistent_jobs, request.token());
 }
 
 }  // namespace Craned
