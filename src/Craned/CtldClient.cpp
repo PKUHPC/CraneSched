@@ -232,7 +232,7 @@ void CtldClient::Init() {
         "Skipping this action for token {}.",
         ProtoTimestampToString(token));
 
-    g_ctld_client_sm->EvConfigurationDone({});
+    g_ctld_client_sm->EvConfigurationDone(std::vector<task_id_t>());
   });
 
   g_ctld_client_sm->SetActionRegisterCb(
@@ -318,7 +318,7 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_DEBUG("Requesting config from CraneCtld...");
 
-  crane::grpc::CranedConnectedCtldNotify req;
+  crane::grpc::CranedTriggerReserveConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
 
@@ -328,7 +328,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 
   google::protobuf::Empty reply;
 
-  grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
+  grpc::Status status =
+      m_stub_->CranedTriggerReverseConn(&context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
     return false;
@@ -386,7 +387,6 @@ void CtldClient::AsyncSendThread_() {
   // Variables for grpc channel maintaining.
   grpc_connectivity_state prev_grpc_state, grpc_state;
   bool prev_connected = false, connected;
-  uint retry_attempt = 0;
 
   // Variable for TaskStatusChange sending part.
   absl::Condition cond(
@@ -407,14 +407,8 @@ void CtldClient::AsyncSendThread_() {
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
       }
 
-      retry_attempt++;
-      uint64_t delay = retry_attempt >= 10 ? 10'000 : retry_attempt * 1'000;
-      CRANE_INFO("Channel to CraneCtlD disconnected. Reconnecting after {}s.",
-                 delay / 1000);
-      std::this_thread::sleep_for(std::chrono::milliseconds(delay));
-
       std::chrono::time_point ddl =
-          std::chrono::system_clock::now() + std::chrono::seconds(2);
+          std::chrono::system_clock::now() + std::chrono::seconds(3);
       bool timeout = m_ctld_channel_->WaitForStateChange(prev_grpc_state, ddl);
       if (!timeout) continue;  // No state change. No need to update prev state.
 
@@ -424,8 +418,6 @@ void CtldClient::AsyncSendThread_() {
     }
 
     // Connected case:
-    retry_attempt = 0;
-
     if (!prev_connected) {  // Edge triggered: grpc disconnected -> connected.
       CRANE_TRACE("Channel to CraneCtlD is connected.");
       for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();

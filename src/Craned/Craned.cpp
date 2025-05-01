@@ -627,6 +627,7 @@ void GlobalVariableInit() {
   g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
 
+  g_ctld_client->Init();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
   g_ctld_client->AddGrpcCtldDisconnectedCb(
       [] { g_server->SetGrpcSrvReady(false); });

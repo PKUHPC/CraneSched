@@ -104,9 +104,9 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
+grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext *context,
-    const crane::grpc::CranedConnectedCtldNotify *request,
+    const crane::grpc::CranedTriggerReserveConnRequest *request,
     google::protobuf::Empty *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
@@ -1431,8 +1431,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   std::thread signal_waiting_thread([p_server = m_server_.get()] {
     util::SetCurrentThreadName("SIG_Waiter");
 
-    std::unique_lock<std::mutex> lk(s_exit_mtx);
-    s_sigint_cv.wait(lk);
+    std::unique_lock<std::mutex> lk(s_sigint_cv_mtx_);
+    s_sigint_cv_.wait(lk);
 
     CRANE_TRACE(
         "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");

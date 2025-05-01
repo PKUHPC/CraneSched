@@ -39,17 +39,23 @@ CranedStub::~CranedStub() {
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id,
                                  const RegToken &token) {
-  CRANE_TRACE("Configuring craned {} with token {}:{}", craned_id,
-              token.seconds(), token.nanos());
+  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
+              ProtoTimestampToString(token));
+
   this->SetRegToken(token);
+
   crane::grpc::ConfigureCranedRequest request;
+  request.set_ok(true);
   *request.mutable_token() = token;
+
   // For Supervisor recovery.
   // g_task_scheduler->QueryJobOfNode(craned_id, &request);
-  google::protobuf::Empty reply;
+
   ClientContext context;
+  google::protobuf::Empty reply;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
   auto status = m_stub_->Configure(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(

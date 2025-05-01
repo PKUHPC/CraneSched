@@ -194,9 +194,9 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::TaskStatusChangeRequest *request,
       crane::grpc::TaskStatusChangeReply *response) override;
 
-  grpc::Status CranedConnectedCtld(
+  grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext *context,
-      const crane::grpc::CranedConnectedCtldNotify *request,
+      const crane::grpc::CranedTriggerReserveConnRequest *request,
       google::protobuf::Empty *response) override;
 
   grpc::Status CranedRegister(
@@ -352,9 +352,9 @@ class CtldServer {
   HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
-  inline static std::mutex s_exit_mtx;
-  inline static std::condition_variable s_sigint_cv;
-  static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
+  inline static std::mutex s_sigint_cv_mtx_;
+  inline static std::condition_variable s_sigint_cv_;
+  static void signal_handler_func(int) { s_sigint_cv_.notify_one(); };
 
   friend class CraneCtldServiceImpl;
 };
