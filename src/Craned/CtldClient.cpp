@@ -68,7 +68,7 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
   } else {
     if (!request.ok())
       CRANE_WARN("ConfigureCranedRequest failed from Ctld.");
-    else if (request.has_token()) {
+    else if (!request.has_token()) {
       CRANE_WARN("No token in ConfigureCranedRequest from Ctld.");
     } else
       CRANE_DEBUG(
@@ -385,7 +385,8 @@ void CtldClient::AsyncSendThread_() {
   m_connection_start_notification_.WaitForNotification();
 
   // Variables for grpc channel maintaining.
-  grpc_connectivity_state prev_grpc_state, grpc_state;
+  grpc_connectivity_state prev_grpc_state{GRPC_CHANNEL_IDLE};
+  grpc_connectivity_state grpc_state;
   bool prev_connected = false, connected;
 
   // Variable for TaskStatusChange sending part.
