@@ -90,7 +90,7 @@ class CtldClientStateMachine {
   std::function<void()> m_action_ready_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
-  State m_state_ = State::DISCONNECTED;
+  State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
