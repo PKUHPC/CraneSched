@@ -366,7 +366,7 @@ bool CraneStateMachine::RestoreFromDB() {
 
   result = m_fixed_db_->IterateAllKv(
       [&](std::string &&key, std::vector<uint8_t> &&value) {
-        var_value_map_[key] = std::move(value);
+        fix_value_map_[key] = std::move(value);
         return true;
       });
 
@@ -382,7 +382,7 @@ bool CraneStateMachine::RestoreFromDB() {
       });
 
   if (!result) {
-    CRANE_ERROR("Failed to apply snapshots from fixed data!");
+    CRANE_ERROR("Failed to apply snapshots from reservation data!");
     return false;
   }
   return true;

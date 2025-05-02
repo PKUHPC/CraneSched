@@ -17,13 +17,10 @@
  */
 #pragma once
 
-#include <grpcpp/channel.h>
-
 #include <libnuraft/nuraft.hxx>
 #include <memory>
 
 #include "CraneStateMachine.h"
-#include "CtldPublicDefs.h"
 #include "TaskScheduler.h"
 #include "crane/NuRaftLogStore.h"
 #include "crane/NuRaftLoggerWrapper.h"
@@ -36,44 +33,94 @@ class CraneStateMachine;
 
 using namespace nuraft;
 
-class RaftServerStuff {
+class RaftServerStuffBase {
  public:
-  RaftServerStuff(int server_id, const std::string& hostname, int port)
+  RaftServerStuffBase() = default;
+
+  virtual ~RaftServerStuffBase() = default;
+
+  virtual void Init() {}
+
+  virtual bool CheckServerNodeExist(int server_id) const {
+    if (server_id == m_default_server_id_)
+      return true;
+    else
+      return false;
+  }
+
+  virtual bool AddServerAsync(int server_id, const std::string& endpoint) {
+    return false;
+  }
+
+  virtual bool AddServer(int server_id, const std::string& endpoint) {
+    return false;
+  }
+
+  virtual bool RemoveServer(int server_id) { return false; }
+
+  virtual bool AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
+    return false;
+  }
+
+  virtual bool RegisterToLeader(const std::string& leader_hostname,
+                                const std::string& grpc_port) {
+    return false;
+  }
+
+  virtual void YieldLeadership(int next_leader_id) const {}
+
+  virtual int GetLeaderId() const { return m_default_server_id_; }
+
+  virtual bool IsLeader() const { return true; }
+
+  virtual int GetServerId() const { return m_default_server_id_; }
+
+  virtual CraneStateMachine* GetStateMachine() { return nullptr; }
+
+  virtual void GetNodeStatus(crane::grpc::QueryLeaderInfoReply* response) {}
+
+ private:
+  int m_default_server_id_ = 0;
+};
+
+class RaftServerStuff final : public RaftServerStuffBase {
+ public:
+  explicit RaftServerStuff(int server_id, const std::string& hostname, int port)
       : m_server_id_(server_id),
         m_port_(port),
-        m_endpoint_(fmt::format("{}:{}", hostname, port)){};
+        m_endpoint_(fmt::format("{}:{}", hostname, port)) {};
 
-  ~RaftServerStuff();
+  ~RaftServerStuff() override;
 
-  void Init();
+  void Init() override;
 
-  bool CheckServerNodeExist(int server_id) const;
+  bool CheckServerNodeExist(int server_id) const override;
 
-  bool AddServerAsync(int server_id, const std::string& endpoint);
+  bool AddServerAsync(int server_id, const std::string& endpoint) override;
 
-  bool AddServer(int server_id, const std::string& endpoint);
+  bool AddServer(int server_id, const std::string& endpoint) override;
 
-  bool RemoveServer(int server_id);
+  bool RemoveServer(int server_id) override;
 
-  bool AppendLog(std::shared_ptr<nuraft::buffer> new_log);
+  bool AppendLog(std::shared_ptr<nuraft::buffer> new_log) override;
 
   bool RegisterToLeader(const std::string& leader_hostname,
-                        const std::string& grpc_port);
+                        const std::string& grpc_port) override;
 
-  void YieldLeadership(int next_leader_id = -1) const {
+  void YieldLeadership(int next_leader_id = -1) const override {
     if (next_leader_id == m_server_id_) return;
     return m_raft_instance_->yield_leadership(false, next_leader_id);
   };
 
-  int GetLeaderId() const { return m_raft_instance_->get_leader(); };
+  int GetLeaderId() const override { return m_raft_instance_->get_leader(); };
 
-  bool IsLeader() const { return m_raft_instance_->is_leader(); };
+  bool IsLeader() const override { return m_raft_instance_->is_leader(); };
 
-  int GetServerId() const { return m_server_id_; };
+  int GetServerId() const override { return m_server_id_; };
 
-  CraneStateMachine* GetStateMachine();
+  CraneStateMachine* GetStateMachine() override;
 
-  void GetNodeStatus(crane::grpc::QueryLeaderInfoReply* response);
+  void GetNodeStatus(crane::grpc::QueryLeaderInfoReply* response) override;
 
   // void get_all_keys() {
   //   static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
@@ -107,4 +154,4 @@ class RaftServerStuff {
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::RaftServerStuff> g_raft_server;
+inline std::unique_ptr<Ctld::RaftServerStuffBase> g_raft_server;

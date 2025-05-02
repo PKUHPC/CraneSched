@@ -129,7 +129,7 @@ struct Config {
     std::string PlugindSockPath;
   };
 
-  struct RaftNode {
+  struct ServerNode {
     std::string HostName;
     std::string RaftPort;
     std::string ListenAddr;
@@ -157,8 +157,9 @@ struct Config {
 
   Priority PriorityConfig;
 
-  std::vector<RaftNode> RaftServers;
+  std::vector<ServerNode> Servers;
   int CurServerId = 0;
+  bool EnableRaft = false;
 
   // Database config
   std::string DbUser;
