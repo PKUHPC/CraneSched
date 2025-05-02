@@ -1,5 +1,7 @@
 # Cluster settings (This must be identical across all nodes)
-# the hostname of node which is running cranectld
+# Some parameters of nodes which are running cranectld
+# When the parameter 'CraneCtldEnablingRaft' is true, all the following parameters take effect, allowing for multiple crate nodes.
+# otherwise there is only one CraneCtld, which defaults to the first one, and the parameter 'raftPort' is invalid.
 ControlMachine:
   - hostname: cn15
     raftPort: 10009
@@ -42,6 +44,8 @@ CraneCtldLogFile: cranectld/cranectld.log
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
+# whether the cranectld is running in raft mode, When this parameter is false, the first ControlMachine is read by default as the Crannectld node
+CraneCtldEnableRaft: false
 
 # Craned settings
 # the listening address of control machine

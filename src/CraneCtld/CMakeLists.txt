@@ -13,6 +13,11 @@ add_executable(cranectld
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
 
+        CraneStateMachine.cpp
+        CraneStateMachine.h
+        RaftServerStuff.cpp
+        RaftServerStuff.h
+
         Security/VaultClient.cpp
         Security/VaultClient.h
 
@@ -28,15 +33,6 @@ add_executable(cranectld
         CtldPreCompiledHeader.h
 )
 
-if (CRANE_RAFT_SERVER)
-    target_sources(cranectld PRIVATE
-            CraneStateMachine.cpp
-            CraneStateMachine.h
-            RaftServerStuff.cpp
-            RaftServerStuff.h
-    )
-endif ()
-
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
 target_include_directories(cranectld PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -50,6 +46,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PublicHeader
         Utility_PluginClient
         Utility_EmbeddedDb
+        Utility_NuRaft
 
         uvw
 
@@ -76,12 +73,6 @@ target_link_libraries(cranectld PRIVATE
 
         Backward::Interface
 )
-
-if (CRANE_RAFT_SERVER)
-    target_compile_definitions(cranectld PRIVATE CRANE_WITH_RAFT)
-    target_link_libraries(cranectld PRIVATE Utility_NuRaft)
-endif ()
-
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

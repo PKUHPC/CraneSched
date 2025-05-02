@@ -127,8 +127,6 @@ option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
-
-option(CRANE_RAFT_SERVER "Enable Crane server with Raft algorithm" OFF)
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 23)

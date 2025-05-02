@@ -89,7 +89,14 @@ class NuRaftLogStore : public log_store {
       return false;
     }
 
-    return m_logs_db_->Store(0, key, data, len).has_value();
+    auto res = m_logs_db_->Begin();
+    if (res.has_value()) {
+      m_logs_db_->Store(res.value(), key, data, len);
+      return m_logs_db_->Commit(res.value()).has_value();
+    } else {
+      CRANE_ERROR("Failed to begin a transaction.");
+      return false;
+    }
   }
 
   std::shared_ptr<buffer> ExternElemFetch(const std::string& key) const {

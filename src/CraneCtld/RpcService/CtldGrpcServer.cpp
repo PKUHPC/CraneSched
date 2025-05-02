@@ -34,7 +34,6 @@ grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
     grpc::ServerContext *context,
     const crane::grpc::CraneCtldRegisterRequest *request,
     crane::grpc::CraneCtldRegisterReply *response) {
-#ifdef CRANE_WITH_RAFT
   if (g_raft_server->CheckServerNodeExist(request->server_id())) {
     response->set_ok(true);
     response->set_already_registered(true);
@@ -46,7 +45,6 @@ grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
   } else {
     response->set_ok(false);
   }
-#endif
   return grpc::Status::OK;
 }
 
@@ -1165,14 +1163,6 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
-#ifdef CRANE_WITH_RAFT
-  if (!g_raft_server->IsLeader()) {
-    response->set_ok(false);
-    response->set_cur_leader_id(g_raft_server->GetLeaderId());
-    return grpc::Status::OK;
-  }
-#endif
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
@@ -1262,6 +1252,20 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
   return grpc::Status::OK;
 }
 
+void CraneCtldInterceptor::Intercept(
+    grpc::experimental::InterceptorBatchMethods *methods) {
+  if (methods->QueryInterceptionHookPoint(
+          grpc::experimental::InterceptionHookPoints::
+              POST_RECV_INITIAL_METADATA)) {
+    if (g_config.EnableRaft && !g_raft_server->IsLeader()) {
+      m_ctx_->TryCancel();
+      return;
+    }
+              }
+
+  methods->Proceed();
+}
+
 grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
     grpc::ServerContext *context,
     const crane::grpc::EnableAutoPowerControlRequest *request,
@@ -1330,9 +1334,7 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderId(
     grpc::ServerContext *context,
     const crane::grpc::QueryLeaderIdRequest *request,
     crane::grpc::QueryLeaderIdReply *response) {
-#ifdef CRANE_WITH_RAFT
   response->set_leader_id(g_raft_server->GetLeaderId());
-#endif
   return grpc::Status::OK;
 }
 
@@ -1340,12 +1342,10 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryLeaderInfoRequest *request,
     crane::grpc::QueryLeaderInfoReply *response) {
-#ifdef CRANE_WITH_RAFT
   if (g_raft_server->IsLeader())
     g_raft_server->GetNodeStatus(response);
   else
     return grpc::Status::CANCELLED;
-#endif
   return grpc::Status::OK;
 }
 
@@ -1353,7 +1353,6 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
     grpc::ServerContext *context,
     const crane::grpc::AddFollowerRequest *request,
     crane::grpc::AddFollowerReply *response) {
-#ifdef CRANE_WITH_RAFT
   bool found = false;
   int server_id = 0;
   std::string endpoint;
@@ -1361,15 +1360,15 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
   switch (request->key_case()) {
   case crane::grpc::AddFollowerRequest::kServerId: {
     server_id = request->server_id();
-    if (server_id >= 0 && server_id < g_config.RaftServers.size()) {
+    if (server_id >= 0 && server_id < g_config.Servers.size()) {
       found = true;
-      endpoint = fmt::format("{}:{}", g_config.RaftServers[server_id].HostName,
-                             g_config.RaftServers[server_id].RaftPort);
+      endpoint = fmt::format("{}:{}", g_config.Servers[server_id].HostName,
+                             g_config.Servers[server_id].RaftPort);
     }
     break;
   }
   case crane::grpc::AddFollowerRequest::kHostName: {
-    for (const auto &server : g_config.RaftServers) {
+    for (const auto &server : g_config.Servers) {
       if (server.HostName == request->host_name()) {
         found = true;
         endpoint = fmt::format("{}:{}", server.HostName, server.RaftPort);
@@ -1403,7 +1402,6 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
     response->set_ok(false);
     response->set_reason("AddFollower failed: internal error.");
   }
-#endif
   return grpc::Status::OK;
 }
 
@@ -1411,18 +1409,17 @@ grpc::Status CraneCtldServiceImpl::RemoveFollower(
     grpc::ServerContext *context,
     const crane::grpc::RemoveFollowerRequest *request,
     crane::grpc::RemoveFollowerReply *response) {
-#ifdef CRANE_WITH_RAFT
   bool found = false;
   int server_id = 0;
 
   switch (request->key_case()) {
   case crane::grpc::RemoveFollowerRequest::kServerId: {
     server_id = request->server_id();
-    if (server_id >= 0 && server_id < g_config.RaftServers.size()) found = true;
+    if (server_id >= 0 && server_id < g_config.Servers.size()) found = true;
     break;
   }
   case crane::grpc::RemoveFollowerRequest::kHostName: {
-    for (const auto &server : g_config.RaftServers) {
+    for (const auto &server : g_config.Servers) {
       if (server.HostName == request->host_name()) {
         found = true;
         break;
@@ -1456,7 +1453,6 @@ grpc::Status CraneCtldServiceImpl::RemoveFollower(
     response->set_ok(false);
     response->set_reason("Follower does not exist in the Raft cluster.");
   }
-#endif
   return grpc::Status::OK;
 }
 
@@ -1464,7 +1460,6 @@ grpc::Status CraneCtldServiceImpl::YieldLeadership(
     grpc::ServerContext *context,
     const crane::grpc::YieldLeadershipRequest *request,
     crane::grpc::YieldLeadershipReply *response) {
-#ifdef CRANE_WITH_RAFT
   if (request->next_server_id() != -1 &&
       !g_raft_server->CheckServerNodeExist(request->next_server_id())) {
     response->set_ok(false);
@@ -1472,7 +1467,6 @@ grpc::Status CraneCtldServiceImpl::YieldLeadership(
     g_raft_server->YieldLeadership(request->next_server_id());
     response->set_ok(true);
   }
-#endif
   return grpc::Status::OK;
 }
 
@@ -1495,6 +1489,12 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   }
 
   builder.RegisterService(m_service_impl_.get());
+
+  std::vector<
+      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+      creators;
+  creators.push_back(std::make_unique<CraneCtldInterceptorFactory>());
+  builder.experimental().SetInterceptorCreators(std::move(creators));
 
   m_server_ = builder.BuildAndStart();
   if (!m_server_) {

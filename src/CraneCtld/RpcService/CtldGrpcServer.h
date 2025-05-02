@@ -33,6 +33,25 @@ using grpc::Server;
 
 class CtldServer;
 
+class CraneCtldInterceptor final : public grpc::experimental::Interceptor {
+ public:
+  explicit CraneCtldInterceptor(grpc::ServerContextBase *ctx) : m_ctx_(ctx) {}
+
+  void Intercept(grpc::experimental::InterceptorBatchMethods *methods) override;
+
+ private:
+  grpc::ServerContextBase *m_ctx_;
+};
+
+class CraneCtldInterceptorFactory final
+    : public grpc::experimental::ServerInterceptorFactoryInterface {
+ public:
+  grpc::experimental::Interceptor *CreateServerInterceptor(
+      grpc::experimental::ServerRpcInfo *info) override {
+    return new CraneCtldInterceptor(info->server_context());
+  }
+};
+
 class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}

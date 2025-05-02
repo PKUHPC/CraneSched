@@ -75,10 +75,6 @@ target_link_libraries(craned
         $<$<BOOL:${CRANE_ENABLE_BPF}>:BPF::BPF>
 )
 
-if (CRANE_RAFT_SERVER)
-    target_compile_definitions(craned PRIVATE CRANE_WITH_RAFT)
-endif ()
-
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(craned stdc++fs)

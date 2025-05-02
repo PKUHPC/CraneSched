@@ -21,11 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#ifdef CRANE_WITH_RAFT
-#  include "CraneStateMachine.h"
-#  include "RaftServerStuff.h"
-#endif
-
+#include "CraneStateMachine.h"
+#include "RaftServerStuff.h"
 #include "crane/EmbeddedDb.h"
 #include "protos/Crane.pb.h"
 
@@ -34,8 +31,6 @@ namespace Ctld {
 using DbErrorCode = crane::Internal::DbErrorCode;
 using txn_id_t = crane::Internal::txn_id_t;
 using IEmbeddedDb = crane::Internal::IEmbeddedDb;
-
-#ifdef CRANE_WITH_RAFT
 
 class NuRaftMemoryDb : public IEmbeddedDb {
  public:
@@ -80,8 +75,6 @@ class NuRaftMemoryDb : public IEmbeddedDb {
   uint8_t db_index_;
   std::string m_db_path_;
 };
-
-#endif
 
 class EmbeddedDbClient {
  private:

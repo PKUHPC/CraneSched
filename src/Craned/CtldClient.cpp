@@ -522,9 +522,12 @@ void CtldClient::AsyncSendThread_() {
             status.error_message(), context.debug_error_string(),
             int(status.error_code()));
 
-        if (status.error_code() == grpc::UNAVAILABLE) {
+        if (status.error_code() == grpc::UNAVAILABLE ||
+            status.error_code() == grpc::CANCELLED) {
           // If some messages are not sent due to channel failure,
           // put them back into m_task_status_change_list_
+          CRANE_INFO(
+              "Pause TaskStatusChange and reconnect with the server to retry.");
           if (!changes.empty()) {
             m_task_status_change_mtx_.Lock();
             m_task_status_change_list_.splice(
@@ -534,24 +537,15 @@ void CtldClient::AsyncSendThread_() {
           // Sleep for a while to avoid too many retries.
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           break;
-        } else
+        } else {
+          CRANE_INFO("Unexpected grpc error code, discard this request.");
           changes.pop_front();
+        }
       } else {
         CRANE_TRACE(
             "TaskStatusChange for task #{} sent to server #{}. reply.ok={}",
             status_change.task_id, m_cur_leader_id_.load(), reply.ok());
-        if (!reply.ok()) {
-          // try again
-          if (reply.cur_leader_id() != -2) {
-            m_cur_leader_id_ = reply.cur_leader_id();
-            CRANE_TRACE(
-                "Leader id was changed to %d, try again in a little while.",
-                reply.cur_leader_id());
-          }
-          std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        } else {
-          changes.pop_front();
-        }
+        changes.pop_front();
       }
     }
   }
