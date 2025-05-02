@@ -20,8 +20,6 @@
 
 namespace Ctld {
 
-#ifdef CRANE_WITH_RAFT
-
 std::expected<void, DbErrorCode> NuRaftMemoryDb::Store(txn_id_t txn_id,
                                                        const std::string& key,
                                                        const void* data,
@@ -91,8 +89,6 @@ std::expected<void, DbErrorCode> NuRaftMemoryDb::IterateAllKv(
   return {};
 }
 
-#endif
-
 EmbeddedDbClient::~EmbeddedDbClient() {
   if (m_variable_db_) {
     auto result = m_variable_db_->Close();
@@ -116,41 +112,39 @@ EmbeddedDbClient::~EmbeddedDbClient() {
 }
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
-#ifdef CRANE_WITH_RAFT
-  m_variable_db_ = std::make_unique<NuRaftMemoryDb>(0);
-  m_fixed_db_ = std::make_unique<NuRaftMemoryDb>(1);
-  m_resv_db_ = std::make_unique<NuRaftMemoryDb>(2);
-#else
-
-  if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
-#  ifdef CRANE_HAVE_UNQLITE
-    m_variable_db_ = std::make_unique<UnqliteDb>();
-    m_fixed_db_ = std::make_unique<UnqliteDb>();
-    m_resv_db_ = std::make_unique<UnqliteDb>();
-#  else
-    CRANE_ERROR(
-        "Select unqlite as the embedded db but it's not been compiled.");
-    return false;
-#  endif
-
-  } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
-#  ifdef CRANE_HAVE_BERKELEY_DB
-    m_variable_db_ = std::make_unique<BerkeleyDb>();
-    m_fixed_db_ = std::make_unique<BerkeleyDb>();
-    m_resv_db_ = std::make_unique<BerkeleyDb>();
-#  else
-    CRANE_ERROR(
-        "Select Berkeley DB as the embedded db but it's not been compiled.");
-    return false;
-#  endif
-
+  if (g_config.EnableRaft) {
+    m_variable_db_ = std::make_unique<NuRaftMemoryDb>(0);
+    m_fixed_db_ = std::make_unique<NuRaftMemoryDb>(1);
+    m_resv_db_ = std::make_unique<NuRaftMemoryDb>(2);
   } else {
-    CRANE_ERROR("Invalid embedded database backend: {}",
-                g_config.CraneEmbeddedDbBackend);
-    return false;
-  }
-
+    if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
+#ifdef CRANE_HAVE_UNQLITE
+      m_variable_db_ = std::make_unique<UnqliteDb>();
+      m_fixed_db_ = std::make_unique<UnqliteDb>();
+      m_resv_db_ = std::make_unique<UnqliteDb>();
+#else
+      CRANE_ERROR(
+          "Select unqlite as the embedded db but it's not been compiled.");
+      return false;
 #endif
+
+    } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
+#ifdef CRANE_HAVE_BERKELEY_DB
+      m_variable_db_ = std::make_unique<BerkeleyDb>();
+      m_fixed_db_ = std::make_unique<BerkeleyDb>();
+      m_resv_db_ = std::make_unique<BerkeleyDb>();
+#else
+      CRANE_ERROR(
+          "Select Berkeley DB as the embedded db but it's not been compiled.");
+      return false;
+#endif
+
+    } else {
+      CRANE_ERROR("Invalid embedded database backend: {}",
+                  g_config.CraneEmbeddedDbBackend);
+      return false;
+    }
+  }
 
   auto result = m_variable_db_->Init(db_path + "var");
   if (!result) return false;

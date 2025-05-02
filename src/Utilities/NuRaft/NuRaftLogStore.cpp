@@ -144,16 +144,26 @@ void NuRaftLogStore::write_at(uint64_t index,
   }
   m_durable_ea_.invoke();
 
+  txn_id_t txn_id = 0;
+  auto res = m_logs_db_->Begin();
+  if (res.has_value()) {
+    txn_id = res.value();
+  } else {
+    CRANE_ERROR("Failed to begin a transaction.");
+  }
+
   std::shared_ptr<log_entry> clone = make_clone_(entry);
   // Discard all logs equal to or greater than `index.
   auto itr = m_logs_.lower_bound(index);
   while (itr != m_logs_.end()) {
-    m_logs_db_->Delete(0, std::to_string(itr->first));
+    m_logs_db_->Delete(txn_id, std::to_string(itr->first));
     itr = m_logs_.erase(itr);
   }
   m_logs_[index] = clone;
   auto buf = entry->serialize();
-  m_logs_db_->Store(0, std::to_string(index), buf->data(), buf->size());
+
+  m_logs_db_->Store(txn_id, std::to_string(index), buf->data(), buf->size());
+  m_logs_db_->Commit(txn_id);
 }
 
 std::vector<std::shared_ptr<log_entry>> NuRaftLogStore::all_log_entries() {
@@ -312,13 +322,22 @@ void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
 bool NuRaftLogStore::compact(log_index_t last_log_index) {
   std::lock_guard<std::mutex> l(logs_lock_);
 
+  txn_id_t txn_id = 0;
+  auto res = m_logs_db_->Begin();
+  if (res.has_value()) {
+    txn_id = res.value();
+  } else {
+    CRANE_ERROR("Failed to begin a transaction.");
+  }
+
   for (log_index_t i = start_idx_; i <= last_log_index; ++i) {
     auto entry = m_logs_.find(i);
     if (entry != m_logs_.end()) {
       m_logs_.erase(entry);
-      m_logs_db_->Delete(0, std::to_string(i));
+      m_logs_db_->Delete(txn_id, std::to_string(i));
     }
   }
+  m_logs_db_->Commit(txn_id);
 
   // WARNING:
   //   Even though nothing has been erased,
@@ -375,12 +394,24 @@ void NuRaftLogStore::durable_thread_() {
       // Remove all timestamps equal to or smaller than `cur_time`,
       // and pick the greatest one among them.3
 
+      txn_id_t txn_id;
+      if (!m_logs_being_written_.empty()) {
+        auto res = m_logs_db_->Begin();
+        if (res.has_value()) {
+          txn_id = res.value();
+        } else {
+          CRANE_ERROR("Failed to begin a transaction.");
+          return;
+        }
+      } else
+        return;
+
       int max_retry = 0;
       while (!m_logs_being_written_.empty()) {
         log_index_t i = m_logs_being_written_.front();
         std::shared_ptr<buffer> buf = m_logs_[i]->serialize();
-        auto res =
-            m_logs_db_->Store(0, std::to_string(i), buf->data(), buf->size());
+        auto res = m_logs_db_->Store(txn_id, std::to_string(i), buf->data(),
+                                     buf->size());
         if (res.has_value()) {
           m_logs_being_written_.pop();
           call_notification = true;
@@ -389,6 +420,8 @@ void NuRaftLogStore::durable_thread_() {
           if (max_retry > 5) break;
         }
       }
+
+      m_logs_db_->Commit(txn_id);
     }
 
     if (call_notification && raft_server_bwd_pointer_) {

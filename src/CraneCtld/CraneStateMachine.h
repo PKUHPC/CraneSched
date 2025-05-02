@@ -108,8 +108,15 @@ class CraneStateMachine : public state_machine {
   };
 
   inline bool StoreValueToDB_(const std::string &key, uint64_t value) {
-    return m_variable_db_->Store(0, key, &value, sizeof(uint64_t)).has_value();
-  };
+    auto res = m_variable_db_->Begin();
+    if (res.has_value()) {
+      m_variable_db_->Store(res.value(), key, &value, sizeof(uint64_t));
+      return m_variable_db_->Commit(res.value()).has_value();
+    } else {
+      CRANE_ERROR("Failed to begin a transaction.");
+      return false;
+    }
+  }
 
   bool RestoreFromDB();
 
