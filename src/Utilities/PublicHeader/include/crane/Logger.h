@@ -47,6 +47,7 @@
 
 #define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
 
+#include <spdlog/fmt/chrono.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 #include <spdlog/spdlog.h>

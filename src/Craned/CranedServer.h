@@ -21,6 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include "CtldClient.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
@@ -34,9 +35,20 @@ using grpc::Status;
 
 using crane::grpc::Craned;
 
+enum class RequestSource : std::int8_t {
+  CTLD = 0,
+  PAM = 1,
+  SUPERVISOR = 2,
+  INVALID
+};
+
 class CranedServiceImpl : public Craned::Service {
  public:
   CranedServiceImpl() = default;
+
+  grpc::Status Configure(grpc::ServerContext *context,
+                         const crane::grpc::ConfigureCranedRequest *request,
+                         google::protobuf::Empty *response) override;
 
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
@@ -96,24 +108,42 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
-
-  grpc::Status QueryCranedRemoteMeta(
-      grpc::ServerContext *context,
-      const ::crane::grpc::QueryCranedRemoteMetaRequest *request,
-      crane::grpc::QueryCranedRemoteMetaReply *response) override;
 };
 
 class CranedServer {
  public:
   explicit CranedServer(const Config::CranedListenConf &listen_conf);
 
-  inline void Shutdown() { m_server_->Shutdown(); }
+  void Shutdown() { m_server_->Shutdown(); }
 
-  inline void Wait() { m_server_->Wait(); }
+  void Wait() { m_server_->Wait(); }
+
+  void SetGrpcSrvReady(bool ready) {
+    m_grpc_srv_ready_.store(ready, std::memory_order_release);
+  }
+
+  [[nodiscard]] bool ReadyFor(RequestSource request_source) const {
+    if (!m_supervisor_recovered_.load(std::memory_order_acquire)) return false;
+
+    if (request_source == RequestSource::CTLD)
+      return m_grpc_srv_ready_.load(std::memory_order_acquire);
+
+    return true;
+  }
+
+  void FinishSupervisorRecovery() {
+    CRANE_DEBUG("Craned finished recover.");
+    m_supervisor_recovered_.store(true, std::memory_order_release);
+  }
 
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
+
+  std::atomic_bool m_grpc_srv_ready_{false};
+
+  /* When supervisor ready, init with false */
+  std::atomic_bool m_supervisor_recovered_{true};
 
   friend class CranedServiceImpl;
 };

@@ -977,7 +977,10 @@ MongodbClient::MongodbClient() {
   m_connect_uri_ = fmt::format(
       "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
       g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-  CRANE_TRACE("Mongodb connect uri: {}", m_connect_uri_);
+  CRANE_TRACE(
+      "Mongodb connect uri: "
+      "mongodb://{}:[passwd]@{}:{}/?replicaSet={}&maxPoolSize=1000",
+      g_config.DbUser, g_config.DbHost, g_config.DbPort, g_config.DbRSName);
   m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
   m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);

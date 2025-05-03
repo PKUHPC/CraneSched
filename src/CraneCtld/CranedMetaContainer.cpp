@@ -24,19 +24,9 @@
 
 namespace Ctld {
 
-void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
-  CranedRemoteMeta remote_meta;
-
-  auto stub = g_craned_keeper->GetCranedStub(craned_id);
-  if (stub != nullptr && !stub->Invalid()) {
-    CraneErrCode err = stub->QueryCranedRemoteMeta(&remote_meta);
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
-      return;
-    }
-    stub.reset();  // Release shared_ptr
-  }
-
+void CranedMetaContainer::CranedUp(
+    const CranedId& craned_id,
+    const crane::grpc::CranedRemoteMeta& remote_meta) {
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
@@ -55,7 +45,7 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = true;
 
-  node_meta->remote_meta = std::move(remote_meta);
+  node_meta->remote_meta = CranedRemoteMeta(remote_meta);
 
   node_meta->res_total.allocatable_res +=
       node_meta->static_meta.res.allocatable_res;
@@ -75,6 +65,8 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
 
     part_global_meta.alive_craned_cnt++;
   }
+
+  CRANE_INFO("Craned {} is up now.", craned_id);
 }
 
 void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
@@ -84,11 +76,11 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
+  auto raw_part_metas_map = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids) {
-    auto& raw_part_meta = raw_part_metas_map_->at(part_id);
+    auto& raw_part_meta = raw_part_metas_map->at(part_id);
     part_meta_ptrs.emplace_back(raw_part_meta.GetExclusivePtr());
   }
 
@@ -116,9 +108,18 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
-  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
-  return node_meta->alive;
+  auto craned_meta_ptr = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  CRANE_ASSERT(craned_meta_ptr);
+
+  return craned_meta_ptr->alive;
+}
+
+int CranedMetaContainer::GetOnlineCranedCount() {
+  int count = 0;
+  auto map_ptr = craned_meta_map_.GetMapConstSharedPtr();
+  for (const auto& v : *map_ptr | std::ranges::views::values)
+    if (v.GetExclusivePtr()->alive) count++;
+  return count;
 }
 
 CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
@@ -426,8 +427,10 @@ CranedMetaContainer::QueryAllPartitionInfo() {
         part_meta->partition_global_meta.res_avail);
     *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_in_use);
-    part_info->set_default_mem_per_cpu(g_config.Partitions[part_name].default_mem_per_cpu);
-    part_info->set_max_mem_per_cpu(g_config.Partitions[part_name].max_mem_per_cpu);
+    part_info->set_default_mem_per_cpu(
+        g_config.Partitions[part_name].default_mem_per_cpu);
+    part_info->set_max_mem_per_cpu(
+        g_config.Partitions[part_name].max_mem_per_cpu);
 
     if (part_meta->partition_global_meta.alive_craned_cnt > 0)
       part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
@@ -470,9 +473,10 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
 
   part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
 
-  part_info->set_default_mem_per_cpu(g_config.Partitions[partition_name].default_mem_per_cpu);
-  part_info->set_max_mem_per_cpu(g_config.Partitions[partition_name].max_mem_per_cpu);
-
+  part_info->set_default_mem_per_cpu(
+      g_config.Partitions[partition_name].default_mem_per_cpu);
+  part_info->set_max_mem_per_cpu(
+      g_config.Partitions[partition_name].max_mem_per_cpu);
 
   *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);

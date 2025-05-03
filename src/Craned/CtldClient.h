@@ -26,19 +26,94 @@
 namespace Craned {
 
 using crane::grpc::CraneCtld;
-using crane::grpc::CranedRegisterReply;
-using crane::grpc::CranedRegisterRequest;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
+class CtldClientStateMachine {
+ public:
+  void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
+  void SetActionConfigureCb(std::function<void(RegToken const&)>&& cb);
+  void SetActionRegisterCb(
+      std::function<void(RegToken const&, std::vector<task_id_t> const&)>&& cb);
+  void SetActionReadyCb(std::function<void()>&& cb);
+  void SetActionDisconnectedCb(std::function<void()>&& cb);
+
+  // Grpc Application-level Events:
+  bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
+  void EvConfigurationDone(std::optional<std::vector<task_id_t>> lost_task_ids);
+  bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
+
+  // Grpc Channel events
+  void EvGrpcConnected();
+  void EvGrpcConnectionFailed();
+  void EvGrpcTimeout();
+
+  bool IsReadyNow();
+
+ private:
+  enum class State : uint8_t {
+    DISCONNECTED = 0,
+    REQUESTING_CONFIG,
+    CONFIGURING,
+    REGISTERING,
+    READY,
+  };
+
+  static constexpr std::string_view StateToString(State state) {
+    switch (state) {
+    case State::DISCONNECTED:
+      return "DISCONNECTED";
+    case State::REQUESTING_CONFIG:
+      return "REQUESTING_CONFIG";
+    case State::CONFIGURING:
+      return "CONFIGURING";
+    case State::REGISTERING:
+      return "REGISTERING";
+    case State::READY:
+      return "READY";
+    }
+    return "UNKNOWN";
+  }
+
+  // State Actions:
+  void ActionRequestConfig_();
+  void ActionConfigure_();
+  void ActionRegister_(std::vector<task_id_t>&& non_existent_tasks);
+  void ActionReady_();
+  void ActionDisconnected_();
+
+  std::function<void(RegToken const&)> m_action_request_config_cb_;
+  std::function<void(RegToken const&)> m_action_configure_cb_;
+  std::function<void(RegToken const&, std::vector<task_id_t> const&)>
+      m_action_register_cb_;
+  std::function<void()> m_action_ready_cb_;
+  std::function<void()> m_action_disconnected_cb_;
+
+  State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
+
+  std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
+  std::optional<std::chrono::time_point<std::chrono::steady_clock>>
+      m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
+  std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_mtx_);
+
+  absl::Mutex m_mtx_;
+};
+
 class CtldClient {
  public:
   CtldClient() = default;
-
   ~CtldClient();
 
+  CtldClient(CtldClient const&) = delete;
+  CtldClient(CtldClient&&) = delete;
+
+  CtldClient& operator=(CtldClient const&) = delete;
+  CtldClient& operator=(CtldClient&&) = delete;
+
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
+
+  void Init();
 
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
@@ -48,9 +123,13 @@ class CtldClient {
    * If CraneCtld cannot be connected within 3s, kConnectionTimeout is
    * returned.
    */
-  void InitChannelAndStub(const std::string& server_address);
+  void InitGrpcChannel(const std::string& server_address);
 
-  void OnCraneCtldConnected();
+  void AddGrpcCtldConnectedCb(std::function<void()> cb);
+
+  void AddGrpcCtldDisconnectedCb(std::function<void()> cb);
+
+  void StartGrpcCtldConnection() { m_connection_start_notification_.Notify(); }
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -59,11 +138,12 @@ class CtldClient {
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
-  inline void StartConnectingCtld() {
-    m_start_connecting_notification_.Notify();
-  }
-
  private:
+  bool RequestConfigFromCtld_(RegToken const& token);
+
+  bool CranedRegister_(RegToken const& token,
+                       std::vector<task_id_t> const& nonexistent_jobs);
+
   void AsyncSendThread_();
 
   absl::Mutex m_task_status_change_mtx_;
@@ -80,9 +160,14 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
-  absl::Notification m_start_connecting_notification_;
+  std::atomic<bool> m_grpc_has_initialized_;
+  std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;
+  std::vector<std::function<void()>> m_on_ctld_disconnected_cb_chain_;
+
+  absl::Notification m_connection_start_notification_;
 };
 
 }  // namespace Craned
 
+inline std::unique_ptr<Craned::CtldClientStateMachine> g_ctld_client_sm;
 inline std::unique_ptr<Craned::CtldClient> g_ctld_client;

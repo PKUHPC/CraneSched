@@ -96,11 +96,14 @@ class CranedMetaContainer final {
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
 
-  void CranedUp(const CranedId& craned_id);
+  void CranedUp(const CranedId& craned_id,
+                const crane::grpc::CranedRemoteMeta& remote_meta);
 
   void CranedDown(const CranedId& craned_id);
 
   bool CheckCranedOnline(const CranedId& craned_id);
+
+  int GetOnlineCranedCount();
 
   PartitionMetaPtr GetPartitionMetasPtr(const PartitionId& partition_id);
 

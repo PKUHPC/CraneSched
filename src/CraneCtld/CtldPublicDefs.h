@@ -24,6 +24,7 @@
 namespace Ctld {
 
 using moodycamel::ConcurrentQueue;
+using RegToken = google::protobuf::Timestamp;
 
 using task_db_id_t = int64_t;
 
@@ -166,9 +167,15 @@ struct Config {
   bool JobFileOpenModeAppend{false};
 };
 
+struct RunTimeStatus {
+  std::atomic_bool srv_ready{false};
+};
+
 }  // namespace Ctld
 
 inline Ctld::Config g_config{};
+
+inline Ctld::RunTimeStatus g_runtime_status{};
 
 namespace Ctld {
 
@@ -192,6 +199,19 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
+
+  CranedRemoteMeta() = default;
+
+  explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)
+      : dres_in_node(grpc_meta.dres_in_node()) {
+    this->sys_rel_info.name = grpc_meta.sys_rel_info().name();
+    this->sys_rel_info.release = grpc_meta.sys_rel_info().release();
+    this->sys_rel_info.version = grpc_meta.sys_rel_info().version();
+    this->craned_start_time =
+        absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
+    this->system_boot_time =
+        absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
+  }
 };
 
 /**

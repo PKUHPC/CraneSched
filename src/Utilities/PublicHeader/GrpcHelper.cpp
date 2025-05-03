@@ -20,6 +20,36 @@
 
 #include "crane/Network.h"
 
+std::string_view GrpcConnStateStr(grpc_connectivity_state state) {
+  switch (state) {
+  case GRPC_CHANNEL_IDLE:
+    return "IDLE";
+  case GRPC_CHANNEL_CONNECTING:
+    return "CONNECTING";
+  case GRPC_CHANNEL_READY:
+    return "READY";
+  case GRPC_CHANNEL_TRANSIENT_FAILURE:
+    return "TRANSIENT_FAILURE";
+  case GRPC_CHANNEL_SHUTDOWN:
+    return "SHUTDOWN";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+std::chrono::system_clock::time_point ChronoFromProtoTimestamp(
+    const google::protobuf::Timestamp& timestamp) {
+  auto secs = std::chrono::seconds(timestamp.seconds());
+  auto nanos = std::chrono::nanoseconds(timestamp.nanos());
+
+  return std::chrono::system_clock::time_point(secs + nanos);
+}
+
+std::string ProtoTimestampToString(
+    const google::protobuf::Timestamp& timestamp) {
+  return fmt::format("{}{}", timestamp.seconds(), timestamp.nanos());
+}
+
 static std::string GrpcFormatIpAddress(std::string const& addr) {
   // Grpc needs to use [] to wrap ipv6 address
   if (int ip_ver = crane::GetIpAddrVer(addr); ip_ver == 6)
