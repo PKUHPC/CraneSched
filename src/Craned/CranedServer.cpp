@@ -20,8 +20,8 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "JobManager.h"
 #include "CtldClient.h"
+#include "JobManager.h"
 #include "TaskManager.h"
 
 namespace Craned {
