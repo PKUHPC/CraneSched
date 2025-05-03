@@ -1431,8 +1431,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   std::thread signal_waiting_thread([p_server = m_server_.get()] {
     util::SetCurrentThreadName("SIG_Waiter");
 
-    std::unique_lock<std::mutex> lk(s_sigint_cv_mtx_);
-    s_sigint_cv_.wait(lk);
+    std::unique_lock<std::mutex> lk(s_signal_cv_mtx_);
+    s_signal_cv_.wait(lk);
 
     CRANE_TRACE(
         "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
