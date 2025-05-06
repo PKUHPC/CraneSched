@@ -78,9 +78,9 @@ bool Coll::PmixCollContribLocal(CollType type, const std::string& data,
   case CollType::FENCE_RING:
     result = PmixCollRingLocal_(data, cbfunc, cbdata);
     break;
-  // case CollType::FENCE_TREE:
-  //   result = PmixCollTreeLocal_(data, size, cbfunc, cbdata);
-  //   break;
+  case CollType::FENCE_TREE:
+    result = PmixCollTreeLocal_(data, cbfunc, cbdata);
+    break;
   default:
     result = false;
     break;

@@ -30,37 +30,26 @@ CranedStub::CranedStub(CranedClient *craned_client)
 
 }
 
-void CranedStub::SendPmixRingMsg(grpc::ClientContext* context, crane::grpc::SendPmixRingMsgReq request, crane::grpc::SendPmixRingMsgReply* reply, AsyncGrpcCallback callback) {
-
-  m_stub_->async()->SendPmixRingMsg(context, &request, reply, std::move(callback));
+void CranedStub::SendPmixRingMsg(grpc::ClientContext* context,
+                                 crane::grpc::SendPmixRingMsgReq request,
+                                 crane::grpc::SendPmixRingMsgReply* reply,
+                                 AsyncGrpcCallback callback) {
+  m_stub_->async()->SendPmixRingMsg(context, &request, reply,
+                                    std::move(callback));
 }
 
-bool CranedStub::PmixTreeUpwardForward(
-    crane::grpc::PmixTreeUpwardForwardReq request) {
-  using crane::grpc::PmixTreeUpwardForwardReply;
-
-  PmixTreeUpwardForwardReply reply;
-  grpc::ClientContext context;
-  grpc::Status status;
-
-  status = m_stub_->PmixTreeUpwardForward(&context, request, &reply);
-  if (!status.ok() || !reply.ok()) return false;
-
-  return true;
+void CranedStub::PmixTreeUpwardForward(grpc::ClientContext* context,
+                                       crane::grpc::PmixTreeUpwardForwardReq request,
+                                       crane::grpc::PmixTreeUpwardForwardReply* reply,
+                                       AsyncGrpcCallback callback) {
+  m_stub_->async()->PmixTreeUpwardForward(context, &request, reply, std::move(callback));
 }
 
-bool CranedStub::PmixTreeDownwardForward(
-    crane::grpc::PmixTreeDownwardForwardReq request) {
-  using crane::grpc::PmixTreeDownwardForwardReply;
-
-  PmixTreeDownwardForwardReply reply;
-  grpc::ClientContext context;
-  grpc::Status status;
-
-  status = m_stub_->PmixTreeDownwardForward(&context, request, &reply);
-  if (!status.ok() || !reply.ok()) return false;
-
-  return true;
+void CranedStub::PmixTreeDownwardForward(grpc::ClientContext* context,
+                                         crane::grpc::PmixTreeDownwardForwardReq request,
+                                         crane::grpc::PmixTreeDownwardForwardReply* reply,
+                                         AsyncGrpcCallback callback) {
+  m_stub_->async()->PmixTreeDownwardForward(context, &request, reply, std::move(callback));
 }
 
 void CranedStub::PmixDModexRequest(grpc::ClientContext* context, crane::grpc::PmixDModexRequestReq request, crane::grpc::PmixDModexRequestReply* reply, AsyncGrpcCallback callback) {
