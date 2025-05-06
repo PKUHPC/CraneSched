@@ -24,7 +24,7 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
     const std::string& username, const TaskInCtld& task, const Qos& qos) {
-  if (static_cast<double>(task.cpus_per_task) > qos.max_cpus_per_user)
+  if (static_cast<double>(task.cpus_per_task)*task.node_num > qos.max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
   if (qos.max_jobs_per_user == 0)
