@@ -147,7 +147,7 @@ class PMIxServerModule {
 
      // TODO: 从env中获取type，默认tree
      // CollType type = pmixp_info_srv_fence_coll_type();
-     CollType type = CollType::FENCE_RING;
+     CollType type = CollType::FENCE_TREE;
 
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
