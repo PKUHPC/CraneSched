@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include "AccountManager.h"
+#include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "TaskScheduler.h"
@@ -1513,6 +1514,8 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
+
+  g_account_meta_container->FreeQosResource(task->Username(), *task);
 
   return std::unexpected(result.error());
 }

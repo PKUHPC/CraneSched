@@ -114,6 +114,8 @@ bool TaskScheduler::Init() {
                                                        task->uid);
           }
 
+          g_account_meta_container->FreeQosResource(task->Username(), *task);
+
           ok = g_db_client->InsertJob(task.get());
           if (!ok) {
             CRANE_ERROR(
@@ -326,6 +328,7 @@ bool TaskScheduler::Init() {
 
       if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
+        g_account_meta_container->FreeQosResource(task->Username(), *task);
         mark_task_as_failed = true;
       }
 
@@ -1964,7 +1967,10 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      for (auto& pair : accepted_tasks) {
+        pair.second /*promise*/.set_value(0);
+        g_account_meta_container->FreeQosResource(pair.first->Username(), *pair.first);
+      }
       break;
     }
 
@@ -1994,8 +2000,11 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (rejected_actual_size == 0) break;
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
-    for (size_t i = 0; i < rejected_actual_size; i++)
+    for (size_t i = 0; i < rejected_actual_size; i++) {
+      g_account_meta_container->FreeQosResource(rejected_tasks[i].first->Username(), *rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
+    }
+
   } while (false);
 }
 
@@ -3112,7 +3121,10 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
+    if (!ok) {
+      g_account_meta_container->FreeQosResource(task->Username(), *task);
+      return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
+    }
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -3120,7 +3132,10 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
+    if (!ok) {
+      g_account_meta_container->FreeQosResource(task->Username(), *task);
+      return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
+    }
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
