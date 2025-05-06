@@ -366,6 +366,10 @@ bool CtldClient::CranedRegister_(
   grpc_meta->mutable_nonexistent_jobs()->Assign(nonexistent_jobs.begin(),
                                                 nonexistent_jobs.end());
 
+  for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
+    *grpc_meta->add_network_interfaces() = interface;
+  }
+
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));

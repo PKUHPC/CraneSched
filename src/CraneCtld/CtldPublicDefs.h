@@ -213,6 +213,11 @@ struct CranedRemoteMeta {
         absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
     this->system_boot_time =
         absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
+    
+    this->network_interfaces.clear();
+    for (const auto& interface : grpc_meta.network_interfaces()) {
+      this->network_interfaces.emplace_back(interface);
+    }
   }
 };
 
