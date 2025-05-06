@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <string>
-
 #include "SupervisorPreCompiledHeader.h"
 // Precompiled header comes first
 
