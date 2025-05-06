@@ -81,7 +81,8 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   return failed_task_ids;
 }
 
-CraneErrCode CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
+CraneErrCode CranedStub::TerminateTasks(
+    const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateTasksReply;
   using crane::grpc::TerminateTasksRequest;
 
@@ -103,6 +104,7 @@ CraneErrCode CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) 
   return CraneErrCode::SUCCESS;
 }
 
+// FIXME: Not used?
 CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
   using crane::grpc::TerminateOrphanedTaskReply;
   using crane::grpc::TerminateOrphanedTaskRequest;
@@ -185,7 +187,8 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
+CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
+                                             uint64_t seconds) {
   using crane::grpc::ChangeTaskTimeLimitReply;
   using crane::grpc::ChangeTaskTimeLimitRequest;
 

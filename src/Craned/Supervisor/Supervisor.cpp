@@ -209,8 +209,8 @@ void StartServer() {
 
   g_server->Wait();
   g_task_mgr->Wait();
-  g_task_mgr.reset();
 
+  g_task_mgr.reset();
   g_craned_client.reset();
   g_plugin_client.reset();
   g_thread_pool->wait();

@@ -22,6 +22,7 @@
 
 #include "CforedClient.h"
 #include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
 
 namespace Supervisor {
 struct StepSpec {
@@ -65,7 +66,6 @@ class ExecutionInterface {
       : step_spec(step_spec) {}
   virtual ~ExecutionInterface();
 
-  void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
   // Interfaces must be implemented.
@@ -73,7 +73,8 @@ class ExecutionInterface {
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
-  // TODO: SigChldHandler()
+
+  virtual CraneErrCode HandleSigChld() = 0;
 
   // Set from TaskManager
   const StepSpec* step_spec;
@@ -149,6 +150,8 @@ class ContainerInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
+  CraneErrCode HandleSigChld() override;
+
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
@@ -170,6 +173,8 @@ class ProcessInstance : public ExecutionInterface {
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
+
+  CraneErrCode HandleSigChld() override;
 };
 
 class TaskManager {

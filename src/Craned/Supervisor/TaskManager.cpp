@@ -75,14 +75,6 @@ ExecutionInterface::~ExecutionInterface() {
   }
 }
 
-void ExecutionInterface::TaskProcStopped() {
-  auto ok_to_free = step_spec->cfored_client->TaskProcessStop(m_pid_);
-  if (ok_to_free) {
-    CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
-    step_spec->cfored_client->TaskEnd(m_pid_);
-  }
-}
-
 std::string ExecutionInterface::ParseFilePathPattern_(
     const std::string& pattern, const std::string& cwd) const {
   std::filesystem::path resolved_path(pattern);
@@ -276,6 +268,8 @@ void ExecutionInterface::SetChildProcessSignalHandler_() {
   signal(SIGUSR2, SIG_DFL);
   signal(SIGALRM, SIG_DFL);
   signal(SIGHUP, SIG_DFL);
+  // Reset SIGPIPE as some programs may use it to detect broken pipes.
+  signal(SIGPIPE, SIG_DFL);
 }
 
 CraneErrCode ExecutionInterface::SetChildProcessProperty_() {
@@ -872,13 +866,14 @@ CraneErrCode ContainerInstance::Spawn() {
     util::os::CloseFdFrom(3);
 
     // TODO: X11 in Container (feasible?)
-    // SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
+    // if (step_spec->IsCrun() && step_spec->spec.interactive_meta().x11())
+    //   SetChildProcessCrunX11_(GetCrunMeta()->x11_port);
 
     // Set env just in case OCI requires some.
-    // Real env in container is handled in ModifyOCIBundle_
+    // Real env in container is handled in ModifyOCIBundle_.
     err = SetChildProcessEnv_();
     if (err != CraneErrCode::SUCCESS) {
-      fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
+      fmt::print(stderr, "[Subprocess] Error: Failed to set environments.\n");
     }
 
     // Prepare the command line arguments.
@@ -998,6 +993,52 @@ CraneErrCode ContainerInstance::Cleanup() {
 
   // Dummy return
   return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::HandleSigChld() {
+  int status;
+  pid_t pid;
+  while (true) {
+    pid = waitpid(-1, &status, WNOHANG
+                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+
+    if (pid > 0) {
+      if (WIFEXITED(status)) {
+        // Exited with status WEXITSTATUS(status)
+        sigchld_info.pid = pid;
+        sigchld_info.is_terminated_by_signal = false;
+        sigchld_info.value = WEXITSTATUS(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                    pid, WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        // FIXME: Fix container exit code
+        // Killed by signal WTERMSIG(status)
+        sigchld_info.pid = pid;
+        sigchld_info.is_terminated_by_signal = true;
+        sigchld_info.value = WTERMSIG(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+                    pid, WTERMSIG(status));
+      }
+      /* Todo(More status tracing):
+       else if (WIFSTOPPED(status)) {
+        printf("stopped by signal %d\n", WSTOPSIG(status));
+      } else if (WIFCONTINUED(status)) {
+        printf("continued\n");
+      } */
+
+      return CraneErrCode::SUCCESS;
+    } else if (pid == 0) {
+      break;
+    } else if (pid < 0) {
+      if (errno != ECHILD)
+        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+      break;
+    }
+  }
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 CraneErrCode ProcessInstance::Prepare() {
@@ -1241,7 +1282,7 @@ CraneErrCode ProcessInstance::Spawn() {
     // Apply environment variables
     err = SetChildProcessEnv_();
     if (err != CraneErrCode::SUCCESS) {
-      fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
+      fmt::print(stderr, "[Subprocess] Error: Failed to set environments.\n");
     }
 
     // Prepare the command line arguments.
@@ -1294,6 +1335,51 @@ CraneErrCode ProcessInstance::Cleanup() {
 
   // Dummy return
   return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ProcessInstance::HandleSigChld() {
+  int status;
+  pid_t pid;
+  while (true) {
+    pid = waitpid(-1, &status, WNOHANG
+                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+
+    if (pid > 0) {
+      if (WIFEXITED(status)) {
+        // Exited with status WEXITSTATUS(status)
+        sigchld_info.pid = pid;
+        sigchld_info.is_terminated_by_signal = false;
+        sigchld_info.value = WEXITSTATUS(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                    pid, WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        // Killed by signal WTERMSIG(status)
+        sigchld_info.pid = pid;
+        sigchld_info.is_terminated_by_signal = true;
+        sigchld_info.value = WTERMSIG(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+                    pid, WTERMSIG(status));
+      }
+      /* Todo(More status tracing):
+       else if (WIFSTOPPED(status)) {
+        printf("stopped by signal %d\n", WSTOPSIG(status));
+      } else if (WIFCONTINUED(status)) {
+        printf("continued\n");
+      } */
+
+      return CraneErrCode::SUCCESS;
+    } else if (pid == 0) {
+      break;
+    } else if (pid < 0) {
+      if (errno != ECHILD)
+        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+      break;
+    }
+  }
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 TaskManager::TaskManager()
@@ -1425,7 +1511,7 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                             std::optional<std::string> reason) {
   m_instance_->Cleanup();
   bool orphaned = m_instance_->orphaned;
-  // No need to free the TaskInstance structure,will destruct with TaskMgr.
+  // No need to free the TaskInstance here, will destruct with TaskMgr.
   if (!orphaned)
     g_craned_client->TaskStatusChangeAsync(new_status, exit_code,
                                            std::move(reason));
@@ -1485,20 +1571,21 @@ void TaskManager::LaunchExecution_() {
     return;
   }
 
-  CRANE_TRACE("[Job #{}] Spawning process in task",
-              m_step_spec_.spec.task_id());
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
   if (m_step_spec_.IsCrun()) {
     auto cfored_client = std::make_unique<CforedClient>();
     cfored_client->InitChannelAndStub(
         m_step_spec_.spec.interactive_meta().cfored_name());
     m_step_spec_.cfored_client = std::move(cfored_client);
   }
+
+  CRANE_TRACE("[Job #{}] Spawning process in task",
+              m_step_spec_.spec.task_id());
   err = m_instance_->Spawn();
   if (err != CraneErrCode::SUCCESS) {
+    // err will NOT be kOk ONLY if fork() is not called due to some failure
+    // or fork() fails.
+    // In this case, SIGCHLD will NOT be received for this task, and
+    // we should send TaskStatusChange manually.
     ActivateTaskStatusChange_(
         crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeSpawnProcessFail,
         fmt::format("Cannot spawn child process in task"));
@@ -1536,58 +1623,34 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
 }
 
 void TaskManager::EvSigchldCb_() {
-  int status;
-  pid_t pid;
-  while (true) {
-    pid = waitpid(-1, &status, WNOHANG
-                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
-
-    if (pid > 0) {
-      auto sigchld_info = std::make_unique<ProcSigchldInfo>();
-
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info->pid = pid;
-        sigchld_info->is_terminated_by_signal = false;
-        sigchld_info->value = WEXITSTATUS(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        // Killed by signal WTERMSIG(status)
-        sigchld_info->pid = pid;
-        sigchld_info->is_terminated_by_signal = true;
-        sigchld_info->value = WTERMSIG(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
-      m_instance_->sigchld_info = *sigchld_info;
-
-      if (m_step_spec_.IsCrun())
-        // TaskStatusChange of a crun task is triggered in
-        // CforedManager.
-        m_instance_->TaskProcStopped();
-      else /* Batch / Calloc */ {
-        // If the TaskInstance has no process left,
-        // send TaskStatusChange for this task.
-        // See the comment of EvActivateTaskStatusChange_.
-        TaskStopAndDoStatusChange();
-      }
-    } else if (pid == 0) {
-      break;
-    } else if (pid < 0) {
-      if (errno != ECHILD)
-        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
-      break;
+  CRANE_TRACE("SIGCHLD received.");
+  if (m_instance_) {
+    auto err = m_instance_->HandleSigChld();
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_TRACE("Failed to handle SIGCHLD. Ignore it.");
+      return;
     }
+
+    auto pid = m_instance_->GetPid();
+
+    if (m_step_spec_.IsCrun()) {
+      // TaskStatusChange of a crun task is triggered in
+      // CforedManager.
+      auto ok_to_free = m_step_spec_.cfored_client->TaskProcessStop(pid);
+      if (ok_to_free) {
+        CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
+        m_step_spec_.cfored_client->TaskEnd(pid);
+      }
+    } else /* Batch / Calloc */ {
+      // If the ExecutionInterface has no process left,
+      // send TaskStatusChange for this task.
+      // See the comment of EvActivateTaskStatusChange_.
+      TaskStopAndDoStatusChange();
+    }
+
+  } else {
+    CRANE_DEBUG("SIGCHLD received for a non-existent task #{}.",
+                g_config.JobId);
   }
 }
 
