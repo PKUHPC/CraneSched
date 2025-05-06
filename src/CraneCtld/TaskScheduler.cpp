@@ -557,7 +557,7 @@ bool TaskScheduler::Init() {
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   CRANE_ASSERT_MSG(
-      g_account_meta_container->TryMallocQosResource(task->Username(), *task) ==
+      g_account_meta_container->TryMallocQosResource(*task) ==
           CraneErrCode::SUCCESS,
       fmt::format(
           "ApplyQosLimitOnTask failed when recovering pending task #{}.",
@@ -569,8 +569,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  auto res =
-      g_account_meta_container->TryMallocQosResource(task->Username(), *task);
+  auto res = g_account_meta_container->TryMallocQosResource(*task);
   CRANE_ASSERT_MSG(
       res == CraneErrCode::SUCCESS,
       fmt::format(
@@ -1060,7 +1059,7 @@ void TaskScheduler::ScheduleThread_() {
           if (task->reservation != "")
             g_meta_container->FreeResourceFromResv(task->reservation,
                                                    task->TaskId());
-          g_account_meta_container->FreeQosResource(task->Username(), *task);
+          g_account_meta_container->FreeQosResource(*task);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1893,7 +1892,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
-    g_account_meta_container->FreeQosResource(task->Username(), *task);
+    g_account_meta_container->FreeQosResource(*task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -1977,7 +1976,10 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      for (auto& pair : accepted_tasks) {
+        g_account_meta_container->FreeQosResource(*pair.first);
+        pair.second /*promise*/.set_value(0);
+      }
       break;
     }
 
@@ -2007,8 +2009,10 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (rejected_actual_size == 0) break;
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
-    for (size_t i = 0; i < rejected_actual_size; i++)
+    for (size_t i = 0; i < rejected_actual_size; i++) {
+      g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
+    }
   } while (false);
 }
 
@@ -2123,7 +2127,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
     if (task->reservation != "")
       g_meta_container->FreeResourceFromResv(task->reservation, task->TaskId());
-    g_account_meta_container->FreeQosResource(task->Username(), *task);
+    g_account_meta_container->FreeQosResource(*task);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -3113,6 +3117,14 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
   task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+
+  auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
+      task->Username(), task->account, task);
+  if (!check_qos_result) {
+    CRANE_ERROR("Failed to call CheckQosLimitOnTask: {}",
+                CraneErrStr(check_qos_result.error()));
+    return check_qos_result;
+  }
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;

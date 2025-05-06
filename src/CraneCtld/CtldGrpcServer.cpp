@@ -46,9 +46,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     } else {
       response->set_ok(false);
       response->set_code(CraneErrCode::ERR_BEYOND_TASK_ID);
-      // In this case task passed check but failed to submit.
-      // So we need to free the resources.
-      g_account_meta_container->FreeQosResource(task->Username(), *task);
     }
   } else {
     response->set_ok(false);
@@ -1513,8 +1510,7 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res =
-        g_account_meta_container->TryMallocQosResource(task->Username(), *task);
+    auto res = g_account_meta_container->TryMallocQosResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
       return std::unexpected(res);
