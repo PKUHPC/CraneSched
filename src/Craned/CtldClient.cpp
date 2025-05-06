@@ -405,6 +405,10 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_meta->mutable_lost_jobs()->Assign(lost_jobs.begin(), lost_jobs.end());
   grpc_meta->mutable_lost_tasks()->Assign(lost_tasks.begin(), lost_tasks.end());
 
+  for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
+    *grpc_meta->add_network_interfaces() = interface;
+  }
+
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
