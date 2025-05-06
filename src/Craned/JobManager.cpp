@@ -31,12 +31,6 @@ EnvMap JobSpec::GetJobEnvMap() const {
   return env_map;
 }
 
-JobInstance::JobInstance(JobSpec&& spec)
-    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
-
-JobInstance::JobInstance(const JobSpec& spec)
-    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
-
 bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
   CRANE_DEBUG("Allocating {} tasks", job_specs.size());
 
@@ -101,34 +95,34 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     }
   }
   for (auto [idx, cgroup] : cg_ptr_vec | std::ranges::views::enumerate) {
+    if (cgroup == nullptr) continue;
+
     if (g_config.Plugin.Enabled) {
       g_plugin_client->DestroyCgroupHookAsync(job_ids[idx],
                                               cgroup->GetCgroupString());
     }
+    g_thread_pool->detach_task([cgroup]() {
+      int cnt = 0;
 
-    if (cgroup != nullptr) {
-      g_thread_pool->detach_task([cgroup]() {
-        int cnt = 0;
+      while (true) {
+        if (cgroup->Empty()) break;
 
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cgroup->GetCgroupString(), cnt);
+          break;
         }
 
-        delete cgroup;
-      });
-    }
+        cgroup->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      cgroup->Destroy();
+
+      delete cgroup;
+    });
   }
   return true;
 }

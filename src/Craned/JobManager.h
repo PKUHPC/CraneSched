@@ -34,8 +34,10 @@ struct JobSpec {
 };
 
 struct JobInstance {
-  explicit JobInstance(JobSpec&& spec);
-  explicit JobInstance(const JobSpec& spec);
+  explicit JobInstance(JobSpec&& spec)
+      : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
+  explicit JobInstance(const JobSpec& spec)
+      : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
   JobInstance(JobInstance&& other) noexcept
       : job_id(std::move(other.job_id)),
         job_spec(std::move(other.job_spec)),

@@ -287,83 +287,6 @@ constexpr ControllerFlags CgV2PreferredControllers =
     CgroupConstant::Controller::MEMORY_CONTORLLER_V2 |
     CgroupConstant::Controller::IO_CONTROLLER_V2;
 
-class Cgroup {
- public:
-  Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
-      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id(id) {}
-  ~Cgroup();
-
-  struct cgroup *NativeHandle() { return m_cgroup_; }
-
-  // Using the zombie object pattern as exceptions are not available.
-  bool Valid() const { return m_cgroup_ != nullptr; }
-
-  bool SetControllerValue(CgroupConstant::Controller controller,
-                          CgroupConstant::ControllerFile controller_file,
-                          uint64_t value);
-  bool SetControllerStr(CgroupConstant::Controller controller,
-                        CgroupConstant::ControllerFile controller_file,
-                        const std::string &str);
-  bool SetControllerStrs(CgroupConstant::Controller controller,
-                         CgroupConstant::ControllerFile controller_file,
-                         const std::vector<std::string> &strs);
-
-  // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
-  bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
-  std::string m_cgroup_path_;
-  mutable struct cgroup *m_cgroup_;
-  uint64_t m_cgroup_id;
-};
-
-class CgroupInterface {
- public:
-  CgroupInterface(const std::string &path, struct cgroup *handle,
-                  uint64_t id = 0)
-      : m_cgroup_info_(path, handle, id) {};
-  virtual ~CgroupInterface() = default;
-  virtual bool SetCpuCoreLimit(double core_num) = 0;
-  virtual bool SetCpuShares(uint64_t share) = 0;
-  virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
-  virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
-  virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
-  virtual bool SetBlockioWeight(uint64_t weight) = 0;
-  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
-                               bool set_read, bool set_write,
-                               bool set_mknod) = 0;
-
-  virtual bool KillAllProcesses() = 0;
-
-  virtual bool Empty() = 0;
-
-  bool MigrateProcIn(pid_t pid);
-  const std::string &GetCgroupString() const {
-    return m_cgroup_info_.m_cgroup_path_;
-  };
-
- protected:
-  Cgroup m_cgroup_info_;
-};
-
-class CgroupV1 : public CgroupInterface {
- public:
-  CgroupV1(const std::string &path, struct cgroup *handle)
-      : CgroupInterface(path, handle) {}
-  ~CgroupV1() override = default;
-  bool SetCpuCoreLimit(double core_num) override;
-  bool SetCpuShares(uint64_t share) override;
-  bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
-  bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
-  bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
-  bool SetBlockioWeight(uint64_t weight) override;
-
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
-                       bool set_write, bool set_mknod) override;
-
-  bool KillAllProcesses() override;
-
-  bool Empty() override;
-};
-
 #ifdef CRANE_ENABLE_BPF
 class BpfRuntimeInfo {
  public:
@@ -395,6 +318,89 @@ class BpfRuntimeInfo {
 };
 #endif
 
+class Cgroup {
+ public:
+  Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
+      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id(id) {}
+  ~Cgroup() = default;
+
+  struct cgroup *NativeHandle() { return m_cgroup_; }
+
+  // Using the zombie object pattern as exceptions are not available.
+  bool Valid() const { return m_cgroup_ != nullptr; }
+
+  bool SetControllerValue(CgroupConstant::Controller controller,
+                          CgroupConstant::ControllerFile controller_file,
+                          uint64_t value);
+  bool SetControllerStr(CgroupConstant::Controller controller,
+                        CgroupConstant::ControllerFile controller_file,
+                        const std::string &str);
+  bool SetControllerStrs(CgroupConstant::Controller controller,
+                         CgroupConstant::ControllerFile controller_file,
+                         const std::vector<std::string> &strs);
+
+  void Destroy();
+
+  // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
+  bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
+  std::string m_cgroup_path_;
+  mutable struct cgroup *m_cgroup_;
+  uint64_t m_cgroup_id;
+};
+
+class CgroupInterface {
+ public:
+  CgroupInterface(const std::string &path, struct cgroup *handle,
+                  uint64_t id = 0)
+      : m_cgroup_info_(path, handle, id) {};
+  virtual ~CgroupInterface() = default;
+  virtual bool SetCpuCoreLimit(double core_num) = 0;
+  virtual bool SetCpuShares(uint64_t share) = 0;
+  virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
+  virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetBlockioWeight(uint64_t weight) = 0;
+  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write,
+                               bool set_mknod) = 0;
+
+  virtual bool KillAllProcesses() = 0;
+
+  virtual bool Empty() = 0;
+
+  virtual void Destroy();
+
+  bool MigrateProcIn(pid_t pid);
+  const std::string &GetCgroupString() const {
+    return m_cgroup_info_.m_cgroup_path_;
+  };
+
+ protected:
+  Cgroup m_cgroup_info_;
+};
+
+class CgroupV1 : public CgroupInterface {
+ public:
+  CgroupV1(const std::string &path, struct cgroup *handle)
+      : CgroupInterface(path, handle) {}
+  ~CgroupV1() override = default;
+  bool SetCpuCoreLimit(double core_num) override;
+  bool SetCpuShares(uint64_t share) override;
+  bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
+  bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
+  bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
+  bool SetBlockioWeight(uint64_t weight) override;
+
+  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+                       bool set_write, bool set_mknod) override;
+
+  bool KillAllProcesses() override;
+
+  bool Empty() override;
+
+  void Destroy() override;
+};
+
 class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);
@@ -402,7 +408,7 @@ class CgroupV2 : public CgroupInterface {
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
            std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
 #endif
-  ~CgroupV2() override;
+  ~CgroupV2() override {};
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -445,6 +451,8 @@ class CgroupV2 : public CgroupInterface {
   bool KillAllProcesses() override;
 
   bool Empty() override;
+
+  void Destroy() override;
 
  private:
 #ifdef CRANE_ENABLE_BPF
