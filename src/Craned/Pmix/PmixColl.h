@@ -101,7 +101,9 @@ class Coll {
   const std::vector<pmix_proc_t>& get_procs() const { return m_pset_.m_procs_; }
   CollType get_type() const { return m_type_; }
 
-  static void ReleaseFn(void* rel_dedata);
+  static void RingReleaseFn(void* rel_data);
+
+  static void TreeReleaseFn(void* rel_data);
 
  private:
   /* coll states */
@@ -151,11 +153,14 @@ class Coll {
   struct CbData {
     Coll* coll;
     CollRingCtx* coll_ring_ctx;
+    uint32_t seq;
+    volatile uint32_t refcntr;
   };
 
   /* tree coll functions */
-  bool PmixCollTreeInit_(std::set<std::string> hostset);
-  bool PmixCollTreeLocal_(char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+  bool PmixCollTreeInit_(const std::set<std::string>& hostset);
+  bool PmixCollTreeLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
+                          void* cbdata);
 
   void ProgressCollectTree_();
   bool ProgressCollect_();
@@ -172,7 +177,7 @@ class Coll {
   void PmixCollLocalCbNodata(int status);
 
   /* ring coll functions */
-  bool PmixCollRingInit_(std::set<std::string> hostset);
+  bool PmixCollRingInit_(const std::set<std::string>& hostset);
   bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
                           void* cbdata);
 
