@@ -25,7 +25,7 @@
 
 namespace pmix {
 
-bool Coll::PmixCollRingInit_(std::set<std::string> hostset) {
+bool Coll::PmixCollRingInit_(const std::set<std::string>& hostset) {
 
   auto iter = hostset.find(g_pmix_server->GetHostname());
   if (iter != hostset.end()) {
@@ -208,7 +208,7 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   } while (result);
 }
 
-void Coll::ReleaseFn(void* rel_data) {
+void Coll::RingReleaseFn(void* rel_data) {
   auto* cb_data = static_cast<CbData*>(rel_data);
 
   std::lock_guard lock_guard(cb_data->coll->m_lock_);
@@ -227,7 +227,7 @@ void Coll::InvokeCallBackRing(CollRingCtx& coll_ring_ctx) {
   cb_data->coll_ring_ctx = &coll_ring_ctx;
 
   PmixLibModexInvoke(m_cbfunc_, PMIX_SUCCESS, coll_ring_ctx.m_ring_buf_.data(),
-          coll_ring_ctx.m_ring_buf_.size(), m_cbdata_, (void*)(Coll::ReleaseFn), cb_data.release());
+          coll_ring_ctx.m_ring_buf_.size(), m_cbdata_, (void*)(Coll::RingReleaseFn), cb_data.release());
 
   m_cbfunc_ = nullptr;
   m_cbdata_ = nullptr;
