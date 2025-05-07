@@ -36,8 +36,8 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
 
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
-    strncpy(tmp_proc.nspace, proc.nspace().c_str(), sizeof(proc.nspace()) - 1);
-    tmp_proc.nspace[sizeof(proc.nspace()) - 1] = '\0';
+    auto& nspace_str = proc.nspace();
+    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
@@ -71,8 +71,8 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
   std::vector<pmix_proc_t> procs;
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
-    strncpy(tmp_proc.nspace, proc.nspace().c_str(), sizeof(proc.nspace()) - 1);
-    tmp_proc.nspace[sizeof(proc.nspace()) - 1] = '\0';
+    auto& nspace_str = proc.nspace();
+    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
@@ -82,6 +82,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
           pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
+    response->set_ok(false);
     reactor->Finish(Status::OK);
     return reactor;
   }
@@ -102,8 +103,8 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
   std::vector<pmix_proc_t> procs;
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
-    strncpy(tmp_proc.nspace, proc.nspace().c_str(), sizeof(proc.nspace()) - 1);
-    tmp_proc.nspace[sizeof(proc.nspace()) - 1] = '\0';
+    auto& nspace_str = proc.nspace();
+    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
@@ -113,6 +114,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
         pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
+    response->set_ok(false);
     reactor->Finish(Status::OK);
     return reactor;
   }
@@ -136,7 +138,9 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixDModexRequest(
   snprintf(proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
   proc.rank = request->pmix_proc().rank();
 
-  g_dmodex_req_manager->PmixProcessRequest(request->seq_num(), request->craned_id(), proc, request->local_namespace());
+  g_dmodex_req_manager->PmixProcessRequest(request->seq_num(),
+                                           request->craned_id(), proc,
+                                           request->local_namespace());
 
 
   reactor->Finish(Status::OK);
@@ -165,19 +169,17 @@ CranedASyncServer::CranedASyncServer(const Config::CranedListenConf &listen_conf
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, craned_listen_addr,
-                                        "10015",
+                                        kCranedAsyncDefaultPort,
                                         listen_conf.TlsCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
-                                             "10015");
+                                             kCranedAsyncDefaultPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("CranedASync is listening on [{}, {}:{}]",
-             listen_conf.UnixSocketListenAddr, craned_listen_addr,
-             "10015");
+  CRANE_INFO("CranedASync is listening on [{}:{}]", craned_listen_addr, kCranedAsyncDefaultPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();

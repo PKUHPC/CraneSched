@@ -48,7 +48,11 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexResponseReply>();
-  g_craned_client->GetCranedStub(dmo_modex_cb_data->craned_id)->PmixDModexResponse(
+  auto stub = g_craned_client->GetCranedStub(dmo_modex_cb_data->craned_id);
+  if (!stub)
+    CRANE_ERROR("Cannot send direct modex response to {}", dmo_modex_cb_data->craned_id);
+
+  stub->PmixDModexResponse(
           context.get(), std::move(request), reply.get(),
           [context, reply, craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
             if (!status.ok()) {
@@ -61,10 +65,9 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
 }  // namespace
 
-bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int rank,
-                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
-
-
+bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
+                                         int rank, pmix_modex_cbfunc_t cbfunc,
+                                         void *cbdata) {
   // Find the node host corresponding to the nspace-rank.
   auto pmix_nspace = g_pmix_server->PmixNamespaceGet(pmix_namespace);
   if (!pmix_nspace) {
@@ -76,16 +79,13 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
 
   crane::grpc::PmixDModexRequestReq request{};
 
-
   {
     util::lock_guard lock(m_dmodex_mutex_);
     m_pmix_dmodex_req_list_.emplace_back(
-      PmixDModexReq{
-        .m_seq_num_ = dmdx_seq_num_,
-        .m_ts_ = time(nullptr),
-        .m_cb_func_ = cbfunc,
-        .m_cb_data_ = cbdata
-      });
+        PmixDModexReq{.m_seq_num_ = dmdx_seq_num_,
+                      .m_ts_ = time(nullptr),
+                      .m_cb_func_ = cbfunc,
+                      .m_cb_data_ = cbdata});
     request.set_seq_num(dmdx_seq_num_++);
   }
 
@@ -96,12 +96,15 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
   request.set_local_namespace(pmix_namespace);
   request.set_craned_id(g_pmix_server->GetHostname());
 
-
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexRequestReply>();
+  auto stub = g_craned_client->GetCranedStub(craned_id);
+  if (!stub)
+    CRANE_ERROR("PmixDModex rpc failed.");
 
-  g_craned_client->GetCranedStub(craned_id)->PmixDModexRequest(
-      context.get(), std::move(request), reply.get(), [context, reply, cbfunc, cbdata](grpc::Status status) {
+  stub->PmixDModexRequest(
+      context.get(), std::move(request), reply.get(),
+      [context, reply, cbfunc, cbdata](grpc::Status status) {
         if (!status.ok()) {
           CRANE_ERROR("PmixDModex rpc failed.");
           // TODO: Is it needed?
@@ -113,10 +116,10 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace, int 
   return true;
 }
 
-// TODO: const CranedId&
-void PmixDModexReqManager::PmixProcessRequest(
-    uint32_t seq_num, CranedId craned_id, const pmix_proc_t &pmix_proc,
-    const std::string &send_nspace) {
+void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
+                                              const CranedId &craned_id,
+                                              const pmix_proc_t &pmix_proc,
+                                              const std::string &send_nspace) {
 
   auto pmix_nspace = g_pmix_server->PmixNamespaceGet(pmix_proc.nspace);
   if (!pmix_nspace) {
@@ -173,7 +176,12 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::strin
 
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexResponseReply>();
-  g_craned_client->GetCranedStub(craned_id)->PmixDModexResponse(
+  auto stub = g_craned_client->GetCranedStub(craned_id);
+  if (!stub) {
+    CRANE_ERROR("Cannot send direct modex error response to {}",
+                      craned_id);
+  }
+  stub->PmixDModexResponse(
       context.get(), std::move(request), reply.get(), [context, reply, craned_id](grpc::Status status) {
         if (!status.ok()) {
           CRANE_ERROR("Cannot send direct modex error response to {}",
