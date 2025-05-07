@@ -30,8 +30,6 @@ class PmixState {
  public:
   PmixState() = default;
 
-  void Init();
-
   std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& ranges,
                          size_t nranges);
  private:
@@ -41,3 +39,5 @@ class PmixState {
 };
 
 } // namespace pmix
+
+inline std::unique_ptr<pmix::PmixState> g_pmix_state;
