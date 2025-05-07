@@ -37,7 +37,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
     auto& nspace_str = proc.nspace();
-    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
+    snprintf(tmp_proc.nspace, sizeof(tmp_proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
@@ -54,8 +54,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
 
   auto result = coll->ProcessRingRequest(request->pmix_ring_msg_hdr(), procs,
                                          request->msg());
-
-  if (!result) response->set_ok(false);
+  response->set_ok(result);
 
 
   reactor->Finish(Status::OK);
@@ -72,7 +71,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
     auto& nspace_str = proc.nspace();
-    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
+    snprintf(tmp_proc.nspace, sizeof(tmp_proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
@@ -104,7 +103,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
   for (const auto &proc : request->pmix_procs()) {
     pmix_proc_t tmp_proc;
     auto& nspace_str = proc.nspace();
-    snprintf(tmp_proc.nspace, sizeof(proc.nspace), "%s", nspace_str.c_str());
+    snprintf(tmp_proc.nspace, sizeof(tmp_proc.nspace), "%s", nspace_str.c_str());
     tmp_proc.rank = proc.rank();
     procs.emplace_back(tmp_proc);
   }
