@@ -857,9 +857,10 @@ message SendPmixRingMsgReply {
 };
 
 message PmixTreeUpwardForwardReq {
-  repeated PmixProc pmix_procs = 1;
-  string peer_host = 2;
-  string msg = 3;
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  string msg = 4;
 }
 
 message PmixTreeUpwardForwardReply {
@@ -867,9 +868,10 @@ message PmixTreeUpwardForwardReply {
 }
 
 message PmixTreeDownwardForwardReq {
-  repeated PmixProc pmix_procs = 1;
-  string peer_host = 2;
-  string msg = 3;
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  string msg = 4;
 }
 
 message PmixTreeDownwardForwardReply {
