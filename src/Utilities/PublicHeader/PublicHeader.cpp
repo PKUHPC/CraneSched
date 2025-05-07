@@ -709,9 +709,9 @@ double ResourceView::CpuCount() const {
 uint64_t ResourceView::GetGpuCount() const {
   uint64_t total_sum = 0;
 
-  for (const auto& [device_name, device_data] : device_map) {
+  for (const auto& [_, device_data] : device_map) {
     total_sum += device_data.first;
-    for (const auto& [type_name, type_total] : device_data.second) {
+    for (const auto& [_, type_total] : device_data.second) {
       total_sum += type_total;
     }
   }
