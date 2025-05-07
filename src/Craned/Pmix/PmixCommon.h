@@ -92,12 +92,9 @@ class PMIxServerModule {
                                  void *cbdata) {
      CRANE_DEBUG("abort_fn called: status = {}, msg = {}\n", status, msg);
 
-     std::regex numberRegex("(\\d+)$");
-     std::smatch match;
-     std::string name = pmix_proc->nspace;
-     if (std::regex_search(name, match, numberRegex)) {
-       task_id_t task_id = std::stoi(match.str(0));
-       g_task_mgr->TerminateTaskAsync(task_id);
+     auto result = g_pmix_server->TaskIdGet(pmix_proc->nspace);
+     if (result) {
+       g_task_mgr->TerminateTaskAsync(result.value());
      }
 
      if (nullptr != cbfunc) {
