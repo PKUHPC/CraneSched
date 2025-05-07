@@ -68,7 +68,7 @@ bool Coll::PmixCollRingLocal_(const std::string& data,
     return false;
   }
 
-  CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(coll_ctx), coll_ctx->m_seq_, static_cast<int>(coll_ctx->m_state_), data.size());
+  CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(coll_ctx), coll_ctx->m_seq_, ToString(coll_ctx->m_state_), data.size());
 
   // contrib peer node
   CollRingContrib(*coll_ctx, m_peerid_, 0, data);
@@ -203,7 +203,7 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
       }
       break;
     default:
-      // CRANE_ERROR("Unknown state: {}", coll_ring_ctx.m_state_);
+      CRANE_ERROR("Unknown state: {}", ToString(coll_ring_ctx.m_state_));
       break;
     }
   } while (result);
@@ -302,7 +302,7 @@ bool Coll::PmixCollRingNeighbor_(
 
   CRANE_DEBUG("{:p}: contrib/nbr: seq_num={}, state={}, nodeid={}, contrib={}, hop_seq={}, size={}",
                   static_cast<void*>(&coll_ring_ctx),
-                  coll_ring_ctx->m_seq_, static_cast<int>(coll_ring_ctx->m_state_), hdr.craned_id(),
+                  coll_ring_ctx->m_seq_, ToString(coll_ring_ctx->m_state_), hdr.craned_id(),
                   hdr.contrib_id(), hdr.hop_seq(), hdr.msgsize());
 
   /* compute the actual hops of ring: (src - dst + size) % size */

@@ -43,6 +43,17 @@ enum class CollType {
   DISCONNECT
 };
 
+inline std::string ToString(CollType type) {
+  switch(type) {
+  case CollType::FENCE_TREE:   return "FENCE_TREE";
+  case CollType::FENCE_RING:   return "FENCE_RING";
+  case CollType::FENCE_MAX:    return "FENCE_MAX";
+  case CollType::CONNECT:      return "CONNECT";
+  case CollType::DISCONNECT:   return "DISCONNECT";
+  default:                     return "UNKNOWN";
+  }
+}
+
 enum class CollTreeState {
   SYNC,
   COLLECT,
@@ -52,6 +63,18 @@ enum class CollTreeState {
   DOWNFWD,
 };
 
+inline std::string ToString(CollTreeState state) {
+  switch(state) {
+  case CollTreeState::SYNC:        return "SYNC";
+  case CollTreeState::COLLECT:     return "COLLECT";
+  case CollTreeState::UPFWD:       return "UPFWD";
+  case CollTreeState::UPFWD_WSC:   return "UPFWD_WSC";
+  case CollTreeState::UPFWD_WPC:   return "UPFWD_WPC";
+  case CollTreeState::DOWNFWD:     return "DOWNFWD";
+  default:                         return "UNKNOWN";
+  }
+}
+
 enum class CollTreeSndState {
   NONE,
   ACTIVE,
@@ -59,17 +82,30 @@ enum class CollTreeSndState {
   FAILED,
 };
 
-enum class CollReqState {
-  PROGRESS,
-  SKIP,
-  FAILURE
-};
+inline std::string ToString(CollTreeSndState state) {
+  switch(state) {
+  case CollTreeSndState::NONE:    return "NONE";
+  case CollTreeSndState::ACTIVE:  return "ACTIVE";
+  case CollTreeSndState::DONE:    return "DONE";
+  case CollTreeSndState::FAILED:  return "FAILED";
+  default:                        return "UNKNOWN";
+  }
+}
 
 enum class CollRingState {
   SYNC,
   PROGRESS,
   FINALIZE,
 };
+
+inline std::string ToString(CollRingState state) {
+  switch(state) {
+  case CollRingState::SYNC:      return "SYNC";
+  case CollRingState::PROGRESS:  return "PROGRESS";
+  case CollRingState::FINALIZE:  return "FINALIZE";
+  default:                       return "UNKNOWN";
+  }
+}
 
 
 class Coll {

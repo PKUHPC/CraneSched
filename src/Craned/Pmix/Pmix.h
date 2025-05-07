@@ -101,6 +101,8 @@ class PmixServer {
 
   std::string GetHostname();
 
+  std::optional<task_id_t> TaskIdGet(const std::string& pmix_namespace);
+
 private:
   template <typename Key, typename Value>
   using ParallelMap = phmap::parallel_flat_hash_map<
