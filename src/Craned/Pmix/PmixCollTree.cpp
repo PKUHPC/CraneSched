@@ -216,9 +216,15 @@ bool Coll::ProgressCollect_() {
 
     auto context = std::make_shared<grpc::ClientContext>();
     auto reply = std::make_shared<crane::grpc::PmixTreeUpwardForwardReply>();
-
-    g_craned_client->GetCranedStub(m_tree_.m_parent_host_)->PmixTreeUpwardForward(
-      context.get(), std::move(request), reply.get(), [context, reply, seq = this->m_seq_, this](grpc::Status status) {
+    auto stub = g_craned_client->GetCranedStub(m_tree_.m_parent_host_);
+    if (!stub) {
+      CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.m_upfwd_buf_, this->m_tree_.m_parent_host_);
+      this->m_tree_.m_upfwd_buf_.clear();
+      this->m_tree_.m_upfwd_status_ = CollTreeSndState::FAILED;
+      return false;
+    }
+    stub->PmixTreeUpwardForward(context.get(), std::move(request), reply.get(),
+      [context, reply, seq = this->m_seq_, this](grpc::Status status) {
         std::lock_guard lock(this->m_lock_);
         if (!status.ok() || !reply->ok()) {
           CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.m_upfwd_buf_, this->m_tree_.m_parent_host_);
@@ -300,7 +306,14 @@ bool Coll::ProgressUpFwd_() {
     auto context = std::make_shared<grpc::ClientContext>();
     auto reply = std::make_shared<crane::grpc::PmixTreeDownwardForwardReply>();
 
-    g_craned_client->GetCranedStub(host)->PmixTreeDownwardForward(
+    auto stub = g_craned_client->GetCranedStub(host);
+    if (!stub) {
+      CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.m_upfwd_buf_, this->m_tree_.m_parent_host_);
+      this->m_tree_.m_downfwd_buf_.clear();
+      this->m_tree_.m_downfwd_status_ = CollTreeSndState::FAILED;
+      return false;
+    }
+    stub->PmixTreeDownwardForward(
       context.get(), std::move(request), reply.get(),
       [context, reply, seq = this->m_seq_, this](grpc::Status status) {
         std::lock_guard lock(this->m_lock_);

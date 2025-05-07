@@ -91,14 +91,14 @@ void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
       channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
     CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
-                ip_addr, "10015",
+                ip_addr, kCranedAsyncDefaultPort,
                 m_channel_count_.fetch_add(1) + 1);
 
     if (g_config.ListenConf.UseTls) {
       // TODO: tls
     } else
       craned->m_channel_ = CreateTcpInsecureCustomChannel(
-          ip_addr, "10015", channel_args);
+          ip_addr, kCranedAsyncDefaultPort, channel_args);
 
     craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
@@ -113,7 +113,10 @@ void CranedClient::Init(const std::set<CranedId>& craned_id_list) {
 std::shared_ptr<CranedStub> CranedClient::GetCranedStub(
     const CranedId& craned_id) {
 
-  return m_craned_id_stub_map_.at(craned_id);
+  auto iter = m_craned_id_stub_map_.find(craned_id);
+  if (iter == m_craned_id_stub_map_.end()) return nullptr;
+
+  return iter->second;
 }
 
 } //namespace craned
