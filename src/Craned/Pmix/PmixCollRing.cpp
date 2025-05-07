@@ -144,12 +144,16 @@ bool Coll::CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
 
     auto context = std::make_shared<grpc::ClientContext>();
     auto reply = std::make_shared<crane::grpc::SendPmixRingMsgReply>();
-
-    g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_)->SendPmixRingMsg(
-            context.get(), std::move(request), reply.get(),
+    auto stub = g_craned_client->GetCranedStub(m_ring_.m_next_craned_id_);
+    if (!stub) {
+      CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
+      coll_ring_ctx.m_ring_buf_.clear();
+      return false;
+    }
+    stub->SendPmixRingMsg(context.get(), std::move(request), reply.get(),
             [context, reply, seq = coll_ring_ctx.m_seq_, &coll_ring_ctx, this](grpc::Status status) {
               std::lock_guard lock_guard(this->m_lock_);
-              if (!status.ok()) {
+              if (!status.ok() || !reply->ok()) {
                 CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
                 coll_ring_ctx.m_ring_buf_.clear();
                 return;

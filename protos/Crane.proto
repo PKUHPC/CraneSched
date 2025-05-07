@@ -886,7 +886,7 @@ message PmixDModexRequestReq {
 };
 
 message PmixDModexRequestReply {
-
+  bool ok = 1;
 };
 
 message PmixDModexResponseReq {
@@ -898,7 +898,7 @@ message PmixDModexResponseReq {
 }
 
 message PmixDModexResponseReply {
-
+  bool ok = 1;
 }
 
 
