@@ -117,7 +117,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   }
   uint64_t mem_per_node =
       this->task.resources().allocatable_res_in_node().memory_limit_bytes() /
-      (static_cast<uint64_t>(1024 * 1024));
+      (1024ULL * 1024ULL);
 
   double cpus_on_node =
       this->task.resources().allocatable_res_in_node().cpu_core_limit();
