@@ -20,6 +20,7 @@
 
 #include "CranedClient.h"
 #include "Pmix.h"
+#include "PmixCommon.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "crane/Logger.h"
 #include "protos/Crane.pb.h"

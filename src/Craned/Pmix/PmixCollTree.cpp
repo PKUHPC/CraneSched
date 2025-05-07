@@ -19,6 +19,7 @@
 #include "CranedClient.h"
 #include "Pmix.h"
 #include "PmixColl.h"
+#include "PmixCommon.h"
 #include "PmixState.h"
 #include "ReverseTree.h"
 #include "crane/Logger.h"
