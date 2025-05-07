@@ -20,6 +20,7 @@
 #include "CranedPublicDefs.h"
 #include "Pmix.h"
 #include "PmixColl.h"
+#include "PmixCommon.h"
 #include "PmixState.h"
 #include "crane/Logger.h"
 

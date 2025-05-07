@@ -36,9 +36,6 @@
 
 namespace pmix {
 
-void PmixLibModexInvoke(pmix_modex_cbfunc_t mdx_fn, int status, const char *data, size_t ndata,
-                        void *cbdata, void *rel_fn, void *rel_data);
-
 class PmixServer;
 
 struct PmixNameSpace {
@@ -102,30 +99,25 @@ class PmixServer {
 
   std::optional<PmixNameSpace> PmixNamespaceGet(const std::string& pmix_namespace);
 
-  std::string GetHostNameByRank(const PmixNameSpace& pmix_namespace, uint32_t rank);
-
   std::string GetHostname();
 
-  PmixState* GetPmixState();
-
 private:
+  template <typename Key, typename Value>
+  using ParallelMap = phmap::parallel_flat_hash_map<
+      Key, Value,
+      phmap::priv::hash_default_hash<Key>,
+      phmap::priv::hash_default_eq<Key>,
+      std::allocator<std::pair<const Key, Value>>,
+      4, std::shared_mutex>;
+
   std::string m_server_tmpdir_;
   std::string m_hostname_;
 
-  std::mutex m_mutex_;
-  std::unordered_map<task_id_t, std::unique_ptr<PmixTaskInstance>> m_task_instances_;
+  ParallelMap<task_id_t, std::unique_ptr<PmixTaskInstance>> m_task_instances_;
 
-  using NamespaceMap = phmap::parallel_flat_hash_map<
-    std::string,  // nspace
-    PmixNameSpace, phmap::priv::hash_default_hash<std::string>,
-    phmap::priv::hash_default_eq<std::string>,
-    std::allocator<std::pair<const std::string, PmixNameSpace>>, 4,
-    std::shared_mutex>;
+  ParallelMap<std::string, task_id_t> m_nspace_to_task_map_;
 
-  NamespaceMap m_namespace_map_;
-
-  // TODO: g_pmix_state?
-  PmixState m_pmix_state_;
+  ParallelMap<std::string, PmixNameSpace> m_namespace_map_;
 
   bool m_is_init_{false};
 };
