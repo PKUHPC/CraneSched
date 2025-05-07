@@ -86,8 +86,8 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
     return reactor;
   }
 
-  auto result = coll->PmixCollTreeChild(request->peer_host(), request->msg());
-
+  auto result = coll->PmixCollTreeChild(request->peer_host(), request->seq(), request->msg());
+  response->set_ok(result);
 
   reactor->Finish(Status::OK);
   return reactor;
@@ -117,7 +117,8 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
     return reactor;
   }
 
-  auto result = coll->PmixCollTreeParent(request->peer_host(), request->msg());
+  auto result = coll->PmixCollTreeParent(request->peer_host(), request->seq(), request->msg());
+  response->set_ok(result);
 
   reactor->Finish(Status::OK);
   return reactor;
