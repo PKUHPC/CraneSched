@@ -43,7 +43,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      g_pmix_state->PmixStateCollGet(
           pmix::CollType::FENCE_RING, procs, procs.size());
 
   if (!coll) {
@@ -78,7 +78,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-      g_pmix_server->GetPmixState()->PmixStateCollGet(
+      g_pmix_state->PmixStateCollGet(
           pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {
@@ -109,7 +109,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
   }
 
   std::shared_ptr<pmix::Coll> coll =
-    g_pmix_server->GetPmixState()->PmixStateCollGet(
+    g_pmix_state->PmixStateCollGet(
         pmix::CollType::FENCE_TREE, procs, procs.size());
 
   if (!coll) {

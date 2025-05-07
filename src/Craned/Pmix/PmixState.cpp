@@ -20,8 +20,6 @@
 
 namespace pmix {
 
-void PmixState::Init() {}
-
 std::shared_ptr<Coll> PmixState::PmixStateCollGet(
     CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
 
