@@ -402,6 +402,11 @@ std::optional<std::unordered_map<std::string, std::string>> PmixServer::SetupFor
 }
 
 void PmixServer::DeregisterTask(task_id_t task_id) {
+  if (!m_task_instances_.contains(task_id)) return ;
+
+  m_task_instances_.modify_if(task_id, [&](std::pair<const task_id_t, std::unique_ptr<PmixTaskInstance>>& pair) {
+    m_nspace_to_task_map_.erase(pair.second->m_nspace_);
+  });
   m_task_instances_.erase(task_id);
 }
 
@@ -424,5 +429,15 @@ std::optional<PmixNameSpace> PmixServer::PmixNamespaceGet(
 }
 
 std::string PmixServer::GetHostname() { return m_hostname_; }
+
+std::optional<task_id_t> PmixServer::TaskIdGet(
+    const std::string &pmix_namespace) {
+  std::optional<task_id_t> result = std::nullopt;
+  m_nspace_to_task_map_.modify_if(pmix_namespace, [&](std::pair<const std::string, task_id_t>& pair) {
+    result = pair.second;
+  });
+
+  return result;
+}
 
 }  // namespace pmix
