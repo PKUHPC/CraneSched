@@ -635,9 +635,10 @@ void StartServer() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
+  g_a_sync_server = std::make_unique<Craned::CranedASyncServer>(g_config.ListenConf);
+
   g_server->Wait();
 
-  g_a_sync_server = std::make_unique<Craned::CranedASyncServer>(g_config.ListenConf);
   g_a_sync_server->Wait();
 
   // Free global variables

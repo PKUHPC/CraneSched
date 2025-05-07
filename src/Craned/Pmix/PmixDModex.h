@@ -37,9 +37,10 @@ class PmixDModexReqManager {
 public:
   PmixDModexReqManager() = default;
 
-  bool PmixDModexGet(const std::string& pmix_namespace, int rank, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+  bool PmixDModexGet(const std::string& pmix_namespace, int rank,
+                     pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
-  void PmixProcessRequest(uint32_t seq_num, CranedId craned_id,
+  void PmixProcessRequest(uint32_t seq_num, const CranedId& craned_id,
                           const pmix_proc_t& pmix_proc,
                           const std::string& send_nspace);
 
