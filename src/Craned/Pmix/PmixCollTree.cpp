@@ -219,7 +219,7 @@ bool Coll::ProgressCollect_() {
     g_craned_client->GetCranedStub(m_tree_.m_parent_host_)->PmixTreeUpwardForward(
       context.get(), std::move(request), reply.get(), [context, reply, seq = this->m_seq_, this](grpc::Status status) {
         std::lock_guard lock(this->m_lock_);
-        if (!status.ok()) {
+        if (!status.ok() || !reply->ok()) {
           CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.m_upfwd_buf_, this->m_tree_.m_parent_host_);
           this->m_tree_.m_upfwd_buf_.clear();
           this->m_tree_.m_upfwd_status_ = CollTreeSndState::FAILED;
@@ -303,7 +303,7 @@ bool Coll::ProgressUpFwd_() {
       context.get(), std::move(request), reply.get(),
       [context, reply, seq = this->m_seq_, this](grpc::Status status) {
         std::lock_guard lock(this->m_lock_);
-        if (!status.ok()) {
+        if (!status.ok() || !reply->ok()) {
           CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.m_upfwd_buf_, this->m_tree_.m_parent_host_);
           this->m_tree_.m_downfwd_buf_.clear();
           this->m_tree_.m_downfwd_status_ = CollTreeSndState::FAILED;
@@ -432,6 +432,8 @@ bool Coll::ProgressDownFwd_() {
 }
 bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
                               const std::string& data) {
+  std::lock_guard lock(m_lock_);
+
   int child_id = -1;
   auto it = std::find(m_tree_.m_childrn_hosts_.begin(),
                       m_tree_.m_childrn_hosts_.end(), peer_host);
@@ -450,20 +452,31 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
     m_ts_ = time(nullptr);
   case CollTreeState::COLLECT:
     if (m_seq_ != seq) {
-      CRANE_ERROR("{:p}: ");
+      CRANE_ERROR("{:p}: unexpected contrib from {} (child #{}) seq = {}, coll->seq = {}, state={}",
+                    static_cast<void*>(this), peer_host, child_id, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+      goto error;
     }
     break;
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WSC:
-    // TODO: kill job
-    return false;
+    CRANE_ERROR("{:p}: unexpected contrib from {}, state = {}",
+                  static_cast<void*>(this), peer_host, static_cast<int>(m_tree_.m_state_));
+    goto error;
   case CollTreeState::UPFWD_WPC:
   case CollTreeState::DOWNFWD:
+    CRANE_DEBUG("{:p}: contrib for the next coll. node_id={}, child={} seq={}, coll->seq={}, state={}",
+                  static_cast<void*>(this), peer_host, child_id, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+    if ((m_seq_+1) != seq) {
+      CRANE_ERROR("{:p}: unexpected contrib from {}(x:{}) seq = {}, coll->seq = {}, state={}",
+                  static_cast<void*>(this), peer_host, child_id, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+      goto error;
+    }
     break;
   default:
+    CRANE_ERROR("{:p}: unknown collective state {}",
+                  static_cast<void*>(this), static_cast<int>(m_tree_.m_state_));
     m_tree_.m_state_ = CollTreeState::SYNC;
-    // TODO: kill job
-    return false;
+    goto error2;
   }
 
   if (m_tree_.m_contrib_child_[child_id]) {
@@ -482,37 +495,65 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
   CRANE_DEBUG("finish nodeid={}, child={}", peer_host, child_id);
 
   return true;
+
+error:
+  ResetCollTree();
+error2:
+  // TODO: kill job;
+
+  return false;
 }
-bool Coll::PmixCollTreeParent(const CranedId& peer_host,
+bool Coll::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
                                const std::string& data) {
+
+  std::lock_guard lock(m_lock_);
+
   std::string expected_host = m_tree_.m_parent_host_;
 
   if (expected_host != peer_host) {
+    CRANE_ERROR("{:p}: parent contrib from bad node_id={}, expect={}", static_cast<void*>(this), peer_host, expected_host);
     ProgressCollectTree_();
     return true;
   }
+
+  CRANE_DEBUG("{:p}: contrib/rem node_id={}: state={}, size={}", static_cast<void*>(this), peer_host, static_cast<int>(m_tree_.m_state_), data.size());
 
   switch (m_tree_.m_state_) {
   case CollTreeState::SYNC:
   case CollTreeState::COLLECT:
+    CRANE_DEBUG("{:p}: prev contrib node_id={}: seq={}, cur_seq={}, state={}",
+                static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+    if ((m_seq_-1) != seq) {
+      CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
+                  static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+      goto error;
+    }
     ProgressCollectTree_();
     return true;
   case CollTreeState::UPFWD_WSC:
-    // TODO: kill job
-    return false;
+    CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
+                  static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+    goto error;
   case CollTreeState::UPFWD:
   case CollTreeState::UPFWD_WPC:
     break;
   case CollTreeState::DOWNFWD:
+    CRANE_DEBUG("{:p}: double contrib node_id={} seq={}, cur_seq={}, state={}",
+              static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+    if (m_seq_ != seq) {
+      CRANE_ERROR("{:p}: unexpected from {}: seq = {}, coll->seq = {}, state={}",
+                  static_cast<void*>(this), peer_host, seq, m_seq_, static_cast<int>(m_tree_.m_state_));
+      goto error;
+    }
     ProgressCollectTree_();
     return true;
   default:
     m_tree_.m_state_ = CollTreeState::SYNC;
-    // TODO: kill job
-    return false;
+    goto error2;
   }
 
   if (m_tree_.m_contrib_prnt_) {
+    CRANE_DEBUG("{:p}: multiple contributions from parent {}", static_cast<void*>(this), peer_host);
     ProgressCollectTree_();
     return true;
   }
@@ -522,7 +563,16 @@ bool Coll::PmixCollTreeParent(const CranedId& peer_host,
 
   ProgressCollectTree_();
 
+  CRANE_DEBUG("{:p}: finish: node_id={}, state={}", static_cast<void*>(this), peer_host,  static_cast<int>(m_tree_.m_state_));
+
   return true;
+
+error:
+  ResetCollTree();
+error2:
+  // TODO: kill job
+
+  return false;
 }
 
 void Coll::ResetCollTree() {

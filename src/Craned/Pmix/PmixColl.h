@@ -89,7 +89,8 @@ class Coll {
 
   bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
                          const std::string& data);
-  bool PmixCollTreeParent(const CranedId& peer_host, const std::string& data);
+  bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
+                          const std::string& data);
 
   size_t get_nprocs() const { return m_pset_.m_nprocs_; }
   const pmix_proc_t& get_procs(size_t index) const {
