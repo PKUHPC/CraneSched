@@ -1463,6 +1463,7 @@ void TaskManager::TaskStopAndDoStatusChange() {
     break;
 
   case CraneErrCode::ERR_CGROUP:
+    // FIXME: Not used.
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeCgroupError, std::nullopt);
     break;
@@ -1595,6 +1596,7 @@ void TaskManager::LaunchExecution_() {
 std::future<CraneExpected<pid_t>> TaskManager::CheckTaskStatusAsync() {
   std::promise<CraneExpected<pid_t>> status_promise;
   auto status_future = status_promise.get_future();
+
   m_check_task_status_queue_.enqueue(std::move(status_promise));
   m_check_task_status_async_handle_->send();
   return status_future;
@@ -1604,9 +1606,12 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
     absl::Duration time_limit) {
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
-  ChangeTaskTimeLimitQueueElem elem;
-  elem.time_limit = time_limit;
-  elem.ok_prom = std::move(ok_promise);
+
+  ChangeTaskTimeLimitQueueElem elem{
+      .time_limit = time_limit,
+      .ok_prom = std::move(ok_promise),
+  };
+
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
   m_change_task_time_limit_async_handle_->send();
   return ok_future;
@@ -1614,9 +1619,11 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
 
 void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
                                      bool terminated_by_user) {
-  TaskTerminateQueueElem elem;
-  elem.mark_as_orphaned = mark_as_orphaned;
-  elem.terminated_by_user = terminated_by_user;
+  TaskTerminateQueueElem elem{
+      .terminated_by_user = terminated_by_user,
+      .mark_as_orphaned = mark_as_orphaned,
+  };
+
   m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
   return;
@@ -1631,11 +1638,10 @@ void TaskManager::EvSigchldCb_() {
       return;
     }
 
-    auto pid = m_instance_->GetPid();
-
     if (m_step_spec_.IsCrun()) {
       // TaskStatusChange of a crun task is triggered in
       // CforedManager.
+      auto pid = m_instance_->GetPid();
       auto ok_to_free = m_step_spec_.cfored_client->TaskProcessStop(pid);
       if (ok_to_free) {
         CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
@@ -1763,7 +1769,6 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       TaskTerminateQueueElem ev_task_terminate{.terminated_by_timeout = true};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
-
     } else {
       // If the task haven't timed out, set up a new timer.
       AddTerminationTimer_(
