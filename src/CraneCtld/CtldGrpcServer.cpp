@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include "AccountManager.h"
+#include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "TaskScheduler.h"
@@ -1509,6 +1510,11 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
+    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    if (res != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      return std::unexpected(res);
+    }
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
