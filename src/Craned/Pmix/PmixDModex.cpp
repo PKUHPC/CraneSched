@@ -34,13 +34,6 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
   CRANE_DEBUG("DmodexFn is called");
 
-  // std::cout << "DmodexFn data received, size: " << sz << std::endl;
-  // std::cout << "DmodexFn Raw data (hex): ";
-  // for (size_t i = 0; i < sz; ++i) {
-  //   printf("%02x ", (unsigned char)data[i]);
-  // }
-  // printf("\n");
-
   crane::grpc::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
   request.set_code(PMIX_SUCCESS);
@@ -75,7 +68,7 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
     return false;
   }
 
-  CranedId craned_id = pmix_nspace->m_hostlist_[pmix_nspace->m_task_map_[rank]];
+  CranedId craned_id = pmix_nspace->hostlist[pmix_nspace->task_map[rank]];
 
   crane::grpc::PmixDModexRequestReq request{};
 
@@ -128,8 +121,8 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
     return;
   }
 
-  if (pmix_nspace->m_task_num_ <= pmix_proc.rank) {
-    CRANE_ERROR("Bad request from {}: nspace {} has only {} ranks, asked for {}", craned_id, pmix_proc.nspace, pmix_nspace->m_task_num_, pmix_proc.rank);
+  if (pmix_nspace->task_num <= pmix_proc.rank) {
+    CRANE_ERROR("Bad request from {}: nspace {} has only {} ranks, asked for {}", craned_id, pmix_proc.nspace, pmix_nspace->task_num, pmix_proc.rank);
     ResponseWithError_(seq_num, craned_id, send_nspace, PMIX_ERR_BAD_PARAM);
   }
 

@@ -35,10 +35,10 @@ namespace pmix {
 
 #define PMIX_COLL_RING_CTX_NUM 3
 
-enum class CollType {
-  FENCE_TREE = 0,
+enum class CollType : std::uint8_t {
+  FENCE_TREE,
   FENCE_RING,
-  FENCE_MAX = 15,
+  FENCE_MAX,
   CONNECT,
   DISCONNECT
 };
@@ -54,7 +54,7 @@ inline std::string ToString(CollType type) {
   }
 }
 
-enum class CollTreeState {
+enum class CollTreeState : std::uint8_t {
   SYNC,
   COLLECT,
   UPFWD,
@@ -75,7 +75,7 @@ inline std::string ToString(CollTreeState state) {
   }
 }
 
-enum class CollTreeSndState {
+enum class CollTreeSndState : std::uint8_t {
   NONE,
   ACTIVE,
   DONE,
@@ -92,7 +92,7 @@ inline std::string ToString(CollTreeSndState state) {
   }
 }
 
-enum class CollRingState {
+enum class CollRingState : std::uint8_t {
   SYNC,
   PROGRESS,
   FINALIZE,
@@ -112,32 +112,31 @@ class Coll {
  public:
   Coll() = default;
 
-  ~Coll() = default;
-
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs);
 
   bool PmixCollContribLocal(CollType type, const std::string& data,
                             pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
-  bool ProcessRingRequest(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
-                          const std::vector<pmix_proc_t>& procs,
-                          const std::string& msg);
+  bool ProcessRingRequest(
+      const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+      const std::string& msg);
 
   bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
                          const std::string& data);
   bool PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
                           const std::string& data);
 
-  size_t get_nprocs() const { return m_pset_.m_nprocs_; }
-  const pmix_proc_t& get_procs(size_t index) const {
-    if (index >= m_pset_.m_procs_.size())
+  size_t GetProcNum() const { return m_pset_.nprocs; }
+
+  const pmix_proc_t& GetProcs(size_t index) const {
+    if (index >= m_pset_.procs.size())
         throw std::out_of_range("Index out of range in get_procs");
 
-    return m_pset_.m_procs_[index];
+    return m_pset_.procs[index];
 }
 
-  const std::vector<pmix_proc_t>& get_procs() const { return m_pset_.m_procs_; }
-  CollType get_type() const { return m_type_; }
+  const std::vector<pmix_proc_t>& GetProcs() const { return m_pset_.procs; }
+  CollType GetType() const { return m_type_; }
 
   static void RingReleaseFn(void* rel_data);
 
@@ -146,53 +145,49 @@ class Coll {
  private:
   /* coll states */
   struct CollRingCtx {
-    CollType m_type_;
-    int m_peers_cnt_;
-    bool m_in_use_;
-    uint32_t m_seq_;
-    bool m_contrib_local_;
-    uint32_t m_contrib_prev_;
-    uint32_t m_forward_cnt_;
-    std::vector<bool> m_contrib_map_;
-    CollRingState m_state_;
-    std::string m_ring_buf_;
+    CollType type;
+    int peers_cnt;
+    bool in_use;
+    uint32_t seq;
+    bool contrib_local;
+    uint32_t contrib_prev;
+    uint32_t forward_cnt;
+    std::vector<bool> contrib_map;
+    CollRingState state;
+    std::string ring_buf;
   };
 
   struct CollRing {
-    int m_next_peerid_;
-    CranedId m_next_craned_id_;
-    CollRingCtx m_ctx_array_[PMIX_COLL_RING_CTX_NUM];
-    std::string m_fwrd_buf_pool_;
-    std::string m_ring_buf_pool_;
+    int next_peerid{};
+    CranedId next_craned_id;
+    std::array<CollRingCtx, PMIX_COLL_RING_CTX_NUM> ctx_array;
   };
 
   struct CollTree {
-    CollTreeState m_state_;
-    bool m_contrib_local_;
-    uint32_t m_contrib_children_;
-    std::vector<bool> m_contrib_child_;
-    CollTreeSndState m_upfwd_status_;
-    bool m_contrib_prnt_;
-    uint32_t m_downfwd_cb_cnt_, m_downfwd_cb_wait_;
-    CollTreeSndState m_downfwd_status_;
-    std::string m_upfwd_buf_, m_downfwd_buf_;
-    size_t m_serv_offs_, m_downfwd_offset_, m_upfwd_offset_;
-    std::string m_parent_host_;
-    int m_parent_peerid_;
-    std::string m_root_host_;
-    int m_root_peerid_;
-    int m_childrn_cnt_;
-    std::list<std::string> m_all_chldrn_hl_;
-    std::string m_chldrn_str_;
-    std::list<int> m_chldrn_ids_;
-    std::vector<std::string> m_childrn_hosts_;
+    CollTreeState state;
+    bool contrib_local;
+    uint32_t contrib_children;
+    std::vector<bool> contrib_child;
+    CollTreeSndState upfwd_status;
+    bool contrib_prnt;
+    uint32_t downfwd_cb_cnt, downfwd_cb_wait;
+    CollTreeSndState downfwd_status;
+    std::string upfwd_buf, downfwd_buf;
+    std::string parent_host;
+    int parent_peerid;
+    std::string root_host;
+    int root_peerid;
+    int childrn_cnt;
+    std::list<std::string> all_chldrn_hl;
+    std::string chldrn_str;
+    std::list<int> chldrn_ids;
+    std::vector<std::string> childrn_hosts;
   };
 
   struct CbData {
     Coll* coll;
     CollRingCtx* coll_ring_ctx;
     uint32_t seq;
-    volatile uint32_t refcntr;
   };
 
   /* tree coll functions */
@@ -207,43 +202,42 @@ class Coll {
   bool ProgressUpFwdWpc_();
   bool ProgressDownFwd_();
 
-  // TODO: 函数名clang-format
-  void ResetCollTree();
-  void ResetCollTreeUpFwd();
-  void ResetCollTreeDownFwd();
+  void ResetCollTree_();
+  void ResetCollTreeUpFwd_();
+  void ResetCollTreeDownFwd_();
 
-  void PmixCollLocalCbNodata(int status);
+  void PmixCollLocalCbNodata_(int status);
 
   /* ring coll functions */
   bool PmixCollRingInit_(const std::set<std::string>& hostset);
   bool PmixCollRingLocal_(const std::string& data, pmix_modex_cbfunc_t cbfunc,
                           void* cbdata);
 
-  CollRingCtx* CollRingCtxNew();
+  CollRingCtx* CollRingCtxNew_();
 
-  bool CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id,
-                       uint32_t hop_seq, const std::string& data);
+  bool CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
+                        uint32_t hop_seq, const std::string& data);
 
   void ProgressCollectRing_(CollRingCtx& coll_ring_ctx);
 
-  void InvokeCallBackRing(CollRingCtx& coll_ring_ctx);
+  void InvokeCallBackRing_(CollRingCtx& coll_ring_ctx);
 
-  void ResetCollRing(CollRingCtx& coll_ring_ctx);
+  void ResetCollRing_(CollRingCtx& coll_ring_ctx);
 
   bool PmixCollRingNeighbor_(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
 
   std::mutex m_lock_;
-  uint32_t m_seq_;
-  CollType m_type_;
+  uint32_t m_seq_{};
+  CollType m_type_ {CollType::FENCE_MAX};
   struct {
-    std::vector<pmix_proc_t> m_procs_;
-    size_t m_nprocs_;
+    std::vector<pmix_proc_t> procs;
+    size_t nprocs;
   } m_pset_;
-  int m_peerid_;
-  int m_peers_cnt_;
-  pmix_modex_cbfunc_t m_cbfunc_;
-  void* m_cbdata_;
-  time_t m_ts_, m_ts_next_;
+  uint32_t m_peerid_{};
+  uint32_t m_peers_cnt_{};
+  pmix_modex_cbfunc_t m_cbfunc_{};
+  void* m_cbdata_{};
+  time_t m_ts_{}, m_ts_next_{};
 
   CollTree m_tree_;
   CollRing m_ring_;

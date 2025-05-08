@@ -133,7 +133,7 @@ class PMIxServerModule {
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
 
-       if (collect && (ndata > 0))
+       if (collect && ndata > 0)
          type = CollType::FENCE_RING;
      }
 

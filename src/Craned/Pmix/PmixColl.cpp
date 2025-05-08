@@ -28,8 +28,8 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
                          size_t nprocs) {
   m_seq_ = 0;
   m_type_ = type;
-  m_pset_.m_nprocs_ = nprocs;
-  m_pset_.m_procs_.assign(procs.begin(), procs.end());
+  m_pset_.nprocs = nprocs;
+  m_pset_.procs.assign(procs.begin(), procs.end());
 
   std::set<std::string> hostname_set;
 
@@ -38,16 +38,18 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
     if (!pmix_namespace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : pmix_namespace->m_hostlist_) {
+      for (const auto& hostname : pmix_namespace->hostlist) {
         hostname_set.emplace(hostname);
       }
     } else {
-      int node_id = pmix_namespace->m_task_map_[proc.rank];
-      hostname_set.insert(pmix_namespace->m_hostlist_[node_id]);
+      uint32_t node_id = pmix_namespace->task_map[proc.rank];
+      hostname_set.insert(pmix_namespace->hostlist[node_id]);
     }
   }
 
-  if ((m_peers_cnt_ = hostname_set.size()) <= 0) {
+  m_peers_cnt_ = hostname_set.size();
+
+  if (m_peers_cnt_ <= 0) {
     CRANE_ERROR("No peers found");
     return false;
   }
