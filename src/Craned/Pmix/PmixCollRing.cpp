@@ -62,7 +62,7 @@ bool Coll::PmixCollRingLocal_(const std::string& data,
   this->m_cbdata_ = cbdata;
 
   CollRingCtx* coll_ctx = this->CollRingCtxNew_();
-  if (coll_ctx != nullptr) {
+  if (coll_ctx == nullptr) {
     CRANE_ERROR("{:p}: Can not get new ring collective context, seq= {}",
                 static_cast<void*>(this), this->m_seq_);
     return false;
