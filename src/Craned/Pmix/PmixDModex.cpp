@@ -42,8 +42,11 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexResponseReply>();
   auto stub = g_craned_client->GetCranedStub(dmo_modex_cb_data->craned_id);
-  if (!stub)
+  if (!stub) {
     CRANE_ERROR("Cannot send direct modex response to {}", dmo_modex_cb_data->craned_id);
+    return ;
+  }
+
 
   stub->PmixDModexResponse(
           context.get(), std::move(request), reply.get(),
@@ -92,8 +95,10 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexRequestReply>();
   auto stub = g_craned_client->GetCranedStub(craned_id);
-  if (!stub)
+  if (!stub) {
     CRANE_ERROR("PmixDModex rpc failed.");
+    return false;
+  }
 
   stub->PmixDModexRequest(
       context.get(), std::move(request), reply.get(),
@@ -126,9 +131,14 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
     ResponseWithError_(seq_num, craned_id, send_nspace, PMIX_ERR_BAD_PARAM);
   }
 
-  DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num, .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank = pmix_proc.rank};
+  // DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num, .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank = pmix_proc.rank};
+  auto dmo_modex_cb_data = std::make_unique<DModexCbData>();
+  dmo_modex_cb_data->seq_num = seq_num;
+  dmo_modex_cb_data->craned_id = craned_id;
+  dmo_modex_cb_data->nspace = pmix_proc.nspace;
+  dmo_modex_cb_data->rank = pmix_proc.rank;
   auto rc =
-        PMIx_server_dmodex_request(&pmix_proc, DModexOpCb, dmo_modex_cb_data);
+        PMIx_server_dmodex_request(&pmix_proc, DModexOpCb, dmo_modex_cb_data.release());
   if (rc != PMIX_SUCCESS) {
     CRANE_ERROR("Error: PMIx_server_dmodex_request. {}",
                   PMIx_Error_string(rc));
@@ -158,7 +168,7 @@ void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num, const CranedId&
     }
   }
 
-  PmixLibModexInvoke(pmix_dmodex_req.m_cb_func_, PMIX_SUCCESS, data.data(), data.size(), pmix_dmodex_req.m_cb_data_, nullptr, nullptr);
+  PmixLibModexInvoke(pmix_dmodex_req.m_cb_func_, status, data.data(), data.size(), pmix_dmodex_req.m_cb_data_, nullptr, nullptr);
 }
 
 void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::string& craned_id, const std::string& sender_ns, int status) {
@@ -173,6 +183,7 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::strin
   if (!stub) {
     CRANE_ERROR("Cannot send direct modex error response to {}",
                       craned_id);
+    return ;
   }
   stub->PmixDModexResponse(
       context.get(), std::move(request), reply.get(), [context, reply, craned_id](grpc::Status status) {
