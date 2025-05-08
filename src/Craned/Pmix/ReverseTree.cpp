@@ -171,7 +171,7 @@ void ReverseTreeInfo(int rank, int num_nodes, int width,
 }
 
 int ReverseTreeDirectChildren(int rank, int num_nodes, int width,
-				 int depth, std::list<int>* children)
+				 int depth, std::vector<int>* children)
 {
 	int current, child_distance;
 	int max_depth, sub_depth, max_rank_children;

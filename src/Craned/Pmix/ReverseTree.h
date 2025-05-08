@@ -29,7 +29,7 @@ namespace pmix {
 
 void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent, int *num_children, int *depth, int *total_depth);
 
-int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth, std::list<int>* children);
+int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth, std::vector<int>* children);
 
 }
 
