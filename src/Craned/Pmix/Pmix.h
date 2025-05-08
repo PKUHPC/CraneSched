@@ -20,7 +20,6 @@
 
 #include <fmt/format.h>
 #include <parallel_hashmap/phmap.h>
-#include <pmix.h>
 #include <pmix_common.h>
 #include <pmix_server.h>
 
@@ -39,13 +38,11 @@ namespace pmix {
 class PmixServer;
 
 struct PmixNameSpace {
-  std::string m_namespace_;
-  uint32_t m_node_num_ = 0; /* number of nodes in this namespace */
-  uint32_t m_task_num_ = 0; /* total number of tasks in this namespace */
-  // std::vector<uint32_t> m_task_cnts_; /* Number of tasks on each node of namespace */
-  // std::string m_task_map_packed_; /* Packed task mapping information */
-  std::vector<uint32_t> m_task_map_; /* i'th task is located on task_map[i] node */
-  std::vector<std::string> m_hostlist_;
+  std::string nspace;
+  uint32_t node_num = 0; /* number of nodes in this namespace */
+  uint32_t task_num = 0; /* total number of tasks in this namespace */
+  std::vector<uint32_t> task_map; /* i'th task is located on task_map[i] node */
+  std::vector<std::string> hostlist;
 };
 
 class PmixTaskInstance {
@@ -53,6 +50,10 @@ class PmixTaskInstance {
   PmixTaskInstance() = default;
 
   ~PmixTaskInstance();
+  PmixTaskInstance(const PmixTaskInstance&) = delete;
+  PmixTaskInstance& operator=(const PmixTaskInstance&) = delete;
+  PmixTaskInstance(PmixTaskInstance&&) = delete;
+  PmixTaskInstance& operator=(PmixTaskInstance&&) = delete;
 
   bool Init(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 
@@ -68,7 +69,7 @@ class PmixTaskInstance {
   std::vector<std::string> m_node_list_;
   std::string m_node_list_str_;
   uint32_t m_node_id_{};
-  uint32_t m_node_num_;
+  uint32_t m_node_num_ = 1;
   uint32_t m_ntasks_per_node_{}; /* number of tasks on *this* node */
   uint32_t m_task_num_{};
 
@@ -88,8 +89,12 @@ class PmixServer {
   PmixServer() = default;
 
   ~PmixServer();
+  PmixServer(const PmixServer&) = delete;
+  PmixServer& operator=(const PmixServer&) = delete;
+  PmixServer(PmixServer&&) = delete;
+  PmixServer& operator=(PmixServer&&) = delete;
 
-  bool Init(const std::string& server_tmpdir);
+  bool Init(const std::string& server_base_dir);
 
   bool RegisterTask(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 
