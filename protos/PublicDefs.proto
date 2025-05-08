@@ -83,6 +83,8 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
+  CRANE_OFF = 4;
+  CRANE_SLEEPING = 5;
 }
 
 enum CranedPowerState {
