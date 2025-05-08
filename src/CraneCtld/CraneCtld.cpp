@@ -773,8 +773,6 @@ void InitializeCtldGlobalVariables() {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
     // No need to worry disconnect before task scheduler init
     g_meta_container->CranedDown(craned_id);
-    g_task_scheduler->TerminateTasksOnCraned(craned_id,
-                                             ExitCode::kExitCodeCranedDown);
   });
 
   std::list<CranedId> to_register_craned_list;
@@ -787,40 +785,6 @@ void InitializeCtldGlobalVariables() {
   g_task_scheduler = std::make_unique<TaskScheduler>();
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
-  // TaskScheduler will always recovery pending or running tasks since last
-  // failure, it might be reasonable to wait some time (1s) for all healthy
-  // craned nodes (most of the time all the craned nodes are healthy) to be
-  // online or to wait for the connections to some offline craned nodes to
-  // time out. Otherwise, recovered pending or running tasks may always fail
-  // to be re-queued.
-  size_t to_registered_craneds_cnt = g_config.Nodes.size();
-  // sigmoid function, where x=0 -> y=1.89, x=inf -> y=301
-  // The time space is approximately [2s, 5min].
-  int timeout =
-      (int)(314.0 /
-            (1.0 + std::exp(-0.0001 *
-                            ((double)to_registered_craneds_cnt - 30000.0)))) -
-      13;
-  std::chrono::time_point<std::chrono::system_clock> wait_end_point =
-      std::chrono::system_clock::now() + std::chrono::seconds(timeout) +
-      std::chrono::seconds(10);
-  while (true) {
-    auto online_cnt = g_meta_container->GetOnlineCranedCount();
-    if (online_cnt >= to_registered_craneds_cnt) {
-      CRANE_INFO("All craned nodes are up.");
-      break;
-    }
-
-    std::this_thread::sleep_for(
-        std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
-    if (std::chrono::system_clock::now() > wait_end_point) {
-      CRANE_INFO(
-          "Waiting all craned node to be online timed out. Continuing. "
-          "{} craned is online. Total: {}.",
-          online_cnt, to_registered_craneds_cnt);
-      break;
-    }
-  }
 
   ok = g_task_scheduler->Init();
   if (!ok) {

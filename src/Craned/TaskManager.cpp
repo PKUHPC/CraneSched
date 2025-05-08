@@ -34,6 +34,31 @@
 
 namespace Craned {
 
+TaskInstance::~TaskInstance() {
+  if (termination_timer) {
+    termination_timer->close();
+  }
+
+  if (this->IsCrun()) {
+    auto* crun_meta = GetCrunMeta();
+
+    close(crun_meta->task_input_fd);
+    // For crun pty job, avoid close same fd twice
+    if (crun_meta->task_output_fd != crun_meta->task_input_fd)
+      close(crun_meta->task_output_fd);
+
+    if (!crun_meta->x11_auth_path.empty() &&
+        !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
+      std::error_code ec;
+      bool ok = std::filesystem::remove(crun_meta->x11_auth_path, ec);
+      if (!ok)
+        CRANE_ERROR("Failed to remove x11 auth {} for task #{}: {}",
+                    crun_meta->x11_auth_path, this->task.task_id(),
+                    ec.message());
+    }
+  }
+}
+
 bool TaskInstance::IsCrun() const {
   return this->task.type() == crane::grpc::Interactive &&
          this->task.interactive_meta().interactive_type() == crane::grpc::Crun;
@@ -191,11 +216,11 @@ TaskManager::TaskManager() {
         EvCleanTerminateTaskQueueCb_();
       });
 
-  m_check_task_status_async_handle_ =
+  m_query_running_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_check_task_status_async_handle_->on<uvw::async_event>(
+  m_query_running_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanCheckTaskStatusQueueCb_();
+        EvCleanQueryRunningTasksQueueCb_();
       });
 
   m_uvw_thread_ = std::thread([this]() {
@@ -1431,46 +1456,25 @@ void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
   m_terminate_task_async_handle_->send();
 }
 
-bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
-                                       crane::grpc::TaskStatus* status) {
-  CheckTaskStatusQueueElem elem{.task_id = task_id};
+std::set<task_id_t> TaskManager::QueryRunningTasksAsync() {
+  std::promise<std::set<task_id_t>> status_prom;
 
-  std::future<std::pair<bool, crane::grpc::TaskStatus>> res{
-      elem.status_prom.get_future()};
+  auto res = status_prom.get_future();
 
-  m_check_task_status_queue_.enqueue(std::move(elem));
-  m_check_task_status_async_handle_->send();
+  m_query_running_task_queue_.enqueue(std::move(status_prom));
+  m_query_running_task_async_handle_->send();
 
-  auto [ok, task_status] = res.get();
-  if (!ok) return false;
-
-  *status = task_status;
-  return true;
+  return res.get();
 }
 
-void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
-  CheckTaskStatusQueueElem elem;
-  while (m_check_task_status_queue_.try_dequeue(elem)) {
-    task_id_t task_id = elem.task_id;
-    if (m_task_map_.contains(task_id)) {
-      // Found in task map. The task must be running.
-      elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
-      continue;
+void TaskManager::EvCleanQueryRunningTasksQueueCb_() {
+  std::promise<std::set<task_id_t>> elem;
+  while (m_query_running_task_queue_.try_dequeue(elem)) {
+    std::set task_ids = g_ctld_client->GetAllTaskStatusChangeId();
+    for (const task_id_t task_id : (m_task_map_ | std::ranges::views::keys)) {
+      task_ids.emplace(task_id);
     }
-
-    // If a task id can be found in g_ctld_client, the task has ended.
-    //  Now if CraneCtld check the status of these tasks, there is no need to
-    //  send to TaskStatusChange again. Just cancel them.
-    crane::grpc::TaskStatus status;
-    bool exist =
-        g_ctld_client->CancelTaskStatusChangeByTaskId(task_id, &status);
-    if (exist) {
-      elem.status_prom.set_value({true, status});
-      continue;
-    }
-
-    elem.status_prom.set_value(
-        {false, /* Invalid Value*/ crane::grpc::Pending});
+    elem.set_value(std::move(task_ids));
   }
 }
 
