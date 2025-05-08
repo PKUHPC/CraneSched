@@ -2182,14 +2182,14 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
       if (stub && !stub->Invalid()) {
         CraneErrCode err = stub->TerminateOrphanedTasks(job_ids);
         if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to terminate orphanedTask {} tasks on Node {}",
+          CRANE_DEBUG("Failed to terminate {} orphaned tasks on Node {}",
                       job_ids.size(), craned_id);
         }
       }
       job_latch.count_down();
     });
-    job_latch.wait();
   }
+  job_latch.wait();
 
   std::latch cg_latch(craned_cg_map.size());
   for (auto& [craned_id, cgroups] : craned_cg_map) {
@@ -2204,13 +2204,16 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
       }
       cg_latch.count_down();
     });
-    cg_latch.wait();
   }
+  cg_latch.wait();
 
   for (const auto& [job_id, exec_nodes] : job_exec_node_map) {
-    for (const auto& craned_id : exec_nodes)
+    for (const auto& craned_id : exec_nodes) {
+      CRANE_TRACE("Job {} failed on Node {} due to craned down.", job_id,
+                  craned_id);
       TaskStatusChangeAsync(job_id, craned_id, crane::grpc::TaskStatus::Failed,
                             ExitCode::kExitCodeCranedDown);
+    }
   }
 }
 

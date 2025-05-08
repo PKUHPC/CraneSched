@@ -47,12 +47,6 @@ void CranedMetaContainer::CranedUp(
   node_meta->alive = true;
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
-
-  for (auto job_id : remote_meta.lost_jobs()) {
-    g_task_scheduler->TaskStatusChangeAsync(job_id, craned_id,
-                                            crane::grpc::TaskStatus::Failed,
-                                            ExitCode::kExitCodeCranedDown);
-  }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
