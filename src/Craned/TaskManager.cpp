@@ -205,6 +205,8 @@ TaskManager::TaskManager() {
         EvCleanCheckTaskStatusQueueCb_();
       });
 
+  g_pmix_server = std::make_unique<pmix::PmixServer>();
+  g_pmix_server->Init(g_config.CraneBaseDir);
 
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
@@ -222,9 +224,6 @@ TaskManager::TaskManager() {
     }
     m_uvw_loop_->run();
   });
-
-  g_pmix_server = std::make_unique<pmix::PmixServer>();
-  g_pmix_server->Init(g_config.CraneBaseDir);
 }
 
 TaskManager::~TaskManager() {
@@ -395,9 +394,6 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     ProcessInstance* proc = proc_iter->second;
     uint32_t task_id = instance->task.task_id();
 
-    if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix")
-      g_pmix_server->DeregisterTask(instance->task.task_id());
-
     // Remove indexes from pid to ProcessInstance*
     m_pid_proc_map_.erase(proc_iter);
     m_pid_task_map_.erase(task_iter);
@@ -423,13 +419,16 @@ void TaskManager::EvCleanSigchldQueueCb_() {
           TerminateTaskAsync(task_id);
         }
       } else {
-        if (instance->IsCrun())
+        if (instance->IsCrun()) {
+          if (instance->task.interactive_meta().mpi() == "pmix")
+            g_pmix_server->DeregisterTask(instance->task.task_id());
+
           // TaskStatusChange of a crun task is triggered in
           // CforedManager.
           g_cfored_manager->TaskProcOnCforedStopped(
               instance->task.interactive_meta().cfored_name(),
               instance->task.task_id());
-        else /* Batch / Calloc */ {
+        } else /* Batch / Calloc */ {
           // If the ProcessInstance has no process left,
           // send TaskStatusChange for this task.
           // See the comment of EvActivateTaskStatusChange_.
@@ -549,7 +548,7 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
 }
 
 CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                                  ProcessInstance* process) {
+                                                  ProcessInstance* process, int local_rank) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -1007,8 +1006,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix") {
-      // Each task currently supports only one thread.
-      auto result = g_pmix_server->SetupFork(instance->task.task_id(), instance->processes.size());
+      auto result = g_pmix_server->SetupFork(instance->task.task_id(), local_rank);
 
       if (!result) {
         fmt::print(stderr, "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
@@ -1205,7 +1203,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
                 task_id, strerror(errno));
   }
 
-  for (int i = 0; i< instance->task.ntasks_per_node(); i++) {
+  for (int local_rank = 0; local_rank< instance->task.ntasks_per_node(); local_rank++) {
     auto process =
       std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
@@ -1241,7 +1239,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // or fork() fails.
     // In this case, SIGCHLD will NOT be received for this task, and
     // we should send TaskStatusChange manually.
-    CraneErrCode err = SpawnProcessInInstance_(instance, process.get());
+    CraneErrCode err = SpawnProcessInInstance_(instance, process.get(), local_rank);
     if (err != CraneErrCode::SUCCESS) {
       ActivateTaskStatusChangeAsync_(
           task_id, crane::grpc::TaskStatus::Failed,

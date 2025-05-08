@@ -850,17 +850,17 @@ message SendPmixRingMsgReq {
   PmixRingMsgHdr pmix_ring_msg_hdr = 1;
   repeated PmixProc pmix_procs = 2;
   bytes msg = 3;
-};
+}
 
 message SendPmixRingMsgReply {
   bool ok = 1;
-};
+}
 
 message PmixTreeUpwardForwardReq {
   uint32 seq = 1;
   repeated PmixProc pmix_procs = 2;
   string peer_host = 3;
-  string msg = 4;
+  bytes msg = 4;
 }
 
 message PmixTreeUpwardForwardReply {
@@ -871,7 +871,7 @@ message PmixTreeDownwardForwardReq {
   uint32 seq = 1;
   repeated PmixProc pmix_procs = 2;
   string peer_host = 3;
-  string msg = 4;
+  bytes msg = 4;
 }
 
 message PmixTreeDownwardForwardReply {
@@ -884,11 +884,11 @@ message PmixDModexRequestReq {
   PmixProc pmix_proc = 3;
   string local_namespace = 4;
   int32 status = 5;
-};
+}
 
 message PmixDModexRequestReply {
   bool ok = 1;
-};
+}
 
 message PmixDModexResponseReq {
   uint32 seq_num = 1;
