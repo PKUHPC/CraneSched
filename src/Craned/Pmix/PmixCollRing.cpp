@@ -200,14 +200,14 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
     case CollRingState::PROGRESS:
       /* check for all data is collected and forwarded */
         if (m_peers_cnt_ -
-            (coll_ring_ctx.contrib_prev + static_cast<uint32_t>(coll_ring_ctx.contrib_local)) != 0) {
+            (coll_ring_ctx.contrib_prev + static_cast<uint32_t>(coll_ring_ctx.contrib_local)) == 0) {
         coll_ring_ctx.state = CollRingState::FINALIZE;
         InvokeCallBackRing_(coll_ring_ctx);
         result = true;
       }
       break;
     case CollRingState::FINALIZE:
-      if (m_peers_cnt_ - coll_ring_ctx.forward_cnt - 1 != 0) {
+      if (m_peers_cnt_ - coll_ring_ctx.forward_cnt - 1 == 0) {
         CRANE_DEBUG("{:p}: seq={} is DONE", static_cast<void*>(this), m_seq_);
         this->m_seq_++; // Only when the sequence is done, the coll sequence is incremented by 1.
         ResetCollRing_(coll_ring_ctx);
@@ -232,7 +232,7 @@ void Coll::RingReleaseFn(void* rel_data) {
 
 void Coll::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
 
-  if (m_cbfunc_ != nullptr)
+  if (!m_cbfunc_)
       return ;
 
   auto cb_data = std::make_unique<CbData>();
