@@ -44,9 +44,13 @@ namespace {
     .job_control = PMIxServerModule::JobControl,
   };
 
-  void AppCb(pmix_status_t status, pmix_info_t info[], size_t ninfo,
-    void *provided_cbdata, pmix_op_cbfunc_t cbfunc,
-    void *cbdata) {
+  void AppCb(
+      pmix_status_t status,
+      pmix_info_t info [[maybe_unused]][],
+      size_t ninfo [[maybe_unused]],
+      void *provided_cbdata, pmix_op_cbfunc_t cbfunc [[maybe_unused]],
+      void *cbdata [[maybe_unused]])
+{
     auto *bc = reinterpret_cast<absl::BlockingCounter *>(provided_cbdata);
     bc->DecrementCount();
     CRANE_DEBUG("app callback is called with status={}: {}", status, PMIx_Error_string(status));
@@ -69,7 +73,6 @@ PmixTaskInstance::~PmixTaskInstance() {
 }
 
 bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map) {
-  InfoSet_(task, env_map);
 
   CRANE_TRACE("Crun Task #{} Launch the PMIx server, version {}.{}.{}", task.task_id(), PMIX_VERSION_MAJOR, PMIX_VERSION_MINOR, PMIX_VERSION_RELEASE);
 
@@ -159,10 +162,9 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
   std::ostringstream ppn_oss;
   for (uint32_t i = 0; i < m_node_num_; i++) {
     for (uint32_t j = 0; j < m_ntasks_per_node_; j++) {
-      if (j > 0) {
+      if (j > 0)
         ppn_oss << ",";
-      }
-      ppn_oss << (i * m_ntasks_per_node_ + j);
+      ppn_oss << ((i * m_ntasks_per_node_) + j);
     }
     if (i < m_node_num_ - 1) {
       ppn_oss << ";";
@@ -196,7 +198,7 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
 
   {
     absl::BlockingCounter bc(1);
-    rc = PMIx_server_register_nspace(m_nspace_.c_str(), m_ntasks_per_node_, ns_info, info_list.size(), OpCb, &bc);
+    rc = PMIx_server_register_nspace(m_nspace_.c_str(), static_cast<int>(m_ntasks_per_node_), ns_info, info_list.size(), OpCb, &bc);
     PMIX_INFO_DESTRUCT(ns_info);
     if (rc != PMIX_SUCCESS) {
       CRANE_ERROR("Error: PMIx_server_register_nspace. {}", PMIx_Error_string(rc));
@@ -217,7 +219,7 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
   pmix_proc_t proc;
   PMIX_LOAD_NSPACE(proc.nspace, m_nspace_.c_str());
   for (uint32_t rank = 0; rank < m_ntasks_per_node_; rank++) {
-    uint32_t gloabl_rank = m_ntasks_per_node_ * m_node_id_ + rank;
+    uint32_t gloabl_rank = (m_ntasks_per_node_ * m_node_id_) + rank;
     proc.rank = gloabl_rank;
     {
       absl::BlockingCounter bc(1);
@@ -286,9 +288,9 @@ void PmixTaskInstance::InfoSet_(const crane::grpc::TaskToD& task,  const std::un
   std::ranges::replace(m_node_list_str_, ';', ',');
   m_node_list_ = absl::StrSplit(m_node_list_str_, ',');
 
-  auto it = std::find(m_node_list_.begin(), m_node_list_.end(), m_hostname_);
+  auto it = std::ranges::find(m_node_list_, m_hostname_);
   if (it != m_node_list_.end())
-    m_node_id_ = std::distance(m_node_list_.begin(), it);
+    m_node_id_ = std::ranges::distance(m_node_list_.begin(), it);
 }
 
 template <typename T>
@@ -367,17 +369,21 @@ bool PmixServer::RegisterTask(const crane::grpc::TaskToD& task, const std::unord
   std::unique_ptr<PmixTaskInstance> pmix_task = std::make_unique<PmixTaskInstance>();
   if (!pmix_task->Init(task, env_map)) return false;
 
-  std::vector<uint32_t> task_map;
-  for (uint32_t rank = 0; rank < task.node_num()*task.ntasks_per_node(); rank++) {
-    task_map.emplace_back(rank / task.ntasks_per_node());
+  size_t node_num = task.node_num();
+  size_t ntasks_per_node = task.ntasks_per_node();
+  size_t total_tasks = node_num * ntasks_per_node;
+  std::vector<uint32_t> task_map(total_tasks);
+
+  for (size_t node = 0; node < node_num; ++node) {
+    std::fill_n(task_map.begin() + node * ntasks_per_node, ntasks_per_node, node);
   }
 
   PmixNameSpace pmix_name_space{
-    .m_namespace_ = pmix_task->m_nspace_,
-    .m_node_num_ = pmix_task->m_node_num_,
-    .m_task_num_ = pmix_task->m_task_num_,
-    .m_task_map_ = std::move(task_map),
-    .m_hostlist_ = pmix_task->m_node_list_,
+    .nspace = pmix_task->m_nspace_,
+    .node_num = pmix_task->m_node_num_,
+    .task_num = pmix_task->m_task_num_,
+    .task_map = std::move(task_map),
+    .hostlist = pmix_task->m_node_list_,
   };
 
   m_nspace_to_task_map_.emplace(pmix_task->m_nspace_, task_id);

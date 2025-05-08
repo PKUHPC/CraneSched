@@ -26,12 +26,12 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   util::write_lock_guard lock_guard(m_mutex_);
 
   for (const auto& coll : m_coll_list_) {
-    if (coll->get_nprocs() != nprocs) continue;
-    if (coll->get_type() != type) continue;
-    if (!coll->get_nprocs()) return coll;
+    if (coll->GetProcNum() != nprocs) continue;
+    if (coll->GetType() != type) continue;
+    if (!coll->GetProcNum()) return coll;
 
     for (size_t i = 0; i < nprocs; i++) {
-      const auto& proc = coll->get_procs(i);
+      const auto& proc = coll->GetProcs(i);
       if (std::strcmp(proc.nspace, procs[i].nspace) == 0 &&
           proc.rank == procs[i].rank)
         return coll;
@@ -46,4 +46,4 @@ std::shared_ptr<Coll> PmixState::PmixStateCollGet(
   return coll;
 }
 
-};
+} // namespace pmix

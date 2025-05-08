@@ -52,8 +52,7 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
     return reactor;
   }
 
-  auto result = coll->ProcessRingRequest(request->pmix_ring_msg_hdr(), procs,
-                                         request->msg());
+  auto result = coll->ProcessRingRequest(request->pmix_ring_msg_hdr(), request->msg());
   response->set_ok(result);
 
 
