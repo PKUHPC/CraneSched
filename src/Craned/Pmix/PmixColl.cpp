@@ -42,6 +42,10 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
         hostname_set.emplace(hostname);
       }
     } else {
+      if (proc.rank > pmix_namespace->task_map.size()) {
+        CRANE_ERROR("The rank is out of the task number range.");
+        return false;
+      }
       uint32_t node_id = pmix_namespace->task_map[proc.rank];
       hostname_set.insert(pmix_namespace->hostlist[node_id]);
     }
@@ -57,6 +61,10 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
   auto it = hostname_set.find(g_pmix_server->GetHostname());
   if (it != hostname_set.end())
     m_peerid_ = std::distance(hostname_set.begin(), it);
+  else {
+    CRANE_ERROR("unkown hostname");
+    return false;
+  }
 
   switch (type) {
     case CollType::FENCE_TREE:
@@ -66,6 +74,7 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
       this->PmixCollRingInit_(hostname_set);
       break;
     default:
+      CRANE_ERROR("unkown coll type");
       return false;
   }
 

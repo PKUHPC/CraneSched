@@ -119,4 +119,4 @@ std::shared_ptr<CranedStub> CranedClient::GetCranedStub(
   return iter->second;
 }
 
-} //namespace craned
+} // namespace craned
