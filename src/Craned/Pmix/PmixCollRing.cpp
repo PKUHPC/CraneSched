@@ -151,10 +151,12 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
       coll_ring_ctx.ring_buf.clear();
       return false;
     }
+
+    auto self = shared_from_this();
     stub->SendPmixRingMsg(context.get(), std::move(request), reply.get(),
                           [context, reply, seq = coll_ring_ctx.seq,
-                           &coll_ring_ctx, this](grpc::Status status) {
-                            std::lock_guard lock_guard(this->m_lock_);
+                           &coll_ring_ctx, self](grpc::Status status) {
+                            std::lock_guard lock_guard(self->m_lock_);
                             if (!status.ok() || !reply->ok()) {
                               CRANE_ERROR("{:p}, Cannot forward ring data",
                                           static_cast<void*>(&coll_ring_ctx));
@@ -173,7 +175,7 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
                             }
 
                             coll_ring_ctx.forward_cnt++;
-                            this->ProgressCollectRing_(coll_ring_ctx);
+                            self->ProgressCollectRing_(coll_ring_ctx);
                             coll_ring_ctx.ring_buf.clear();
                           });
   }
