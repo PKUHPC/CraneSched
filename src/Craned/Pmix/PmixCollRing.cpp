@@ -153,9 +153,9 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
     }
 
     auto self = shared_from_this();
-    stub->SendPmixRingMsg(context.get(), std::move(request), reply.get(),
+    stub->SendPmixRingMsg(context.get(), request, reply.get(),
                           [context, reply, seq = coll_ring_ctx.seq,
-                           &coll_ring_ctx, self](grpc::Status status) {
+                           &coll_ring_ctx, self](const grpc::Status& status) {
                             std::lock_guard lock_guard(self->m_lock_);
                             if (!status.ok() || !reply->ok()) {
                               CRANE_ERROR("{:p}, Cannot forward ring data",

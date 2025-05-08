@@ -49,9 +49,9 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
 
   stub->PmixDModexResponse(
-      context.get(), std::move(request), reply.get(),
+      context.get(), request, reply.get(),
       [context, reply,
-       craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
+       craned_id = dmo_modex_cb_data->craned_id](const grpc::Status& status) {
         if (!status.ok()) {
           CRANE_ERROR("Cannot send direct modex response to {}", craned_id);
         }
@@ -69,6 +69,11 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   auto pmix_nspace = g_pmix_server->PmixNamespaceGet(pmix_namespace);
   if (!pmix_nspace) {
     CRANE_ERROR("Cannot find pmix namespace {}", pmix_namespace);
+    return false;
+  }
+
+  if (rank >= pmix_nspace->task_map.size()) {
+    CRANE_ERROR("The rank is out of the range of the task_map.");
     return false;
   }
 
@@ -102,8 +107,8 @@ bool PmixDModexReqManager::PmixDModexGet(const std::string &pmix_namespace,
   }
 
   stub->PmixDModexRequest(
-      context.get(), std::move(request), reply.get(),
-      [context, reply, cbfunc, cbdata](grpc::Status status) {
+      context.get(), request, reply.get(),
+      [context, reply, cbfunc, cbdata](const grpc::Status& status) {
         if (!status.ok()) {
           CRANE_ERROR("PmixDModex rpc failed.");
           // TODO: Is it needed?
@@ -187,8 +192,8 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::strin
     return ;
   }
   stub->PmixDModexResponse(
-      context.get(), std::move(request), reply.get(),
-      [context, reply, craned_id](grpc::Status status) {
+      context.get(), request, reply.get(),
+      [context, reply, craned_id](const grpc::Status& status) {
         if (!status.ok()) {
           CRANE_ERROR("Cannot send direct modex error response to {}",
                       craned_id);
