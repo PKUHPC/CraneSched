@@ -83,6 +83,8 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
+  CRANE_OFF = 4;
+  CRANE_SLEEPING = 5;
 }
 
 enum CranedPowerState {
@@ -584,5 +586,5 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp system_boot_time = 5;
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
-  repeated NetworkInterface network_interfaces = 7;
+  repeated NetworkInterface network_interfaces = 8;
 }

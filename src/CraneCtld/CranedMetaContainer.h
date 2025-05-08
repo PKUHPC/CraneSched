@@ -103,6 +103,9 @@ class CranedMetaContainer final {
 
   bool CheckCranedOnline(const CranedId& craned_id);
 
+  bool UpdateCranedPowerState(const CranedId& craned_id,
+                              const crane::grpc::CranedPowerState& power_state);
+
   int GetOnlineCranedCount();
 
   PartitionMetaPtr GetPartitionMetasPtr(const PartitionId& partition_id);

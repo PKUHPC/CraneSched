@@ -36,7 +36,7 @@ void CranedMetaContainer::CranedUp(
     }
     g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
   }
-  
+
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
@@ -711,7 +711,17 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
         }
       } else {
-        resource_state = crane::grpc::CranedResourceState::CRANE_DOWN;
+        if (craned_meta->power_state == CranedPowerState::PoweredOff ||
+            craned_meta->power_state == CranedPowerState::PoweringOff ||
+            craned_meta->power_state == CranedPowerState::PoweringOn) {
+          resource_state = crane::grpc::CranedResourceState::CRANE_OFF;
+        } else if (craned_meta->power_state == CranedPowerState::Sleeping ||
+                   craned_meta->power_state == CranedPowerState::ToSleeping ||
+                   craned_meta->power_state == CranedPowerState::WakingUp) {
+          resource_state = crane::grpc::CranedResourceState::CRANE_SLEEPING;
+        } else {
+          resource_state = crane::grpc::CranedResourceState::CRANE_DOWN;
+        }
       }
       if (control_filters[static_cast<int>(control_state)] &&
           resource_filters[static_cast<int>(resource_state)]) {
@@ -963,13 +973,65 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     else
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_MIX);
-  } else
-    craned_info->set_resource_state(
-        crane::grpc::CranedResourceState::CRANE_DOWN);
+  } else {
+    if (craned_meta.power_state == CranedPowerState::PoweredOff ||
+        craned_meta.power_state == CranedPowerState::PoweringOff ||
+        craned_meta.power_state == CranedPowerState::PoweringOn) {
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_OFF);
+    } else if (craned_meta.power_state == CranedPowerState::Sleeping ||
+               craned_meta.power_state == CranedPowerState::ToSleeping ||
+               craned_meta.power_state == CranedPowerState::WakingUp) {
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_SLEEPING);
+    } else {
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_DOWN);
+    }
+  }
 
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),
       craned_meta.static_meta.partition_ids.end());
+}
+
+bool CranedMetaContainer::UpdateCranedPowerState(
+    const CranedId& craned_id,
+    const crane::grpc::CranedPowerState& power_state) {
+  if (!craned_meta_map_.Contains(craned_id)) {
+    return false;
+  }
+
+  auto craned_meta = craned_meta_map_[craned_id];
+  switch (power_state) {
+  case crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE:
+    craned_meta->power_state = CranedPowerState::Active;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_IDLE:
+    craned_meta->power_state = CranedPowerState::Idle;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_SLEEPING:
+    craned_meta->power_state = CranedPowerState::Sleeping;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_POWEREDOFF:
+    craned_meta->power_state = CranedPowerState::PoweredOff;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_TO_SLEEPING:
+    craned_meta->power_state = CranedPowerState::ToSleeping;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_WAKING_UP:
+    craned_meta->power_state = CranedPowerState::WakingUp;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_POWERING_ON:
+    craned_meta->power_state = CranedPowerState::PoweringOn;
+    break;
+  case crane::grpc::CranedPowerState::CRANE_POWER_POWERING_OFF:
+    craned_meta->power_state = CranedPowerState::PoweringOff;
+    break;
+  default:
+    return false;
+  }
+  return true;
 }
 
 }  // namespace Ctld

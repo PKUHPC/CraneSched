@@ -22,6 +22,7 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldPublicDefs.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -359,6 +360,9 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
+  CRANE_TRACE("Received update state request: {}",
+              crane::grpc::CranedControlState_Name(request->new_state()));
+
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -380,9 +384,6 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
       request->new_state() == crane::grpc::CRANE_SLEEP ||
       request->new_state() == crane::grpc::CRANE_WAKE ||
       request->new_state() == crane::grpc::CRANE_POWERON) {
-    CRANE_TRACE("Received update state request: {}",
-                crane::grpc::CranedControlState_Name(request->new_state()));
-
     if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
       for (auto crane_id : request->craned_ids()) {
         response->add_not_modified_nodes(crane_id);
@@ -397,6 +398,34 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
         response->add_not_modified_nodes(crane_id);
         response->add_not_modified_reasons("Node not found or not allowed");
         continue;
+      }
+
+      auto craned_meta = g_meta_container->GetCranedMetaPtr(crane_id);
+      if (!craned_meta) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons("Node not found");
+        continue;
+      }
+
+      if (request->new_state() == crane::grpc::CRANE_POWEROFF ||
+          request->new_state() == crane::grpc::CRANE_SLEEP) {
+        if (craned_meta->power_state == CranedPowerState::Active) {
+          response->add_not_modified_nodes(crane_id);
+          response->add_not_modified_reasons(
+              "Node is running, can't sleep or poweroff");
+          continue;
+        }
+      }
+
+      if (request->new_state() == crane::grpc::CRANE_WAKE ||
+          request->new_state() == crane::grpc::CRANE_POWERON) {
+        if (craned_meta->power_state == CranedPowerState::Idle ||
+            craned_meta->power_state == CranedPowerState::Active) {
+          response->add_not_modified_nodes(crane_id);
+          response->add_not_modified_reasons(
+              "Node is idle or running, don't need to wake up or poweron");
+          continue;
+        }
       }
 
       CRANE_INFO("Updating state {} on node {}",
@@ -1264,11 +1293,21 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
     grpc::ServerContext *context,
     const crane::grpc::PowerStateChangeRequest *request,
     crane::grpc::PowerStateChangeReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
   CRANE_INFO("Received power state change request for node {}: {}",
              request->craned_id(),
              crane::grpc::CranedPowerState_Name(request->state()));
 
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!g_meta_container->UpdateCranedPowerState(request->craned_id(),
+                                                request->state())) {
     response->set_ok(false);
     return grpc::Status::OK;
   }
