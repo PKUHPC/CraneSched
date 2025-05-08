@@ -92,8 +92,6 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
     ++iter;
   }
 
-  m_tree_.upfwd_buf.clear();
-  m_tree_.downfwd_buf.clear();
   ResetCollTreeUpFwd_();
   ResetCollTreeDownFwd_();
   m_cbdata_ = nullptr;
@@ -235,8 +233,8 @@ bool Coll::ProgressCollect_() {
     }
     auto self = shared_from_this();
     stub->PmixTreeUpwardForward(
-        context.get(), std::move(request), reply.get(),
-        [context, reply, seq = this->m_seq_, self](grpc::Status status) {
+        context.get(), request, reply.get(),
+        [context, reply, seq = this->m_seq_, self](const grpc::Status& status) {
           std::lock_guard lock(self->m_lock_);
           if (!status.ok() || !reply->ok()) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
@@ -328,8 +326,8 @@ bool Coll::ProgressUpFwd_() {
     }
     auto self = shared_from_this();
     stub->PmixTreeDownwardForward(
-        context.get(), std::move(request), reply.get(),
-        [context, reply, seq = this->m_seq_, self](grpc::Status status) {
+        context.get(), request, reply.get(),
+        [context, reply, seq = this->m_seq_, self](const grpc::Status& status) {
           std::lock_guard lock(self->m_lock_);
           if (!status.ok() || !reply->ok()) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
