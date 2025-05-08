@@ -37,27 +37,29 @@ class CranedStub {
   ~CranedStub() = default;
 
   void SendPmixRingMsg(grpc::ClientContext *context,
-                       crane::grpc::SendPmixRingMsgReq request,
+                       const crane::grpc::SendPmixRingMsgReq &request,
                        crane::grpc::SendPmixRingMsgReply *reply,
                        AsyncGrpcCallback callback);
 
-  void PmixTreeUpwardForward(grpc::ClientContext *context,
-                             crane::grpc::PmixTreeUpwardForwardReq request,
-                             crane::grpc::PmixTreeUpwardForwardReply *reply,
-                             AsyncGrpcCallback callback);
+  void PmixTreeUpwardForward(
+      grpc::ClientContext *context,
+      const crane::grpc::PmixTreeUpwardForwardReq &request,
+      crane::grpc::PmixTreeUpwardForwardReply *reply,
+      AsyncGrpcCallback callback);
 
-  void PmixTreeDownwardForward(grpc::ClientContext *context,
-                               crane::grpc::PmixTreeDownwardForwardReq request,
-                               crane::grpc::PmixTreeDownwardForwardReply* reply,
-                               AsyncGrpcCallback callback);
+  void PmixTreeDownwardForward(
+      grpc::ClientContext *context,
+      const crane::grpc::PmixTreeDownwardForwardReq &request,
+      crane::grpc::PmixTreeDownwardForwardReply *reply,
+      AsyncGrpcCallback callback);
 
   void PmixDModexRequest(grpc::ClientContext *context,
-                         crane::grpc::PmixDModexRequestReq request,
+                         const crane::grpc::PmixDModexRequestReq &request,
                          crane::grpc::PmixDModexRequestReply *reply,
                          AsyncGrpcCallback callback);
 
   void PmixDModexResponse(grpc::ClientContext *context,
-                          crane::grpc::PmixDModexResponseReq request,
+                          const crane::grpc::PmixDModexResponseReq &request,
                           crane::grpc::PmixDModexResponseReply *reply,
                           AsyncGrpcCallback callback);
 

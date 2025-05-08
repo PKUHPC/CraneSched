@@ -49,12 +49,13 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
 
   stub->PmixDModexResponse(
-          context.get(), std::move(request), reply.get(),
-          [context, reply, craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
-            if (!status.ok()) {
-              CRANE_ERROR("Cannot send direct modex response to {}", craned_id);
-            }
-          });
+      context.get(), std::move(request), reply.get(),
+      [context, reply,
+       craned_id = dmo_modex_cb_data->craned_id](grpc::Status status) {
+        if (!status.ok()) {
+          CRANE_ERROR("Cannot send direct modex response to {}", craned_id);
+        }
+      });
 
   delete dmo_modex_cb_data;
 }
@@ -186,7 +187,8 @@ void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::strin
     return ;
   }
   stub->PmixDModexResponse(
-      context.get(), std::move(request), reply.get(), [context, reply, craned_id](grpc::Status status) {
+      context.get(), std::move(request), reply.get(),
+      [context, reply, craned_id](grpc::Status status) {
         if (!status.ok()) {
           CRANE_ERROR("Cannot send direct modex error response to {}",
                       craned_id);
