@@ -30,8 +30,8 @@ class PmixState {
  public:
   PmixState() = default;
 
-  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& ranges,
-                         size_t nranges);
+  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
+                         size_t nprocs);
  private:
 
   util::rw_mutex m_mutex_;
