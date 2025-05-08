@@ -82,7 +82,8 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
 
    {
     absl::BlockingCounter bc(1);
-    if (PMIX_SUCCESS != PMIx_server_setup_application(m_nspace_.c_str(), nullptr, 0, AppCb, &bc)) {
+    rc = PMIx_server_setup_application(m_nspace_.c_str(), nullptr, 0, AppCb, &bc);
+    if (PMIX_SUCCESS != rc) {
       CRANE_ERROR("Failed to setup application: {}", PMIx_Error_string(rc));
       return false;
     }
