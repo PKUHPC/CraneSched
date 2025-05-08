@@ -180,7 +180,7 @@ class Coll : public std::enable_shared_from_this<Coll> {
     int childrn_cnt;
     std::list<std::string> all_chldrn_hl;
     std::string chldrn_str;
-    std::list<int> chldrn_ids;
+    std::vector<int> chldrn_ids;
     std::vector<std::string> childrn_hosts;
   };
 
