@@ -135,6 +135,7 @@ void PmixDModexReqManager::PmixProcessRequest(uint32_t seq_num,
   if (pmix_nspace->task_num <= pmix_proc.rank) {
     CRANE_ERROR("Bad request from {}: nspace {} has only {} ranks, asked for {}", craned_id, pmix_proc.nspace, pmix_nspace->task_num, pmix_proc.rank);
     ResponseWithError_(seq_num, craned_id, send_nspace, PMIX_ERR_BAD_PARAM);
+    return ;
   }
 
   // DModexCbData *dmo_modex_cb_data = new DModexCbData{.seq_num = seq_num, .craned_id = craned_id, .nspace = pmix_proc.nspace, .rank = pmix_proc.rank};
