@@ -82,14 +82,15 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
     m_tree_.chldrn_str.clear();
   }
 
-  auto iter = hostset.begin();
   if (m_tree_.childrn_cnt >= static_cast<std::ptrdiff_t>(hostset.size())) {
     CRANE_ERROR("childrn_cnt indicates that the host does not exist.");
     return false;
   }
+
+  m_tree_.childrn_hosts.resize(m_tree_.childrn_cnt);
   for (size_t i = 0; i < m_tree_.childrn_cnt; i++) {
-    m_tree_.childrn_hosts.emplace_back(*iter);
-    ++iter;
+    auto iter = std::next(hostset.begin(), m_tree_.chldrn_ids[i]);
+    m_tree_.childrn_hosts[i] = *iter;
   }
 
   ResetCollTreeUpFwd_();
