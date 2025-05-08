@@ -108,7 +108,7 @@ inline std::string ToString(CollRingState state) {
 }
 
 
-class Coll {
+class Coll : public std::enable_shared_from_this<Coll> {
  public:
   Coll() = default;
 
