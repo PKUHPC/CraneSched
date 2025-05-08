@@ -82,10 +82,7 @@ class CranedStub {
 
   CraneErrCode TerminateTasks(const std::vector<task_id_t> &task_ids);
 
-  CraneErrCode TerminateOrphanedTask(task_id_t task_id);
-
-  CraneErrCode CheckTaskStatus(task_id_t task_id,
-                               crane::grpc::TaskStatus *status);
+  CraneErrCode TerminateOrphanedTasks(const std::vector<task_id_t> &task_ids);
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 

@@ -165,6 +165,14 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
   stub->SetReady();
+  std::vector<task_id_t> lost_jobs =
+      std::vector(request->remote_meta().lost_jobs().begin(),
+                  request->remote_meta().lost_jobs().end());
+  if (!lost_jobs.empty()) {
+    CRANE_INFO("Craned {} lost jobs:[{}].", request->craned_id(),
+               absl::StrJoin(lost_jobs, ","));
+  }
+  g_task_scheduler->TerminateOrphanedJobs(lost_jobs);
 
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
   response->set_ok(true);

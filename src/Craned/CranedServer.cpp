@@ -90,8 +90,8 @@ grpc::Status CranedServiceImpl::TerminateOrphanedTask(
     response->set_reason("CranedServer is not ready");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-
-  g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(request->task_id());
+  for (task_id_t job_id : request->task_id_list())
+    g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
   response->set_ok(true);
 
   return Status::OK;
@@ -212,7 +212,7 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
 
   std::vector<JobSpec> job_specs;
   for (const auto &cg_spec_req : request->job_spec_vec()) {
-    CRANE_TRACE("Receive CreateCgroup for job #{}, uid {}",
+    CRANE_TRACE("Allocating job #{}, uid {}",
                 cg_spec_req.job_id(), cg_spec_req.uid());
     job_specs.emplace_back(cg_spec_req);
   }
@@ -515,24 +515,6 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   for (const auto &[name, value] : reply_from_remote_service.env_map()) {
     response->mutable_env_map()->emplace(name, value);
   }
-
-  return Status::OK;
-}
-
-grpc::Status CranedServiceImpl::CheckTaskStatus(
-    grpc::ServerContext *context,
-    const crane::grpc::CheckTaskStatusRequest *request,
-    crane::grpc::CheckTaskStatusReply *response) {
-  crane::grpc::TaskStatus status{};
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
-    CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
-  }
-
-  bool exist = g_task_mgr->CheckTaskStatusAsync(request->task_id(), &status);
-  response->set_ok(exist);
-  response->set_status(status);
 
   return Status::OK;
 }

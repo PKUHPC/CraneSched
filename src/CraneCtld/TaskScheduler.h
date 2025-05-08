@@ -505,6 +505,11 @@ class TaskScheduler {
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
+  void QueryJobOfNode(const CranedId& craned_id,
+                      crane::grpc::ConfigureCranedRequest* req);
+
+  void TerminateOrphanedJobs(const std::vector<task_id_t>& jobs);
+
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
