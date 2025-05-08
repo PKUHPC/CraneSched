@@ -233,32 +233,33 @@ bool Coll::ProgressCollect_() {
       this->m_tree_.upfwd_status = CollTreeSndState::FAILED;
       return false;
     }
+    auto self = shared_from_this();
     stub->PmixTreeUpwardForward(
         context.get(), std::move(request), reply.get(),
-        [context, reply, seq = this->m_seq_, this](grpc::Status status) {
-          std::lock_guard lock(this->m_lock_);
+        [context, reply, seq = this->m_seq_, self](grpc::Status status) {
+          std::lock_guard lock(self->m_lock_);
           if (!status.ok() || !reply->ok()) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
-                        this->m_tree_.upfwd_buf, this->m_tree_.parent_host);
-            this->m_tree_.upfwd_buf.clear();
-            this->m_tree_.upfwd_status = CollTreeSndState::FAILED;
+                        self->m_tree_.upfwd_buf, self->m_tree_.parent_host);
+            self->m_tree_.upfwd_buf.clear();
+            self->m_tree_.upfwd_status = CollTreeSndState::FAILED;
             return;
           }
 
-          if (seq != this->m_seq_) {
+          if (seq != self->m_seq_) {
             CRANE_DEBUG("Collective was reset!");
-            this->ProgressCollectTree_();
+            self->ProgressCollectTree_();
             return;
           }
 
-          this->m_tree_.upfwd_status = CollTreeSndState::DONE;
+          self->m_tree_.upfwd_status = CollTreeSndState::DONE;
 
           CRANE_DEBUG("{:p}: state: {}, snd_status={}",
-                      static_cast<void*>(this),
-                      static_cast<int>(this->m_tree_.state),
-                      static_cast<int>(this->m_tree_.upfwd_status));
+                      static_cast<void*>(self.get()),
+                      static_cast<int>(self->m_tree_.state),
+                      static_cast<int>(self->m_tree_.upfwd_status));
 
-          this->ProgressCollectTree_();
+          self->ProgressCollectTree_();
         });
   } else {
     /* move data from input buffer to the output */
@@ -325,33 +326,34 @@ bool Coll::ProgressUpFwd_() {
       this->m_tree_.downfwd_status = CollTreeSndState::FAILED;
       return false;
     }
+    auto self = shared_from_this();
     stub->PmixTreeDownwardForward(
         context.get(), std::move(request), reply.get(),
-        [context, reply, seq = this->m_seq_, this](grpc::Status status) {
-          std::lock_guard lock(this->m_lock_);
+        [context, reply, seq = this->m_seq_, self](grpc::Status status) {
+          std::lock_guard lock(self->m_lock_);
           if (!status.ok() || !reply->ok()) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
-                        this->m_tree_.upfwd_buf, this->m_tree_.parent_host);
-            this->m_tree_.downfwd_buf.clear();
-            this->m_tree_.downfwd_status = CollTreeSndState::FAILED;
+                        self->m_tree_.upfwd_buf, self->m_tree_.parent_host);
+            self->m_tree_.downfwd_buf.clear();
+            self->m_tree_.downfwd_status = CollTreeSndState::FAILED;
             return;
           }
 
-          if (seq != this->m_seq_) {
+          if (seq != self->m_seq_) {
             CRANE_DEBUG("Collective was reset!");
-            this->ProgressCollectTree_();
+            self->ProgressCollectTree_();
             return;
           }
 
-          this->m_tree_.downfwd_cb_cnt++;
+          self->m_tree_.downfwd_cb_cnt++;
 
           CRANE_DEBUG(
               "{:p}: state: {}, snd_status={}, compl_cnt={}/{}",
-              static_cast<void*>(this), static_cast<int>(this->m_tree_.state),
-              static_cast<int>(this->m_tree_.downfwd_status),
-              this->m_tree_.downfwd_cb_cnt, this->m_tree_.downfwd_cb_wait);
+              static_cast<void*>(self.get()), static_cast<int>(self->m_tree_.state),
+              static_cast<int>(self->m_tree_.downfwd_status),
+              self->m_tree_.downfwd_cb_cnt, self->m_tree_.downfwd_cb_wait);
 
-          this->ProgressCollectTree_();
+          self->ProgressCollectTree_();
         });
 
     CRANE_DEBUG("fwd to {}, size = {}", host, m_tree_.downfwd_buf.size());
