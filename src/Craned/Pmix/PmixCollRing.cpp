@@ -152,25 +152,30 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
       return false;
     }
     stub->SendPmixRingMsg(context.get(), std::move(request), reply.get(),
-            [context, reply, seq = coll_ring_ctx.seq, &coll_ring_ctx, this](grpc::Status status) {
-              std::lock_guard lock_guard(this->m_lock_);
-              if (!status.ok() || !reply->ok()) {
-                CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
-                coll_ring_ctx.ring_buf.clear();
-                return;
-              }
+                          [context, reply, seq = coll_ring_ctx.seq,
+                           &coll_ring_ctx, this](grpc::Status status) {
+                            std::lock_guard lock_guard(this->m_lock_);
+                            if (!status.ok() || !reply->ok()) {
+                              CRANE_ERROR("{:p}, Cannot forward ring data",
+                                          static_cast<void*>(&coll_ring_ctx));
+                              coll_ring_ctx.ring_buf.clear();
+                              return;
+                            }
 
-              CRANE_DEBUG("{:p}: called {}" ,static_cast<void*>(&coll_ring_ctx), coll_ring_ctx.seq);
-              if (seq != coll_ring_ctx.seq) {
-                CRANE_DEBUG("{:p}: collective was reset!", static_cast<void*>(&coll_ring_ctx));
-                coll_ring_ctx.ring_buf.clear();
-                return;
-              }
+                            CRANE_DEBUG("{:p}: called {}",
+                                        static_cast<void*>(&coll_ring_ctx),
+                                        coll_ring_ctx.seq);
+                            if (seq != coll_ring_ctx.seq) {
+                              CRANE_DEBUG("{:p}: collective was reset!",
+                                          static_cast<void*>(&coll_ring_ctx));
+                              coll_ring_ctx.ring_buf.clear();
+                              return;
+                            }
 
-              coll_ring_ctx.forward_cnt++;
-              this->ProgressCollectRing_(coll_ring_ctx);
-              coll_ring_ctx.ring_buf.clear();
-            });
+                            coll_ring_ctx.forward_cnt++;
+                            this->ProgressCollectRing_(coll_ring_ctx);
+                            coll_ring_ctx.ring_buf.clear();
+                          });
   }
 
   return true;
