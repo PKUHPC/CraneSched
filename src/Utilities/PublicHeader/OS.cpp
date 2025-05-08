@@ -41,11 +41,11 @@ bool DeleteFile(std::string const& p) {
 
 bool DeleteFolder(std::string const& p) {
   std::error_code ec;
-  bool ok = std::filesystem::remove_all(p, ec);
+  std::filesystem::remove_all(p, ec);
 
-  if (ec) CRANE_ERROR("Failed to remove floder {}: {}", p, ec.message());
+  if (ec) CRANE_ERROR("Failed to remove folder {}: {}", p, ec.message());
 
-  return ok;
+  return !ec;
 }
 
 bool CreateFolders(std::string const& p) {

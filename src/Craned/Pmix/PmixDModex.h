@@ -57,7 +57,7 @@ private:
      void* m_cb_data_;
    };
 
-  uint32_t dmdx_seq_num_;
+  uint32_t dmdx_seq_num_ = 0;
   util::mutex m_dmodex_mutex_;
   std::list<PmixDModexReq> m_pmix_dmodex_req_list_;
 };
