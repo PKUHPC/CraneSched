@@ -40,6 +40,10 @@ class AccountMetaContainer final {
 
   CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
 
+  bool CheckQosResource(const TaskInCtld& task);
+
+  void MallocQosResource(const TaskInCtld& task);
+
   void FreeQosSubmitResource(const TaskInCtld& task);
 
   void FreeQosResource(const TaskInCtld& task);
