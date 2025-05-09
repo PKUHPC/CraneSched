@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "AccountManager.h"
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -28,8 +29,8 @@ class AccountMetaContainer final {
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
                                               QosResource>;
 
-  using UserResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string,  // username
+  using ResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string,
       QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
@@ -51,9 +52,18 @@ class AccountMetaContainer final {
   void DeleteUserResource(const std::string& username);
 
  private:
-  UserResourceMetaMap user_meta_map_;
+
+  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task, const Qos& qos);
+
+  CraneErrCode CheckQosSubmitResourceForAccount_(
+      const TaskInCtld& task, const Qos& qos,
+      const AccountManager::AccountMapMutexSharedPtr& account_map_ptr);
+
+  ResourceMetaMap m_user_meta_map_;
+
+  ResourceMetaMap m_account_meta_map_;
 };
 
-inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
-
 }  // namespace Ctld
+
+inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
