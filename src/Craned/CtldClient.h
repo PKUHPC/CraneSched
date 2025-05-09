@@ -36,12 +36,14 @@ class CtldClientStateMachine {
   struct ConfigureArg {
     RegToken token;
     std::set<task_id_t> job_ids;
+    std::set<task_id_t> task_ids;
   };
   void SetActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb);
 
   struct RegisterArg {
     RegToken token;
-    std::vector<task_id_t> job_ids;
+    std::vector<task_id_t> lost_jobs;
+    std::vector<task_id_t> lost_tasks;
   };
 
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
@@ -50,7 +52,8 @@ class CtldClientStateMachine {
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
-  void EvConfigurationDone(std::optional<std::vector<task_id_t>> job_ids);
+  void EvConfigurationDone(std::optional<std::vector<task_id_t>> lost_jobs,
+                           std::optional<std::vector<task_id_t>> lost_tasks);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
 
   // Grpc Channel events
@@ -89,7 +92,8 @@ class CtldClientStateMachine {
   void ActionRequestConfig_();
   void ActionConfigure_(
       const crane::grpc::ConfigureCranedRequest& configure_req);
-  void ActionRegister_(std::vector<task_id_t> job_ids);
+  void ActionRegister_(std::vector<task_id_t>&& lost_jobs,
+                       std::vector<task_id_t>&& lost_tasks);
   void ActionReady_();
   void ActionDisconnected_();
 
