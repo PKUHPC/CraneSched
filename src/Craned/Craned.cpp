@@ -205,9 +205,13 @@ void ParseConfig(int argc, char** argv) {
           else
             server_node.ListenPort = kCtldDefaultPort;
 
-          g_config.ControlMachine.push_back(std::move(server_node));
+          g_config.ControlMachines.push_back(std::move(server_node));
         }
       }
+
+      if (config["CraneCtldEnableRaft"])
+        g_config.EnableRaft = config["CraneCtldEnableRaft"].as<bool>();
+      CRANE_INFO("Raft mode enable: {}", g_config.EnableRaft);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -450,7 +454,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (parsed_args.count("server-address") == 0) {
-    if (g_config.ControlMachine.empty()) {
+    if (g_config.ControlMachines.empty()) {
       CRANE_CRITICAL(
           "CraneCtld address must be specified in command line or config "
           "file.\n{}",
@@ -458,7 +462,7 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
   } else {
-    g_config.ControlMachine.emplace_back(
+    g_config.ControlMachines.emplace_back(
         parsed_args["server-address"].as<std::string>(), kCtldDefaultPort);
   }
 
@@ -601,11 +605,10 @@ void GlobalVariableInit() {
   g_ctld_client->AddGrpcCtldDisconnectedCb(
       [] { g_server->SetGrpcSrvReady(false); });
 
-  for (const auto& node : g_config.ControlMachine) {
-    g_ctld_client->AddCtldChannelAndStub(node.HostName, node.ListenPort);
-  }
-  g_ctld_client->InitSendThread();
-  //g_ctld_client->InitGrpcChannel(g_config.ControlMachine);
+  if (g_config.EnableRaft)
+    g_ctld_client->InitGrpcChannel(g_config.ControlMachines);
+  else
+    g_ctld_client->InitGrpcChannel({g_config.ControlMachines[0]});
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

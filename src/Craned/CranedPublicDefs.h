@@ -75,7 +75,9 @@ struct Config {
   CranedListenConf ListenConf;
   bool CompressedRpc{};
 
-  std::vector<ServerEndPoint> ControlMachine;
+  std::vector<ServerEndPoint> ControlMachines;
+  bool EnableRaft = false;
+
   std::string CranedDebugLevel;
 
   std::filesystem::path CraneBaseDir;
