@@ -29,10 +29,24 @@ struct PdJobInScheduler;
 
 constexpr int kNumStripes = 128;
 
+struct MetaResource {
+  ResourceView resource{};
+  uint32_t jobs_count{0};
+  uint32_t submit_jobs_count{0};
+  absl::Duration wall_time{absl::ZeroDuration()};
+
+  bool operator<=(const MetaResource& rhs) const;
+
+  MetaResource& operator+=(const MetaResource& rhs);
+  MetaResource& operator-=(const MetaResource& rhs);
+};
+
+constexpr int kNumStripes = 128;
+
 class AccountMetaContainer final {
  public:
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
-                                              QosResource>;
+                                              MetaResource>;
 
   using ResourceMetaMap = phmap::parallel_flat_hash_map<
       std::string, QosToResourceMap,
@@ -45,6 +59,18 @@ class AccountMetaContainer final {
       std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
+  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
       std::shared_mutex>;
 
   AccountMetaContainer() = default;
@@ -67,6 +93,8 @@ class AccountMetaContainer final {
   void DeleteUserMeta(const std::string& username);
 
   void DeleteAccountMeta(const std::string& account);
+
+  void DeleteQosMeta(const std::string& qos);
 
   void UserAddTask(const std::string& username);
 
@@ -128,6 +156,7 @@ class AccountMetaContainer final {
 
   ResourceMetaMap m_user_meta_map_;
   ResourceMetaMap m_account_meta_map_;
+  QosResourceMap m_qos_meta_map_;
   UserToTaskNumMap m_user_to_task_map_;
 };
 
