@@ -47,17 +47,17 @@ public:
   void PmixProcessResponse(uint32_t seq_num, const CranedId& craned_id, const std::string& data, int status);
 
 private:
-  void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
-                         const std::string& sender_ns, int status);
+  static void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
+                                int status);
 
    struct PmixDModexReq {
-     uint32_t m_seq_num_;
-     time_t m_ts_;
-     pmix_modex_cbfunc_t m_cb_func_;
-     void* m_cb_data_;
+     uint32_t seq_num;
+     time_t ts;
+     pmix_modex_cbfunc_t cb_func;
+     void* cb_data;
    };
 
-  uint32_t dmdx_seq_num_ = 0;
+  uint32_t m_dmdx_seq_num_ = 0;
   util::mutex m_dmodex_mutex_;
   std::list<PmixDModexReq> m_pmix_dmodex_req_list_;
 };

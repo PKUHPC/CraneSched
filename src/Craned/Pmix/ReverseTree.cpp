@@ -196,4 +196,4 @@ int ReverseTreeDirectChildren(int rank, int num_nodes, int width,
 	return i;
 }
 
-}
+}// namespace pmix

@@ -145,7 +145,6 @@ class Coll : public std::enable_shared_from_this<Coll> {
  private:
   /* coll states */
   struct CollRingCtx {
-    CollType type;
     int peers_cnt;
     bool in_use;
     uint32_t seq;

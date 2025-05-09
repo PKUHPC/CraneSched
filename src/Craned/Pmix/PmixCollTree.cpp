@@ -667,7 +667,7 @@ void Coll::TreeReleaseFn(void* rel_data) {
 
   std::lock_guard lock(cb_data->coll->m_lock_);
 
-  auto coll = cb_data->coll;
+  Coll* coll = cb_data->coll;
 
   coll->m_tree_.downfwd_buf.clear();
 
