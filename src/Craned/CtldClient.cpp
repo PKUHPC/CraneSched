@@ -275,7 +275,7 @@ void CtldClient::Init() {
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.lost_jobs);
+        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_tasks);
       });
 
   AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });
@@ -363,7 +363,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 }
 
 bool CtldClient::CranedRegister_(RegToken const& token,
-                                 std::vector<task_id_t> const& lost_jobs) {
+                                 std::vector<task_id_t> const& lost_jobs,
+                                 std::vector<task_id_t> const& lost_tasks) {
   CRANE_DEBUG("Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
@@ -388,6 +389,7 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_meta->mutable_system_boot_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
   grpc_meta->mutable_lost_jobs()->Assign(lost_jobs.begin(), lost_jobs.end());
+  grpc_meta->mutable_lost_tasks()->Assign(lost_tasks.begin(), lost_tasks.end());
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -505,6 +507,8 @@ void CtldClient::AsyncSendThread_() {
                 m_task_status_change_list_.begin(), std::move(changes));
             m_task_status_change_mtx_.Unlock();
           }
+          // Sleep for a while to avoid too many retries.
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
           break;
         } else
           changes.pop_front();

@@ -153,7 +153,8 @@ class CtldClient {
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(RegToken const& token,
-                       std::vector<task_id_t> const& lost_jobs);
+                       std::vector<task_id_t> const& lost_jobs,
+                       std::vector<task_id_t> const& lost_tasks);
 
   void AsyncSendThread_();
 
