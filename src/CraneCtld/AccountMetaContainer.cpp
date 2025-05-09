@@ -84,6 +84,48 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   return result;
 }
 
+bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
+  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
+  if (!qos) {
+    CRANE_ERROR("Unknown QOS '{}'", task.qos);
+    return CraneErrCode::ERR_INVALID_QOS;
+  }
+
+  // TODO: Delete a user while jobs are in the queue?
+  CRANE_ASSERT(user_meta_map_.contains(task.Username()));
+
+  bool result = true;
+
+  user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& qos_to_resource_map = pair.second;
+      auto iter = qos_to_resource_map.find(task.qos);
+
+      CRANE_ASSERT(iter != qos_to_resource_map.end());
+
+      auto& val = iter->second;
+      if (val.jobs_count + 1 > qos->max_jobs_per_user) {
+        result = false;
+      }
+  });
+
+  return result;
+}
+
+void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
+
+  CRANE_ASSERT(user_meta_map_.contains(task.Username()));
+
+  user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+    auto& qos_to_resource_map = pair.second;
+    auto iter = qos_to_resource_map.find(task.qos);
+
+    CRANE_ASSERT(iter != qos_to_resource_map.end());
+
+    auto& val = iter->second;
+    val.jobs_count++;
+  });
+}
+
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -113,6 +155,8 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
                      val.resource.GetAllocatableRes());
         val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.jobs_count--;
+        val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
+        val.submit_jobs_count--;
       });
 }
 

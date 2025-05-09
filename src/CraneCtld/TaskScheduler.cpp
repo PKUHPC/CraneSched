@@ -722,6 +722,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromResv(task->reservation, task->TaskId(),
                                              task->AllocatedRes());
   }
+  g_account_meta_container->MallocQosResource(*task);
   if (!task->licenses_count.empty())
     g_licenses_manager->MallocLicenseWhenRecoverRunning(task->licenses_count);
 
