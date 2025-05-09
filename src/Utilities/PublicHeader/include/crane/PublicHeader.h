@@ -299,7 +299,16 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "ERR_INVALID_ARGUMENT",
         "ERR_RESOURCE_ALREADY_EXIST",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
-        "ERR_USER_HAS_TASK"
+        "ERR_USER_HAS_TASK",
+        "ERR_RESOURCE_ALREADY_EXIST"
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
+        "ERR_USER_HAS_TASK",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+
+        "ERR_CONVERT_TO_RESOURCE_VIEW",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)"
+        "The current submitted job exceeds the QoS limit (ERR_TRES_PER_TASK_BEYOND)"
     };
 // clang-format on
 }  // namespace Internal
@@ -447,6 +456,9 @@ using DeviceMap =
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
 DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs);
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
@@ -547,6 +559,10 @@ class ResourceView {
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
 
+  // Account level resource operations
+  ResourceView& operator+=(const ResourceView& rhs);
+  ResourceView& operator-=(const ResourceView& rhs);
+
   bool IsZero() const;
   void SetToZero();
 
@@ -564,6 +580,8 @@ class ResourceView {
 
   DeviceMap& GetDeviceMap() { return device_map; }
   const DeviceMap& GetDeviceMap() const { return device_map; }
+
+  std::string ResourceViewToString() const;
 
  private:
   AllocatableResource allocatable_res;
