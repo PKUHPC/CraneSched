@@ -199,7 +199,6 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
-  std::unordered_set<task_id_t> running_jobs;
 
   CranedRemoteMeta() = default;
 

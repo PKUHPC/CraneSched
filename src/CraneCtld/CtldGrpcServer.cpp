@@ -165,13 +165,24 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  auto lost_jobs = std::vector(request->remote_meta().lost_jobs().begin(),
-                               request->remote_meta().lost_jobs().end());
-  if (!lost_jobs.empty()) {
-    CRANE_INFO("Craned {} lost jobs:[{}].", request->craned_id(),
-               absl::StrJoin(lost_jobs, ","));
+  // Some job allocation lost
+  std::vector<task_id_t> orphaned_job_ids;
+  if (!request->remote_meta().lost_jobs().empty()) {
+    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
+               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
   }
-  g_task_scheduler->TerminateOrphanedJobs(lost_jobs);
+  orphaned_job_ids.insert(orphaned_job_ids.end(),
+                          request->remote_meta().lost_jobs().begin(),
+                          request->remote_meta().lost_jobs().end());
+  if (!request->remote_meta().lost_tasks().empty()) {
+    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
+               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
+  }
+  orphaned_job_ids.insert(orphaned_job_ids.end(),
+                          request->remote_meta().lost_tasks().begin(),
+                          request->remote_meta().lost_tasks().end());
+
+  g_task_scheduler->TerminateOrphanedJobs(orphaned_job_ids);
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());

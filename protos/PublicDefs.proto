@@ -557,5 +557,6 @@ message CranedRemoteMeta {
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
-  repeated uint32 lost_jobs = 6;
+  repeated uint32 lost_tasks = 6;
+  repeated uint32 lost_jobs = 7;
 }

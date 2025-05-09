@@ -19,7 +19,6 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
-#include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 

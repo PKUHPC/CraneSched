@@ -2147,7 +2147,8 @@ void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
     if (job_it == m_running_task_map_.end()) continue;
 
     job_spec_map->emplace(job_id, job_it->second->GetJobOfNode(craned_id));
-
+    if (!std::ranges::contains(job_it->second->executing_craned_ids, craned_id))
+      continue;
     task_spec_map->emplace(job_id, job_it->second->GetTaskOfNode(craned_id));
   }
 }
@@ -2170,6 +2171,7 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
         job_exec_node_map[job_id] = job->executing_craned_ids;
         for (const auto& craned_id : job->CranedIds()) {
           craned_job_map[craned_id].emplace_back(job_id);
+          craned_cg_map[craned_id].emplace_back(job_id, job->uid);
         }
       }
     }
@@ -2177,23 +2179,25 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
 
   std::latch job_latch(craned_job_map.size());
   for (auto& [craned_id, job_ids] : craned_job_map) {
-    g_thread_pool->detach_task([&craned_id, &job_ids, &job_latch] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        CraneErrCode err = stub->TerminateOrphanedTasks(job_ids);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_DEBUG("Failed to terminate {} orphaned tasks on Node {}",
-                      job_ids.size(), craned_id);
-        }
-      }
-      job_latch.count_down();
-    });
+    g_thread_pool->detach_task(
+        [craned_id, job_ids = std::move(job_ids), &job_latch] {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          if (stub && !stub->Invalid()) {
+            CraneErrCode err = stub->TerminateOrphanedTasks(job_ids);
+            if (err != CraneErrCode::SUCCESS) {
+              CRANE_DEBUG("Failed to terminate {} orphaned tasks on Node {}",
+                          job_ids.size(), craned_id);
+            }
+          }
+          job_latch.count_down();
+        });
   }
   job_latch.wait();
 
   std::latch cg_latch(craned_cg_map.size());
   for (auto& [craned_id, cgroups] : craned_cg_map) {
-    g_thread_pool->detach_task([&craned_id, &cgroups, &cg_latch] {
+    g_thread_pool->detach_task([craned_id, cgroups = std::move(cgroups),
+                                &cg_latch] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (stub && !stub->Invalid()) {
         CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);

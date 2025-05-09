@@ -85,7 +85,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
 }
 
 void CtldClientStateMachine::EvConfigurationDone(
-    std::optional<std::vector<task_id_t>> job_ids) {
+    std::optional<std::vector<task_id_t>> lost_jobs,
+    std::optional<std::vector<task_id_t>> lost_tasks) {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
@@ -95,9 +96,10 @@ void CtldClientStateMachine::EvConfigurationDone(
     return;
   }
 
-  if (job_ids.has_value()) {
+  if (lost_jobs.has_value() && lost_tasks.has_value()) {
     m_state_ = State::REGISTERING;
-    ActionRegister_(std::move(job_ids.value()));
+    ActionRegister_(std::move(lost_jobs.value()),
+                    std::move(lost_tasks.value()));
   } else {
     m_state_ = State::REQUESTING_CONFIG;
     ActionRequestConfig_();
@@ -182,21 +184,31 @@ void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& configure_req) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-  auto task_ids = configure_req.job_map() | std::ranges::views::keys |
+  auto job_ids = configure_req.job_map() | std::ranges::views::keys |
+                 std::ranges::to<std::set<task_id_t>>();
+  auto task_ids = configure_req.job_tasks_map() | std::ranges::views::keys |
                   std::ranges::to<std::set<task_id_t>>();
-  g_thread_pool->detach_task(
-      [tok = m_reg_token_.value(), task_ids = std::move(task_ids), this] {
-        m_action_configure_cb_({.token = tok, .job_ids = task_ids});
-      });
+  if (!job_ids.empty())
+    CRANE_TRACE("Recv ctld job: [{}],task: [{}]", absl::StrJoin(job_ids, ","),
+                absl::StrJoin(task_ids, ","));
+
+  g_thread_pool->detach_task([tok = m_reg_token_.value(),
+                              job_ids = std::move(job_ids),
+                              task_ids = std::move(task_ids), this] {
+    m_action_configure_cb_(
+        {.token = tok, .job_ids = job_ids, .task_ids = task_ids});
+  });
 }
 
-void CtldClientStateMachine::ActionRegister_(std::vector<task_id_t> job_ids) {
+void CtldClientStateMachine::ActionRegister_(
+    std::vector<task_id_t>&& lost_jobs, std::vector<task_id_t>&& lost_tasks) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
 
   g_thread_pool->detach_task(
-      [tok = m_reg_token_.value(), job_status = std::move(job_ids), this] {
-        m_action_register_cb_({.token = tok, .job_ids = job_status});
+      [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] {
+        m_action_register_cb_(
+            {.token = tok, .lost_jobs = lost_jobs, .lost_tasks = lost_tasks});
       });
 }
 
@@ -232,28 +244,38 @@ void CtldClient::Init() {
 
   g_ctld_client_sm->SetActionConfigureCb(
       [](CtldClientStateMachine::ConfigureArg const& arg) {
-        CRANE_DEBUG(
-            "Configuring action for Craned has not been implement yet. "
-            "Skipping this action for token {}.",
-            ProtoTimestampToString(arg.token));
+        CRANE_DEBUG("Configuring action for token {}.",
+                    ProtoTimestampToString(arg.token));
 
-        std::set exact_job_ids = g_task_mgr->QueryRunningTasksAsync();
+        std::set exact_job_ids = g_cg_mgr->GetAllocatedJobs();
         std::vector<task_id_t> lost_jobs{};
         std::vector<task_id_t> invalid_jobs{};
         std::ranges::set_difference(arg.job_ids, exact_job_ids,
                                     std::back_inserter(lost_jobs));
         std::ranges::set_difference(exact_job_ids, arg.job_ids,
                                     std::back_inserter(invalid_jobs));
-        g_ctld_client_sm->EvConfigurationDone(lost_jobs);
+
+        std::set exact_task_ids = g_task_mgr->QueryRunningTasksAsync();
+        std::vector<task_id_t> lost_tasks{};
+        std::vector<task_id_t> invalid_tasks{};
+        std::ranges::set_difference(arg.task_ids, exact_task_ids,
+                                    std::back_inserter(lost_tasks));
+        std::ranges::set_difference(exact_task_ids, arg.job_ids,
+                                    std::back_inserter(invalid_tasks));
+
+        g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
+        for (auto task_id : invalid_tasks) {
+          g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id);
+          g_cg_mgr->ReleaseCgroupByTaskIdOnly(task_id);
+        }
         for (auto job_id : invalid_jobs) {
-          g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
           g_cg_mgr->ReleaseCgroupByTaskIdOnly(job_id);
         }
       });
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.job_ids);
+        CranedRegister_(arg.token, arg.lost_jobs);
       });
 
   AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });

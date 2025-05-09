@@ -290,6 +290,12 @@ void CgroupManager::ControllersMounted() {
   }
 }
 
+std::set<task_id_t> CgroupManager::GetAllocatedJobs() {
+  auto map_ptr = m_task_id_to_cg_map_.GetMapConstSharedPtr();
+  return *map_ptr | std::ranges::views::keys |
+         std::ranges::to<std::set<task_id_t>>();
+}
+
 /*
  * Initialize a controller for a given cgroup.
  *
