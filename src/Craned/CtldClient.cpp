@@ -194,7 +194,7 @@ void CtldClientStateMachine::ActionConfigure_(
 
   g_thread_pool->detach_task([tok = m_reg_token_.value(),
                               job_ids = std::move(job_ids),
-                              task_ids = std::move(task_ids), this] {
+                              task_ids = std::move(task_ids), this] mutable {
     m_action_configure_cb_(
         {.token = tok, .job_ids = job_ids, .task_ids = task_ids});
   });
@@ -206,7 +206,7 @@ void CtldClientStateMachine::ActionRegister_(
               StateToString(m_state_));
 
   g_thread_pool->detach_task(
-      [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] {
+      [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] mutable {
         m_action_register_cb_(
             {.token = tok, .lost_jobs = lost_jobs, .lost_tasks = lost_tasks});
       });
