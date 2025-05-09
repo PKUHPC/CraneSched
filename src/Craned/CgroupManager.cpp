@@ -1123,7 +1123,7 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 #ifdef CRANE_ENABLE_BPF
 
 BpfRuntimeInfo::BpfRuntimeInfo()
-    : bpf_enable_logging_(false),
+    : bpf_debug_log_level_(0),
       bpf_obj_(nullptr),
       bpf_prog_(nullptr),
       dev_map_(nullptr),
