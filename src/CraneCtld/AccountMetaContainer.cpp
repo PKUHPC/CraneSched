@@ -37,6 +37,9 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs_per_user == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
+  if (qos->max_submit_jobs_per_account == 0)
+    return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+
   task.qos_priority = qos->priority;
 
   if (task.time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
@@ -46,36 +49,55 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
 
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+
   CraneErrCode result = CraneErrCode::SUCCESS;
 
+  result = CheckQosSubmitResourceForUser_(task, *qos);
+  if (!result) return result;
+
+  result = CheckQosSubmitResourceForAccount_(task, *qos, account_map_ptr);
+  if (!result) return result;
+
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
-  user_meta_map_.try_emplace_l(
+
+  m_user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& qos_to_resource_map = pair.second;
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{std::move(resource_view), 1});
+                                      QosResource{std::move(resource_view), 0, 1});
           return;
         }
 
         auto& val = iter->second;
-        if (val.resource.CpuCount() + resource_view.CpuCount() >
-            qos->max_cpus_per_user) {
-          result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
-          return;
-        }
-        if (val.submit_jobs_count + 1 > qos->max_submit_jobs_per_user) {
-          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
-          return;
-        }
         val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
         val.submit_jobs_count++;
       },
-      QosToResourceMap{
-          {task.qos, QosResource{.resource = std::move(resource_view),
-                                 .jobs_per_user = 1}}});
+      QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 0, 1}}});
+
+
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.try_emplace_l(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& qos_to_resource_map = pair.second;
+      auto iter = qos_to_resource_map.find(task.qos);
+      if (iter == qos_to_resource_map.end()) {
+        qos_to_resource_map.emplace(task.qos,
+                                    QosResource{std::move(resource_view), 0, 1});
+        return ;
+      }
+
+      auto& val = iter->second;
+      val.submit_jobs_count++;
+    },
+    QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 0, 1}}});
+
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
 
   CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}",
               util::ReadableResourceView(resource_view), task.Username(),
@@ -92,11 +114,11 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
   }
 
   // TODO: Delete a user while jobs are in the queue?
-  CRANE_ASSERT(user_meta_map_.contains(task.Username()));
+  CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   bool result = true;
 
-  user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+  m_user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
       auto& qos_to_resource_map = pair.second;
       auto iter = qos_to_resource_map.find(task.qos);
 
@@ -113,9 +135,9 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
 
 void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 
-  CRANE_ASSERT(user_meta_map_.contains(task.Username()));
+  CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
-  user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+  m_user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
     auto& qos_to_resource_map = pair.second;
     auto iter = qos_to_resource_map.find(task.qos);
 
@@ -129,7 +151,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
-  user_meta_map_.modify_if(
+  m_user_meta_map_.modify_if(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -146,7 +168,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
               util::ReadableResourceView(resource_view), task.TaskId(),
               task.Username());
 
-  user_meta_map_.modify_if(
+  m_user_meta_map_.modify_if(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -161,7 +183,58 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::DeleteUserResource(const std::string& username) {
-  user_meta_map_.erase(username);
+  m_user_meta_map_.erase(username);
+}
+
+CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
+    const TaskInCtld& task, const Qos& qos) {
+  auto result = CraneErrCode::SUCCESS;
+
+  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+
+  m_user_meta_map_.modify_if(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& qos_to_resource_map = pair.second;
+        auto iter = qos_to_resource_map.find(task.qos);
+        if (iter == qos_to_resource_map.end())
+          return;
+
+        auto& val = iter->second;
+        if (val.resource.CpuCount() + resource_view.CpuCount() >
+            qos.max_cpus_per_user) {
+          result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+          return;
+        }
+
+        if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user)
+          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+      });
+
+  return result;
+}
+
+CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
+    const TaskInCtld& task, const Qos& qos, const AccountManager::AccountMapMutexSharedPtr& account_map_ptr) {
+
+  auto result = CraneErrCode::SUCCESS;
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& qos_to_resource_map = pair.second;
+      auto iter = qos_to_resource_map.find(task.qos);
+      if (iter == qos_to_resource_map.end())
+        return;
+
+      auto& val = iter->second;
+      if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
+        result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+    });
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
+
+  return result;
 }
 
 }  // namespace Ctld
