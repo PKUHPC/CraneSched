@@ -71,8 +71,6 @@ class Synchronized {
 };
 
 template <template <typename...> class MapType, typename Key, typename T>
-  requires std::constructible_from<T, T&&> ||
-           std::constructible_from<T, const T&>
 class AtomicHashMap {
  public:
   class CombinedLock;

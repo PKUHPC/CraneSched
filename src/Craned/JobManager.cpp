@@ -32,14 +32,14 @@ EnvMap JobSpec::GetJobEnvMap() const {
 }
 
 bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
-  CRANE_DEBUG("Allocating {} tasks", job_specs.size());
+  CRANE_DEBUG("Allocating {} job", job_specs.size());
 
   auto begin = std::chrono::steady_clock::now();
 
   for (auto& job_spec : job_specs) {
     task_id_t job_id = job_spec.cgroup_spec.job_id;
     uid_t uid = job_spec.cgroup_spec.uid;
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", job_id,
+    CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
                 uid);
     m_job_map_.Emplace(job_id, JobInstance(job_spec));
 
@@ -52,7 +52,7 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
   }
 
   auto end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
+  CRANE_TRACE("Allocating cgroups costed {} ms",
               std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                   .count());
   return true;

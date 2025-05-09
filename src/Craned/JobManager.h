@@ -38,10 +38,13 @@ struct JobInstance {
       : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
   explicit JobInstance(const JobSpec& spec)
       : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
+  JobInstance(const JobInstance& other) = delete;
   JobInstance(JobInstance&& other) noexcept
       : job_id(std::move(other.job_id)),
         job_spec(std::move(other.job_spec)),
         cgroup(std::move(other.cgroup)) {};
+
+  JobInstance& operator=(const JobInstance& other) = delete;
   JobInstance& operator=(JobInstance&& other) noexcept {
     if (this != &other) {
       job_id = std::move(other.job_id);

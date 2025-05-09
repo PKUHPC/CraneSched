@@ -484,8 +484,7 @@ struct CgroupSpec {
   CgroupSpec(const CgroupSpec& spce) = default;
   explicit CgroupSpec(const crane::grpc::JobSpec& job_spec);
   CgroupSpec(const task_id_t job_id, const uid_t uid,
-             const ResourceInNode& res_in_node,
-             const std::string& execution_node);
+             const ResourceInNode& res_in_node, const CranedId& execution_node);
 
   /**
    * @brief set grpc struct,will move res_in_node field

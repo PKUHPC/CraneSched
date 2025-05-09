@@ -1039,7 +1039,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 }
 
 CraneErrCode TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  CRANE_INFO("Executing task #{}", task.task_id());
+  CRANE_INFO("Executing task #{} {}", task.task_id(), task.DebugString());
 
   auto instance = std::make_unique<TaskInstance>();
 
