@@ -1766,8 +1766,14 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->priority = qos_view[Qos::FieldStringOfPriority()].get_int64().value;
     qos->max_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxJobsPerUser()].get_int64().value;
+    qos->max_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxJobsPerAccount()].get_int64().value;
     qos->max_cpus_per_user =
         qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_user =
+      qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
   } catch (const bsoncxx::exception& e) {
@@ -1777,7 +1783,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{
+  std::array<std::string, 11> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -1786,9 +1792,12 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
       Qos::FieldStringOfMaxTimeLimitPerTask(),
+      Qos::FieldStringOfMaxJobsPerAccount(),
+      Qos::FieldStringOfMaxSubmitJobsPerUser(),
+      Qos::FieldStringOfMaxSubmitJobsPerAccount()
   };
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t>
+             int64_t, int64_t, int64_t, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -1796,7 +1805,10 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             qos.max_jobs_per_account,
+             qos.max_submit_jobs_per_user,
+             qos.max_submit_jobs_per_account};
 
   return DocumentConstructor_(fields, values);
 }

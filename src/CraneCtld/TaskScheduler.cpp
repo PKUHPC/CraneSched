@@ -694,7 +694,7 @@ bool TaskScheduler::Init() {
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   CRANE_ASSERT_MSG(
-      g_account_meta_container->TryMallocQosResource(*task) ==
+      g_account_meta_container->TryMallocQosSubmitResource(*task) ==
           CraneErrCode::SUCCESS,
       fmt::format(
           "ApplyQosLimitOnTask failed when recovering pending task #{}.",
@@ -706,7 +706,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  auto res = g_account_meta_container->TryMallocQosResource(*task);
+  auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
   CRANE_ASSERT_MSG(
       res == CraneErrCode::SUCCESS,
       fmt::format(
