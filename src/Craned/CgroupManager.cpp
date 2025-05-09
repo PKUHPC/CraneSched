@@ -39,7 +39,6 @@
 namespace Craned {
 
 #ifdef CRANE_ENABLE_BPF
-BpfRuntimeInfo CgroupManager::bpf_runtime_info{};
 
 CgroupManager::~CgroupManager() {
   // Release BpfDeviceMap if no cgroups
@@ -204,6 +203,10 @@ CraneErrCode CgroupManager::Init() {
 
     ControllersMounted();
     // root cgroup controller can't be change or created
+#ifdef CRANE_ENABLE_BPF
+    bpf_runtime_info.SetLogEnabled(
+        StrToLogLevel(g_config.CranedDebugLevel).value() < spdlog::level::info);
+#endif
 
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
@@ -731,6 +734,7 @@ CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) const {
     return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
   if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    // cgroup file format: 0::/Crane_Task_148567
     std::string line;
     while (std::getline(infile, line)) {
       if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
@@ -739,6 +743,21 @@ CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) const {
       }
     }
   } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    /* cgroup file format:
+     *  13:devices:/Crane_Task_148568
+     *  12:hugetlb:/
+     *  11:cpuset:/
+     *  10:perf_event:/
+     *  9:pids:/user.slice/user-0.slice/session-131.scope
+     *  8:net_cls,net_prio:/
+     *  7:blkio:/Crane_Task_148568
+     *  6:freezer:/
+     *  5:misc:/
+     *  4:rdma:/
+     *  3:memory:/Crane_Task_148568
+     *  2:cpu,cpuacct:/Crane_Task_148568
+     *  1:name=systemd:/user.slice/user-0.slice/session-131.scope
+     */
     std::string line;
     if (!std::getline(infile, line)) {
       CRANE_ERROR("Failed to read cgroup file");
@@ -855,7 +874,8 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
     }
 
     CRANE_DEBUG(
-        "Unable to modify_cgroup for {} in cgroup {} due to EINTR. Retrying...",
+        "Unable to modify_cgroup for {} in cgroup {} due to EINTR. "
+        "Retrying...",
         CgroupConstant::GetControllerFileStringView(controller_file),
         m_cgroup_path_);
     retry_time++;
@@ -936,10 +956,11 @@ bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgroupConstant::GetControllerStringView;
 
   // We want to make sure task migration is turned on for the
-  // associated memory controller.  So, we get to look up the original cgroup.
+  // associated memory controller.  So, we get to look up the original
+  // cgroup.
   //
-  // If there is no memory controller present, we skip all this and just attempt
-  // a migrate
+  // If there is no memory controller present, we skip all this and just
+  // attempt a migrate
   int err;
   // TODO: handle memory.move_charge_at_immigrate
   // https://github.com/PKUHPC/CraneSched/pull/327/files/eaa0d04dcc4c12a1773ac9a3fd42aa9f898741aa..9dc93a50528c1b22dbf50d0bf40a11a98bbed36d#r1838007422
@@ -979,11 +1000,10 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
 /*
  * CPU_CFS_PERIOD_US is the period of time in microseconds for how long a
  * cgroup's access to CPU resources is measured.
- * CPU_CFS_QUOTA_US is the maximum amount of time in microseconds for which a
- * cgroup's tasks are allowed to run during one period.
- * CPU_CFS_PERIOD_US should be set to between 1ms(1000) and 1s(1000'000).
- * CPU_CFS_QUOTA_US should be set to -1 for unlimited, or larger than 1ms(1000).
- * See
+ * CPU_CFS_QUOTA_US is the maximum amount of time in microseconds for which
+ * a cgroup's tasks are allowed to run during one period. CPU_CFS_PERIOD_US
+ * should be set to between 1ms(1000) and 1s(1000'000). CPU_CFS_QUOTA_US
+ * should be set to -1 for unlimited, or larger than 1ms(1000). See
  * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/6/html/resource_management_guide/sec-cpu
  */
 bool CgroupV1::SetCpuCoreLimit(double core_num) {
@@ -1088,15 +1108,14 @@ void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
 
 #ifdef CRANE_ENABLE_BPF
 
-BpfRuntimeInfo::BpfRuntimeInfo() {
-  bpf_obj_ = nullptr;
-  bpf_prog_ = nullptr;
-  dev_map_ = nullptr;
-  bpf_enable_logging_ = false;
-  bpf_mtx_ = std::make_unique<absl::Mutex>();
-  bpf_prog_fd_ = -1;
-  cgroup_count_ = 0;
-}
+BpfRuntimeInfo::BpfRuntimeInfo()
+    : bpf_enable_logging_(false),
+      bpf_obj_(nullptr),
+      bpf_prog_(nullptr),
+      dev_map_(nullptr),
+      bpf_prog_fd_(-1),
+      bpf_mtx_(std::make_unique<absl::Mutex>()),
+      cgroup_count_(0) {}
 
 BpfRuntimeInfo::~BpfRuntimeInfo() {
   bpf_obj_ = nullptr;
@@ -1200,7 +1219,7 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
     : CgroupInterface(path, handle, id) {
 #ifdef CRANE_ENABLE_BPF
-  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
+  if (g_cg_mgr->bpf_runtime_info.InitializeBpfObj()) {
     CRANE_TRACE("Bpf object initialization succeed");
   } else {
     CRANE_TRACE("Bpf object initialization failed");
@@ -1268,7 +1287,7 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
+  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1306,12 +1325,12 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     }
   }
   {
-    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
+    absl::MutexLock lk(g_cg_mgr->bpf_runtime_info.BpfMutex());
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
-                               &key, sizeof(BpfKey), &bpf_devices[i],
+      if (bpf_map__update_elem(g_cg_mgr->bpf_runtime_info.BpfDevMap(), &key,
+                               sizeof(BpfKey), &bpf_devices[i],
                                sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
         CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
                     bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
@@ -1322,8 +1341,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
     // No need to attach ebpf prog twice.
     if (!m_bpf_attached_) {
-      if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
-                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
+      if (bpf_prog_attach(g_cg_mgr->bpf_runtime_info.BpfProgFd(), cgroup_fd,
+                          BPF_CGROUP_DEVICE, 0) < 0) {
         CRANE_ERROR("Failed to attach BPF program");
         close(cgroup_fd);
         return false;
@@ -1337,14 +1356,15 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
 #ifndef CRANE_ENABLE_BPF
   CRANE_WARN(
-      "BPF is disabled in craned, you can use Cgroup V1 to set devices access");
+      "BPF is disabled in craned, you can use Cgroup V1 to set devices "
+      "access");
   return false;
 #endif
 }
 
 #ifdef CRANE_ENABLE_BPF
 bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
+  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1392,15 +1412,15 @@ bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
 }
 
 bool CgroupV2::EraseBpfDeviceMap() {
-  if (!CgroupManager::bpf_runtime_info.Valid()) {
+  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
-  absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
+  absl::MutexLock lk(g_cg_mgr->bpf_runtime_info.BpfMutex());
   for (const auto &bpf_meta : m_cgroup_bpf_devices) {
     struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_meta.major,
                          bpf_meta.minor};
-    if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(), &key,
+    if (bpf_map__delete_elem(g_cg_mgr->bpf_runtime_info.BpfDevMap(), &key,
                              sizeof(BpfKey), BPF_ANY) < 0) {
       CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
                   bpf_meta.major, bpf_meta.minor, key.cgroup_id);
@@ -1470,7 +1490,7 @@ void CgroupV2::Destroy() {
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  CgroupManager::bpf_runtime_info.CloseBpfObj();
+  g_cg_mgr->bpf_runtime_info.CloseBpfObj();
 #endif
 }
 
@@ -1480,8 +1500,8 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
 
-  // Depending on the system configuration, the following two options may not
-  // be enabled, so we ignore the result of them.
+  // Depending on the system configuration, the following two options may
+  // not be enabled, so we ignore the result of them.
   cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
   cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
   return ok;
@@ -1493,8 +1513,8 @@ bool AllocatableResourceAllocator::Allocate(
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
 
-  // Depending on the system configuration, the following two options may not
-  // be enabled, so we ignore the result of them.
+  // Depending on the system configuration, the following two options may
+  // not be enabled, so we ignore the result of them.
   cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
   cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
   return ok;

@@ -110,10 +110,6 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-#ifdef CRANE_ENABLE_BPF
-      Craned::CgroupManager::bpf_runtime_info.SetLogEnabled(
-          log_level.value() < spdlog::level::info);
-#endif
       g_config.CranedUnixSockPath =
           g_config.CraneBaseDir /
           value_or(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
