@@ -40,12 +40,17 @@ message TaskStatusChangeReply {
 message QueryLeaderIdRequest {}
 
 message QueryLeaderIdReply {
-  int32 leader_id = 2;
+  int32 leader_id = 1;
 }
 
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
+}
+
+message CranedTriggerReserveConnResponse {
+  bool ok = 1;
+  int32 cur_leader_id = 2;
 }
 
 message ConfigureCranedRequest {
@@ -55,15 +60,15 @@ message ConfigureCranedRequest {
   google.protobuf.Timestamp token = 4;
 }
 
-message CraneCtldRegisterRequest {
-  int32 server_id = 1;
-  string end_point = 2;
-}
-
-message CraneCtldRegisterReply {
-  bool ok = 1;
-  bool already_registered = 2;
-}
+//message CraneCtldRegisterRequest {
+//  int32 server_id = 1;
+//  string end_point = 2;
+//}
+//
+//message CraneCtldRegisterReply {
+//  bool ok = 1;
+//  bool already_registered = 2;
+//}
 
 message CranedRegisterRequest {
   string craned_id = 1;
@@ -73,8 +78,7 @@ message CranedRegisterRequest {
 
 message CranedRegisterReply {
   bool ok = 1;
-  bool already_registered = 2;
-  int32 cur_leader_id = 3;
+  int32 cur_leader_id = 2;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -128,6 +132,10 @@ message ReleaseCgroupForTasksRequest {
 }
 
 message ReleaseCgroupForTasksReply {}
+
+message UpdateLeaderIdRequest {
+  int32 cur_leader_id = 1;
+}
 
 message TerminateTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -982,14 +990,12 @@ service CraneCtld {
 }
 
 service CraneCtldForInternal {
-  /* RPCs called from Other CraneCtld */
-  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
+  //  /* RPCs called from Other CraneCtld */
+  //  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
 
-  /* RPCs called from Other CraneCtld */
-  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
+  rpc CranedTriggerReverseConn(CranedTriggerReserveConnRequest) returns (CranedTriggerReserveConnResponse);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
@@ -1003,6 +1009,8 @@ service Craned {
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
+
+  rpc UpdateLeaderId(UpdateLeaderIdRequest) returns (google.protobuf.Empty);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

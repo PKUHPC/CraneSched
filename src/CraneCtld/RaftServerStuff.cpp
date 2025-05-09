@@ -18,6 +18,8 @@
 
 #include "RaftServerStuff.h"
 
+#include "CranedKeeper.h"
+
 namespace Ctld {
 
 RaftServerStuff::~RaftServerStuff() {
@@ -200,79 +202,79 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
   return true;
 }
 
-bool RaftServerStuff::RegisterToLeader(const std::string &leader_hostname,
-                                       const std::string &grpc_port) {
-  if (static_cast<crane::Internal::NuRaftStateManager *>(m_state_mgr_.get())
-          ->HasServersRun())
-    return true;
-
-  grpc::ChannelArguments channel_args;
-
-  if (g_config.CompressedRpc)
-    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
-
-  std::shared_ptr<grpc::Channel> channel;
-
-  if (g_config.ListenConf.UseTls)
-    channel = CreateTcpTlsCustomChannelByHostname(
-        leader_hostname, grpc_port, g_config.ListenConf.Certs, channel_args);
-  else
-    channel = CreateTcpInsecureCustomChannel(leader_hostname, grpc_port,
-                                             channel_args);
-
-  std::unique_ptr<crane::grpc::CraneCtld::Stub> stub =
-      crane::grpc::CraneCtld::NewStub(channel);
-
-  static bool prev_conn_state(false);
-
-  while (true) {
-    if (m_exit_) break;
-
-    bool connected = channel->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
-
-    if (connected && !prev_conn_state) {
-      grpc::ClientContext context;
-      crane::grpc::CraneCtldRegisterRequest request;
-      crane::grpc::CraneCtldRegisterReply reply;
-      grpc::Status status;
-
-      CRANE_TRACE("Register this node to the leader node: ip={}, port={}",
-                  leader_hostname, grpc_port);
-
-      request.set_server_id(m_server_id_);
-      request.set_end_point(m_endpoint_);
-
-      while (true) {
-        status = stub->CraneCtldRegister(&context, request, &reply);
-
-        if (!status.ok()) {
-          CRANE_ERROR(
-              "Failed to send CraneCtldRegister: reason: {} | {}, code: {}",
-              status.error_message(), context.debug_error_string(),
-              int(status.error_code()));
-
-        } else {
-          if (reply.ok()) {
-            if (reply.already_registered()) {
-              CRANE_TRACE("CraneCtld join success!");
-            } else {
-              CRANE_TRACE("CraneCtld register success!");
-            }
-            return true;
-          } else {
-            CRANE_ERROR("CraneCtldRegister failed, unknown reason.");
-            return false;
-          }
-        }
-      }
-    }
-
-    prev_conn_state = connected;
-  }
-
-  return true;
-}
+// bool RaftServerStuff::RegisterToLeader(const std::string &leader_hostname,
+//                                        const std::string &grpc_port) {
+//   if (static_cast<crane::Internal::NuRaftStateManager *>(m_state_mgr_.get())
+//           ->HasServersRun())
+//     return true;
+//
+//   grpc::ChannelArguments channel_args;
+//
+//   if (g_config.CompressedRpc)
+//     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+//
+//   std::shared_ptr<grpc::Channel> channel;
+//
+//   if (g_config.ListenConf.UseTls)
+//     channel = CreateTcpTlsCustomChannelByHostname(
+//         leader_hostname, grpc_port, g_config.ListenConf.Certs, channel_args);
+//   else
+//     channel = CreateTcpInsecureCustomChannel(leader_hostname, grpc_port,
+//                                              channel_args);
+//
+//   std::unique_ptr<crane::grpc::CraneCtld::Stub> stub =
+//       crane::grpc::CraneCtld::NewStub(channel);
+//
+//   static bool prev_conn_state(false);
+//
+//   while (true) {
+//     if (m_exit_) break;
+//
+//     bool connected = channel->WaitForConnected(
+//         std::chrono::system_clock::now() + std::chrono::seconds(3));
+//
+//     if (connected && !prev_conn_state) {
+//       grpc::ClientContext context;
+//       crane::grpc::CraneCtldRegisterRequest request;
+//       crane::grpc::CraneCtldRegisterReply reply;
+//       grpc::Status status;
+//
+//       CRANE_TRACE("Register this node to the leader node: ip={}, port={}",
+//                   leader_hostname, grpc_port);
+//
+//       request.set_server_id(m_server_id_);
+//       request.set_end_point(m_endpoint_);
+//
+//       while (true) {
+//         status = stub->CraneCtldRegister(&context, request, &reply);
+//
+//         if (!status.ok()) {
+//           CRANE_ERROR(
+//               "Failed to send CraneCtldRegister: reason: {} | {}, code: {}",
+//               status.error_message(), context.debug_error_string(),
+//               int(status.error_code()));
+//
+//         } else {
+//           if (reply.ok()) {
+//             if (reply.already_registered()) {
+//               CRANE_TRACE("CraneCtld join success!");
+//             } else {
+//               CRANE_TRACE("CraneCtld register success!");
+//             }
+//             return true;
+//           } else {
+//             CRANE_ERROR("CraneCtldRegister failed, unknown reason.");
+//             return false;
+//           }
+//         }
+//       }
+//     }
+//
+//     prev_conn_state = connected;
+//   }
+//
+//   return true;
+// }
 
 CraneStateMachine *RaftServerStuff::GetStateMachine() {
   return static_cast<CraneStateMachine *>(m_state_machine_.get());
@@ -344,11 +346,22 @@ cb_func::ReturnCode RaftServerStuff::StatusChangeCallback(cb_func::Type type,
         g_task_scheduler->RestoreFromEmbeddedDb();
       });
     }
+  } else if (type == cb_func::Type::BecomeFollower) {
+    uint64_t term_id = *static_cast<uint64_t *>(p->ctx);
+    if (term_id > 1) {
+      // async
+      g_thread_pool->detach_task([]() {
+        int cur_leader_id;
+        while (true) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(200));
+          cur_leader_id = g_raft_server->GetLeaderId();
+          if (cur_leader_id >= 0) break;
+        }
+        g_craned_keeper->BroadcastLeaderId(cur_leader_id);
+        g_meta_container->MarkAllCranedDown();
+      });
+    }
   }
-  //  else if (type == cb_func::Type::BecomeFollower) {
-  //    uint64_t term_id = *static_cast<uint64_t *>(p->ctx);
-  //    if(term_id > 1 && g_task_scheduler)g_task_scheduler->Reset();
-  //  }
 
   return cb_func::ReturnCode::Ok;
 }

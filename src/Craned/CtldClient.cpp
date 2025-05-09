@@ -297,7 +297,8 @@ void CtldClient::Init() {
   AddGrpcCtldDisconnectedCb([] { g_ctld_client_sm->EvGrpcConnectionFailed(); });
 }
 
-void CtldClient::InitGrpcChannel(const std::string& server_address) {
+void CtldClient::InitGrpcChannel(
+    const std::vector<Config::ServerEndPoint>& server_address) {
   m_grpc_has_initialized_.store(true, std::memory_order::release);
 
   grpc::ChannelArguments channel_args;
@@ -306,21 +307,22 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  std::shared_ptr<Channel> channel;
+  for (const auto& server : server_address) {
+    std::shared_ptr<Channel> channel;
 
-  if (g_config.ListenConf.UseTls)
-    channel = CreateTcpTlsCustomChannelByHostname(server_address, listen_port,
-                                                  g_config.ListenConf.TlsCerts,
-                                                  channel_args);
-  else
-    channel = CreateTcpInsecureCustomChannel(server_address, listen_port,
-                                             channel_args);
+    if (g_config.ListenConf.UseTls)
+      channel = CreateTcpTlsCustomChannelByHostname(
+          server.HostName, server.ListenPort, g_config.ListenConf.TlsCerts,
+          channel_args);
+    else
+      channel = CreateTcpInsecureCustomChannel(server.HostName,
+                                               server.ListenPort, channel_args);
 
-  m_ctld_channels_.emplace_back(channel);
+    m_ctld_channels_.emplace_back(channel);
 
-  // std::unique_ptr will automatically release the dangling stub.
-  m_stubs_.emplace_back(CraneCtld::NewStub(channel));
-}
+    // std::unique_ptr will automatically release the dangling stub.
+    m_stubs_.emplace_back(CraneCtld::NewStub(channel));
+  }
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
@@ -362,7 +364,8 @@ std::set<task_id_t> CtldClient::GetAllTaskStatusChangeId() {
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_DEBUG("Requesting config from CraneCtld...");
 
-  crane::grpc::CranedTriggerReverseConnRequest req;
+  crane::grpc::CranedTriggerReserveConnRequest req;
+  crane::grpc::CranedTriggerReserveConnResponse reply;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
 
@@ -370,14 +373,23 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
 
-  google::protobuf::Empty reply;
-
-  grpc::Status status =
-      m_stub_->CranedTriggerReverseConn(&context, req, &reply);
+  grpc::Status status = m_stubs_[m_pre_leader_id_]->CranedTriggerReverseConn(
+      &context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
     return false;
   }
+  if (!reply.ok()) {
+    CRANE_ERROR("CraneCtld #{} reject to config, current leader id: {}",
+                m_pre_leader_id_, reply.cur_leader_id());
+    if (reply.cur_leader_id() >= 0)
+      m_cur_leader_id_ = reply.cur_leader_id();
+    else
+      CRANE_ERROR("CraneCtld #{} response a wrong leader id: {}.",
+                  m_pre_leader_id_, reply.cur_leader_id());
+    return false;
+  }
+
   return true;
 }
 
@@ -419,9 +431,20 @@ bool CtldClient::CranedRegister_(RegToken const& token,
                        std::chrono::seconds(1));
 
   crane::grpc::CranedRegisterReply ready_reply;
-  auto status = m_stub_->CranedRegister(&context, ready_request, &ready_reply);
+  auto status = m_stubs_[m_pre_leader_id_]->CranedRegister(
+      &context, ready_request, &ready_reply);
   if (!status.ok()) {
     CRANE_DEBUG("CranedRegister failed: {}", status.error_message());
+    return false;
+  }
+  if (!ready_reply.ok()) {
+    CRANE_ERROR("CraneCtld #{} reject to register this craned node.",
+                m_pre_leader_id_);
+    if (ready_reply.cur_leader_id() >= 0)
+      m_cur_leader_id_ = ready_reply.cur_leader_id();
+    else
+      CRANE_ERROR("CraneCtld #{} response a wrong leader id: {}.",
+                  m_pre_leader_id_, ready_reply.cur_leader_id());
     return false;
   }
 
@@ -435,7 +458,9 @@ void CtldClient::AsyncSendThread_() {
   // Variables for grpc channel maintaining.
   grpc_connectivity_state prev_grpc_state{GRPC_CHANNEL_IDLE};
   grpc_connectivity_state grpc_state;
-  bool prev_connected = false, connected;
+  bool prev_connected = false;
+  int retry_time = 0;
+  const int server_num = m_ctld_channels_.size();
 
   // Variable for TaskStatusChange sending part.
   absl::Condition cond(
@@ -447,19 +472,39 @@ void CtldClient::AsyncSendThread_() {
   while (true) {
     if (m_thread_stop_) break;
 
-    grpc_state = m_ctld_channel_->GetState(true);
-    connected = prev_grpc_state == GRPC_CHANNEL_READY;
+    int cur_leader_id = m_cur_leader_id_.load(std::memory_order_relaxed);
+    if (m_pre_leader_id_ != cur_leader_id) {  // if leader changed
+      FailTheCurrentConn(m_pre_leader_id_);
+      m_pre_leader_id_ = cur_leader_id;
+      prev_grpc_state = GRPC_CHANNEL_IDLE;
+      prev_connected = false;
+    }
+
+    grpc_state = m_ctld_channels_[m_pre_leader_id_]->GetState(true);
+    bool connected = prev_grpc_state == GRPC_CHANNEL_READY;
 
     if (!connected) {
       if (prev_connected) {  // Edge triggered: grpc connected -> disconnected.
-        CRANE_TRACE("Channel to CraneCtlD is disconnected.");
-        for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
+        FailTheCurrentConn(m_pre_leader_id_);
       }
 
       std::chrono::time_point ddl =
           std::chrono::system_clock::now() + std::chrono::seconds(3);
-      bool timeout = m_ctld_channel_->WaitForStateChange(prev_grpc_state, ddl);
-      if (!timeout) continue;  // No state change. No need to update prev state.
+      bool timeout = m_ctld_channels_[m_pre_leader_id_]->WaitForStateChange(
+          prev_grpc_state, ddl);
+      retry_time++;
+
+      if (retry_time >= 5) {
+        int next_id = (m_pre_leader_id_ + 1) % server_num;
+        CRANE_WARN("CraneCtlD #{} is offline, try to connect to CraneCtlD #{}",
+                   m_pre_leader_id_, next_id);
+        m_cur_leader_id_ = next_id;
+        retry_time = 0;
+      }
+
+      if (!timeout) {
+        continue;  // No state change. No need to update prev state.
+      }
 
       prev_grpc_state = grpc_state;
       prev_connected = connected;
@@ -468,7 +513,7 @@ void CtldClient::AsyncSendThread_() {
 
     // Connected case:
     if (!prev_connected) {  // Edge triggered: grpc disconnected -> connected.
-      CRANE_TRACE("Channel to CraneCtlD is connected.");
+      CRANE_TRACE("Channel to CraneCtlD #{} is connected.", m_pre_leader_id_);
       for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();
     }
 
@@ -512,10 +557,10 @@ void CtldClient::AsyncSendThread_() {
       if (status_change.reason.has_value())
         request.set_reason(status_change.reason.value());
 
-      status = m_stubs_[m_cur_leader_id_]->TaskStatusChange(&context, request,
+      status = m_stubs_[m_pre_leader_id_]->TaskStatusChange(&context, request,
                                                             &reply);
       if (!status.ok()) {
-        CRANE_ERROR(
+        CRANE_WARN(
             "Failed to send TaskStatusChange: "
             "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
             status_change.task_id, int(status_change.new_status),
@@ -528,6 +573,17 @@ void CtldClient::AsyncSendThread_() {
           // put them back into m_task_status_change_list_
           CRANE_INFO(
               "Pause TaskStatusChange and reconnect with the server to retry.");
+          FailTheCurrentConn(m_pre_leader_id_);
+
+          if (status.error_code() == grpc::UNAVAILABLE) {
+            // The previous leader is offline, try to connect to the next leader
+            m_cur_leader_id_ = (m_pre_leader_id_ + 1) % server_num;
+          } else {
+            // Otherwise the previous leader become follower, it will send the
+            // new leader id actively.
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+          }
+
           if (!changes.empty()) {
             m_task_status_change_mtx_.Lock();
             m_task_status_change_list_.splice(
@@ -544,70 +600,16 @@ void CtldClient::AsyncSendThread_() {
       } else {
         CRANE_TRACE(
             "TaskStatusChange for task #{} sent to server #{}. reply.ok={}",
-            status_change.task_id, m_cur_leader_id_.load(), reply.ok());
+            status_change.task_id, m_pre_leader_id_, reply.ok());
         changes.pop_front();
       }
     }
   }
 }
 
-int CtldClient::ConnectToServersAndFindLeader_(int prev_leader_id) {
-  int len = m_ctld_channels_.size();
-  static std::vector<bool> prev_conn_states(len, false);
-
-  bool connected = m_ctld_channels_[prev_leader_id]->WaitForConnected(
-      std::chrono::system_clock::now() + std::chrono::seconds(3));
-
-  if (connected) {
-    if (!prev_conn_states[prev_leader_id]) {
-      prev_conn_states[prev_leader_id] = true;
-      int check_id = g_ctld_client->OnCraneCtldConnected(prev_leader_id);
-
-      if (check_id == prev_leader_id || check_id == -2)
-        return check_id;
-      else if (check_id == -1) {
-        CRANE_ERROR("Raft Server Error! leader id -1");
-        m_cur_leader_id_ = 0;
-        return -1;
-      } else {
-        m_cur_leader_id_ = check_id;
-        return -2;
-      }
-    } else {
-      prev_conn_states[prev_leader_id] = true;
-      return prev_leader_id;
-    }
-  } else {  // start query
-    prev_conn_states[prev_leader_id] = false;
-
-    for (int i = 1; i < len; i++) {
-      int id = (prev_leader_id + i) % len;
-
-      connected = m_ctld_channels_[id]->WaitForConnected(
-          std::chrono::system_clock::now() + std::chrono::seconds(3));
-
-      if (connected) {
-        if (!prev_conn_states[id]) {
-          prev_conn_states[id] = true;
-
-          int leader_id = g_ctld_client->OnCraneCtldConnected(id);
-          if (leader_id == id || leader_id == -2)
-            return leader_id;
-          else if (leader_id == -1) {
-            CRANE_ERROR("Raft Server Error! leader id -1");
-            m_cur_leader_id_ = 0;
-            return -1;
-          } else {
-            m_cur_leader_id_ = leader_id;
-            return -2;
-          }
-        }
-      } else {
-        prev_conn_states[id] = false;
-      }
-    }
-    return -2;
-  }
+void CtldClient::FailTheCurrentConn(int prev_leader_id) {
+  CRANE_TRACE("Channel to CraneCtlD #{} is disconnected.", prev_leader_id);
+  for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
 }
 
 }  // namespace Craned

@@ -24,29 +24,30 @@
 #include "CranedMetaContainer.h"
 #include "CtldForInternalServer.h"
 #include "CtldPublicDefs.h"
+#include "RaftServerStuff.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
-grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
-    grpc::ServerContext *context,
-    const crane::grpc::CraneCtldRegisterRequest *request,
-    crane::grpc::CraneCtldRegisterReply *response) {
-  if (g_raft_server->CheckServerNodeExist(request->server_id())) {
-    response->set_ok(true);
-    response->set_already_registered(true);
-    return grpc::Status::OK;
-  }
-
-  if (g_raft_server->AddServer(request->server_id(), request->end_point())) {
-    response->set_ok(true);
-  } else {
-    response->set_ok(false);
-  }
-  return grpc::Status::OK;
-}
+// grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
+//     grpc::ServerContext *context,
+//     const crane::grpc::CraneCtldRegisterRequest *request,
+//     crane::grpc::CraneCtldRegisterReply *response) {
+//   if (g_raft_server->CheckServerNodeExist(request->server_id())) {
+//     response->set_ok(true);
+//     response->set_already_registered(true);
+//     return grpc::Status::OK;
+//   }
+//
+//   if (g_raft_server->AddServer(request->server_id(), request->end_point())) {
+//     response->set_ok(true);
+//   } else {
+//     response->set_ok(false);
+//   }
+//   return grpc::Status::OK;
+// }
 
 grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
@@ -1252,7 +1253,7 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
   return grpc::Status::OK;
 }
 
-void CraneCtldInterceptor::Intercept(
+void RaftLeaderInterceptor::Intercept(
     grpc::experimental::InterceptorBatchMethods *methods) {
   if (methods->QueryInterceptionHookPoint(
           grpc::experimental::InterceptionHookPoints::
@@ -1261,8 +1262,7 @@ void CraneCtldInterceptor::Intercept(
       m_ctx_->TryCancel();
       return;
     }
-              }
-
+  }
   methods->Proceed();
 }
 
@@ -1342,10 +1342,7 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryLeaderInfoRequest *request,
     crane::grpc::QueryLeaderInfoReply *response) {
-  if (g_raft_server->IsLeader())
-    g_raft_server->GetNodeStatus(response);
-  else
-    return grpc::Status::CANCELLED;
+  g_raft_server->GetNodeStatus(response);
   return grpc::Status::OK;
 }
 
@@ -1353,6 +1350,12 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
     grpc::ServerContext *context,
     const crane::grpc::AddFollowerRequest *request,
     crane::grpc::AddFollowerReply *response) {
+  if (!g_config.EnableRaft) {
+    response->set_ok(false);
+    response->set_reason("Raft mode not enable in config file.");
+    return grpc::Status::OK;
+  }
+
   bool found = false;
   int server_id = 0;
   std::string endpoint;
@@ -1522,6 +1525,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     // main thread will access g_craned_keeper simultaneously and a race
     // condition will occur.
     g_craned_keeper->Shutdown();
+
+    // raft_server MUST be shutdown before GrpcServer.
+    g_raft_server.reset();
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));

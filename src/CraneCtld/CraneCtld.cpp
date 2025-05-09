@@ -126,6 +126,7 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CraneCtldEnableRaft"])
         g_config.EnableRaft = config["CraneCtldEnableRaft"].as<bool>();
+      CRANE_INFO("Raft mode enable: {}", g_config.EnableRaft);
 
       if (config["ControlMachine"]) {
         for (auto it = config["ControlMachine"].begin();
@@ -776,7 +777,6 @@ void DestroyCtldGlobalVariables() {
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
-  g_raft_server.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
@@ -911,12 +911,12 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  if (g_config.EnableRaft && g_config.CurServerId > 0) {
-    g_thread_pool->detach_task([]() {
-      g_raft_server->RegisterToLeader(g_config.Servers[0].HostName,
-                                      g_config.Servers[0].ListenPort);
-    });
-  }
+  // if (g_config.EnableRaft && g_config.CurServerId > 0) {
+  //   g_thread_pool->detach_task([]() {
+  //     g_raft_server->RegisterToLeader(g_config.Servers[0].HostName,
+  //                                     g_config.Servers[0].ListenPort);
+  //   });
+  // }
 
   g_ctld_server->Wait();
   g_ctld_for_internal_server->Wait();

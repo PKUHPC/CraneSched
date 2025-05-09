@@ -35,7 +35,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
 std::expected<void, DbErrorCode> UnqliteDb::Close() {
   int rc;
   if (m_db_ != nullptr) {
-    CRANE_TRACE("Closing unqlite...");
+    CRANE_TRACE("Closing unqlite... Path: {}", m_db_path_);
     rc = unqlite_close(m_db_);
     m_db_ = nullptr;
 
@@ -296,7 +296,7 @@ std::expected<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
 
 std::expected<void, DbErrorCode> BerkeleyDb::Close() {
   if (m_db_ != nullptr && m_env_ != nullptr) {
-    CRANE_TRACE("Closing berkeley db...");
+    CRANE_TRACE("Closing berkeley db... Path: {}", m_db_path_);
     try {
       // close all databases before closing environment
       m_db_->close(0);

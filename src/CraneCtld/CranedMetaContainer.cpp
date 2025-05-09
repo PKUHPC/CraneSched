@@ -271,6 +271,36 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
   resv_meta->logical_part.rn_task_res_map.erase(resource_iter);
 }
 
+void CranedMetaContainer::MarkAllCranedDown() {
+  auto partition_meta_map = partition_meta_map_.GetMapExclusivePtr();
+  auto craned_meta_map = craned_meta_map_.GetMapExclusivePtr();
+
+  bool changed = false;
+  for (auto& [craned_id, craned_meta] : *craned_meta_map) {
+    auto* node_meta = craned_meta.RawPtr();
+    if (node_meta->alive) {
+      changed = true;
+      node_meta->alive = false;
+      node_meta->res_total.SetToZero();
+      node_meta->res_avail.SetToZero();
+      node_meta->res_in_use.SetToZero();
+      node_meta->rn_task_res_map.clear();
+    }
+  }
+
+  if (!changed) return;
+
+  for (auto& [part_id, part_meta] : *partition_meta_map) {
+    auto part_global_meta = part_meta.RawPtr()->partition_global_meta;
+    if (part_global_meta.alive_craned_cnt > 0) {
+      part_global_meta.alive_craned_cnt = 0;
+      part_global_meta.res_total.SetToZero();
+      part_global_meta.res_avail.SetToZero();
+      part_global_meta.res_in_use.SetToZero();
+    }
+  }
+}
+
 void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;

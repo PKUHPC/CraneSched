@@ -33,9 +33,12 @@ using grpc::Server;
 
 class CtldServer;
 
-class CraneCtldInterceptor final : public grpc::experimental::Interceptor {
+/**
+ * Used to intercept requests arriving at follower nodes
+ */
+class RaftLeaderInterceptor final : public grpc::experimental::Interceptor {
  public:
-  explicit CraneCtldInterceptor(grpc::ServerContextBase *ctx) : m_ctx_(ctx) {}
+  explicit RaftLeaderInterceptor(grpc::ServerContextBase *ctx) : m_ctx_(ctx) {}
 
   void Intercept(grpc::experimental::InterceptorBatchMethods *methods) override;
 
@@ -48,18 +51,27 @@ class CraneCtldInterceptorFactory final
  public:
   grpc::experimental::Interceptor *CreateServerInterceptor(
       grpc::experimental::ServerRpcInfo *info) override {
-    return new CraneCtldInterceptor(info->server_context());
+    if (kBypassMethods.contains(info->method())) {
+      return nullptr;
+    }
+    return new RaftLeaderInterceptor(info->server_context());
   }
+
+ private:
+  inline static const std::unordered_set<std::string> kBypassMethods = {
+      "/crane.grpc.CraneCtld/CranedTriggerReverseConn",
+      "/crane.grpc.CraneCtld/CranedRegister",
+      "/crane.grpc.CraneCtld/QueryLeaderId"};
 };
 
 class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
-  grpc::Status CraneCtldRegister(
-      grpc::ServerContext *context,
-      const crane::grpc::CraneCtldRegisterRequest *request,
-      crane::grpc::CraneCtldRegisterReply *response) override;
+//  grpc::Status CraneCtldRegister(
+//      grpc::ServerContext *context,
+//      const crane::grpc::CraneCtldRegisterRequest *request,
+//      crane::grpc::CraneCtldRegisterReply *response) override;
 
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,

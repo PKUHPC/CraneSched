@@ -230,6 +230,27 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
+CraneErrCode CranedStub::UpdateLeaderId(int cur_leader_id) {
+  CRANE_ASSERT(cur_leader_id >= 0);
+  using crane::grpc::UpdateLeaderIdRequest;
+
+  ClientContext context;
+  UpdateLeaderIdRequest request;
+  google::protobuf::Empty reply;
+
+  request.set_cur_leader_id(cur_leader_id);
+  Status status = m_stub_->UpdateLeaderId(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("UpdateLeaderId to Craned {} failed: {} ", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
     CRANE_INFO("Craned {} reports service unavailable. Considering it down.",
@@ -638,6 +659,12 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
 
   util::lock_guard guard(m_unavail_craned_set_mtx_);
   m_unavail_craned_set_.emplace(crane_id, token);
+}
+
+void CranedKeeper::BroadcastLeaderId(int cur_leader_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
+  for (const auto &craned : m_connected_craned_id_stub_map_)
+    craned.second->UpdateLeaderId(cur_leader_id);
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
