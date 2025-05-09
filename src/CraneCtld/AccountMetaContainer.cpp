@@ -116,19 +116,30 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
   // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+
   bool result = true;
 
-  m_user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& qos_to_resource_map = pair.second;
-      auto iter = qos_to_resource_map.find(task.qos);
-
-      CRANE_ASSERT(iter != qos_to_resource_map.end());
-
-      auto& val = iter->second;
+  m_user_meta_map_.modify_if(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& val = pair.second[task.qos];
       if (val.jobs_count + 1 > qos->max_jobs_per_user) {
         result = false;
       }
   });
+
+  if (!result) return result;
+
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& val = pair.second[task.qos];
+      if (val.jobs_count + 1 > qos->max_jobs_per_account)
+        result = false;
+    });
+    if (!result) break;
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
 
   return result;
 }
@@ -137,15 +148,22 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
-  m_user_meta_map_.try_emplace_l(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
-    auto& qos_to_resource_map = pair.second;
-    auto iter = qos_to_resource_map.find(task.qos);
-
-    CRANE_ASSERT(iter != qos_to_resource_map.end());
-
-    auto& val = iter->second;
+  m_user_meta_map_.modify_if(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
+    auto& val = pair.second[task.qos];
     val.jobs_count++;
   });
+
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& val = pair.second[task.qos];
+      val.jobs_count++;
+    });
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
+
 }
 
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
@@ -160,6 +178,19 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
         val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.submit_jobs_count--;
       });
+
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& val = pair.second[task.qos];
+      CRANE_ASSERT(val.submit_jobs_count > 0);
+      val.submit_jobs_count--;
+    });
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
+
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
@@ -180,6 +211,20 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.submit_jobs_count--;
       });
+
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+  std::string account_name = task.account;
+
+  do {
+    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
+      auto& val = pair.second[task.qos];
+      CRANE_ASSERT(val.submit_jobs_count > 0);
+      CRANE_ASSERT(val.jobs_count > 0);
+      val.jobs_count--;
+      val.submit_jobs_count--;
+    });
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
 }
 
 void AccountMetaContainer::DeleteUserResource(const std::string& username) {
