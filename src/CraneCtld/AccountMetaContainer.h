@@ -38,7 +38,9 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosResource(TaskInCtld& task);
+  CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
+
+  void FreeQosSubmitResource(const TaskInCtld& task);
 
   void FreeQosResource(const TaskInCtld& task);
 
