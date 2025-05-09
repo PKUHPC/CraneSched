@@ -583,6 +583,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
         task->reservation, task->TaskId(),
         {task->EndTime(), task->Resources()});
   }
+  g_account_meta_container->MallocQosResource(*task);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -2760,6 +2761,12 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
+    bool ok = g_account_meta_container->CheckQosResource(*task);
+    if (!ok) {
+      task->pending_reason = "QOSResourceLimit";
+      continue;
+    }
+
     {
       auto all_partitions_meta_map =
           g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2837,6 +2844,7 @@ void MinLoadFirst::NodeSelect(
             task->reservation, task->TaskId(),
             {task->EndTime(), task->Resources()});
       }
+      g_account_meta_container->MallocQosResource(*task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the
