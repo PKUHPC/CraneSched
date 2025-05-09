@@ -149,6 +149,8 @@ class CranedMetaContainer final {
 
   void FreeResourceFromResv(ResvId reservation_id, task_id_t task_id);
 
+  void MarkAllCranedDown();
+
  private:
   // In this part of code, the following lock sequence MUST be held
   // to avoid deadlock:

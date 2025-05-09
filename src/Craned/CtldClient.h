@@ -115,6 +115,8 @@ class CtldClient {
 
   void Init();
 
+  void SetLeaderId(int leader_id) { m_cur_leader_id_ = leader_id; }
+
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
    * @param server_address The "[Address]:[Port]" of CraneCtld.
@@ -123,7 +125,8 @@ class CtldClient {
    * If CraneCtld cannot be connected within 3s, kConnectionTimeout is
    * returned.
    */
-  void InitGrpcChannel(const std::string& server_address);
+  void InitGrpcChannel(
+      const std::vector<Config::ServerEndPoint>& server_address);
 
   void AddGrpcCtldConnectedCb(std::function<void()> cb);
 
@@ -146,7 +149,9 @@ class CtldClient {
 
   void AsyncSendThread_();
 
-  int ConnectToServersAndFindLeader_(int prev_leader_id);
+  // int ConnectToServersAndFindLeader_(int tar_server_id);
+
+  void FailTheCurrentConn(int prev_leader_id);
 
   absl::Mutex m_task_status_change_mtx_;
 
@@ -157,10 +162,10 @@ class CtldClient {
   std::atomic_bool m_thread_stop_{false};
 
   std::vector<std::shared_ptr<Channel>> m_ctld_channels_;
-
   std::vector<std::unique_ptr<CraneCtld::Stub>> m_stubs_;
 
   std::atomic<int> m_cur_leader_id_ = 0;
+  int m_pre_leader_id_ = 0;  // Only allowed to modify in AsyncSendThread
 
   CranedId m_craned_id_;
 

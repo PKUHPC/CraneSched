@@ -88,6 +88,9 @@ class CranedStub {
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
+  // cur_leader_id must be a valid leader id.
+  CraneErrCode UpdateLeaderId(int cur_leader_id);
+
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
            !m_registered_.load(std::memory_order_acquire);
@@ -161,6 +164,8 @@ class CranedKeeper {
 
   void PutNodeIntoUnavailSet(const std::string &crane_id,
                              const RegToken &token);
+
+  void BroadcastLeaderId(int cur_leader_id);
 
  private:
   struct CqTag {
