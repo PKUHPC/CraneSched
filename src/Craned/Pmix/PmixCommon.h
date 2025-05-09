@@ -29,7 +29,7 @@ inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
                         const char* data, size_t ndata, void* cbdata,
                         void* rel_fn, void* rel_data) {
   pmix_status_t rc = PMIX_SUCCESS;
-  pmix_release_cbfunc_t release_fn = (pmix_release_cbfunc_t)rel_fn;
+  auto release_fn = reinterpret_cast<pmix_release_cbfunc_t>(rel_fn);
 
   // Currently, CraneSched only focuses on these two scenarios.
   switch (status) {
@@ -112,6 +112,7 @@ class PMIxServerModule {
      /* pass the provided data back to each participating proc */
 
      std::vector<pmix_proc_t> procs;
+     procs.reserve(nprocs);
      bool collect = false;
 
      for (size_t i = 0; i< nprocs; i++) {
