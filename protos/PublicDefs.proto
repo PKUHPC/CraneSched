@@ -126,6 +126,12 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+message SignalParam {
+  bool valid = 1;
+  int32 signal_number = 2;
+  uint32 seconds_before_kill = 3;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -245,6 +251,7 @@ message BatchTaskAdditionalMeta {
   optional bool open_mode_append = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
+  SignalParam signal_param = 5;
 }
 
 message X11Meta {
