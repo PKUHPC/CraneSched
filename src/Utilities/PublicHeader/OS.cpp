@@ -18,6 +18,8 @@
 
 #include "crane/OS.h"
 
+#include <subprocess/subprocess.h>
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -101,8 +103,7 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
       }
     }
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(),
-                e.what());
+    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(), e.what());
     return false;
   }
 
@@ -155,6 +156,40 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   rlim.rlim_max = num;
 
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
+}
+
+std::tuple<int, std::string, std::string> RunSubprocess(
+    const std::string& cmd) {
+  std::vector<const char*> argv;
+  for (auto&& s : std::views::split(cmd, ' ')) {
+    argv.emplace_back(s.data());
+  }
+  argv.push_back(nullptr);
+
+  subprocess_s subprocess{};
+  int rc = subprocess_create(argv.data(), 0, &subprocess);
+  if (rc) {
+    return {rc, "", ""};
+  }
+
+  auto buf = std::make_unique<char[]>(4096);
+  std::string stdout_str, stderr_str;
+
+  std::FILE* cmd_fd = subprocess_stdout(&subprocess);
+  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+    stdout_str.append(buf.get());
+
+  cmd_fd = subprocess_stderr(&subprocess);
+  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+    stderr_str.append(buf.get());
+
+  if (0 != subprocess_join(&subprocess, &rc))
+    CRANE_ERROR("Failed to join subprocess for {}.", cmd);
+
+  if (0 != subprocess_destroy(&subprocess))
+    CRANE_ERROR("Failed to destroy subprocess for {}.", cmd);
+
+  return {rc, stdout_str, stderr_str};
 }
 
 bool CheckProxyEnvironmentVariable() {

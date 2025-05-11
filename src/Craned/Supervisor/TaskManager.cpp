@@ -473,46 +473,54 @@ std::string ContainerInstance::ParseOCICmdPattern_(
 }
 
 // If OCI runtime does not support `run` command, we have to use `create`.
-CraneErrCode ContainerInstance::CreateContainer_(
-    const std::string& create_cmd) const {
-  std::vector<const char*> argv;
-  for (auto&& s : std::views::split(create_cmd, ' ')) {
-    argv.emplace_back(s.data());
-  }
-  argv.push_back(nullptr);
-
-  subprocess_s subprocess{};
-  int rc = subprocess_create(argv.data(), 0, &subprocess);
-  if (rc) {
-    CRANE_ERROR("Failed to create subprocess for OCI create: {}.",
-                strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  auto buf = std::make_unique<char[]>(4096);
-  std::string runtime_stdout_str, runtime_stderr_str;
-
-  std::FILE* cmd_fd = subprocess_stdout(&subprocess);
-  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
-    runtime_stdout_str.append(buf.get());
-
-  cmd_fd = subprocess_stderr(&subprocess);
-  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
-    runtime_stderr_str.append(buf.get());
-
-  if (0 != subprocess_join(&subprocess, &rc))
-    CRANE_ERROR("Failed to join subprocess for OCI create.");
-
-  if (0 != subprocess_destroy(&subprocess))
-    CRANE_ERROR("Failed to destroy subprocess for OCI create.");
-
+CraneErrCode ContainerInstance::CreateContainer_() const {
+  auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeCreate);
+  auto [rc, stdout, stderr] = util::os::RunSubprocess(cmd);
   if (rc != 0) {
-    CRANE_ERROR("OCI create return with {}. stdout: {}; stderr: {}.", rc,
-                runtime_stdout_str, runtime_stderr_str);
+    CRANE_ERROR(
+        "Failed to create container for task #{}: stdout: {}; stderr: {}.",
+        step_spec->spec.task_id(), rc, stdout, stderr);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   return CraneErrCode::SUCCESS;
+}
+
+std::expected<ContainerInstance::ContainerState, CraneErrCode>
+ContainerInstance::GetContainerState_() const {
+  using json = nlohmann::json;
+
+  auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+  auto [rc, stdout, stderr] = util::os::RunSubprocess(cmd);
+  if (rc != 0) {
+    CRANE_ERROR(
+        "Failed to query container state for task #{}: stdout: {}; stderr: {}.",
+        step_spec->spec.task_id(), rc, stdout, stderr);
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  auto state = json::parse(stdout, nullptr, false);
+  if (state.is_discarded()) {
+    CRANE_ERROR("Failed to parse OCI state output: {}", stdout);
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  std::string status;
+  pid_t pid = 0;
+
+  try {
+    status = state["status"];
+    pid = state["pid"];
+  } catch (json::exception& e) {
+    CRANE_ERROR("Failed to parse OCI state output: {}", e.what());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  if (auto result = ParseContainerStatus(status); result) {
+    return ContainerState{result.value(), pid};
+  } else {
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
 }
 
 CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
@@ -683,7 +691,7 @@ CraneErrCode ContainerInstance::Prepare() {
   }
 
   // Otherwise, we need to create the container before starting it.
-  err = CreateContainer_(ParseOCICmdPattern_(g_config.Container.RuntimeCreate));
+  err = CreateContainer_();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to create container for task #{}",
                 step_spec->spec.task_id());
@@ -930,8 +938,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
       goto ProcessKill;
     }
 
-    // Take action according to OCI container states, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
+    // Take action according to OCI container states
     status = std::move(jret["status"]);
     if (status == "creating") {
       goto ProcessKill;
@@ -995,50 +1002,71 @@ CraneErrCode ContainerInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ContainerInstance::HandleSigChld() {
-  int status;
-  pid_t pid;
-  while (true) {
-    pid = waitpid(-1, &status, WNOHANG
-                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+void ContainerInstance::Exited(ProcessExitInfo exit_info) {
+  const auto& status = exit_info.status;
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    exit_info.is_terminated_by_signal = false;
+    exit_info.value = WEXITSTATUS(status);
+    CRANE_TRACE(
+        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: false, Status: {}",
+        step_spec->spec.task_id(), m_pid_, WEXITSTATUS(status));
+  } else if (WIFSIGNALED(status)) {
+    // Killed by signal WTERMSIG(status)
+    exit_info.is_terminated_by_signal = true;
+    exit_info.value = WTERMSIG(status);
+    CRANE_TRACE(
+        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: true, Signal: {}",
+        step_spec->spec.task_id(), m_pid_, WTERMSIG(status));
+  }
+  /* Todo(More status tracing):
+   else if (WIFSTOPPED(status)) {
+    printf("stopped by signal %d\n", WSTOPSIG(status));
+  } else if (WIFCONTINUED(status)) {
+    printf("continued\n");
+  } */
+}
 
-    if (pid > 0) {
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info.pid = pid;
-        sigchld_info.is_terminated_by_signal = false;
-        sigchld_info.value = WEXITSTATUS(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        // FIXME: Fix container exit code
-        // Killed by signal WTERMSIG(status)
-        sigchld_info.pid = pid;
-        sigchld_info.is_terminated_by_signal = true;
-        sigchld_info.value = WTERMSIG(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
-      return CraneErrCode::SUCCESS;
-    } else if (pid == 0) {
-      break;
-    } else if (pid < 0) {
-      if (errno != ECHILD)
-        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
-      break;
-    }
+bool ContainerInstance::Polling() {
+  if (m_has_run_cmd_) {
+    // If the runtime supports `run` command,
+    // we don't need to polling the container state.
+    return true;
   }
 
-  return CraneErrCode::ERR_GENERIC_FAILURE;
+  ProcessExitInfo info{.pid = m_pid_};
+
+  auto result = GetContainerState_();
+  if (!result) {
+    CRANE_ERROR(
+        "Failed to get container state for task #{}, assuming stopped. ",
+        step_spec->spec.task_id());
+
+    info.is_terminated_by_signal = true;
+    Exited(std::move(info));
+    return true;
+  }
+
+  // TODO: Finishing this
+  auto state = result.value();
+  switch (state.status) {
+  case ContainerStatus::CREATING:
+    break;
+  case ContainerStatus::CREATED:
+    break;
+  case ContainerStatus::RUNNING:
+    break;
+  case ContainerStatus::STOPPED:
+    info.is_terminated_by_signal = true;
+    Exited(std::move(info));
+    return true;
+  default:
+    // Should never reach here!
+    CRANE_ERROR("Unknown container status for task #{}");
+    std::unreachable();
+  }
+
+  return false;
 }
 
 CraneErrCode ProcessInstance::Prepare() {
@@ -1337,49 +1365,29 @@ CraneErrCode ProcessInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ProcessInstance::HandleSigChld() {
-  int status;
-  pid_t pid;
-  while (true) {
-    pid = waitpid(-1, &status, WNOHANG
-                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
-
-    if (pid > 0) {
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info.pid = pid;
-        sigchld_info.is_terminated_by_signal = false;
-        sigchld_info.value = WEXITSTATUS(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        // Killed by signal WTERMSIG(status)
-        sigchld_info.pid = pid;
-        sigchld_info.is_terminated_by_signal = true;
-        sigchld_info.value = WTERMSIG(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
-      return CraneErrCode::SUCCESS;
-    } else if (pid == 0) {
-      break;
-    } else if (pid < 0) {
-      if (errno != ECHILD)
-        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
-      break;
-    }
+void ProcessInstance::Exited(ProcessExitInfo exit_info) {
+  const auto& status = exit_info.status;
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    exit_info.is_terminated_by_signal = false;
+    exit_info.value = WEXITSTATUS(status);
+    CRANE_TRACE(
+        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: false, Status: {}",
+        step_spec->spec.task_id(), m_pid_, WEXITSTATUS(status));
+  } else if (WIFSIGNALED(status)) {
+    // Killed by signal WTERMSIG(status)
+    exit_info.is_terminated_by_signal = true;
+    exit_info.value = WTERMSIG(status);
+    CRANE_TRACE(
+        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: true, Signal: {}",
+        step_spec->spec.task_id(), m_pid_, WTERMSIG(status));
   }
-
-  return CraneErrCode::ERR_GENERIC_FAILURE;
+  /* Todo(More status tracing):
+   else if (WIFSTOPPED(status)) {
+    printf("stopped by signal %d\n", WSTOPSIG(status));
+  } else if (WIFCONTINUED(status)) {
+    printf("continued\n");
+  } */
 }
 
 TaskManager::TaskManager()
@@ -1451,7 +1459,7 @@ void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::TaskStopAndDoStatusChange() {
+void TaskManager::TaskStoppedAndDoStatusChange() {
   CRANE_INFO("task #{} stopped and is doing TaskStatusChange...",
              m_instance_->step_spec->spec.task_id());
 
@@ -1472,38 +1480,35 @@ void TaskManager::TaskStopAndDoStatusChange() {
     break;
   }
 
-  ProcSigchldInfo& sigchld_info = m_instance_->sigchld_info;
+  const ProcessExitInfo& exit_info = m_instance_->GetExitInfo();
   if (m_step_spec_.IsBatch() || m_step_spec_.IsCrun()) {
     // For a Batch task, the end of the process means it is done.
-    if (sigchld_info.is_terminated_by_signal) {
+    if (exit_info.is_terminated_by_signal) {
       if (m_instance_->cancelled_by_user)
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Cancelled,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
       else if (m_instance_->terminated_by_timeout)
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::ExceedTimeLimit,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
       else
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Failed,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
     } else
       ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                sigchld_info.value, std::nullopt);
+                                exit_info.value, std::nullopt);
   } else /* Calloc */ {
     // For a COMPLETING Calloc task with a process running,
     // the end of this process means that this task is done.
-    if (sigchld_info.is_terminated_by_signal)
+    if (exit_info.is_terminated_by_signal)
       ActivateTaskStatusChange_(
           crane::grpc::TaskStatus::Completed,
-          sigchld_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
     else
       ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                sigchld_info.value, std::nullopt);
+                                exit_info.value, std::nullopt);
   }
 }
 
@@ -1581,6 +1586,7 @@ void TaskManager::LaunchExecution_() {
 
   CRANE_TRACE("[Job #{}] Spawning process in task",
               m_step_spec_.spec.task_id());
+
   err = m_instance_->Spawn();
   if (err != CraneErrCode::SUCCESS) {
     // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -1590,6 +1596,12 @@ void TaskManager::LaunchExecution_() {
     ActivateTaskStatusChange_(
         crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeSpawnProcessFail,
         fmt::format("Cannot spawn child process in task"));
+  }
+
+  if (m_instance_->IsPollingNeeded()) {
+    AddPollingTimer_(m_instance_.get(), 10, [instance = m_instance_.get()]() {
+      return instance->Polling();
+    });
   }
 }
 
@@ -1630,33 +1642,45 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
 }
 
 void TaskManager::EvSigchldCb_() {
-  CRANE_TRACE("SIGCHLD received.");
-  if (m_instance_) {
-    auto err = m_instance_->HandleSigChld();
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_TRACE("Failed to handle SIGCHLD. Ignore it.");
-      return;
-    }
+  int status;
+  pid_t pid;
+  while (true) {
+    pid = waitpid(-1, &status, WNOHANG
+                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
-    if (m_step_spec_.IsCrun()) {
-      // TaskStatusChange of a crun task is triggered in
-      // CforedManager.
-      auto pid = m_instance_->GetPid();
-      auto ok_to_free = m_step_spec_.cfored_client->TaskProcessStop(pid);
-      if (ok_to_free) {
-        CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
-        m_step_spec_.cfored_client->TaskEnd(pid);
+    if (pid > 0) {
+      CRANE_TRACE("Received SIGCHLD for pid {}", pid);
+
+      // exit_info is set in the ExecutionInterface.
+      auto exit_info = ProcessExitInfo{
+          .pid = pid,
+          .status = status,
+      };
+      m_instance_->Exited(std::move(exit_info));
+
+      if (m_step_spec_.IsCrun()) {
+        // TaskStatusChange of a crun task is triggered in
+        // CforedManager.
+        auto ok_to_free = m_step_spec_.cfored_client->TaskProcessStop(pid);
+        if (ok_to_free) {
+          CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
+          m_step_spec_.cfored_client->TaskEnd(pid);
+        }
+      } else /* Batch / Calloc */ {
+        // If the TaskInstance has no process left,
+        // send TaskStatusChange for this task.
+        // See the comment of EvActivateTaskStatusChange_.
+        TaskStoppedAndDoStatusChange();
       }
-    } else /* Batch / Calloc */ {
-      // If the ExecutionInterface has no process left,
-      // send TaskStatusChange for this task.
-      // See the comment of EvActivateTaskStatusChange_.
-      TaskStopAndDoStatusChange();
-    }
 
-  } else {
-    CRANE_DEBUG("SIGCHLD received for a non-existent task #{}.",
-                g_config.JobId);
+    } else if (pid == 0) {
+      // TODO: Support multiple tasks.
+      break;
+    } else if (pid < 0) {
+      if (errno != ECHILD)
+        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+      break;
+    }
   }
 }
 
@@ -1700,8 +1724,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
       // Note if Ctld wants to terminate some tasks that are not running,
       // it might indicate other nodes allocated to the task might have
-      // crashed. We should mark the task as kind of not runnable by removing
-      // its cgroup.
+      // crashed. We should mark the task as kind of not runnable by
+      // removing its cgroup.
       //
       // Considering such a situation:
       // In Task Scheduler of Ctld,
@@ -1734,11 +1758,12 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
 
     if (m_instance_->GetPid()) {
-      // For an Interactive task with a process running or a Batch task, we
+      // For a Batch task or a Interactive task with a process running, we
       // just send a kill signal here.
       m_instance_->Kill(sig);
     } else if (m_step_spec_.spec.type() == crane::grpc::Interactive) {
-      // For an Interactive task with no process running, it ends immediately.
+      // For an Interactive task with no process running, it ends
+      // immediately.
       ActivateTaskStatusChange_(crane::grpc::Completed,
                                 ExitCode::kExitCodeTerminated, std::nullopt);
     }

@@ -54,8 +54,9 @@ struct CrunMetaInExecution : MetaInExecution {
   ~CrunMetaInExecution() override = default;
 };
 
-struct ProcSigchldInfo {
+struct ProcessExitInfo {
   pid_t pid;
+  int status;
   bool is_terminated_by_signal;
   int value;
 };
@@ -67,27 +68,36 @@ class ExecutionInterface {
   virtual ~ExecutionInterface();
 
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
+  [[nodiscard]] const ProcessExitInfo& GetExitInfo() const {
+    return m_exit_info;
+  }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
+  virtual void Exited(ProcessExitInfo exit_info) = 0;
 
-  virtual CraneErrCode HandleSigChld() = 0;
+  // If true, the checking is done.
+  virtual bool IsPollingNeeded() const { return false; }
+  virtual bool Polling() { return true; }
 
   // Set from TaskManager
   const StepSpec* step_spec;
-
   PasswordEntry pwd;
-  ProcSigchldInfo sigchld_info{};
 
+  // Set from TaskManager, timer for job time limit
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
+
+  // Set from TaskManager, timer for polling job status (only for containers)
+  std::shared_ptr<uvw::timer_handle> polling_timer{nullptr};
 
   bool orphaned{false};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
+
+  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
  protected:
   CrunMetaInExecution* GetCrunMeta() const {
@@ -129,6 +139,7 @@ class ExecutionInterface {
 
   pid_t m_pid_{0};  // forked pid
   std::unique_ptr<MetaInExecution> m_meta_{nullptr};
+  ProcessExitInfo m_exit_info{};
 
   EnvMap m_env_{};
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
@@ -150,13 +161,53 @@ class ContainerInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  CraneErrCode HandleSigChld() override;
+  void Exited(ProcessExitInfo exit_info) override;
+
+  // For container w/o OCI run support, Polling() is mandatory.
+  bool IsPollingNeeded() const override { return !m_has_run_cmd_; }
+  bool Polling() override;
+
+  // See:
+  // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
+  enum class ContainerStatus {
+    CREATING = 0,
+    CREATED = 1,
+    RUNNING = 2,
+    STOPPED = 3,
+  };
+
+  struct ContainerState {
+    ContainerStatus status;
+    pid_t pid;
+  };
+
+  static std::expected<ContainerStatus, CraneErrCode> ParseContainerStatus(
+      const std::string& str) {
+    static const std::unordered_map<std::string, ContainerStatus> status_map = {
+        {"CREATING", ContainerStatus::CREATING},
+        {"CREATED", ContainerStatus::CREATED},
+        {"RUNNING", ContainerStatus::RUNNING},
+        {"STOPPED", ContainerStatus::STOPPED}};
+
+    auto it = status_map.find(absl::AsciiStrToUpper(str));
+    if (it != status_map.end()) return it->second;
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  };
 
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
-  CraneErrCode CreateContainer_(const std::string& create_cmd) const;
-  std::string ParseOCICmdPattern_(const std::string& cmd) const;
+
+  // Get container state from OCI runtime
+  std::expected<ContainerState, CraneErrCode> GetContainerState_() const;
+
+  // Create container using OCI runtime
+  CraneErrCode CreateContainer_() const;
+
+  // CraneErrCode StartContainer_() const;
+  // CraneErrCode RunContainer_() const;
+
+  std::string ParseOCICmdPattern_(const std::string&) const;
 
   bool m_has_run_cmd_{false};
   std::filesystem::path m_bundle_path_;
@@ -173,8 +224,9 @@ class ProcessInstance : public ExecutionInterface {
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
+  void Exited(ProcessExitInfo exit_info) override;
 
-  CraneErrCode HandleSigChld() override;
+  // Polling() is not used for process.
 };
 
 class TaskManager {
@@ -213,7 +265,27 @@ class TaskManager {
     instance->termination_timer.reset();
   }
 
-  void TaskStopAndDoStatusChange();
+  void AddPollingTimer_(ExecutionInterface* instance, int64_t secs,
+                        std::function<bool()> func) {
+    auto polling_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    polling_handle->on<uvw::timer_event>(
+        [&, this](const uvw::timer_event&, uvw::timer_handle& h) {
+          auto done = func();
+          if (done) DelPollingTimer_(instance);
+          // TODO: Activate task status change
+        });
+
+    polling_handle->start(std::chrono::seconds(secs),
+                          std::chrono::seconds(secs));
+    instance->polling_timer = polling_handle;
+  }
+
+  void DelPollingTimer_(ExecutionInterface* instance) {
+    instance->polling_timer->close();
+    instance->polling_timer.reset();
+  }
+
+  void TaskStoppedAndDoStatusChange();
 
   void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,

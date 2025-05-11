@@ -15,6 +15,7 @@ target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
         crane_proto_lib
+        subprocess
         fpm
 )
 

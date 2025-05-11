@@ -552,7 +552,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
     argv.push_back(nullptr);
 
-    // Use execvp to search the kSupervisorPath in the PATH.
+    // PATH is supported by execvp.
     execvp(g_config.Supervisor.Path.c_str(),
            const_cast<char* const*>(argv.data()));
 

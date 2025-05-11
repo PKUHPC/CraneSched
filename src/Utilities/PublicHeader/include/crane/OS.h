@@ -63,6 +63,8 @@ void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
 
+std::tuple<int, std::string, std::string> RunSubprocess(const std::string& cmd);
+
 bool GetSystemReleaseInfo(SystemRelInfo* info);
 
 bool CheckProxyEnvironmentVariable();
