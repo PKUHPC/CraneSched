@@ -1294,9 +1294,9 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
                                        bool send_completion_ack) {
             CRANE_TRACE("The completion callback of task #{} has been called.",
                         task_id);
-            if (auto writer = writer_weak_ptr.lock();
-                writer && send_completion_ack) {
-              writer->WriteTaskCompletionAckReply(task_id);
+            if (auto writer = writer_weak_ptr.lock(); writer) {
+              if (send_completion_ack)
+                writer->WriteTaskCompletionAckReply(task_id);
             } else {
               CRANE_ERROR(
                   "Stream writer of ia task #{} has been destroyed. "

@@ -1379,7 +1379,8 @@ void TaskManager::EvTaskTimerCb_(task_id_t task_id) {
   TaskInstance* task_instance = task_it->second.get();
   DelTerminationTimer_(task_instance);
 
-  if (task_instance->task.type() == crane::grpc::Batch) {
+  if (task_instance->task.type() == crane::grpc::Batch ||
+      task_instance->IsCrun()) {
     TaskTerminateQueueElem ev_task_terminate{
         .task_id = task_id,
         .terminated_by_timeout = true,
