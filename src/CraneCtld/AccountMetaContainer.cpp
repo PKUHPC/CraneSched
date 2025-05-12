@@ -104,10 +104,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
 bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
-  if (!qos) {
-    CRANE_ERROR("Unknown QOS '{}'", task.qos);
-    return CraneErrCode::ERR_INVALID_QOS;
-  }
+
+  CRANE_ASSERT(qos);
 
   // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
