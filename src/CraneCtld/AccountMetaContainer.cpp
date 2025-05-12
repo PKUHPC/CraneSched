@@ -54,10 +54,10 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   result = CheckQosSubmitResourceForUser_(task, *qos);
-  if (!result) return result;
+  if (result != CraneErrCode::SUCCESS) return result;
 
   result = CheckQosSubmitResourceForAccount_(task, *qos, account_map_ptr);
-  if (!result) return result;
+  if (result != CraneErrCode::SUCCESS) return result;
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
