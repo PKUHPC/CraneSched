@@ -149,17 +149,17 @@ class NuRaftLogStore : public log_store {
   /**
    * Lock for `logs_`.
    */
-  mutable std::mutex logs_lock_;
+  mutable std::mutex m_logs_lock_;
 
   /**
    * The index of the first log.
    */
-  std::atomic<log_index_t> start_idx_;
+  std::atomic<log_index_t> m_start_idx_;
 
   /**
    * Backward pointer to Raft server.
    */
-  raft_server* raft_server_bwd_pointer_;
+  raft_server* m_raft_server_bwd_pointer_;
 
   /**
    * Last written log index.

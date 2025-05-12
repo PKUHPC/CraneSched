@@ -22,20 +22,11 @@
 
 namespace Ctld {
 
-RaftServerStuff::~RaftServerStuff() {
-  m_exit_ = true;
-  bool res = m_launcher_.shutdown();
-  if (res)
-    CRANE_INFO("Raft server shutdown success!");
-  else
-    CRANE_ERROR("Raft server shutdown failed!");
-}
-
 void RaftServerStuff::Init() {  // State manager.
   m_state_mgr_ = std::make_shared<crane::Internal::NuRaftStateManager>(
       m_server_id_, m_endpoint_, m_raft_instance_.get());
   // State machine.
-  m_state_machine_ = std::make_shared<CraneStateMachine>(false);
+  m_state_machine_ = std::make_shared<CraneStateMachine>(true);
 
   m_logger_ = std::make_shared<crane::Internal::NuRaftLoggerWrapper>();
 
@@ -52,22 +43,21 @@ void RaftServerStuff::Init() {  // State manager.
 
   // Upto 10 logs will be preserved ahead the last snapshot.
   params.reserved_log_items_ = 10;
-  // Snapshot will be created for every 1000 log appends.
-  params.snapshot_distance_ = 1000;
+  // Snapshot will be created for every 3000 log appends.
+  params.snapshot_distance_ = 3000;
   // Client timeout: 3000 ms.
   params.client_req_timeout_ = 3000;
   // According to this method, `append_log` function
   // should be handled differently.
-  params.return_method_ = raft_params::blocking;  // or async_handler
+  params.return_method_ = raft_params::async_handler;  // or blocking
 
   raft_server::init_options init_options{};
   init_options.raft_callback_ = StatusChangeCallback;
 
-  GetStateMachine()->init(
-      g_config.CraneCtldDbPath + '_' + std::to_string(m_server_id_),
-      static_cast<crane::Internal::NuRaftLogStore *>(
-          m_state_mgr_->load_log_store().get())
-          ->all_log_entries());
+  GetStateMachine()->init(g_config.CraneCtldDbPath,
+                          static_cast<crane::Internal::NuRaftLogStore *>(
+                              m_state_mgr_->load_log_store().get())
+                              ->all_log_entries());
 
   // Initialize Raft server.
   m_raft_instance_ = m_launcher_.init(m_state_machine_, m_state_mgr_, m_logger_,
@@ -92,6 +82,17 @@ void RaftServerStuff::Init() {  // State manager.
       "Init raft server failed! During the offline period of this node, there "
       "may have been a raft configuration update. Please have the "
       "administrator fix it.");
+}
+
+void RaftServerStuff::Shutdown() {
+  if (m_exit_) return;
+
+  m_exit_ = true;
+  bool res = m_launcher_.shutdown();
+  if (res)
+    CRANE_INFO("Raft server shutdown success!");
+  else
+    CRANE_ERROR("Raft server shutdown failed!");
 }
 
 bool RaftServerStuff::CheckServerNodeExist(int server_id) const {
@@ -171,30 +172,15 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
     //   `append_entries` returns after getting a consensus,
     //   so that `ret` already has the result from state machine.
     std::shared_ptr<std::exception> err(nullptr);
-
-    // handle_result
-    if (ret->get_result_code() != cmd_result_code::OK) {
-      // Something went wrong.
-      // This means committing this log failed,
-      // but the log itself is still in the log store.
-      CRANE_ERROR("Append log failed: {},{}",
-                  static_cast<int>(ret->get_result_code()),
-                  ret->get_result_str());
-      return false;
-    }
-    std::shared_ptr<buffer> buf = ret->get();
-    uint64_t ret_value = buf->get_ulong();
-    CRANE_TRACE("Append log succeeded, return value: {}", ret_value);
+    handle_result(*ret, err);
   } else if (m_raft_instance_->get_current_params().return_method_ ==
              raft_params::async_handler) {
     // Async mode:
     //   `append_entries` returns immediately.
     //   `handle_result` will be invoked asynchronously,
     //   after getting a consensus.
-    //    ret->when_ready( std::bind( handle_result,
-    //                              timer,
-    //                              std::placeholders::_1,
-    //                              std::placeholders::_2 ) );
+    ret->when_ready(std::bind(&RaftServerStuff::handle_result, this,
+                              std::placeholders::_1, std::placeholders::_2));
 
   } else {
     return false;
@@ -331,6 +317,22 @@ void RaftServerStuff::GetNodeStatus(
       m_state_machine_->last_snapshot()
           ? m_state_machine_->last_snapshot()->get_last_log_term()
           : 0);
+}
+
+void RaftServerStuff::handle_result(raft_result &result,
+                                    ptr<std::exception> &err) {
+  if (result.get_result_code() != cmd_result_code::OK) {
+    // Something went wrong.
+    // This means committing this log failed,
+    // but the log itself is still in the log store.
+    CRANE_ERROR("Append log failed: {},{}",
+                static_cast<int>(result.get_result_code()),
+                result.get_result_str());
+    return;
+  }
+  std::shared_ptr<buffer> buf = result.get();
+  uint64_t ret_value = buf->get_ulong();
+  CRANE_TRACE("Append log succeeded, return value: {}", ret_value);
 }
 
 cb_func::ReturnCode RaftServerStuff::StatusChangeCallback(cb_func::Type type,

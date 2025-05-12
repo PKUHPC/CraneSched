@@ -146,15 +146,9 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
 
-          if (node["listenAddr"])
-            raft_node.ListenAddr = node["listenAddr"].as<std::string>();
-          else
-            raft_node.ListenAddr = "0.0.0.0";
-
-          if (node["listenPort"])
-            raft_node.ListenPort = node["listenPort"].as<std::string>();
-          else
-            raft_node.ListenPort = kCtldDefaultPort;
+          raft_node.ListenAddr = YamlValueOr(node["listenAddr"], "0.0.0.0");
+          raft_node.ListenPort =
+              YamlValueOr(node["listenPort"], kCtldDefaultPort);
 
           g_config.Servers.push_back(std::move(raft_node));
         }
@@ -769,14 +763,13 @@ void ParseConfig(int argc, char** argv) {
 }
 
 void DestroyCtldGlobalVariables() {
-  using namespace Ctld;
-
   g_task_scheduler.reset();
   g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
+  g_raft_server.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

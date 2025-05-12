@@ -243,10 +243,8 @@ void ParseConfig(int argc, char** argv) {
           else
             std::exit(1);
 
-          if (node["listenPort"])
-            server_node.ListenPort = node["listenPort"].as<std::string>();
-          else
-            server_node.ListenPort = kCtldDefaultPort;
+          server_node.ListenPort =
+              YamlValueOr(node["listenPort"], kCtldDefaultPort);
 
           g_config.ControlMachines.push_back(std::move(server_node));
         }

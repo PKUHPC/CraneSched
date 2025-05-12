@@ -21,8 +21,8 @@ namespace crane {
 namespace Internal {
 
 NuRaftLogStore::NuRaftLogStore(raft_server* server_ptr)
-    : start_idx_(1),
-      raft_server_bwd_pointer_(server_ptr),
+    : m_start_idx_(1),
+      m_raft_server_bwd_pointer_(server_ptr),
       m_last_durable_index_(0),
       m_durable_thread_stop_signal_(false) {
   // Dummy entry for index 0.
@@ -93,21 +93,23 @@ bool NuRaftLogStore::init(const std::string& db_backend,
         return true;
       });
 
+  if (m_logs_.size() > 1) m_start_idx_ = std::next(m_logs_.begin())->first;
+
   return true;
 }
 
 uint64_t NuRaftLogStore::next_slot() const {
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
   // Exclude the dummy entry.
-  return start_idx_ + m_logs_.size() - 1;
+  return m_start_idx_ + m_logs_.size() - 1;
 }
 
-uint64_t NuRaftLogStore::start_index() const { return start_idx_; }
+uint64_t NuRaftLogStore::start_index() const { return m_start_idx_; }
 
 std::shared_ptr<log_entry> NuRaftLogStore::last_entry() const {
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
 
-  uint64_t next_idx = start_idx_ + m_logs_.size() - 1;
+  uint64_t next_idx = m_start_idx_ + m_logs_.size() - 1;
   auto entry = m_logs_.find(next_idx - 1);
   if (entry == m_logs_.end()) {
     // return dummy constant entry means there are no logs present.
@@ -120,8 +122,8 @@ std::shared_ptr<log_entry> NuRaftLogStore::last_entry() const {
 uint64_t NuRaftLogStore::append(std::shared_ptr<log_entry>& entry) {
   std::shared_ptr<log_entry> clone = make_clone_(entry);
 
-  std::lock_guard<std::mutex> l(logs_lock_);
-  size_t idx = start_idx_ + m_logs_.size() - 1;
+  std::lock_guard<std::mutex> l(m_logs_lock_);
+  size_t idx = m_start_idx_ + m_logs_.size() - 1;
   m_logs_[idx] = clone;
 
   m_logs_being_written_.push(idx);
@@ -132,7 +134,7 @@ uint64_t NuRaftLogStore::append(std::shared_ptr<log_entry>& entry) {
 
 void NuRaftLogStore::write_at(uint64_t index,
                               std::shared_ptr<log_entry>& entry) {
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
   // Remove entries greater than `index`.
   int len = m_logs_being_written_.size();
   for (int i = 0; i < len; i++) {
@@ -169,7 +171,7 @@ void NuRaftLogStore::write_at(uint64_t index,
 std::vector<std::shared_ptr<log_entry>> NuRaftLogStore::all_log_entries() {
   std::vector<std::shared_ptr<log_entry>> ret;
 
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
   if (!m_logs_.empty()) {
     ret.resize(m_logs_.size());
     uint64_t pos = 0;
@@ -191,7 +193,7 @@ NuRaftLogStore::log_entries(uint64_t start, uint64_t end) {
   for (uint64_t i = start; i < end; ++i) {
     std::shared_ptr<log_entry> src;
     {
-      std::lock_guard<std::mutex> l(logs_lock_);
+      std::lock_guard<std::mutex> l(m_logs_lock_);
       auto entry = m_logs_.find(i);
       if (entry == m_logs_.end()) {
         entry = m_logs_.find(0);
@@ -218,7 +220,7 @@ NuRaftLogStore::log_entries_ext(uint64_t start, uint64_t end,
   for (uint64_t i = start; i < end; ++i) {
     std::shared_ptr<log_entry> src;
     {
-      std::lock_guard<std::mutex> l(logs_lock_);
+      std::lock_guard<std::mutex> l(m_logs_lock_);
       auto entry = m_logs_.find(i);
       if (entry == m_logs_.end()) {
         entry = m_logs_.find(0);
@@ -238,7 +240,7 @@ NuRaftLogStore::log_entries_ext(uint64_t start, uint64_t end,
 std::shared_ptr<log_entry> NuRaftLogStore::entry_at(uint64_t index) {
   std::shared_ptr<log_entry> src;
   {
-    std::lock_guard<std::mutex> l(logs_lock_);
+    std::lock_guard<std::mutex> l(m_logs_lock_);
     auto entry = m_logs_.find(index);
     if (entry == m_logs_.end()) {
       entry = m_logs_.find(0);
@@ -251,7 +253,7 @@ std::shared_ptr<log_entry> NuRaftLogStore::entry_at(uint64_t index) {
 uint64_t NuRaftLogStore::term_at(uint64_t index) {
   uint64_t term;
   {
-    std::lock_guard<std::mutex> l(logs_lock_);
+    std::lock_guard<std::mutex> l(m_logs_lock_);
     auto entry = m_logs_.find(index);
     if (entry == m_logs_.end()) {
       entry = m_logs_.find(0);
@@ -268,7 +270,7 @@ std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32 cnt) {
   for (uint64_t i = index; i < index + cnt; ++i) {
     std::shared_ptr<log_entry> le;
     {
-      std::lock_guard<std::mutex> l(logs_lock_);
+      std::lock_guard<std::mutex> l(m_logs_lock_);
       le = m_logs_[i];
     }
     assert(le.get());
@@ -303,24 +305,24 @@ void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
 
     std::shared_ptr<log_entry> le = log_entry::deserialize(*buf_local);
     {
-      std::lock_guard<std::mutex> l(logs_lock_);
+      std::lock_guard<std::mutex> l(m_logs_lock_);
       m_logs_[cur_idx] = le;
     }
   }
 
   {
-    std::lock_guard<std::mutex> l(logs_lock_);
+    std::lock_guard<std::mutex> l(m_logs_lock_);
     auto entry = m_logs_.upper_bound(0);
     if (entry != m_logs_.end()) {
-      start_idx_ = entry->first;
+      m_start_idx_ = entry->first;
     } else {
-      start_idx_ = 1;
+      m_start_idx_ = 1;
     }
   }
 }
 
 bool NuRaftLogStore::compact(log_index_t last_log_index) {
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
 
   txn_id_t txn_id = 0;
   auto res = m_logs_db_->Begin();
@@ -330,7 +332,7 @@ bool NuRaftLogStore::compact(log_index_t last_log_index) {
     CRANE_ERROR("Failed to begin a transaction.");
   }
 
-  for (log_index_t i = start_idx_; i <= last_log_index; ++i) {
+  for (log_index_t i = m_start_idx_; i <= last_log_index; ++i) {
     auto entry = m_logs_.find(i);
     if (entry != m_logs_.end()) {
       m_logs_.erase(entry);
@@ -342,8 +344,8 @@ bool NuRaftLogStore::compact(log_index_t last_log_index) {
   // WARNING:
   //   Even though nothing has been erased,
   //   we should set `start_idx_` to new index.
-  if (start_idx_ <= last_log_index) {
-    start_idx_ = last_log_index + 1;
+  if (m_start_idx_ <= last_log_index) {
+    m_start_idx_ = last_log_index + 1;
   }
   return true;
 }
@@ -357,14 +359,14 @@ bool NuRaftLogStore::flush() {
     return false;
   }
 
-  std::lock_guard<std::mutex> l(logs_lock_);
+  std::lock_guard<std::mutex> l(m_logs_lock_);
   for (const auto& [k, v] : m_logs_) {
     std::shared_ptr<buffer> buf = v->serialize();
     m_logs_db_->Store(txn_id, std::to_string(k), buf->data(), buf->size());
   }
 
   if (m_logs_db_->Commit(txn_id).has_value()) {
-    m_last_durable_index_ = start_idx_ + m_logs_.size() - 2;
+    m_last_durable_index_ = m_start_idx_ + m_logs_.size() - 2;
     return true;
   } else {
     return false;
@@ -390,7 +392,7 @@ void NuRaftLogStore::durable_thread_() {
 
     bool call_notification = false;
     {
-      std::lock_guard<std::mutex> l(logs_lock_);
+      std::lock_guard<std::mutex> l(m_logs_lock_);
       // Remove all timestamps equal to or smaller than `cur_time`,
       // and pick the greatest one among them.3
 
@@ -424,8 +426,8 @@ void NuRaftLogStore::durable_thread_() {
       m_logs_db_->Commit(txn_id);
     }
 
-    if (call_notification && raft_server_bwd_pointer_) {
-      raft_server_bwd_pointer_->notify_log_append_completion(true);
+    if (call_notification && m_raft_server_bwd_pointer_) {
+      m_raft_server_bwd_pointer_->notify_log_append_completion(true);
     }
   }
 }

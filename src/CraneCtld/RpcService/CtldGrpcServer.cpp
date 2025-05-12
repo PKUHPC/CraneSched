@@ -1527,7 +1527,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     g_craned_keeper->Shutdown();
 
     // raft_server MUST be shutdown before GrpcServer.
-    g_raft_server.reset();
+    g_raft_server->Shutdown();
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
