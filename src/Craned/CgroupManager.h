@@ -537,6 +537,8 @@ class CgroupManager {
   static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
       const std::string &root_cgroup_path);
 
+  void RmAllJobCgroups_();
+
 #ifdef CRANE_ENABLE_BPF
   CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
