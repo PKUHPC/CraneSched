@@ -68,7 +68,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{std::move(resource_view), 0, 1});
+                                      QosResource{resource_view, 0, 1});
           return;
         }
 
@@ -76,7 +76,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
         val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
         val.submit_jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 0, 1}}});
+      QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
 
 
   std::string account_name = task.account;
@@ -87,14 +87,14 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       auto iter = qos_to_resource_map.find(task.qos);
       if (iter == qos_to_resource_map.end()) {
         qos_to_resource_map.emplace(task.qos,
-                                    QosResource{std::move(resource_view), 0, 1});
+                                    QosResource{resource_view, 0, 1});
         return ;
       }
 
       auto& val = iter->second;
       val.submit_jobs_count++;
     },
-    QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 0, 1}}});
+    QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
 
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
