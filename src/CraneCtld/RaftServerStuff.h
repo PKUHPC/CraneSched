@@ -35,11 +35,15 @@ using namespace nuraft;
 
 class RaftServerStuffBase {
  public:
+  using raft_result = cmd_result<std::shared_ptr<buffer>>;
+
   RaftServerStuffBase() = default;
 
   virtual ~RaftServerStuffBase() = default;
 
   virtual void Init() {}
+
+  virtual void Shutdown() {}
 
   virtual bool CheckServerNodeExist(int server_id) const {
     if (server_id == m_default_server_id_)
@@ -90,9 +94,11 @@ class RaftServerStuff final : public RaftServerStuffBase {
         m_port_(port),
         m_endpoint_(fmt::format("{}:{}", hostname, port)) {};
 
-  ~RaftServerStuff() override;
+  ~RaftServerStuff() override { Shutdown(); }
 
   void Init() override;
+
+  void Shutdown() override;
 
   bool CheckServerNodeExist(int server_id) const override;
 
@@ -128,6 +134,8 @@ class RaftServerStuff final : public RaftServerStuffBase {
   // };
 
  private:
+  void handle_result(raft_result& result, ptr<std::exception>& err);
+
   static cb_func::ReturnCode StatusChangeCallback(cb_func::Type type,
                                                   cb_func::Param* p);
   int m_server_id_;
