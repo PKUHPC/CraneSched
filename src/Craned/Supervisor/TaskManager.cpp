@@ -1002,39 +1002,55 @@ CraneErrCode ContainerInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-void ContainerInstance::Exited(ProcessExitInfo exit_info) {
+const ExitInfo& ContainerInstance::HandleAndSetExitInfo(ExitInfo exit_info) {
   const auto& status = exit_info.status;
-  if (WIFEXITED(status)) {
-    // Exited with status WEXITSTATUS(status)
-    exit_info.is_terminated_by_signal = false;
-    exit_info.value = WEXITSTATUS(status);
-    CRANE_TRACE(
-        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: false, Status: {}",
-        step_spec->spec.task_id(), m_pid_, WEXITSTATUS(status));
-  } else if (WIFSIGNALED(status)) {
-    // Killed by signal WTERMSIG(status)
-    exit_info.is_terminated_by_signal = true;
-    exit_info.value = WTERMSIG(status);
-    CRANE_TRACE(
-        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: true, Signal: {}",
-        step_spec->spec.task_id(), m_pid_, WTERMSIG(status));
+  if (m_has_run_cmd_) {
+    if (WIFEXITED(status)) {
+      // Exited with status WEXITSTATUS(status)
+      exit_info.value = WEXITSTATUS(status);
+      if (exit_info.value > 128) {
+        // OCI runtime may return 128 + signal number
+        // See: https://tldp.org/LDP/abs/html/exitcodes.html
+        exit_info.is_terminated_by_signal = true;
+        exit_info.value -= 128;
+      } else {
+        // OCI runtime normal exiting
+        exit_info.is_terminated_by_signal = false;
+      }
+    } else if (WIFSIGNALED(status)) {
+      // OCI runtime is forced to exit by signal
+      // This is not desired!
+      exit_info.is_terminated_by_signal = true;
+      exit_info.value = WTERMSIG(status);
+      CRANE_WARN("OCI runtime for task #{} is killed by signal {}!",
+                 step_spec->spec.task_id(), exit_info.value);
+    }
+  } else {
+    // In this case, we never receive SIGCHLD. This is called in Polling().
+    // OCI state does not support `exit code`, so we let it be 0.
+    exit_info.value = 0;
+    // Besides, we don't know if the container is killed by signal or not.
+    // So, we solely rely on our states.
+    if (cancelled_by_user || terminated_by_timeout)
+      exit_info.is_terminated_by_signal = true;
+    else
+      exit_info.is_terminated_by_signal = false;
   }
-  /* Todo(More status tracing):
-   else if (WIFSTOPPED(status)) {
-    printf("stopped by signal %d\n", WSTOPSIG(status));
-  } else if (WIFCONTINUED(status)) {
-    printf("continued\n");
-  } */
+
+  m_exit_info_ = std::move(exit_info);
+  return m_exit_info_;
 }
 
-bool ContainerInstance::Polling() {
+std::optional<ExitInfo> ContainerInstance::Polling() {
   if (m_has_run_cmd_) {
     // If the runtime supports `run` command,
     // we don't need to polling the container state.
-    return true;
+    std::unreachable();
+    return std::nullopt;
   }
 
-  ProcessExitInfo info{.pid = m_pid_};
+  // status： 0 - normal exit, 1 - abnormal exit
+  ExitInfo info{.pid = m_pid_, .status = 0};
 
   auto result = GetContainerState_();
   if (!result) {
@@ -1042,31 +1058,34 @@ bool ContainerInstance::Polling() {
         "Failed to get container state for task #{}, assuming stopped. ",
         step_spec->spec.task_id());
 
-    info.is_terminated_by_signal = true;
-    Exited(std::move(info));
-    return true;
+    info.status = 1;
+    return info;
   }
 
-  // TODO: Finishing this
   auto state = result.value();
   switch (state.status) {
-  case ContainerStatus::CREATING:
-    break;
-  case ContainerStatus::CREATED:
-    break;
   case ContainerStatus::RUNNING:
-    break;
+    // Continue polling
+    return std::nullopt;
   case ContainerStatus::STOPPED:
-    info.is_terminated_by_signal = true;
-    Exited(std::move(info));
-    return true;
+    // Normally stopped
+    return info;
+  case ContainerStatus::CREATING:
+  case ContainerStatus::CREATED:
+    // Creating/Created state means the container is created but not started.
+    // Polling should be started after the container is started.
+    CRANE_ERROR("Container for task #{} is created but not started!",
+                step_spec->spec.task_id());
+
+    info.status = 1;
+    return info;
   default:
     // Should never reach here!
     CRANE_ERROR("Unknown container status for task #{}");
     std::unreachable();
   }
 
-  return false;
+  return std::nullopt;
 }
 
 CraneErrCode ProcessInstance::Prepare() {
@@ -1365,22 +1384,16 @@ CraneErrCode ProcessInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-void ProcessInstance::Exited(ProcessExitInfo exit_info) {
+const ExitInfo& ProcessInstance::HandleAndSetExitInfo(ExitInfo exit_info) {
   const auto& status = exit_info.status;
   if (WIFEXITED(status)) {
     // Exited with status WEXITSTATUS(status)
     exit_info.is_terminated_by_signal = false;
     exit_info.value = WEXITSTATUS(status);
-    CRANE_TRACE(
-        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: false, Status: {}",
-        step_spec->spec.task_id(), m_pid_, WEXITSTATUS(status));
   } else if (WIFSIGNALED(status)) {
     // Killed by signal WTERMSIG(status)
     exit_info.is_terminated_by_signal = true;
     exit_info.value = WTERMSIG(status);
-    CRANE_TRACE(
-        "Receiving SIGCHLD for task #{} (pid: {}). Signaled: true, Signal: {}",
-        step_spec->spec.task_id(), m_pid_, WTERMSIG(status));
   }
   /* Todo(More status tracing):
    else if (WIFSTOPPED(status)) {
@@ -1388,6 +1401,9 @@ void ProcessInstance::Exited(ProcessExitInfo exit_info) {
   } else if (WIFCONTINUED(status)) {
     printf("continued\n");
   } */
+
+  m_exit_info_ = std::move(exit_info);
+  return m_exit_info_;
 }
 
 TaskManager::TaskManager()
@@ -1480,7 +1496,7 @@ void TaskManager::TaskStoppedAndDoStatusChange() {
     break;
   }
 
-  const ProcessExitInfo& exit_info = m_instance_->GetExitInfo();
+  const ExitInfo& exit_info = m_instance_->GetExitInfo();
   if (m_step_spec_.IsBatch() || m_step_spec_.IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (exit_info.is_terminated_by_signal) {
@@ -1649,21 +1665,25 @@ void TaskManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      CRANE_TRACE("Received SIGCHLD for pid {}", pid);
-
       // exit_info is set in the ExecutionInterface.
-      auto exit_info = ProcessExitInfo{
+      const auto& exit_info = m_instance_->HandleAndSetExitInfo(ExitInfo{
           .pid = pid,
           .status = status,
-      };
-      m_instance_->Exited(std::move(exit_info));
+      });
+
+      CRANE_TRACE(
+          "Receiving SIGCHLD for task #{} (pid: {}). "
+          "Terminated: {}; Value: {}. ",
+          m_step_spec_.spec.task_id(), pid, exit_info.is_terminated_by_signal,
+          exit_info.value);
 
       if (m_step_spec_.IsCrun()) {
         // TaskStatusChange of a crun task is triggered in
         // CforedManager.
         auto ok_to_free = m_step_spec_.cfored_client->TaskProcessStop(pid);
         if (ok_to_free) {
-          CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
+          CRANE_TRACE("It's ok to unregister task #{}",
+                      m_step_spec_.spec.task_id());
           m_step_spec_.cfored_client->TaskEnd(pid);
         }
       } else /* Batch / Calloc */ {
@@ -1708,6 +1728,44 @@ void TaskManager::EvTaskTimerCb_() {
   } else {
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::ExceedTimeLimit,
                               ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+  }
+}
+
+void TaskManager::EvTaskPollingCb_(
+    std::function<std::optional<ExitInfo>()> poll) {
+  if (!m_instance_) {
+    CRANE_DEBUG("task #{} has already been removed.", g_config.JobId);
+    DelPollingTimer_(m_instance_.get());
+    return;
+  }
+
+  auto result = poll();
+  if (!result) {
+    return;
+  }
+
+  DelPollingTimer_(m_instance_.get());
+  const auto& exit_info = m_instance_->HandleAndSetExitInfo(result.value());
+
+  CRANE_TRACE("task #{} polling finished. Terminated: {}; Value: {}. ",
+              m_step_spec_.spec.task_id(), result->is_terminated_by_signal,
+              result->value);
+
+  if (m_step_spec_.IsCrun()) {
+    // TaskStatusChange of a crun task is triggered in
+    // CforedManager.
+    auto ok_to_free =
+        m_step_spec_.cfored_client->TaskProcessStop(exit_info.pid);
+    if (ok_to_free) {
+      CRANE_TRACE("It's ok to unregister task #{}",
+                  m_step_spec_.spec.task_id());
+      m_step_spec_.cfored_client->TaskEnd(exit_info.pid);
+    }
+  } else /* Batch / Calloc */ {
+    // If the TaskInstance has no process left,
+    // send TaskStatusChange for this task.
+    // See the comment of EvActivateTaskStatusChange_.
+    TaskStoppedAndDoStatusChange();
   }
 }
 

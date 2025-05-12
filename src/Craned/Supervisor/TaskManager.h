@@ -54,11 +54,11 @@ struct CrunMetaInExecution : MetaInExecution {
   ~CrunMetaInExecution() override = default;
 };
 
-struct ProcessExitInfo {
+struct ExitInfo {
   pid_t pid;
   int status;
-  bool is_terminated_by_signal;
   int value;
+  bool is_terminated_by_signal;
 };
 
 class ExecutionInterface {
@@ -68,20 +68,21 @@ class ExecutionInterface {
   virtual ~ExecutionInterface();
 
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
-  [[nodiscard]] const ProcessExitInfo& GetExitInfo() const {
-    return m_exit_info;
-  }
+  [[nodiscard]] const ExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
-  virtual void Exited(ProcessExitInfo exit_info) = 0;
 
-  // If true, the checking is done.
+  // When exiting, the instance uses this function to properly set the fields of
+  // ProcessExitInfo.
+  virtual const ExitInfo& HandleAndSetExitInfo(ExitInfo exit_info) = 0;
+
+  // Some task requires polling to track the status of the job.
   virtual bool IsPollingNeeded() const { return false; }
-  virtual bool Polling() { return true; }
+  virtual std::optional<ExitInfo> Polling() { return std::nullopt; }
 
   // Set from TaskManager
   const StepSpec* step_spec;
@@ -139,7 +140,7 @@ class ExecutionInterface {
 
   pid_t m_pid_{0};  // forked pid
   std::unique_ptr<MetaInExecution> m_meta_{nullptr};
-  ProcessExitInfo m_exit_info{};
+  ExitInfo m_exit_info_{};
 
   EnvMap m_env_{};
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
@@ -161,11 +162,11 @@ class ContainerInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  void Exited(ProcessExitInfo exit_info) override;
+  const ExitInfo& HandleAndSetExitInfo(ExitInfo exit_info) override;
 
   // For container w/o OCI run support, Polling() is mandatory.
   bool IsPollingNeeded() const override { return !m_has_run_cmd_; }
-  bool Polling() override;
+  std::optional<ExitInfo> Polling() override;
 
   // See:
   // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
@@ -224,7 +225,8 @@ class ProcessInstance : public ExecutionInterface {
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
-  void Exited(ProcessExitInfo exit_info) override;
+
+  const ExitInfo& HandleAndSetExitInfo(ExitInfo exit_info) override;
 
   // Polling() is not used for process.
 };
@@ -254,6 +256,7 @@ class TaskManager {
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
           EvTaskTimerCb_();
         });
+
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
     instance->termination_timer = termination_handle;
@@ -266,13 +269,11 @@ class TaskManager {
   }
 
   void AddPollingTimer_(ExecutionInterface* instance, int64_t secs,
-                        std::function<bool()> func) {
+                        std::function<std::optional<ExitInfo>()> func) {
     auto polling_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     polling_handle->on<uvw::timer_event>(
         [&, this](const uvw::timer_event&, uvw::timer_handle& h) {
-          auto done = func();
-          if (done) DelPollingTimer_(instance);
-          // TODO: Activate task status change
+          EvTaskPollingCb_(func);
         });
 
     polling_handle->start(std::chrono::seconds(secs),
@@ -326,6 +327,7 @@ class TaskManager {
 
   void EvSigchldCb_();
   void EvTaskTimerCb_();
+  void EvTaskPollingCb_(std::function<std::optional<ExitInfo>()> func);
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
