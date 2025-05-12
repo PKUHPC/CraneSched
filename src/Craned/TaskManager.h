@@ -305,15 +305,21 @@ class TaskManager {
   }
 
   void AddSignalTimer_(TaskInstance* instance, int64_t secs) {
+    if (instance->task.type() != crane::grpc::Batch) {
+      return;
+    }
+
+    if (instance->signal_timer) {
+      instance->signal_timer->close();
+      instance->signal_timer.reset();
+    }
     auto signal_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     signal_handle->on<uvw::timer_event>(
         [this, instance](const uvw::timer_event&, uvw::timer_handle& h) {
-          if (instance->task.type() == crane::grpc::Batch) {
-            for (const auto& [_, pr_instance] : instance->processes) {
-              KillProcessInstance_(
-                  pr_instance.get(),
-                  instance->task.batch_meta().signal_param().signal_number());
-            }
+          for (const auto& [_, pr_instance] : instance->processes) {
+            KillProcessInstance_(
+                pr_instance.get(),
+                instance->task.batch_meta().signal_param().signal_number());
           }
         });
     signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
@@ -321,8 +327,10 @@ class TaskManager {
   }
 
   static void DelSignalTimer_(TaskInstance* instance) {
-    instance->signal_timer->close();
-    instance->signal_timer.reset();
+    if (instance->signal_timer) {
+      instance->signal_timer->close();
+      instance->signal_timer.reset();
+    }
   }
 
   /**
