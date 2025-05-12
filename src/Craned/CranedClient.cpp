@@ -16,12 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 #include "CranedClient.h"
 
 #include <pmix_common.h>
-
-#include "CranedPublicDefs.h"
 
 namespace Craned {
 
@@ -119,4 +116,4 @@ std::shared_ptr<CranedStub> CranedClient::GetCranedStub(
   return iter->second;
 }
 
-} // namespace craned
+} // namespace Craned
