@@ -496,5 +496,5 @@ struct CgroupSpec {
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
   // Recovered on start,no need to apply res limit.
-  bool recovered;
+  bool recovered{false};
 };

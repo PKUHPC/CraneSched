@@ -1115,7 +1115,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(job_expt.value().cgroup_spec);
+  auto* cg = g_job_mgr->GetCgForJob(task_id);
   if (!cg) {
     CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);
     ActivateTaskStatusChangeAsync_(
@@ -1124,7 +1124,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
         fmt::format("Failed to allocate cgroup for task #{}", task_id));
     return;
   }
-  instance->cgroup = std::move(cg);
+  instance->cgroup = cg;
   instance->cgroup_path = instance->cgroup->GetCgroupString();
 
   // Calloc tasks have no scripts to run. Just return.

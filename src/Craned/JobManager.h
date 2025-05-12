@@ -64,7 +64,10 @@ struct JobInstance {
 class JobManager {
  public:
   JobManager() = default;
+
   bool AllocJobs(std::vector<JobSpec>&& job_specs);
+
+  CgroupInterface* GetCgForJob(task_id_t job_id);
 
   bool FreeJobs(const std::vector<task_id_t>& job_ids);
 

@@ -178,7 +178,7 @@ struct TaskInstance {
   std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
-  std::unique_ptr<CgroupInterface> cgroup;
+  CgroupInterface* cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
   // Task execution results

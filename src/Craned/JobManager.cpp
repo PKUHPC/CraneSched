@@ -58,6 +58,30 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
   return true;
 }
 
+CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
+  CgroupSpec spec;
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      return nullptr;
+    }
+    spec = job->job_spec.cgroup_spec;
+  }
+
+  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(spec);
+  auto* raw_ptr = cg.get();
+  {
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job) {
+      CRANE_ERROR("Cgroup created for a freed job #{}.", job_id);
+      cg->Destroy();
+      return nullptr;
+    }
+    job->cgroup = std::move(cg);
+  }
+  return raw_ptr;
+}
+
 bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
@@ -74,9 +98,8 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
-      cg_ptr_vec.emplace_back(map_ptr->at(job_id).RawPtr()->cgroup.release());
-      uid_vec.emplace_back(
-          map_ptr->at(job_id).RawPtr()->job_spec.cgroup_spec.uid);
+      cg_ptr_vec.push_back(map_ptr->at(job_id).RawPtr()->cgroup.release());
+      uid_vec.push_back(map_ptr->at(job_id).RawPtr()->job_spec.cgroup_spec.uid);
       map_ptr->erase(job_id);
     }
   }
@@ -133,13 +156,12 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
   info.cgroup_exists = false;
 
   if (auto task_ids = this->m_uid_to_job_ids_map_[uid]; task_ids) {
-    if (!task_ids) {
-      CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
-      return std::nullopt;
-    }
     info.cgroup_exists = true;
     info.job_cnt = task_ids->size();
     info.first_task_id = *task_ids->begin();
+  } else {
+    CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
+    return std::nullopt;
   }
   return info;
 }

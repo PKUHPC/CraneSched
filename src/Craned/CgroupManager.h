@@ -352,7 +352,7 @@ class CgroupInterface {
  public:
   CgroupInterface(const std::string &path, struct cgroup *handle,
                   uint64_t id = 0)
-      : m_cgroup_info_(path, handle, id) {};
+      : m_cgroup_info(path, handle, id) {};
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
@@ -372,11 +372,11 @@ class CgroupInterface {
 
   bool MigrateProcIn(pid_t pid);
   const std::string &GetCgroupString() const {
-    return m_cgroup_info_.m_cgroup_path_;
+    return m_cgroup_info.m_cgroup_path_;
   };
 
  protected:
-  Cgroup m_cgroup_info_;
+  Cgroup m_cgroup_info;
 };
 
 class CgroupV1 : public CgroupInterface {
