@@ -968,8 +968,17 @@ CraneExpected<void> AccountManager::ModifyQos(
   case crane::grpc::ModifyField::MaxJobsPerUser:
     item = "max_jobs_per_user";
     break;
+  case crane::grpc::ModifyField::MaxJobsPerAccount:
+    item = "max_jobs_per_account";
+    break;
   case crane::grpc::ModifyField::MaxCpusPerUser:
     item = "max_cpus_per_user";
+    break;
+  case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
+    item = "max_submit_jobs_per_user";
+    break;
+  case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
+    item = "max_submit_jobs_per_account";
     break;
   case crane::grpc::ModifyField::MaxTimeLimitPerTask:
     item = "max_time_limit_per_task";
