@@ -18,9 +18,10 @@
 
 #pragma once
 
+#include "CranedPublicDefs.h"
+
 #include "crane/Lock.h"
 #include "crane/Network.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
