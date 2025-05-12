@@ -1133,6 +1133,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_jobs_per_account = qos_info->max_jobs_per_account();
+  qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
+  qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -1536,7 +1539,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_description(qos.description);
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+    qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+    qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
+    qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
   }
