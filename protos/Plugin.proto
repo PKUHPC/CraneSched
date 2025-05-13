@@ -19,7 +19,7 @@
 syntax = "proto3";
 
 package crane.grpc.plugin; 
-option go_package = "/protos";
+option go_package = "CraneFrontEnd/generated/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/timestamp.proto";
