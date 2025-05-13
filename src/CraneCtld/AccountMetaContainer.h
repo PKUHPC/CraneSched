@@ -18,11 +18,15 @@
 
 #pragma once
 
-#include "AccountManager.h"
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "AccountManager.h"
+
+
 namespace Ctld {
+
+constexpr int kNumStripes = 128;
 
 class AccountMetaContainer final {
  public:
@@ -53,11 +57,19 @@ class AccountMetaContainer final {
 
  private:
 
+  static int StripeForKey_(const std::string& key) {
+    return std::hash<std::string>{}(key) % kNumStripes;
+  }
+
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task, const Qos& qos);
 
   CraneErrCode CheckQosSubmitResourceForAccount_(
       const TaskInCtld& task, const Qos& qos,
-      const AccountManager::AccountMapMutexSharedPtr& account_map_ptr);
+      const std::list<std::string>& account_chain);
+
+  std::array<std::mutex, kNumStripes> m_user_stripes_;
+
+  std::array<std::mutex, kNumStripes> m_account_stripes_;
 
   ResourceMetaMap m_user_meta_map_;
 
