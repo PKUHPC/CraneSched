@@ -24,6 +24,19 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
+
+  std::set<int> account_stripes;
+  std::list<std::string> account_chain;
+  {
+    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+    std::string account_name = task.account;
+    do {
+      account_chain.emplace_back(account_name);
+      account_stripes.insert(StripeForKey_(account_name));
+      account_name = account_map_ptr->at(account_name)->parent_account;
+    } while (!account_name.empty());
+  }
+
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -49,14 +62,20 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
 
-  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-
   CraneErrCode result = CraneErrCode::SUCCESS;
+
+  // Lock the specified user/account to minimize the impact on other users and accounts.
+  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
+  std::list<std::unique_lock<std::mutex>> account_locks;
+  for (const auto account_stripe : account_stripes) {
+    account_locks.emplace_back(m_account_stripes_[account_stripe]);
+  }
 
   result = CheckQosSubmitResourceForUser_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceForAccount_(task, *qos, account_map_ptr);
+  result = CheckQosSubmitResourceForAccount_(task, *qos, account_chain);
   if (result != CraneErrCode::SUCCESS) return result;
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
@@ -78,10 +97,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       },
       QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
 
-
-  std::string account_name = task.account;
-
-  do {
+  for (const auto& account_name : account_chain) {
     m_account_meta_map_.try_emplace_l(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
       auto& qos_to_resource_map = pair.second;
       auto iter = qos_to_resource_map.find(task.qos);
@@ -95,22 +111,38 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       val.submit_jobs_count++;
     },
     QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
-
-    account_name = account_map_ptr->at(account_name)->parent_account;
-  } while (!account_name.empty());
+  }
 
   return result;
 }
 
 bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
+
+  std::set<int> account_stripes;
+  std::list<std::string> account_chain;
+  {
+    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+    std::string account_name = task.account;
+    do {
+      account_chain.emplace_back(account_name);
+      account_stripes.insert(StripeForKey_(account_name));
+      account_name = account_map_ptr->at(account_name)->parent_account;
+    } while (!account_name.empty());
+  }
+
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
 
   CRANE_ASSERT(qos);
 
+  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
+  std::list<std::unique_lock<std::mutex>> account_locks;
+  for (const auto account_stripe : account_stripes) {
+    account_locks.emplace_back(m_account_stripes_[account_stripe]);
+  }
+
   // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
-
-  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
 
   bool result = true;
 
@@ -123,17 +155,14 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
 
   if (!result) return result;
 
-  std::string account_name = task.account;
-
-  do {
+  for (const auto& account_name : account_chain) {
     m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
       auto& val = pair.second[task.qos];
       if (val.jobs_count + 1 > qos->max_jobs_per_account)
         result = false;
     });
     if (!result) break;
-    account_name = account_map_ptr->at(account_name)->parent_account;
-  } while (!account_name.empty());
+  }
 
   return result;
 }
@@ -250,12 +279,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
-    const TaskInCtld& task, const Qos& qos, const AccountManager::AccountMapMutexSharedPtr& account_map_ptr) {
+    const TaskInCtld& task, const Qos& qos, const std::list<std::string>& account_chain) {
 
   auto result = CraneErrCode::SUCCESS;
-  std::string account_name = task.account;
 
-  do {
+  for (const auto& account_name : account_chain) {
     m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
       auto& qos_to_resource_map = pair.second;
       auto iter = qos_to_resource_map.find(task.qos);
@@ -266,8 +294,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
       if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
         result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
     });
-    account_name = account_map_ptr->at(account_name)->parent_account;
-  } while (!account_name.empty());
+  }
 
   return result;
 }
