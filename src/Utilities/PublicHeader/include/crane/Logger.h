@@ -154,7 +154,7 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string &level);
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path, bool console);
+                const std::string &log_file_path, bool enable_console);
 
 // Custom type formatting
 namespace fmt {

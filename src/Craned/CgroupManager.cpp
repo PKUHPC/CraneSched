@@ -38,35 +38,6 @@
 
 namespace Craned {
 
-#ifdef CRANE_ENABLE_BPF
-
-CgroupManager::~CgroupManager() {
-  // Release BpfDeviceMap if no cgroups
-  if (!bpf_runtime_info.Valid()) return;
-  absl::MutexLock lock(bpf_runtime_info.BpfMutex());
-  int bpf_map_count = 0;
-  auto pre_key = std::make_unique<BpfKey>();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr,
-                            pre_key.get(), sizeof(BpfKey)) < 0) {
-    CRANE_ERROR("Failed to get first key of bpf map");
-    return;
-  } else {
-    bpf_map_count++;
-  }
-  auto cur_key = std::make_unique<BpfKey>();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
-                               cur_key.get(), sizeof(BpfKey)) == 0) {
-    *pre_key = *cur_key;
-    ++bpf_map_count;
-  }
-  // always one key for logging
-  if (bpf_map_count == 1) {
-    // All task end
-    BpfRuntimeInfo::RmBpfDeviceMap();
-  }
-}
-#endif
-
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
@@ -1232,6 +1203,12 @@ void BpfRuntimeInfo::CloseBpfObj() {
     dev_map_ = nullptr;
     RmBpfDeviceMap();
   }
+}
+
+void BpfRuntimeInfo::Destroy() {
+  if (!Valid()) return;
+  absl::MutexLock lock(bpf_mtx_.get());
+  if (cgroup_count_ == 0) RmBpfDeviceMap();
 }
 
 void BpfRuntimeInfo::RmBpfDeviceMap() {

@@ -294,6 +294,7 @@ class BpfRuntimeInfo {
   ~BpfRuntimeInfo();
   bool InitializeBpfObj();
   void CloseBpfObj();
+  void Destroy();
   static void RmBpfDeviceMap();
 
   struct bpf_object *BpfObj() { return bpf_obj_; }
@@ -478,9 +479,13 @@ class DedicatedResourceAllocator {
 
 class CgroupManager {
  public:
-#ifdef CRANE_ENABLE_BPF
-  ~CgroupManager();
-#endif
+  CgroupManager() = default;
+  ~CgroupManager() = default;
+
+  CgroupManager(const CgroupManager &) = delete;
+  CgroupManager(CgroupManager &&) = delete;
+  CgroupManager &operator=(const CgroupManager &) = delete;
+  CgroupManager &operator=(CgroupManager &&) = delete;
 
   CraneErrCode Init();
 
