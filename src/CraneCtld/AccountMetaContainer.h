@@ -23,7 +23,6 @@
 
 #include "AccountManager.h"
 
-
 namespace Ctld {
 
 constexpr int kNumStripes = 128;
@@ -34,8 +33,8 @@ class AccountMetaContainer final {
                                               QosResource>;
 
   using ResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string,
-      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+      std::string, QosToResourceMap,
+      phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
       std::shared_mutex>;
@@ -56,12 +55,12 @@ class AccountMetaContainer final {
   void DeleteUserResource(const std::string& username);
 
  private:
-
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task, const Qos& qos);
+  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+                                              const Qos& qos);
 
   CraneErrCode CheckQosSubmitResourceForAccount_(
       const TaskInCtld& task, const Qos& qos,

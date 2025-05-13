@@ -24,7 +24,6 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
-
   std::set<int> account_stripes;
   std::list<std::string> account_chain;
   {
@@ -64,7 +63,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  // Lock the specified user/account to minimize the impact on other users and accounts.
+  // Lock the specified user/account to minimize the impact on other users and
+  // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
 
   std::list<std::unique_lock<std::mutex>> account_locks;
@@ -98,26 +98,27 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
 
   for (const auto& account_name : account_chain) {
-    m_account_meta_map_.try_emplace_l(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& qos_to_resource_map = pair.second;
-      auto iter = qos_to_resource_map.find(task.qos);
-      if (iter == qos_to_resource_map.end()) {
-        qos_to_resource_map.emplace(task.qos,
-                                    QosResource{resource_view, 0, 1});
-        return ;
-      }
+    m_account_meta_map_.try_emplace_l(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& qos_to_resource_map = pair.second;
+          auto iter = qos_to_resource_map.find(task.qos);
+          if (iter == qos_to_resource_map.end()) {
+            qos_to_resource_map.emplace(task.qos,
+                                        QosResource{resource_view, 0, 1});
+            return;
+          }
 
-      auto& val = iter->second;
-      val.submit_jobs_count++;
-    },
-    QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+          auto& val = iter->second;
+          val.submit_jobs_count++;
+        },
+        QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
   }
 
   return result;
 }
 
 bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
-
   std::set<int> account_stripes;
   std::list<std::string> account_chain;
   {
@@ -146,21 +147,24 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
 
   bool result = true;
 
-  m_user_meta_map_.modify_if(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& val = pair.second[task.qos];
-      if (val.jobs_count + 1 > qos->max_jobs_per_user) {
-        result = false;
-      }
-  });
+  m_user_meta_map_.modify_if(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& val = pair.second[task.qos];
+        if (val.jobs_count + 1 > qos->max_jobs_per_user) {
+          result = false;
+        }
+      });
 
   if (!result) return result;
 
   for (const auto& account_name : account_chain) {
-    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& val = pair.second[task.qos];
-      if (val.jobs_count + 1 > qos->max_jobs_per_account)
-        result = false;
-    });
+    m_account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          if (val.jobs_count + 1 > qos->max_jobs_per_account) result = false;
+        });
     if (!result) break;
   }
 
@@ -168,25 +172,27 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
-
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
-  m_user_meta_map_.modify_if(task.Username(), [&](std::pair<const std::string, QosToResourceMap>& pair) {
-    auto& val = pair.second[task.qos];
-    val.jobs_count++;
-  });
+  m_user_meta_map_.modify_if(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& val = pair.second[task.qos];
+        val.jobs_count++;
+      });
 
   const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& val = pair.second[task.qos];
-      val.jobs_count++;
-    });
+    m_account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          val.jobs_count++;
+        });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
-
 }
 
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
@@ -206,14 +212,15 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& val = pair.second[task.qos];
-      CRANE_ASSERT(val.submit_jobs_count > 0);
-      val.submit_jobs_count--;
-    });
+    m_account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          CRANE_ASSERT(val.submit_jobs_count > 0);
+          val.submit_jobs_count--;
+        });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
-
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
@@ -235,13 +242,15 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& val = pair.second[task.qos];
-      CRANE_ASSERT(val.submit_jobs_count > 0);
-      CRANE_ASSERT(val.jobs_count > 0);
-      val.jobs_count--;
-      val.submit_jobs_count--;
-    });
+    m_account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          CRANE_ASSERT(val.submit_jobs_count > 0);
+          CRANE_ASSERT(val.jobs_count > 0);
+          val.jobs_count--;
+          val.submit_jobs_count--;
+        });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
 }
@@ -261,8 +270,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& qos_to_resource_map = pair.second;
         auto iter = qos_to_resource_map.find(task.qos);
-        if (iter == qos_to_resource_map.end())
-          return;
+        if (iter == qos_to_resource_map.end()) return;
 
         auto& val = iter->second;
         if (val.resource.CpuCount() + resource_view.CpuCount() >
@@ -279,21 +287,22 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
-    const TaskInCtld& task, const Qos& qos, const std::list<std::string>& account_chain) {
-
+    const TaskInCtld& task, const Qos& qos,
+    const std::list<std::string>& account_chain) {
   auto result = CraneErrCode::SUCCESS;
 
   for (const auto& account_name : account_chain) {
-    m_account_meta_map_.modify_if(account_name, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      auto& qos_to_resource_map = pair.second;
-      auto iter = qos_to_resource_map.find(task.qos);
-      if (iter == qos_to_resource_map.end())
-        return;
+    m_account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& qos_to_resource_map = pair.second;
+          auto iter = qos_to_resource_map.find(task.qos);
+          if (iter == qos_to_resource_map.end()) return;
 
-      auto& val = iter->second;
-      if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
-        result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
-    });
+          auto& val = iter->second;
+          if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
+            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+        });
   }
 
   return result;
