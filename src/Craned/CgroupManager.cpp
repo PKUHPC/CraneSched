@@ -1208,7 +1208,24 @@ void BpfRuntimeInfo::CloseBpfObj() {
 void BpfRuntimeInfo::Destroy() {
   if (!Valid()) return;
   absl::MutexLock lock(bpf_mtx_.get());
-  if (cgroup_count_ == 0) RmBpfDeviceMap();
+  auto pre_key = std::make_unique<BpfKey>();
+  if (bpf_map__get_next_key(dev_map_, nullptr, pre_key.get(), sizeof(BpfKey)) <
+      0) {
+    return;
+  }
+
+  int bpf_map_count = 1;
+  auto cur_key = std::make_unique<BpfKey>();
+  while (bpf_map__get_next_key(dev_map_, pre_key.get(), cur_key.get(),
+                               sizeof(BpfKey)) == 0) {
+    pre_key.swap(cur_key);
+    ++bpf_map_count;
+  }
+  // always one key for logging
+  if (bpf_map_count == 1) {
+    // All task end
+    RmBpfDeviceMap();
+  }
 }
 
 void BpfRuntimeInfo::RmBpfDeviceMap() {
