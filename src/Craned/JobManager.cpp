@@ -65,6 +65,9 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
     if (!job) {
       return nullptr;
     }
+    if (job->cgroup) {
+      return job->cgroup.get();
+    }
     spec = job->job_spec.cgroup_spec;
   }
 
@@ -167,12 +170,7 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 }
 
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
-  auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_instance) return false;
-  auto& cg = job_instance->cgroup;
-  if (!cg) {
-    cg = g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
-  }
+  auto cg = GetCgForJob(job_id);
   if (!cg) return false;
 
   return cg->MigrateProcIn(pid);
