@@ -2309,6 +2309,9 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // An offline craned shouldn't be scheduled.
     if (!craned_meta->alive || craned_meta->drain) continue;
 
+    node_selection_info_ref.InitCostAndTimeAvailResMap(craned_id,
+                                                       craned_meta->res_total);
+
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
     std::vector<std::pair<absl::Time, std::pair<bool, ResourceInNode>>>
@@ -2329,6 +2332,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         // res_avail = 0 and will cause a severe error where res_avail < 0.
         end_time_task_id_vec.emplace_back(end_time, task_id);
         time_res_vec.emplace_back(end_time, std::make_pair(true, res));
+        node_selection_info_ref.UpdateCost(craned_id, now, end_time, res);
       }
     }
 
@@ -2376,6 +2380,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         time_res_vec.emplace_back(std::max(now, end_time),
                                   std::make_pair(true, resv_in_node.res_total));
         first_resv_time = std::min(first_resv_time, start_time);
+        node_selection_info_ref.UpdateCost(craned_id, start_time, end_time,
+                                           resv_in_node.res_total);
       }
       node_selection_info_ref.SetFirstResvTime(craned_id, first_resv_time);
     }
@@ -2387,8 +2393,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // Calculate how many resources are available at [now, first task end,
     // second task end, ...] in this node.
     auto& time_avail_res_map =
-        node_selection_info_ref.InitCostAndGetTimeAvailResMap(
-            craned_id, craned_meta->res_total);
+        node_selection_info_ref.GetTimeAvailResMap(craned_id);
 
     // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
     // null.
@@ -2499,6 +2504,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
     if (!craned_meta_ptr->alive || craned_meta_ptr->drain) continue;
 
     node_time_res_vec_map[craned_id];
+    node_selection_info_ref.InitCostAndTimeAvailResMap(
+        craned_id, resv_meta->logical_part.res_total.at(craned_id));
   }
 
   for (const auto& res :
@@ -2510,6 +2517,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
       auto iter = node_time_res_vec_map.find(craned_id);
       if (iter != node_time_res_vec_map.end()) {
         iter->second.emplace_back(end_time, res_in_node);
+        node_selection_info_ref.UpdateCost(craned_id, now, end_time,
+                                           res_in_node);
       }
     }
   }
@@ -2521,8 +2530,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
         [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
 
     auto& time_avail_res_map =
-        node_selection_info_ref.InitCostAndGetTimeAvailResMap(
-            craned_id, resv_meta->logical_part.res_total.at(craned_id));
+        node_selection_info_ref.GetTimeAvailResMap(craned_id);
 
     time_avail_res_map[now] = resv_meta->logical_part.res_avail.at(craned_id);
 
@@ -2903,7 +2911,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   // Increase the running task num in Craned `crane_id`.
   for (CranedId const& craned_id : craned_ids) {
     ResourceInNode const& task_res_in_node = resources.at(craned_id);
-    node_info.UpdateCost(craned_id, task_end_time - expected_start_time,
+    node_info.UpdateCost(craned_id, expected_start_time, task_end_time,
                          task_res_in_node);
     TimeAvailResMap& time_avail_res_map =
         node_info.GetTimeAvailResMap(craned_id);
