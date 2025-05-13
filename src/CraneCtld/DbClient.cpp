@@ -1771,7 +1771,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_cpus_per_user =
         qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
     qos->max_submit_jobs_per_user =
-      qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
     qos->max_submit_jobs_per_account =
         qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
@@ -1794,8 +1794,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxTimeLimitPerTask(),
       Qos::FieldStringOfMaxJobsPerAccount(),
       Qos::FieldStringOfMaxSubmitJobsPerUser(),
-      Qos::FieldStringOfMaxSubmitJobsPerAccount()
-  };
+      Qos::FieldStringOfMaxSubmitJobsPerAccount()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
              int64_t, int64_t, int64_t, int64_t>
       values{false,
