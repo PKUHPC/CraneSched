@@ -246,7 +246,7 @@ CraneErrCode CgroupManager::Recover(
       if (cg_unique_ptr == nullptr) {
         CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
       }
-      // cg_unique_ptr.reset();
+      cg_unique_ptr->Destroy();
     }
   }
   return CraneErrCode::SUCCESS;
@@ -1206,8 +1206,8 @@ void BpfRuntimeInfo::CloseBpfObj() {
 }
 
 void BpfRuntimeInfo::Destroy() {
-  if (!Valid()) return;
   absl::MutexLock lock(bpf_mtx_.get());
+  if (!Valid()) return;
   auto pre_key = std::make_unique<BpfKey>();
   if (bpf_map__get_next_key(dev_map_, nullptr, pre_key.get(), sizeof(BpfKey)) <
       0) {
