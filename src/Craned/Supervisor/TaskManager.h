@@ -202,11 +202,14 @@ class ContainerInstance : public ExecutionInterface {
   // Get container state from OCI runtime
   std::expected<ContainerState, CraneErrCode> GetContainerState_() const;
 
-  // Create container using OCI runtime
-  CraneErrCode CreateContainer_() const;
+  // Create container
+  CraneErrCode CreateContainer_();
 
-  // CraneErrCode StartContainer_() const;
-  // CraneErrCode RunContainer_() const;
+  // Start container
+  CraneErrCode StartContainer_();
+
+  // Run container using fork()
+  CraneErrCode RunContainer_();
 
   std::string ParseOCICmdPattern_(const std::string&) const;
 

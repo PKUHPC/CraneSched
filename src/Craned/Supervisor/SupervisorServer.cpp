@@ -18,7 +18,9 @@
 
 #include "SupervisorServer.h"
 
+#include "SupervisorPublicDefs.h"
 #include "TaskManager.h"
+#include "crane/Logger.h"
 
 grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
@@ -35,6 +37,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
   } else {
     response->set_ok(false);
   }
+
   return Status::OK;
 }
 
@@ -44,6 +47,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::CheckTaskStatus(
     crane::grpc::supervisor::CheckTaskStatusReply* response) {
   auto pid_future = g_task_mgr->CheckTaskStatusAsync();
   pid_future.wait();
+
   auto pid_expt = pid_future.get();
   if (pid_expt.has_value()) {
     response->set_job_id(g_config.JobId);

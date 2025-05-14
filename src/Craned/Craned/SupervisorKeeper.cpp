@@ -45,7 +45,8 @@ CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
   if (ok.ok() && reply.ok()) {
     return std::pair{reply.job_id(), reply.pid()};
   } else {
-    CRANE_WARN("CheckTaskStatus failed: reply {},{}", reply.ok(),ok.error_message());
+    CRANE_WARN("CheckTaskStatus failed: reply {}, {}", reply.ok(),
+               ok.error_message());
     return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
 }
@@ -105,9 +106,8 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
               CraneExpected<std::pair<task_id_t, pid_t>> task_status =
                   stub->CheckTaskStatus();
               if (!task_status) {
-                CRANE_ERROR(
-                    "CheckTaskStatus for {} failed, removing it.",
-                    file.string());
+                CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
+                            file.string());
                 std::filesystem::remove(file);
                 all_supervisor_reply.count_down();
                 return;
@@ -121,7 +121,7 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
       all_supervisor_reply.wait();
       return tasks;
     } else {
-      CRANE_WARN("Supervisor socket dir dose not exit, skip recovery.");
+      CRANE_WARN("Supervisor socket directory not exists, skipping recovery.");
       return {};
     }
   } catch (const std::exception& e) {

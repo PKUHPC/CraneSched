@@ -31,6 +31,11 @@
 using Supervisor::g_config;
 
 void InitFromStdin(int argc, char** argv) {
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+
   cxxopts::Options options("CSupervisor");
 
   // clang-format off
@@ -58,9 +63,6 @@ void InitFromStdin(int argc, char** argv) {
     fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
-
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
 
   auto istream = FileInputStream(STDIN_FILENO);
   crane::grpc::supervisor::InitSupervisorRequest msg;
@@ -116,11 +118,10 @@ void InitFromStdin(int argc, char** argv) {
   }
 
   if (!ok) {
-    using google::protobuf::io::FileOutputStream;
-    using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-    auto ostream = FileOutputStream(STDOUT_FILENO);
     crane::grpc::supervisor::SupervisorReady msg;
     msg.set_ok(ok);
+
+    auto ostream = FileOutputStream(STDOUT_FILENO);
     SerializeDelimitedToZeroCopyStream(msg, &ostream);
     ostream.Flush();
     std::abort();
@@ -142,21 +143,22 @@ bool CreateRequiredDirectories() {
 }
 
 void GlobalVariableInit() {
-  bool ok = CreateRequiredDirectories();
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+
+  bool ok = CreateRequiredDirectories();
   auto ostream = FileOutputStream(STDOUT_FILENO);
+  crane::grpc::supervisor::SupervisorReady msg;
 
   // Ready for grpc call
-  crane::grpc::supervisor::SupervisorReady msg;
-  msg.set_ok(ok);
   if (!ok) {
+    msg.set_ok(false);
     SerializeDelimitedToZeroCopyStream(msg, &ostream);
     ostream.Flush();
     std::abort();
   }
 
-  // Ignore following sig
+  // Ignore the following signals
   signal(SIGINT, SIG_IGN);
   signal(SIGTERM, SIG_IGN);
   signal(SIGTSTP, SIG_IGN);
@@ -187,6 +189,7 @@ void GlobalVariableInit() {
 
   g_server = std::make_unique<Supervisor::SupervisorServer>();
 
+  msg.set_ok(true);
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();
   if (!ok) std::abort();

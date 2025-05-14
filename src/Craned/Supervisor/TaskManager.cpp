@@ -391,10 +391,9 @@ void ExecutionInterface::SetChildProcessCrunX11_(uint16_t port) {
       "MIT-MAGIC-COOKIE-1",
       proto_x11_meta.cookie().c_str(),
   };
-  std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
-
   xauth_argv.push_back(nullptr);
 
+  // TODO: Refactor using util::os::RunSubprocess()
   subprocess_s subprocess{};
   int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
   if (0 != result) {
@@ -473,7 +472,7 @@ std::string ContainerInstance::ParseOCICmdPattern_(
 }
 
 // If OCI runtime does not support `run` command, we have to use `create`.
-CraneErrCode ContainerInstance::CreateContainer_() const {
+CraneErrCode ContainerInstance::CreateContainer_() {
   auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeCreate);
   auto [rc, stdout, stderr] = util::os::RunSubprocess(cmd);
   if (rc != 0) {
@@ -486,225 +485,24 @@ CraneErrCode ContainerInstance::CreateContainer_() const {
   return CraneErrCode::SUCCESS;
 }
 
-std::expected<ContainerInstance::ContainerState, CraneErrCode>
-ContainerInstance::GetContainerState_() const {
-  using json = nlohmann::json;
-
-  auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+CraneErrCode ContainerInstance::StartContainer_() {
+  // `start` is non-blocking. It doesn't wait for the container to stop.
+  // So we simply use subprocess to run it.
+  auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeStart);
   auto [rc, stdout, stderr] = util::os::RunSubprocess(cmd);
   if (rc != 0) {
     CRANE_ERROR(
-        "Failed to query container state for task #{}: stdout: {}; stderr: {}.",
+        "Failed to start container for task #{}: stdout: {}; stderr: {}.",
         step_spec->spec.task_id(), rc, stdout, stderr);
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
-  }
-
-  auto state = json::parse(stdout, nullptr, false);
-  if (state.is_discarded()) {
-    CRANE_ERROR("Failed to parse OCI state output: {}", stdout);
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
-  }
-
-  std::string status;
-  pid_t pid = 0;
-
-  try {
-    status = state["status"];
-    pid = state["pid"];
-  } catch (json::exception& e) {
-    CRANE_ERROR("Failed to parse OCI state output: {}", e.what());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
-  }
-
-  if (auto result = ParseContainerStatus(status); result) {
-    return ContainerState{result.value(), pid};
-  } else {
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
-  }
-}
-
-CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
-    const std::string& src, const std::string& dst) const {
-  using json = nlohmann::json;
-
-  // Check if bundle is valid
-  auto src_config = std::filesystem::path(src) / "config.json";
-  auto src_rootfs = std::filesystem::path(src) / "rootfs";
-  if (!std::filesystem::exists(src_config) ||
-      !std::filesystem::exists(src_rootfs)) {
-    CRANE_ERROR("Bundle provided by task #{} not exists : {}",
-                step_spec->spec.task_id(), src_config.string());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  std::ifstream fin{src_config};
-  if (!fin) {
-    CRANE_ERROR("Failed to open bundle config provided by task #{}: {}",
-                step_spec->spec.task_id(), src_config.string());
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-
-  json config = json::parse(fin, nullptr, false);
-  if (config.is_discarded()) {
-    CRANE_ERROR("Bundle config provided by task #{} is invalid: {}",
-                step_spec->spec.task_id(), src_config.string());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  try {
-    // Set root object, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#root
-    // Set real rootfs path in the modified config.
-    config["root"]["path"] = src_rootfs;
-
-    // Set mounts array, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
-    // Bind mount script into the container
-    auto mounts = config["mounts"].get<std::vector<json>>();
-    std::string parsed_sh_mounted_path = "/tmp/crane/script.sh";
-    mounts.emplace_back(json::object({
-        {"destination", parsed_sh_mounted_path},
-        {"source", m_meta_->parsed_sh_script_path},
-        {"options", json::array({"bind", "ro"})},
-    }));
-    config["mounts"] = mounts;
-
-    // Set process object, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
-    auto& process = config["process"];
-
-    // Set pass-through mode.
-    // TODO: Check if interactive task is supported.
-    process["terminal"] = false;
-
-    // Write environment variables in IEEE format.
-    std::vector<std::string> env_list;
-    for (const auto& [name, value] : m_env_)
-      env_list.emplace_back(fmt::format("{}={}", name, value));
-    process["env"] = env_list;
-
-    // For container, we use `/bin/sh` as the default interpreter.
-    std::string real_exe = "/bin/sh";
-    if (step_spec->IsBatch() &&
-        !step_spec->spec.batch_meta().interpreter().empty())
-      real_exe = step_spec->spec.batch_meta().interpreter();
-
-    std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
-    args.emplace_back(std::move(parsed_sh_mounted_path));
-    process["args"] = args;
-  } catch (json::exception& e) {
-    CRANE_ERROR("Failed to generate bundle config for task #{}: {}",
-                step_spec->spec.task_id(), e.what());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  // Write the modified config
-  auto dst_config = std::filesystem::path(dst) / "config.json";
-  std::ofstream fout{dst_config};
-  if (!fout) {
-    CRANE_ERROR("Failed to write bundle config for task #{}: {}",
-                step_spec->spec.task_id(), dst_config.string());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  fout << config.dump(4);
-  fout.flush();
 
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ContainerInstance::Prepare() {
-  // Generate path and params.
-  m_temp_path_ =
-      g_config.Container.TempDir / fmt::format("{}", step_spec->spec.task_id());
-  m_bundle_path_ = step_spec->spec.container();
-  m_env_ = GetChildProcessEnv_();
-  m_has_run_cmd_ = !g_config.Container.RuntimeRun.empty();
-
-  // Check relative path
-  if (m_bundle_path_.is_relative())
-    m_bundle_path_ = step_spec->spec.cwd() / m_bundle_path_;
-
-  // Write script into the temp folder
-  auto sh_path =
-      m_temp_path_ / fmt::format("Crane-{}.sh", step_spec->spec.task_id());
-  if (!util::os::CreateFoldersForFile(sh_path)) {
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}",
-                step_spec->spec.task_id());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  if (step_spec->IsBatch())
-    fputs(step_spec->spec.batch_meta().sh_script().c_str(), fptr);
-  else  // Crun
-    fputs(step_spec->spec.interactive_meta().sh_script().c_str(), fptr);
-
-  fclose(fptr);
-
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-
-  // Write meta
-  if (step_spec->IsBatch()) {
-    // Prepare file output name for batch tasks.
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
-    auto meta = std::make_unique<BatchMetaInExecution>();
-    meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        step_spec->spec.batch_meta().output_file_pattern(),
-        step_spec->spec.cwd());
-
-    // If -e / --error is not defined, leave
-    // batch_meta.parsed_error_file_pattern empty;
-    if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
-      meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          step_spec->spec.batch_meta().error_file_pattern(),
-          step_spec->spec.cwd());
-    }
-
-    m_meta_ = std::move(meta);
-  } else {
-    m_meta_ = std::make_unique<CrunMetaInExecution>();
-  }
-  m_meta_->parsed_sh_script_path = sh_path;
-
-  // Modify bundle
-  auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
-  if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
-                step_spec->spec.task_id());
-    return err;
-  }
-
-  // If the runtime supports `run` command, we can just return.
-  if (m_has_run_cmd_) {
-    m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
-    CRANE_DEBUG("Runtime {} supports run command, will use {}. ",
-                g_config.Container.RuntimeBin, m_executable_);
-    return CraneErrCode::SUCCESS;
-  }
-
-  // Otherwise, we need to create the container before starting it.
-  err = CreateContainer_();
-  if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to create container for task #{}",
-                step_spec->spec.task_id());
-    return err;
-  }
-
-  // After creating the container, we can start it later.
-  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeStart);
-
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode ContainerInstance::Spawn() {
+CraneErrCode ContainerInstance::RunContainer_() {
+  // `run` is a blocking command, it waits for the container to stop.
+  // So we are forking a child process to run it and will collect SIGCHLD later.
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -904,6 +702,236 @@ CraneErrCode ContainerInstance::Spawn() {
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
     abort();
+  }
+}
+
+std::expected<ContainerInstance::ContainerState, CraneErrCode>
+ContainerInstance::GetContainerState_() const {
+  using json = nlohmann::json;
+
+  auto cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+  auto [rc, stdout, stderr] = util::os::RunSubprocess(cmd);
+  if (rc != 0) {
+    CRANE_ERROR(
+        "Failed to query container state for task #{}: stdout: {}; stderr: {}.",
+        step_spec->spec.task_id(), rc, stdout, stderr);
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  auto state = json::parse(stdout, nullptr, false);
+  if (state.is_discarded()) {
+    CRANE_ERROR("Failed to parse OCI state output: {}", stdout);
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  std::string status;
+  pid_t pid = 0;
+
+  try {
+    status = state["status"];
+    pid = state["pid"];
+  } catch (json::exception& e) {
+    CRANE_ERROR("Failed to parse OCI state output: {}", e.what());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  if (auto result = ParseContainerStatus(status); result) {
+    return ContainerState{result.value(), pid};
+  } else {
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+}
+
+CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
+    const std::string& src, const std::string& dst) const {
+  using json = nlohmann::json;
+
+  // Check if bundle is valid
+  auto src_config = std::filesystem::path(src) / "config.json";
+  auto src_rootfs = std::filesystem::path(src) / "rootfs";
+  if (!std::filesystem::exists(src_config) ||
+      !std::filesystem::exists(src_rootfs)) {
+    CRANE_ERROR("Bundle provided by task #{} not exists : {}",
+                step_spec->spec.task_id(), src_config.string());
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  std::ifstream fin{src_config};
+  if (!fin) {
+    CRANE_ERROR("Failed to open bundle config provided by task #{}: {}",
+                step_spec->spec.task_id(), src_config.string());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  json config = json::parse(fin, nullptr, false);
+  if (config.is_discarded()) {
+    CRANE_ERROR("Bundle config provided by task #{} is invalid: {}",
+                step_spec->spec.task_id(), src_config.string());
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  try {
+    // Set root object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#root
+    // Set real rootfs path in the modified config.
+    config["root"]["path"] = src_rootfs;
+
+    // Set mounts array, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
+    // Bind mount script into the container
+    auto mounts = config["mounts"].get<std::vector<json>>();
+    std::string parsed_sh_mounted_path = "/tmp/crane/script.sh";
+    mounts.emplace_back(json::object({
+        {"destination", parsed_sh_mounted_path},
+        {"source", m_meta_->parsed_sh_script_path},
+        {"options", json::array({"bind", "ro"})},
+    }));
+    config["mounts"] = mounts;
+
+    // Set process object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
+    auto& process = config["process"];
+
+    // Set pass-through mode.
+    // TODO: Check if interactive task is supported.
+    process["terminal"] = false;
+
+    // Write environment variables in IEEE format.
+    std::vector<std::string> env_list;
+    for (const auto& [name, value] : m_env_)
+      env_list.emplace_back(fmt::format("{}={}", name, value));
+    process["env"] = env_list;
+
+    // For container, we use `/bin/sh` as the default interpreter.
+    std::string real_exe = "/bin/sh";
+    if (step_spec->IsBatch() &&
+        !step_spec->spec.batch_meta().interpreter().empty())
+      real_exe = step_spec->spec.batch_meta().interpreter();
+
+    std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
+    args.emplace_back(std::move(parsed_sh_mounted_path));
+    process["args"] = args;
+  } catch (json::exception& e) {
+    CRANE_ERROR("Failed to generate bundle config for task #{}: {}",
+                step_spec->spec.task_id(), e.what());
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  // Write the modified config
+  auto dst_config = std::filesystem::path(dst) / "config.json";
+  std::ofstream fout{dst_config};
+  if (!fout) {
+    CRANE_ERROR("Failed to write bundle config for task #{}: {}",
+                step_spec->spec.task_id(), dst_config.string());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  fout << config.dump(4);
+  fout.flush();
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::Prepare() {
+  // Generate path and params.
+  m_temp_path_ =
+      g_config.Container.TempDir / fmt::format("{}", step_spec->spec.task_id());
+  m_bundle_path_ = step_spec->spec.container();
+  m_env_ = GetChildProcessEnv_();
+  m_has_run_cmd_ = !g_config.Container.RuntimeRun.empty();
+
+  CRANE_TRACE("Container job received, bundle: {}, temp: {}, has_run_cmd: {}",
+              m_bundle_path_.string(), m_temp_path_.string(), m_has_run_cmd_);
+
+  // Check relative path
+  if (m_bundle_path_.is_relative())
+    m_bundle_path_ = step_spec->spec.cwd() / m_bundle_path_;
+
+  // Write script into the temp folder
+  auto sh_path =
+      m_temp_path_ / fmt::format("Crane-{}.sh", step_spec->spec.task_id());
+  if (!util::os::CreateFoldersForFile(sh_path)) {
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  FILE* fptr = fopen(sh_path.c_str(), "w");
+  if (fptr == nullptr) {
+    CRANE_ERROR("Failed write the script for task #{}",
+                step_spec->spec.task_id());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (step_spec->IsBatch())
+    fputs(step_spec->spec.batch_meta().sh_script().c_str(), fptr);
+  else  // Crun
+    fputs(step_spec->spec.interactive_meta().sh_script().c_str(), fptr);
+
+  fclose(fptr);
+
+  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+
+  // Write meta
+  if (step_spec->IsBatch()) {
+    // Prepare file output name for batch tasks.
+    /* Perform file name substitutions
+     * %j - Job ID
+     * %u - Username
+     * %x - Job name
+     */
+    auto meta = std::make_unique<BatchMetaInExecution>();
+    meta->parsed_output_file_pattern = ParseFilePathPattern_(
+        step_spec->spec.batch_meta().output_file_pattern(),
+        step_spec->spec.cwd());
+
+    // If -e / --error is not defined, leave
+    // batch_meta.parsed_error_file_pattern empty;
+    if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
+      meta->parsed_error_file_pattern = ParseFilePathPattern_(
+          step_spec->spec.batch_meta().error_file_pattern(),
+          step_spec->spec.cwd());
+    }
+
+    m_meta_ = std::move(meta);
+  } else {
+    m_meta_ = std::make_unique<CrunMetaInExecution>();
+  }
+  m_meta_->parsed_sh_script_path = sh_path;
+
+  // Modify bundle
+  auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
+                step_spec->spec.task_id());
+    return err;
+  }
+
+  // If the runtime supports `run` command, we can just return.
+  if (m_has_run_cmd_) {
+    m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
+    CRANE_DEBUG("Runtime {} supports run command, will use {}. ",
+                g_config.Container.RuntimeBin, m_executable_);
+    return CraneErrCode::SUCCESS;
+  }
+
+  // Otherwise, we need to create the container before starting it.
+  err = CreateContainer_();
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to create container for task #{}",
+                step_spec->spec.task_id());
+    return err;
+  }
+
+  // After creating the container, we can start it later.
+  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeStart);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::Spawn() {
+  CRANE_INFO("Spawning container for task #{}", step_spec->spec.task_id());
+  if (m_has_run_cmd_) {
+    return RunContainer_();
+  } else {
+    return StartContainer_();
   }
 }
 
@@ -1484,13 +1512,13 @@ void TaskManager::TaskStoppedAndDoStatusChange() {
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeSpawnProcessFail,
                               std::nullopt);
-    break;
+    return;
 
   case CraneErrCode::ERR_CGROUP:
     // FIXME: Not used.
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeCgroupError, std::nullopt);
-    break;
+    return;
 
   default:
     break;
@@ -1547,12 +1575,6 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
 
   if (spec.container().length() != 0) {
     // Container
-    if (!g_config.Container.Enabled) {
-      // Container job is not supported in this node.
-      elem.pid_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
-      return pid_future;
-    }
-
     elem.instance = std::make_unique<ContainerInstance>(&m_step_spec_);
   } else {
     // Process
@@ -1567,15 +1589,14 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
 void TaskManager::LaunchExecution_() {
   m_instance_->pwd.Init(m_instance_->step_spec->spec.uid());
   if (!m_instance_->pwd.Valid()) {
-    CRANE_DEBUG("[Job #{}] Failed to look up password entry for uid {} of task",
+    CRANE_DEBUG("Failed to look up password entry for uid {} of task",
                 m_instance_->step_spec->spec.task_id(),
                 m_instance_->step_spec->spec.uid());
     ActivateTaskStatusChange_(
         crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
-        fmt::format(
-            "[Job #{}] Failed to look up password entry for uid {} of task",
-            m_instance_->step_spec->spec.task_id(),
-            m_instance_->step_spec->spec.uid()));
+        fmt::format("Failed to look up password entry for uid {} of task",
+                    m_instance_->step_spec->spec.task_id(),
+                    m_instance_->step_spec->spec.uid()));
     return;
   }
 
@@ -1585,8 +1606,7 @@ void TaskManager::LaunchExecution_() {
   // Prepare for execution
   CraneErrCode err = m_instance_->Prepare();
   if (err != CraneErrCode::SUCCESS) {
-    CRANE_DEBUG("[Job #{}] Failed to prepare task",
-                m_step_spec_.spec.task_id());
+    CRANE_DEBUG("Failed to prepare task", m_step_spec_.spec.task_id());
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeFileNotFound,
                               fmt::format("Failed to prepare task"));
@@ -1600,8 +1620,7 @@ void TaskManager::LaunchExecution_() {
     m_step_spec_.cfored_client = std::move(cfored_client);
   }
 
-  CRANE_TRACE("[Job #{}] Spawning process in task",
-              m_step_spec_.spec.task_id());
+  CRANE_TRACE("Spawning process in task {}", m_step_spec_.spec.task_id());
 
   err = m_instance_->Spawn();
   if (err != CraneErrCode::SUCCESS) {

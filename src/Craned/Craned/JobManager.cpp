@@ -437,6 +437,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       container_conf->set_run_cmd(g_config.Container.RuntimeRun);
       container_conf->set_create_cmd(g_config.Container.RuntimeCreate);
       container_conf->set_start_cmd(g_config.Container.RuntimeStart);
+
+      CRANE_INFO("Container is enabled, runtime bin: {}",
+                 g_config.Container.RuntimeBin);
     }
 
     if (g_config.Plugin.Enabled) {
@@ -466,11 +469,11 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream, nullptr);
-    if (!ok || !msg.ok()) {
+    if (!ok || !supervisor_ready.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
                     step->step_spec.task_id(), strerror(istream.GetErrno()));
-      if (!msg.ok())
+      if (!supervisor_ready.ok())
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     step->step_spec.task_id());
 
