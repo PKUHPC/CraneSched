@@ -84,7 +84,7 @@ class ProcessInstance {
 
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t m_pid_;
+  pid_t m_pid_{-1};
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;
@@ -105,7 +105,7 @@ class ProcessInstance {
    */
   std::function<void(bool, int, void*)> m_finish_cb_;
 
-  void* m_user_data_;
+  void* m_user_data_{nullptr};
   std::function<void(void*)> m_clean_cb_;
 };
 
@@ -131,9 +131,9 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
 
 // also arg for EvSigchldTimerCb_
 struct ProcSigchldInfo {
-  pid_t pid;
-  bool is_terminated_by_signal;
-  int value;
+  pid_t pid{};
+  bool is_terminated_by_signal{};
+  int value{};
 
   std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
@@ -437,7 +437,7 @@ class TaskManager {
 
   std::thread m_uvw_thread_;
 
-  static inline TaskManager* m_instance_ptr_;
+  static inline TaskManager* s_instance_ptr_;
 };
 }  // namespace Craned
 

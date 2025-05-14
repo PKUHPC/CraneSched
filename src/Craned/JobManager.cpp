@@ -23,11 +23,11 @@
 namespace Craned {
 
 EnvMap JobSpec::GetJobEnvMap() const {
-  auto env_map = CgroupManager::GetResourceEnvMapByResInNode(
-      this->cgroup_spec.res_in_node);
+  auto env_map =
+      CgroupManager::GetResourceEnvMapByResInNode(this->cg_spec.res_in_node);
 
   // TODO: Move all job level env to here.
-  env_map.emplace("CRANE_JOB_ID", std::to_string(this->cgroup_spec.job_id));
+  env_map.emplace("CRANE_JOB_ID", std::to_string(this->cg_spec.job_id));
   return env_map;
 }
 
@@ -37,8 +37,8 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
   auto begin = std::chrono::steady_clock::now();
 
   for (auto& job_spec : job_specs) {
-    task_id_t job_id = job_spec.cgroup_spec.job_id;
-    uid_t uid = job_spec.cgroup_spec.uid;
+    task_id_t job_id = job_spec.cg_spec.job_id;
+    uid_t uid = job_spec.cg_spec.uid;
     CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
                 uid);
     m_job_map_.Emplace(job_id, JobInstance(job_spec));
@@ -68,7 +68,7 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
     if (job->cgroup) {
       return job->cgroup.get();
     }
-    spec = job->job_spec.cgroup_spec;
+    spec = job->job_spec.cg_spec;
   }
 
   auto cg = g_cg_mgr->AllocateAndGetJobCgroup(spec);
@@ -101,8 +101,10 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
-      cg_ptr_vec.push_back(map_ptr->at(job_id).RawPtr()->cgroup.release());
-      uid_vec.push_back(map_ptr->at(job_id).RawPtr()->job_spec.cgroup_spec.uid);
+      JobInstance* job_inst = map_ptr->at(job_id).RawPtr();
+
+      cg_ptr_vec.push_back(job_inst->cgroup.release());
+      uid_vec.push_back(job_inst->job_spec.cg_spec.uid);
       map_ptr->erase(job_id);
     }
   }
@@ -170,7 +172,7 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 }
 
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
-  auto cg = GetCgForJob(job_id);
+  CgroupInterface* cg = GetCgForJob(job_id);
   if (!cg) return false;
 
   return cg->MigrateProcIn(pid);

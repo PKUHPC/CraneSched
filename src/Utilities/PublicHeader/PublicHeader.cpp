@@ -790,7 +790,7 @@ CgroupSpec::CgroupSpec(const crane::grpc::JobSpec& job_spec)
     : job_id(job_spec.job_id()),
       uid(job_spec.uid()),
       res_in_node(static_cast<crane::grpc::ResourceInNode>(job_spec.res())),
-      execution_node(job_spec.execution_node()),
+      exec_node(job_spec.execution_node()),
       recovered(false) {}
 
 CgroupSpec::CgroupSpec(const task_id_t job_id, const uid_t uid,
@@ -799,12 +799,12 @@ CgroupSpec::CgroupSpec(const task_id_t job_id, const uid_t uid,
     : job_id(job_id),
       uid(uid),
       res_in_node(static_cast<crane::grpc::ResourceInNode>(res_in_node)),
-      execution_node(execution_node),
+      exec_node(execution_node),
       recovered(false) {}
 
 void CgroupSpec::SetJobSpec(crane::grpc::JobSpec* job_spec) const {
   job_spec->set_job_id(this->job_id);
   job_spec->set_uid(this->uid);
   *job_spec->mutable_res() = this->res_in_node;
-  job_spec->set_execution_node(this->execution_node);
+  job_spec->set_execution_node(this->exec_node);
 }

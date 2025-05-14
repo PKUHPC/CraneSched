@@ -27,33 +27,35 @@ namespace Craned {
 
 struct JobSpec {
   JobSpec() = default;
-  explicit JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
+  explicit JobSpec(const crane::grpc::JobSpec& spec) : cg_spec(spec) {}
 
-  CgroupSpec cgroup_spec;
+  CgroupSpec cg_spec;
   EnvMap GetJobEnvMap() const;
 };
 
 struct JobInstance {
   explicit JobInstance(JobSpec&& spec)
-      : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
+      : job_id(spec.cg_spec.job_id), job_spec(spec) {}
   explicit JobInstance(const JobSpec& spec)
-      : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
+      : job_id(spec.cg_spec.job_id), job_spec(spec) {}
+
   JobInstance(const JobInstance& other) = delete;
   JobInstance(JobInstance&& other) noexcept
-      : job_id(std::move(other.job_id)),
+      : job_id(other.job_id),
         job_spec(std::move(other.job_spec)),
         cgroup(std::move(other.cgroup)) {};
+
+  ~JobInstance() = default;
 
   JobInstance& operator=(const JobInstance& other) = delete;
   JobInstance& operator=(JobInstance&& other) noexcept {
     if (this != &other) {
-      job_id = std::move(other.job_id);
+      job_id = other.job_id;
       job_spec = std::move(other.job_spec);
       cgroup = std::move(other.cgroup);
     }
     return *this;
   }
-  ~JobInstance() = default;
 
   task_id_t job_id;
   JobSpec job_spec;

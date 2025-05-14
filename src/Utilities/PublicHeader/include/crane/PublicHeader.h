@@ -494,7 +494,7 @@ struct CgroupSpec {
   task_id_t job_id;
   uid_t uid;
   crane::grpc::ResourceInNode res_in_node;
-  std::string execution_node;
+  std::string exec_node;
   // Recovered on start,no need to apply res limit.
   bool recovered{false};
 };

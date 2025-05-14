@@ -35,12 +35,12 @@
 
 namespace util {
 
-template <typename D = std::string, typename T1, typename T2>
-  requires requires(const T1 &node) {
-    { node.template as<D>() };
-  } && std::convertible_to<T2, D>
-D value_or(const T1 &node, const T2 &default_value) {
-  return node ? node.template as<D>() : default_value;
+template <typename T = std::string, typename YamlNode, typename DefaultType>
+  requires requires(const YamlNode &node) {
+    { node.template as<T>() };
+  } && std::convertible_to<DefaultType, T>
+T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
+  return node ? node.template as<T>() : default_value;
 }
 
 std::string ReadFileIntoString(std::filesystem::path const &p);

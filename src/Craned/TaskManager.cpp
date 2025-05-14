@@ -115,7 +115,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
 TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
-  m_instance_ptr_ = this;
+  s_instance_ptr_ = this;
 
   m_uvw_loop_ = uvw::loop::create();
 
@@ -292,7 +292,7 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
 }
 
 void TaskManager::EvSigchldCb_() {
-  assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
+  assert(s_instance_ptr_->s_instance_ptr_ != nullptr);
 
   int status;
   pid_t pid;
@@ -543,10 +543,10 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   using crane::grpc::subprocess::CanStartMessage;
   using crane::grpc::subprocess::ChildProcessReady;
 
-  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+  int ctrl_sock_pair[2]{};  // Socket pair for passing control messages.
 
-  int craned_crun_pipe[2];
-  int crun_craned_pipe[2];
+  int craned_crun_pipe[2]{};
+  int crun_craned_pipe[2]{};
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -554,7 +554,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // If the lock is held in the parent process during fork, the forked thread
   // in the child proc will block forever. That's why we should copy it here
   // and the child proc should not hold any lock.
-  auto job_expt = g_job_mgr->QueryJobSpec(instance->task.task_id());
+  CraneExpected<JobSpec> job_expt =
+      g_job_mgr->QueryJobSpec(instance->task.task_id());
   if (!job_expt.has_value()) {
     CRANE_ERROR("[Task #{}] Failed to get resource info",
                 instance->task.task_id());
@@ -993,7 +994,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap res_env_map = CgroupManager::GetResourceEnvMapByResInNode(
-        job_expt.value().cgroup_spec.res_in_node);
+        job_expt.value().cg_spec.res_in_node);
 
     // clearenv() should be called just before fork!
     if (clearenv()) fmt::print(stderr, "[Subproc] clearenv() failed.\n");

@@ -380,7 +380,8 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
         request->ssh_remote_port(), reply_from_remote_service.task_id());
     return Status::OK;
   } else {
-    auto info_opt = g_job_mgr->QueryTaskInfoOfUid(request->uid());
+    std::optional<TaskInfoOfUid> info_opt =
+        g_job_mgr->QueryTaskInfoOfUid(request->uid());
     if (info_opt.has_value()) {
       auto info = info_opt.value();
       CRANE_TRACE(
@@ -465,12 +466,13 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     response->set_ok(false);
     return Status::OK;
   }
+
   JobSpec &job_spec = job_spec_expt.value();
   for (const auto &[name, value] : job_spec.GetJobEnvMap()) {
     response->mutable_env_map()->emplace(name, value);
   }
 
-  std::string execution_node = job_spec.cgroup_spec.execution_node;
+  const std::string &execution_node = job_spec.cg_spec.exec_node;
   if (!g_config.CranedRes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;

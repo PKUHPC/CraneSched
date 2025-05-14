@@ -40,7 +40,7 @@
 #include "crane/PluginClient.h"
 
 void ParseConfig(int argc, char** argv) {
-  using util::value_or;
+  using util::YamlValueOr;
   cxxopts::Options options("cranectld");
 
   // clang-format off
@@ -86,14 +86,14 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
 
       g_config.CraneBaseDir =
-          value_or(config["CraneBaseDir"], kDefaultCraneBaseDir);
+          YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
       g_config.CraneCtldLogFile =
           g_config.CraneBaseDir /
-          value_or(config["CraneCtldLogFile"], kDefaultCraneCtldLogPath);
+          YamlValueOr(config["CraneCtldLogFile"], kDefaultCraneCtldLogPath);
 
       g_config.CraneCtldDebugLevel =
-          value_or(config["CraneCtldDebugLevel"], "info");
+          YamlValueOr(config["CraneCtldDebugLevel"], "info");
 
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
@@ -110,14 +110,14 @@ void ParseConfig(int argc, char** argv) {
       }
 
       g_config.CraneCtldMutexFilePath =
-          g_config.CraneBaseDir / value_or(config["CraneCtldMutexFilePath"],
+          g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
                                            kDefaultCraneCtldMutexFile);
 
       g_config.ListenConf.CraneCtldListenAddr =
-          value_or(config["CraneCtldListenAddr"], "0.0.0.0");
+          YamlValueOr(config["CraneCtldListenAddr"], "0.0.0.0");
 
       g_config.ListenConf.CraneCtldListenPort =
-          value_or(config["CraneCtldListenPort"], kCtldDefaultPort);
+          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -180,7 +180,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       g_config.CranedListenConf.CranedListenPort =
-          value_or(config["CranedListenPort"], kCranedDefaultPort);
+          YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
 
       g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
@@ -287,7 +287,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       g_config.RejectTasksBeyondCapacity =
-          value_or<bool>(config["RejectJobsBeyondCapacity"],
+          YamlValueOr<bool>(config["RejectJobsBeyondCapacity"],
                          Ctld::kDefaultRejectTasksBeyondCapacity);
 
       if (config["JobFileAppend"]) {
@@ -552,7 +552,7 @@ void ParseConfig(int argc, char** argv) {
 
         g_config.Plugin.PlugindSockPath =
             fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                        value_or(plugin_config["PlugindSockPath"],
+                        YamlValueOr(plugin_config["PlugindSockPath"],
                                  kDefaultPlugindUnixSockPath));
       }
     } catch (YAML::BadFile& e) {
