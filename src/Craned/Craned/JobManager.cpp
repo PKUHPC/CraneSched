@@ -196,7 +196,7 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
       if (!map_ptr->contains(job_id)) {
-        CRANE_WARN("Try to free nonexistent job #{}", job_ids);
+        CRANE_WARN("Try to free non-existent job #{}", job_ids);
         return false;
       }
     }
@@ -217,12 +217,16 @@ bool JobManager::EvCheckSupervisorRunning_() {
   std::error_code ec;
   std::vector<task_id_t> job_ids;
   for (task_id_t job_id : m_release_job_req_set_) {
-    // TODO: replace following with step_id
+    // TODO: replace the following with step_id
+
+    auto job_it = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_it) {
+      CRANE_WARN("Job #{} not found in job map.", job_id);
+      continue;
+    }
+
     auto exists = std::filesystem::exists(
-        fmt::format("/proc/{}", m_job_map_.GetValueExclusivePtr(job_id)
-                                    ->get()
-                                    ->step_map[0]
-                                    ->supervisor_pid),
+        fmt::format("/proc/{}", job_it->get()->step_map[0]->supervisor_pid),
         ec);
     if (ec) {
       CRANE_WARN("Failed to check supervisor for Job #{} is running.", job_id);

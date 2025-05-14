@@ -71,16 +71,15 @@ struct Config {
   std::filesystem::path CraneScriptDir;
   std::filesystem::path CranedUnixSocketPath;
 
-  // Only for debugging
   std::filesystem::path SupervisorLogFile;
+  std::filesystem::path SupervisorUnixSockPath;
 
   CranedId CranedIdOfThisNode;
 
-  std::filesystem::path SupervisorUnixSockPath;
-
   task_id_t JobId;
-  EnvMap JobEnv;
   step_id_t StepId;
+
+  EnvMap JobEnv;
   StepToSuper StepSpec;
   std::atomic_int TaskCount;
 };

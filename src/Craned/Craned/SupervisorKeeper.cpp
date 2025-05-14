@@ -135,6 +135,7 @@ void SupervisorKeeper::AddSupervisor(task_id_t task_id) {
                                kDefaultSupervisorUnixSockDir, task_id);
   std::shared_ptr stub = std::make_shared<SupervisorClient>();
   stub->InitChannelAndStub(sock_path);
+
   absl::WriterMutexLock lk(&m_mutex);
   if (auto it = m_supervisor_map.find(task_id); it != m_supervisor_map.end()) {
     CRANE_ERROR("Duplicate supervisor for task #{}", task_id);
@@ -149,7 +150,7 @@ void SupervisorKeeper::RemoveSupervisor(task_id_t task_id) {
     CRANE_TRACE("Removing supervisor for task #{}", task_id);
     m_supervisor_map.erase(it);
   } else {
-    CRANE_ERROR("Try to remove nonexistent supervisor for task #{}", task_id);
+    CRANE_ERROR("Try to remove non-existent supervisor for task #{}", task_id);
   }
 }
 
