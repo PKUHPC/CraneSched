@@ -84,7 +84,7 @@ class ProcessInstance {
 
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t m_pid_;
+  pid_t m_pid_{-1};
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;
@@ -105,7 +105,7 @@ class ProcessInstance {
    */
   std::function<void(bool, int, void*)> m_finish_cb_;
 
-  void* m_user_data_;
+  void* m_user_data_{nullptr};
   std::function<void(void*)> m_clean_cb_;
 };
 
@@ -131,9 +131,9 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
 
 // also arg for EvSigchldTimerCb_
 struct ProcSigchldInfo {
-  pid_t pid;
-  bool is_terminated_by_signal;
-  int value;
+  pid_t pid{};
+  bool is_terminated_by_signal{};
+  int value{};
 
   std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
@@ -205,8 +205,6 @@ class TaskManager {
 
   CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  CraneExpected<task_id_t> QueryTaskIdFromPidAsync(pid_t pid);
-
   CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
 
   void TerminateTaskAsync(uint32_t task_id);
@@ -236,11 +234,6 @@ class TaskManager {
   struct SavedPrivilege {
     uid_t uid;
     gid_t gid;
-  };
-
-  struct EvQueueQueryTaskIdFromPid {
-    std::promise<CraneExpected<task_id_t>> task_id_prom;
-    pid_t pid;
   };
 
   struct EvQueueQueryTaskEnvMap {
@@ -384,8 +377,6 @@ class TaskManager {
 
   void EvCleanGrpcExecuteTaskQueueCb_();
 
-  void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
-
   void EvCleanGrpcQueryTaskEnvQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
@@ -407,11 +398,7 @@ class TaskManager {
   // When this event is triggered, the TaskManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
-
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
-
-  std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
-  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
   std::shared_ptr<uvw::async_handle>
       m_query_task_environment_variables_async_handle_;
@@ -450,7 +437,7 @@ class TaskManager {
 
   std::thread m_uvw_thread_;
 
-  static inline TaskManager* m_instance_ptr_;
+  static inline TaskManager* s_instance_ptr_;
 };
 }  // namespace Craned
 

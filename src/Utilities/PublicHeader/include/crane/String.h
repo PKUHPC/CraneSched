@@ -35,6 +35,14 @@
 
 namespace util {
 
+template <typename T = std::string, typename YamlNode, typename DefaultType>
+  requires requires(const YamlNode &node) {
+    { node.template as<T>() };
+  } && std::convertible_to<DefaultType, T>
+T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
+  return node ? node.template as<T>() : default_value;
+}
+
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);

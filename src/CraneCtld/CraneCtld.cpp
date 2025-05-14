@@ -40,6 +40,7 @@
 #include "crane/PluginClient.h"
 
 void ParseConfig(int argc, char** argv) {
+  using util::YamlValueOr;
   cxxopts::Options options("cranectld");
 
   // clang-format off
@@ -84,68 +85,39 @@ void ParseConfig(int argc, char** argv) {
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
 
-      if (config["CraneBaseDir"])
-        g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
-      else
-        g_config.CraneBaseDir = kDefaultCraneBaseDir;
+      g_config.CraneBaseDir =
+          YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
-      if (config["CraneCtldLogFile"])
-        g_config.CraneCtldLogFile =
-            g_config.CraneBaseDir +
-            config["CraneCtldLogFile"].as<std::string>();
-      else
-        g_config.CraneCtldLogFile =
-            g_config.CraneBaseDir + kDefaultCraneCtldLogPath;
+      g_config.CraneCtldLogFile =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CraneCtldLogFile"], kDefaultCraneCtldLogPath);
 
-      if (config["CraneCtldDebugLevel"])
-        g_config.CraneCtldDebugLevel =
-            config["CraneCtldDebugLevel"].as<std::string>();
-      else
-        g_config.CraneCtldDebugLevel = "info";
+      g_config.CraneCtldDebugLevel =
+          YamlValueOr(config["CraneCtldDebugLevel"], "info");
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CraneCtldDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CraneCtldDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CraneCtldDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CraneCtldDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CraneCtldDebugLevel == "error") {
-        log_level = spdlog::level::err;
+      std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
+      if (log_level.has_value()) {
+        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
-
-      InitLogger(log_level, g_config.CraneCtldLogFile);
 
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();
       }
 
-      if (config["CraneCtldMutexFilePath"])
-        g_config.CraneCtldMutexFilePath =
-            g_config.CraneBaseDir +
-            config["CraneCtldMutexFilePath"].as<std::string>();
-      else
-        g_config.CraneCtldMutexFilePath =
-            g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
+      g_config.CraneCtldMutexFilePath =
+          g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
+                                              kDefaultCraneCtldMutexFile);
 
-      if (config["CraneCtldListenAddr"])
-        g_config.ListenConf.CraneCtldListenAddr =
-            config["CraneCtldListenAddr"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldListenAddr = "0.0.0.0";
+      g_config.ListenConf.CraneCtldListenAddr =
+          YamlValueOr(config["CraneCtldListenAddr"], "0.0.0.0");
 
-      if (config["CraneCtldListenPort"])
-        g_config.ListenConf.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
+      g_config.ListenConf.CraneCtldListenPort =
+          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -207,11 +179,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
-      if (config["CranedListenPort"])
-        g_config.CranedListenConf.CranedListenPort =
-            config["CranedListenPort"].as<std::string>();
-      else
-        g_config.CranedListenConf.CranedListenPort = kCranedDefaultPort;
+      g_config.CranedListenConf.CranedListenPort =
+          YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
 
       g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
@@ -317,13 +286,9 @@ void ParseConfig(int argc, char** argv) {
         g_config.ScheduledBatchSize = Ctld::kDefaultScheduledBatchSize;
       }
 
-      if (config["RejectJobsBeyondCapacity"]) {
-        g_config.RejectTasksBeyondCapacity =
-            config["RejectJobsBeyondCapacity"].as<bool>();
-      } else {
-        g_config.RejectTasksBeyondCapacity =
-            Ctld::kDefaultRejectTasksBeyondCapacity;
-      }
+      g_config.RejectTasksBeyondCapacity =
+          YamlValueOr<bool>(config["RejectJobsBeyondCapacity"],
+                            Ctld::kDefaultRejectTasksBeyondCapacity);
 
       if (config["JobFileAppend"]) {
         g_config.JobFileOpenModeAppend = config["JobFileAppend"].as<bool>();
@@ -585,15 +550,10 @@ void ParseConfig(int argc, char** argv) {
         if (plugin_config["Enabled"])
           g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
 
-        if (plugin_config["PlugindSockPath"]) {
-          g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          plugin_config["PlugindSockPath"].as<std::string>());
-        } else {
-          g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          kDefaultPlugindUnixSockPath);
-        }
+        g_config.Plugin.PlugindSockPath =
+            fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                        YamlValueOr(plugin_config["PlugindSockPath"],
+                                    kDefaultPlugindUnixSockPath));
       }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
@@ -618,12 +578,12 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull()) {
         std::filesystem::path path(config["CraneCtldDbPath"].as<std::string>());
         if (path.is_absolute())
-          g_config.CraneCtldDbPath = path.string();
+          g_config.CraneCtldDbPath = path;
         else
-          g_config.CraneCtldDbPath = g_config.CraneBaseDir + path.string();
+          g_config.CraneCtldDbPath = g_config.CraneBaseDir / path;
       } else
         g_config.CraneCtldDbPath =
-            g_config.CraneBaseDir + kDefaultCraneCtldDbPath;
+            g_config.CraneBaseDir / kDefaultCraneCtldDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();

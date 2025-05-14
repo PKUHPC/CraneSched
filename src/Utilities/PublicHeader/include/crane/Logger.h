@@ -150,8 +150,11 @@
     } while (false)
 #endif
 
+std::optional<spdlog::level::level_enum> StrToLogLevel(
+    const std::string &level);
+
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+                const std::string &log_file_path, bool enable_console);
 
 // Custom type formatting
 namespace fmt {
@@ -166,6 +169,19 @@ struct formatter<cpu_t> {
   template <typename FormatContext>
   auto format(const cpu_t &v, FormatContext &ctx) const {
     return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
+  }
+};
+
+template <>
+struct formatter<std::filesystem::path> {
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    return ctx.begin();
+  };
+
+  template <typename FormatContext>
+  auto format(const std::filesystem::path &v, FormatContext &ctx) const {
+    return fmt::format_to(ctx.out(), "{}", v.string());
   }
 };
 

@@ -37,8 +37,9 @@ class CranedStub {
  public:
   explicit CranedStub(CranedKeeper *craned_keeper);
   CranedStub(const CranedStub &) = delete;
-
+  CranedStub(CranedStub &&) = delete;
   CranedStub &operator=(const CranedStub &) = delete;
+  CranedStub &operator=(CranedStub &&) = delete;
 
   ~CranedStub();
 
@@ -134,6 +135,10 @@ class CranedKeeper {
 
  public:
   explicit CranedKeeper(uint32_t node_num);
+  CranedKeeper(const CranedKeeper &) = delete;
+  CranedKeeper(CranedKeeper &&) = delete;
+  CranedKeeper &operator=(const CranedKeeper &) = delete;
+  CranedKeeper &operator=(CranedKeeper &&) = delete;
 
   ~CranedKeeper();
 
@@ -164,7 +169,7 @@ class CranedKeeper {
 
  private:
   struct CqTag {
-    enum Type { kInitializingCraned, kEstablishedCraned };
+    enum Type : uint8_t { kInitializingCraned, kEstablishedCraned };
     Type type;
     CranedStub *craned;
   };

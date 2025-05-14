@@ -159,11 +159,8 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const CgroupSpec &spec : cgroup_specs) {
-    request.mutable_task_id_list()->Add(spec.task_id);
-    request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
-    request.add_execution_node(spec.execution_node);
+  for (const auto &spec : cgroup_specs) {
+    spec.SetJobSpec(request.add_job_spec_vec());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);

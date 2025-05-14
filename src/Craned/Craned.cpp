@@ -30,6 +30,7 @@
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "JobManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -79,101 +80,68 @@ void ParseConfig(int argc, char** argv) {
       each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
+      using util::YamlValueOr;
       YAML::Node config = YAML::LoadFile(config_path);
 
-      if (config["CraneBaseDir"])
-        g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
-      else
-        g_config.CraneBaseDir = kDefaultCraneBaseDir;
+      g_config.CraneBaseDir =
+          YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
       if (parsed_args.count("log-file"))
         g_config.CranedLogFile = parsed_args["log-file"].as<std::string>();
-      else if (config["CranedLogFile"])
-        g_config.CranedLogFile =
-            g_config.CraneBaseDir + config["CranedLogFile"].as<std::string>();
       else
-        g_config.CranedLogFile = g_config.CraneBaseDir + kDefaultCranedLogPath;
+        g_config.CranedLogFile =
+            g_config.CraneBaseDir /
+            YamlValueOr(config["CranedLogFile"], kDefaultCranedLogPath);
 
       if (parsed_args.count("debug-level"))
         g_config.CranedDebugLevel =
             parsed_args["debug-level"].as<std::string>();
-      else if (config["CranedDebugLevel"])
-        g_config.CranedDebugLevel =
-            config["CranedDebugLevel"].as<std::string>();
       else
-        g_config.CranedDebugLevel = "info";
+        g_config.CranedDebugLevel =
+            YamlValueOr(config["CranedDebugLevel"], "info");
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CranedDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CranedDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CranedDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CranedDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CranedDebugLevel == "error") {
-        log_level = spdlog::level::err;
+      std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
+      if (log_level.has_value()) {
+        InitLogger(log_level.value(), g_config.CranedLogFile, true);
       } else {
-        fmt::print(stderr, "Illegal debug-level format.");
+        fmt::print(stderr, "Illegal Craned debug-level format: {}.\n",
+                   g_config.CranedDebugLevel);
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CranedLogFile);
-#ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLogLevel(static_cast<uint32_t>(log_level));
-#endif
-      if (config["CranedUnixSockPath"])
-        g_config.CranedUnixSockPath =
-            g_config.CraneBaseDir +
-            config["CranedUnixSockPath"].as<std::string>();
-      else
-        g_config.CranedUnixSockPath =
-            g_config.CraneBaseDir + kDefaultCranedUnixSockPath;
+      g_config.CranedUnixSockPath =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
 
-      if (config["CranedScriptDir"])
-        g_config.CranedScriptDir =
-            g_config.CraneBaseDir + config["CranedScriptDir"].as<std::string>();
-      else
-        g_config.CranedScriptDir =
-            g_config.CraneBaseDir + kDefaultCranedScriptDir;
+      g_config.CranedScriptDir =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CranedScriptDir"], kDefaultCranedScriptDir);
 
-      if (config["CranedMutexFilePath"])
-        g_config.CranedMutexFilePath =
-            g_config.CraneBaseDir +
-            config["CranedMutexFilePath"].as<std::string>();
-      else
-        g_config.CranedMutexFilePath =
-            g_config.CraneBaseDir + kDefaultCranedMutexFile;
+      g_config.CranedMutexFilePath =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CranedMutexFilePath"], kDefaultCranedMutexFile);
 
       // Parsing node hostnames needs network functions, initialize it first.
       crane::InitializeNetworkFunctions();
 
-      if (config["CranedListen"])
-        g_config.ListenConf.CranedListenAddr =
-            config["CranedListen"].as<std::string>();
-      else
-        g_config.ListenConf.CranedListenAddr = "0.0.0.0";
+      g_config.ListenConf.CranedListenAddr =
+          YamlValueOr(config["CranedListen"], kDefaultHost);
 
-      if (config["CranedListenPort"])
-        g_config.ListenConf.CranedListenPort =
-            config["CranedListenPort"].as<std::string>();
-      else
-        g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
+      g_config.ListenConf.CranedListenPort =
+          YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
 
-      if (config["CompressedRpc"])
-        g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
+      g_config.CompressedRpc =
+          YamlValueOr<bool>(config["CompressedRpc"], false);
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
         g_config.ListenConf.UseTls = true;
         TlsCertificates& tls_certs = g_config.ListenConf.TlsCerts;
 
-        if (config["DomainSuffix"])
-          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
+        tls_certs.DomainSuffix = YamlValueOr(config["DomainSuffix"], "");
 
         if (config["ServerCertFilePath"]) {
           tls_certs.ServerCertFilePath =
@@ -186,6 +154,7 @@ void ParseConfig(int argc, char** argv) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
+
           if (tls_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
                 "UseTls is true, but the file specified by ServerCertFilePath "
@@ -222,13 +191,13 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["ControlMachine"]) {
         g_config.ControlMachine = config["ControlMachine"].as<std::string>();
+      } else {
+        CRANE_ERROR("ControlMachine is not configured.");
+        std::exit(1);
       }
 
-      if (config["CraneCtldListenPort"])
-        g_config.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
-      else
-        g_config.CraneCtldListenPort = kCtldDefaultPort;
+      g_config.CraneCtldListenPort =
+          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -440,29 +409,18 @@ void ParseConfig(int argc, char** argv) {
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
 
-        if (config["CranedForeground"]) {
-          auto val = config["CranedForeground"].as<std::string>();
-          if (val == "true")
-            g_config.CranedForeground = true;
-          else
-            g_config.CranedForeground = false;
-        }
+        g_config.CranedForeground =
+            YamlValueOr<bool>(config["CranedForeground"], false);
 
         if (config["Plugin"]) {
           const auto& plugin_config = config["Plugin"];
 
-          if (plugin_config["Enabled"])
-            g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
-
-          if (plugin_config["PlugindSockPath"]) {
-            g_config.Plugin.PlugindSockPath =
-                fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                            plugin_config["PlugindSockPath"].as<std::string>());
-          } else {
-            g_config.Plugin.PlugindSockPath =
-                fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                            kDefaultPlugindUnixSockPath);
-          }
+          g_config.Plugin.Enabled =
+              YamlValueOr<bool>(plugin_config["Enabled"], false);
+          g_config.Plugin.PlugindSockPath =
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                          YamlValueOr(plugin_config["PlugindSockPath"],
+                                      kDefaultPlugindUnixSockPath));
         }
       }
     } catch (YAML::BadFile& e) {
@@ -597,11 +555,11 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
   using Craned::CgroupManager;
-  using Craned::CgroupConstant::Controller;
+  using Craned::CgConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
   g_cg_mgr->Init();
   if (g_cg_mgr->GetCgroupVersion() ==
-          Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
+          Craned::CgConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
        !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
        !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER) ||
@@ -611,7 +569,7 @@ void GlobalVariableInit() {
     std::exit(1);
   }
   if (g_cg_mgr->GetCgroupVersion() ==
-          Craned::CgroupConstant::CgroupVersion::CGROUP_V2 &&
+          Craned::CgConstant::CgroupVersion::CGROUP_V2 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
        !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2) ||
        !g_cg_mgr->Mounted(Controller::IO_CONTROLLER_V2))) {
@@ -642,6 +600,8 @@ void GlobalVariableInit() {
 
   g_cfored_manager = std::make_unique<Craned::CforedManager>();
   g_cfored_manager->Init();
+
+  g_job_mgr = std::make_unique<Craned::JobManager>();
 }
 
 void StartServer() {
@@ -675,6 +635,8 @@ void StartServer() {
   g_cfored_manager.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_job_mgr.reset();
+  g_cg_mgr.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
