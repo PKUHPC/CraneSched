@@ -182,6 +182,7 @@ message TaskToCtld {
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
   optional string wckey = 42;
+  optional uint64 mem_per_cpu = 45;
 }
 
 message TaskInEmbeddedDb {
@@ -246,7 +247,8 @@ message StepToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
+  string container = 36;
+  optional uint64 mem_per_cpu = 37;
 }
 
 message RuntimeAttrOfStep {
