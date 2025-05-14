@@ -255,8 +255,7 @@ class EmbeddedDbClient {
   bool UpdateReservationInfo(
       txn_id_t txn_id, const ResvId& name,
       const crane::grpc::CreateReservationRequest& reservation_req) {
-    return StoreTypeIntoDb_(m_resv_db_.get(), txn_id, name,
-                            &reservation_req)
+    return StoreTypeIntoDb_(m_resv_db_.get(), txn_id, name, &reservation_req)
         .has_value();
   }
 

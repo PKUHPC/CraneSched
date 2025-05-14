@@ -28,8 +28,8 @@
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
-#include "SupervisorKeeper.h"
 #include "JobManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -439,8 +439,8 @@ void ParseConfig(int argc, char** argv) {
 
           if (g_config.Container.Enabled) {
             g_config.Container.TempDir =
-                g_config.CraneBaseDir /
-                YamlValueOr(container_config["TempDir"], kDefaultContainerTempDir);
+                g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
+                                                    kDefaultContainerTempDir);
 
             if (container_config["RuntimeBin"]) {
               g_config.Container.RuntimeBin =
@@ -484,8 +484,8 @@ void ParseConfig(int argc, char** argv) {
           }
         }
 
-      if (config["Plugin"]) {
-        const auto& plugin_config = config["Plugin"];
+        if (config["Plugin"]) {
+          const auto& plugin_config = config["Plugin"];
 
           g_config.Plugin.Enabled =
               YamlValueOr<bool>(plugin_config["Enabled"], false);

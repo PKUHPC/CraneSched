@@ -22,8 +22,8 @@
 
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "TaskManager.h"
 #include "SupervisorKeeper.h"
+#include "TaskManager.h"
 
 namespace Craned {
 

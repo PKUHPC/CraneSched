@@ -47,9 +47,7 @@ class SupervisorClient {
 class SupervisorKeeper {
  public:
   SupervisorKeeper() = default;
-  ~SupervisorKeeper() {
-    CRANE_DEBUG("Destroy SupervisorKeeper.");
-  }
+  ~SupervisorKeeper() { CRANE_DEBUG("Destroy SupervisorKeeper."); }
 
   /**
    * @brief Query all existing supervisor for task they hold.

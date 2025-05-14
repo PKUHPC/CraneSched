@@ -42,7 +42,7 @@ constexpr std::array<std::string_view,
         "ascend",
 };
 const inline std::array<std::vector<std::string_view>,
-                     DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
+                        DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
     DeviceEnvNameStr = {
         std::vector{"common"sv},
         {"CUDA_VISIBLE_DEVICES"sv, "NVIDIA_VISIBLE_DEVICES"sv},
