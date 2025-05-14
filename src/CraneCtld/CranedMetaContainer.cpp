@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -43,26 +44,21 @@ void CranedMetaContainer::CranedUp(
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
+  auto stub = g_craned_keeper->GetCranedStub(craned_id);
+  if (stub != nullptr) {
+    if (!stub->SetConnected(req->token())) {
+      CRANE_DEBUG("Craned {} try to up,but insufficient token {} got.",
+                  craned_id, req->token());
+    }
+    stub.reset();
+  }
   node_meta->alive = true;
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
 
-  node_meta->res_total.allocatable_res +=
-      node_meta->static_meta.res.allocatable_res;
-  node_meta->res_avail.allocatable_res +=
-      node_meta->static_meta.res.allocatable_res;
-  node_meta->res_total.dedicated_res += node_meta->remote_meta.dres_in_node;
-  node_meta->res_avail.dedicated_res += node_meta->remote_meta.dres_in_node;
-
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-
-    part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
-    part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
-    part_global_meta.res_total += node_meta->remote_meta.dres_in_node;
-    part_global_meta.res_avail += node_meta->remote_meta.dres_in_node;
-
     part_global_meta.alive_craned_cnt++;
   }
 
@@ -87,24 +83,17 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  node_meta->alive = false;
 
+  if (!node_meta->alive) {
+    CRANE_TRACE("Craned {} down, but it's not alive, skip clean.", craned_id);
+    return;
+  }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-
-    part_global_meta.res_total -= node_meta->res_total;
-    part_global_meta.res_avail -= node_meta->res_avail;
-    part_global_meta.res_in_use -= node_meta->res_in_use;
-
     part_global_meta.alive_craned_cnt--;
   }
-
-  node_meta->res_total.SetToZero();
-  node_meta->res_avail.SetToZero();
-  node_meta->res_in_use.SetToZero();
-
-  node_meta->rn_task_res_map.clear();
+  node_meta->alive = false;
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
@@ -216,11 +205,6 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
-  if (!node_meta->alive) {
-    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
-                node_meta->static_meta.hostname);
-    return;
-  }
 
   auto resource_iter = node_meta->rn_task_res_map.find(task_id);
   if (resource_iter == node_meta->rn_task_res_map.end()) {
@@ -233,7 +217,6 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
-
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -310,6 +293,10 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
+
+    craned_meta.res_total += static_meta.res;
+    craned_meta.res_avail += static_meta.res;
+    craned_meta.res_in_use.SetToZero();
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
@@ -326,6 +313,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       craned_id_part_ids_map_[craned_name].emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
+      part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
+      part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
 
       CRANE_DEBUG(
           "Add the resource of Craned {} (cpu: {}, mem: {}, gres: {}) to "
@@ -340,6 +329,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
 
     part_meta.partition_global_meta.name = part_name;
     part_meta.partition_global_meta.res_total_inc_dead = part_res;
+    part_meta.partition_global_meta.res_in_use.SetToZero();
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
     part_meta.partition_global_meta.allowed_accounts =

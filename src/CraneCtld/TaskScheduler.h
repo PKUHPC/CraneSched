@@ -485,7 +485,7 @@ class TaskScheduler {
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string>&& reason) {
-    // Todo: Add reason implementation here!
+    // TODO: Add reason implementation here!
     TaskStatusChangeAsync(task_id, craned_index, new_status, exit_code);
   }
 
@@ -498,6 +498,11 @@ class TaskScheduler {
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
+
+  void QueryJobOfNode(const CranedId& craned_id,
+                      crane::grpc::ConfigureCranedRequest* req);
+
+  void TerminateJobs(const std::vector<task_id_t>& jobs);
 
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
