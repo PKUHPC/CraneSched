@@ -36,8 +36,8 @@ void DModexOpCb(pmix_status_t status, char *data, size_t sz, void *cbdata) {
 
   crane::grpc::PmixDModexResponseReq request{};
   request.set_seq_num(dmo_modex_cb_data->seq_num);
-  request.set_code(PMIX_SUCCESS);
   request.set_data(data, sz);
+  request.set_status(PMIX_SUCCESS);
 
   auto context = std::make_shared<grpc::ClientContext>();
   auto reply = std::make_shared<crane::grpc::PmixDModexResponseReply>();
@@ -180,7 +180,7 @@ void PmixDModexReqManager::PmixProcessResponse(uint32_t seq_num, const CranedId&
 void PmixDModexReqManager::ResponseWithError_(uint32_t seq_num, const std::string& craned_id, int status) {
   crane::grpc::PmixDModexResponseReq request{};
 
-  request.set_code(status);
+  request.set_status(status);
   request.set_seq_num(seq_num);
 
   auto context = std::make_shared<grpc::ClientContext>();
