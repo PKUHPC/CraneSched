@@ -3003,7 +3003,9 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (task_alloc_res.memory_bytes == 0) {
     // If a task leaves its memory bytes to 0,
     // use the partition's default value.
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+    task_mem_per_cpu = task->TaskToCtld().mem_per_cpu() == 0
+                           ? part_meta.default_mem_per_cpu
+                           : task->TaskToCtld().mem_per_cpu();
   } else if (part_meta.max_mem_per_cpu != 0) {
     // If a task sets its memory bytes,
     // check if memory/core ratio is greater than the partition's maximum
