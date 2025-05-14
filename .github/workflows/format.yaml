@@ -37,14 +37,11 @@ jobs:
 
       - name: Run clang-format and apply changes
         run: |
-          git diff --name-only origin/master...HEAD | while read -r file; do
-            if [[ "$file" == *.cpp || "$file" == *.h ]]; then
-              clang-format-20 -i --style=file "$file"
-            fi
-
-            if [[ "$file" == *.proto ]]; then
-              clang-format-20 -i --style=file:.clang-format-proto "$file"
-            fi
+          find src -type f \( -name "*.cpp" -o -name "*.h" \) | while read -r file; do
+            clang-format-20 -i --style=file "$file"
+          done
+          find protos -type f -name "*.proto" | while read -r file; do
+            clang-format-20 -i --style=file:.clang-format-proto "$file"
           done
 
           if ! git diff --quiet; then
