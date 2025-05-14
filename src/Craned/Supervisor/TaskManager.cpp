@@ -952,6 +952,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     json jret;
 
     // Check the state of the container
+    // TODO: Refactor using subprocess instead of system()!
     cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
 
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),

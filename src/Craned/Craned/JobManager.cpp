@@ -221,27 +221,39 @@ bool JobManager::EvCheckSupervisorRunning_() {
 
     auto job_it = m_job_map_.GetValueExclusivePtr(job_id);
     if (!job_it) {
-      CRANE_WARN("Job #{} not found in job map.", job_id);
+      CRANE_ERROR("Failed to check supervisor of a non-existent Job #{}.",
+                  job_id);
       continue;
     }
 
-    auto exists = std::filesystem::exists(
-        fmt::format("/proc/{}", job_it->get()->step_map[0]->supervisor_pid),
-        ec);
-    if (ec) {
-      CRANE_WARN("Failed to check supervisor for Job #{} is running.", job_id);
-      continue;
+    bool exists;
+
+    if (job_it->get()->err_before_supervisor_ready) {
+      // Supervisor is not spawned.
+      exists = false;
+    } else {
+      // Check if the supervisor is running.
+      exists = std::filesystem::exists(
+          fmt::format("/proc/{}", job_it->get()->step_map[0]->supervisor_pid),
+          ec);
+      if (ec) {
+        CRANE_ERROR("Failed to check if Job #{}'s supervisor is running: {}",
+                    job_id, ec.message());
+        continue;
+      }
     }
+
     if (!exists) {
       job_ids.emplace_back(job_id);
     }
   }
+
   for (task_id_t job_id : job_ids) {
     m_release_job_req_set_.erase(job_id);
   }
 
   if (!job_ids.empty()) {
-    CRANE_TRACE("Supervisor for Job [{}] found to be exited",
+    CRANE_TRACE("Supervisors for Job [{}] are not running. Freeing jobs...",
                 absl::StrJoin(job_ids, ","));
 
     m_pending_thread_pool_tasks.count_up();
@@ -257,13 +269,13 @@ bool JobManager::EvCheckSupervisorRunning_() {
 void JobManager::EvSigchldCb_() {
   int status;
   pid_t pid;
+
   while (true) {
-    pid = waitpid(-1, &status, WNOHANG
-                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+    pid = waitpid(-1, &status, WNOHANG);
 
     if (pid > 0) {
-      CRANE_TRACE("Child pid {} exit", pid);
-      // We do nothing now
+      // No work to do as supervisor is not always the child.
+      CRANE_TRACE("Child process (pid: {}) exited.", pid);
     } else if (pid == 0) {
       // There's no child that needs reaping.
       break;
@@ -366,7 +378,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
           "migration.",
           step->step_spec.task_id());
 
-      job->err_before_exec = CraneErrCode::ERR_CGROUP;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_CGROUP;
 
       // Ask child to suicide
       msg.set_ok(false);
@@ -375,7 +387,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
                     child_pid, step->step_spec.task_id());
 
-        job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+        job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
         KillPid_(child_pid, SIGKILL);
       }
 
@@ -397,7 +409,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
                   step->step_spec.task_id(), child_pid,
                   strerror(ostream.GetErrno()));
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_PROTOBUF;
     }
@@ -412,7 +424,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] Received false from subprocess {}",
                     step->step_spec.task_id(), child_pid);
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_PROTOBUF;
     }
@@ -466,7 +478,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
                   child_pid, step->step_spec.task_id(),
                   strerror(ostream.GetErrno()));
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_PROTOBUF;
     } else {
@@ -484,7 +496,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     step->step_spec.task_id());
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_PROTOBUF;
     }
@@ -492,6 +504,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
 
+    // Supervisor is ready from now on.
     g_supervisor_keeper->AddSupervisor(step->step_spec.task_id());
 
     auto stub = g_supervisor_keeper->GetStub(step->step_spec.task_id());
@@ -499,7 +512,6 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     if (!pid) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
                   step->step_spec.task_id());
-      job->err_before_exec = CraneErrCode::ERR_SUPERVISOR;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_SUPERVISOR;
     }
@@ -707,14 +719,14 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_it.get()->get();
 
   // Check if the step is acceptable.
-  CRANE_INFO("Container req: {}, enabled: {}", step->step_spec.container(),
-             g_config.Container.Enabled);
   if (step->step_spec.container().length() && !g_config.Container.Enabled) {
-    CRANE_ERROR("Container is not supported in this node.");
-    ActivateTaskStatusChangeAsync_(step->step_spec.task_id(),
-                                   crane::grpc::TaskStatus::Failed,
-                                   ExitCode::kExitCodeSpawnProcessFail,
-                                   "Container is not supported in craned.");
+    CRANE_ERROR("Container support is disabled but job #{} requires it.",
+                job_id);
+    job->err_before_supervisor_ready = CraneErrCode::ERR_SYSTEM_ERR;
+    ActivateTaskStatusChangeAsync_(
+        step->step_spec.task_id(), crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodeSpawnProcessFail,
+        "Container is not supported in this craned.");
     return;
   }
 
@@ -723,31 +735,26 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
   if (!job->cgroup) {
     CRANE_ERROR("Failed to get cgroup for job #{}", job_id);
+    job->err_before_supervisor_ready = CraneErrCode::ERR_CGROUP;
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get cgroup for job #{} ", job_id));
+        fmt::format("Failed to get cgroup for job #{}", job_id));
     return;
   }
 
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
+  // err will NOT be kOk if supervisor is not able to execute the task.
+  // In this case, we need to activate status change.
   CraneErrCode err = SpawnSupervisor_(job, step.get());
   if (err != CraneErrCode::SUCCESS) {
+    // err_before_supervisor_ready is handled in SpawnSupervisor_.
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format("Cannot spawn a new process inside the instance of job #{}",
-                    job_id));
+        fmt::format("Cannot spawn supervisor for job #{}", job_id));
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
-    // process. Now we put the child pid into index maps. SIGCHLD sent just
-    // after fork() and before putting pid into maps will repeatedly be sent
-    // by timer and eventually be handled once the SIGCHLD processing callback
-    // sees the pid in index maps. Now we do not support launch multiple tasks
-    // in a job.
-    CRANE_TRACE("[job #{}] Spawned successfully.", job->job_id);
+    // process. Now we put the child pid into index maps.
+    CRANE_TRACE("Supervisor for job #{} spawned.", job->job_id);
     // TODO: replace this with step_id
     job->step_map.emplace(0, std::move(step));
   }
@@ -765,7 +772,9 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    g_supervisor_keeper->RemoveSupervisor(job_pptr.get()->get()->job_id);
+    if (!job_pptr.get()->get()->err_before_supervisor_ready)
+      g_supervisor_keeper->RemoveSupervisor(job_pptr.get()->get()->job_id);
+
     bool orphaned = job_pptr->get()->orphaned;
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
@@ -914,15 +923,17 @@ bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
   return ok_fut.get();
 }
 
-void JobManager::TaskStopAndDoStatusChangeAsync(
+void JobManager::TaskStoppedAndDoStatusChangeAsync(
     uint32_t job_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+
   if (!m_job_map_.Contains(job_id)) {
     CRANE_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
                 job_id);
     return;
   }
+
   CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", job_id);
   ActivateTaskStatusChangeAsync_(job_id, new_status, exit_code,
                                  std::move(reason));

@@ -150,6 +150,7 @@ void SupervisorKeeper::RemoveSupervisor(task_id_t task_id) {
     CRANE_TRACE("Removing supervisor for task #{}", task_id);
     m_supervisor_map.erase(it);
   } else {
+    // This could happen if LaunchStepMt_ failed to get the allocation for job.
     CRANE_ERROR("Try to remove non-existent supervisor for task #{}", task_id);
   }
 }

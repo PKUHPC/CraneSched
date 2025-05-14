@@ -65,7 +65,7 @@ struct JobInstance {
 
   // Task execution results
   bool orphaned{false};
-  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
+  CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 };
@@ -105,10 +105,12 @@ class JobManager {
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
-  void TaskStopAndDoStatusChangeAsync(uint32_t job_id,
-                                      crane::grpc::TaskStatus new_status,
-                                      uint32_t exit_code,
-                                      std::optional<std::string> reason);
+  // If the task status change is from supervisor, we call this func.
+  // Otherwise, we call ActivateTaskStatusChangeAsync_ directly.
+  void TaskStoppedAndDoStatusChangeAsync(uint32_t job_id,
+                                         crane::grpc::TaskStatus new_status,
+                                         uint32_t exit_code,
+                                         std::optional<std::string> reason);
 
   // Wait internal libuv base loop to exit...
   void Wait();
@@ -167,11 +169,10 @@ class JobManager {
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
    * 1. A task is completed successfully. It means that this task returns
-   *  normally with 0 or a non-zero code. (EvSigchldCb_)
+   *  normally with 0 or a non-zero code. (From Supervisor)
    * 2. A task is killed by a signal. In this case, the task is considered
-   *  failed. (EvSigchldCb_)
-   * 3. A task cannot be created because of various reasons.
-   *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
+   *  failed. (From Supervisor)
+   * 3. A task cannot be created because of various reasons. (LaunchStepMt_)
    */
   void ActivateTaskStatusChangeAsync_(uint32_t task_id,
                                       crane::grpc::TaskStatus new_status,
@@ -179,11 +180,10 @@ class JobManager {
                                       std::optional<std::string> reason);
 
   /**
-   * Send a signal to the process group of pid. For kill uninitialized
-   * Supervisor only.
+   * Send a signal to the process group of pid.
+   * It's for killing uninitialized Supervisor ONLY.
    * This function ASSUMES that ALL processes belongs to the
-   * process group with the PGID set to the PID of the first process in this
-   * TaskExecutionInstance.
+   * process group with the PGID set to the PID of the first process.
    * @param signum the value of signal.
    * @return if the signal is sent successfully, kOk is returned.
    * otherwise, kGenericFailure is returned.
@@ -200,6 +200,7 @@ class JobManager {
 
   bool EvCheckSupervisorRunning_();
 
+  // Dummy function just for reapping the child process.
   void EvSigchldCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
