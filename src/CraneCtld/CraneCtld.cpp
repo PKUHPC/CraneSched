@@ -111,7 +111,7 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.CraneCtldMutexFilePath =
           g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
-                                           kDefaultCraneCtldMutexFile);
+                                              kDefaultCraneCtldMutexFile);
 
       g_config.ListenConf.CraneCtldListenAddr =
           YamlValueOr(config["CraneCtldListenAddr"], "0.0.0.0");
@@ -288,7 +288,7 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.RejectTasksBeyondCapacity =
           YamlValueOr<bool>(config["RejectJobsBeyondCapacity"],
-                         Ctld::kDefaultRejectTasksBeyondCapacity);
+                            Ctld::kDefaultRejectTasksBeyondCapacity);
 
       if (config["JobFileAppend"]) {
         g_config.JobFileOpenModeAppend = config["JobFileAppend"].as<bool>();
@@ -553,7 +553,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.Plugin.PlugindSockPath =
             fmt::format("unix://{}{}", g_config.CraneBaseDir,
                         YamlValueOr(plugin_config["PlugindSockPath"],
-                                 kDefaultPlugindUnixSockPath));
+                                    kDefaultPlugindUnixSockPath));
       }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
