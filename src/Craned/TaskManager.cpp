@@ -1126,7 +1126,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
   instance->cgroup = cg;
-  instance->cgroup_path = instance->cgroup->GetCgroupString();
+  instance->cgroup_path = instance->cgroup->CgroupPathStr();
 
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;

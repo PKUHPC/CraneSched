@@ -319,7 +319,7 @@ class BpfRuntimeInfo {
 class Cgroup {
  public:
   Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
-      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id(id) {}
+      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id_(id) {}
   ~Cgroup() = default;
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
@@ -339,18 +339,26 @@ class Cgroup {
 
   void Destroy();
 
-  // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
+  // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
+
+  const std::filesystem::path &GetCgroupPath() const { return m_cgroup_path_; }
+
+  uint64_t GetCgroupId() const { return m_cgroup_id_; }
+
+  struct cgroup *RawCgHandle() const { return m_cgroup_; }
+
+ private:
   std::filesystem::path m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
-  uint64_t m_cgroup_id;
+  uint64_t m_cgroup_id_;
 };
 
 class CgroupInterface {
  public:
   CgroupInterface(const std::string &path, struct cgroup *handle,
                   uint64_t id = 0)
-      : m_cgroup_info(path, handle, id) {};
+      : m_cgroup_info_(path, handle, id) {};
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
@@ -369,12 +377,13 @@ class CgroupInterface {
   virtual void Destroy();
 
   bool MigrateProcIn(pid_t pid);
-  std::string GetCgroupString() const {
-    return m_cgroup_info.m_cgroup_path_.string();
+
+  std::string CgroupPathStr() const {
+    return m_cgroup_info_.GetCgroupPath().string();
   }
 
  protected:
-  Cgroup m_cgroup_info;
+  Cgroup m_cgroup_info_;
 };
 
 class CgroupV1 : public CgroupInterface {

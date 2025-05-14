@@ -127,7 +127,7 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
 
     if (g_config.Plugin.Enabled) {
       g_plugin_client->DestroyCgroupHookAsync(job_ids[idx],
-                                              cgroup->GetCgroupString());
+                                              cgroup->CgroupPathStr());
     }
     g_thread_pool->detach_task([cgroup]() {
       int cnt = 0;
@@ -139,7 +139,7 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
           CRANE_ERROR(
               "Couldn't kill the processes in cgroup {} after {} times. "
               "Skipping it.",
-              cgroup->GetCgroupString(), cnt);
+              cgroup->CgroupPathStr(), cnt);
           break;
         }
 
