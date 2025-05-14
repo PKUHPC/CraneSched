@@ -467,7 +467,7 @@ class CgroupV2 : public CgroupInterface {
 
  private:
 #ifdef CRANE_ENABLE_BPF
-  bool m_bpf_attached_;
+  bool m_bpf_attached_{false};
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
 #endif
 };

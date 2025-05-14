@@ -1140,7 +1140,6 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
     if (!bpf_obj_) {
       CRANE_ERROR("Failed to open BPF object file {}",
                   CgConstant::kBpfObjectFilePath);
-      bpf_object__close(bpf_obj_);
       return false;
     }
 

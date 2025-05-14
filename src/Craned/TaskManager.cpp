@@ -292,7 +292,7 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
 }
 
 void TaskManager::EvSigchldCb_() {
-  assert(s_instance_ptr_->s_instance_ptr_ != nullptr);
+  CRANE_ASSERT(s_instance_ptr_ != nullptr);
 
   int status;
   pid_t pid;
