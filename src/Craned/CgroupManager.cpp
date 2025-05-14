@@ -707,6 +707,7 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
   while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
                                cur_key.get(), sizeof(BpfKey)) == 0) {
     add_task(cur_key.get());
+    pre_key.swap(cur_key);
   }
   if (init_ebpf) bpf_runtime_info.CloseBpfObj();
 
