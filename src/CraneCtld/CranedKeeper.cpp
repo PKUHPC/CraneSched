@@ -161,7 +161,7 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (const auto &spec : cgroup_specs) {
-    spec.SetJobSpec(request.add_job_spec_vec());
+    spec.SetJobToD(request.add_job_list());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);

@@ -211,9 +211,9 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   }
 
   std::vector<JobSpec> job_specs;
-  for (const auto &cg_spec_req : request->job_spec_vec()) {
-    CRANE_TRACE("Allocating job #{}, uid {}",
-                cg_spec_req.job_id(), cg_spec_req.uid());
+  for (const auto &cg_spec_req : request->job_list()) {
+    CRANE_TRACE("Allocating job #{}, uid {}", cg_spec_req.job_id(),
+                cg_spec_req.uid());
     job_specs.emplace_back(cg_spec_req);
   }
 

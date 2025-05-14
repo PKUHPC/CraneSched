@@ -79,7 +79,7 @@ class JobManager {
 
   CraneExpected<JobSpec> QueryJobSpec(task_id_t job_id);
 
-  std::unordered_set<task_id_t> QueryExistentJobIds();
+  std::set<task_id_t> GetAllocatedJobs();
 
  private:
   util::AtomicHashMap<absl::node_hash_map, task_id_t, JobInstance> m_job_map_;

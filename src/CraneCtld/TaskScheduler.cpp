@@ -2153,10 +2153,11 @@ void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
   }
 }
 
-void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
+void TaskScheduler::TerminateOrphanedJobs(const std::set<task_id_t>& jobs) {
   std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
-      craned_cg_map;
-  std::unordered_map<CranedId, std::vector<task_id_t>> craned_job_map;
+      craned_job_map;
+  // Now we just terminate all job and task.
+  std::unordered_map<CranedId, std::vector<task_id_t>> craned_task_map;
   std::unordered_map<task_id_t, std::vector<CranedId>> job_exec_node_map;
   {
     LockGuard running_job_guard(&m_running_task_map_mtx_);
@@ -2170,15 +2171,15 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
         auto& job = job_it->second;
         job_exec_node_map[job_id] = job->executing_craned_ids;
         for (const auto& craned_id : job->CranedIds()) {
-          craned_job_map[craned_id].emplace_back(job_id);
-          craned_cg_map[craned_id].emplace_back(job_id, job->uid);
+          craned_task_map[craned_id].emplace_back(job_id);
+          craned_job_map[craned_id].emplace_back(job_id, job->uid);
         }
       }
     }
   }
 
-  std::latch job_latch(craned_job_map.size());
-  for (auto& [craned_id, job_ids] : craned_job_map) {
+  std::latch job_latch(craned_task_map.size());
+  for (auto& [craned_id, job_ids] : craned_task_map) {
     g_thread_pool->detach_task(
         [craned_id, job_ids = std::move(job_ids), &job_latch] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
@@ -2194,8 +2195,8 @@ void TaskScheduler::TerminateOrphanedJobs(const std::vector<task_id_t>& jobs) {
   }
   job_latch.wait();
 
-  std::latch cg_latch(craned_cg_map.size());
-  for (auto& [craned_id, cgroups] : craned_cg_map) {
+  std::latch cg_latch(craned_job_map.size());
+  for (auto& [craned_id, cgroups] : craned_job_map) {
     g_thread_pool->detach_task([craned_id, cgroups = std::move(cgroups),
                                 &cg_latch] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);

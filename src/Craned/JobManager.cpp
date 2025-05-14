@@ -184,12 +184,12 @@ CraneExpected<JobSpec> JobManager::QueryJobSpec(task_id_t job_id) {
   return instance->job_spec;
 };
 
-std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
+std::set<task_id_t> JobManager::GetAllocatedJobs() {
   std::unordered_set<task_id_t> job_ids;
   auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
   job_ids.reserve(job_map_ptr->size());
   return *job_map_ptr | std::ranges::views::keys |
-         std::ranges::to<std::unordered_set<task_id_t>>();
+         std::ranges::to<std::set<task_id_t>>();
 }
 
 };  // namespace Craned
