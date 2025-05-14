@@ -242,13 +242,13 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
     ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                    ExitCode::kExitCodeSpawnProcessFail,
                                    std::nullopt);
-    break;
+    return;
 
   case CraneErrCode::ERR_CGROUP:
     ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                    ExitCode::kExitCodeCgroupError,
                                    std::nullopt);
-    break;
+    return;
 
   default:
     break;
