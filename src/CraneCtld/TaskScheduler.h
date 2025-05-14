@@ -275,13 +275,123 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
   class NodeSelectionInfo {
    public:
-    void InitCostAndTimeAvailResMap(const CranedId& craned_id,
-                                    const ResourceInNode& res_total) {
-      m_cost_node_id_set_.erase({m_node_cost_map_[craned_id], craned_id});
-      m_node_cost_map_[craned_id] = 0;
-      m_cost_node_id_set_.emplace(0, craned_id);
+    void InitCostAndTimeAvailResMap(
+        const CranedId& craned_id, const ResourceInNode& res_total,
+        const ResourceInNode& res_avail, const absl::Time& now,
+        const std::vector<std::pair<absl::Time, const ResourceInNode*>>&
+            running_tasks,
+        const absl::flat_hash_map<ResvId, CranedMeta::ResvInNode>* resv_map) {
+      struct ResChange {
+        absl::Time time;
+        const ResourceInNode* res;
+        bool is_alloc;
+      };
+      std::vector<ResChange> changes;
+
+      uint64_t& cost = m_node_cost_map_[craned_id];
+      for (const auto& [end_time, res] : running_tasks) {
+        UpdateCostFunc(cost, now, end_time, *res, res_total);
+        changes.emplace_back(ResChange{end_time, res, false});
+      }
+
+      if (resv_map != nullptr && !resv_map->empty()) {
+        absl::Time first_resv_time = absl::InfiniteFuture();
+        for (const auto& [resv_id, resv] : *resv_map) {
+          const absl::Time& end_time = resv.end_time;
+          if (end_time < now) {  // Already expired
+            continue;
+          }
+          absl::Time start_time = std::max(now, resv.start_time);
+          UpdateCostFunc(cost, start_time, end_time, resv.res_total, res_total);
+          changes.emplace_back(ResChange{start_time, &resv.res_total, true});
+          changes.emplace_back(ResChange{end_time, &resv.res_total, false});
+          if (start_time < first_resv_time) {
+            first_resv_time = start_time;
+          }
+        }
+        m_first_resv_time_map_[craned_id] = first_resv_time;
+      }
+
+      m_cost_node_id_set_.emplace(cost, craned_id);
       m_node_res_total_map_[craned_id] = res_total;
-      m_node_time_avail_res_map_[craned_id].clear();
+
+      std::sort(changes.begin(), changes.end(),
+                [](const ResChange& lhs, const ResChange& rhs) {
+                  return lhs.time == rhs.time
+                             ? lhs.is_alloc < rhs.is_alloc  // release before
+                                                            // allocation
+                             : lhs.time < rhs.time;
+                });
+      ResourceInNode cur_res = res_avail;
+      absl::Time cur_time = now;
+      TimeAvailResMap& time_avail_res_map =
+          m_node_time_avail_res_map_[craned_id];
+
+      for (const auto& change : changes) {
+        if (change.time != cur_time) {
+          time_avail_res_map.emplace(cur_time, cur_res);
+          if constexpr (kAlgoTraceOutput) {
+            CRANE_TRACE(
+                "Insert duration [now+{}s, inf) with resource: "
+                "cpu: {}, mem: {}, gres: {}",
+                absl::ToInt64Seconds(cur_time - now),
+                cur_res.allocatable_res.cpu_count,
+                cur_res.allocatable_res.memory_bytes,
+                util::ReadableDresInNode(cur_res));
+          }
+          cur_time = change.time;
+        }
+        if (change.is_alloc) {
+          cur_res -= *(change.res);
+        } else {
+          cur_res += *(change.res);
+        }
+
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE(
+              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
+              "{}; ",
+              craned_id, absl::ToInt64Seconds(cur_time - now),
+              cur_res.allocatable_res.cpu_count,
+              cur_res.allocatable_res.memory_bytes,
+              util::ReadableDresInNode(cur_res));
+        }
+      }
+      time_avail_res_map.emplace(cur_time, cur_res);
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Insert duration [now+{}s, inf) with resource: "
+            "cpu: {}, mem: {}, gres: {}",
+            absl::ToInt64Seconds(cur_time - now),
+            cur_res.allocatable_res.cpu_count,
+            cur_res.allocatable_res.memory_bytes,
+            util::ReadableDresInNode(cur_res));
+      }
+
+      if constexpr (kAlgoTraceOutput) {
+        std::string str;
+        str.append(fmt::format("Node {}: ", craned_id));
+        auto prev_iter = time_avail_res_map.begin();
+        auto iter = std::next(prev_iter);
+        for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
+          str.append(
+              fmt::format("[ now+{}s , now+{}s ) Available allocatable "
+                          "res: cpu core {}, mem {}, gres {}",
+                          absl::ToInt64Seconds(prev_iter->first - now),
+                          absl::ToInt64Seconds(iter->first - now),
+                          prev_iter->second.allocatable_res.cpu_count,
+                          prev_iter->second.allocatable_res.memory_bytes,
+                          util::ReadableDresInNode(prev_iter->second)));
+        }
+        str.append(
+            fmt::format("[ now+{}s , inf ) Available allocatable "
+                        "res: cpu core {}, mem {}, gres {}",
+                        absl::ToInt64Seconds(prev_iter->first - now),
+                        prev_iter->second.allocatable_res.cpu_count,
+                        prev_iter->second.allocatable_res.memory_bytes,
+                        util::ReadableDresInNode(prev_iter->second)));
+        CRANE_TRACE("{}", str);
+      }
     }
 
     void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
@@ -289,12 +399,8 @@ class MinLoadFirst : public INodeSelectionAlgo {
                     const ResourceInNode& resources) {
       uint64_t& cost = m_node_cost_map_.at(craned_id);
       m_cost_node_id_set_.erase({cost, craned_id});
-      ResourceInNode& total_res = m_node_res_total_map_.at(craned_id);
-      double cpu_ratio =
-          static_cast<double>(resources.allocatable_res.cpu_count) /
-          static_cast<double>(total_res.allocatable_res.cpu_count);
-      cost += std::round((end_time - start_time) / absl::Seconds(1) *
-                         cpu_ratio * 256);
+      UpdateCostFunc(cost, start_time, end_time, resources,
+                     m_node_res_total_map_.at(craned_id));
       m_cost_node_id_set_.emplace(cost, craned_id);
     }
 
@@ -322,6 +428,17 @@ class MinLoadFirst : public INodeSelectionAlgo {
     }
 
    private:
+    void UpdateCostFunc(uint64_t& cost, const absl::Time& start_time,
+                        const absl::Time& end_time,
+                        const ResourceInNode& resources,
+                        const ResourceInNode& total_res) {
+      double cpu_ratio =
+          static_cast<double>(resources.allocatable_res.cpu_count) /
+          static_cast<double>(total_res.allocatable_res.cpu_count);
+      cost += std::round((end_time - start_time) / absl::Seconds(1) *
+                         cpu_ratio * 256);
+    }
+
     // Craned_ids are sorted by cost.
     std::set<std::pair<uint64_t, CranedId>> m_cost_node_id_set_;
     std::unordered_map<CranedId, uint64_t> m_node_cost_map_;
@@ -495,7 +612,8 @@ class TaskScheduler {
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
-  // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
+  // Temporary inconsistency may happen. If 'false' is returned, just ignore
+  // it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
