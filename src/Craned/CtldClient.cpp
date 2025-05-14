@@ -19,6 +19,7 @@
 #include "CtldClient.h"
 
 #include "CranedServer.h"
+#include "JobManager.h"
 #include "TaskManager.h"
 #include "crane/GrpcHelper.h"
 
@@ -247,7 +248,7 @@ void CtldClient::Init() {
         CRANE_DEBUG("Configuring action for token {}.",
                     ProtoTimestampToString(arg.token));
 
-        std::set exact_job_ids = g_cg_mgr->GetAllocatedJobs();
+        std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
         std::vector<task_id_t> lost_jobs{};
         std::vector<task_id_t> invalid_jobs{};
         std::ranges::set_difference(arg.job_ids, exact_job_ids,
@@ -264,13 +265,6 @@ void CtldClient::Init() {
                                     std::back_inserter(invalid_tasks));
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
-        for (auto task_id : invalid_tasks) {
-          g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id);
-          g_cg_mgr->ReleaseCgroupByTaskIdOnly(task_id);
-        }
-        for (auto job_id : invalid_jobs) {
-          g_cg_mgr->ReleaseCgroupByTaskIdOnly(job_id);
-        }
       });
 
   g_ctld_client_sm->SetActionRegisterCb(

@@ -99,7 +99,7 @@ message ExecuteTasksReply {
 }
 
 message CreateCgroupForTasksRequest {
-  repeated JobSpec job_spec_vec = 1;
+  repeated JobToD job_list = 1;
 }
 
 message CreateCgroupForTasksReply {}
