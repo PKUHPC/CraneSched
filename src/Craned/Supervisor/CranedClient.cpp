@@ -100,7 +100,7 @@ void CranedClient::AsyncSendThread_() {
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     elem.task_id, reply.ok());
         if (finished_count == g_config.TaskCount) {
-          CRANE_TRACE("All tasks finished,exiting...");
+          CRANE_TRACE("All tasks finished, exiting...");
           m_thread_stop_ = true;
           g_server->Shutdown();
           g_task_mgr->Shutdown();

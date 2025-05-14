@@ -20,7 +20,6 @@
 
 #include "SupervisorPublicDefs.h"
 #include "TaskManager.h"
-#include "crane/Logger.h"
 
 grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,

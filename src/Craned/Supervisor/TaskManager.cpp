@@ -832,6 +832,13 @@ CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  // Check if container support is enabled.
+  if (!g_config.Container.Enabled) {
+    // NOTE: This should never happen, as we checked it in Craned.
+    CRANE_ERROR("Container support is not enabled in supervisor.");
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
   // Generate path and params.
   m_temp_path_ =
       g_config.Container.TempDir / fmt::format("{}", step_spec->spec.task_id());
@@ -1606,7 +1613,8 @@ void TaskManager::LaunchExecution_() {
   // Prepare for execution
   CraneErrCode err = m_instance_->Prepare();
   if (err != CraneErrCode::SUCCESS) {
-    CRANE_DEBUG("Failed to prepare task", m_step_spec_.spec.task_id());
+    // TODO: Add more accurate error codes.
+    CRANE_DEBUG("Failed to prepare for task {}", m_step_spec_.spec.task_id());
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeFileNotFound,
                               fmt::format("Failed to prepare task"));

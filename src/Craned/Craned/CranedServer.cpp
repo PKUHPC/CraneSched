@@ -46,11 +46,13 @@ grpc::Status CranedServiceImpl::ExecuteTask(
     crane::grpc::ExecuteTasksReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
+
     for (auto const &task_to_d : request->tasks())
       response->add_failed_task_id_list(task_to_d.task_id());
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
+
+  CRANE_TRACE("Received request from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
   CraneErrCode err;

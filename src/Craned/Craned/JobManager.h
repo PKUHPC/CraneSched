@@ -130,7 +130,7 @@ class JobManager {
   };
 
   struct EvQueueExecuteTaskElem {
-    std::unique_ptr<StepInstance> execution;
+    std::unique_ptr<StepInstance> step;
     std::promise<CraneErrCode> ok_prom;
   };
 

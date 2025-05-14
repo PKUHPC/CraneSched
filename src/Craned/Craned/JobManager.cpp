@@ -128,17 +128,20 @@ CraneErrCode JobManager::Recover(
     std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map) {
   for (auto& [job_id, step_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
+
     uid_t uid = step_status.job_spec.cgroup_spec.uid;
     step_status.job_spec.cgroup_spec.recovered = true;
+
     auto job_instance = std::make_unique<JobInstance>(step_status.job_spec);
-    auto execution = std::make_unique<StepInstance>(
+    auto step = std::make_unique<StepInstance>(
         StepInstance{.step_spec = step_status.step_spec});
+
     // TODO:replace this with step_id
-    job_instance->step_map.emplace(0, std::move(execution));
+    job_instance->step_map.emplace(0, std::move(step));
     job_instance->cgroup =
         g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
-
     m_job_map_.Emplace(job_id, std::move(job_instance));
+
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     if (uid_map->contains(uid)) {
       uid_map->at(uid).RawPtr()->emplace(job_id);
@@ -193,7 +196,7 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
       if (!map_ptr->contains(job_id)) {
-        CRANE_WARN("Try to free nonexistent job#{}", job_ids);
+        CRANE_WARN("Try to free nonexistent job #{}", job_ids);
         return false;
       }
     }
@@ -504,6 +507,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
+    // Supervisor will be launched in a new process group.
+    setpgid(0, 0);
+
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
@@ -581,13 +587,13 @@ CraneErrCode JobManager::ExecuteTaskAsync(
                 task_spec.task_id());
     return CraneErrCode::ERR_CGROUP;
   }
-  auto step = std::make_unique<StepInstance>();
 
-  // Simply wrap the Task structure within an Execution structure and
+  // Simply wrap the Task structure within an StepInstance structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
+  auto step = std::make_unique<StepInstance>();
   step->step_spec = task_spec;
-  EvQueueExecuteTaskElem elem{.execution = std::move(step)};
+  EvQueueExecuteTaskElem elem{.step = std::move(step)};
 
   auto future = elem.ok_prom.get_future();
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
@@ -600,18 +606,17 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   EvQueueExecuteTaskElem elem;
 
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    // Once ExecuteTask RPC is processed, the Exection goes into
-    // m_job_map_.
-    std::unique_ptr execution = std::move(elem.execution);
+    // Once ExecuteTask RPC is processed, the Exection goes into m_job_map_.
+    std::unique_ptr step = std::move(elem.step);
 
-    if (!m_job_map_.Contains(execution->step_spec.task_id())) {
+    if (!m_job_map_.Contains(step->step_spec.task_id())) {
       CRANE_ERROR("Failed to find job #{} allocation",
-                  execution->step_spec.task_id());
+                  step->step_spec.task_id());
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
     }
     m_pending_thread_pool_tasks.count_up();
-    g_thread_pool->detach_task([this, execution = execution.release()] {
-      LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
+    g_thread_pool->detach_task([this, instance = step.release()] {
+      LaunchStepMt_(std::unique_ptr<StepInstance>(instance));
       m_pending_thread_pool_tasks.count_down();
     });
   }
@@ -621,6 +626,7 @@ bool JobManager::FreeJobInstanceAllocation_(
     const std::vector<task_id_t>& job_ids) {
   CRANE_DEBUG("Freeing job [{}] instance allocation",
               absl::StrJoin(job_ids, ","));
+
   std::vector<JobInstance*> job_ptr_vec;
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
@@ -629,6 +635,7 @@ bool JobManager::FreeJobInstanceAllocation_(
       map_ptr->erase(job_id);
     }
   }
+
   {
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     for (auto* job : job_ptr_vec) {
@@ -643,6 +650,7 @@ bool JobManager::FreeJobInstanceAllocation_(
       }
     }
   }
+
   for (auto* instance : job_ptr_vec) {
     auto* cgroup = instance->cgroup.release();
     if (g_config.Plugin.Enabled) {
@@ -686,22 +694,34 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   task_id_t job_id = step->step_spec.task_id();
   auto job_it = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_it) {
-    CRANE_ERROR("Failed to get the allocation of job#{}", job_id);
+    CRANE_ERROR("Failed to get the allocation of job #{}", job_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get the allocation for job#{} ", job_id));
+        fmt::format("Failed to get the allocation for job #{} ", job_id));
     return;
   }
   auto* job = job_it.get()->get();
+
+  // Check if the step is acceptable.
+  CRANE_INFO("Container req: {}, enabled: {}", step->step_spec.container(),
+             g_config.Container.Enabled);
+  if (step->step_spec.container().length() && !g_config.Container.Enabled) {
+    CRANE_ERROR("Container is not supported in this node.");
+    ActivateTaskStatusChangeAsync_(step->step_spec.task_id(),
+                                   crane::grpc::TaskStatus::Failed,
+                                   ExitCode::kExitCodeSpawnProcessFail,
+                                   "Container is not supported in craned.");
+    return;
+  }
 
   if (!job->cgroup) {
     job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job->job_spec.cgroup_spec);
   }
   if (!job->cgroup) {
-    CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
+    CRANE_ERROR("Failed to get cgroup for job #{}", job_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get cgroup for job#{} ", job_id));
+        fmt::format("Failed to get cgroup for job #{} ", job_id));
     return;
   }
 
