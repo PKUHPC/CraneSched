@@ -839,12 +839,11 @@ message StreamTaskIOReply {
 
 message SendPmixRingMsgReq {
   message PmixRingMsgHdr {
-    uint32 type = 1;
-    uint32 contrib_id = 2;
-    uint32 seq = 3;
-    uint32 hop_seq = 4;
-    string craned_id = 5;
-    uint32 msgsize = 6;
+    uint32 contrib_id = 1;
+    uint32 seq = 2;
+    uint32 hop_seq = 3;
+    string craned_id = 4;
+    uint32 msgsize = 5;
   };
 
   PmixRingMsgHdr pmix_ring_msg_hdr = 1;
@@ -893,9 +892,8 @@ message PmixDModexRequestReply {
 message PmixDModexResponseReq {
   uint32 seq_num = 1;
   string craned_id = 2;
-  int32 code = 3;
-  bytes data = 4;
-  int32 status = 5;
+  bytes data = 3;
+  int32 status = 4;
 }
 
 message PmixDModexResponseReply {
