@@ -24,6 +24,7 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "Pmix/Pmix.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -275,7 +276,8 @@ class TaskManager {
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
   CraneErrCode SpawnProcessInInstance_(TaskInstance* instance,
-                                       ProcessInstance* process);
+                                       ProcessInstance* process,
+                                       int local_rank);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 

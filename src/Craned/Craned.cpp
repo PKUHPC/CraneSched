@@ -27,6 +27,8 @@
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
+#include "CranedASyncServer.h"
+#include "CranedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -246,6 +248,10 @@ void ParseConfig(int argc, char** argv) {
                         fmt::join(name_list, ", "));
           } else
             std::exit(1);
+
+          for (auto& name : name_list) {
+            g_config.NodeList.insert(name);
+          }
 
           if (node["cpu"])
             node_res->allocatable_res.cpu_count =
@@ -642,6 +648,9 @@ void GlobalVariableInit() {
 
   g_cfored_manager = std::make_unique<Craned::CforedManager>();
   g_cfored_manager->Init();
+
+  g_craned_client = std::make_unique<Craned::CranedClient>();
+  g_craned_client->Init(g_config.NodeList);
 }
 
 void StartServer() {
@@ -666,7 +675,11 @@ void StartServer() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
+  g_a_sync_server = std::make_unique<Craned::CranedASyncServer>(g_config.ListenConf);
+
   g_server->Wait();
+
+  g_a_sync_server->Wait();
 
   // Free global variables
   g_task_mgr->Wait();
@@ -675,6 +688,8 @@ void StartServer() {
   g_cfored_manager.reset();
   g_server.reset();
   g_ctld_client.reset();
+
+  g_a_sync_server.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

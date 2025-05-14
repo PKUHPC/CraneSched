@@ -48,6 +48,8 @@ inline const char* const kCtldDefaultPort = "10011";
 inline const char* const kCranedDefaultPort = "10010";
 inline const char* const kCforedDefaultPort = "10012";
 
+inline const char* const kCranedAsyncDefaultPort = "10015";
+
 inline const char* const kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* const kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
@@ -97,6 +99,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
   kExitCodeExecutionError,
+  kExitCodeInitMpiServer,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };
