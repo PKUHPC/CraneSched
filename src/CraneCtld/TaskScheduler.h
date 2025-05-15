@@ -275,26 +275,20 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
   class NodeSelectionInfo {
    public:
-    void InitCostAndTimeAvailResMap(const CranedId& craned_id,
-                                    const ResourceInNode& res_total) {
-      m_cost_node_id_set_.erase({m_node_cost_map_[craned_id], craned_id});
-      m_node_cost_map_[craned_id] = 0;
-      m_cost_node_id_set_.emplace(0, craned_id);
-      m_node_res_total_map_[craned_id] = res_total;
-      m_node_time_avail_res_map_[craned_id].clear();
-    }
+    void InitCostAndTimeAvailResMap(
+        const CranedId& craned_id, const ResourceInNode& res_total,
+        const ResourceInNode& res_avail, const absl::Time& now,
+        const std::vector<std::pair<absl::Time, const ResourceInNode*>>&
+            running_tasks,
+        const absl::flat_hash_map<ResvId, CranedMeta::ResvInNode>* resv_map);
 
     void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
                     const absl::Time& end_time,
                     const ResourceInNode& resources) {
       uint64_t& cost = m_node_cost_map_.at(craned_id);
       m_cost_node_id_set_.erase({cost, craned_id});
-      ResourceInNode& total_res = m_node_res_total_map_.at(craned_id);
-      double cpu_ratio =
-          static_cast<double>(resources.allocatable_res.cpu_count) /
-          static_cast<double>(total_res.allocatable_res.cpu_count);
-      cost += std::round((end_time - start_time) / absl::Seconds(1) *
-                         cpu_ratio * 256);
+      UpdateCostFunc(cost, start_time, end_time, resources,
+                     m_node_res_total_map_.at(craned_id));
       m_cost_node_id_set_.emplace(cost, craned_id);
     }
 
@@ -322,6 +316,17 @@ class MinLoadFirst : public INodeSelectionAlgo {
     }
 
    private:
+    void UpdateCostFunc(uint64_t& cost, const absl::Time& start_time,
+                        const absl::Time& end_time,
+                        const ResourceInNode& resources,
+                        const ResourceInNode& total_res) {
+      double cpu_ratio =
+          static_cast<double>(resources.allocatable_res.cpu_count) /
+          static_cast<double>(total_res.allocatable_res.cpu_count);
+      cost += std::round((end_time - start_time) / absl::Seconds(1) *
+                         cpu_ratio * 256);
+    }
+
     // Craned_ids are sorted by cost.
     std::set<std::pair<uint64_t, CranedId>> m_cost_node_id_set_;
     std::unordered_map<CranedId, uint64_t> m_node_cost_map_;
@@ -495,7 +500,8 @@ class TaskScheduler {
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
-  // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
+  // Temporary inconsistency may happen. If 'false' is returned, just ignore
+  // it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
