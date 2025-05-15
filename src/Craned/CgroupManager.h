@@ -409,38 +409,6 @@ class CgroupV1 : public CgroupInterface {
   void Destroy() override;
 };
 
-#ifdef CRANE_ENABLE_BPF
-class BpfRuntimeInfo {
- public:
-  BpfRuntimeInfo();
-  ~BpfRuntimeInfo();
-  bool InitializeBpfObj();
-  void CloseBpfObj();
-  void RmBpfDeviceMap();
-
-  struct bpf_object *BpfObj() { return bpf_obj_; }
-  struct bpf_program *BpfProgram() { return bpf_prog_; }
-  std::mutex *BpfMutex() { return bpf_mtx_; }
-  struct bpf_map *BpfDevMap() { return dev_map_; }
-  int BpfProgFd() { return bpf_prog_fd_; }
-  void SetLogLevel(uint32_t log_devel) { bpf_debug_log_level_ = log_devel; }
-  bool BpfInvalid() {
-    std::unique_lock<std::mutex> lk(*bpf_mtx_);
-    return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
-           cgroup_count_ > 0;
-  }
-
- private:
-  uint32_t bpf_debug_log_level_;
-  struct bpf_object *bpf_obj_;
-  struct bpf_program *bpf_prog_;
-  struct bpf_map *dev_map_;
-  int bpf_prog_fd_;
-  std::mutex *bpf_mtx_;
-  size_t cgroup_count_;
-};
-#endif
-
 class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);

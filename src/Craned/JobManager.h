@@ -27,7 +27,7 @@ namespace Craned {
 
 struct JobSpec {
   JobSpec() = default;
-  explicit JobSpec(const crane::grpc::JobSpec& spec) : cg_spec(spec) {}
+  explicit JobSpec(const crane::grpc::JobToD& spec) : cg_spec(spec) {}
 
   CgroupSpec cg_spec;
   EnvMap GetJobEnvMap() const;
@@ -71,7 +71,7 @@ class JobManager {
 
   CgroupInterface* GetCgForJob(task_id_t job_id);
 
-  bool FreeJobs(const std::vector<task_id_t>& job_ids);
+  bool FreeJobs(const std::set<task_id_t>& job_ids);
 
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 

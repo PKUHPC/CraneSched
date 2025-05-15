@@ -180,9 +180,11 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
                           request->remote_meta().lost_tasks().end());
 
-  g_thread_pool->detach_task([jobs = std::move(orphaned_job_ids)] {
-    g_task_scheduler->TerminateOrphanedJobs(jobs);
-  });
+  if (!orphaned_job_ids.empty())
+    g_thread_pool->detach_task(
+        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
+          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
+        });
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());

@@ -86,8 +86,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
 }
 
 void CtldClientStateMachine::EvConfigurationDone(
-    std::optional<std::vector<task_id_t>> lost_jobs,
-    std::optional<std::vector<task_id_t>> lost_tasks) {
+    std::optional<std::set<task_id_t>> lost_jobs,
+    std::optional<std::set<task_id_t>> lost_tasks) {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
@@ -201,8 +201,8 @@ void CtldClientStateMachine::ActionConfigure_(
   });
 }
 
-void CtldClientStateMachine::ActionRegister_(
-    std::vector<task_id_t>&& lost_jobs, std::vector<task_id_t>&& lost_tasks) {
+void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
+                                             std::set<task_id_t>&& lost_tasks) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
 
@@ -249,22 +249,37 @@ void CtldClient::Init() {
                     ProtoTimestampToString(arg.token));
 
         std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
-        std::vector<task_id_t> lost_jobs{};
-        std::vector<task_id_t> invalid_jobs{};
+        std::set<task_id_t> lost_jobs{};
+        std::set<task_id_t> invalid_jobs{};
         std::ranges::set_difference(arg.job_ids, exact_job_ids,
-                                    std::back_inserter(lost_jobs));
-        std::ranges::set_difference(exact_job_ids, arg.job_ids,
-                                    std::back_inserter(invalid_jobs));
+                                    std::inserter(lost_jobs, lost_jobs.end()));
+        std::ranges::set_difference(
+            exact_job_ids, arg.job_ids,
+            std::inserter(invalid_jobs, invalid_jobs.end()));
 
         std::set exact_task_ids = g_task_mgr->QueryRunningTasksAsync();
-        std::vector<task_id_t> lost_tasks{};
-        std::vector<task_id_t> invalid_tasks{};
-        std::ranges::set_difference(arg.task_ids, exact_task_ids,
-                                    std::back_inserter(lost_tasks));
-        std::ranges::set_difference(exact_task_ids, arg.job_ids,
-                                    std::back_inserter(invalid_tasks));
+        std::set<task_id_t> lost_tasks{};
+        std::set<task_id_t> invalid_tasks{};
+        std::ranges::set_difference(
+            arg.task_ids, exact_task_ids,
+            std::inserter(lost_tasks, lost_tasks.end()));
+        std::ranges::set_difference(
+            exact_task_ids, arg.job_ids,
+            std::inserter(invalid_tasks, invalid_tasks.end()));
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
+        if (!invalid_tasks.empty()) {
+          CRANE_DEBUG("Terminating orphaned tasks: [{}].",
+                      absl::StrJoin(invalid_tasks, ","));
+          for (auto task_id : invalid_tasks) {
+            g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id);
+          }
+        }
+        if (!invalid_jobs.empty()) {
+          CRANE_DEBUG("Freeing invalid jobs: [{}].",
+                      absl::StrJoin(invalid_jobs, ","));
+          g_job_mgr->FreeJobs(invalid_jobs);
+        }
       });
 
   g_ctld_client_sm->SetActionRegisterCb(
@@ -357,8 +372,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 }
 
 bool CtldClient::CranedRegister_(RegToken const& token,
-                                 std::vector<task_id_t> const& lost_jobs,
-                                 std::vector<task_id_t> const& lost_tasks) {
+                                 std::set<task_id_t> const& lost_jobs,
+                                 std::set<task_id_t> const& lost_tasks) {
   CRANE_DEBUG("Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;

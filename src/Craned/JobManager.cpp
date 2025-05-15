@@ -85,7 +85,8 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   return raw_ptr;
 }
 
-bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
+bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
+  CRANE_DEBUG("Release Cgroup for job [{}]", absl::StrJoin(job_ids, ","));
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
@@ -96,14 +97,14 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     }
   }
 
-  std::vector<CgroupInterface*> cg_ptr_vec;
+  std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
   std::vector<uid_t> uid_vec;
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
       JobInstance* job_inst = map_ptr->at(job_id).RawPtr();
 
-      cg_ptr_vec.push_back(job_inst->cgroup.release());
+      job_cg_map[job_id] = job_inst->cgroup.release();
       uid_vec.push_back(job_inst->job_spec.cg_spec.uid);
       map_ptr->erase(job_id);
     }
@@ -122,12 +123,12 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
       }
     }
   }
-  for (auto [idx, cgroup] : cg_ptr_vec | std::ranges::views::enumerate) {
+
+  for (auto [job_id, cgroup] : job_cg_map) {
     if (cgroup == nullptr) continue;
 
     if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(job_ids[idx],
-                                              cgroup->CgroupPathStr());
+      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupPathStr());
     }
     g_thread_pool->detach_task([cgroup]() {
       int cnt = 0;
