@@ -322,50 +322,41 @@ class MinLoadFirst : public INodeSelectionAlgo {
                                                             // allocation
                              : lhs.time < rhs.time;
                 });
-      ResourceInNode cur_res = res_avail;
-      absl::Time cur_time = now;
       TimeAvailResMap& time_avail_res_map =
           m_node_time_avail_res_map_[craned_id];
+      {
+        auto [cur_iter, ok] = time_avail_res_map.emplace(now, res_avail);
 
-      for (const auto& change : changes) {
-        if (change.time != cur_time) {
-          time_avail_res_map.emplace(cur_time, cur_res);
+        for (const auto& change : changes) {
+          if (change.time != cur_iter->first) {
+            std::tie(cur_iter, ok) =
+                time_avail_res_map.emplace(change.time, cur_iter->second);
+            if constexpr (kAlgoTraceOutput) {
+              CRANE_TRACE(
+                  "Insert duration [now+{}s, inf) with resource: "
+                  "cpu: {}, mem: {}, gres: {}",
+                  absl::ToInt64Seconds(cur_iter->first - now),
+                  cur_iter->second.allocatable_res.cpu_count,
+                  cur_iter->second.allocatable_res.memory_bytes,
+                  util::ReadableDresInNode(cur_iter->second));
+            }
+          }
+          if (change.is_alloc) {
+            cur_iter->second -= *(change.res);
+          } else {
+            cur_iter->second += *(change.res);
+          }
+
           if constexpr (kAlgoTraceOutput) {
             CRANE_TRACE(
-                "Insert duration [now+{}s, inf) with resource: "
-                "cpu: {}, mem: {}, gres: {}",
-                absl::ToInt64Seconds(cur_time - now),
-                cur_res.allocatable_res.cpu_count,
-                cur_res.allocatable_res.memory_bytes,
-                util::ReadableDresInNode(cur_res));
+                "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
+                "{}; ",
+                craned_id, absl::ToInt64Seconds(cur_iter->first - now),
+                cur_iter->second.allocatable_res.cpu_count,
+                cur_iter->second.allocatable_res.memory_bytes,
+                util::ReadableDresInNode(cur_iter->second));
           }
-          cur_time = change.time;
         }
-        if (change.is_alloc) {
-          cur_res -= *(change.res);
-        } else {
-          cur_res += *(change.res);
-        }
-
-        if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE(
-              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
-              "{}; ",
-              craned_id, absl::ToInt64Seconds(cur_time - now),
-              cur_res.allocatable_res.cpu_count,
-              cur_res.allocatable_res.memory_bytes,
-              util::ReadableDresInNode(cur_res));
-        }
-      }
-      time_avail_res_map.emplace(cur_time, cur_res);
-      if constexpr (kAlgoTraceOutput) {
-        CRANE_TRACE(
-            "Insert duration [now+{}s, inf) with resource: "
-            "cpu: {}, mem: {}, gres: {}",
-            absl::ToInt64Seconds(cur_time - now),
-            cur_res.allocatable_res.cpu_count,
-            cur_res.allocatable_res.memory_bytes,
-            util::ReadableDresInNode(cur_res));
       }
 
       if constexpr (kAlgoTraceOutput) {
