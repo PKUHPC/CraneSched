@@ -2491,7 +2491,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
     auto craned_meta_ptr = craned_meta_map.at(craned_id).GetExclusivePtr();
     if (!craned_meta_ptr->alive || craned_meta_ptr->drain) continue;
 
-    node_time_res_vec_map[craned_id] = {};
+    node_time_res_vec_map[craned_id];
   }
 
   for (const auto& res :
