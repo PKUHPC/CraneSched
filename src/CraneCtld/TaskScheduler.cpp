@@ -2290,6 +2290,115 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(filtered_rng, append_fn);
 }
 
+void MinLoadFirst::NodeSelectionInfo::InitCostAndTimeAvailResMap(
+    const CranedId& craned_id, const ResourceInNode& res_total,
+    const ResourceInNode& res_avail, const absl::Time& now,
+    const std::vector<std::pair<absl::Time, const ResourceInNode*>>&
+        running_tasks,
+    const absl::flat_hash_map<ResvId, CranedMeta::ResvInNode>* resv_map) {
+  struct ResChange {
+    absl::Time time;
+    const ResourceInNode* res;
+    bool is_alloc;
+  };
+  std::vector<ResChange> changes;
+
+  uint64_t& cost = m_node_cost_map_[craned_id];
+  for (const auto& [end_time, res] : running_tasks) {
+    UpdateCostFunc(cost, now, end_time, *res, res_total);
+    changes.emplace_back(ResChange{end_time, res, false});
+  }
+
+  if (resv_map != nullptr && !resv_map->empty()) {
+    absl::Time first_resv_time = absl::InfiniteFuture();
+    for (const auto& [resv_id, resv] : *resv_map) {
+      const absl::Time& end_time = resv.end_time;
+      if (end_time < now) {  // Already expired
+        continue;
+      }
+      absl::Time start_time = std::max(now, resv.start_time);
+      UpdateCostFunc(cost, start_time, end_time, resv.res_total, res_total);
+      changes.emplace_back(ResChange{start_time, &resv.res_total, true});
+      changes.emplace_back(ResChange{end_time, &resv.res_total, false});
+      if (start_time < first_resv_time) {
+        first_resv_time = start_time;
+      }
+    }
+    m_first_resv_time_map_[craned_id] = first_resv_time;
+  }
+
+  m_cost_node_id_set_.emplace(cost, craned_id);
+  m_node_res_total_map_[craned_id] = res_total;
+
+  std::sort(changes.begin(), changes.end(),
+            [](const ResChange& lhs, const ResChange& rhs) {
+              return lhs.time == rhs.time
+                         ? lhs.is_alloc <
+                               rhs.is_alloc  // release before  allocation
+                         : lhs.time < rhs.time;
+            });
+  TimeAvailResMap& time_avail_res_map = m_node_time_avail_res_map_[craned_id];
+  {
+    auto [cur_iter, ok] = time_avail_res_map.emplace(now, res_avail);
+
+    for (const auto& change : changes) {
+      if (change.time != cur_iter->first) {
+        std::tie(cur_iter, ok) =
+            time_avail_res_map.emplace(change.time, cur_iter->second);
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE(
+              "Insert duration [now+{}s, inf) with resource: "
+              "cpu: {}, mem: {}, gres: {}",
+              absl::ToInt64Seconds(cur_iter->first - now),
+              cur_iter->second.allocatable_res.cpu_count,
+              cur_iter->second.allocatable_res.memory_bytes,
+              util::ReadableDresInNode(cur_iter->second));
+        }
+      }
+      if (change.is_alloc) {
+        cur_iter->second -= *(change.res);
+      } else {
+        cur_iter->second += *(change.res);
+      }
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
+            "{}; ",
+            craned_id, absl::ToInt64Seconds(cur_iter->first - now),
+            cur_iter->second.allocatable_res.cpu_count,
+            cur_iter->second.allocatable_res.memory_bytes,
+            util::ReadableDresInNode(cur_iter->second));
+      }
+    }
+  }
+
+  if constexpr (kAlgoTraceOutput) {
+    std::string str;
+    str.append(fmt::format("Node {}: ", craned_id));
+    auto prev_iter = time_avail_res_map.begin();
+    auto iter = std::next(prev_iter);
+    for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
+      str.append(
+          fmt::format("[ now+{}s , now+{}s ) Available allocatable "
+                      "res: cpu core {}, mem {}, gres {}",
+                      absl::ToInt64Seconds(prev_iter->first - now),
+                      absl::ToInt64Seconds(iter->first - now),
+                      prev_iter->second.allocatable_res.cpu_count,
+                      prev_iter->second.allocatable_res.memory_bytes,
+                      util::ReadableDresInNode(prev_iter->second)));
+    }
+    str.append(
+        fmt::format("[ now+{}s , inf ) Available allocatable "
+                    "res: cpu core {}, mem {}, gres {}",
+                    absl::ToInt64Seconds(prev_iter->first - now),
+                    prev_iter->second.allocatable_res.cpu_count,
+                    prev_iter->second.allocatable_res.memory_bytes,
+                    util::ReadableDresInNode(prev_iter->second)));
+    CRANE_TRACE("{}", str);
+  }
+}
+
 void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
@@ -2306,20 +2415,15 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // An offline craned shouldn't be scheduled.
     if (!craned_meta->alive || craned_meta->drain) continue;
 
-    node_selection_info_ref.InitCostAndTimeAvailResMap(craned_id,
-                                                       craned_meta->res_total);
-
-    // Sort all running task in this node by ending time.
-    std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
-    std::vector<std::pair<absl::Time, std::pair<bool, ResourceInNode>>>
-        time_res_vec;
+    std::vector<std::pair<absl::Time, const ResourceInNode*>>
+        end_time_task_res_vec;
 
     for (const auto& [task_id, res] : craned_meta->rn_task_res_map) {
       const auto& task = running_tasks.at(task_id);
       absl::Time end_time = std::max(task->StartTime() + task->time_limit,
                                      now + absl::Seconds(1));
-      // Reservation may has been deleted
-      if (task->reservation == "") {
+      if (task->reservation == "") {  // task using reserved resource is not
+                                      // considered here.
         // For some completing tasks,
         // task->StartTime() + task->time_limit <= absl::Now().
         // In this case,
@@ -2327,21 +2431,27 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         // should be taken for end time,
         // otherwise, tasks might be scheduled and executed even when
         // res_avail = 0 and will cause a severe error where res_avail < 0.
-        end_time_task_id_vec.emplace_back(end_time, task_id);
-        time_res_vec.emplace_back(end_time, std::make_pair(true, res));
-        node_selection_info_ref.UpdateCost(craned_id, now, end_time, res);
+        end_time_task_res_vec.emplace_back(end_time, &res);
       }
     }
 
     if constexpr (kAlgoTraceOutput) {
+      std::vector<std::pair<absl::Time, task_id_t>> end_time_task_id_vec;
+      for (const auto& [task_id, res] : craned_meta->rn_task_res_map) {
+        const auto& task = running_tasks.at(task_id);
+        absl::Time end_time = std::max(task->StartTime() + task->time_limit,
+                                       now + absl::Seconds(1));
+        if (task->reservation == "") {
+          end_time_task_id_vec.emplace_back(end_time, task_id);
+        }
+      }
+
       std::string running_task_ids_str;
       for (const auto& [end_time, task_id] : end_time_task_id_vec)
         running_task_ids_str.append(fmt::format("{}, ", task_id));
-      CRANE_TRACE("Craned node {} has running tasks: {}", craned_id,
-                  running_task_ids_str);
-    }
+      CRANE_TRACE("Craned node {} has running non-reservation tasks: {}",
+                  craned_id, running_task_ids_str);
 
-    if constexpr (kAlgoTraceOutput) {
       std::sort(end_time_task_id_vec.begin(), end_time_task_id_vec.end(),
                 [](const auto& lhs, const auto& rhs) {
                   return lhs.first < rhs.first;
@@ -2358,128 +2468,9 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       }
     }
 
-    if (!craned_meta->resv_in_node_map.empty()) {
-      absl::Time first_resv_time = absl::InfiniteFuture();
-      for (const auto& [resv_id, resv_in_node] :
-           craned_meta->resv_in_node_map) {
-        absl::Time start_time = resv_in_node.start_time;
-        absl::Time end_time = resv_in_node.end_time;
-        if (end_time <= now) {
-          CRANE_DEBUG("Expired resv {} on node {}", resv_id, craned_id);
-          continue;
-        }
-
-        if (start_time < now) start_time = now;
-
-        time_res_vec.emplace_back(
-            std::max(now, start_time),
-            std::make_pair(false, resv_in_node.res_total));
-        time_res_vec.emplace_back(std::max(now, end_time),
-                                  std::make_pair(true, resv_in_node.res_total));
-        first_resv_time = std::min(first_resv_time, start_time);
-        node_selection_info_ref.UpdateCost(craned_id, start_time, end_time,
-                                           resv_in_node.res_total);
-      }
-      node_selection_info_ref.SetFirstResvTime(craned_id, first_resv_time);
-    }
-
-    std::sort(
-        time_res_vec.begin(), time_res_vec.end(),
-        [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-
-    // Calculate how many resources are available at [now, first task end,
-    // second task end, ...] in this node.
-    auto& time_avail_res_map =
-        node_selection_info_ref.GetTimeAvailResMap(craned_id);
-
-    // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
-    // null.
-    time_avail_res_map[now] = craned_meta->res_avail;
-
-    if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}, gres: {}",
-                  craned_id, craned_meta->res_avail.allocatable_res.cpu_count,
-                  craned_meta->res_avail.allocatable_res.memory_bytes,
-                  util::ReadableDresInNode(craned_meta->res_avail));
-    }
-
-    {  // Limit the scope of `iter`
-      auto cur_time_iter = time_avail_res_map.begin();
-      bool ok;
-      for (auto& [end_time, res_info] : time_res_vec) {
-        const auto& [is_end, res] = res_info;
-        if (!time_avail_res_map.contains(end_time)) {
-          /**
-           * If there isn't any task that ends at the `end_time`,
-           * insert an interval [end_time, inf) with the resource of
-           * the previous interval for the following addition of
-           * freed resources.
-           * Note: Such two intervals [5,6), [6,inf) do not overlap with
-           *       each other.
-           */
-          std::tie(cur_time_iter, ok) =
-              time_avail_res_map.emplace(end_time, cur_time_iter->second);
-
-          if constexpr (kAlgoTraceOutput) {
-            CRANE_TRACE(
-                "Insert duration [now+{}s, inf) with resource: "
-                "cpu: {}, mem: {}, gres: {}",
-                absl::ToInt64Seconds(end_time - now),
-                craned_meta->res_avail.allocatable_res.cpu_count,
-                craned_meta->res_avail.allocatable_res.memory_bytes,
-                util::ReadableDresInNode(craned_meta->res_avail));
-          }
-        }
-
-        /**
-         * For the situation in which multiple tasks may end at the same
-         * time:
-         * end_time__task_id_vec: [{now+1, 1}, {now+1, 2}, ...]
-         * But we want only 1 time point in time__avail_res__map:
-         * {{now+1+1: available_res(now) + available_res(1) +
-         *  available_res(2)}, ...}
-         */
-        if (is_end)
-          cur_time_iter->second += res;
-        else
-          cur_time_iter->second -= res;
-
-        if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE(
-              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
-              "{}; ",
-              craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
-              cur_time_iter->second.allocatable_res.cpu_count,
-              cur_time_iter->second.allocatable_res.memory_bytes,
-              util::ReadableDresInNode(cur_time_iter->second));
-        }
-      }
-
-      if constexpr (kAlgoTraceOutput) {
-        std::string str;
-        str.append(fmt::format("Node ({}, {}): ", partition_id, craned_id));
-        auto prev_iter = time_avail_res_map.begin();
-        auto iter = std::next(prev_iter);
-        for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
-          str.append(
-              fmt::format("[ now+{}s , now+{}s ) Available allocatable "
-                          "res: cpu core {}, mem {}, gres {}",
-                          absl::ToInt64Seconds(prev_iter->first - now),
-                          absl::ToInt64Seconds(iter->first - now),
-                          prev_iter->second.allocatable_res.cpu_count,
-                          prev_iter->second.allocatable_res.memory_bytes,
-                          util::ReadableDresInNode(prev_iter->second)));
-        }
-        str.append(
-            fmt::format("[ now+{}s , inf ) Available allocatable "
-                        "res: cpu core {}, mem {}, gres {}",
-                        absl::ToInt64Seconds(prev_iter->first - now),
-                        prev_iter->second.allocatable_res.cpu_count,
-                        prev_iter->second.allocatable_res.memory_bytes,
-                        util::ReadableDresInNode(prev_iter->second)));
-        CRANE_TRACE("{}", str);
-      }
-    }
+    node_selection_info_ref.InitCostAndTimeAvailResMap(
+        craned_id, craned_meta->res_total, craned_meta->res_avail, now,
+        end_time_task_res_vec, &craned_meta->resv_in_node_map);
   }
 }
 
@@ -2493,7 +2484,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
 
   // Sort all running task in this node by ending time.
   std::unordered_map<CranedId,
-                     std::vector<std::pair<absl::Time, ResourceInNode>>>
+                     std::vector<std::pair<absl::Time, const ResourceInNode*>>>
       node_time_res_vec_map;
 
   for (const auto& craned_id : resv_meta->logical_part.craned_ids) {
@@ -2501,8 +2492,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
     if (!craned_meta_ptr->alive || craned_meta_ptr->drain) continue;
 
     node_time_res_vec_map[craned_id];
-    node_selection_info_ref.InitCostAndTimeAvailResMap(
-        craned_id, resv_meta->logical_part.res_total.at(craned_id));
   }
 
   for (const auto& res :
@@ -2513,36 +2502,22 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
     for (const auto& [craned_id, res_in_node] : each_node_res_map) {
       auto iter = node_time_res_vec_map.find(craned_id);
       if (iter != node_time_res_vec_map.end()) {
-        iter->second.emplace_back(end_time, res_in_node);
-        node_selection_info_ref.UpdateCost(craned_id, now, end_time,
-                                           res_in_node);
+        iter->second.emplace_back(end_time, &res_in_node);
       }
     }
   }
 
   // TODO: Move out to reduce the scope of the lock of crane_meta_map
   for (auto& [craned_id, time_res_vec] : node_time_res_vec_map) {
-    std::sort(
-        time_res_vec.begin(), time_res_vec.end(),
-        [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+    node_selection_info_ref.InitCostAndTimeAvailResMap(
+        craned_id, resv_meta->logical_part.res_total.at(craned_id),
+        resv_meta->logical_part.res_avail.at(craned_id), now,
+        node_time_res_vec_map[craned_id], nullptr);
 
     auto& time_avail_res_map =
         node_selection_info_ref.GetTimeAvailResMap(craned_id);
 
-    time_avail_res_map[now] = resv_meta->logical_part.res_avail.at(craned_id);
-
-    {
-      auto cur_time_iter = time_avail_res_map.begin();
-      bool ok;
-      for (auto& [end_time, res] : time_res_vec) {
-        if (!time_avail_res_map.contains(end_time)) {
-          std::tie(cur_time_iter, ok) =
-              time_avail_res_map.emplace(end_time, cur_time_iter->second);
-        }
-        cur_time_iter->second += res;
-      }
-      time_avail_res_map[resv_meta->logical_part.end_time].SetToZero();
-    }
+    time_avail_res_map[resv_meta->logical_part.end_time].SetToZero();
   }
 }
 
