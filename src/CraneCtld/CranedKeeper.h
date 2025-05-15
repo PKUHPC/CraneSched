@@ -86,6 +86,9 @@ class CranedStub {
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
+  bool Connected() const {
+    return !m_disconnected_.load(std::memory_order_acquire);
+  }
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
            !m_registered_.load(std::memory_order_acquire);

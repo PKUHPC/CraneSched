@@ -2153,7 +2153,10 @@ void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
   }
 }
 
-void TaskScheduler::TerminateOrphanedJobs(const std::set<task_id_t>& jobs) {
+void TaskScheduler::TerminateOrphanedJobs(const std::set<task_id_t>& jobs,
+                                          const CranedId& expect_node) {
+  CRANE_INFO("Terminate orphaned jobs: [{}] synced by {}.",
+             absl::StrJoin(jobs, ","), expect_node);
   std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
       craned_job_map;
   // Now we just terminate all job and task.
@@ -2167,50 +2170,17 @@ void TaskScheduler::TerminateOrphanedJobs(const std::set<task_id_t>& jobs) {
       if (job_it == m_running_task_map_.end()) {
         CRANE_WARN("Job {} not found in running task map.", job_id);
         continue;
-      } else {
-        auto& job = job_it->second;
-        job_exec_node_map[job_id] = job->executing_craned_ids;
-        for (const auto& craned_id : job->CranedIds()) {
-          craned_task_map[craned_id].emplace_back(job_id);
-          craned_job_map[craned_id].emplace_back(job_id, job->uid);
-        }
+      }
+      auto& job = job_it->second;
+      job_exec_node_map[job_id] = job->executing_craned_ids;
+      for (const auto& craned_id : job->CranedIds()) {
+        craned_job_map[craned_id].emplace_back(job_id, job->uid);
+      }
+      for (const auto& craned_id : job->executing_craned_ids) {
+        craned_task_map[craned_id].emplace_back(job_id);
       }
     }
   }
-
-  std::latch job_latch(craned_task_map.size());
-  for (auto& [craned_id, job_ids] : craned_task_map) {
-    g_thread_pool->detach_task(
-        [craned_id, job_ids = std::move(job_ids), &job_latch] {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub && !stub->Invalid()) {
-            CraneErrCode err = stub->TerminateOrphanedTasks(job_ids);
-            if (err != CraneErrCode::SUCCESS) {
-              CRANE_DEBUG("Failed to terminate {} orphaned tasks on Node {}",
-                          job_ids.size(), craned_id);
-            }
-          }
-          job_latch.count_down();
-        });
-  }
-  job_latch.wait();
-
-  std::latch cg_latch(craned_job_map.size());
-  for (auto& [craned_id, cgroups] : craned_job_map) {
-    g_thread_pool->detach_task([craned_id, cgroups = std::move(cgroups),
-                                &cg_latch] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub && !stub->Invalid()) {
-        CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
-                      cgroups.size(), craned_id);
-        }
-      }
-      cg_latch.count_down();
-    });
-  }
-  cg_latch.wait();
 
   for (const auto& [job_id, exec_nodes] : job_exec_node_map) {
     for (const auto& craned_id : exec_nodes) {
