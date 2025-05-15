@@ -262,6 +262,13 @@ std::optional<std::unordered_map<std::string, std::string>> PmixTaskInstance::Se
   env_map.emplace("SLURM_NODELIST", m_node_list_str_);
   env_map.emplace("SLURM_STEP_ID", "0");
 
+  if (!std::getenv("OMPI_MCA_orte_precondition_transports")) {
+    char key[64];
+    uint32_t id = std::strtoul(m_task_id_.c_str(), nullptr, 0);
+    std::snprintf(key, sizeof(key), "%08x%08x-%08x%08x", id, 0, id, 0);
+    env_map.emplace("OMPI_MCA_orte_precondition_transports", key);
+  }
+
   return std::move(env_map);
 }
 
@@ -336,6 +343,9 @@ bool PmixServer::Init(const std::string& server_base_dir) {
 
   pmix_info_t *server_info;
   PMIX_INFO_CREATE(server_info, 1);
+  // TODO: PMIX ERROR: ERROR in file gds_ds12_lock_pthread.c at line 168
+  // if (PMIX_VERSION_MAJOR < 5)
+  // PMIX_INFO_LOAD(&server_info[0], PMIX_USERID, &uid, PMIX_UINT32);
   PMIX_INFO_LOAD(&server_info[0], PMIX_SERVER_TMPDIR, m_server_tmpdir_.c_str(), PMIX_STRING);
 
   rc = PMIx_server_init(&g_k_crane_pmix_cb, server_info, 1);
