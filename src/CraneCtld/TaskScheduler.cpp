@@ -2747,9 +2747,9 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
-    bool ok = g_account_meta_container->CheckQosResource(*task);
-    if (!ok) {
-      task->pending_reason = "QOSResourceLimit";
+    auto has_reason = g_account_meta_container->CheckQosResource(*task);
+    if (has_reason) {
+      task->pending_reason = has_reason.value();
       continue;
     }
 

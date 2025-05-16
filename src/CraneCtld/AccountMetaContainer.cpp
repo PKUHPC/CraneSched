@@ -121,7 +121,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   return result;
 }
 
-bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
+std::optional<std::string> AccountMetaContainer::CheckQosResource(
+    const TaskInCtld& task) {
   std::set<int> account_stripes;
   std::list<std::string> account_chain;
   {
@@ -135,8 +136,7 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
   }
 
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
-
-  CRANE_ASSERT(qos);
+  if (!qos) return "InvalidQOS";
 
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
 
@@ -145,6 +145,7 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
 
+  // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   bool result = true;
@@ -158,7 +159,7 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
         }
       });
 
-  if (!result) return result;
+  if (!result) return "QOSResourceLimit";
 
   for (const auto& account_name : account_chain) {
     m_account_meta_map_.modify_if(
@@ -170,7 +171,9 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
     if (!result) break;
   }
 
-  return result;
+  if (!result) return "QOSResourceLimit";
+
+  return std::nullopt;
 }
 
 void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
@@ -185,6 +188,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
         val.jobs_count++;
       });
 
+  // TODO: The account inheritance tree changes while jobs are in the queue?
   const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
   std::string account_name = task.account;
 
@@ -212,7 +216,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
         val.submit_jobs_count--;
       });
 
-  // TODO: What should I do if the account inheritance tree changes?
+  // TODO: The account inheritance tree changes while jobs are in the queue?
   const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
   std::string account_name = task.account;
 
