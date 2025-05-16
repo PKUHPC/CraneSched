@@ -513,8 +513,7 @@ class CgroupManager {
    * \param job cgroup spec for job.
    * \return CgroupInterface ptr,null if error.
    */
-  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
-      const JobToD &job);
+  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobToD &job);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
