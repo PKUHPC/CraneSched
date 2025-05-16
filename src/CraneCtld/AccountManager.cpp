@@ -2592,8 +2592,6 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
-
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
   return {};
