@@ -496,19 +496,18 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  // account and qos
-  Description = 10;
+  Description = 3; // account and qos
   // user
-  AdminLevel = 20;
-  DefaultAccount = 21;
+  AdminLevel = 4;
+  DefaultAccount = 5;
   // qos
-  Priority = 30;
-  MaxJobsPerUser = 31;
-  MaxCpusPerUser = 32;
-  MaxTimeLimitPerTask = 33;
-  MaxJobsPerAccount = 34;
-  MaxSubmitJobsPerUser = 35;
-  MaxSubmitJobsPerAccount = 36;
+  Priority = 6;
+  MaxJobsPerUser = 7;
+  MaxCpusPerUser = 8;
+  MaxTimeLimitPerTask = 9;
+  MaxJobsPerAccount = 10;
+  MaxSubmitJobsPerUser = 11;
+  MaxSubmitJobsPerAccount = 12;
 }
 
 message AccountInfo {
