@@ -25,6 +25,7 @@
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+
 #include <ranges>
 
 #include "crane/Logger.h"
@@ -357,17 +358,19 @@ std::vector<NetworkInterface> GetNetworkInterfaces() {
   std::unordered_map<std::string, NetworkInterface> interface_map;
   constexpr int kMaxRetries = 10;
   constexpr int kRetryIntervalMs = 3000;  // Retry every 3 seconds
-  
+
   for (int retry = 0; retry < kMaxRetries; ++retry) {
     interface_map.clear();
     bool has_valid_ip = false;
-    
+
     struct ifaddrs *ifaddr, *ifa;
     if (getifaddrs(&ifaddr) == -1) {
       CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
       if (retry < kMaxRetries - 1) {
-        CRANE_WARN("Retrying to get network interfaces ({}/{})", retry + 1, kMaxRetries);
-        std::this_thread::sleep_for(std::chrono::milliseconds(kRetryIntervalMs));
+        CRANE_WARN("Retrying to get network interfaces ({}/{})", retry + 1,
+                   kMaxRetries);
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kRetryIntervalMs));
         continue;
       }
       return {};
@@ -419,19 +422,25 @@ std::vector<NetworkInterface> GetNetworkInterfaces() {
     }
 
     freeifaddrs(ifaddr);
-    
-    // If we found at least one valid non-loopback IP address, consider network ready
+
+    // If we found at least one valid non-loopback IP address, consider network
+    // ready
     if (has_valid_ip) {
-      CRANE_INFO("Successfully retrieved network interfaces, found {} interfaces", interface_map.size());
+      CRANE_INFO(
+          "Successfully retrieved network interfaces, found {} interfaces",
+          interface_map.size());
       break;
     }
-    
+
     if (retry < kMaxRetries - 1) {
-      CRANE_WARN("No valid network interface IP found, waiting for network service to start ({}/{})", 
-                retry + 1, kMaxRetries);
+      CRANE_WARN(
+          "No valid network interface IP found, waiting for network service to "
+          "start ({}/{})",
+          retry + 1, kMaxRetries);
       std::this_thread::sleep_for(std::chrono::milliseconds(kRetryIntervalMs));
     } else {
-      CRANE_ERROR("Failed to find valid network interface IPs after multiple attempts");
+      CRANE_ERROR(
+          "Failed to find valid network interface IPs after multiple attempts");
     }
   }
 
