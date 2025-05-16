@@ -1017,8 +1017,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     EnvMap task_env_map = instance->GetTaskEnvMap();
-    EnvMap res_env_map = CgroupManager::GetResourceEnvMapByResInNode(
-        job_expt.value().res_in_node);
+    EnvMap job_env_map = JobInstance::GetJobEnvMap(job_expt.value());
 
     // clearenv() should be called just before fork!
     if (clearenv()) fmt::print(stderr, "[Subproc] clearenv() failed.\n");
@@ -1030,7 +1029,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                      value);
     };
     FuncSetEnv(task_env_map);
-    FuncSetEnv(res_env_map);
+    FuncSetEnv(job_env_map);
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
