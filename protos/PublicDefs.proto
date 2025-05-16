@@ -822,11 +822,10 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  // account and qos
-  Description = 10;
+  Description = 3; // account and qos
   // user
-  AdminLevel = 20;
-  DefaultAccount = 21;
+  AdminLevel = 4;
+  DefaultAccount = 5;
   // qos
   Priority = 30;
   MaxJobsPerUser = 31;
