@@ -579,8 +579,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // If the lock is held in the parent process during fork, the forked thread
   // in the child proc will block forever. That's why we should copy it here
   // and the child proc should not hold any lock.
-  CraneExpected<JobSpec> job_expt =
-      g_job_mgr->QueryJobSpec(instance->task.task_id());
+  CraneExpected job_expt = g_job_mgr->QueryJob(instance->task.task_id());
   if (!job_expt.has_value()) {
     CRANE_ERROR("[Task #{}] Failed to get resource info",
                 instance->task.task_id());
@@ -1019,7 +1018,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap res_env_map = CgroupManager::GetResourceEnvMapByResInNode(
-        job_expt.value().cg_spec.res_in_node);
+        job_expt.value().res_in_node);
 
     // clearenv() should be called just before fork!
     if (clearenv()) fmt::print(stderr, "[Subproc] clearenv() failed.\n");
@@ -1119,7 +1118,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
-  auto job_expt = g_job_mgr->QueryJobSpec(instance->task.task_id());
+  auto job_expt = g_job_mgr->QueryJob(instance->task.task_id());
   if (!job_expt.has_value()) {
     CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
     ActivateTaskStatusChangeAsync_(

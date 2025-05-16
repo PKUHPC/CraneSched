@@ -786,25 +786,22 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
          lhs.allocatable_res <= rhs.allocatable_res;
 }
 
-CgroupSpec::CgroupSpec(const crane::grpc::JobToD& job_to_d)
+JobToD::JobToD(const crane::grpc::JobToD& job_to_d)
     : job_id(job_to_d.job_id()),
       uid(job_to_d.uid()),
       res_in_node(static_cast<crane::grpc::ResourceInNode>(job_to_d.res())),
-      exec_node(job_to_d.execution_node()),
-      recovered(false) {}
+      exec_node(job_to_d.execution_node()) {}
 
-CgroupSpec::CgroupSpec(const task_id_t job_id, const uid_t uid,
-                       const ResourceInNode& res_in_node,
-                       const std::string& execution_node)
+JobToD::JobToD(task_id_t job_id, uid_t uid, const ResourceInNode& res_in_node,
+               const std::string& execution_node)
     : job_id(job_id),
       uid(uid),
       res_in_node(static_cast<crane::grpc::ResourceInNode>(res_in_node)),
-      exec_node(execution_node),
-      recovered(false) {}
+      exec_node(execution_node) {}
 
-void CgroupSpec::SetJobToD(crane::grpc::JobToD* job_spec) const {
-  job_spec->set_job_id(this->job_id);
-  job_spec->set_uid(this->uid);
-  *job_spec->mutable_res() = this->res_in_node;
-  job_spec->set_execution_node(this->exec_node);
+void JobToD::SetJobToD(crane::grpc::JobToD* job_to_d) const {
+  job_to_d->set_job_id(this->job_id);
+  job_to_d->set_uid(this->uid);
+  *job_to_d->mutable_res() = this->res_in_node;
+  job_to_d->set_execution_node(this->exec_node);
 }

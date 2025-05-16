@@ -523,10 +523,10 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 }
 
 std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
-    const CgroupSpec &cg_spec) {
-  crane::grpc::ResourceInNode res = cg_spec.res_in_node;
-  bool recover = cg_spec.recovered;
-  auto job_id = cg_spec.job_id;
+    const JobToD &job) {
+  crane::grpc::ResourceInNode res = job.res_in_node;
+  bool recover = job.recovered;
+  auto job_id = job.job_id;
 
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -547,14 +547,14 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
       return cg_unique_ptr;
     }
     CgroupV2 *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromCgSpec(cg_spec);
+    cg_v2_ptr->RecoverFromCgSpec(job);
 #endif
 
     return cg_unique_ptr;
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(cg_spec.job_id,
+    g_plugin_client->CreateCgroupHookAsync(job.job_id,
                                            cg_unique_ptr->CgroupPathStr(),
                                            res.dedicated_res_in_node());
   }
@@ -1391,7 +1391,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
+bool CgroupV2::RecoverFromCgSpec(const JobToD &cg_spec) {
   if (!g_cg_mgr->bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;

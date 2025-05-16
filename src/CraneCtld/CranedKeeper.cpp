@@ -147,8 +147,7 @@ CraneErrCode CranedStub::TerminateOrphanedTasks(
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::CreateCgroupForTasks(
-    std::vector<CgroupSpec> const &cgroup_specs) {
+CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
@@ -160,8 +159,8 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const auto &spec : cgroup_specs) {
-    spec.SetJobToD(request.add_job_list());
+  for (const auto &job : jobs) {
+    job.SetJobToD(request.add_job_list());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);

@@ -210,14 +210,13 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  std::vector<JobSpec> job_specs;
-  for (const auto &cg_spec_req : request->job_list()) {
-    CRANE_TRACE("Allocating job #{}, uid {}", cg_spec_req.job_id(),
-                cg_spec_req.uid());
-    job_specs.emplace_back(cg_spec_req);
+  std::vector<JobToD> jobs;
+  for (const auto &job : request->job_list()) {
+    CRANE_TRACE("Allocating job #{}, uid {}", job.job_id(), job.uid());
+    jobs.emplace_back(job);
   }
 
-  bool ok = g_job_mgr->AllocJobs(std::move(job_specs));
+  bool ok = g_job_mgr->AllocJobs(std::move(jobs));
   if (!ok) {
     CRANE_ERROR("Failed to alloc some jobs.");
   }
@@ -460,18 +459,18 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   }
 
   // First query local device related env list
-  auto job_spec_expt = g_job_mgr->QueryJobSpec(request->task_id());
-  if (!job_spec_expt) {
+  auto job_expt = g_job_mgr->QueryJob(request->task_id());
+  if (!job_expt) {
     response->set_ok(false);
     return Status::OK;
   }
 
-  JobSpec &job_spec = job_spec_expt.value();
-  for (const auto &[name, value] : job_spec.GetJobEnvMap()) {
+  JobToD &job_to_d = job_expt.value();
+  for (const auto &[name, value] : JobInstance::GetJobEnvMap(job_to_d)) {
     response->mutable_env_map()->emplace(name, value);
   }
 
-  const std::string &execution_node = job_spec.cg_spec.exec_node;
+  const std::string &execution_node = job_to_d.exec_node;
   if (!g_config.CranedRes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;

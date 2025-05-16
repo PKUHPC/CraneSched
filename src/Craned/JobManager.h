@@ -25,24 +25,13 @@
 
 namespace Craned {
 
-struct JobSpec {
-  JobSpec() = default;
-  explicit JobSpec(const crane::grpc::JobToD& spec) : cg_spec(spec) {}
-
-  CgroupSpec cg_spec;
-  EnvMap GetJobEnvMap() const;
-};
-
 struct JobInstance {
-  explicit JobInstance(JobSpec&& spec)
-      : job_id(spec.cg_spec.job_id), job_spec(spec) {}
-  explicit JobInstance(const JobSpec& spec)
-      : job_id(spec.cg_spec.job_id), job_spec(spec) {}
+  explicit JobInstance(const JobToD& job) : job_id(job.job_id), job_to_d(job) {}
 
   JobInstance(const JobInstance& other) = delete;
   JobInstance(JobInstance&& other) noexcept
       : job_id(other.job_id),
-        job_spec(std::move(other.job_spec)),
+        job_to_d(std::move(other.job_to_d)),
         cgroup(std::move(other.cgroup)) {};
 
   ~JobInstance() = default;
@@ -51,23 +40,25 @@ struct JobInstance {
   JobInstance& operator=(JobInstance&& other) noexcept {
     if (this != &other) {
       job_id = other.job_id;
-      job_spec = std::move(other.job_spec);
+      job_to_d = std::move(other.job_to_d);
       cgroup = std::move(other.cgroup);
     }
     return *this;
   }
 
   task_id_t job_id;
-  JobSpec job_spec;
+  JobToD job_to_d;
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
+
+  static EnvMap GetJobEnvMap(const JobToD& job);
 };
 
 class JobManager {
  public:
   JobManager() = default;
 
-  bool AllocJobs(std::vector<JobSpec>&& job_specs);
+  bool AllocJobs(std::vector<JobToD>&& jobs);
 
   CgroupInterface* GetCgForJob(task_id_t job_id);
 
@@ -77,7 +68,7 @@ class JobManager {
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
-  CraneExpected<JobSpec> QueryJobSpec(task_id_t job_id);
+  CraneExpected<JobToD> QueryJob(task_id_t job_id);
 
   std::set<task_id_t> GetAllocatedJobs();
 
