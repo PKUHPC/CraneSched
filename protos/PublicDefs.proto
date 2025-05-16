@@ -845,7 +845,7 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  Description = 3; // account and qos
+  Description = 3;  // account and qos
   // user
   AdminLevel = 4;
   DefaultAccount = 5;
