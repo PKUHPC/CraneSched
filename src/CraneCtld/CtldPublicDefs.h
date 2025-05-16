@@ -1429,6 +1429,28 @@ struct PdJobInScheduler {
         is_license_or(job->TaskToCtld().is_licenses_or()) {}
 };
 
+constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE> CraneModifyFieldStrArr =  {
+  "partition",
+  "qos",
+  "default_qos",
+  "description", // account and qos
+  // user
+  "admin_level",
+  "default_account",
+  // qos
+  "priority",
+  "max_jobs_per_user",
+  "max_cpus_per_user",
+  "max_time_limit_per_task",
+  "max_jobs_per_account",
+  "max_submit_jobs_per_user",
+  "max_submit_jobs_per_account"
+};
+
+inline std::string_view CraneModifyFieldStr(crane::grpc::ModifyField modify_field) {
+  return CraneModifyFieldStrArr[static_cast<uint16_t>(modify_field)];
+}
+
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
