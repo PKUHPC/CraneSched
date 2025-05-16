@@ -957,35 +957,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-  std::string item = "";
-  switch (modify_field) {
-  case crane::grpc::ModifyField::Description:
-    item = "description";
-    break;
-  case crane::grpc::ModifyField::Priority:
-    item = "priority";
-    break;
-  case crane::grpc::ModifyField::MaxJobsPerUser:
-    item = "max_jobs_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxJobsPerAccount:
-    item = "max_jobs_per_account";
-    break;
-  case crane::grpc::ModifyField::MaxCpusPerUser:
-    item = "max_cpus_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
-    item = "max_submit_jobs_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
-    item = "max_submit_jobs_per_account";
-    break;
-  case crane::grpc::ModifyField::MaxTimeLimitPerTask:
-    item = "max_time_limit_per_task";
-    break;
-  default:
-    std::unreachable();
-  }
+  std::string item = std::string(CraneModifyFieldStr(modify_field));
 
   bool value_is_number{false};
   int64_t value_number;
