@@ -659,15 +659,14 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<CgroupSpec>> craned_cgroup_map;
+      HashMap<CranedId, std::vector<JobToD>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         for (CranedId const& craned_id : task->CranedIds()) {
-          CgroupSpec spec(task->TaskId(), task->uid,
-                          task->Resources().at(craned_id),
-                          task->executing_craned_ids.front());
-          craned_cgroup_map[craned_id].emplace_back(std::move(spec));
+          JobToD job(task->TaskId(), task->uid, task->Resources().at(craned_id),
+                     task->executing_craned_ids.front());
+          craned_cgroup_map[craned_id].emplace_back(std::move(job));
         }
       }
 

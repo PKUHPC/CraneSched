@@ -479,12 +479,12 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
-struct CgroupSpec {
-  CgroupSpec() = default;
-  CgroupSpec(const CgroupSpec& spce) = default;
-  explicit CgroupSpec(const crane::grpc::JobToD& job_to_d);
-  CgroupSpec(const task_id_t job_id, const uid_t uid,
-             const ResourceInNode& res_in_node, const CranedId& execution_node);
+struct JobToD {
+  JobToD() = default;
+  JobToD(const JobToD& spce) = default;
+  explicit JobToD(const crane::grpc::JobToD& job_to_d);
+  JobToD(task_id_t job_id, uid_t uid, const ResourceInNode& res_in_node,
+         const CranedId& execution_node);
 
   /**
    * @brief set grpc struct,will move res_in_node field
