@@ -175,6 +175,8 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
+
+  // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   m_user_meta_map_.modify_if(
@@ -261,6 +263,14 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
+}
+
+void AccountMetaContainer::DeleteUserMeta(const std::string& username) {
+  m_user_meta_map_.erase(username);
+}
+
+void AccountMetaContainer::DeleteAccountMeta(const std::string& account) {
+  m_account_meta_map_.erase(account);
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
