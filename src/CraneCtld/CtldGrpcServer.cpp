@@ -164,8 +164,29 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     response->set_ok(false);
     return grpc::Status::OK;
   }
-  stub->SetReady();
 
+  // Some job allocation lost
+  std::set<task_id_t> orphaned_job_ids;
+  if (!request->remote_meta().lost_jobs().empty()) {
+    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
+               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
+  }
+  orphaned_job_ids.insert(request->remote_meta().lost_jobs().begin(),
+                          request->remote_meta().lost_jobs().end());
+  if (!request->remote_meta().lost_tasks().empty()) {
+    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
+               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
+  }
+  orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
+                          request->remote_meta().lost_tasks().end());
+
+  if (!orphaned_job_ids.empty())
+    g_thread_pool->detach_task(
+        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
+          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
+        });
+
+  stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
   response->set_ok(true);
   return grpc::Status::OK;

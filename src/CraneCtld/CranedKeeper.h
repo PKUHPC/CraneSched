@@ -74,21 +74,20 @@ class CranedStub {
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 
-  CraneErrCode CreateCgroupForTasks(
-      std::vector<CgroupSpec> const &cgroup_specs);
+  CraneErrCode CreateCgroupForTasks(std::vector<JobToD> const &jobs);
 
   CraneErrCode ReleaseCgroupForTasks(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
   CraneErrCode TerminateTasks(const std::vector<task_id_t> &task_ids);
 
-  CraneErrCode TerminateOrphanedTask(task_id_t task_id);
-
-  CraneErrCode CheckTaskStatus(task_id_t task_id,
-                               crane::grpc::TaskStatus *status);
+  CraneErrCode TerminateOrphanedTasks(const std::vector<task_id_t> &task_ids);
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
+  bool Connected() const {
+    return !m_disconnected_.load(std::memory_order_acquire);
+  }
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
            !m_registered_.load(std::memory_order_acquire);

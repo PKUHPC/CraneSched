@@ -44,8 +44,8 @@ message CranedTriggerReserveConnRequest {
 
 message ConfigureCranedRequest {
   bool ok = 1;
-  map<uint32, google.protobuf.Empty /*JobSpec place holder*/> job_map = 2;
-  map<uint32, TaskToD> job_id_tasks_map = 3;
+  map<uint32, JobToD> job_map = 2;
+  map<uint32, TaskToD> job_tasks_map = 3;
   google.protobuf.Timestamp token = 4;
 }
 
@@ -99,7 +99,7 @@ message ExecuteTasksReply {
 }
 
 message CreateCgroupForTasksRequest {
-  repeated JobSpec job_spec_vec = 1;
+  repeated JobToD job_list = 1;
 }
 
 message CreateCgroupForTasksReply {}
@@ -121,7 +121,7 @@ message TerminateTasksReply {
 }
 
 message TerminateOrphanedTaskRequest {
-  uint32 task_id = 1;
+  repeated uint32 task_id_list = 1;
 }
 
 message TerminateOrphanedTaskReply {
@@ -136,15 +136,6 @@ message ChangeTaskTimeLimitRequest {
 
 message ChangeTaskTimeLimitReply {
   bool ok = 1;
-}
-
-message CheckTaskStatusRequest {
-  uint32 task_id = 1;
-}
-
-message CheckTaskStatusReply {
-  bool ok = 1;
-  TaskStatus status = 2;
 }
 
 message CancelTaskRequest {
@@ -893,8 +884,6 @@ service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteTask(ExecuteTasksRequest) returns (ExecuteTasksReply);
-
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns (CheckTaskStatusReply);
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);

@@ -33,15 +33,27 @@ using grpc::Status;
 class CtldClientStateMachine {
  public:
   void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
-  void SetActionConfigureCb(std::function<void(RegToken const&)>&& cb);
-  void SetActionRegisterCb(
-      std::function<void(RegToken const&, std::vector<task_id_t> const&)>&& cb);
+  struct ConfigureArg {
+    RegToken token;
+    std::set<task_id_t> job_ids;
+    std::set<task_id_t> task_ids;
+  };
+  void SetActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb);
+
+  struct RegisterArg {
+    RegToken token;
+    std::set<task_id_t> lost_jobs;
+    std::set<task_id_t> lost_tasks;
+  };
+
+  void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
   void SetActionDisconnectedCb(std::function<void()>&& cb);
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
-  void EvConfigurationDone(std::optional<std::vector<task_id_t>> lost_task_ids);
+  void EvConfigurationDone(std::optional<std::set<task_id_t>> lost_jobs,
+                           std::optional<std::set<task_id_t>> lost_tasks);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
 
   // Grpc Channel events
@@ -78,15 +90,16 @@ class CtldClientStateMachine {
 
   // State Actions:
   void ActionRequestConfig_();
-  void ActionConfigure_();
-  void ActionRegister_(std::vector<task_id_t>&& non_existent_tasks);
+  void ActionConfigure_(
+      const crane::grpc::ConfigureCranedRequest& configure_req);
+  void ActionRegister_(std::set<task_id_t>&& lost_jobs,
+                       std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
   void ActionDisconnected_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
-  std::function<void(RegToken const&)> m_action_configure_cb_;
-  std::function<void(RegToken const&, std::vector<task_id_t> const&)>
-      m_action_register_cb_;
+  std::function<void(ConfigureArg const&)> m_action_configure_cb_;
+  std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
@@ -95,7 +108,6 @@ class CtldClientStateMachine {
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
-  std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
 };
@@ -133,8 +145,7 @@ class CtldClient {
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
-  bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
-                                      crane::grpc::TaskStatus* new_status);
+  [[nodiscard]] std::set<task_id_t> GetAllTaskStatusChangeId();
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
@@ -142,7 +153,8 @@ class CtldClient {
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(RegToken const& token,
-                       std::vector<task_id_t> const& nonexistent_jobs);
+                       std::set<task_id_t> const& lost_jobs,
+                       std::set<task_id_t> const& lost_tasks);
 
   void AsyncSendThread_();
 

@@ -456,7 +456,7 @@ class CgroupV2 : public CgroupInterface {
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const CgroupSpec &cg_spec);
+  bool RecoverFromCgSpec(const JobToD &cg_spec);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -510,11 +510,10 @@ class CgroupManager {
   /**
    * \brief Allocate and return cgroup handle for job, should only called once
    * per job.
-   * \param cg_spec cgroup spec for job.
+   * \param job cgroup spec for job.
    * \return CgroupInterface ptr,null if error.
    */
-  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
-      const CgroupSpec &cg_spec);
+  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobToD &job);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
