@@ -438,14 +438,13 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  auto job_spec_expt = g_job_mgr->QueryJobSpec(request->task_id());
-  if (!job_spec_expt) {
-    response->set_ok(false);
-  } else {
-    for (const auto &[name, value] : job_spec_expt.value().GetJobEnvMap())
+  auto task_env_map = g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
+  if (task_env_map.has_value()) {
+    for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
     response->set_ok(true);
-  }
+  } else
+    response->set_ok(false);
 
   return Status::OK;
 }
