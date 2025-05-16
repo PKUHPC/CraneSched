@@ -1433,7 +1433,8 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE> Crane
   "max_submit_jobs_per_account"
 };
 
-inline std::string_view CraneModifyFieldStr(crane::grpc::ModifyField modify_field) {
+inline std::string_view CraneModifyFieldStr(
+    crane::grpc::ModifyField modify_field) {
   return CraneModifyFieldStrArr[static_cast<uint16_t>(modify_field)];
 }
 
