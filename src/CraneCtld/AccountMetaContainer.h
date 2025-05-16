@@ -52,8 +52,6 @@ class AccountMetaContainer final {
 
   void FreeQosResource(const TaskInCtld& task);
 
-  void DeleteUserResource(const std::string& username);
-
  private:
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;

@@ -146,7 +146,6 @@ bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
 
-  // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   bool result = true;
@@ -212,6 +211,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
         val.submit_jobs_count--;
       });
 
+  // TODO: What should I do if the account inheritance tree changes?
   const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
   std::string account_name = task.account;
 
@@ -261,10 +261,6 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
-}
-
-void AccountMetaContainer::DeleteUserResource(const std::string& username) {
-  m_user_meta_map_.erase(username);
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
