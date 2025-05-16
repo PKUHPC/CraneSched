@@ -52,6 +52,11 @@ class AccountMetaContainer final {
 
   void FreeQosResource(const TaskInCtld& task);
 
+  // When a user/account object is deleted, resources need to be reset.
+  void DeleteUserMeta(const std::string& username);
+
+  void DeleteAccountMeta(const std::string& account);
+
  private:
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
