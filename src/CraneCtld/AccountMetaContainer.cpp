@@ -150,7 +150,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
 
   bool result = true;
 
-  m_user_meta_map_.modify_if(
+  m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -162,7 +162,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
   if (!result) return "QOSResourceLimit";
 
   for (const auto& account_name : account_chain) {
-    m_account_meta_map_.modify_if(
+    m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& val = pair.second[task.qos];
@@ -181,7 +181,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
   // TODO: Delete a user while jobs are in the queue?
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
-  m_user_meta_map_.modify_if(
+  m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -193,7 +193,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(
+    m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& val = pair.second[task.qos];
@@ -206,7 +206,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
-  m_user_meta_map_.modify_if(
+  m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -221,7 +221,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(
+    m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& val = pair.second[task.qos];
@@ -238,7 +238,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
-  m_user_meta_map_.modify_if(
+  m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
@@ -255,7 +255,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
   std::string account_name = task.account;
 
   do {
-    m_account_meta_map_.modify_if(
+    m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& val = pair.second[task.qos];
@@ -282,7 +282,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
-  m_user_meta_map_.modify_if(
+  m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& qos_to_resource_map = pair.second;
@@ -309,7 +309,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
   auto result = CraneErrCode::SUCCESS;
 
   for (const auto& account_name : account_chain) {
-    m_account_meta_map_.modify_if(
+    m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& qos_to_resource_map = pair.second;
