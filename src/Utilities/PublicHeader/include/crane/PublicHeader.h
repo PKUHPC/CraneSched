@@ -209,6 +209,10 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "User has insufficient privilege",
         "The current account is not in the allowed account list for the partition",
         "The current account has been explicitly added to the deny list for the partition",
+        "",
+
+        // 70 - 71
+        "",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
     };
 // clang-format on
