@@ -2605,6 +2605,8 @@ CraneExpectedRich<void> AccountManager::DeleteUser_(
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
+  if (res_user.deleted) g_account_meta_container->DeleteUserMeta(name);
+
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
   return {};
@@ -2644,6 +2646,8 @@ CraneExpectedRich<void> AccountManager::DeleteAccount_(
   for (const auto& qos : account.allowed_qos_list) {
     m_qos_map_[qos]->reference_count--;
   }
+
+  g_account_meta_container->DeleteAccountMeta(name);
 
   return {};
 }
