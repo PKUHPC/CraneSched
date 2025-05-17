@@ -706,6 +706,19 @@ double ResourceView::CpuCount() const {
   return static_cast<double>(allocatable_res.cpu_count);
 }
 
+uint64_t ResourceView::GetGpuCount() const {
+  uint64_t total_sum = 0;
+
+  for (const auto& [_, device_data] : device_map) {
+    total_sum += device_data.first;
+    for (const auto& [_, type_total] : device_data.second) {
+      total_sum += type_total;
+    }
+  }
+
+  return total_sum;
+}
+
 uint64_t ResourceView::MemoryBytes() const {
   return allocatable_res.memory_bytes;
 }
