@@ -561,7 +561,7 @@ struct TaskInCtld {
 
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
-    requested_node_res_view = static_cast<ResourceView>(val.resources());
+    requested_node_res_view = static_cast<ResourceView>(val.req_resources());
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -637,6 +637,8 @@ struct TaskInCtld {
       }
 
       resources = static_cast<ResourceV2>(runtime_attr.resources());
+      allocated_res_view.SetToZero();
+      allocated_res_view += resources;
     }
 
     nodes_alloc = craned_ids.size();
@@ -679,7 +681,7 @@ struct TaskInCtld {
     task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                                 executing_craned_ids.end());
 
-    *task_info->mutable_res_view() =
+    *task_info->mutable_req_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
 
     task_info->set_exit_code(runtime_attr.exit_code());
@@ -691,6 +693,10 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
+    task_info->set_exclusive(task_to_ctld.exclusive());
+
+    *task_info->mutable_allocated_res_view() =
+        static_cast<crane::grpc::ResourceView>(allocated_res_view);
   }
 };
 

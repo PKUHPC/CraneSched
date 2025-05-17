@@ -2541,6 +2541,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   task->allocated_res_view.SetToZero();
 
   absl::Time earliest_end_time = now + task->time_limit;
+  ResourceView requested_node_res_view;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
@@ -2587,6 +2588,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
           !(task->requested_node_res_view <= iter->second.res_total) ||
+          (task->TaskToCtld().exclusive() &&
+           !(craned_meta->res_total <= iter->second.res_total)) ||
           now + task->time_limit > iter->second.end_time) {
         continue;
       }
@@ -2602,6 +2605,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
     }
 
+    if (task->TaskToCtld().exclusive()) {
+      requested_node_res_view.SetToZero();
+      requested_node_res_view += craned_meta->res_total;
+    } else {
+      requested_node_res_view = task->requested_node_res_view;
+    }
+
     if constexpr (kAlgoRedundantNode) {
       craned_indexes_.emplace_back(craned_index);
       if (craned_indexes_.size() >= node_num_limit) break;
@@ -2615,7 +2625,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // Find all possible nodes that can run the task now.
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
-      bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+      bool ok = requested_node_res_view.GetFeasibleResourceInNode(
           craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
@@ -2652,10 +2662,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+    bool ok = requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+      ok = requested_node_res_view.GetFeasibleResourceInNode(
           craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
