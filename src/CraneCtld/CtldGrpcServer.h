@@ -314,6 +314,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::DeleteReservationRequest *request,
       crane::grpc::DeleteReservationReply *response) override;
 
+  grpc::Status PowerStateChange(
+      grpc::ServerContext *context,
+      const crane::grpc::PowerStateChangeRequest *request,
+      crane::grpc::PowerStateChangeReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };
