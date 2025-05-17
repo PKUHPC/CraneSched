@@ -42,6 +42,7 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
+  SetGrpcClientKeepAliveChannelArgs(&channel_args);
   // Todo: Use cfored listen config
   if (g_config.ListenConf.UseTls) {
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
