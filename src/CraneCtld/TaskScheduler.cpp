@@ -557,7 +557,7 @@ bool TaskScheduler::Init() {
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   CRANE_ASSERT_MSG(
-      g_account_meta_container->TryMallocQosResource(*task) ==
+      g_account_meta_container->TryMallocQosSubmitResource(*task) ==
           CraneErrCode::SUCCESS,
       fmt::format(
           "ApplyQosLimitOnTask failed when recovering pending task #{}.",
@@ -569,7 +569,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  auto res = g_account_meta_container->TryMallocQosResource(*task);
+  auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
   CRANE_ASSERT_MSG(
       res == CraneErrCode::SUCCESS,
       fmt::format(
@@ -583,6 +583,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
         task->reservation, task->TaskId(),
         {task->EndTime(), task->Resources()});
   }
+  g_account_meta_container->MallocQosResource(*task);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -1889,7 +1890,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
-    g_account_meta_container->FreeQosResource(*task);
+    g_account_meta_container->FreeQosSubmitResource(*task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -1974,7 +1975,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
-        g_account_meta_container->FreeQosResource(*pair.first);
+        g_account_meta_container->FreeQosSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(0);
       }
       break;
@@ -2007,7 +2008,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
+      g_account_meta_container->FreeQosSubmitResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
     }
   } while (false);
@@ -2760,6 +2761,12 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
+    auto has_reason = g_account_meta_container->CheckQosResource(*task);
+    if (has_reason) {
+      task->pending_reason = has_reason.value();
+      continue;
+    }
+
     {
       auto all_partitions_meta_map =
           g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2837,6 +2844,7 @@ void MinLoadFirst::NodeSelect(
             task->reservation, task->TaskId(),
             {task->EndTime(), task->Resources()});
       }
+      g_account_meta_container->MallocQosResource(*task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the

@@ -957,26 +957,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-  std::string item = "";
-  switch (modify_field) {
-  case crane::grpc::ModifyField::Description:
-    item = "description";
-    break;
-  case crane::grpc::ModifyField::Priority:
-    item = "priority";
-    break;
-  case crane::grpc::ModifyField::MaxJobsPerUser:
-    item = "max_jobs_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxCpusPerUser:
-    item = "max_cpus_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxTimeLimitPerTask:
-    item = "max_time_limit_per_task";
-    break;
-  default:
-    std::unreachable();
-  }
+  std::string item = std::string(CraneModifyFieldStr(modify_field));
 
   bool value_is_number{false};
   int64_t value_number;
@@ -1947,7 +1928,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
+  if (res_user.deleted) g_account_meta_container->DeleteUserMeta(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
@@ -1985,6 +1966,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
   for (const auto& qos : account.allowed_qos_list) {
     m_qos_map_[qos]->reference_count--;
   }
+
+  g_account_meta_container->DeleteAccountMeta(name);
 
   return {};
 }
