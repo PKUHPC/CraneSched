@@ -181,7 +181,7 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
-  uint64 mem_per_cpu = 42;
+  optional uint64 mem_per_cpu = 42;
 }
 
 message TaskInEmbeddedDb {
