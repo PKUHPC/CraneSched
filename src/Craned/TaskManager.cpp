@@ -1368,7 +1368,7 @@ void TaskManager::EvTaskTimerCb_(task_id_t task_id) {
         .task_id = task_id,
         .terminated_by_timeout = true,
     };
-    m_task_terminate_queue_.enqueue(ev_task_terminate);
+    m_task_terminate_queue_.enqueue(std::move(ev_task_terminate));
     m_terminate_task_async_handle_->send();
   } else {
     ActivateTaskStatusChangeAsync_(
@@ -1439,14 +1439,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
                                      ExitCode::kExitCodeTerminated,
                                      std::nullopt);
     }
-    if (elem.termination_prom.has_value())
-      elem.termination_prom.value().set_value();
+    elem.termination_prom.set_value();
   }
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
-  m_task_terminate_queue_.enqueue(elem);
+  m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
 }
 
@@ -1457,7 +1456,7 @@ std::future<void> TaskManager::MarkTaskAsOrphanedAndTerminateAsync(
   TaskTerminateQueueElem elem{.task_id = task_id,
                               .mark_as_orphaned = true,
                               .termination_prom = std::move(promise)};
-  m_task_terminate_queue_.enqueue(elem);
+  m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
   return termination_future;
 }
@@ -1513,7 +1512,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
         // If the task times out, terminate it.
         TaskTerminateQueueElem ev_task_terminate{.task_id = elem.task_id,
                                                  .terminated_by_timeout = true};
-        m_task_terminate_queue_.enqueue(ev_task_terminate);
+        m_task_terminate_queue_.enqueue(std::move(ev_task_terminate));
         m_terminate_task_async_handle_->send();
 
       } else {
