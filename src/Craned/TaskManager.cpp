@@ -1439,6 +1439,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
                                      ExitCode::kExitCodeTerminated,
                                      std::nullopt);
     }
+    if (elem.termination_prom.has_value())
+      elem.termination_prom.value().set_value();
   }
 }
 
@@ -1448,10 +1450,16 @@ void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   m_terminate_task_async_handle_->send();
 }
 
-void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
-  TaskTerminateQueueElem elem{.task_id = task_id, .mark_as_orphaned = true};
+std::future<void> TaskManager::MarkTaskAsOrphanedAndTerminateAsync(
+    task_id_t task_id) {
+  std::promise<void> promise;
+  auto termination_future = promise.get_future();
+  TaskTerminateQueueElem elem{.task_id = task_id,
+                              .mark_as_orphaned = true,
+                              .termination_prom = std::move(promise)};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+  return termination_future;
 }
 
 std::set<task_id_t> TaskManager::QueryRunningTasksAsync() {

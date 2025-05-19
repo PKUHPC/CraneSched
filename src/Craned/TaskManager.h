@@ -187,7 +187,7 @@ class TaskManager {
 
   void TerminateTaskAsync(uint32_t task_id);
 
-  void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
+  std::future<void> MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
 
   std::set<task_id_t> QueryRunningTasksAsync();
 
@@ -232,6 +232,7 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is canceled by user,
                                         // task->status=Timeout
     bool mark_as_orphaned{false};
+    std::optional<std::promise<void>> termination_prom;
   };
 
   struct QueryTasksStatusQueueElem {

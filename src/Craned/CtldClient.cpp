@@ -271,9 +271,14 @@ void CtldClient::Init() {
         if (!invalid_tasks.empty()) {
           CRANE_DEBUG("Terminating orphaned tasks: [{}].",
                       absl::StrJoin(invalid_tasks, ","));
+          std::latch latch(invalid_tasks.size());
           for (auto task_id : invalid_tasks) {
-            g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id);
+            g_thread_pool->detach_task([task_id, &latch] {
+              g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id).wait();
+              latch.count_down();
+            });
           }
+          latch.wait();
         }
         if (!invalid_jobs.empty()) {
           CRANE_DEBUG("Freeing invalid jobs: [{}].",
