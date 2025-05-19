@@ -48,8 +48,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   request.set_ok(true);
   *request.mutable_token() = token;
 
-  // For Supervisor recovery.
-  // g_task_scheduler->QueryJobOfNode(craned_id, &request);
+  g_task_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
 
   ClientContext context;
   google::protobuf::Empty reply;
@@ -120,7 +119,8 @@ CraneErrCode CranedStub::TerminateTasks(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
+CraneErrCode CranedStub::TerminateOrphanedTasks(
+    const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateOrphanedTaskReply;
   using crane::grpc::TerminateOrphanedTaskRequest;
 
@@ -129,12 +129,12 @@ CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
   TerminateOrphanedTaskRequest request;
   TerminateOrphanedTaskReply reply;
 
-  request.set_task_id(task_id);
+  request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
 
   status = m_stub_->TerminateOrphanedTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
-        "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
+        "TerminateOrphanedTasks RPC for Node {} returned status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -146,8 +146,7 @@ CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::CreateCgroupForTasks(
-    std::vector<CgroupSpec> const &cgroup_specs) {
+CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
@@ -159,8 +158,8 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const auto &spec : cgroup_specs) {
-    spec.SetJobSpec(request.add_job_spec_vec());
+  for (const auto &job : jobs) {
+    job.SetJobToD(request.add_job_list());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -203,34 +202,6 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
   }
 
   return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
-                                         crane::grpc::TaskStatus *status) {
-  using crane::grpc::CheckTaskStatusReply;
-  using crane::grpc::CheckTaskStatusRequest;
-
-  ClientContext context;
-  Status grpc_status;
-  CheckTaskStatusRequest request;
-  CheckTaskStatusReply reply;
-
-  request.set_task_id(task_id);
-  grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
-
-  if (!grpc_status.ok()) {
-    CRANE_DEBUG(
-        "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
-        m_craned_id_, grpc_status.error_message());
-    HandleGrpcErrorCode_(grpc_status.error_code());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  if (reply.ok()) {
-    *status = reply.status();
-    return CraneErrCode::SUCCESS;
-  } else
-    return CraneErrCode::ERR_NON_EXISTENT;
 }
 
 CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,

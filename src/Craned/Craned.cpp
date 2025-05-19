@@ -637,6 +637,7 @@ void StartServer() {
   g_ctld_client.reset();
   g_job_mgr.reset();
   g_cg_mgr.reset();
+  g_ctld_client_sm.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

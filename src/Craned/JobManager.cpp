@@ -22,26 +22,25 @@
 
 namespace Craned {
 
-EnvMap JobSpec::GetJobEnvMap() const {
-  auto env_map =
-      CgroupManager::GetResourceEnvMapByResInNode(this->cg_spec.res_in_node);
+EnvMap JobInstance::GetJobEnvMap(const JobToD& job) {
+  auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job.res_in_node);
 
   // TODO: Move all job level env to here.
-  env_map.emplace("CRANE_JOB_ID", std::to_string(this->cg_spec.job_id));
+  env_map.emplace("CRANE_JOB_ID", std::to_string(job.job_id));
   return env_map;
 }
 
-bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
-  CRANE_DEBUG("Allocating {} job", job_specs.size());
+bool JobManager::AllocJobs(std::vector<JobToD>&& jobs) {
+  CRANE_DEBUG("Allocating {} job", jobs.size());
 
   auto begin = std::chrono::steady_clock::now();
 
-  for (auto& job_spec : job_specs) {
-    task_id_t job_id = job_spec.cg_spec.job_id;
-    uid_t uid = job_spec.cg_spec.uid;
+  for (const auto& job : jobs) {
+    task_id_t job_id = job.job_id;
+    uid_t uid = job.uid;
     CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
                 uid);
-    m_job_map_.Emplace(job_id, JobInstance(job_spec));
+    m_job_map_.Emplace(job_id, JobInstance(job));
 
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     if (uid_map->contains(uid)) {
@@ -59,33 +58,34 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
 }
 
 CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
-  CgroupSpec spec;
+  JobToD job;
   {
-    auto job = m_job_map_.GetValueExclusivePtr(job_id);
-    if (!job) {
+    auto job_inst = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_inst) {
       return nullptr;
     }
-    if (job->cgroup) {
-      return job->cgroup.get();
+    if (job_inst->cgroup) {
+      return job_inst->cgroup.get();
     }
-    spec = job->job_spec.cg_spec;
+    job = job_inst->job_to_d;
   }
 
-  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(spec);
+  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(job);
   auto* raw_ptr = cg.get();
   {
-    auto job = m_job_map_.GetValueExclusivePtr(job_id);
-    if (!job) {
+    auto job_inst = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_inst) {
       CRANE_ERROR("Cgroup created for a freed job #{}.", job_id);
       cg->Destroy();
       return nullptr;
     }
-    job->cgroup = std::move(cg);
+    job_inst->cgroup = std::move(cg);
   }
   return raw_ptr;
 }
 
-bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
+bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
+  CRANE_DEBUG("Release Cgroup for job [{}]", absl::StrJoin(job_ids, ","));
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
@@ -96,15 +96,15 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     }
   }
 
-  std::vector<CgroupInterface*> cg_ptr_vec;
+  std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
   std::vector<uid_t> uid_vec;
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
       JobInstance* job_inst = map_ptr->at(job_id).RawPtr();
 
-      cg_ptr_vec.push_back(job_inst->cgroup.release());
-      uid_vec.push_back(job_inst->job_spec.cg_spec.uid);
+      job_cg_map[job_id] = job_inst->cgroup.release();
+      uid_vec.push_back(job_inst->job_to_d.uid);
       map_ptr->erase(job_id);
     }
   }
@@ -122,12 +122,12 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
       }
     }
   }
-  for (auto [idx, cgroup] : cg_ptr_vec | std::ranges::views::enumerate) {
+
+  for (auto [job_id, cgroup] : job_cg_map) {
     if (cgroup == nullptr) continue;
 
     if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(job_ids[idx],
-                                              cgroup->CgroupPathStr());
+      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupPathStr());
     }
     g_thread_pool->detach_task([cgroup]() {
       int cnt = 0;
@@ -178,18 +178,18 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   return cg->MigrateProcIn(pid);
 }
 
-CraneExpected<JobSpec> JobManager::QueryJobSpec(task_id_t job_id) {
+CraneExpected<JobToD> JobManager::QueryJob(task_id_t job_id) {
   auto instance = m_job_map_.GetValueExclusivePtr(job_id);
   if (!instance) return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
-  return instance->job_spec;
+  return instance->job_to_d;
 };
 
-std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
+std::set<task_id_t> JobManager::GetAllocatedJobs() {
   std::unordered_set<task_id_t> job_ids;
   auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
   job_ids.reserve(job_map_ptr->size());
   return *job_map_ptr | std::ranges::views::keys |
-         std::ranges::to<std::unordered_set<task_id_t>>();
+         std::ranges::to<std::set<task_id_t>>();
 }
 
 };  // namespace Craned

@@ -692,6 +692,74 @@ struct TaskInCtld {
       task_info->set_craned_list(allocated_craneds_regex);
     }
   }
+
+  crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
+    crane::grpc::TaskToD task_to_d;
+    // Set time_limit
+    task_to_d.mutable_time_limit()->CopyFrom(
+        google::protobuf::util::TimeUtil::MillisecondsToDuration(
+            ToInt64Milliseconds(this->time_limit)));
+
+    // TODO: remove this field
+    //  Set resources
+    auto* mutable_res_in_node = task_to_d.mutable_resources();
+    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
+        this->Resources().at(craned_id));
+
+    // Set type
+    task_to_d.set_type(this->type);
+
+    task_to_d.set_task_id(this->TaskId());
+    task_to_d.set_name(this->name);
+    task_to_d.set_account(this->account);
+    task_to_d.set_qos(this->qos);
+    task_to_d.set_partition(this->partition_id);
+
+    for (auto&& node : this->included_nodes) {
+      task_to_d.mutable_nodelist()->Add()->assign(node);
+    }
+
+    for (auto&& node : this->excluded_nodes) {
+      task_to_d.mutable_excludes()->Add()->assign(node);
+    }
+
+    task_to_d.set_node_num(this->node_num);
+    task_to_d.set_ntasks_per_node(this->ntasks_per_node);
+    task_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
+
+    task_to_d.set_uid(this->uid);
+    task_to_d.set_gid(this->gid);
+    task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
+    task_to_d.set_cwd(this->cwd);
+    // task_to_d.set_container(this->container);
+    task_to_d.set_get_user_env(this->get_user_env);
+
+    for (const auto& hostname : this->CranedIds())
+      task_to_d.mutable_allocated_nodes()->Add()->assign(hostname);
+
+    task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
+    task_to_d.mutable_time_limit()->set_seconds(
+        ToInt64Seconds(this->time_limit));
+
+    if (this->type == crane::grpc::Batch) {
+      auto* mutable_meta = task_to_d.mutable_batch_meta();
+      mutable_meta->CopyFrom(this->task_to_ctld.batch_meta());
+    } else {
+      const auto& proto_ia_meta = this->task_to_ctld.interactive_meta();
+      auto* mutable_meta = task_to_d.mutable_interactive_meta();
+      mutable_meta->CopyFrom(proto_ia_meta);
+    }
+    return task_to_d;
+  }
+  crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const {
+    crane::grpc::JobToD spec;
+    spec.set_job_id(task_id);
+    spec.set_uid(uid);
+    *spec.mutable_res() = crane::grpc::ResourceInNode(resources.at(craned_id));
+    spec.set_execution_node(executing_craned_ids.front());
+    return spec;
+  }
 };
 
 struct Qos {

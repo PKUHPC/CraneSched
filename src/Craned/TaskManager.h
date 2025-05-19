@@ -37,9 +37,9 @@ struct BatchMetaInProcessInstance {
 class ProcessInstance {
  public:
   ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
-      : m_executive_path_(std::move(exec_path)),
+      : m_pid_(0),
+        m_executive_path_(std::move(exec_path)),
         m_arguments_(std::move(arg_list)),
-        m_pid_(0),
         m_user_data_(nullptr) {}
 
   ~ProcessInstance() {
@@ -140,30 +140,8 @@ struct ProcSigchldInfo {
 
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
-  ~TaskInstance() {
-    if (termination_timer) {
-      termination_timer->close();
-    }
-
-    if (this->IsCrun()) {
-      auto* crun_meta = GetCrunMeta();
-
-      close(crun_meta->task_input_fd);
-      // For crun pty job, avoid close same fd twice
-      if (crun_meta->task_output_fd != crun_meta->task_input_fd)
-        close(crun_meta->task_output_fd);
-
-      if (!crun_meta->x11_auth_path.empty() &&
-          !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
-        std::error_code ec;
-        bool ok = std::filesystem::remove(crun_meta->x11_auth_path, ec);
-        if (!ok)
-          CRANE_ERROR("Failed to remove x11 auth {} for task #{}: {}",
-                      crun_meta->x11_auth_path, this->task.task_id(),
-                      ec.message());
-      }
-    }
-  }
+  TaskInstance() = default;
+  ~TaskInstance();
 
   bool IsCrun() const;
   bool IsCalloc() const;
@@ -174,11 +152,11 @@ struct TaskInstance {
 
   crane::grpc::TaskToD task;
 
-  PasswordEntry pwd_entry;
-  std::unique_ptr<MetaInTaskInstance> meta;
+  PasswordEntry pwd_entry{};
+  std::unique_ptr<MetaInTaskInstance> meta{};
 
   std::string cgroup_path;
-  CgroupInterface* cgroup;
+  CgroupInterface* cgroup{};
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
   // Task execution results
@@ -188,7 +166,7 @@ struct TaskInstance {
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
 
-  absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
+  absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes{};
 };
 
 /**
@@ -209,9 +187,9 @@ class TaskManager {
 
   void TerminateTaskAsync(uint32_t task_id);
 
-  void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
+  std::future<void> MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
 
-  bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
+  std::set<task_id_t> QueryRunningTasksAsync();
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
@@ -254,11 +232,12 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is canceled by user,
                                         // task->status=Timeout
     bool mark_as_orphaned{false};
+    std::promise<void> termination_prom{};
   };
 
-  struct CheckTaskStatusQueueElem {
-    task_id_t task_id;
-    std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
+  struct QueryTasksStatusQueueElem {
+    std::promise<std::unordered_map<task_id_t, crane::grpc::TaskStatus>>
+        status_prom;
   };
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
@@ -383,7 +362,7 @@ class TaskManager {
 
   void EvCleanTerminateTaskQueueCb_();
 
-  void EvCleanCheckTaskStatusQueueCb_();
+  void EvCleanQueryRunningTasksQueueCb_();
 
   void EvCleanChangeTaskTimeLimitQueueCb_();
 
@@ -421,8 +400,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
-  ConcurrentQueue<CheckTaskStatusQueueElem> m_check_task_status_queue_;
+  std::shared_ptr<uvw::async_handle> m_query_running_task_async_handle_;
+  ConcurrentQueue<std::promise<std::set<task_id_t>>>
+      m_query_running_task_queue_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;

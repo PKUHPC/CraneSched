@@ -176,7 +176,7 @@ message RuntimeAttrOfTask {
   double cached_priority = 20;
 }
 
-message JobSpec {
+message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
   ResourceInNode res = 3;
@@ -557,5 +557,6 @@ message CranedRemoteMeta {
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
-  repeated uint32 nonexistent_jobs = 6;
+  repeated uint32 lost_tasks = 6;
+  repeated uint32 lost_jobs = 7;
 }
