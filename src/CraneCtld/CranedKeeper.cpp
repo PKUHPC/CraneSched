@@ -48,7 +48,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   request.set_ok(true);
   *request.mutable_token() = token;
 
-  g_task_scheduler->QueryJobOfNode(craned_id, &request);
+  g_task_scheduler->QueryRnJobOnCtldForNodeConfig(craned_id, &request);
 
   ClientContext context;
   google::protobuf::Empty reply;

@@ -2129,8 +2129,8 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(filtered_rng, append_fn);
 }
 
-void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
-                                   crane::grpc::ConfigureCranedRequest* req) {
+void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
+    const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
