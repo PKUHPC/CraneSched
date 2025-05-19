@@ -693,7 +693,7 @@ struct TaskInCtld {
     }
   }
 
-  crane::grpc::TaskToD GetTaskOfNode(const CranedId& craned_id) const {
+  crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
     crane::grpc::TaskToD task_to_d;
     // Set time_limit
     task_to_d.mutable_time_limit()->CopyFrom(
@@ -752,7 +752,7 @@ struct TaskInCtld {
     }
     return task_to_d;
   }
-  crane::grpc::JobToD GetJobOfNode(const CranedId& craned_id) const {
+  crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const {
     crane::grpc::JobToD spec;
     spec.set_job_id(task_id);
     spec.set_uid(uid);

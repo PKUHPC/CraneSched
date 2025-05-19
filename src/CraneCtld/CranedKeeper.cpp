@@ -134,8 +134,7 @@ CraneErrCode CranedStub::TerminateOrphanedTasks(
   status = m_stub_->TerminateOrphanedTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
-        "TerminateOrphanedTasks RPC for Node {} returned with status not ok: "
-        "{}",
+        "TerminateOrphanedTasks RPC for Node {} returned status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;

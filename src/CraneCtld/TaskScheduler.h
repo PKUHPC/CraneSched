@@ -509,7 +509,7 @@ class TaskScheduler {
                       crane::grpc::ConfigureCranedRequest* req);
 
   void TerminateOrphanedJobs(const std::set<task_id_t>& jobs,
-                             const CranedId& expect_node);
+                             const CranedId& excluded_node);
 
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);

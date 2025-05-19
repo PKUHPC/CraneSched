@@ -35,7 +35,7 @@ bool JobManager::AllocJobs(std::vector<JobToD>&& jobs) {
 
   auto begin = std::chrono::steady_clock::now();
 
-  for (auto& job : jobs) {
+  for (const auto& job : jobs) {
     task_id_t job_id = job.job_id;
     uid_t uid = job.uid;
     CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,

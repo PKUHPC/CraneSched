@@ -18,8 +18,6 @@
 
 #include "TaskScheduler.h"
 
-#include <latch>
-
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
@@ -2139,23 +2137,24 @@ void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
   auto it = m_node_to_tasks_map_.find(craned_id);
   if (it == m_node_to_tasks_map_.end()) return;
 
-  auto* job_spec_map = req->mutable_job_map();
-  auto* task_spec_map = req->mutable_job_tasks_map();
+  auto* job_map = req->mutable_job_map();
+  auto* task_map = req->mutable_job_tasks_map();
+
   for (const auto& job_id : it->second) {
     auto job_it = m_running_task_map_.find(job_id);
     if (job_it == m_running_task_map_.end()) continue;
 
-    job_spec_map->emplace(job_id, job_it->second->GetJobOfNode(craned_id));
+    job_map->emplace(job_id, job_it->second->GetJobToD(craned_id));
     if (!std::ranges::contains(job_it->second->executing_craned_ids, craned_id))
       continue;
-    task_spec_map->emplace(job_id, job_it->second->GetTaskOfNode(craned_id));
+    task_map->emplace(job_id, job_it->second->GetTaskToD(craned_id));
   }
 }
 
 void TaskScheduler::TerminateOrphanedJobs(const std::set<task_id_t>& jobs,
-                                          const CranedId& expect_node) {
+                                          const CranedId& excluded_node) {
   CRANE_INFO("Terminate orphaned jobs: [{}] synced by {}.",
-             absl::StrJoin(jobs, ","), expect_node);
+             absl::StrJoin(jobs, ","), excluded_node);
   std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
       craned_job_map;
   // Now we just terminate all job and task.
