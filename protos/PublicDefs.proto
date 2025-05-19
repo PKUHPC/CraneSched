@@ -148,7 +148,7 @@ message TaskToCtld {
   string nodelist = 35;
 
   string reservation = 36;
-  uint64 mem_per_cpu = 37;
+  optional uint64 mem_per_cpu = 37;
 }
 
 message TaskInEmbeddedDb {
