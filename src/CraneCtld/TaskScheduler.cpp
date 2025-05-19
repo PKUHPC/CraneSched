@@ -2509,10 +2509,15 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
 
   // TODO: Move out to reduce the scope of the lock of crane_meta_map
   for (auto& [craned_id, time_res_vec] : node_time_res_vec_map) {
+    auto res_avail_iter =
+        resv_meta->logical_part.res_avail.EachNodeResMap().find(craned_id);
     node_selection_info_ref.InitCostAndTimeAvailResMap(
         craned_id, resv_meta->logical_part.res_total.at(craned_id),
-        resv_meta->logical_part.res_avail.at(craned_id), now,
-        node_time_res_vec_map[craned_id], nullptr);
+        res_avail_iter !=
+                resv_meta->logical_part.res_avail.EachNodeResMap().end()
+            ? res_avail_iter->second
+            : ResourceInNode(),
+        now, node_time_res_vec_map[craned_id], nullptr);
 
     auto& time_avail_res_map =
         node_selection_info_ref.GetTimeAvailResMap(craned_id);
