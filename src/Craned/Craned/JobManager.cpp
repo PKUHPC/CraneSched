@@ -418,11 +418,11 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
     ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
                                           nullptr);
-    if (!ok || !msg.ok()) {
+    if (!ok || !child_process_ready.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
                     step->step_to_d.task_id(), strerror(istream.GetErrno()));
-      if (!msg.ok())
+      if (!child_process_ready.ok())
         CRANE_ERROR("[Task #{}] Received false from subprocess {}",
                     step->step_to_d.task_id(), child_pid);
 
@@ -476,18 +476,18 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_PROTOBUF;
-    } else {
-      CRANE_TRACE("[Job #{}] Supervisor init msg send.",
-                  step->step_to_d.task_id());
     }
+
+    CRANE_TRACE("[Job #{}] Supervisor init msg send.",
+                step->step_to_d.task_id());
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream, nullptr);
-    if (!ok || !msg.ok()) {
+    if (!ok || !supervisor_ready.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
                     step->step_to_d.task_id(), strerror(istream.GetErrno()));
-      if (!msg.ok())
+      if (!supervisor_ready.ok())
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     step->step_to_d.task_id());
 
@@ -514,7 +514,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     // TODO: replace this with step_id
     step->supervisor_pid = child_pid;
     return CraneErrCode::SUCCESS;
-  } else {  // Child proc
+  } else {  // Child proc, NOLINT(readability-else-after-return)
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
