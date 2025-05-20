@@ -21,7 +21,6 @@
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
-#include "TaskScheduler.h"
 
 namespace Ctld {
 
