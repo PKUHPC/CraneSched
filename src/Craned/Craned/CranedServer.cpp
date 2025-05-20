@@ -23,7 +23,6 @@
 #include "CranedForPamServer.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "TaskManager.h"
 #include "SupervisorKeeper.h"
 
 namespace Craned {
@@ -93,7 +92,7 @@ grpc::Status CranedServiceImpl::TerminateOrphanedTask(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
   for (task_id_t job_id : request->task_id_list())
-    g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
+    g_job_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
   response->set_ok(true);
 
   return Status::OK;
@@ -438,8 +437,14 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariables(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+  auto stub = g_supervisor_keeper->GetStub(request->task_id());
+  if (!stub) {
+    CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
+    response->set_ok(false);
+    return Status::OK;
+  }
 
-  auto task_env_map = g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
+  auto task_env_map = stub->QueryStepEnv();
   if (task_env_map.has_value()) {
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
@@ -482,10 +487,7 @@ grpc::Status CranedServiceImpl::TaskStatusChange(
   return Status::OK;
 }
 
-CranedServer::CranedServer(
-    const Config::CranedListenConf &listen_conf,
-    std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise)
-    : m_configure_promise_(std::move(init_promise)) {
+CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;

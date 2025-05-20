@@ -772,7 +772,7 @@ void TaskScheduler::ScheduleThread_() {
            craned_task_to_exec_raw_ptrs_map) {
         crane::grpc::ExecuteTasksRequest req;
         for (TaskInCtld* task : tasks_raw_ptrs) {
-          req.mutable_tasks()->Add(task->GetTaskSpecOfNode(craned_id));
+          req.mutable_tasks()->Add(task->GetTaskToD(craned_id));
         }
         craned_exec_requests_map.emplace(craned_id, std::move(req));
       }

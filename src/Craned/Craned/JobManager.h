@@ -23,6 +23,7 @@
 
 #include <grp.h>
 
+#include "../../Utilities/PublicHeader/include/crane/PublicHeader.h"
 #include "CgroupManager.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -30,44 +31,53 @@
 
 namespace Craned {
 // TODO: Replace this with task execution info.
-using StepSpec = crane::grpc::TaskToD;
+using StepToD = crane::grpc::TaskToD;
 
 struct StepInstance {
-  StepSpec step_spec;
+  StepToD step_to_d;
   pid_t supervisor_pid;
+  static EnvMap GetStepEnvMap(const StepToD& step);
 };
 
-struct JobSpec {
-  JobSpec() = default;
-  explicit JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
-
-  CgroupSpec cgroup_spec;
-  EnvMap GetJobEnvMap() const;
-};
-
-struct JobStatusSpec {
-  JobSpec job_spec;
-  StepSpec step_spec;
+struct JobStatus {
+  JobToD job_to_d;
+  StepToD step_to_d;
   pid_t task_pid;
 };
 
 // Job allocation info
 // allocation = job spec + execution info
 struct JobInstance {
-  explicit JobInstance(JobSpec&& spec);
-  explicit JobInstance(const JobSpec& spec);
+  explicit JobInstance(const JobToD& job) : job_id(job.job_id), job_to_d(job) {}
+
+  JobInstance(const JobInstance& other) = delete;
+  JobInstance(JobInstance&& other) noexcept
+      : job_id(other.job_id),
+        job_to_d(std::move(other.job_to_d)),
+        cgroup(std::move(other.cgroup)) {};
+
   ~JobInstance() = default;
 
+  JobInstance& operator=(const JobInstance& other) = delete;
+  JobInstance& operator=(JobInstance&& other) noexcept {
+    if (this != &other) {
+      job_id = other.job_id;
+      job_to_d = std::move(other.job_to_d);
+      cgroup = std::move(other.cgroup);
+    }
+    return *this;
+  }
+
   task_id_t job_id;
-  JobSpec job_spec;
+  JobToD job_to_d;
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
-
-  // Task execution results
   bool orphaned{false};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
+
+  static EnvMap GetJobEnvMap(const JobToD& job);
 };
 
 /**
@@ -81,23 +91,25 @@ class JobManager {
   JobManager();
 
   CraneErrCode Recover(
-      std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map);
+      std::unordered_map<task_id_t, JobStatus>&& job_status_map);
 
   ~JobManager();
 
-  bool AllocJobs(std::vector<JobSpec>&& job_specs);
+  bool AllocJobs(std::vector<JobToD>&& jobs);
 
-  bool FreeJobs(const std::vector<task_id_t>& job_ids);
+  CgroupInterface* GetCgForJob(task_id_t job_id);
+
+  bool FreeJobs(const std::set<task_id_t>& job_ids);
 
   CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  bool QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info);
+  std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
-  CraneExpected<JobSpec> QueryJobSpec(task_id_t job_id);
+  CraneExpected<JobToD> QueryJob(task_id_t job_id);
 
-  std::unordered_set<task_id_t> QueryExistentJobIds();
+  std::set<task_id_t> GetAllocatedJobs();
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -126,7 +138,7 @@ class JobManager {
 
   struct EvQueueAllocateJobElem {
     std::promise<bool> ok_prom;
-    std::vector<JobSpec> job_specs;
+    std::vector<JobToD> job_specs;
   };
 
   struct EvQueueExecuteTaskElem {
@@ -150,6 +162,7 @@ class JobManager {
     bool terminated_by_user{false};  // If the task is canceled by user,
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
+    std::promise<void> terminate_prom;
   };
 
   struct CheckTaskStatusQueueElem {
@@ -191,9 +204,7 @@ class JobManager {
   static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
-                      std::unique_ptr<JobInstance>>
-      m_job_map_;
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, JobInstance> m_job_map_;
   util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
                       absl::flat_hash_set<task_id_t>>
       m_uid_to_job_ids_map_;

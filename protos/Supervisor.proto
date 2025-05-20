@@ -74,6 +74,14 @@ message TaskExecutionReply{
   int32 pid = 2;
 }
 
+message QueryStepEnvRequest{
+
+}
+
+message QueryStepEnvReply{
+  map<string, string> env = 1;
+}
+
 message CheckTaskStatusRequest{
 
 }
@@ -104,6 +112,7 @@ message TerminateTaskReply{
 
 service Supervisor{
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
+  rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns(ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns(TerminateTaskReply);

@@ -33,6 +33,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -446,9 +447,61 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedForeground =
             YamlValueOr<bool>(config["CranedForeground"], false);
 
+        if (config["Container"]) {
+          const auto& container_config = config["Container"];
+
+          g_config.Container.Enabled =
+              YamlValueOr<bool>(container_config["Enabled"], false);
+
+          if (g_config.Container.Enabled) {
+            g_config.Container.TempDir =
+                g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
+                                                    kDefaultContainerTempDir);
+
+            if (container_config["RuntimeBin"]) {
+              g_config.Container.RuntimeBin =
+                  container_config["RuntimeBin"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeBin is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeState"]) {
+              g_config.Container.RuntimeState =
+                  container_config["RuntimeState"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeState is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeKill"]) {
+              g_config.Container.RuntimeKill =
+                  container_config["RuntimeKill"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeKill is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeDelete"]) {
+              g_config.Container.RuntimeDelete =
+                  container_config["RuntimeDelete"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeDelete is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeRun"]) {
+              g_config.Container.RuntimeRun =
+                  container_config["RuntimeRun"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeRun is not configured.");
+              std::exit(1);
+            }
+          }
+        }
+
         if (config["Plugin"]) {
           const auto& plugin_config = config["Plugin"];
-
           g_config.Plugin.Enabled =
               YamlValueOr<bool>(plugin_config["Enabled"], false);
           g_config.Plugin.PlugindSockPath =
@@ -589,6 +642,12 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  // It is always ok to create thread pool first.
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
+
   using Craned::CgroupManager;
   using Craned::CgConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
@@ -633,9 +692,6 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  g_cfored_manager = std::make_unique<Craned::CforedManager>();
-  g_cfored_manager->Init();
-
   g_job_mgr = std::make_unique<Craned::JobManager>();
 }
 
@@ -652,9 +708,6 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
-  // Supervisor.Init();
-  // Supervisor.WaitInitFinish();
-
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
@@ -664,9 +717,21 @@ void StartServer() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
+  std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
+  auto config_future = conf_promise.get_future();
+  g_ctld_client_sm->SubscribeConfigure(
+      std::move([promise = std::move(conf_promise)](
+                    const crane::grpc::ConfigureCranedRequest& req) mutable {
+        promise.set_value(req);
+      }),
+      true);
+
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
+      g_supervisor_keeper->Init();
+
   std::unordered_set<task_id_t> task_ids_supervisor;
   std::unordered_map<task_id_t, pid_t> job_id_pid_map =
-      tasks.value_or(std::unordered_map<task_id_t, pid_t>());
+      steps.value_or(std::unordered_map<task_id_t, pid_t>());
   for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
     task_ids_supervisor.emplace(job_id);
   }
@@ -675,19 +740,19 @@ void StartServer() {
                 absl::StrJoin(task_ids_supervisor, ","));
   }
 
-  std::unordered_map<task_id_t, Craned::JobSpec> job_map;
-  std::unordered_map<task_id_t, Craned::StepSpec> step_map;
+  std::unordered_map<task_id_t, JobToD> job_map;
+  std::unordered_map<task_id_t, Craned::StepToD> step_map;
   std::unordered_set<task_id_t> running_jobs;
   std::vector<task_id_t> nonexistent_jobs;
 
   auto grpc_config_req = config_future.get();
   job_map.reserve(grpc_config_req.job_map_size());
-  step_map.reserve(grpc_config_req.job_id_tasks_map_size());
+  step_map.reserve(grpc_config_req.job_tasks_map_size());
   for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
     if (task_ids_supervisor.erase(job_id)) {
       running_jobs.emplace(job_id);
       job_map.emplace(job_id, job_spec);
-      step_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
+      step_map.emplace(job_id, grpc_config_req.job_tasks_map().at(job_id));
     } else {
       nonexistent_jobs.emplace_back(job_id);
     }
@@ -702,13 +767,13 @@ void StartServer() {
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
 
-  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
+  std::unordered_map<task_id_t, Craned::JobStatus> job_status_map;
   for (const auto& job_id : running_jobs) {
     job_status_map.emplace(
         // For now, each job only have one step
-        job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
-                                      .step_spec = step_map[job_id],
-                                      .task_pid = job_id_pid_map[job_id]});
+        job_id, Craned::JobStatus{.job_to_d = job_map[job_id],
+                                  .step_to_d = step_map[job_id],
+                                  .task_pid = job_id_pid_map[job_id]});
   }
   g_job_mgr->Recover(std::move(job_status_map));
 
@@ -716,7 +781,7 @@ void StartServer() {
     CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
                 absl::StrJoin(task_ids_supervisor, ","));
   }
-  g_server->FinishRecover();
+  g_server->FinishSupervisorRecovery();
   g_server->Wait();
   g_craned_for_pam_server->Wait();
   // CltdClient will call g_server->SetReady() in cb,set it to empty

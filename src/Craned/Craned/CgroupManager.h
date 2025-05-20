@@ -528,13 +528,10 @@ class CgroupManager {
   CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid) const;
 
   void SetCgroupVersion(CgConstant::CgroupVersion v) { m_cg_version_ = v; }
-  [[nodiscard]] CgroupConstant::CgroupVersion GetCgroupVersion() const {
-    return m_cg_version_;
-  }
-
   [[nodiscard]] CgConstant::CgroupVersion GetCgroupVersion() const {
     return m_cg_version_;
   }
+
 #ifdef CRANE_ENABLE_BPF
   BpfRuntimeInfo bpf_runtime_info;
 #endif

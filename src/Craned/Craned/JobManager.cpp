@@ -33,20 +33,13 @@
 
 namespace Craned {
 
-EnvMap JobSpec::GetJobEnvMap() const {
-  auto env_map = CgroupManager::GetResourceEnvMapByResInNode(
-      this->cgroup_spec.res_in_node);
+EnvMap JobInstance::GetJobEnvMap(const JobToD& job) {
+  auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job.res_in_node);
 
   // TODO: Move all job level env to here.
-  env_map.emplace("CRANE_JOB_ID", std::to_string(this->cgroup_spec.job_id));
+  env_map.emplace("CRANE_JOB_ID", std::to_string(job.job_id));
   return env_map;
-};
-
-JobInstance::JobInstance(JobSpec&& spec)
-    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
-
-JobInstance::JobInstance(const JobSpec& spec)
-    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
+}
 
 JobManager::JobManager() {
   // Only called once. Guaranteed by singleton pattern.
@@ -125,18 +118,18 @@ JobManager::JobManager() {
 }
 
 CraneErrCode JobManager::Recover(
-    std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map) {
+    std::unordered_map<task_id_t, JobStatus>&& job_status_map) {
   for (auto& [job_id, step_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
-    uid_t uid = step_status.job_spec.cgroup_spec.uid;
-    step_status.job_spec.cgroup_spec.recovered = true;
-    auto job_instance = std::make_unique<JobInstance>(step_status.job_spec);
+    uid_t uid = step_status.job_to_d.uid;
+    step_status.job_to_d.recovered = true;
+    auto job_instance = std::make_unique<JobInstance>(step_status.job_to_d);
     auto execution = std::make_unique<StepInstance>(
-        StepInstance{.step_spec = step_status.step_spec});
+        StepInstance{.step_to_d = step_status.step_to_d});
     // TODO:replace this with step_id
     job_instance->step_map.emplace(0, std::move(execution));
     job_instance->cgroup =
-        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
+        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_to_d);
 
     m_job_map_.Emplace(job_id, std::move(job_instance));
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
@@ -156,21 +149,18 @@ JobManager::~JobManager() {
   m_pending_thread_pool_tasks.wait();
 }
 
-bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
+bool JobManager::AllocJobs(std::vector<JobToD>&& jobs) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
-  CRANE_DEBUG("Allocating {} tasks", job_specs.size());
+  CRANE_DEBUG("Allocating {} job", jobs.size());
 
   auto begin = std::chrono::steady_clock::now();
 
-  for (auto& job_spec : job_specs) {
-    auto& cg_spec = job_spec.cgroup_spec;
-    task_id_t job_id = cg_spec.job_id;
-    uid_t uid = cg_spec.uid;
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", job_id,
+  for (const auto& job : jobs) {
+    task_id_t job_id = job.job_id;
+    uid_t uid = job.uid;
+    CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
                 uid);
-
-    auto job_instance = std::make_unique<JobInstance>(std::move(job_spec));
-    m_job_map_.Emplace(job_id, std::move(job_instance));
+    m_job_map_.Emplace(job_id, JobInstance(job));
 
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     if (uid_map->contains(uid)) {
@@ -187,7 +177,37 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
   return true;
 }
 
-bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
+CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
+  JobToD job;
+  {
+    auto job_inst = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_inst) {
+      CRANE_TRACE("Job #{} does not exist.");
+      return nullptr;
+    }
+    if (job_inst->cgroup) {
+      return job_inst->cgroup.get();
+    }
+    job = job_inst->job_to_d;
+  }
+
+  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(job);
+  auto* raw_ptr = cg.get();
+  {
+    auto job_inst = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_inst) {
+      CRANE_ERROR("Cgroup created for a freed job #{}.", job_id);
+      cg->Destroy();
+      return nullptr;
+    }
+    job_inst->cgroup = std::move(cg);
+  }
+  return raw_ptr;
+}
+
+// Wait for supervisor exit and release cgroup
+bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
+  // We do noting here,just check if supervisor exist and remove its cgroup
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
@@ -217,7 +237,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
     // TODO: replace following with step_id
     auto exists = std::filesystem::exists(
         fmt::format("/proc/{}", m_job_map_.GetValueExclusivePtr(job_id)
-                                    ->get()
+                                    .get()
                                     ->step_map[0]
                                     ->supervisor_pid),
         ec);
@@ -331,14 +351,14 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
   pid_t child_pid = fork();
 
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", step->step_spec.task_id(),
+    CRANE_ERROR("fork() failed for task #{}: {}", step->step_to_d.task_id(),
                 strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   if (child_pid > 0) {  // Parent proc
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                step->step_spec.task_id(), child_pid);
+                step->step_to_d.task_id(), child_pid);
 
     bool ok;
     CanStartMessage msg;
@@ -357,7 +377,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       CRANE_ERROR(
           "[Task #{}] Terminate the subprocess due to failure of cgroup "
           "migration.",
-          step->step_spec.task_id());
+          step->step_to_d.task_id());
 
       job->err_before_exec = CraneErrCode::ERR_CGROUP;
 
@@ -366,7 +386,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
       if (!ok) {
         CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
-                    child_pid, step->step_spec.task_id());
+                    child_pid, step->step_to_d.task_id());
 
         job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
         KillPid_(child_pid, SIGKILL);
@@ -381,13 +401,13 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
-                  step->step_spec.task_id(), strerror(ostream.GetErrno()));
+                  step->step_to_d.task_id(), strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to send ok=true to supervisor {}: {}",
-                  step->step_spec.task_id(), child_pid,
+                  step->step_to_d.task_id(), child_pid,
                   strerror(ostream.GetErrno()));
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
@@ -400,10 +420,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     if (!ok || !msg.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
-                    step->step_spec.task_id(), strerror(istream.GetErrno()));
+                    step->step_to_d.task_id(), strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("[Task #{}] Received false from subprocess {}",
-                    step->step_spec.task_id(), child_pid);
+                    step->step_to_d.task_id(), child_pid);
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
@@ -412,16 +432,16 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_req;
-    init_req.set_job_id(step->step_spec.task_id());
+    init_req.set_job_id(step->step_to_d.task_id());
     init_req.set_debug_level(g_config.Supervisor.DebugLevel);
     init_req.set_craned_id(g_config.CranedIdOfThisNode);
     init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
-    init_req.mutable_step_spec()->CopyFrom(step->step_spec);
+    init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
 
     // Pass job env to supervisor
-    EnvMap res_env_map = job->job_spec.GetJobEnvMap();
+    EnvMap res_env_map = JobInstance::GetJobEnvMap(job->job_to_d);
     init_req.mutable_env()->clear();
     init_req.mutable_env()->insert(res_env_map.begin(), res_env_map.end());
 
@@ -443,13 +463,13 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
-                  step->step_spec.task_id(), strerror(ostream.GetErrno()));
+                  step->step_to_d.task_id(), strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to send init msg to supervisor: {}",
-                  child_pid, step->step_spec.task_id(),
+                  child_pid, step->step_to_d.task_id(),
                   strerror(ostream.GetErrno()));
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
@@ -457,7 +477,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       return CraneErrCode::ERR_PROTOBUF;
     } else {
       CRANE_TRACE("[Job #{}] Supervisor init msg send.",
-                  step->step_spec.task_id());
+                  step->step_to_d.task_id());
     }
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
@@ -465,10 +485,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     if (!ok || !msg.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
-                    step->step_spec.task_id(), strerror(istream.GetErrno()));
+                    step->step_to_d.task_id(), strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
-                    step->step_spec.task_id());
+                    step->step_to_d.task_id());
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
@@ -478,13 +498,13 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
 
-    g_supervisor_keeper->AddSupervisor(step->step_spec.task_id());
+    g_supervisor_keeper->AddSupervisor(step->step_to_d.task_id());
 
-    auto stub = g_supervisor_keeper->GetStub(step->step_spec.task_id());
-    auto pid = stub->ExecuteTask(step->step_spec);
+    auto stub = g_supervisor_keeper->GetStub(step->step_to_d.task_id());
+    auto pid = stub->ExecuteTask(step->step_to_d);
     if (!pid) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
-                  step->step_spec.task_id());
+                  step->step_to_d.task_id());
       job->err_before_exec = CraneErrCode::ERR_SUPERVISOR;
       KillPid_(child_pid, SIGKILL);
       return CraneErrCode::ERR_SUPERVISOR;
@@ -579,7 +599,7 @@ CraneErrCode JobManager::ExecuteTaskAsync(
   // Simply wrap the Task structure within an Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  step->step_spec = task_spec;
+  step->step_to_d = task_spec;
   EvQueueExecuteTaskElem elem{.execution = std::move(step)};
 
   auto future = elem.ok_prom.get_future();
@@ -597,9 +617,9 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
     // m_job_map_.
     std::unique_ptr execution = std::move(elem.execution);
 
-    if (!m_job_map_.Contains(execution->step_spec.task_id())) {
+    if (!m_job_map_.Contains(execution->step_to_d.task_id())) {
       CRANE_ERROR("Failed to find job #{} allocation",
-                  execution->step_spec.task_id());
+                  execution->step_to_d.task_id());
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
     }
     m_pending_thread_pool_tasks.count_up();
@@ -614,59 +634,61 @@ bool JobManager::FreeJobInstanceAllocation_(
     const std::vector<task_id_t>& job_ids) {
   CRANE_DEBUG("Freeing job [{}] instance allocation",
               absl::StrJoin(job_ids, ","));
-  std::vector<JobInstance*> job_ptr_vec;
+  std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
+  std::vector<uid_t> uid_vec;
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
-      job_ptr_vec.emplace_back(map_ptr->at(job_id).RawPtr()->release());
+      JobInstance* job_inst = map_ptr->at(job_id).RawPtr();
+
+      job_cg_map[job_id] = job_inst->cgroup.release();
+      uid_vec.push_back(job_inst->job_to_d.uid);
       map_ptr->erase(job_id);
     }
   }
   {
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
-    for (auto* job : job_ptr_vec) {
+    for (auto [idx, job_id] : job_ids | std::ranges::views::enumerate) {
       bool erase{false};
       {
-        auto& value = uid_map->at(job->job_spec.cgroup_spec.uid);
-        value.RawPtr()->erase(job->job_id);
+        auto& value = uid_map->at(uid_vec[idx]);
+        value.RawPtr()->erase(job_id);
         erase = value.RawPtr()->empty();
       }
       if (erase) {
-        uid_map->erase(job->job_spec.cgroup_spec.uid);
+        uid_map->erase(uid_vec[idx]);
       }
     }
   }
-  for (auto* instance : job_ptr_vec) {
-    auto* cgroup = instance->cgroup.release();
-    if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(instance->job_id,
-                                              cgroup->GetCgroupString());
+
+  for (auto [job_id, cgroup] : job_cg_map) {
+    if (cgroup == nullptr) continue;
+
+    if (g_config.Plugin.Enabled && g_plugin_client) {
+      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupPathStr());
     }
+    g_thread_pool->detach_task([cgroup]() {
+      int cnt = 0;
 
-    if (cgroup != nullptr) {
-      g_thread_pool->detach_task([cgroup]() {
-        int cnt = 0;
+      while (true) {
+        if (cgroup->Empty()) break;
 
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cgroup->CgroupPathStr(), cnt);
+          break;
         }
 
-        delete cgroup;
-      });
-    }
-    delete instance;
+        cgroup->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      cgroup->Destroy();
+
+      delete cgroup;
+    });
   }
   return true;
 }
@@ -676,19 +698,19 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // safety. JobInstance will not be free during this function. Take care of
   // data race for job instance.
 
-  task_id_t job_id = step->step_spec.task_id();
-  auto job_it = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_it) {
+  task_id_t job_id = step->step_to_d.task_id();
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) {
     CRANE_ERROR("Failed to get the allocation of job#{}", job_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
         fmt::format("Failed to get the allocation for job#{} ", job_id));
     return;
   }
-  auto* job = job_it.get()->get();
+  auto* job = job_ptr.get();
 
   if (!job->cgroup) {
-    job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job->job_spec.cgroup_spec);
+    job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job->job_to_d);
   }
   if (!job->cgroup) {
     CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
@@ -725,8 +747,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
 void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto job_pptr = m_job_map_.GetValueExclusivePtr(status_change.task_id);
-    if (!job_pptr) {
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.task_id);
+    if (!job_ptr) {
       // When Ctrl+C is pressed for Craned, all tasks including just forked
       // tasks will be terminated.
       // In some error cases, a double TaskStatusChange might be triggered.
@@ -734,8 +756,8 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    g_supervisor_keeper->RemoveSupervisor(job_pptr.get()->get()->job_id);
-    bool orphaned = job_pptr->get()->orphaned;
+    g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
+    bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
   }
@@ -760,49 +782,41 @@ void JobManager::ActivateTaskStatusChangeAsync_(
  */
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
-  auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_instance) return false;
-  auto& cg = job_instance->get()->cgroup;
-  if (!cg) {
-    cg = g_cg_mgr->AllocateAndGetJobCgroup(
-        job_instance->get()->job_spec.cgroup_spec);
-  }
+  CgroupInterface* cg = GetCgForJob(job_id);
   if (!cg) return false;
 
   return cg->MigrateProcIn(pid);
 }
 
-CraneExpected<JobSpec> JobManager::QueryJobSpec(task_id_t job_id) {
+CraneExpected<JobToD> JobManager::QueryJob(task_id_t job_id) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   auto instance = m_job_map_.GetValueExclusivePtr(job_id);
   if (!instance) return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
-  return instance->get()->job_spec;
+  return instance->job_to_d;
 }
 
-std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
-  std::unordered_set<task_id_t> job_ids;
+std::set<task_id_t> JobManager::GetAllocatedJobs() {
   auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
-  job_ids.reserve(job_map_ptr->size());
   return *job_map_ptr | std::ranges::views::keys |
-         std::ranges::to<std::unordered_set<task_id_t>>();
+         std::ranges::to<std::set<task_id_t>>();
 }
 
-bool JobManager::QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info) {
+std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
   CRANE_DEBUG("Query task info for uid {}", uid);
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
-
-  info->job_cnt = 0;
-  info->cgroup_exists = false;
+  TaskInfoOfUid info;
+  info.job_cnt = 0;
+  info.cgroup_exists = false;
 
   if (auto task_ids = this->m_uid_to_job_ids_map_[uid]; task_ids) {
-    if (!task_ids) {
-      CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
-      return false;
-    }
-    info->job_cnt = task_ids->size();
-    info->first_task_id = *task_ids->begin();
+    info.cgroup_exists = true;
+    info.job_cnt = task_ids->size();
+    info.first_task_id = *task_ids->begin();
+  } else {
+    CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
+    return std::nullopt;
   }
-  return info->job_cnt > 0;
+  return info;
 }
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
@@ -814,7 +828,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         elem.task_id);
 
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
-    if (!job_instance || job_instance->get()->step_map.empty()) {
+    if (!job_instance || job_instance->step_map.empty()) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -841,7 +855,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    auto* instance = job_instance.get()->get();
+    auto* instance = job_instance.get();
     instance->orphaned = elem.mark_as_orphaned;
 
     auto stub = g_supervisor_keeper->GetStub(elem.task_id);
@@ -860,14 +874,14 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 void JobManager::TerminateTaskAsync(uint32_t task_id) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
-  m_task_terminate_queue_.enqueue(elem);
+  m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
 }
 
 void JobManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   TaskTerminateQueueElem elem{.task_id = task_id, .mark_as_orphaned = true};
-  m_task_terminate_queue_.enqueue(elem);
+  m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
 }
 
