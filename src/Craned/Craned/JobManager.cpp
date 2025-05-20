@@ -53,7 +53,7 @@ JobManager::JobManager() {
         EvSigchldCb_();
       });
 
-  if (int rc = m_sigchld_handle_->start(SIGCLD); rc != 0) {
+  if (int rc = m_sigchld_handle_->start(SIGCHLD); rc != 0) {
     CRANE_ERROR("Failed to start the SIGCHLD handle: {}", uv_err_name(rc));
   }
 
