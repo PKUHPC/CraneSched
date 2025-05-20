@@ -38,6 +38,21 @@ grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
   return Status::OK;
 }
 
+grpc::Status Supervisor::SupervisorServiceImpl::QueryEnvMap(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::QueryStepEnvRequest* request,
+    crane::grpc::supervisor::QueryStepEnvReply* response) {
+  auto env_future = g_task_mgr->QueryStepEnvAsync();
+  std::expected env_expt = env_future.get();
+  if (env_expt.has_value()) {
+    auto grep_env = response->mutable_env();
+    for (auto& [key, value] : env_expt.value()) {
+      (*grep_env)[key] = value;
+    }
+  }
+  return Status::OK;
+}
+
 grpc::Status Supervisor::SupervisorServiceImpl::CheckTaskStatus(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::CheckTaskStatusRequest* request,

@@ -163,9 +163,9 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed) {
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
-        // If a batch task failed to requeue the task into pending queue due
-        // to insufficient resource or other reasons or the task is an
-        // interactive task, Mark it as FAILED and move it to the ended queue.
+        // If a batch task failed to requeue the task into pending queue due to
+        // insufficient resource or other reasons or the task is an interactive
+        // task , Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
@@ -557,8 +557,8 @@ void TaskScheduler::ScheduleThread_() {
     m_pending_task_map_mtx_.Lock();
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
-      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks
-      // running map first and then locks g_meta_container.
+      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
+      // map first and then locks g_meta_container.
       m_running_task_map_mtx_.Lock();
 
       schedule_begin = std::chrono::steady_clock::now();
@@ -1235,8 +1235,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   uint32_t operator_uid = request.operator_uid();
 
-  // When an ordinary user tries to cancel jobs, they are automatically
-  // filtered to their own jobs.
+  // When an ordinary user tries to cancel jobs, they are automatically filtered
+  // to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
       !g_account_manager->CheckUidIsAdmin(operator_uid)) {

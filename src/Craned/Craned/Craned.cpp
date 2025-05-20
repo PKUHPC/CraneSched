@@ -720,9 +720,9 @@ void StartServer() {
   std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
   auto config_future = conf_promise.get_future();
   g_ctld_client_sm->SubscribeConfigure(
-      std::move([promise = std::move(conf_promise)](
+      std::move([&conf_promise](
                     const crane::grpc::ConfigureCranedRequest& req) mutable {
-        promise.set_value(req);
+        conf_promise.set_value(req);
       }),
       true);
 
