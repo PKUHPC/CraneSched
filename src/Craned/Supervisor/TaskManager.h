@@ -24,8 +24,8 @@
 #include "crane/PasswordEntry.h"
 
 namespace Supervisor {
-struct StepSpec {
-  crane::grpc::TaskToD spec;
+struct Step {
+  crane::grpc::TaskToD step_to_super;
   std::unique_ptr<CforedClient> cfored_client;
   inline bool IsBatch() const;
   inline bool IsCrun() const;
@@ -61,12 +61,16 @@ struct ProcSigchldInfo {
 
 class ExecutionInterface {
  public:
-  explicit ExecutionInterface(const StepSpec* step_spec)
-      : step_spec(step_spec) {}
+  explicit ExecutionInterface(const Step* step_spec) : step(step_spec) {}
   virtual ~ExecutionInterface();
 
   void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
+
+  // FIXME: Remove this in future.
+  // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
+  // this function.
+  [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -76,7 +80,7 @@ class ExecutionInterface {
   // TODO: SigChldHandler()
 
   // Set from TaskManager
-  const StepSpec* step_spec;
+  const Step* step;
 
   PasswordEntry pwd;
   ProcSigchldInfo sigchld_info{};
@@ -92,10 +96,6 @@ class ExecutionInterface {
   CrunMetaInExecution* GetCrunMeta() const {
     return dynamic_cast<CrunMetaInExecution*>(this->m_meta_.get());
   };
-  // FIXME: Remove this in future.
-  // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
-  // this function.
-  [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
 
   // Helper methods
   CraneErrCode SetupCrunX11_();
@@ -136,7 +136,7 @@ class ExecutionInterface {
 
 class ContainerInstance : public ExecutionInterface {
  public:
-  explicit ContainerInstance(const StepSpec* step_spec)
+  explicit ContainerInstance(const Step* step_spec)
       : ExecutionInterface(step_spec) {}
   ~ContainerInstance() override = default;
 
@@ -156,7 +156,7 @@ class ContainerInstance : public ExecutionInterface {
 
 class ProcessInstance : public ExecutionInterface {
  public:
-  explicit ProcessInstance(const StepSpec* step_spec)
+  explicit ProcessInstance(const Step* step_spec)
       : ExecutionInterface(step_spec) {}
   ~ProcessInstance() override = default;
 
@@ -211,6 +211,8 @@ class TaskManager {
   std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const StepToSuper& spec);
   void LaunchExecution_();
 
+  std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
+
   std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
 
   std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
@@ -248,6 +250,7 @@ class TaskManager {
   void EvCleanChangeTaskTimeLimitQueueCb_();
   void EvCleanCheckTaskStatusQueueCb_();
   void EvGrpcExecuteTaskCb_();
+  void EvGrpcQueryStepEnvCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -266,10 +269,14 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_grpc_query_step_env_async_handle_;
+  ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
+      m_grpc_query_step_env_queue_;
+
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
-  StepSpec m_step_spec_;
+  Step m_step_spec_;
   // TODO: Support multiple tasks
   std::unique_ptr<ExecutionInterface> m_instance_;
 };
