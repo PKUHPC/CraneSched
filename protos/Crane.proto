@@ -825,6 +825,70 @@ message StreamTaskIOReply {
   }
 }
 
+message SendPmixRingMsgReq {
+  message PmixRingMsgHdr {
+    uint32 contrib_id = 1;
+    uint32 seq = 2;
+    uint32 hop_seq = 3;
+    string craned_id = 4;
+    uint32 msgsize = 5;
+  };
+
+  PmixRingMsgHdr pmix_ring_msg_hdr = 1;
+  repeated PmixProc pmix_procs = 2;
+  bytes msg = 3;
+}
+
+message SendPmixRingMsgReply {
+  bool ok = 1;
+}
+
+message PmixTreeUpwardForwardReq {
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  bytes msg = 4;
+}
+
+message PmixTreeUpwardForwardReply {
+  bool ok = 1;
+}
+
+message PmixTreeDownwardForwardReq {
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  bytes msg = 4;
+}
+
+message PmixTreeDownwardForwardReply {
+  bool ok = 1;
+}
+
+message PmixDModexRequestReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  PmixProc pmix_proc = 3;
+  string local_namespace = 4;
+  int32 status = 5;
+}
+
+message PmixDModexRequestReply {
+  bool ok = 1;
+}
+
+message PmixDModexResponseReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  bytes data = 3;
+  int32 status = 4;
+}
+
+message PmixDModexResponseReply {
+  bool ok = 1;
+}
+
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -906,6 +970,13 @@ service Craned {
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+
+  /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
+  rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
+  rpc PmixTreeUpwardForward(PmixTreeUpwardForwardReq) returns (PmixTreeUpwardForwardReply);
+  rpc PmixTreeDownwardForward(PmixTreeDownwardForwardReq) returns (PmixTreeDownwardForwardReply);
+  rpc PmixDModexRequest(PmixDModexRequestReq) returns (PmixDModexRequestReply);
+  rpc PmixDModexResponse(PmixDModexResponseReq) returns (PmixDModexResponseReply);
 }
 
 service CraneForeD {

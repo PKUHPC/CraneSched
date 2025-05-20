@@ -249,6 +249,8 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+
+  string mpi = 8;
 }
 
 message TaskInfo {
@@ -559,4 +561,9 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp system_boot_time = 5;
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }
