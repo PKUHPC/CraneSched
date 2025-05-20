@@ -76,7 +76,8 @@ message TaskExecutionReply {
 message QueryStepEnvRequest {}
 
 message QueryStepEnvReply {
-  map<string, string> env = 1;
+  bool ok = 1;
+  map<string, string> env = 2;
 }
 
 message CheckTaskStatusRequest {}
