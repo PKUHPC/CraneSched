@@ -173,9 +173,9 @@ class JobManager {
 
   bool FreeJobInstanceAllocation_(const std::vector<task_id_t>& job_ids);
 
-  void LaunchStepMt_(std::unique_ptr<StepInstance> task);
+  void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
-  CraneErrCode SpawnSupervisor_(JobInstance* instance, StepInstance* task);
+  CraneErrCode SpawnSupervisor_(JobInstance* job, StepInstance* step);
 
   /**
    * Inform CraneCtld of the status change of a task.
