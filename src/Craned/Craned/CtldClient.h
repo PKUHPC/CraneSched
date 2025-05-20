@@ -61,6 +61,10 @@ class CtldClientStateMachine {
   void EvGrpcConnectionFailed();
   void EvGrpcTimeout();
 
+  void SubscribeConfigure(
+      std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
+      bool consume);
+
   bool IsReadyNow();
 
  private:
@@ -108,6 +112,13 @@ class CtldClientStateMachine {
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
+
+  struct SubscribeConfigureArg {
+    std::function<void(const crane::grpc::ConfigureCranedRequest&)> cb;
+    bool consume;
+  };
+  std::list<SubscribeConfigureArg> m_configure_subscribe_cb_list_
+      ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
 };

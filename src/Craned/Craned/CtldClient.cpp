@@ -20,7 +20,6 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
-#include "TaskManager.h"
 #include "crane/GrpcHelper.h"
 
 namespace Craned {
@@ -65,7 +64,19 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
       request.token() == m_reg_token_.value()) {
     m_state_ = State::CONFIGURING;
     ActionConfigure_(request);
-
+    std::latch latch(m_configure_subscribe_cb_list_.size());
+    for (auto it = m_configure_subscribe_cb_list_.begin();
+         it != m_configure_subscribe_cb_list_.end(); ++it) {
+      g_thread_pool->detach_task([it, request, &latch, this] {
+        absl::MutexLock lk(&m_mtx_);
+        it->cb(request);
+        if (it->consume) {
+          m_configure_subscribe_cb_list_.erase(it);
+        }
+        latch.count_down();
+      });
+    }
+    latch.wait();
     return true;
   } else {
     if (!request.ok())
@@ -164,6 +175,12 @@ void CtldClientStateMachine::EvGrpcTimeout() {
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
 }
+void CtldClientStateMachine::SubscribeConfigure(
+    std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
+    bool consume) {
+  m_configure_subscribe_cb_list_.emplace_back(
+      SubscribeConfigureArg{arg, consume});
+}
 
 bool CtldClientStateMachine::IsReadyNow() {
   absl::MutexLock lk(&m_mtx_);
@@ -257,7 +274,7 @@ void CtldClient::Init() {
             exact_job_ids, arg.job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
 
-        std::set exact_task_ids = g_task_mgr->QueryRunningTasksAsync();
+        std::set exact_task_ids = g_job_mgr->GetAllocatedJobs();
         std::set<task_id_t> lost_tasks{};
         std::set<task_id_t> invalid_tasks{};
         std::ranges::set_difference(
@@ -271,14 +288,9 @@ void CtldClient::Init() {
         if (!invalid_tasks.empty()) {
           CRANE_DEBUG("Terminating orphaned tasks: [{}].",
                       absl::StrJoin(invalid_tasks, ","));
-          std::latch latch(invalid_tasks.size());
           for (auto task_id : invalid_tasks) {
-            g_thread_pool->detach_task([task_id, &latch] {
-              g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id).wait();
-              latch.count_down();
-            });
+            g_job_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id);
           }
-          latch.wait();
         }
         if (!invalid_jobs.empty()) {
           CRANE_DEBUG("Freeing invalid jobs: [{}].",
