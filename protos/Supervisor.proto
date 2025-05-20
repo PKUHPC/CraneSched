@@ -60,60 +60,55 @@ message InitSupervisorRequest {
   map<string, string> env = 10;
 }
 
-
 message SupervisorReady {
   bool ok = 1;
 }
 
-message TaskExecutionRequest{
+message TaskExecutionRequest {
   TaskToD task = 1;
 }
 
-message TaskExecutionReply{
+message TaskExecutionReply {
   bool ok = 1;
   int32 pid = 2;
 }
 
-message QueryStepEnvRequest{
+message QueryStepEnvRequest {}
 
-}
-
-message QueryStepEnvReply{
+message QueryStepEnvReply {
   map<string, string> env = 1;
 }
 
-message CheckTaskStatusRequest{
+message CheckTaskStatusRequest {}
 
-}
-
-message CheckTaskStatusReply{
+message CheckTaskStatusReply {
   int32 job_id = 1;
   int32 pid = 2;
   bool ok = 3;
 }
 
-message ChangeTaskTimeLimitRequest{
+message ChangeTaskTimeLimitRequest {
   int64 time_limit_seconds = 1;
 }
 
-message ChangeTaskTimeLimitReply{
+message ChangeTaskTimeLimitReply {
   bool ok = 1;
 }
 
-message TerminateTaskRequest{
+message TerminateTaskRequest {
   bool mark_orphaned = 1;
   bool terminated_by_user = 2;
 }
 
-message TerminateTaskReply{
+message TerminateTaskReply {
   bool ok = 1;
   string reason = 2;
 }
 
-service Supervisor{
+service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
-  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns(ChangeTaskTimeLimitReply);
-  rpc TerminateTask(TerminateTaskRequest) returns(TerminateTaskReply);
+  rpc CheckTaskStatus(CheckTaskStatusRequest) returns (CheckTaskStatusReply);
+  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
+  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
 }

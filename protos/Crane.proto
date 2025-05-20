@@ -760,7 +760,7 @@ message StreamCrunReply {
 }
 
 message StreamTaskIORequest {
-  enum SupervisorRequestType{
+  enum SupervisorRequestType {
     SUPERVISOR_REGISTER = 0;
     TASK_OUTPUT = 1;
     SUPERVISOR_UNREGISTER = 2;
