@@ -121,11 +121,6 @@ class CranedServer {
     m_supervisor_recovered_.store(true, std::memory_order_release);
   }
 
-  void FinishRecover() {
-    CRANE_DEBUG("Craned finished recover.");
-    m_recovered_.store(true, std::memory_order_release);
-  }
-
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

@@ -760,8 +760,6 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
-  g_task_scheduler = std::make_unique<TaskScheduler>();
-  ok = g_task_scheduler->Init();
 
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
@@ -781,11 +779,6 @@ void InitializeCtldGlobalVariables() {
     // No need to worry disconnect before task scheduler init
     g_meta_container->CranedDown(craned_id);
   });
-
-  std::list<CranedId> to_register_craned_list;
-  for (auto&& kv : g_config.Nodes) {
-    to_register_craned_list.emplace_back(kv.first);
-  }
 
   using namespace std::chrono_literals;
 

@@ -30,7 +30,7 @@ namespace Craned {
 class SupervisorClient {
  public:
   CraneExpected<pid_t> ExecuteTask(const crane::grpc::TaskToD& task);
-
+  CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::pair<task_id_t, pid_t>> CheckTaskStatus();
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
@@ -47,9 +47,7 @@ class SupervisorClient {
 class SupervisorKeeper {
  public:
   SupervisorKeeper() = default;
-  ~SupervisorKeeper() {
-    CRANE_DEBUG("Destroy SupervisorKeeper.");
-  }
+  ~SupervisorKeeper() { CRANE_DEBUG("Destroy SupervisorKeeper."); }
 
   /**
    * @brief Query all existing supervisor for task they hold.
