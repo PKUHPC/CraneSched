@@ -267,6 +267,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
   return m_release_job_req_set_.empty();
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void JobManager::EvSigchldCb_() {
   int status;
   pid_t pid;
@@ -708,6 +709,18 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     return;
   }
   auto* job = job_ptr.get();
+
+  // Check if the step is acceptable.
+  if (step->step_to_d.container().length() != 0 &&
+      !g_config.Container.Enabled) {
+    CRANE_ERROR("Container support is disabled but job #{} requires it.",
+                job_id);
+    ActivateTaskStatusChangeAsync_(step->step_to_d.task_id(),
+                                   crane::grpc::TaskStatus::Failed,
+                                   ExitCode::kExitCodeSpawnProcessFail,
+                                   "Container is not enabled in this craned.");
+    return;
+  }
 
   if (!job->cgroup) {
     job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job->job_to_d);
