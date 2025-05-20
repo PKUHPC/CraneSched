@@ -575,6 +575,13 @@ CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  if (!g_config.Container.Enabled) {
+    // Should never happen, as we do filtering in Craned.
+    CRANE_ERROR("Container is not enabled for task #{}",
+                step->step_to_super.task_id());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
   // Generate path and params.
   m_temp_path_ = g_config.Container.TempDir /
                  fmt::format("{}", step->step_to_super.task_id());
@@ -1215,18 +1222,15 @@ CraneErrCode ProcessInstance::Spawn() {
 }
 
 CraneErrCode ProcessInstance::Kill(int signum) {
-  if (m_pid_) {
+  if (m_pid_ != 0) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
     // Send the signal to the whole process group.
     int err = kill(-m_pid_, signum);
+    if (err == 0) return CraneErrCode::SUCCESS;
 
-    if (err == 0)
-      return CraneErrCode::SUCCESS;
-    else {
-      CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
-    }
+    CRANE_TRACE("kill failed. error: {}", strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   return CraneErrCode::ERR_NON_EXISTENT;
@@ -1328,12 +1332,12 @@ void TaskManager::TaskStopAndDoStatusChange() {
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeSpawnProcessFail,
                               std::nullopt);
-    break;
+    return;
 
   case CraneErrCode::ERR_CGROUP:
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeCgroupError, std::nullopt);
-    break;
+    return;
 
   default:
     break;
@@ -1393,12 +1397,6 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
 
   if (spec.container().length() != 0) {
     // Container
-    if (!g_config.Container.Enabled) {
-      // Container job is not supported in this node.
-      elem.pid_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
-      return pid_future;
-    }
-
     elem.instance = std::make_unique<ContainerInstance>(&m_step_spec_);
   } else {
     // Process
@@ -1435,7 +1433,7 @@ void TaskManager::LaunchExecution_() {
                 m_step_spec_.step_to_super.task_id());
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeFileNotFound,
-                              fmt::format("Failed to prepare task"));
+                              fmt::format("Failed to prepare for task"));
     return;
   }
 
@@ -1492,9 +1490,9 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
   elem.terminated_by_user = terminated_by_user;
+
   m_task_terminate_queue_.enqueue(std::move(elem));
   m_terminate_task_async_handle_->send();
-  return;
 }
 
 void TaskManager::EvSigchldCb_() {
