@@ -493,11 +493,7 @@ class DedicatedResourceAllocator {
 class CgroupManager {
  public:
   CgroupManager() = default;
-#ifdef CRANE_ENABLE_BPF
-  ~CgroupManager();
-#else
   ~CgroupManager() = default;
-#endif
 
   CgroupManager(const CgroupManager &) = delete;
   CgroupManager(CgroupManager &&) = delete;
