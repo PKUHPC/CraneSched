@@ -313,8 +313,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       craned_id_part_ids_map_[craned_name].emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
-      part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
-      part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
 
       part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
       part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
