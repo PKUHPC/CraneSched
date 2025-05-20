@@ -123,13 +123,13 @@ CraneErrCode JobManager::Recover(
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
     uid_t uid = step_status.job_to_d.uid;
     step_status.job_to_d.recovered = true;
-    auto job_instance = std::make_unique<JobInstance>(step_status.job_to_d);
+    auto job_instance = JobInstance(step_status.job_to_d);
     auto execution = std::make_unique<StepInstance>(
         StepInstance{.step_to_d = step_status.step_to_d});
     // TODO:replace this with step_id
-    job_instance->step_map.emplace(0, std::move(execution));
-    job_instance->cgroup =
-        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_to_d);
+    job_instance.step_map.emplace(0, std::move(execution));
+    job_instance.cgroup =
+        g_cg_mgr->AllocateAndGetJobCgroup(job_instance.job_to_d);
 
     m_job_map_.Emplace(job_id, std::move(job_instance));
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();

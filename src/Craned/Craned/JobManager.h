@@ -23,7 +23,6 @@
 
 #include <grp.h>
 
-#include "../../Utilities/PublicHeader/include/crane/PublicHeader.h"
 #include "CgroupManager.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -48,6 +47,8 @@ struct JobStatus {
 // Job allocation info
 // allocation = job spec + execution info
 struct JobInstance {
+  // Should never use, only for AtomicHashMap.
+  JobInstance() = default;
   explicit JobInstance(const JobToD& job) : job_id(job.job_id), job_to_d(job) {}
 
   JobInstance(const JobInstance& other) = delete;
