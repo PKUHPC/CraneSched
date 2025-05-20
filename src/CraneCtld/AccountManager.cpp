@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
+#include "TaskScheduler.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -185,6 +186,9 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   // The provided account is invalid.
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+
+  if (!g_task_scheduler->CheckUserHasTasks(user->name))
+    return std::unexpected(CraneErrCode::ERR_USER_HAS_TASK);
 
   return DeleteUser_(*user, account);
 }
@@ -973,7 +977,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   }
 
   mongocxx::client_session::with_transaction_cb callback;
-  if (item == "description") {
+  if (item == Qos::FieldStringOfDescription()) {
     // Update to database
     callback = [&](mongocxx::client_session* session) {
       g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
