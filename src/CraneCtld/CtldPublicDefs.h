@@ -395,6 +395,8 @@ struct TaskInCtld {
 
   std::string reservation;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
