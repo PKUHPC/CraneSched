@@ -42,6 +42,8 @@ CraneExpected<EnvMap> SupervisorClient::QueryStepEnv() {
   if (ok.ok()) {
     return std::unordered_map(reply.env().begin(), reply.env().end());
   }
+  CRANE_ERROR("QueryStepEnv failed: reply {},{}", reply.ok(),
+              ok.error_message());
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
