@@ -22,12 +22,10 @@
 namespace Craned {
 using grpc::ClientContext;
 
-CraneExpected<pid_t> SupervisorClient::ExecuteTask(
-    const crane::grpc::TaskToD& task) {
+CraneExpected<pid_t> SupervisorClient::ExecuteTask() {
   ClientContext context;
   crane::grpc::supervisor::TaskExecutionRequest request;
   crane::grpc::supervisor::TaskExecutionReply reply;
-  request.mutable_task()->CopyFrom(task);
   auto ok = m_stub_->ExecuteTask(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
     return reply.pid();
