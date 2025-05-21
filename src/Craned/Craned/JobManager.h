@@ -102,13 +102,13 @@ class JobManager {
 
   std::set<task_id_t> GetAllocatedJobs();
 
-  void TerminateTaskAsync(uint32_t task_id);
+  void TerminateTaskAsync(task_id_t task_id);
 
   void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
-  void TaskStopAndDoStatusChangeAsync(uint32_t job_id,
+  void TaskStopAndDoStatusChangeAsync(task_id_t job_id,
                                       crane::grpc::TaskStatus new_status,
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
