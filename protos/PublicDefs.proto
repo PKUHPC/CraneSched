@@ -701,6 +701,7 @@ enum ErrCode {
   ERR_NO_DEFAULT_WCKEY = 89;
 
   ERR_MAX_JOB_COUNT_PER_ACCOUNT = 90;
+  ERR_USER_HAS_TASK = 91;
 }
 
 enum EntityType {
