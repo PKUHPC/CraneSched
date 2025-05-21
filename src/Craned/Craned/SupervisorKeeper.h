@@ -29,7 +29,7 @@ namespace Craned {
 
 class SupervisorClient {
  public:
-  CraneExpected<pid_t> ExecuteTask(const crane::grpc::TaskToD& task);
+  CraneExpected<pid_t> ExecuteTask();
   CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::pair<task_id_t, pid_t>> CheckTaskStatus();
 
