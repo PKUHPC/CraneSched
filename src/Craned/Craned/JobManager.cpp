@@ -189,7 +189,7 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   {
     auto job_inst = m_job_map_.GetValueExclusivePtr(job_id);
     if (!job_inst) {
-      CRANE_TRACE("Job #{} does not exist.");
+      CRANE_TRACE("Job #{} does not exist.", job_id);
       return nullptr;
     }
     if (job_inst->cgroup) {
