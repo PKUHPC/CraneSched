@@ -65,9 +65,8 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
                                               const Qos& qos);
 
-  CraneErrCode CheckQosSubmitResourceForAccount_(
-      const TaskInCtld& task, const Qos& qos,
-      const std::list<std::string>& account_chain);
+  CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
+                                                 const Qos& qos);
 
   std::array<std::mutex, kNumStripes> m_user_stripes_;
 
