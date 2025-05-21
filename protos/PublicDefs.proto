@@ -478,6 +478,7 @@ enum ErrCode {
   ERR_EBPF = 69;
   ERR_SUPERVISOR = 70;
   ERR_MAX_JOB_COUNT_PER_ACCOUNT = 71;
+  ERR_USER_HAS_TASK = 72;
 }
 
 enum EntityType {
