@@ -706,6 +706,8 @@ struct TaskInCtld {
 
   std::unordered_map<std::string, uint32_t> licenses_count;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
