@@ -1117,9 +1117,15 @@ struct Qos {
   uint32_t max_running_tasks_per_user;
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
-  uint32_t max_cpus_per_account;
   uint32_t max_submit_jobs_per_user;
   uint32_t max_submit_jobs_per_account;
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
+  absl::Duration max_wall;
+  ResourceView max_tres;
+  ResourceView max_tres_per_user;
+  ResourceView max_tres_per_account;
+  bool deny_on_limit;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -1185,6 +1191,7 @@ struct Qos {
       return "max_submit_jobs_per_user";
     case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
       return "max_submit_jobs_per_account";
+      // TODO:
     default:
       std::unreachable();
     }
@@ -1452,6 +1459,12 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
         "max_jobs_per_account",
         "max_submit_jobs_per_user",
         "max_submit_jobs_per_account"
+        "max_jobs",
+        "max_submit_jobs",
+        "max_wall",
+        "max_tres",
+        "max_tres_per_user",
+        "max_tres_per_account"
     };
 // clang-format on
 inline std::string_view CraneModifyFieldStr(

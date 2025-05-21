@@ -433,6 +433,8 @@ using DeviceMap =
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
 DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
@@ -532,6 +534,9 @@ class ResourceView {
 
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
+
+  // Account level resource operations
+  ResourceView& operator+=(const ResourceView& rhs);
 
   bool IsZero() const;
   void SetToZero();
