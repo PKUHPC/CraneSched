@@ -824,6 +824,8 @@ struct TaskInCtld {
   bool using_default_wckey{false};
   std::string wckey;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
