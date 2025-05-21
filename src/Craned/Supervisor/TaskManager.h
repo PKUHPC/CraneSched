@@ -24,7 +24,7 @@
 #include "crane/PasswordEntry.h"
 
 namespace Supervisor {
-struct Step {
+struct StepInstance {
   crane::grpc::TaskToD step_to_super;
   std::unique_ptr<CforedClient> cfored_client;
   inline bool IsBatch() const;
@@ -61,7 +61,8 @@ struct ProcSigchldInfo {
 
 class ExecutionInterface {
  public:
-  explicit ExecutionInterface(const Step* step_spec) : step(step_spec) {}
+  explicit ExecutionInterface(const StepInstance* step_spec)
+      : step(step_spec) {}
   virtual ~ExecutionInterface();
 
   void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
@@ -80,7 +81,7 @@ class ExecutionInterface {
   // TODO: SigChldHandler()
 
   // Set from TaskManager
-  const Step* step;
+  const StepInstance* step;
 
   PasswordEntry pwd;
   ProcSigchldInfo sigchld_info{};
@@ -136,7 +137,7 @@ class ExecutionInterface {
 
 class ContainerInstance : public ExecutionInterface {
  public:
-  explicit ContainerInstance(const Step* step_spec)
+  explicit ContainerInstance(const StepInstance* step_spec)
       : ExecutionInterface(step_spec) {}
   ~ContainerInstance() override = default;
 
@@ -156,7 +157,7 @@ class ContainerInstance : public ExecutionInterface {
 
 class ProcessInstance : public ExecutionInterface {
  public:
-  explicit ProcessInstance(const Step* step_spec)
+  explicit ProcessInstance(const StepInstance* step_spec)
       : ExecutionInterface(step_spec) {}
   ~ProcessInstance() override = default;
 
@@ -208,7 +209,7 @@ class TaskManager {
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
 
-  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const StepToSuper& step);
+  std::future<CraneExpected<pid_t>> ExecuteTaskAsync();
   void LaunchExecution_();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
@@ -276,9 +277,9 @@ class TaskManager {
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
-  Step m_step_spec_;
+  StepInstance m_step_;
   // TODO: Support multiple tasks
-  std::unique_ptr<ExecutionInterface> m_instance_;
+  std::unique_ptr<ExecutionInterface> m_task_;
 };
 
 }  // namespace Supervisor

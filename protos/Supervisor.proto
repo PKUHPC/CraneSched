@@ -65,7 +65,6 @@ message SupervisorReady {
 }
 
 message TaskExecutionRequest {
-  TaskToD task = 1;
 }
 
 message TaskExecutionReply {

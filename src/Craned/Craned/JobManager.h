@@ -52,22 +52,12 @@ struct JobInstance {
   explicit JobInstance(const JobToD& job) : job_id(job.job_id), job_to_d(job) {}
 
   JobInstance(const JobInstance& other) = delete;
-  JobInstance(JobInstance&& other) noexcept
-      : job_id(other.job_id),
-        job_to_d(std::move(other.job_to_d)),
-        cgroup(std::move(other.cgroup)) {};
+  JobInstance(JobInstance&& other) = default;
 
   ~JobInstance() = default;
 
   JobInstance& operator=(const JobInstance& other) = delete;
-  JobInstance& operator=(JobInstance&& other) noexcept {
-    if (this != &other) {
-      job_id = other.job_id;
-      job_to_d = std::move(other.job_to_d);
-      cgroup = std::move(other.cgroup);
-    }
-    return *this;
-  }
+  JobInstance& operator=(JobInstance&& other) noexcept = default;
 
   task_id_t job_id;
   JobToD job_to_d;

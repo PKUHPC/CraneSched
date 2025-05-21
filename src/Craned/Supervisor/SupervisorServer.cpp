@@ -24,8 +24,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
-  std::future<CraneExpected<pid_t>> pid_future =
-      g_task_mgr->ExecuteTaskAsync(request->task());
+  std::future<CraneExpected<pid_t>> pid_future = g_task_mgr->ExecuteTaskAsync();
   pid_future.wait();
 
   auto pid = pid_future.get();
