@@ -269,6 +269,8 @@ uint16_t ExecutionInterface::SetupCrunMsgFwd_(
 }
 
 void ExecutionInterface::SetChildProcessSignalHandler_() {
+  // Recover SIGPIPE default handler in from child processes.
+  signal(SIGPIPE, SIG_DFL);
   // Disable SIGABRT backtrace from child processes.
   signal(SIGABRT, SIG_DFL);
   // Reset the following signal handlers to default.

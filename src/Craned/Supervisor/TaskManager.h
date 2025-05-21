@@ -170,6 +170,10 @@ class ProcessInstance : public ExecutionInterface {
 class TaskManager {
  public:
   explicit TaskManager();
+  TaskManager(const TaskManager&) = delete;
+  TaskManager(TaskManager&&) = delete;
+  TaskManager& operator=(const TaskManager&) = delete;
+  TaskManager& operator=(TaskManager&&) = delete;
   ~TaskManager();
   void Wait();
 
