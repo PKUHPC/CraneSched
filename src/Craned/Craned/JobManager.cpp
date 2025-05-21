@@ -347,6 +347,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
   }
 
   if (pipe(craned_supervisor_pipe.data()) == -1) {
+    close(supervisor_craned_pipe[0]);
+    close(supervisor_craned_pipe[1]);
     CRANE_ERROR("Pipe creation failed!");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -363,6 +365,11 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}", step->step_to_d.task_id(),
                 strerror(errno));
+
+    close(craned_supervisor_pipe[0]);
+    close(craned_supervisor_pipe[1]);
+    close(supervisor_craned_pipe[0]);
+    close(supervisor_craned_pipe[1]);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -401,7 +408,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
         KillPid_(child_pid, SIGKILL);
       }
-
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_CGROUP;
     }
 
@@ -422,6 +430,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
+
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
 
@@ -437,6 +448,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
+
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
 
@@ -484,6 +498,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
+
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
 
@@ -502,6 +519,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
       job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
+
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_PROTOBUF;
     }
 
@@ -517,6 +537,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
                   step->step_to_d.task_id());
       job->err_before_exec = CraneErrCode::ERR_SUPERVISOR;
       KillPid_(child_pid, SIGKILL);
+      close(craned_supervisor_fd);
+      close(supervisor_craned_fd);
       return CraneErrCode::ERR_SUPERVISOR;
     }
 
@@ -894,7 +916,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
   }
 }
 
-void JobManager::TerminateTaskAsync(uint32_t task_id) {
+void JobManager::TerminateTaskAsync(task_id_t task_id) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
   m_task_terminate_queue_.enqueue(std::move(elem));
@@ -921,7 +943,7 @@ bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
 }
 
 void JobManager::TaskStopAndDoStatusChangeAsync(
-    uint32_t job_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    task_id_t job_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   if (!m_job_map_.Contains(job_id)) {
