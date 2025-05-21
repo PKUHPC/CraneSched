@@ -227,6 +227,8 @@ class MongodbClient {
 
   DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
 
+  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view, const std::string& field, ResourceView* resource);
+
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
   const std::string m_account_collection_name_{"acct_table"};
@@ -254,6 +256,16 @@ template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceView>(
+  document& doc, const std::string& key,
+  const ResourceView& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
+  sub_document& doc, const std::string& key,
+  const DeviceMap& value);
 
 }  // namespace Ctld
 

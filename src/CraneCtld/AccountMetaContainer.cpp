@@ -70,7 +70,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   result = CheckQosSubmitResourceForAccount_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+  ResourceView resource_use{task.requested_node_res_view * task.node_num};
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
@@ -79,15 +79,16 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{resource_view, 0, 1});
+                                      QosResource{resource_use, 0, 1});
           return;
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
+        if (qos->deny_on_limit)
+          val.resource += resource_use;
         val.submit_jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+      QosToResourceMap{{task.qos, QosResource{resource_use, 0, 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -97,14 +98,16 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{resource_view, 0, 1});
+                                        QosResource{resource_use, 0, 1});
             return;
           }
 
           auto& val = iter->second;
+          if (qos->deny_on_limit)
+            val.resource += resource_use;
           val.submit_jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+        QosToResourceMap{{task.qos, QosResource{resource_use, 0, 1}}});
   }
 
   return result;
@@ -357,8 +360,6 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -367,12 +368,14 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (iter == qos_to_resource_map.end()) return;
 
         auto& val = iter->second;
-        if (val.resource.CpuCount() + resource_view.CpuCount() >
-            qos.max_cpus_per_user) {
-          result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
-          return;
+        if (qos.deny_on_limit) {
+          ResourceView resource_use{task.requested_node_res_view * task.node_num};
+          resource_use += val.resource;
+          if (!(resource_use <= qos.max_tres_per_user)) {
+            result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+            return;
+          }
         }
-
         if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user)
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
       });
@@ -393,6 +396,14 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (iter == qos_to_resource_map.end()) return;
 
           auto& val = iter->second;
+          if (qos.deny_on_limit) {
+            ResourceView resource_use{task.requested_node_res_view * task.node_num};
+            resource_use += val.resource;
+            if (!(resource_use <= qos.max_tres_per_account)) {
+              result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+              return;
+            }
+          }
           if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
         });
