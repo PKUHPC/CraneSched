@@ -64,8 +64,7 @@ message SupervisorReady {
   bool ok = 1;
 }
 
-message TaskExecutionRequest {
-}
+message TaskExecutionRequest {}
 
 message TaskExecutionReply {
   bool ok = 1;
