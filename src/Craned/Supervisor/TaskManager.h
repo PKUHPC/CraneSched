@@ -25,6 +25,7 @@
 
 namespace Supervisor {
 struct StepInstance {
+
   crane::grpc::TaskToD step_to_super;
   std::unique_ptr<CforedClient> cfored_client;
   inline bool IsBatch() const;
@@ -63,6 +64,10 @@ class ExecutionInterface {
  public:
   explicit ExecutionInterface(const StepInstance* step_spec)
       : step(step_spec) {}
+  ExecutionInterface(const ExecutionInterface&) = delete;
+  ExecutionInterface(ExecutionInterface&&) = delete;
+  ExecutionInterface& operator=(ExecutionInterface&&) = delete;
+  ExecutionInterface& operator=(const ExecutionInterface&) = delete;
   virtual ~ExecutionInterface();
 
   void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
