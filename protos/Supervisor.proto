@@ -19,7 +19,7 @@
 syntax = "proto3";
 
 package crane.grpc.supervisor;
-option go_package = "/protos/subprocess";
+option go_package = "CraneFrontEnd/generated/protos/supervisor";
 
 import "PublicDefs.proto";
 
