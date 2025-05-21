@@ -64,6 +64,13 @@ JobManager::JobManager() {
     CRANE_ERROR("Failed to start the SIGINT handle: {}", uv_err_name(rc));
   }
 
+  m_sigterm_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
+  m_sigterm_handle_->on<uvw::signal_event>(
+      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
+  if (int rc = m_sigterm_handle_->start(SIGTERM); rc != 0) {
+    CRANE_ERROR("Failed to start the SIGTERM handle: {}", uv_err_name(rc));
+  }
+
   m_check_supervisor_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_check_supervisor_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& handle) {
@@ -230,27 +237,29 @@ bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
-  absl::MutexLock lk(&m_release_cg_mtx_);
-  std::error_code ec;
   std::vector<task_id_t> job_ids;
-  for (task_id_t job_id : m_release_job_req_set_) {
-    // TODO: replace following with step_id
-    auto exists = std::filesystem::exists(
-        fmt::format("/proc/{}", m_job_map_.GetValueExclusivePtr(job_id)
-                                    .get()
-                                    ->step_map[0]
-                                    ->supervisor_pid),
-        ec);
-    if (ec) {
-      CRANE_WARN("Failed to check supervisor for Job #{} is running.", job_id);
-      continue;
+  {
+    std::error_code ec;
+    absl::MutexLock lk(&m_release_cg_mtx_);
+    for (task_id_t job_id : m_release_job_req_set_) {
+      // TODO: replace following with step_id
+      auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+      for (const auto& step : job_ptr->step_map | std::views::values) {
+        auto exists = std::filesystem::exists(
+            fmt::format("/proc/{}", step->supervisor_pid), ec);
+        if (ec) {
+          CRANE_WARN("Failed to check supervisor for Job #{} is running.",
+                     job_id);
+          continue;
+        }
+        if (!exists) {
+          job_ids.emplace_back(job_id);
+        }
+      }
     }
-    if (!exists) {
-      job_ids.emplace_back(job_id);
+    for (task_id_t job_id : job_ids) {
+      m_release_job_req_set_.erase(job_id);
     }
-  }
-  for (task_id_t job_id : job_ids) {
-    m_release_job_req_set_.erase(job_id);
   }
 
   if (!job_ids.empty()) {
@@ -329,15 +338,15 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
-  int supervisor_craned_pipe[2];
-  int craned_supervisor_pipe[2];
+  std::array<int, 2> supervisor_craned_pipe;
+  std::array<int, 2> craned_supervisor_pipe;
 
-  if (pipe(supervisor_craned_pipe) == -1) {
+  if (pipe(supervisor_craned_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (pipe(craned_supervisor_pipe) == -1) {
+  if (pipe(craned_supervisor_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -537,13 +546,14 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
     ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!ok || !msg.ok()) {
-      // if (!ok) {
-      // int err = istream.GetErrno();
-      // CRANE_ERROR("Failed to read socket from parent: {}", strerror(err));
-      // }
+      if (!ok) {
+        int err = istream.GetErrno();
+        fmt::print(stderr, "Failed to read socket from parent: {}",
+                   strerror(err));
+      }
 
-      // if (!msg.ok())
-      // CRANE_ERROR("Parent process ask not to start the subprocess.");
+      if (!msg.ok())
+        fmt::print(stderr, "Parent process ask not to start the subprocess.");
 
       std::abort();
     }
@@ -552,7 +562,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      // CRANE_ERROR("[Child Process] Error: Failed to flush.");
+      fmt::print(stderr, "[Child Process] Error: Failed to flush.");
       std::abort();
     }
 

@@ -718,13 +718,14 @@ void StartServer() {
   g_ctld_client->StartGrpcCtldConnection();
 
   std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
+  std::promise<void> conf_done;
   auto config_future = conf_promise.get_future();
   g_ctld_client_sm->SubscribeConfigure(
-      std::move([&conf_promise](
-                    const crane::grpc::ConfigureCranedRequest& req) mutable {
-        conf_promise.set_value(req);
-      }),
-      true);
+      std::move(
+          [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
+            conf_promise.set_value(req);
+          }),
+      std::move(conf_done.get_future()), true);
 
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
       g_supervisor_keeper->Init();
@@ -782,6 +783,7 @@ void StartServer() {
                 absl::StrJoin(task_ids_supervisor, ","));
   }
   g_server->FinishSupervisorRecovery();
+  conf_done.set_value();
   g_server->Wait();
   g_craned_for_pam_server->Wait();
   // CltdClient will call g_server->SetReady() in cb,set it to empty

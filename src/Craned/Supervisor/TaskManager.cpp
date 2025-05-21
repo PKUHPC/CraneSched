@@ -972,7 +972,11 @@ CraneErrCode ProcessInstance::Prepare() {
 
   fclose(fptr);
 
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+  if (chown(sh_path.c_str(), step->step_to_super.uid(),
+            step->step_to_super.gid()) != 0) {
+    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
+                step->step_to_super.task_id(), strerror(errno));
+  }
 
   // Write m_meta_
   if (step->IsBatch()) {
@@ -1010,6 +1014,8 @@ CraneErrCode ProcessInstance::Prepare() {
         fmt::format("{} {}", step->step_to_super.batch_meta().interpreter(),
                     sh_path.string());
   }
+  CRANE_TRACE("Job script wrote with uid {} gid {}", step->step_to_super.uid(),
+              step->step_to_super.gid());
 
   m_env_ = GetChildProcessEnv_();
   // TODO: Currently we don't support arguments in batch scripts.
@@ -1287,9 +1293,9 @@ TaskManager::TaskManager()
         EvGrpcExecuteTaskCb_();
       });
 
-  m_grpc_execute_task_async_handle_ =
+  m_grpc_query_step_env_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_grpc_execute_task_async_handle_->on<uvw::async_event>(
+  m_grpc_query_step_env_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvGrpcQueryStepEnvCb_();
       });
@@ -1390,18 +1396,21 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
 }
 
 std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
-    const StepToSuper& spec) {
+    const StepToSuper& step) {
   std::promise<CraneExpected<pid_t>> pid_promise;
   auto pid_future = pid_promise.get_future();
   auto elem = ExecuteTaskElem{.pid_prom = std::move(pid_promise)};
 
-  if (spec.container().length() != 0) {
+  if (step.container().length() != 0) {
     // Container
     elem.instance = std::make_unique<ContainerInstance>(&m_step_spec_);
   } else {
     // Process
-    elem.instance = std::make_unique<ProcessInstance>(&m_step_spec_);
+    elem.instance = std::make_unique<ProcessInstance>(step);
   }
+  std::string step_type =
+      step.container().length() != 0 ? "Container" : "Process";
+  CRANE_INFO("Spawning {} step #{}.", step_type, step.task_id());
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();

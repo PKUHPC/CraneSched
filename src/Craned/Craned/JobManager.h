@@ -232,6 +232,7 @@ class JobManager {
   // When this event is triggered, the JobManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
+  std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_release_cg_mtx_;
   std::unordered_set<task_id_t> m_release_job_req_set_

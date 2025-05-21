@@ -65,7 +65,7 @@ class CtldClientStateMachine {
 
   void SubscribeConfigure(
       std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
-      bool consume);
+      std::future<void>&& conf_future, bool consume);
 
   bool IsReadyNow();
 
@@ -96,6 +96,8 @@ class CtldClientStateMachine {
 
   // State Actions:
   void ActionRequestConfig_();
+  void NotifyConfigureSubscribe_(
+      const crane::grpc::ConfigureCranedRequest& configure_req);
   void ActionConfigure_(
       const crane::grpc::ConfigureCranedRequest& configure_req);
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
@@ -117,6 +119,7 @@ class CtldClientStateMachine {
 
   struct SubscribeConfigureArg {
     std::function<void(const crane::grpc::ConfigureCranedRequest&)> cb;
+    std::future<void> conf_future;
     bool consume;
   };
   std::list<SubscribeConfigureArg> m_configure_subscribe_cb_list_

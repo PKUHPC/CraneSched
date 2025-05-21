@@ -64,19 +64,6 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
       request.token() == m_reg_token_.value()) {
     m_state_ = State::CONFIGURING;
     ActionConfigure_(request);
-    std::latch latch(m_configure_subscribe_cb_list_.size());
-    for (auto it = m_configure_subscribe_cb_list_.begin();
-         it != m_configure_subscribe_cb_list_.end(); ++it) {
-      g_thread_pool->detach_task([it, request, &latch, this] {
-        absl::MutexLock lk(&m_mtx_);
-        it->cb(request);
-        if (it->consume) {
-          m_configure_subscribe_cb_list_.erase(it);
-        }
-        latch.count_down();
-      });
-    }
-    latch.wait();
     return true;
   } else {
     if (!request.ok())
@@ -175,11 +162,12 @@ void CtldClientStateMachine::EvGrpcTimeout() {
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
 }
+
 void CtldClientStateMachine::SubscribeConfigure(
     std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
-    bool consume) {
+    std::future<void>&& conf_future, bool consume) {
   m_configure_subscribe_cb_list_.emplace_back(
-      SubscribeConfigureArg{arg, consume});
+      SubscribeConfigureArg{arg, std::move(conf_future), consume});
 }
 
 bool CtldClientStateMachine::IsReadyNow() {
@@ -198,6 +186,23 @@ void CtldClientStateMachine::ActionRequestConfig_() {
       [tok = m_reg_token_.value(), this] { m_action_request_config_cb_(tok); });
 }
 
+void CtldClientStateMachine::NotifyConfigureSubscribe_(
+    const crane::grpc::ConfigureCranedRequest& configure_req) {
+  std::latch latch(m_configure_subscribe_cb_list_.size());
+  for (auto it = m_configure_subscribe_cb_list_.begin();
+       it != m_configure_subscribe_cb_list_.end(); ++it) {
+    g_thread_pool->detach_task([it, &configure_req, &latch, this] {
+      it->cb(configure_req);
+      it->conf_future.wait();
+      if (it->consume) {
+        m_configure_subscribe_cb_list_.erase(it);
+      }
+      latch.count_down();
+    });
+  }
+  latch.wait();
+}
+
 void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& configure_req) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
@@ -210,12 +215,13 @@ void CtldClientStateMachine::ActionConfigure_(
     CRANE_TRACE("Recv ctld job: [{}],task: [{}]", absl::StrJoin(job_ids, ","),
                 absl::StrJoin(task_ids, ","));
 
-  g_thread_pool->detach_task([tok = m_reg_token_.value(),
-                              job_ids = std::move(job_ids),
-                              task_ids = std::move(task_ids), this] mutable {
-    m_action_configure_cb_(
-        {.token = tok, .job_ids = job_ids, .task_ids = task_ids});
-  });
+  g_thread_pool->detach_task(
+      [tok = m_reg_token_.value(), job_ids = std::move(job_ids),
+       task_ids = std::move(task_ids), configure_req, this] {
+        this->NotifyConfigureSubscribe_(configure_req);
+        m_action_configure_cb_(
+            {.token = tok, .job_ids = job_ids, .task_ids = task_ids});
+      });
 }
 
 void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
