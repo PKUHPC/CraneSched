@@ -25,7 +25,6 @@
 
 namespace Supervisor {
 struct StepInstance {
-
   crane::grpc::TaskToD step_to_super;
   std::unique_ptr<CforedClient> cfored_client;
   inline bool IsBatch() const;
