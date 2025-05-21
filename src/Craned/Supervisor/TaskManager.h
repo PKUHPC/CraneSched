@@ -208,7 +208,7 @@ class TaskManager {
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
 
-  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const StepToSuper& spec);
+  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const StepToSuper& step);
   void LaunchExecution_();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
