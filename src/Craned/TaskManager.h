@@ -316,10 +316,12 @@ class TaskManager {
     auto signal_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     signal_handle->on<uvw::timer_event>(
         [this, instance](const uvw::timer_event&, uvw::timer_handle& h) {
-          for (const auto& [_, pr_instance] : instance->processes) {
-            KillProcessInstance_(
-                pr_instance.get(),
-                instance->task.batch_meta().signal_param().signal_number());
+          if (instance != nullptr) {
+            for (const auto& [_, pr_instance] : instance->processes) {
+              KillProcessInstance_(
+                  pr_instance.get(),
+                  instance->task.batch_meta().signal_param().signal_number());
+            }
           }
         });
     signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
