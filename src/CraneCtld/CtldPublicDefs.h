@@ -415,7 +415,7 @@ struct TaskInCtld {
   double cached_priority{0.0};
 
   // Might change at each scheduling cycle.
-  ResourceV2 resources;
+  ResourceV2 allocated_res;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
@@ -552,9 +552,9 @@ struct TaskInCtld {
   void SetAlloctatedRes(ResourceV2&& val) {
     *runtime_attr.mutable_allocated_res() =
         static_cast<crane::grpc::ResourceV2>(val);
-    resources = std::move(val);
+    allocated_res = std::move(val);
   }
-  ResourceV2 const& Resources() const { return resources; }
+  ResourceV2 const& AllocatedRes() const { return allocated_res; }
 
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
@@ -636,9 +636,9 @@ struct TaskInCtld {
             executing_craned_ids.emplace_back(craned_id);
       }
 
-      resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
+      allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
       allocated_res_view.SetToZero();
-      allocated_res_view += resources;
+      allocated_res_view += allocated_res;
     }
 
     nodes_alloc = craned_ids.size();
@@ -710,7 +710,7 @@ struct TaskInCtld {
     //  Set resources
     auto* mutable_res_in_node = task_to_d.mutable_resources();
     *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        this->Resources().at(craned_id));
+        this->AllocatedRes().at(craned_id));
 
     // Set type
     task_to_d.set_type(this->type);
@@ -762,7 +762,8 @@ struct TaskInCtld {
     crane::grpc::JobToD spec;
     spec.set_job_id(task_id);
     spec.set_uid(uid);
-    *spec.mutable_res() = crane::grpc::ResourceInNode(resources.at(craned_id));
+    *spec.mutable_res() =
+        crane::grpc::ResourceInNode(allocated_res.at(craned_id));
     spec.set_execution_node(executing_craned_ids.front());
     return spec;
   }

@@ -409,11 +409,11 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
           task->TaskId()));
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                             task->Resources());
+                                             task->AllocatedRes());
   if (!task->reservation.empty()) {
     g_meta_container->MallocResourceFromResv(
         task->reservation, task->TaskId(),
-        {task->EndTime(), task->Resources()});
+        {task->EndTime(), task->AllocatedRes()});
   }
 
   // The order of LockGuards matters.
@@ -662,7 +662,8 @@ void TaskScheduler::ScheduleThread_() {
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         for (CranedId const& craned_id : task->CranedIds()) {
-          JobToD job(task->TaskId(), task->uid, task->Resources().at(craned_id),
+          JobToD job(task->TaskId(), task->uid,
+                     task->AllocatedRes().at(craned_id),
                      task->executing_craned_ids.front());
           craned_cgroup_map[craned_id].emplace_back(std::move(job));
         }
@@ -2724,12 +2725,12 @@ void MinLoadFirst::NodeSelect(
         for (const auto& [partition_id, part_craned_ids] :
              involved_part_craned) {
           SubtractTaskResourceNodeSelectionInfo_(
-              expected_start_time, task->time_limit, task->Resources(),
+              expected_start_time, task->time_limit, task->AllocatedRes(),
               part_craned_ids, &part_id_node_info_map.at(partition_id));
         }
       } else {
         SubtractTaskResourceNodeSelectionInfo_(
-            expected_start_time, task->time_limit, task->Resources(),
+            expected_start_time, task->time_limit, task->AllocatedRes(),
             craned_ids, &node_info);
       }
     }
@@ -2746,11 +2747,11 @@ void MinLoadFirst::NodeSelect(
       // allocated.
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                 task->Resources());
+                                                 task->AllocatedRes());
       if (task->reservation != "") {
         g_meta_container->MallocResourceFromResv(
             task->reservation, task->TaskId(),
-            {task->EndTime(), task->Resources()});
+            {task->EndTime(), task->AllocatedRes()});
       }
       std::unique_ptr<TaskInCtld> moved_task;
 
@@ -2773,7 +2774,8 @@ void MinLoadFirst::NodeSelect(
           break;
         }
         auto& res_avail = node_info.GetTimeAvailResMap(craned_id).at(now);
-        if (!(task->Resources().EachNodeResMap().at(craned_id) <= res_avail)) {
+        if (!(task->AllocatedRes().EachNodeResMap().at(craned_id) <=
+              res_avail)) {
           task->pending_reason = "Resource";
           break;
         }
