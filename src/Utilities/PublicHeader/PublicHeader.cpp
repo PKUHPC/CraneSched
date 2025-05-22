@@ -360,11 +360,28 @@ DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map) {
 
 void operator+=(DeviceMap& lhs, const DeviceMap& rhs) {
   for (const auto& [dev_name, rhs_val] : rhs) {
-    auto& [rhs_untyped, rhs_types] = rhs_val;
+    const auto& [rhs_untyped, rhs_types] = rhs_val;
     auto& lhs_pair = lhs[dev_name];
     lhs_pair.first += rhs_untyped;
     for (const auto& [type_name, type_count] : rhs_types) {
       lhs_pair.second[type_name] += type_count;
+    }
+  }
+}
+
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs) {
+  for (const auto& [dev_name, rhs_val] : rhs) {
+    const auto& [rhs_untyped, rhs_types] = rhs_val;
+    auto lhs_it = lhs.find(dev_name);
+    ABSL_ASSERT(lhs_it != lhs.end());
+    auto& lhs_pair = lhs_it->second;
+    ABSL_ASSERT(lhs_pair.first >= rhs_untyped);
+    lhs_pair.first -= rhs_untyped;
+    for (const auto& [type_name, type_count] : rhs_types) {
+      auto type_it = lhs_pair.second.find(type_name);
+      ABSL_ASSERT(type_it != lhs_pair.second.end());
+      ABSL_ASSERT(type_it->second >= type_count);
+      type_it->second -= type_count;
     }
   }
 }
@@ -707,6 +724,12 @@ ResourceView& ResourceView::operator-=(const DedicatedResourceInNode& rhs) {
 ResourceView& ResourceView::operator+=(const ResourceView& rhs) {
   this->allocatable_res += rhs.allocatable_res;
   this->device_map += rhs.device_map;
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const ResourceView& rhs) {
+  this->allocatable_res -= rhs.allocatable_res;
+  this->device_map -= rhs.device_map;
   return *this;
 }
 

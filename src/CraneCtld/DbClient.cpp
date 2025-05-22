@@ -653,8 +653,9 @@ void MongodbClient::DocumentAppendItem_<ResourceView>(
   const ResourceView& value) {
   doc.append(kvp(key, [&](sub_document valueDocument) {
     valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
-        allocDoc.append(kvp("cpu_count", static_cast<int64_t>(value.CpuCount())));
+        allocDoc.append(kvp("cpu_count", value.CpuCount()));
         allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
+        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
     }));
     SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
   }));
@@ -1085,11 +1086,11 @@ void MongodbClient::QosResourceViewFromDb_(
     ResourceView* resource) {
   auto max_tres = qos_view[field].get_document().value;
   auto allocatable_res = max_tres["allocatable_res"].get_document().value;
-  resource->GetAllocatableRes().cpu_count =  cpu_t::from_raw_value(allocatable_res["cpu_count"].get_int64().value);
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(allocatable_res["cpu_count"].get_double().value);
   resource->GetAllocatableRes().memory_bytes = std::stoull(std::string(allocatable_res["mem"].get_string().value));
+  resource->GetAllocatableRes().memory_sw_bytes = std::stoull(std::string(allocatable_res["mem_sw"].get_string().value));
   for (auto &&device_item : max_tres["device_map"].get_document().value) {
     auto device_doc = device_item.get_document().value;
-
     uint64_t untyped_req_count = device_doc["untyped_req_count"].get_int64().value;
     std::unordered_map<std::string, uint64_t> type_total;
     auto type_total_ele = device_doc["type_total"];
