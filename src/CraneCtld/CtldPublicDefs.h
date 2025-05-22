@@ -549,7 +549,7 @@ struct TaskInCtld {
   }
   double CachedPriority() const { return cached_priority; }
 
-  void SetResources(ResourceV2&& val) {
+  void SetAlloctatedRes(ResourceV2&& val) {
     *runtime_attr.mutable_allocated_res() =
         static_cast<crane::grpc::ResourceV2>(val);
     resources = std::move(val);
