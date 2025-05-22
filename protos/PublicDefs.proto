@@ -173,7 +173,7 @@ message RuntimeAttrOfTask {
   google.protobuf.Timestamp end_time = 17;
 
   bool held = 18;
-  ResourceV2 resources = 19;
+  ResourceV2 allocated_res = 19;
   double cached_priority = 20;
 }
 

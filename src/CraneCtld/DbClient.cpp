@@ -904,7 +904,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   auto const& task_to_ctld = task.task_to_ctld();
   auto const& runtime_attr = task.runtime_attr();
 
-  auto resources = static_cast<ResourceV2>(runtime_attr.resources());
+  auto resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
   ResourceView allocated_res_view;
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
