@@ -39,6 +39,10 @@ TaskInstance::~TaskInstance() {
     termination_timer->close();
   }
 
+  if (signal_timer) {
+    signal_timer->close();
+  }
+
   if (this->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
