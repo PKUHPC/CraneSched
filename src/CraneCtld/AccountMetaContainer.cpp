@@ -248,8 +248,8 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
-            resource_use += val.resource;
-        if (!(resource_use <= qos->max_tres_per_user)) {
+        resource_use += val.resource;
+        if (!CheckTres(resource_use, qos->max_tres_per_user)) {
           result = false;
           return;
         }
@@ -266,7 +266,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
           auto& val = pair.second[task.qos];
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
             resource_use += val.resource;
-          if (!(resource_use <= qos->max_tres_per_account)) {
+          if (!CheckTres(resource_use, qos->max_tres_per_account)) {
             result = false;
             return;
           }
@@ -365,6 +365,35 @@ void AccountMetaContainer::DeleteAccountMeta(const std::string& account) {
   m_account_meta_map_.erase(account);
 }
 
+bool AccountMetaContainer::CheckTres(const ResourceView& resource_req,
+                                     const ResourceView& resource_total) {
+  if (!(resource_req.GetAllocatableRes() <= resource_total.GetAllocatableRes()))
+    return false;
+
+  const auto& device_req = resource_req.GetDeviceMap();
+  const auto& device_total = resource_total.GetDeviceMap();
+
+  for (const auto& [lhs_name, lhs_cnt] : device_req) {
+    auto rhs_it = device_total.find(lhs_name);
+    // Requests for unrecorded devices should not be restricted.
+    if (rhs_it == device_total.end()) continue;
+
+    const auto& [lhs_untyped_cnt, lhs_typed_cnt_map] = lhs_cnt;
+    const auto& [rhs_untyped_cnt, rhs_typed_cnt_map] = rhs_it->second;
+
+    if (lhs_untyped_cnt < rhs_untyped_cnt) return false;
+
+    for (const auto& [lhs_type, lhs_type_cnt] : lhs_typed_cnt_map) {
+      auto rhs_type_it = rhs_typed_cnt_map.find(lhs_type);
+      if (rhs_type_it == rhs_typed_cnt_map.end()) continue;
+
+      if (lhs_type_cnt > rhs_type_it->second) return false;
+    }
+  }
+
+  return true;
+}
+
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos) {
   auto result = CraneErrCode::SUCCESS;
@@ -380,7 +409,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (qos.deny_on_limit) {
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
-          if (!(resource_use <= qos.max_tres_per_user)) {
+          if (!CheckTres(resource_use, qos.max_tres_per_user)) {
             result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
             return;
           }
@@ -408,7 +437,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (qos.deny_on_limit) {
             ResourceView resource_use{task.requested_node_res_view * task.node_num};
             resource_use += val.resource;
-            if (!(resource_use <= qos.max_tres_per_account)) {
+            if (!CheckTres(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
               return;
             }

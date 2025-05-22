@@ -770,9 +770,19 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  CraneExpected<void> modify_res;
+  if (request->modify_field() == crane::grpc::ModifyField::MaxTres ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerUser ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerAccount) {
+    modify_res =
+          g_account_manager->ModifyQosTres(request->uid(), request->name(),
+                                       request->modify_field(), request->value());
+  } else {
+    modify_res =
+             g_account_manager->ModifyQos(request->uid(), request->name(),
+                                          request->modify_field(), request->value());
+  }
 
   if (modify_res) {
     response->set_ok(true);
