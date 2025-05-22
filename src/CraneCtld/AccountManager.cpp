@@ -1297,6 +1297,50 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
   return SetUserDefaultWckey_(name, user_name);
 }
 
+CraneExpected<void> AccountManager::ModifyQosTres(
+    uint32_t uid, const std::string& name,
+    crane::grpc::ModifyField modify_field, const std::string& value) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return std::unexpected(user_result.error());
+    const User* op_user = user_result.value();
+
+    auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+    if (!result) return result;
+  }
+
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
+  const Qos* p = GetExistedQosInfoNoLock_(name);
+  if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+
+  Qos res_qos = *p;
+  std::string item = std::string(CraneModifyFieldStr(modify_field));
+
+  if (item == Qos::FieldStringOfMaxTresPerUser()) {
+    if (!util::ConvertStringToResourceView(value, &res_qos.max_tres_per_user))
+      return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
+  } else if (item == Qos::FieldStringOfMaxTresPerAccount()) {
+      if (!util::ConvertStringToResourceView(value, &res_qos.max_tres_per_account))
+        return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
+  } else if (item == Qos::FieldStringOfMaxTres()) {
+    if (!util::ConvertStringToResourceView(value, &res_qos.max_tres))
+      return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
+  }
+
+  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
+    g_db_client->UpdateQos(res_qos);
+  };
+
+  if (!g_db_client->CommitTransaction(callback))
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+
+  *m_qos_map_[name] = std::move(res_qos);
+
+  return {};
+}
+
 CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
                                                  const std::string& name,
                                                  bool block) {

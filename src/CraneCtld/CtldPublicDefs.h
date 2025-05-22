@@ -1125,7 +1125,7 @@ struct Qos {
   ResourceView max_tres;
   ResourceView max_tres_per_user;
   ResourceView max_tres_per_account;
-  bool deny_on_limit;
+  bool deny_on_limit{false};
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -1458,7 +1458,7 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
         "max_time_limit_per_task",
         "max_jobs_per_account",
         "max_submit_jobs_per_user",
-        "max_submit_jobs_per_account"
+        "max_submit_jobs_per_account",
         "max_jobs",
         "max_submit_jobs",
         "max_wall",

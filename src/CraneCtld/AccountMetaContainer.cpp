@@ -378,7 +378,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (qos.deny_on_limit) {
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
-          if (!(resource_use <= qos.max_tres_per_user)) {
+          if (!CheckTres(resource_use, qos.max_tres_per_user)) {
             result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
             return;
           }
@@ -406,7 +406,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (qos.deny_on_limit) {
             ResourceView resource_use{task.requested_node_res_view * task.node_num};
             resource_use += val.resource;
-            if (!(resource_use <= qos.max_tres_per_account)) {
+            if (!CheckTres(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
               return;
             }

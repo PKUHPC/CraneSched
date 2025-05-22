@@ -127,6 +127,8 @@ class AccountManager {
       uint32_t uid, const std::string& name,
       const std::vector<crane::grpc::ModifyFieldOperation>& operation);
 
+  CraneExpected<void> ModifyQosTres(uint32_t uid, const std::string& name, crane::grpc::ModifyField modify_field, const std::string& value);
+
   CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
                                    bool block);
 
