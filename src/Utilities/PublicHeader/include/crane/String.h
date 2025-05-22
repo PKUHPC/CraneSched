@@ -90,4 +90,8 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
+bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map);
+
+bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
+
 }  // namespace util
