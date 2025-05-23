@@ -107,7 +107,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
 
 grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext *context,
-    const crane::grpc::CranedTriggerReserveConnRequest *request,
+    const crane::grpc::CranedTriggerReverseConnRequest *request,
     google::protobuf::Empty *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);

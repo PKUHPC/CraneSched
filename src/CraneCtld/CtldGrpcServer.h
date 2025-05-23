@@ -196,7 +196,7 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
 
   grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext *context,
-      const crane::grpc::CranedTriggerReserveConnRequest *request,
+      const crane::grpc::CranedTriggerReverseConnRequest *request,
       google::protobuf::Empty *response) override;
 
   grpc::Status CranedRegister(

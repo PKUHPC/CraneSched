@@ -37,7 +37,7 @@ message TaskStatusChangeReply {
   bool ok = 1;
 }
 
-message CranedTriggerReserveConnRequest {
+message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
 }
@@ -831,7 +831,7 @@ message StreamTaskIOReply {
 service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReserveConnRequest) returns (google.protobuf.Empty);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
