@@ -74,14 +74,6 @@ CrunMetaInTaskInstance* TaskInstance::GetCrunMeta() const {
 }
 
 EnvMap TaskInstance::GetTaskEnvMap() const {
-  auto node_id_to_str = [this]() -> std::string {
-    const auto& nodelist = this->task.allocated_nodes();
-    auto it = std::ranges::find(nodelist, g_config.Hostname);
-    if (it == nodelist.end()) return std::to_string(-1);
-    return std::to_string(
-        static_cast<uint32_t>(std::distance(nodelist.begin(), it)));
-  };
-
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
   for (const auto& [name, value] : this->task.env()) {
@@ -115,17 +107,23 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   if (alloc_node_num != 0) {
     gpus_per_node = this->task.total_gpus() / alloc_node_num;
   }
-  uint64_t mem_per_node =
-      this->task.resources().allocatable_res_in_node().memory_limit_bytes() /
-      (1024ULL * 1024ULL);
 
   double cpus_on_node =
       this->task.resources().allocatable_res_in_node().cpu_core_limit();
   uint64_t mem_per_cpu = 0;
   if (cpus_on_node > 1E-6) {
-    mem_per_cpu = static_cast<uint64_t>(static_cast<double>(mem_per_node) /
-                                        (cpus_on_node));
+    mem_per_cpu =
+        static_cast<uint64_t>(static_cast<double>(this->task.resources()
+                                                      .allocatable_res_in_node()
+                                                      .memory_limit_bytes()) /
+                              (1024ULL * 1024ULL) / (cpus_on_node));
   }
+
+  std::string node_id_str;
+  const auto& nodelist = this->task.allocated_nodes();
+  auto it = std::ranges::find(nodelist, g_config.Hostname);
+  node_id_str = std::to_string(
+      static_cast<uint32_t>(std::distance(nodelist.begin(), it)));
 
   env_map.insert(
       {{"CRANE_JOB_NODELIST", absl::StrJoin(this->task.allocated_nodes(), ";")},
@@ -138,7 +136,11 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
        {"CRANE_SUBMIT_DIR", this->task.cwd()},
        {"CRANE_CPUS_PER_TASK",
         std::format("{:.2f}", this->task.cpus_per_task())},
-       {"CRANE_MEM_PER_NODE", std::format("{}M", mem_per_node)},
+       {"CRANE_MEM_PER_NODE",
+        std::format("{}M", this->task.resources()
+                                   .allocatable_res_in_node()
+                                   .memory_limit_bytes() /
+                               (1024ULL * 1024ULL))},
        {"CRANE_JOB_NUM_NODES", std::to_string(alloc_node_num)},
        {"CRANE_NTASKS_PER_NODE", std::to_string(this->task.ntasks_per_node())},
        {"CRANE_GPUS", std::to_string(this->task.total_gpus())},
@@ -148,8 +150,8 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
         std::to_string(alloc_node_num * this->task.ntasks_per_node())},
        {"CRANE_CLUSTER_NAME", g_config.CraneClusterName},
        {"CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node)},
-       {"CRANE_NODEID", node_id_to_str()},
-       {"CRANE_SUBMIT_HOST", this->task.submit_hostname()}});
+       {"CRANE_NODEID", node_id_str},
+       {"CRANE_SUBMIT_HOST", this->task.submit_host()}});
 
   if (this->IsCrun()) {
     auto const& ia_meta = this->task.interactive_meta();

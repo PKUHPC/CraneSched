@@ -476,7 +476,7 @@ class ResourceView {
 
   double CpuCount() const;
   uint64_t MemoryBytes() const;
-  uint64_t GetGpuCount() const;
+  uint64_t GpuCount() const;
 
   AllocatableResource& GetAllocatableRes() { return allocatable_res; }
   const AllocatableResource& GetAllocatableRes() const {
