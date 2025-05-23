@@ -3851,17 +3851,17 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
-bool TaskScheduler::CheckUserHasTasks(const std::string& username) {
+bool TaskScheduler::UserHasTasks(const std::string& username) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   for (const auto& task : m_pending_task_map_ | ranges::views::values) {
-    if (task->Username() == username) return false;
+    if (task->Username() == username) return true;
   }
   LockGuard running_guard(&m_running_task_map_mtx_);
   for (const auto& task : m_running_task_map_ | ranges::views::values) {
-    if (task->Username() == username) return false;
+    if (task->Username() == username) return true;
   }
 
-  return true;
+  return false;
 }
 
 void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
