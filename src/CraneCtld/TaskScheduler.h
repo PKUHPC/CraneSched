@@ -508,7 +508,7 @@ class TaskScheduler {
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
-  bool CheckUserHasTasks(const std::string& username);
+  bool UserHasTasks(const std::string& username);
 
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
