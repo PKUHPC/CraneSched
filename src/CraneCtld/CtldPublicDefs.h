@@ -780,6 +780,11 @@ struct TaskInCtld {
   }
 };
 
+
+struct QosFlags {
+  static constexpr uint32_t DenyOnLimit = 1 << 0;
+};
+
 struct Qos {
   bool deleted = false;
   std::string name;
@@ -799,7 +804,7 @@ struct Qos {
   ResourceView max_tres;
   ResourceView max_tres_per_user;
   ResourceView max_tres_per_account;
-  bool deny_on_limit{false};
+  uint32_t flags;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -849,8 +854,8 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxTresPerAccount() {
     return "max_tres_per_account";
   }
-  static constexpr const char* FieldStringOfDenyOnLimit() {
-    return "deny_on_limit";
+  static constexpr const char* FieldStringOfFlags() {
+    return "flags";
   }
 };
 
@@ -942,7 +947,8 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
         "max_wall",
         "max_tres",
         "max_tres_per_user",
-        "max_tres_per_account"
+        "max_tres_per_account",
+        "flags"
     };
 // clang-format on
 inline std::string_view CraneModifyFieldStr(

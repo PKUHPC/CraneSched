@@ -863,7 +863,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_submit_jobs = qos_view[Qos::FieldStringOfMaxSubmitJobs()].get_int64().value;
     qos->max_wall = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxWall()].get_int64().value);
-
+    qos->flags = qos_view[Qos::FieldStringOfFlags()].get_int64().value;
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(), &qos->max_tres);
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(), &qos->max_tres_per_user);
     QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(), &qos->max_tres_per_account);
@@ -875,7 +875,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 17> fields{
+  std::array<std::string, 18> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -892,9 +892,10 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxWall(),
       Qos::FieldStringOfMaxTres(),
       Qos::FieldStringOfMaxTresPerUser(),
-      Qos::FieldStringOfMaxTresPerAccount()};
+      Qos::FieldStringOfMaxTresPerAccount(),
+      Qos::FieldStringOfFlags()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, ResourceView, ResourceView, ResourceView>
+             int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, ResourceView, ResourceView, ResourceView, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -911,7 +912,8 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              absl::ToInt64Seconds(qos.max_wall),
              qos.max_tres,
              qos.max_tres_per_user,
-             qos.max_tres_per_account};
+             qos.max_tres_per_account,
+             qos.flags};
 
   return DocumentConstructor_(fields, values);
 }
