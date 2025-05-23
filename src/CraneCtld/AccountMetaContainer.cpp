@@ -142,8 +142,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
-        if (val.jobs_count + 1 > qos->max_jobs_per_user)
-          result = false;
+        if (val.jobs_count + 1 > qos->max_jobs_per_user) result = false;
       });
 
   if (!result) return "QOSResourceLimit";

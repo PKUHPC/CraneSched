@@ -70,8 +70,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_submit_jobs_per_user =
         std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
     qos.max_submit_jobs_per_account =
-      std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
-    qos.max_jobs_per_account  =
+        std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
+    qos.max_jobs_per_account =
         std::numeric_limits<decltype(qos.max_jobs_per_account)>::max();
 
     if (!InsertQos(qos)) {
