@@ -409,11 +409,11 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
           task->TaskId()));
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                             task->Resources());
+                                             task->AllocatedRes());
   if (!task->reservation.empty()) {
     g_meta_container->MallocResourceFromResv(
         task->reservation, task->TaskId(),
-        {task->EndTime(), task->Resources()});
+        {task->EndTime(), task->AllocatedRes()});
   }
 
   // The order of LockGuards matters.
@@ -662,7 +662,8 @@ void TaskScheduler::ScheduleThread_() {
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         for (CranedId const& craned_id : task->CranedIds()) {
-          JobToD job(task->TaskId(), task->uid, task->Resources().at(craned_id),
+          JobToD job(task->TaskId(), task->uid,
+                     task->AllocatedRes().at(craned_id),
                      task->executing_craned_ids.front());
           craned_cgroup_map[craned_id].emplace_back(std::move(job));
         }
@@ -2446,6 +2447,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   task->allocated_res_view.SetToZero();
 
   absl::Time earliest_end_time = now + task->time_limit;
+  ResourceView requested_node_res_view;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
@@ -2492,6 +2494,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
           !(task->requested_node_res_view <= iter->second.res_total) ||
+          (task->TaskToCtld().exclusive() &&
+           !(craned_meta->res_total <= iter->second.res_total)) ||
           now + task->time_limit > iter->second.end_time) {
         continue;
       }
@@ -2507,6 +2511,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
     }
 
+    if (task->TaskToCtld().exclusive()) {
+      requested_node_res_view.SetToZero();
+      requested_node_res_view += craned_meta->res_total;
+    } else {
+      requested_node_res_view = task->requested_node_res_view;
+    }
+
     if constexpr (kAlgoRedundantNode) {
       craned_indexes_.emplace_back(craned_index);
       if (craned_indexes_.size() >= node_num_limit) break;
@@ -2520,7 +2531,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // Find all possible nodes that can run the task now.
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
-      bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+      bool ok = requested_node_res_view.GetFeasibleResourceInNode(
           craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
@@ -2534,7 +2545,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           allocated_res.AddResourceInNode(craned_index, feasible_res);
           task->allocated_res_view += feasible_res;
           if (ready_craned_indexes_.size() >= task->node_num) {
-            task->SetResources(std::move(allocated_res));
+            task->SetAllocatedRes(std::move(allocated_res));
             *start_time = now;
             for (const CranedId& ready_craned_index : ready_craned_indexes_) {
               craned_ids->emplace_back(ready_craned_index);
@@ -2557,10 +2568,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+    bool ok = requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+      ok = requested_node_res_view.GetFeasibleResourceInNode(
           craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
@@ -2575,7 +2586,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     task->allocated_res_view += feasible_res;
   }
 
-  task->SetResources(std::move(allocated_res));
+  task->SetAllocatedRes(std::move(allocated_res));
 
   EarliestStartSubsetSelector scheduler(task, node_selection_info,
                                         craned_indexes_);
@@ -2714,12 +2725,12 @@ void MinLoadFirst::NodeSelect(
         for (const auto& [partition_id, part_craned_ids] :
              involved_part_craned) {
           SubtractTaskResourceNodeSelectionInfo_(
-              expected_start_time, task->time_limit, task->Resources(),
+              expected_start_time, task->time_limit, task->AllocatedRes(),
               part_craned_ids, &part_id_node_info_map.at(partition_id));
         }
       } else {
         SubtractTaskResourceNodeSelectionInfo_(
-            expected_start_time, task->time_limit, task->Resources(),
+            expected_start_time, task->time_limit, task->AllocatedRes(),
             craned_ids, &node_info);
       }
     }
@@ -2736,11 +2747,11 @@ void MinLoadFirst::NodeSelect(
       // allocated.
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                 task->Resources());
+                                                 task->AllocatedRes());
       if (task->reservation != "") {
         g_meta_container->MallocResourceFromResv(
             task->reservation, task->TaskId(),
-            {task->EndTime(), task->Resources()});
+            {task->EndTime(), task->AllocatedRes()});
       }
       std::unique_ptr<TaskInCtld> moved_task;
 
@@ -2763,7 +2774,8 @@ void MinLoadFirst::NodeSelect(
           break;
         }
         auto& res_avail = node_info.GetTimeAvailResMap(craned_id).at(now);
-        if (!(task->Resources().EachNodeResMap().at(craned_id) <= res_avail)) {
+        if (!(task->AllocatedRes().EachNodeResMap().at(craned_id) <=
+              res_avail)) {
           task->pending_reason = "Resource";
           break;
         }

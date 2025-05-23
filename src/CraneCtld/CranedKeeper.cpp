@@ -253,7 +253,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     // Set resources
     auto *mutable_res_in_node = mutable_task->mutable_resources();
     *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        task->Resources().at(craned_id));
+        task->AllocatedRes().at(craned_id));
 
     // Set type
     mutable_task->set_type(task->type);

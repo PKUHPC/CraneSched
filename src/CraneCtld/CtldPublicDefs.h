@@ -415,7 +415,7 @@ struct TaskInCtld {
   double cached_priority{0.0};
 
   // Might change at each scheduling cycle.
-  ResourceV2 resources;
+  ResourceV2 allocated_res;
 
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
@@ -549,19 +549,19 @@ struct TaskInCtld {
   }
   double CachedPriority() const { return cached_priority; }
 
-  void SetResources(ResourceV2&& val) {
-    *runtime_attr.mutable_resources() =
+  void SetAllocatedRes(ResourceV2&& val) {
+    *runtime_attr.mutable_allocated_res() =
         static_cast<crane::grpc::ResourceV2>(val);
-    resources = std::move(val);
+    allocated_res = std::move(val);
   }
-  ResourceV2 const& Resources() const { return resources; }
+  ResourceV2 const& AllocatedRes() const { return allocated_res; }
 
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
-    requested_node_res_view = static_cast<ResourceView>(val.resources());
+    requested_node_res_view = static_cast<ResourceView>(val.req_resources());
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -636,7 +636,9 @@ struct TaskInCtld {
             executing_craned_ids.emplace_back(craned_id);
       }
 
-      resources = static_cast<ResourceV2>(runtime_attr.resources());
+      allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
+      allocated_res_view.SetToZero();
+      allocated_res_view += allocated_res;
     }
 
     nodes_alloc = craned_ids.size();
@@ -679,7 +681,7 @@ struct TaskInCtld {
     task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                                 executing_craned_ids.end());
 
-    *task_info->mutable_res_view() =
+    *task_info->mutable_req_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
 
     task_info->set_exit_code(runtime_attr.exit_code());
@@ -691,6 +693,10 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
+    task_info->set_exclusive(task_to_ctld.exclusive());
+
+    *task_info->mutable_allocated_res_view() =
+        static_cast<crane::grpc::ResourceView>(allocated_res_view);
   }
 
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
@@ -704,7 +710,7 @@ struct TaskInCtld {
     //  Set resources
     auto* mutable_res_in_node = task_to_d.mutable_resources();
     *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        this->Resources().at(craned_id));
+        this->AllocatedRes().at(craned_id));
 
     // Set type
     task_to_d.set_type(this->type);
@@ -756,7 +762,8 @@ struct TaskInCtld {
     crane::grpc::JobToD spec;
     spec.set_job_id(task_id);
     spec.set_uid(uid);
-    *spec.mutable_res() = crane::grpc::ResourceInNode(resources.at(craned_id));
+    *spec.mutable_res() =
+        crane::grpc::ResourceInNode(allocated_res.at(craned_id));
     spec.set_execution_node(executing_craned_ids.front());
     return spec;
   }

@@ -356,7 +356,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
             node_selection_info.GetTimeAvailResMap(craned_id);
         m_res_map_iters_.emplace_back(
             craned_id, time_avail_res_map.begin(), time_avail_res_map.end(),
-            &m_satisfied_iters_, &task->Resources().at(craned_id));
+            &m_satisfied_iters_, &task->AllocatedRes().at(craned_id));
         m_time_priority_queue_.emplace(&m_res_map_iters_.back());
       }
     }
