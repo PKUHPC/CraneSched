@@ -375,7 +375,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (iter == qos_to_resource_map.end()) return;
 
         auto& val = iter->second;
-        if (qos.deny_on_limit) {
+        if (qos.flags & QosFlags::DenyOnLimit) {
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
           if (!CheckTres(resource_use, qos.max_tres_per_user)) {
@@ -403,7 +403,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (iter == qos_to_resource_map.end()) return;
 
           auto& val = iter->second;
-          if (qos.deny_on_limit) {
+          if (qos.flags & QosFlags::DenyOnLimit) {
             ResourceView resource_use{task.requested_node_res_view * task.node_num};
             resource_use += val.resource;
             if (!CheckTres(resource_use, qos.max_tres_per_account)) {

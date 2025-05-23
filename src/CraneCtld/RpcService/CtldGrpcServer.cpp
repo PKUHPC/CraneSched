@@ -1142,6 +1142,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.max_tres = static_cast<ResourceView>(qos_info->max_tres());
   qos.max_tres_per_user = static_cast<ResourceView>(qos_info->max_tres_per_user());
   qos.max_tres_per_account = static_cast<ResourceView>(qos_info->max_tres_per_account());
+  qos.flags = qos_info->flags();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -1565,6 +1566,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres));
     qos_info->mutable_max_tres_per_user()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
     qos_info->mutable_max_tres_per_account()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->set_flags(qos.flags);
   }
 
   return grpc::Status::OK;
