@@ -357,7 +357,7 @@ std::set<task_id_t> CtldClient::GetAllTaskStatusChangeId() {
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_DEBUG("Requesting config from CraneCtld...");
 
-  crane::grpc::CranedTriggerReserveConnRequest req;
+  crane::grpc::CranedTriggerReverseConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
 
