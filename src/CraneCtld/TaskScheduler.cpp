@@ -2545,7 +2545,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           allocated_res.AddResourceInNode(craned_index, feasible_res);
           task->allocated_res_view += feasible_res;
           if (ready_craned_indexes_.size() >= task->node_num) {
-            task->SetAlloctatedRes(std::move(allocated_res));
+            task->SetAllocatedRes(std::move(allocated_res));
             *start_time = now;
             for (const CranedId& ready_craned_index : ready_craned_indexes_) {
               craned_ids->emplace_back(ready_craned_index);
@@ -2586,7 +2586,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     task->allocated_res_view += feasible_res;
   }
 
-  task->SetAlloctatedRes(std::move(allocated_res));
+  task->SetAllocatedRes(std::move(allocated_res));
 
   EarliestStartSubsetSelector scheduler(task, node_selection_info,
                                         craned_indexes_);
