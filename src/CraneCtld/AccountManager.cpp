@@ -963,13 +963,10 @@ CraneExpected<void> AccountManager::ModifyQos(
 
   std::string item = std::string(CraneModifyFieldStr(modify_field));
 
-  bool value_is_number{false};
   int64_t value_number;
   if (item != Qos::FieldStringOfDescription()) {
     bool ok = util::ConvertStringToInt64(value, &value_number);
     if (!ok) return std::unexpected(CraneErrCode::ERR_CONVERT_TO_INTEGER);
-
-    value_is_number = true;
 
     if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
         !CheckIfTimeLimitSecIsValid(value_number))

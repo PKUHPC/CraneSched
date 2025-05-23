@@ -517,6 +517,7 @@ enum ModifyField {
   MaxTres = 16;
   MaxTresPerUser = 17;
   MaxTresPerAccount = 18;
+  FLags = 19;
 }
 
 message AccountInfo {
@@ -579,7 +580,7 @@ message QosInfo {
   ResourceView max_tres = 13;
   ResourceView max_tres_per_user = 14;
   ResourceView max_tres_per_account = 15;
-  bool deny_on_limit = 16;
+  uint32 flags = 16;
 }
 
 message TimeInterval {
