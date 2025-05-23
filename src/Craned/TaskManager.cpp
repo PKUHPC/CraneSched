@@ -39,6 +39,10 @@ TaskInstance::~TaskInstance() {
     termination_timer->close();
   }
 
+  if (signal_timer) {
+    signal_timer->close();
+  }
+
   if (this->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
@@ -1107,6 +1111,30 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
     AddTerminationTimer_(instance, sec);
     CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
+    const crane::grpc::SignalParam* signal_param_ptr = nullptr;
+
+    if (instance->task.payload_case() == crane::grpc::TaskToD::kBatchMeta) {
+      if (instance->task.batch_meta().has_signal_param()) {
+        signal_param_ptr = &instance->task.batch_meta().signal_param();
+      }
+    } else if (instance->task.payload_case() ==
+               crane::grpc::TaskToD::kInteractiveMeta) {
+      if (instance->IsCrun() &&
+          instance->task.interactive_meta().has_signal_param()) {
+        signal_param_ptr = &instance->task.interactive_meta().signal_param();
+      }
+    }
+
+    if (signal_param_ptr != nullptr) {
+      int64_t signal_sec = sec - signal_param_ptr->seconds_before_kill();
+      AddSignalTimer_(instance, signal_sec);
+      CRANE_TRACE(
+          "Add a signal timer of seconds_before_kill {} signal_num {} for task "
+          "#{}",
+          signal_param_ptr->seconds_before_kill(),
+          signal_param_ptr->signal_number(), task_id);
+    }
+
     g_thread_pool->detach_task(
         [this, instance]() { LaunchTaskInstanceMt_(instance); });
   }
@@ -1503,6 +1531,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     if (iter != m_task_map_.end()) {
       TaskInstance* task_instance = iter->second.get();
       DelTerminationTimer_(task_instance);
+      DelSignalTimer_(task_instance);
 
       absl::Time start_time =
           absl::FromUnixSeconds(task_instance->task.start_time().seconds());
@@ -1517,9 +1546,35 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
       } else {
         // If the task haven't timed out, set up a new timer.
-        AddTerminationTimer_(
-            task_instance,
-            ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
+        int64_t new_sec =
+            ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
+        AddTerminationTimer_(task_instance, new_sec);
+
+        const crane::grpc::SignalParam* signal_param_ptr = nullptr;
+        if (task_instance->task.payload_case() ==
+            crane::grpc::TaskToD::kBatchMeta) {
+          if (task_instance->task.batch_meta().has_signal_param()) {
+            signal_param_ptr = &task_instance->task.batch_meta().signal_param();
+          }
+        } else if (task_instance->task.payload_case() ==
+                   crane::grpc::TaskToD::kInteractiveMeta) {
+          if (task_instance->IsCrun() &&
+              task_instance->task.interactive_meta().has_signal_param()) {
+            signal_param_ptr =
+                &task_instance->task.interactive_meta().signal_param();
+          }
+        }
+
+        if (signal_param_ptr != nullptr) {
+          int64_t signal_sec =
+              new_sec - signal_param_ptr->seconds_before_kill();
+          AddSignalTimer_(task_instance, signal_sec);
+          CRANE_TRACE(
+              "Add a new signal timer of seconds_before_kill {} signal_num "
+              "{} new seconds {}, timelimt {}",
+              signal_param_ptr->seconds_before_kill(),
+              signal_param_ptr->signal_number(), signal_sec, new_sec);
+        }
       }
       elem.ok_prom.set_value(true);
     } else {
