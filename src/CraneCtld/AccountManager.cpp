@@ -230,7 +230,7 @@ CraneExpectedRich<void> AccountManager::DeleteUser(uint32_t uid,
         FormatRichErr(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
                       fmt::format("user: {}, account: {}", name, account))};
 
-  if (!g_task_scheduler->CheckUserHasTasks(user->name))
+  if (g_task_scheduler->UserHasTasks(user->name))
     return std::unexpected(CraneErrCode::ERR_USER_HAS_TASK);
 
   return DeleteUser_(op_user->name, *user, account);
