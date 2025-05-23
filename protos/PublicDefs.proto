@@ -148,7 +148,7 @@ message TaskToCtld {
   string nodelist = 35;
 
   string reservation = 36;
-  string submit_hostname = 37;
+  string submit_host = 37;
 }
 
 message TaskInEmbeddedDb {
@@ -216,7 +216,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-  string submit_hostname = 25;
+  string submit_host = 25;
   uint32 total_gpus = 26;
 }
 

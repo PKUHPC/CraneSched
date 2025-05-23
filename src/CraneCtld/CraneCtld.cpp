@@ -81,8 +81,12 @@ void ParseConfig(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
 
-      if (config["ClusterName"])
+      if (config["ClusterName"]) {
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+      } else {
+        fmt::print(stderr, "ClusterName is empty.");
+        std::exit(1);
+      }
 
       if (config["CraneBaseDir"])
         g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
