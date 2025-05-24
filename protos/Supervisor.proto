@@ -42,7 +42,6 @@ message InitSupervisorRequest {
 
   message ContainerConfig {
     string temp_dir = 1;
-
     string runtime_bin = 2;
     string state_cmd = 3;
     string run_cmd = 4;
@@ -58,6 +57,8 @@ message InitSupervisorRequest {
 
   TaskToD step_spec = 9;
   map<string, string> env = 10;
+
+  string log_dir = 11;
 }
 
 message SupervisorReady {

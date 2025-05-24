@@ -113,6 +113,7 @@ struct Config {
   struct SupervisorConfig {
     std::filesystem::path Path;
     std::string DebugLevel;
+    std::filesystem::path LogDir;
   };
   SupervisorConfig Supervisor;
 

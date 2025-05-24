@@ -66,6 +66,18 @@ static void PrintNodeInfo() {
   fmt::print("    memory: {}G\n", mem_gb);
 }
 
+void ParseSupervisorConfig(const YAML::Node& config) {
+  using util::YamlValueOr;
+  const auto& supervisor_config = config["Supervisor"];
+  g_config.Supervisor.Path =
+      YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
+  g_config.Supervisor.DebugLevel =
+      YamlValueOr(supervisor_config["DebugLevel"], "trace");
+  g_config.Supervisor.LogDir =
+      g_config.CraneBaseDir /
+      YamlValueOr(supervisor_config["LogDir"], "supervisor");
+}
+
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("craned");
 
@@ -134,6 +146,19 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CranedDebugLevel =
             YamlValueOr(config["CranedDebugLevel"], "info");
+
+      if (config["Supervisor"]) {
+        ParseSupervisorConfig(config["Supervisor"]);
+      } else {
+        fmt::print(stderr, "No Supervisor configuration found.\n");
+        std::exit(1);
+      }
+
+      if (!StrToLogLevel(g_config.Supervisor.DebugLevel).has_value()) {
+        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.\n",
+                   g_config.Supervisor.DebugLevel);
+        std::exit(1);
+      }
 
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
