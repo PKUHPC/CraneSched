@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -60,12 +62,29 @@ struct Config {
 
     std::string UnixSocketListenAddr;
   };
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+    std::string RuntimeState;
+    std::string RuntimeRun;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+  };
+  ContainerConfig Container;
 
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct SupervisorConfig {
+    std::filesystem::path Path;
+    std::string DebugLevel;
+    std::filesystem::path LogDir;
+  };
+  SupervisorConfig Supervisor;
 
   CranedListenConf ListenConf;
   bool CompressedRpc{};
@@ -90,7 +109,6 @@ struct Config {
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
   };
-
   CranedMeta CranedMeta;
 
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;

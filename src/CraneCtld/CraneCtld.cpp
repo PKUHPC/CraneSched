@@ -775,11 +775,6 @@ void InitializeCtldGlobalVariables() {
     g_meta_container->CranedDown(craned_id);
   });
 
-  std::list<CranedId> to_register_craned_list;
-  for (auto&& kv : g_config.Nodes) {
-    to_register_craned_list.emplace_back(kv.first);
-  }
-
   using namespace std::chrono_literals;
 
   g_task_scheduler = std::make_unique<TaskScheduler>();

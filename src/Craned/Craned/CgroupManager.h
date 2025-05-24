@@ -29,8 +29,6 @@
 
 #include <libcgroup.h>
 
-#include "crane/AtomicHashMap.h"
-
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>
 #endif
@@ -94,9 +92,12 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-inline const char *kTaskCgPathPrefix = "Crane_Task_";
-inline const char *kRootCgroupFullPath = "/sys/fs/cgroup";
+inline constexpr bool CgroupLimitDeviceRead = true;
+inline constexpr bool CgroupLimitDeviceWrite = true;
+inline constexpr bool CgroupLimitDeviceMknod = true;
 
+inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
+inline const char *kRootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -268,7 +269,7 @@ constexpr ControllerFlags operator|(
 
 constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
-// In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
+// In m any distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
 //  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
 //  handles this for us and no additional care needs to be taken.
 constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
@@ -315,6 +316,8 @@ class BpfRuntimeInfo {
   size_t cgroup_count_;
 };
 #endif
+
+static std::optional<task_id_t> GetJobIdFromCg(const std::string &path);
 
 class Cgroup {
  public:
@@ -419,7 +422,6 @@ class CgroupV2 : public CgroupInterface {
 #endif
 
   ~CgroupV2() override {}
-
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -455,6 +457,7 @@ class CgroupV2 : public CgroupInterface {
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
+
 #ifdef CRANE_ENABLE_BPF
   bool RecoverFromCgSpec(const JobToD &cg_spec);
   bool EraseBpfDeviceMap();
@@ -521,12 +524,12 @@ class CgroupManager {
   CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid) const;
 
   void SetCgroupVersion(CgConstant::CgroupVersion v) { m_cg_version_ = v; }
-
   [[nodiscard]] CgConstant::CgroupVersion GetCgroupVersion() const {
     return m_cg_version_;
   }
+
 #ifdef CRANE_ENABLE_BPF
-  BpfRuntimeInfo bpf_runtime_info;
+  static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
   inline static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -549,8 +552,6 @@ class CgroupManager {
 
   static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
       const std::string &root_cgroup_path);
-
-  void RmAllJobCgroups_();
 
 #ifdef CRANE_ENABLE_BPF
   CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
