@@ -222,20 +222,6 @@ struct CranedRemoteMeta {
 };
 
 /**
- * The power state of a Craned node.
- */
-enum class CranedPowerState {
-  Active,
-  Idle,
-  Sleeping,
-  PoweredOff,
-  ToSleeping,
-  WakingUp,
-  PoweringOn,
-  PoweringOff
-};
-
-/**
  * Represent the runtime status on a Craned node.
  * A Node is uniquely identified by (partition id, node index).
  */
@@ -244,7 +230,7 @@ struct CranedMeta {
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
-  CranedPowerState power_state{CranedPowerState::Idle};
+  crane::grpc::CranedPowerState power_state{crane::grpc::CRANE_IDLE};
 
   // total = avail + in-use
   ResourceInNode res_total;  // A copy of res in CranedStaticMeta,

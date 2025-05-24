@@ -83,8 +83,6 @@ enum CranedResourceState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
-  CRANE_OFF = 4;
-  CRANE_SLEEPING = 5;
 }
 
 enum CranedPowerState {
@@ -341,10 +339,11 @@ message CranedInfo {
   string hostname = 1;
   CranedResourceState resource_state = 2;
   CranedControlState control_state = 3;
+  CranedPowerState power_state = 4;
 
-  ResourceInNode res_total = 4;
-  ResourceInNode res_avail = 5;
-  ResourceInNode res_alloc = 6;
+  ResourceInNode res_total = 5;
+  ResourceInNode res_avail = 6;
+  ResourceInNode res_alloc = 7;
 
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
@@ -377,8 +376,9 @@ message TrimmedPartitionInfo {
   message TrimmedCranedInfo {
     CranedResourceState resource_state = 1;
     CranedControlState control_state = 2;
-    uint32 count = 3;
-    string craned_list_regex = 4;
+    CranedPowerState power_state = 3;
+    uint32 count = 4;
+    string craned_list_regex = 5;
   }
 
   string name = 1;

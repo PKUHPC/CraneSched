@@ -322,25 +322,4 @@ void PluginClient::RegisterCranedHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
-std::optional<crane::grpc::plugin::GetCranedByPowerStateHookSyncReply>
-PluginClient::GetCranedByPowerStateHookSync(
-    crane::grpc::CranedPowerState state) {
-  grpc::ClientContext context;
-  crane::grpc::plugin::GetCranedByPowerStateHookSyncRequest request;
-  crane::grpc::plugin::GetCranedByPowerStateHookSyncReply reply;
-
-  request.set_state(state);
-
-  auto status =
-      m_stub_->GetCranedByPowerStateHookSync(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_ERROR("[Plugin] Failed to get craned list: {}; {} (code: {})",
-                context.debug_error_string(), status.error_message(),
-                int(status.error_code()));
-    return std::nullopt;
-  }
-
-  return reply;
-}
-
 }  // namespace plugin

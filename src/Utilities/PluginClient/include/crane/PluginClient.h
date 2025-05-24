@@ -85,9 +85,6 @@ class PluginClient {
       const std::string& craned_id,
       const std::vector<crane::NetworkInterface>& interfaces);
 
-  std::optional<crane::grpc::plugin::GetCranedByPowerStateHookSyncReply>
-  GetCranedByPowerStateHookSync(crane::grpc::CranedPowerState state);
-
  private:
   // HookDispatchFunc is a function pointer type that handles different
   // event.

@@ -385,7 +385,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
       request->new_state() == crane::grpc::CRANE_WAKE ||
       request->new_state() == crane::grpc::CRANE_POWERON) {
     if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
-      for (auto crane_id : request->craned_ids()) {
+      for (const auto &crane_id : request->craned_ids()) {
         response->add_not_modified_nodes(crane_id);
         response->add_not_modified_reasons(
             "Plugin system not available for update state");
@@ -393,13 +393,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
       return grpc::Status::OK;
     }
 
-    for (auto crane_id : request->craned_ids()) {
-      if (!g_meta_container->CheckCranedAllowed(crane_id)) {
-        response->add_not_modified_nodes(crane_id);
-        response->add_not_modified_reasons("Node not found or not allowed");
-        continue;
-      }
-
+    for (const auto &crane_id : request->craned_ids()) {
       auto craned_meta = g_meta_container->GetCranedMetaPtr(crane_id);
       if (!craned_meta) {
         response->add_not_modified_nodes(crane_id);
@@ -407,25 +401,24 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
         continue;
       }
 
-      if (request->new_state() == crane::grpc::CRANE_POWEROFF ||
-          request->new_state() == crane::grpc::CRANE_SLEEP) {
-        if (craned_meta->power_state == CranedPowerState::Active) {
-          response->add_not_modified_nodes(crane_id);
-          response->add_not_modified_reasons(
-              "Node is running, can't sleep or poweroff");
-          continue;
-        }
+      const auto requested_state = request->new_state();
+      const auto current_state = craned_meta->power_state;
+      if ((requested_state == crane::grpc::CRANE_POWEROFF ||
+           requested_state == crane::grpc::CRANE_SLEEP) &&
+          current_state == crane::grpc::CRANE_POWER_ACTIVE) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons(
+            "Node is running, can't sleep or poweroff");
+        continue;
       }
-
-      if (request->new_state() == crane::grpc::CRANE_WAKE ||
-          request->new_state() == crane::grpc::CRANE_POWERON) {
-        if (craned_meta->power_state == CranedPowerState::Idle ||
-            craned_meta->power_state == CranedPowerState::Active) {
-          response->add_not_modified_nodes(crane_id);
-          response->add_not_modified_reasons(
-              "Node is idle or running, don't need to wake up or poweron");
-          continue;
-        }
+      if ((requested_state == crane::grpc::CRANE_WAKE ||
+           requested_state == crane::grpc::CRANE_POWERON) &&
+          (current_state == crane::grpc::CRANE_POWER_IDLE ||
+           current_state == crane::grpc::CRANE_POWER_ACTIVE)) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons(
+            "Node is idle or running, don't need to wake up or poweron");
+        continue;
       }
 
       CRANE_INFO("Updating state {} on node {}",
@@ -1301,16 +1294,12 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
              request->craned_id(),
              crane::grpc::CranedPowerState_Name(request->state()));
 
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+  auto craned_meta = g_meta_container->GetCranedMetaPtr(request->craned_id());
+  if (!craned_meta) {
     response->set_ok(false);
     return grpc::Status::OK;
   }
-
-  if (!g_meta_container->UpdateCranedPowerState(request->craned_id(),
-                                                request->state())) {
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
+  craned_meta->power_state = request->state();
 
   if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
     std::vector<crane::grpc::plugin::CranedEventInfo> event_list;
@@ -1329,7 +1318,7 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
     event.set_reason(request->reason());
     event.set_allocated_start_time(timestamp.release());
 
-    event.mutable_state()->set_power_state(request->state());
+    event.set_power_state(request->state());
 
     event_list.emplace_back(event);
 

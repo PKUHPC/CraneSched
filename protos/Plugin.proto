@@ -71,20 +71,16 @@ message DestroyCgroupHookReply {
   bool ok = 1;
 }
 
-message CranedState {
-  oneof state_type {
-    CranedPowerState power_state = 1;
-    CranedControlState control_state = 2;
-  }
-}
-
 message CranedEventInfo {
   google.protobuf.Timestamp start_time = 1;
   string node_name = 2;
   string cluster_name = 3;
   string reason = 4;
-  CranedState state = 5;
-  uint32 uid = 6;
+  oneof state_type {
+    CranedPowerState power_state = 5;
+    CranedControlState control_state = 6;
+  }
+  uint32 uid = 7;
 }
 
 message NodeEventHookRequest {
@@ -104,14 +100,6 @@ message UpdatePowerStateHookReply {
     bool ok = 1;
 }
 
-message GetCranedByPowerStateHookSyncRequest {
-    CranedPowerState state = 1;
-}
-
-message GetCranedByPowerStateHookSyncReply {
-    repeated string craned_ids = 1;
-}
-
 message RegisterCranedHookRequest {
     string craned_id = 1;
     repeated NetworkInterface network_interfaces = 2;
@@ -127,7 +115,6 @@ service CranePluginD {
   rpc EndHook(EndHookRequest) returns (EndHookReply);
   rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
   rpc UpdatePowerStateHook(UpdatePowerStateHookRequest) returns (UpdatePowerStateHookReply);
-  rpc GetCranedByPowerStateHookSync(GetCranedByPowerStateHookSyncRequest) returns (GetCranedByPowerStateHookSyncReply);
   rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
 
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */

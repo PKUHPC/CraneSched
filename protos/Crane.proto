@@ -443,6 +443,7 @@ message QueryClusterInfoRequest {
   repeated string filter_nodes = 2;
   repeated CranedResourceState filter_craned_resource_states = 3;
   repeated CranedControlState filter_craned_control_states = 4;
+  repeated CranedPowerState filter_craned_power_states = 5;
 }
 
 message QueryClusterInfoReply {
@@ -889,6 +890,7 @@ service CraneCtld {
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
 
+  /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
 }
 
