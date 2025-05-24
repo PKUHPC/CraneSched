@@ -36,6 +36,10 @@
 
 namespace Craned {
 
+#ifdef CRANE_ENABLE_BPF
+BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
+#endif
+
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
@@ -180,13 +184,6 @@ CraneErrCode CgroupManager::Init() {
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
-  }
-
-  RmAllJobCgroups_();
-  if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-#ifdef CRANE_ENABLE_BPF
-    bpf_runtime_info.RmBpfDeviceMap();
-#endif
   }
   return CraneErrCode::SUCCESS;
 }
@@ -638,34 +635,6 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
     CRANE_ERROR("Error: {}", e.what());
   }
   return cg_job_id_map;
-}
-
-void CgroupManager::RmAllJobCgroups_() {
-  std::set<task_id_t> job_ids;
-  if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    job_ids.merge(GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else {
-    CRANE_WARN("cgroup version is not supported.");
-  }
-  if (!job_ids.empty()) {
-    CRANE_INFO("Removed all cgroups for jobs: [{}].",
-               absl::StrJoin(job_ids, ", "));
-  }
 }
 
 #ifdef CRANE_ENABLE_BPF

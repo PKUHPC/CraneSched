@@ -529,7 +529,7 @@ class CgroupManager {
   }
 
 #ifdef CRANE_ENABLE_BPF
-  BpfRuntimeInfo bpf_runtime_info;
+  static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
   inline static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -552,8 +552,6 @@ class CgroupManager {
 
   static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
       const std::string &root_cgroup_path);
-
-  void RmAllJobCgroups_();
 
 #ifdef CRANE_ENABLE_BPF
   CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>

@@ -48,4 +48,36 @@ using rw_mutex = std::shared_mutex;
 using read_lock_guard = std::shared_lock<std::shared_mutex>;
 using write_lock_guard = std::unique_lock<std::shared_mutex>;
 
+class flexible_latch {
+  absl::Mutex mtx;
+  absl::CondVar cv;
+  int count;
+
+ public:
+  explicit flexible_latch(int initial_count) : count(initial_count) {}
+
+  void count_down() {
+    lock_guard lock(mtx);
+    if (count > 0) {
+      count--;
+      if (count == 0) {
+        cv.SignalAll();
+      }
+    }
+  }
+
+  void count_up() {
+    lock_guard lock(mtx);
+    count++;
+  }
+
+  void wait() {
+    mtx.Lock();
+    while (count != 0) {
+      cv.Wait(&mtx);
+    }
+    mtx.Unlock();
+  }
+};
+
 }  // namespace util

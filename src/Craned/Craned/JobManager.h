@@ -252,7 +252,7 @@ class JobManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
-  flexible_latch m_pending_thread_pool_tasks{0};
+  util::flexible_latch m_pending_thread_pool_tasks{0};
 
   std::thread m_uvw_thread_;
 
