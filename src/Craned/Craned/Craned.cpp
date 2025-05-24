@@ -36,6 +36,18 @@
 using Craned::g_config;
 using Craned::Partition;
 
+void ParseSupervisorConfig(const YAML::Node& config) {
+  using util::YamlValueOr;
+  const auto& supervisor_config = config["Supervisor"];
+  g_config.Supervisor.Path =
+      YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
+  g_config.Supervisor.DebugLevel =
+      YamlValueOr(supervisor_config["DebugLevel"], "trace");
+  g_config.Supervisor.LogDir =
+      g_config.CraneBaseDir /
+      YamlValueOr(supervisor_config["LogDir"], "supervisor");
+}
+
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("craned");
 
@@ -103,11 +115,7 @@ void ParseConfig(int argc, char** argv) {
             YamlValueOr(config["CranedDebugLevel"], "info");
 
       if (config["Supervisor"]) {
-        const auto& supervisor_config = config["Supervisor"];
-        g_config.Supervisor.Path =
-            YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
-        g_config.Supervisor.DebugLevel =
-            YamlValueOr(supervisor_config["DebugLevel"], "trace");
+        ParseSupervisorConfig(config["Supervisor"]);
       } else {
         fmt::print(stderr, "No Supervisor configuration found.\n");
         std::exit(1);
