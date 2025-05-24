@@ -1004,7 +1004,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             device_map_str,task_to_ctld.container()};
+             device_map_str, task_to_ctld.container()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1086,7 +1086,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str,task->container};
+             device_map_str, task->container};
   return DocumentConstructor_(fields, values);
 }
 
