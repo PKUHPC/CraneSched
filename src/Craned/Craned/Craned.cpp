@@ -70,6 +70,11 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   using util::YamlValueOr;
   g_config.Supervisor.Path =
       YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
+  if (!std::filesystem::exists(g_config.Supervisor.Path)) {
+    fmt::print(stderr, "csupervisor {} does not exist\n",
+               g_config.Supervisor.Path);
+    std::exit(0);
+  }
   g_config.Supervisor.DebugLevel =
       YamlValueOr(supervisor_config["DebugLevel"], "trace");
   g_config.Supervisor.LogDir =
@@ -745,10 +750,9 @@ void StartServer() {
   std::promise<void> conf_done;
   auto config_future = conf_promise.get_future();
   g_ctld_client_sm->SubscribeConfigure(
-      std::move(
-          [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
-            conf_promise.set_value(req);
-          }),
+      [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
+        conf_promise.set_value(req);
+      },
       std::move(conf_done.get_future()), true);
 
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
