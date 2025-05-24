@@ -22,7 +22,10 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldPublicDefs.h"
 #include "TaskScheduler.h"
+#include "crane/PluginClient.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -357,6 +360,9 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
+  CRANE_TRACE("Received update state request: {}",
+              crane::grpc::CranedControlState_Name(request->new_state()));
+
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -373,6 +379,60 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     }
     return grpc::Status::OK;
   }
+
+  if (request->new_state() == crane::grpc::CRANE_POWEROFF ||
+      request->new_state() == crane::grpc::CRANE_SLEEP ||
+      request->new_state() == crane::grpc::CRANE_WAKE ||
+      request->new_state() == crane::grpc::CRANE_POWERON) {
+    if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
+      for (const auto &crane_id : request->craned_ids()) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons(
+            "Plugin system not available for update state");
+      }
+      return grpc::Status::OK;
+    }
+
+    for (const auto &crane_id : request->craned_ids()) {
+      auto craned_meta = g_meta_container->GetCranedMetaPtr(crane_id);
+      if (!craned_meta) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons("Node not found");
+        continue;
+      }
+
+      const auto requested_state = request->new_state();
+      const auto current_state = craned_meta->power_state;
+      if ((requested_state == crane::grpc::CranedControlState::CRANE_POWEROFF ||
+           requested_state == crane::grpc::CranedControlState::CRANE_SLEEP) &&
+          current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons(
+            "Node is running, can't sleep or poweroff");
+        continue;
+      }
+      if ((requested_state == crane::grpc::CranedControlState::CRANE_WAKE ||
+           requested_state == crane::grpc::CranedControlState::CRANE_POWERON) &&
+          (current_state == crane::grpc::CranedPowerState::CRANE_POWER_IDLE ||
+           current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE)) {
+        response->add_not_modified_nodes(crane_id);
+        response->add_not_modified_reasons(
+            "Node is idle or running, don't need to wake up or poweron");
+        continue;
+      }
+
+      CRANE_INFO("Updating state {} on node {}",
+                 crane::grpc::CranedControlState_Name(request->new_state()),
+                 crane_id);
+
+      g_plugin_client->UpdatePowerStateHookAsync(crane_id,
+                                                 request->new_state());
+      response->add_modified_nodes(crane_id);
+    }
+
+    return grpc::Status::OK;
+  }
+
   *response = g_meta_container->ChangeNodeState(*request);
 
   return grpc::Status::OK;
@@ -1219,6 +1279,53 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
   }
 
   *response = g_task_scheduler->DeleteResv(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::PowerStateChange(
+    grpc::ServerContext *context,
+    const crane::grpc::PowerStateChangeRequest *request,
+    crane::grpc::PowerStateChangeReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  CRANE_INFO("Received power state change request for node {}: {}",
+             request->craned_id(),
+             crane::grpc::CranedPowerState_Name(request->state()));
+
+  auto craned_meta = g_meta_container->GetCranedMetaPtr(request->craned_id());
+  if (!craned_meta) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  craned_meta->power_state = request->state();
+
+  if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
+    std::vector<crane::grpc::plugin::CranedEventInfo> event_list;
+    crane::grpc::plugin::CranedEventInfo event;
+
+    absl::Time now = absl::Now();
+    int64_t seconds = absl::ToUnixSeconds(now);
+    int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
+
+    auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
+    timestamp->set_seconds(seconds);
+    timestamp->set_nanos(nanos);
+
+    event.set_cluster_name(g_config.CraneClusterName);
+    event.set_node_name(request->craned_id());
+    event.set_reason(request->reason());
+    event.set_allocated_start_time(timestamp.release());
+
+    event.set_power_state(request->state());
+
+    event_list.emplace_back(event);
+
+    g_plugin_client->NodeEventHookAsync(std::move(event_list));
+  }
+
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 

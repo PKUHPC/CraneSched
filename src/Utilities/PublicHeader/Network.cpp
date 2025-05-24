@@ -18,6 +18,16 @@
 
 #include "crane/Network.h"
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <linux/if_packet.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+
+#include <ranges>
+
 #include "crane/Logger.h"
 
 namespace crane {
@@ -342,6 +352,140 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
     CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
+}
+
+std::vector<NetworkInterface> GetNetworkInterfaces() {
+  std::unordered_map<std::string, NetworkInterface> interface_map;
+  constexpr int kMaxRetries = 10;
+  constexpr int kRetryIntervalMs = 3000;  // Retry every 3 seconds
+
+  for (int retry = 0; retry < kMaxRetries; ++retry) {
+    interface_map.clear();
+    bool has_valid_ip = false;
+
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) {
+      CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
+      if (retry < kMaxRetries - 1) {
+        CRANE_WARN("Retrying to get network interfaces ({}/{})", retry + 1,
+                   kMaxRetries);
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kRetryIntervalMs));
+        continue;
+      }
+      return {};
+    }
+
+    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+      if (ifa->ifa_addr == nullptr) continue;
+
+      std::string if_name(ifa->ifa_name);
+
+      if (!interface_map.contains(if_name)) {
+        interface_map[if_name].name = if_name;
+      }
+
+      int family = ifa->ifa_addr->sa_family;
+
+      switch (family) {
+      case AF_INET: {  // IPv4
+        struct sockaddr_in* addr = (struct sockaddr_in*)ifa->ifa_addr;
+        ipv4_t ipv4_addr = ntohl(addr->sin_addr.s_addr);
+        // Ignore loopback address 127.0.0.1
+        if ((ipv4_addr & 0xFF000000) != 0x7F000000) {
+          has_valid_ip = true;
+        }
+        interface_map[if_name].ipv4_addresses.emplace_back(ipv4_addr);
+        break;
+      }
+      case AF_INET6: {  // IPv6
+        struct sockaddr_in6* addr = (struct sockaddr_in6*)ifa->ifa_addr;
+        ipv6_t ipv6_addr = 0;
+        for (int i = 0; i < 4; ++i) {
+          uint32_t part = ntohl(addr->sin6_addr.s6_addr32[i]);
+          ipv6_addr = (ipv6_addr << 32) | part;
+        }
+        if (!IN6_IS_ADDR_LOOPBACK(&addr->sin6_addr) &&
+            !IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr)) {
+          has_valid_ip = true;
+        }
+        interface_map[if_name].ipv6_addresses.emplace_back(ipv6_addr);
+        break;
+      }
+      case AF_PACKET: {  // MAC
+        struct sockaddr_ll* s = (struct sockaddr_ll*)ifa->ifa_addr;
+        if (s->sll_halen >= 6) {
+          interface_map[if_name].mac_address =
+              fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                          s->sll_addr[0], s->sll_addr[1], s->sll_addr[2],
+                          s->sll_addr[3], s->sll_addr[4], s->sll_addr[5]);
+        }
+        break;
+      }
+      }
+    }
+
+    freeifaddrs(ifaddr);
+
+    // If we found at least one valid non-loopback IP address, consider network
+    // ready
+    if (has_valid_ip) {
+      CRANE_INFO(
+          "Successfully retrieved network interfaces, found {} interfaces",
+          interface_map.size());
+      break;
+    }
+
+    if (retry < kMaxRetries - 1) {
+      CRANE_WARN(
+          "No valid network interface IP found, waiting for network service to "
+          "start ({}/{})",
+          retry + 1, kMaxRetries);
+      std::this_thread::sleep_for(std::chrono::milliseconds(kRetryIntervalMs));
+    } else {
+      CRANE_ERROR(
+          "Failed to find valid network interface IPs after multiple attempts");
+    }
+  }
+
+  return interface_map | std::views::values | std::views::common |
+         std::ranges::to<std::vector>();
+}
+
+NetworkInterface::NetworkInterface(
+    const crane::grpc::NetworkInterface& grpc_interface) {
+  name = grpc_interface.name();
+  mac_address = grpc_interface.mac_address();
+
+  for (const auto& addr : grpc_interface.ipv4_addresses()) {
+    ipv4_t ipv4;
+    if (StrToIpv4(addr, &ipv4)) {
+      ipv4_addresses.push_back(ipv4);
+    }
+  }
+
+  for (const auto& addr : grpc_interface.ipv6_addresses()) {
+    ipv6_t ipv6;
+    if (StrToIpv6(addr, &ipv6)) {
+      ipv6_addresses.push_back(ipv6);
+    }
+  }
+}
+
+NetworkInterface::operator crane::grpc::NetworkInterface() const {
+  crane::grpc::NetworkInterface interface;
+  interface.set_name(name);
+  interface.set_mac_address(mac_address);
+
+  for (const auto& addr : ipv4_addresses) {
+    interface.add_ipv4_addresses(Ipv4ToStr(addr));
+  }
+
+  for (const auto& addr : ipv6_addresses) {
+    interface.add_ipv6_addresses(Ipv6ToStr(addr));
+  }
+
+  return interface;
 }
 
 }  // namespace crane

@@ -534,6 +534,7 @@ void ParseConfig(int argc, char** argv) {
 
   g_config.CranedMeta.CranedStartTime = absl::Now();
   g_config.CranedMeta.SystemBootTime = util::os::GetSystemBootTime();
+  g_config.CranedMeta.NetworkInterfaces = crane::GetNetworkInterfaces();
 }
 
 void CreateRequiredDirectories() {

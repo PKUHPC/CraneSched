@@ -200,6 +200,8 @@ struct CranedRemoteMeta {
   absl::Time craned_start_time;
   absl::Time system_boot_time;
 
+  std::vector<crane::grpc::NetworkInterface> network_interfaces;
+
   CranedRemoteMeta() = default;
 
   explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)
@@ -211,6 +213,11 @@ struct CranedRemoteMeta {
         absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
     this->system_boot_time =
         absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
+
+    this->network_interfaces.clear();
+    for (const auto& interface : grpc_meta.network_interfaces()) {
+      this->network_interfaces.emplace_back(interface);
+    }
   }
 };
 
@@ -223,6 +230,7 @@ struct CranedMeta {
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
+  crane::grpc::CranedPowerState power_state{crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 
   // total = avail + in-use
   ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
