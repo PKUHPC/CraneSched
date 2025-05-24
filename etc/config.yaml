@@ -130,6 +130,7 @@ Supervisor:
   Path: /usr/libexec/csupervisor
   # Supervisor log level
   DebugLevel: trace
+  LogDir: supervisor
 
 Container:
   # Toggle the container support in CraneSched
