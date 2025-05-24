@@ -403,18 +403,18 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
 
       const auto requested_state = request->new_state();
       const auto current_state = craned_meta->power_state;
-      if ((requested_state == crane::grpc::CRANE_POWEROFF ||
-           requested_state == crane::grpc::CRANE_SLEEP) &&
-          current_state == crane::grpc::CRANE_POWER_ACTIVE) {
+      if ((requested_state == crane::grpc::CranedControlState::CRANE_POWEROFF ||
+           requested_state == crane::grpc::CranedControlState::CRANE_SLEEP) &&
+          current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE) {
         response->add_not_modified_nodes(crane_id);
         response->add_not_modified_reasons(
             "Node is running, can't sleep or poweroff");
         continue;
       }
-      if ((requested_state == crane::grpc::CRANE_WAKE ||
-           requested_state == crane::grpc::CRANE_POWERON) &&
-          (current_state == crane::grpc::CRANE_POWER_IDLE ||
-           current_state == crane::grpc::CRANE_POWER_ACTIVE)) {
+      if ((requested_state == crane::grpc::CranedControlState::CRANE_WAKE ||
+           requested_state == crane::grpc::CranedControlState::CRANE_POWERON) &&
+          (current_state == crane::grpc::CranedPowerState::CRANE_POWER_IDLE ||
+           current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE)) {
         response->add_not_modified_nodes(crane_id);
         response->add_not_modified_reasons(
             "Node is idle or running, don't need to wake up or poweron");

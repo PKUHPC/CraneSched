@@ -230,7 +230,7 @@ struct CranedMeta {
   CranedRemoteMeta remote_meta;
 
   bool alive{false};
-  crane::grpc::CranedPowerState power_state{crane::grpc::CRANE_IDLE};
+  crane::grpc::CranedPowerState power_state{crane::grpc::CranedPowerState::CRANE_POWER_IDLE};
 
   // total = avail + in-use
   ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
