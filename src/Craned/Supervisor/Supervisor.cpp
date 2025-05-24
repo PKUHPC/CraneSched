@@ -100,8 +100,8 @@ void InitFromStdin(int argc, char** argv) {
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
 
-  g_config.SupervisorLogFile =
-      g_config.CraneBaseDir / fmt::format("Supervisor/{}.log", g_config.JobId);
+  g_config.SupervisorLogFile = std::filesystem::path(msg.log_dir()) /
+                               fmt::format("{}.log", g_config.JobId);
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
