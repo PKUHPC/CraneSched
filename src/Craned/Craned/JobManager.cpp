@@ -300,7 +300,7 @@ void JobManager::EvSigchldCb_() {
 
 void JobManager::EvSigintCb_() {
   CRANE_TRACE("Triggering exit event...");
-  m_sigint_cb_();
+  if (m_sigint_cb_) m_sigint_cb_();
   m_is_ending_now_ = true;
 }
 
