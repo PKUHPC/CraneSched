@@ -476,7 +476,7 @@ grpc::Status CranedServiceImpl::TaskStatusChange(
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
-    CRANE_ERROR("CranedServer is not ready.");
+    CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }

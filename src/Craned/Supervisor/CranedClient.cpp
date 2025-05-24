@@ -50,8 +50,6 @@ void CranedClient::TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
 }
 
 void CranedClient::AsyncSendThread_() {
-  int finished_count = 0;
-
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   while (true) {
@@ -59,9 +57,9 @@ void CranedClient::AsyncSendThread_() {
 
     bool connected = m_channel_->WaitForConnected(
         std::chrono::system_clock::now() + std::chrono::seconds(3));
-
     if (!connected) {
       CRANE_INFO("Channel to CraneD is not connected. Reconnecting...");
+      m_channel_->GetState(true);
       std::this_thread::sleep_for(std::chrono::seconds(10));
       continue;
     }
@@ -96,10 +94,10 @@ void CranedClient::AsyncSendThread_() {
           break;
         }
       } else {
-        finished_count++;
+        m_finished_tasks_++;
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     elem.task_id, reply.ok());
-        if (finished_count == g_config.TaskCount) {
+        if (m_finished_tasks_ == g_config.TaskCount) {
           CRANE_TRACE("All tasks finished,exiting...");
           m_thread_stop_ = true;
           g_server->Shutdown();
