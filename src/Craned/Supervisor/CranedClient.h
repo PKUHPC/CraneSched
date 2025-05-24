@@ -45,6 +45,7 @@ class CranedClient {
 
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_;
+  int m_finished_tasks_{0};
   std::shared_ptr<grpc::Channel> m_channel_;
   std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
