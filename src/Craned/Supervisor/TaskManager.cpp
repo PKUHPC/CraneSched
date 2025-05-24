@@ -285,15 +285,29 @@ void ExecutionInterface::SetChildProcessSignalHandler_() {
 }
 
 CraneErrCode ExecutionInterface::SetChildProcessProperty_() {
-  // TODO: Add all other supplementary groups.
-  // Currently we only set the primary gid and the egid when task was
-  // submitted.
-  std::vector<gid_t> gids;
-  if (step->step_to_super.gid() != pwd.Gid())
-    gids.emplace_back(step->step_to_super.gid());
-  gids.emplace_back(pwd.Gid());
+  int ngroups = 0;
+  // We should not check rc here. It must be -1.
+  getgrouplist(pwd.Username().c_str(), step->step_to_super.gid(), nullptr,
+               &ngroups);
 
-  int rc = setgroups(gids.size(), gids.data());
+  std::vector<gid_t> gids(ngroups);
+  int rc = getgrouplist(pwd.Username().c_str(), step->step_to_super.gid(),
+                        gids.data(), &ngroups);
+  if (rc == -1) {
+    fmt::print(stderr, "[Subproc] Error: getgrouplist() for user '{}'\n",
+               pwd.Username());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (auto it = std::ranges::find(gids, step->step_to_super.gid());
+      it != gids.begin()) {
+    gids.erase(it);
+    gids.insert(gids.begin(), step->step_to_super.gid());
+  }
+
+  if (!std::ranges::contains(gids, pwd.Gid())) gids.emplace_back(pwd.Gid());
+
+  rc = setgroups(gids.size(), gids.data());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setgroups() failed: {}\n",
                step->step_to_super.task_id(), strerror(errno));
@@ -335,8 +349,10 @@ CraneErrCode ExecutionInterface::SetChildProcessBatchFd_() {
   auto* meta = dynamic_cast<BatchMetaInExecution*>(m_meta_.get());
   const std::string& stdout_file_path = meta->parsed_output_file_pattern;
   const std::string& stderr_file_path = meta->parsed_error_file_pattern;
-
-  stdout_fd = open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+  int open_mode =
+      step->step_to_super.batch_meta().open_mode_append() ? O_APPEND : O_TRUNC;
+  stdout_fd =
+      open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
   if (stdout_fd == -1) {
     fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stdout_file_path,
                strerror(errno));
@@ -348,7 +364,7 @@ CraneErrCode ExecutionInterface::SetChildProcessBatchFd_() {
     dup2(stdout_fd, 2);  // if errfile not set, redirect stderr to stdout
   } else {
     stderr_fd =
-        open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+        open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
     if (stderr_fd == -1) {
       fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stderr_file_path,
                  strerror(errno));
@@ -611,6 +627,11 @@ CraneErrCode ContainerInstance::Prepare() {
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+  if (chown(sh_path.c_str(), step->step_to_super.uid(),
+            step->step_to_super.gid()) != 0) {
+    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
+                step->step_to_super.task_id(), strerror(errno));
+  }
 
   // Write meta
   if (step->IsBatch()) {
@@ -968,6 +989,11 @@ CraneErrCode ProcessInstance::Prepare() {
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+  if (chown(sh_path.c_str(), step->step_to_super.uid(),
+            step->step_to_super.gid()) != 0) {
+    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
+                step->step_to_super.task_id(), strerror(errno));
+  }
 
   // Write m_meta_
   if (step->IsBatch()) {
@@ -1162,7 +1188,7 @@ CraneErrCode ProcessInstance::Spawn() {
     }
 
     if (step->IsBatch()) {
-      SetChildProcessBatchFd_();
+      if (SetChildProcessBatchFd_() != CraneErrCode::SUCCESS) std::abort();
     } else if (step->IsCrun()) {
       SetupChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
                                crun_pty_fd);
@@ -1330,12 +1356,12 @@ void TaskManager::TaskStopAndDoStatusChange() {
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeSpawnProcessFail,
                               std::nullopt);
-    break;
+    return;
 
   case CraneErrCode::ERR_CGROUP:
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeCgroupError, std::nullopt);
-    break;
+    return;
 
   default:
     break;
