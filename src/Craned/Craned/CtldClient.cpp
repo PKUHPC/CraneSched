@@ -192,6 +192,7 @@ void CtldClientStateMachine::NotifyConfigureSubscribe_(
   for (auto it = m_configure_subscribe_cb_list_.begin();
        it != m_configure_subscribe_cb_list_.end(); ++it) {
     g_thread_pool->detach_task([it, &configure_req, &latch, this] {
+      absl::MutexLock lk(&m_mtx_);
       it->cb(configure_req);
       it->conf_future.wait();
       if (it->consume) {
