@@ -38,9 +38,8 @@
 using Craned::g_config;
 using Craned::Partition;
 
-void ParseSupervisorConfig(const YAML::Node& config) {
+void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   using util::YamlValueOr;
-  const auto& supervisor_config = config["Supervisor"];
   g_config.Supervisor.Path =
       YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
   g_config.Supervisor.DebugLevel =
