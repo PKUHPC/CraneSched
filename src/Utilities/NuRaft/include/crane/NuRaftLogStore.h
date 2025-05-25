@@ -138,13 +138,7 @@ class NuRaftLogStore : public log_store {
   static std::shared_ptr<log_entry> make_clone_(
       const std::shared_ptr<log_entry>& entry);
 
-  //  void disk_emul_loop();
   void durable_thread_();
-
-  /**
-   * Map of <log index, log data>.
-   */
-  std::map<log_index_t, std::shared_ptr<log_entry>> m_logs_;
 
   /**
    * Lock for `logs_`.
@@ -152,19 +146,25 @@ class NuRaftLogStore : public log_store {
   mutable std::mutex m_logs_lock_;
 
   /**
+   * Map of <log index, log data>.
+   */
+  std::map<log_index_t, std::shared_ptr<log_entry>> m_logs_
+      ABSL_GUARDED_BY(m_logs_lock_);
+
+  /**
    * The index of the first log.
    */
   std::atomic<log_index_t> m_start_idx_;
 
   /**
+   * Last written log index.
+   */
+  log_index_t m_last_durable_index_ ABSL_GUARDED_BY(m_logs_lock_);
+
+  /**
    * Backward pointer to Raft server.
    */
   raft_server* m_raft_server_bwd_pointer_;
-
-  /**
-   * Last written log index.
-   */
-  std::atomic<log_index_t> m_last_durable_index_;
 
   /**
    * logs that is being written to disk.

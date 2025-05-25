@@ -764,6 +764,7 @@ void DestroyCtldGlobalVariables() {
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
+
   g_raft_server.reset();
 
   g_thread_pool->wait();
@@ -801,7 +802,7 @@ void InitializeCtldGlobalVariables() {
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire
-  // information from account manager.
+  // information from the account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainer>();

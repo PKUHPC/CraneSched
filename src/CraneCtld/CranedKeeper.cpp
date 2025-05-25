@@ -663,8 +663,10 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
 
 void CranedKeeper::BroadcastLeaderId(int cur_leader_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
-  for (const auto &craned : m_connected_craned_id_stub_map_)
+  for (const auto &craned : m_connected_craned_id_stub_map_) {
+    if (m_cq_closed_) return;
     craned.second->UpdateLeaderId(cur_leader_id);
+  }
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
