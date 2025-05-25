@@ -544,18 +544,18 @@ class CgroupManager {
                             CgConstant::Controller controller, bool required,
                             bool has_cgroup, bool &changed_cgroup);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV1(
+  static std::set<task_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV2(
+  static std::set<task_id_t> GetJobIdsFromCgroupV2_(
       const std::string &root_cgroup_path);
 
-  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
+  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2_(
       const std::string &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
   CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
+  GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path);
 #endif
 
   ControllerFlags m_mounted_controllers_;
