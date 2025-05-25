@@ -129,8 +129,8 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
 
 grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext *context,
-    const crane::grpc::CranedTriggerReserveConnRequest *request,
-    crane::grpc::CranedTriggerReserveConnResponse *response) {
+    const crane::grpc::CranedTriggerReverseConnRequest *request,
+    crane::grpc::CranedTriggerReverseConnResponse *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   response->set_cur_leader_id(g_raft_server->GetLeaderId());
@@ -138,6 +138,15 @@ grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
     CRANE_WARN(
         "Reject register request from node {} because this CraneCtld is not "
         "the leader.",
+        request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!g_task_scheduler->GetTaskMapReadyFlag()) {
+    CRANE_WARN(
+        "Reject register request from node {} because the data in the task "
+        "queue is not ready.",
         request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
@@ -1767,15 +1776,15 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     CRANE_TRACE(
         "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
 
+    // raft_server MUST be shutdown before GrpcServer.
+    g_raft_server->Shutdown();
+
     // craned_keeper MUST be shutdown before GrpcServer.
     // Otherwise, once GrpcServer is shut down, the main thread stops and
     // g_craned_keeper.reset() is called. The Shutdown here and reset() in the
     // main thread will access g_craned_keeper simultaneously and a race
     // condition will occur.
     g_craned_keeper->Shutdown();
-
-    // raft_server MUST be shutdown before GrpcServer.
-    g_raft_server->Shutdown();
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));

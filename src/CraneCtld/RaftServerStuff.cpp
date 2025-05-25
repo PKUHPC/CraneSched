@@ -51,6 +51,9 @@ void RaftServerStuff::Init() {  // State manager.
   // should be handled differently.
   params.return_method_ = raft_params::async_handler;  // or blocking
 
+  params.auto_adjust_quorum_for_small_cluster_ = true;
+  params.auto_forwarding_ = true;
+
   raft_server::init_options init_options{};
   init_options.raft_callback_ = StatusChangeCallback;
 
@@ -337,32 +340,49 @@ void RaftServerStuff::handle_result(raft_result &result,
 
 cb_func::ReturnCode RaftServerStuff::StatusChangeCallback(cb_func::Type type,
                                                           cb_func::Param *p) {
+  static crane::grpc::QueryLeaderInfoReply_RaftRole role =
+      crane::grpc::QueryLeaderInfoReply_RaftRole_Follower;
+
   if (type == cb_func::Type::BecomeLeader) {
+    // before become leader
     uint64_t term_id = *static_cast<uint64_t *>(p->ctx);
     CRANE_TRACE("I am leader, term id : {}", term_id);
-    if (term_id > 1 && g_task_scheduler) {
+    role = crane::grpc::QueryLeaderInfoReply_RaftRole_Leader;
+
+    if (term_id > 1 &&
+        g_task_scheduler) {  // Check if the pointer is not null, so that the
+                             // following functions will not run during the
+                             // initialization phase.
+
       g_embedded_db_client->RestoreTaskID();
-      // async
+      // The reason for using asynchrony is that the raft state change can only
+      // be completed after this function returns
       g_thread_pool->detach_task([]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        g_task_scheduler->RestoreFromEmbeddedDb();
+        // Wait for raft status change completion
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        if (g_task_scheduler) g_task_scheduler->RestoreFromEmbeddedDb();
       });
     }
-  } else if (type == cb_func::Type::BecomeFollower) {
-    uint64_t term_id = *static_cast<uint64_t *>(p->ctx);
-    if (term_id > 1) {
+  } else if (type == cb_func::Type::NewSessionFromLeader) {
+    cb_func::ConnectionArgs ctx =
+        *static_cast<cb_func::ConnectionArgs *>(p->ctx);
+    if (!ctx.isLeader) return cb_func::ReturnCode::Ok;
+    if (role == crane::grpc::QueryLeaderInfoReply_RaftRole_Leader &&
+        g_task_scheduler) {
       // async
-      g_thread_pool->detach_task([]() {
-        int cur_leader_id;
-        while (true) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(200));
-          cur_leader_id = g_raft_server->GetLeaderId();
-          if (cur_leader_id >= 0) break;
-        }
-        g_craned_keeper->BroadcastLeaderId(cur_leader_id);
-        g_meta_container->MarkAllCranedDown();
+      g_thread_pool->detach_task([id = ctx.srvId]() {
+        // Although the following operations are time-consuming, this node is
+        // already a follower and has no other tasks.
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            1000));  // Wait for task data in leader ready
+        if (g_craned_keeper) g_craned_keeper->BroadcastLeaderId(id);
+        if (g_meta_container) g_meta_container->MarkAllCranedDown();
       });
+
+      g_task_scheduler->ResetTaskData();
     }
+
+    role = crane::grpc::QueryLeaderInfoReply_RaftRole_Follower;
   }
 
   return cb_func::ReturnCode::Ok;

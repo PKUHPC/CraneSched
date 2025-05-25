@@ -364,8 +364,8 @@ std::set<task_id_t> CtldClient::GetAllTaskStatusChangeId() {
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   CRANE_DEBUG("Requesting config from CraneCtld...");
 
-  crane::grpc::CranedTriggerReserveConnRequest req;
-  crane::grpc::CranedTriggerReserveConnResponse reply;
+  crane::grpc::CranedTriggerReverseConnRequest req;
+  crane::grpc::CranedTriggerReverseConnResponse reply;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = token;
 
@@ -380,13 +380,18 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
     return false;
   }
   if (!reply.ok()) {
-    CRANE_ERROR("CraneCtld #{} reject to config, current leader id: {}",
-                m_pre_leader_id_, reply.cur_leader_id());
+    CRANE_WARN("CraneCtld #{} reject to config, current leader id: {}",
+               m_pre_leader_id_, reply.cur_leader_id());
     if (reply.cur_leader_id() >= 0)
       m_cur_leader_id_ = reply.cur_leader_id();
-    else
-      CRANE_ERROR("CraneCtld #{} response a wrong leader id: {}.",
-                  m_pre_leader_id_, reply.cur_leader_id());
+    else {
+      int next_id = (m_pre_leader_id_ + 1) % m_ctld_channels_.size();
+      m_cur_leader_id_ = next_id;
+      CRANE_WARN(
+          "CraneCtld #{} response a wrong leader id: {}, try to connect to "
+          "CraneCtlD #{}",
+          m_pre_leader_id_, reply.cur_leader_id(), next_id);
+    }
     return false;
   }
 
@@ -438,13 +443,20 @@ bool CtldClient::CranedRegister_(RegToken const& token,
     return false;
   }
   if (!ready_reply.ok()) {
-    CRANE_ERROR("CraneCtld #{} reject to register this craned node.",
-                m_pre_leader_id_);
+    CRANE_WARN(
+        "CraneCtld #{} reject to register this craned node, current leader id: "
+        "{}",
+        m_pre_leader_id_, ready_reply.cur_leader_id());
     if (ready_reply.cur_leader_id() >= 0)
       m_cur_leader_id_ = ready_reply.cur_leader_id();
-    else
-      CRANE_ERROR("CraneCtld #{} response a wrong leader id: {}.",
-                  m_pre_leader_id_, ready_reply.cur_leader_id());
+    else {
+      int next_id = (m_pre_leader_id_ + 1) % m_ctld_channels_.size();
+      m_cur_leader_id_ = next_id;
+      CRANE_WARN(
+          "CraneCtld #{} response a wrong leader id: {}, try to connect to "
+          "CraneCtlD #{}",
+          m_pre_leader_id_, ready_reply.cur_leader_id(), next_id);
+    }
     return false;
   }
 
@@ -478,6 +490,7 @@ void CtldClient::AsyncSendThread_() {
       m_pre_leader_id_ = cur_leader_id;
       prev_grpc_state = GRPC_CHANNEL_IDLE;
       prev_connected = false;
+      retry_time = 0;
     }
 
     grpc_state = m_ctld_channels_[m_pre_leader_id_]->GetState(true);
@@ -490,19 +503,20 @@ void CtldClient::AsyncSendThread_() {
 
       std::chrono::time_point ddl =
           std::chrono::system_clock::now() + std::chrono::seconds(3);
-      bool timeout = m_ctld_channels_[m_pre_leader_id_]->WaitForStateChange(
+      bool changed = m_ctld_channels_[m_pre_leader_id_]->WaitForStateChange(
           prev_grpc_state, ddl);
-      retry_time++;
 
-      if (retry_time >= 5) {
-        int next_id = (m_pre_leader_id_ + 1) % server_num;
-        CRANE_WARN("CraneCtlD #{} is offline, try to connect to CraneCtlD #{}",
-                   m_pre_leader_id_, next_id);
-        m_cur_leader_id_ = next_id;
-        retry_time = 0;
-      }
+      if (!changed) {  // Timeout
+        retry_time++;
 
-      if (!timeout) {
+        if (retry_time >= 5) {
+          int next_id = (m_pre_leader_id_ + 1) % server_num;
+          CRANE_WARN(
+              "CraneCtlD #{} is offline, try to connect to CraneCtlD #{}",
+              m_pre_leader_id_, next_id);
+          m_cur_leader_id_ = next_id;
+          retry_time = 0;
+        }
         continue;  // No state change. No need to update prev state.
       }
 
