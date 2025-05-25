@@ -28,6 +28,15 @@ void CranedMetaContainer::CranedUp(
     const CranedId& craned_id,
     const crane::grpc::CranedRemoteMeta& remote_meta) {
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
+
+  if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
+    std::vector<crane::NetworkInterface> interfaces;
+    for (const auto& interface : remote_meta.network_interfaces()) {
+      interfaces.emplace_back(interface);
+    }
+    g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
+  }
+
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
@@ -617,7 +626,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   };
 
   if (request.filter_craned_control_states().empty() ||
-      request.filter_craned_resource_states().empty()) {
+      request.filter_craned_resource_states().empty() ||
+      request.filter_craned_power_states().empty()) {
     reply.set_ok(true);
     return reply;
   }
@@ -631,6 +641,11 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   bool resource_filters[resource_state_num] = {false};
   for (const auto& it : request.filter_craned_resource_states())
     resource_filters[static_cast<int>(it)] = true;
+
+  const int power_state_num = crane::grpc::CranedPowerState_ARRAYSIZE;
+  bool power_filters[power_state_num] = {false};
+  for (const auto& it : request.filter_craned_power_states())
+    power_filters[static_cast<int>(it)] = true;
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and partition_meta_map_ must be locked before craned_meta_map_
@@ -669,7 +684,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     }
 
     std::list<std::string> craned_name_lists[control_state_num]
-                                            [resource_state_num];
+                                            [resource_state_num]
+                                            [power_state_num];
 
     auto craned_rng =
         craned_ids |
@@ -705,22 +721,26 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
         resource_state = crane::grpc::CranedResourceState::CRANE_DOWN;
       }
       if (control_filters[static_cast<int>(control_state)] &&
-          resource_filters[static_cast<int>(resource_state)]) {
-        craned_name_lists[static_cast<int>(control_state)]
-                         [static_cast<int>(resource_state)]
-                             .emplace_back(craned_meta->static_meta.hostname);
+          resource_filters[static_cast<int>(resource_state)] &&
+          power_filters[static_cast<int>(craned_meta->power_state)]) {
+        craned_name_lists[static_cast<int>(control_state)][static_cast<int>(
+            resource_state)][static_cast<int>(craned_meta->power_state)]
+            .emplace_back(craned_meta->static_meta.hostname);
       }
     });
 
     auto* craned_lists = part_info->mutable_craned_lists();
     for (int i = 0; i < control_state_num; i++) {
       for (int j = 0; j < resource_state_num; j++) {
-        auto* craned_list = craned_lists->Add();
-        craned_list->set_control_state(crane::grpc::CranedControlState(i));
-        craned_list->set_resource_state(crane::grpc::CranedResourceState(j));
-        craned_list->set_count(craned_name_lists[i][j].size());
-        craned_list->set_craned_list_regex(
-            util::HostNameListToStr(craned_name_lists[i][j]));
+        for (int k = 0; k < power_state_num; k++) {
+          auto* craned_list = craned_lists->Add();
+          craned_list->set_control_state(crane::grpc::CranedControlState(i));
+          craned_list->set_resource_state(crane::grpc::CranedResourceState(j));
+          craned_list->set_power_state(crane::grpc::CranedPowerState(k));
+          craned_list->set_count(craned_name_lists[i][j][k].size());
+          craned_list->set_craned_list_regex(
+              util::HostNameListToStr(craned_name_lists[i][j][k]));
+        }
       }
     }
   });
@@ -765,7 +785,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         if (g_config.Plugin.Enabled && craned_meta->drain != true) {
           // Set node event info
           event.set_node_name(craned_id);
-          event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
+          event.set_control_state(crane::grpc::CranedControlState::CRANE_DRAIN);
           event_list.emplace_back(event);
         }
 
@@ -777,7 +797,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         if (g_config.Plugin.Enabled && craned_meta->drain != false) {
           // Set node event info
           event.set_node_name(craned_id);
-          event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
+          event.set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
           event_list.emplace_back(event);
         }
 
@@ -942,6 +962,9 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     craned_info->set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
   }
 
+  // Set power state
+  craned_info->set_power_state(craned_meta.power_state);
+
   if (craned_meta.alive) {
     if (craned_meta.res_in_use.IsZero())
       craned_info->set_resource_state(
@@ -952,9 +975,10 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     else
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_MIX);
-  } else
+  } else {
     craned_info->set_resource_state(
         crane::grpc::CranedResourceState::CRANE_DOWN);
+  }
 
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),

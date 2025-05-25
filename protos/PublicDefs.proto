@@ -85,9 +85,24 @@ enum CranedResourceState {
   CRANE_DOWN = 3;
 }
 
+enum CranedPowerState {
+  CRANE_POWER_ACTIVE = 0;
+  CRANE_POWER_IDLE = 1;
+  CRANE_POWER_SLEEPING = 2;
+  CRANE_POWER_POWEREDOFF = 3;
+  CRANE_POWER_TO_SLEEPING = 4;
+  CRANE_POWER_WAKING_UP = 5;
+  CRANE_POWER_POWERING_ON = 6;
+  CRANE_POWER_POWERING_OFF = 7;
+}
+
 enum CranedControlState {
   CRANE_NONE = 0;
   CRANE_DRAIN = 1;
+  CRANE_POWEROFF = 2;
+  CRANE_SLEEP = 3;
+  CRANE_WAKE = 4;
+  CRANE_POWERON = 5;
 }
 
 enum TaskStatus {
@@ -324,10 +339,11 @@ message CranedInfo {
   string hostname = 1;
   CranedResourceState resource_state = 2;
   CranedControlState control_state = 3;
+  CranedPowerState power_state = 4;
 
-  ResourceInNode res_total = 4;
-  ResourceInNode res_avail = 5;
-  ResourceInNode res_alloc = 6;
+  ResourceInNode res_total = 5;
+  ResourceInNode res_avail = 6;
+  ResourceInNode res_alloc = 7;
 
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
@@ -360,8 +376,9 @@ message TrimmedPartitionInfo {
   message TrimmedCranedInfo {
     CranedResourceState resource_state = 1;
     CranedControlState control_state = 2;
-    uint32 count = 3;
-    string craned_list_regex = 4;
+    CranedPowerState power_state = 3;
+    uint32 count = 4;
+    string craned_list_regex = 5;
   }
 
   string name = 1;
@@ -554,6 +571,13 @@ message SystemRelInfo {
   string version = 3;
 }
 
+message NetworkInterface {
+  string name = 1;
+  string mac_address = 2;
+  repeated string ipv4_addresses = 3;
+  repeated string ipv6_addresses = 4;
+}
+
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;
@@ -562,4 +586,5 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp system_boot_time = 5;
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
+  repeated NetworkInterface network_interfaces = 8;
 }

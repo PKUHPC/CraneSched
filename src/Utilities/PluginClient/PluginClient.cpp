@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -195,6 +196,34 @@ grpc::Status PluginClient::NodeEventHook_(grpc::ClientContext* context,
   return m_stub_->NodeEventHook(context, *request, &reply);
 }
 
+grpc::Status PluginClient::SendUpdatePowerStateHook_(
+    grpc::ClientContext* context, google::protobuf::Message* msg) {
+  using crane::grpc::plugin::UpdatePowerStateHookReply;
+  using crane::grpc::plugin::UpdatePowerStateHookRequest;
+
+  auto* request = dynamic_cast<UpdatePowerStateHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+
+  UpdatePowerStateHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending UpdatePowerStateHook.");
+  return m_stub_->UpdatePowerStateHook(context, *request, &reply);
+}
+
+grpc::Status PluginClient::SendRegisterCranedHook_(
+    grpc::ClientContext* context, google::protobuf::Message* msg) {
+  using crane::grpc::plugin::RegisterCranedHookReply;
+  using crane::grpc::plugin::RegisterCranedHookRequest;
+
+  auto* request = dynamic_cast<RegisterCranedHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+
+  RegisterCranedHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending RegisterCranedHook.");
+  return m_stub_->RegisterCranedHook(context, *request, &reply);
+}
+
 void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
@@ -227,7 +256,7 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
 void PluginClient::CreateCgroupHookAsync(
     task_id_t task_id, const std::string& cgroup,
-    const crane::grpc::DedicatedResourceInNode& resource) {
+    const crane::grpc::ResourceInNode& resource) {
   auto request =
       std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
   request->set_task_id(task_id);
@@ -261,6 +290,34 @@ void PluginClient::NodeEventHookAsync(
   }
 
   HookEvent e{HookType::INSERT_EVENT,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
+
+void PluginClient::UpdatePowerStateHookAsync(
+    const std::string& craned_id, crane::grpc::CranedControlState state) {
+  auto request =
+      std::make_unique<crane::grpc::plugin::UpdatePowerStateHookRequest>();
+  request->set_craned_id(craned_id);
+  request->set_state(state);
+
+  HookEvent e{HookType::UPDATE_POWER_STATE,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
+
+void PluginClient::RegisterCranedHookAsync(
+    const std::string& craned_id,
+    const std::vector<crane::NetworkInterface>& interfaces) {
+  auto request =
+      std::make_unique<crane::grpc::plugin::RegisterCranedHookRequest>();
+  request->set_craned_id(craned_id);
+
+  for (const auto& interface : interfaces) {
+    request->mutable_network_interfaces()->Add()->CopyFrom(interface);
+  }
+
+  HookEvent e{HookType::REGISTER_CRANED,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }
