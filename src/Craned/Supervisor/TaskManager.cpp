@@ -392,13 +392,10 @@ void ExecutionInterface::SetupChildProcessCrunFd_(
   close(from_crun_pipe[1]);
 }
 
-void ExecutionInterface::SetupChildProcessCrunX11_(uint16_t port) {
+void ExecutionInterface::SetupChildProcessCrunX11_() {
   auto* inst_crun_meta = this->GetCrunMeta();
   const auto& proto_x11_meta =
       this->step->step_to_super.interactive_meta().x11_meta();
-
-  // Overwrite x11_port with real value from parent process.
-  inst_crun_meta->x11_port = port;
 
   std::string x11_target = proto_x11_meta.enable_forwarding()
                                ? g_config.CranedIdOfThisNode
@@ -598,6 +595,7 @@ CraneErrCode ContainerInstance::Prepare() {
                  fmt::format("{}", step->step_to_super.task_id());
   m_bundle_path_ = step->step_to_super.container();
   m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
+  // FIXME: Some env like x11 port are assigned later in spawn.
   m_env_ = GetChildProcessEnv_();
   // m_arguments_ is not applicable for container tasks.
 
@@ -1031,8 +1029,6 @@ CraneErrCode ProcessInstance::Prepare() {
         fmt::format("{} {}", step->step_to_super.batch_meta().interpreter(),
                     sh_path.string());
   }
-
-  m_env_ = GetChildProcessEnv_();
   // TODO: Currently we don't support arguments in batch scripts.
   // m_arguments_ = std::list<std::string>{};
 
@@ -1101,8 +1097,7 @@ CraneErrCode ProcessInstance::Spawn() {
       msg.set_x11_port(port);
       CRANE_TRACE("Crun task x11 enabled: {}, forwarding: {}, port: {}",
                   proto_ia_meta.x11(),
-                  proto_ia_meta.x11_meta().enable_forwarding(),
-                  this->GetCrunMeta()->x11_port);
+                  proto_ia_meta.x11_meta().enable_forwarding(), port);
     }
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
@@ -1210,8 +1205,12 @@ CraneErrCode ProcessInstance::Spawn() {
     if (step->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
-    if (step->IsCrun() && step->step_to_super.interactive_meta().x11())
-      SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
+    if (step->IsCrun() && step->step_to_super.interactive_meta().x11()) {
+      this->GetCrunMeta()->x11_port = msg.x11_port();
+      SetupChildProcessCrunX11_();
+    }
+
+    m_env_ = GetChildProcessEnv_();
 
     // Apply environment variables
     err = SetChildProcessEnv_();
@@ -1327,7 +1326,6 @@ TaskManager::TaskManager()
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
             CRANE_TRACE("Stopping supervisor.");
-            g_server->Shutdown();
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
