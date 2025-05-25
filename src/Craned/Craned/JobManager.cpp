@@ -71,6 +71,12 @@ JobManager::JobManager() {
     CRANE_ERROR("Failed to start the SIGTERM handle: {}", uv_err_name(rc));
   }
 
+  m_check_supervisor_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_check_supervisor_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanCheckSupervisorQueueCb_();
+      });
+
   m_check_supervisor_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_check_supervisor_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& handle) {
@@ -227,14 +233,20 @@ bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
     }
   }
 
-  absl::MutexLock lk(&m_release_cg_mtx_);
-
-  m_release_job_req_set_.insert(job_ids.begin(), job_ids.end());
-  if (!m_check_supervisor_timer_handle_->active())
-    m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{1000},
-                                            uvw::timer_handle::time{1000});
-
+  m_check_supervisor_queue_.enqueue(job_ids | std::ranges::to<std::vector>());
+  m_check_supervisor_async_handle_->send();
   return true;
+}
+
+void JobManager::EvCleanCheckSupervisorQueueCb_() {
+  std::vector<task_id_t> job_ids;
+  absl::MutexLock lk(&m_release_cg_mtx_);
+  while (m_check_supervisor_queue_.try_dequeue(job_ids)) {
+    m_release_job_req_set_.insert(job_ids.begin(), job_ids.end());
+    if (!m_check_supervisor_timer_handle_->active())
+      m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{1000},
+                                              uvw::timer_handle::time{1000});
+  }
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
@@ -667,8 +679,7 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
 
 bool JobManager::FreeJobInstanceAllocation_(
     const std::vector<task_id_t>& job_ids) {
-  CRANE_DEBUG("Freeing job [{}] instance allocation",
-              absl::StrJoin(job_ids, ","));
+  CRANE_DEBUG("Freeing job [{}] allocation.", absl::StrJoin(job_ids, ","));
   std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
   std::vector<uid_t> uid_vec;
   {

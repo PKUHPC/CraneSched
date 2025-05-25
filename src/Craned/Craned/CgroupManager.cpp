@@ -1487,7 +1487,7 @@ void CgroupV2::Destroy() {
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  g_cg_mgr->bpf_runtime_info.CloseBpfObj();
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
 }
 

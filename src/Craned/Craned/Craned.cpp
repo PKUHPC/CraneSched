@@ -669,6 +669,14 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
+  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+
+  g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr->SetSigintCallback([] {
+    g_server->Shutdown();
+    CRANE_INFO("Grpc Server Shutdown() was called.");
+  });
+
   g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
 
@@ -684,8 +692,6 @@ void GlobalVariableInit() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
-
-  g_job_mgr = std::make_unique<Craned::JobManager>();
 }
 
 void StartServer() {
@@ -701,7 +707,6 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
   // Make sure grpc server is ready to receive requests.
@@ -753,12 +758,6 @@ void StartServer() {
 
   g_cg_mgr->Recover(running_jobs);
 
-  g_job_mgr = std::make_unique<Craned::JobManager>();
-  g_job_mgr->SetSigintCallback([] {
-    g_server->Shutdown();
-    CRANE_INFO("Grpc Server Shutdown() was called.");
-  });
-
   std::unordered_map<task_id_t, Craned::StepStatus> job_status_map;
   for (const auto& job_id : running_jobs) {
     job_status_map.emplace(
@@ -783,9 +782,11 @@ void StartServer() {
   g_job_mgr->Wait();
   g_job_mgr.reset();
   g_cg_mgr.reset();
-  g_ctld_client_sm.reset();
 
   g_ctld_client.reset();
+  // After ctld client destroyed, it is ok to destroy ctld client state machine
+  g_ctld_client_sm.reset();
+
   g_supervisor_keeper.reset();
 
   g_thread_pool->wait();
