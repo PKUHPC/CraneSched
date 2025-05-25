@@ -73,7 +73,7 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   if (!std::filesystem::exists(g_config.Supervisor.Path)) {
     fmt::print(stderr, "csupervisor {} does not exist\n",
                g_config.Supervisor.Path);
-    std::exit(0);
+    std::exit(1);
   }
   g_config.Supervisor.DebugLevel =
       YamlValueOr(supervisor_config["DebugLevel"], "trace");
