@@ -740,6 +740,7 @@ void StartServer() {
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
+  // Make sure grpc server is ready to receive requests.
   g_craned_for_pam_server =
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 

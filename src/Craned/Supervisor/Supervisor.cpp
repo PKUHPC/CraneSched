@@ -182,6 +182,9 @@ void GlobalVariableInit() {
 
   g_server = std::make_unique<Supervisor::SupervisorServer>();
 
+  // Make sure grpc server is ready to receive requests.
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();
   if (!ok) std::abort();
@@ -200,7 +203,6 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
   CRANE_INFO("Supervisor started.");
-  std::this_thread::sleep_for(std::chrono::seconds(1));
 
   g_server->Wait();
   g_server.reset();
