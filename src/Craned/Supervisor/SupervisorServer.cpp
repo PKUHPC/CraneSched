@@ -52,22 +52,14 @@ grpc::Status Supervisor::SupervisorServiceImpl::QueryEnvMap(
   return Status::OK;
 }
 
-grpc::Status Supervisor::SupervisorServiceImpl::CheckTaskStatus(
+grpc::Status Supervisor::SupervisorServiceImpl::CheckStatus(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::CheckTaskStatusRequest* request,
-    crane::grpc::supervisor::CheckTaskStatusReply* response) {
-  auto pid_future = g_task_mgr->CheckTaskStatusAsync();
-  pid_future.wait();
-  auto pid_expt = pid_future.get();
-  if (pid_expt.has_value()) {
-    response->set_job_id(g_config.JobId);
-    response->set_pid(pid_expt.value());
-    response->set_ok(true);
-    return Status::OK;
-  } else {
-    response->set_ok(false);
-    return Status::OK;
-  }
+    const crane::grpc::supervisor::CheckStatusRequest* request,
+    crane::grpc::supervisor::CheckStatusReply* response) {
+  response->set_job_id(g_config.JobId);
+  response->set_supervisor_pid(getpid());
+  response->set_ok(true);
+  return Status::OK;
 }
 
 grpc::Status Supervisor::SupervisorServiceImpl::ChangeTaskTimeLimit(
