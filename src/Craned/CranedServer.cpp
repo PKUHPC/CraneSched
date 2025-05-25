@@ -284,7 +284,9 @@ grpc::Status CranedServiceImpl::UpdateLeaderId(
     grpc::ServerContext *context,
     const crane::grpc::UpdateLeaderIdRequest *request,
     google::protobuf::Empty *response) {
-  g_ctld_client->SetLeaderId(request->cur_leader_id());
+  if (request->cur_leader_id() >= 0 &&
+      request->cur_leader_id() < g_config.ControlMachines.size())
+    g_ctld_client->SetLeaderId(request->cur_leader_id());
   return Status::OK;
 }
 

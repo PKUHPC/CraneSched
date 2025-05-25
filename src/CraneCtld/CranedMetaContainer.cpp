@@ -276,13 +276,12 @@ void CranedMetaContainer::MarkAllCranedDown() {
   auto craned_meta_map = craned_meta_map_.GetMapExclusivePtr();
 
   bool changed = false;
-  for (auto& [craned_id, craned_meta] : *craned_meta_map) {
+  for (auto& craned_meta : *craned_meta_map | std::views::values) {
     auto* node_meta = craned_meta.RawPtr();
     if (node_meta->alive) {
       changed = true;
       node_meta->alive = false;
-      node_meta->res_total.SetToZero();
-      node_meta->res_avail.SetToZero();
+      node_meta->res_avail = node_meta->res_total;
       node_meta->res_in_use.SetToZero();
       node_meta->rn_task_res_map.clear();
     }
@@ -290,12 +289,11 @@ void CranedMetaContainer::MarkAllCranedDown() {
 
   if (!changed) return;
 
-  for (auto& [part_id, part_meta] : *partition_meta_map) {
+  for (auto& part_meta : *partition_meta_map | std::views::values) {
     auto part_global_meta = part_meta.RawPtr()->partition_global_meta;
     if (part_global_meta.alive_craned_cnt > 0) {
       part_global_meta.alive_craned_cnt = 0;
-      part_global_meta.res_total.SetToZero();
-      part_global_meta.res_avail.SetToZero();
+      part_global_meta.res_avail = part_global_meta.res_total;
       part_global_meta.res_in_use.SetToZero();
     }
   }

@@ -169,6 +169,7 @@ class CranedKeeper {
   void PutNodeIntoUnavailSet(const std::string &crane_id,
                              const RegToken &token);
 
+  // Time-consuming operation
   void BroadcastLeaderId(int cur_leader_id);
 
  private:

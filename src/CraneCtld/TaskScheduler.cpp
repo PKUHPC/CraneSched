@@ -388,6 +388,9 @@ bool TaskScheduler::RestoreFromEmbeddedDb() {
       CRANE_ERROR("Failed to call g_embedded_db_client->PurgeEndedTasks()");
     }
   }
+
+  m_task_map_ready_.store(true, std::memory_order_release);
+
   return true;
 }
 
@@ -1844,6 +1847,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
+  if (approximate_size == 0) return;
 
   std::vector<SubmitQueueElem> accepted_tasks;
   std::vector<TaskInCtld*> accepted_task_ptrs;
@@ -1860,6 +1864,13 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   } else {
     accepted_size = approximate_size;
     rejected_size = 0;
+  }
+
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Rejecting all tasks in submit queue because this node is not leader.");
+    accepted_size = 0;
+    rejected_size = approximate_size;
   }
 
   size_t accepted_actual_size;

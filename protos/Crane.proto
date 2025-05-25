@@ -48,7 +48,7 @@ message CranedTriggerReverseConnRequest {
   google.protobuf.Timestamp token = 2;
 }
 
-message CranedTriggerReserveConnResponse {
+message CranedTriggerReverseConnResponse {
   bool ok = 1;
   int32 cur_leader_id = 2;
 }
@@ -995,7 +995,7 @@ service CraneCtldForInternal {
 
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReserveConnRequest) returns (CranedTriggerReserveConnResponse);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (CranedTriggerReverseConnResponse);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */

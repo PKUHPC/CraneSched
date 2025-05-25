@@ -474,6 +474,23 @@ class TaskScheduler {
 
   bool RestoreFromEmbeddedDb();
 
+  bool GetTaskMapReadyFlag() const {
+    return m_task_map_ready_.load(std::memory_order_acquire);
+  }
+
+  void ResetTaskData() {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+    LockGuard indexes_guard(&m_task_indexes_mtx_);
+
+    m_pending_task_map_.clear();
+    m_pending_map_cached_size_.store(0, std::memory_order::release);
+    m_running_task_map_.clear();
+    m_node_to_tasks_map_.clear();
+
+    m_task_map_ready_.store(false, std::memory_order_acquire);
+  }
+
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
   /// \return The future is set to 0 if task submission is failed.
@@ -619,6 +636,8 @@ class TaskScheduler {
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
       ABSL_GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_task_map_mtx_);
+
+  std::atomic<bool> m_task_map_ready_ = false;
 
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
