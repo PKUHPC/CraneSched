@@ -295,11 +295,13 @@ void PluginClient::NodeEventHookAsync(
 }
 
 void PluginClient::UpdatePowerStateHookAsync(
-    const std::string& craned_id, crane::grpc::CranedControlState state) {
+    const std::string& craned_id, crane::grpc::CranedControlState state,
+    bool EnableAutoPowerControl) {
   auto request =
       std::make_unique<crane::grpc::plugin::UpdatePowerStateHookRequest>();
   request->set_craned_id(craned_id);
   request->set_state(state);
+  request->set_enable_auto_power_control(EnableAutoPowerControl);
 
   HookEvent e{HookType::UPDATE_POWER_STATE,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
