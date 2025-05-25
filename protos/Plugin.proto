@@ -94,6 +94,7 @@ message NodeEventHookReply {
 message UpdatePowerStateHookRequest {
     string craned_id = 1;
     CranedControlState state = 2;
+    bool enable_auto_power_control = 3;
 }
 
 message UpdatePowerStateHookReply {
