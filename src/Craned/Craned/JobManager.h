@@ -200,6 +200,7 @@ class JobManager {
                       absl::flat_hash_set<task_id_t>>
       m_uid_to_job_ids_map_;
 
+  void EvCleanCheckSupervisorQueueCb_();
   bool EvCheckSupervisorRunning_();
 
   void EvSigchldCb_();
@@ -227,6 +228,8 @@ class JobManager {
   absl::Mutex m_release_cg_mtx_;
   std::unordered_set<task_id_t> m_release_job_req_set_
       ABSL_GUARDED_BY(m_release_cg_mtx_);
+  ConcurrentQueue<std::vector<task_id_t>> m_check_supervisor_queue_;
+  std::shared_ptr<uvw::async_handle> m_check_supervisor_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
