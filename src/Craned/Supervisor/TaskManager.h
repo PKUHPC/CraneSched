@@ -120,7 +120,7 @@ class ExecutionInterface {
                                         const std::vector<int>& to_crun_pipe,
                                         const std::vector<int>& from_crun_pipe,
                                         int crun_pty_fd);
-  virtual void SetupChildProcessCrunX11_(uint16_t port);
+  virtual void SetupChildProcessCrunX11_();
   virtual CraneErrCode SetChildProcessEnv_() const;
   virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 

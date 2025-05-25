@@ -166,6 +166,7 @@ void CtldClientStateMachine::EvGrpcTimeout() {
 void CtldClientStateMachine::SubscribeConfigure(
     std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
     std::future<void>&& conf_future, bool consume) {
+  absl::MutexLock lk(&m_subscribe_mutex_);
   m_configure_subscribe_cb_list_.emplace_back(
       SubscribeConfigureArg{arg, std::move(conf_future), consume});
 }
@@ -188,20 +189,25 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 
 void CtldClientStateMachine::NotifyConfigureSubscribe_(
     const crane::grpc::ConfigureCranedRequest& configure_req) {
+  absl::MutexLock lk(&m_subscribe_mutex_);
   std::latch latch(m_configure_subscribe_cb_list_.size());
+  absl::Mutex mtx;
+  std::vector<std::list<SubscribeConfigureArg>::iterator> cb_list_to_erase;
   for (auto it = m_configure_subscribe_cb_list_.begin();
        it != m_configure_subscribe_cb_list_.end(); ++it) {
-    g_thread_pool->detach_task([it, &configure_req, &latch, this] {
-      absl::MutexLock lk(&m_mtx_);
-      it->cb(configure_req);
-      it->conf_future.wait();
-      if (it->consume) {
-        m_configure_subscribe_cb_list_.erase(it);
-      }
-      latch.count_down();
-    });
+    g_thread_pool->detach_task(
+        [it, &configure_req, &latch, &mtx, &cb_list_to_erase, this] {
+          it->cb(configure_req);
+          it->conf_future.wait();
+          if (it->consume) {
+            absl::MutexLock lk(&mtx);
+            cb_list_to_erase.push_back(it);
+          }
+          latch.count_down();
+        });
   }
   latch.wait();
+  for (auto it : cb_list_to_erase) m_configure_subscribe_cb_list_.erase(it);
 }
 
 void CtldClientStateMachine::ActionConfigure_(
