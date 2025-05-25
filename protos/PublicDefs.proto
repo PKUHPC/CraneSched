@@ -103,6 +103,7 @@ enum CranedControlState {
   CRANE_SLEEP = 3;
   CRANE_WAKE = 4;
   CRANE_POWERON = 5;
+  CRANE_UNREGISTER_POWER = 6;
 }
 
 enum TaskStatus {

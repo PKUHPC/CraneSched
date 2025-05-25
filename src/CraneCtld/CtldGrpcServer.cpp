@@ -383,7 +383,8 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   if (request->new_state() == crane::grpc::CRANE_POWEROFF ||
       request->new_state() == crane::grpc::CRANE_SLEEP ||
       request->new_state() == crane::grpc::CRANE_WAKE ||
-      request->new_state() == crane::grpc::CRANE_POWERON) {
+      request->new_state() == crane::grpc::CRANE_POWERON ||
+      request->new_state() == crane::grpc::CRANE_UNREGISTER_POWER) {
     if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
       for (const auto &crane_id : request->craned_ids()) {
         response->add_not_modified_nodes(crane_id);
@@ -394,6 +395,13 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     }
 
     for (const auto &crane_id : request->craned_ids()) {
+      if (request->new_state() == crane::grpc::CRANE_UNREGISTER_POWER) {
+        g_plugin_client->UpdatePowerStateHookAsync(crane_id,
+                                                   request->new_state());
+        response->add_modified_nodes(crane_id);
+        continue;
+      }
+
       auto craned_meta = g_meta_container->GetCranedMetaPtr(crane_id);
       if (!craned_meta) {
         response->add_not_modified_nodes(crane_id);
