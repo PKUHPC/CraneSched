@@ -200,9 +200,10 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
   CRANE_INFO("Supervisor started.");
-  std::this_thread::sleep_for(std::chrono::seconds(10));
+  std::this_thread::sleep_for(std::chrono::seconds(1));
 
   g_server->Wait();
+  g_server.reset();
   g_task_mgr->Wait();
   g_task_mgr.reset();
 

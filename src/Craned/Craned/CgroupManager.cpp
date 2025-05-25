@@ -193,16 +193,16 @@ CraneErrCode CgroupManager::Recover(
   std::set<task_id_t> cg_running_job_ids{};
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::CPU_CONTROLLER));
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::MEMORY_CONTROLLER));
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::DEVICES_CONTROLLER));
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_running_job_ids = GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath);
+    cg_running_job_ids = GetJobIdsFromCgroupV2_(CgConstant::kRootCgroupFullPath);
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
-        GetJobBpfMapCgroupsV2(CgConstant::kRootCgroupFullPath);
+        GetJobBpfMapCgroupsV2_(CgConstant::kRootCgroupFullPath);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
       return CraneErrCode::ERR_EBPF;
@@ -567,7 +567,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
@@ -592,7 +592,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
   return job_ids;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
     const std::string &root_cgroup_path) {
   std::set<task_id_t> job_ids;
   try {
@@ -611,7 +611,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
   return job_ids;
 }
 
-std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
+std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
     const std::string &root_cgroup_path) {
   std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
@@ -640,9 +640,9 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
 #ifdef CRANE_ENABLE_BPF
 
 CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
+CgroupManager::GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
-      GetCgJobIdMapCgroupV2(root_cgroup_path);
+      GetCgJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
