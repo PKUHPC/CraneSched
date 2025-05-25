@@ -38,10 +38,10 @@ struct StepInstance {
   static EnvMap GetStepEnvMap(const StepToD& step);
 };
 
-struct JobStatus {
+struct StepStatus {
   JobToD job_to_d;
   StepToD step_to_d;
-  pid_t task_pid;
+  pid_t super_pid;
 };
 
 // Job allocation info
@@ -82,7 +82,7 @@ class JobManager {
   JobManager();
 
   CraneErrCode Recover(
-      std::unordered_map<task_id_t, JobStatus>&& job_status_map);
+      std::unordered_map<task_id_t, StepStatus>&& job_status_map);
 
   ~JobManager();
 
@@ -177,7 +177,7 @@ class JobManager {
    * 3. A task cannot be created because of various reasons.
    *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
    */
-  void ActivateTaskStatusChangeAsync_(uint32_t task_id,
+  void ActivateTaskStatusChangeAsync_(task_id_t task_id,
                                       crane::grpc::TaskStatus new_status,
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);

@@ -759,10 +759,12 @@ void StartServer() {
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
       g_supervisor_keeper->Init();
 
+  // All jobs from supervisor
   std::unordered_set<task_id_t> task_ids_supervisor;
-  std::unordered_map<task_id_t, pid_t> job_id_pid_map =
+  // JobId,supervisor pid
+  std::unordered_map<task_id_t, pid_t> job_super_pid_map =
       steps.value_or(std::unordered_map<task_id_t, pid_t>());
-  for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
+  for (auto job_id : job_super_pid_map | std::ranges::views::keys) {
     task_ids_supervisor.emplace(job_id);
   }
   if (!task_ids_supervisor.empty()) {
@@ -773,7 +775,7 @@ void StartServer() {
   std::unordered_map<task_id_t, JobToD> job_map;
   std::unordered_map<task_id_t, Craned::StepToD> step_map;
   std::unordered_set<task_id_t> running_jobs;
-  std::vector<task_id_t> nonexistent_jobs;
+  std::vector<task_id_t> invalid_jobs;
 
   auto grpc_config_req = config_future.get();
   job_map.reserve(grpc_config_req.job_map_size());
@@ -784,9 +786,10 @@ void StartServer() {
       job_map.emplace(job_id, job_spec);
       step_map.emplace(job_id, grpc_config_req.job_tasks_map().at(job_id));
     } else {
-      nonexistent_jobs.emplace_back(job_id);
+      invalid_jobs.emplace_back(job_id);
     }
   }
+
   g_cg_mgr->Recover(running_jobs);
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
@@ -797,13 +800,13 @@ void StartServer() {
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
 
-  std::unordered_map<task_id_t, Craned::JobStatus> job_status_map;
+  std::unordered_map<task_id_t, Craned::StepStatus> job_status_map;
   for (const auto& job_id : running_jobs) {
     job_status_map.emplace(
         // For now, each job only have one step
-        job_id, Craned::JobStatus{.job_to_d = job_map[job_id],
-                                  .step_to_d = step_map[job_id],
-                                  .task_pid = job_id_pid_map[job_id]});
+        job_id, Craned::StepStatus{.job_to_d = job_map[job_id],
+                                   .step_to_d = step_map[job_id],
+                                   .super_pid = job_super_pid_map[job_id]});
   }
   g_job_mgr->Recover(std::move(job_status_map));
 

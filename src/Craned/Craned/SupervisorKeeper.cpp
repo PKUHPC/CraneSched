@@ -47,15 +47,15 @@ CraneExpected<EnvMap> SupervisorClient::QueryStepEnv() {
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
-CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
+CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckStatus() {
   ClientContext context;
-  crane::grpc::supervisor::CheckTaskStatusRequest request;
-  crane::grpc::supervisor::CheckTaskStatusReply reply;
-  auto ok = m_stub_->CheckTaskStatus(&context, request, &reply);
+  crane::grpc::supervisor::CheckStatusRequest request;
+  crane::grpc::supervisor::CheckStatusReply reply;
+  auto ok = m_stub_->CheckStatus(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
-    return std::pair{reply.job_id(), reply.pid()};
+    return std::pair{reply.job_id(), reply.supervisor_pid()};
   } else {
-    CRANE_WARN("CheckTaskStatus failed: reply {},{}", reply.ok(),
+    CRANE_WARN("CheckStatus failed: reply {},{}", reply.ok(),
                ok.error_message());
     return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
@@ -103,33 +103,33 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
           files.emplace_back(it.path());
         }
       }
-      std::unordered_map<task_id_t, pid_t> tasks;
-      tasks.reserve(files.size());
-      std::latch all_supervisor_reply(files.size());
+      std::unordered_map<task_id_t, pid_t> supervisor_pid;
+      supervisor_pid.reserve(files.size());
+      std::latch latch(files.size());
       absl::Mutex mtx;
       for (const auto& file : files) {
         g_thread_pool->detach_task(
-            [this, file, &all_supervisor_reply, &mtx, &tasks]() {
+            [this, file, &latch, &mtx, &supervisor_pid]() {
               std::shared_ptr stub = std::make_shared<SupervisorClient>();
               auto sock_path = fmt::format("unix://{}", file.string());
               stub->InitChannelAndStub(sock_path);
-              CraneExpected<std::pair<task_id_t, pid_t>> task_status =
-                  stub->CheckTaskStatus();
-              if (!task_status) {
+              CraneExpected<std::pair<task_id_t, pid_t>> supervisor_status =
+                  stub->CheckStatus();
+              if (!supervisor_status) {
                 CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
                             file.string());
                 std::filesystem::remove(file);
-                all_supervisor_reply.count_down();
+                latch.count_down();
                 return;
               }
               absl::WriterMutexLock lk(&mtx);
-              m_supervisor_map.emplace(task_status.value().first, stub);
-              tasks.emplace(task_status.value());
-              all_supervisor_reply.count_down();
+              m_supervisor_map.emplace(supervisor_status.value().first, stub);
+              supervisor_pid.emplace(supervisor_status.value());
+              latch.count_down();
             });
       }
-      all_supervisor_reply.wait();
-      return tasks;
+      latch.wait();
+      return supervisor_pid;
     } else {
       CRANE_WARN("Supervisor socket dir dose not exit, skip recovery.");
       return {};

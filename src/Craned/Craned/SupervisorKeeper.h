@@ -31,7 +31,7 @@ class SupervisorClient {
  public:
   CraneExpected<pid_t> ExecuteTask();
   CraneExpected<EnvMap> QueryStepEnv();
-  CraneExpected<std::pair<task_id_t, pid_t>> CheckTaskStatus();
+  CraneExpected<std::pair<task_id_t, pid_t>> CheckStatus();
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);

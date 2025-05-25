@@ -125,14 +125,15 @@ JobManager::JobManager() {
 }
 
 CraneErrCode JobManager::Recover(
-    std::unordered_map<task_id_t, JobStatus>&& job_status_map) {
+    std::unordered_map<task_id_t, StepStatus>&& job_status_map) {
   for (auto& [job_id, step_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
     uid_t uid = step_status.job_to_d.uid;
     step_status.job_to_d.recovered = true;
     auto job_instance = JobInstance(step_status.job_to_d);
     auto execution = std::make_unique<StepInstance>(
-        StepInstance{.step_to_d = step_status.step_to_d});
+        StepInstance{.step_to_d = step_status.step_to_d,
+                     .supervisor_pid = step_status.super_pid});
     // TODO:replace this with step_id
     job_instance.step_map.emplace(0, std::move(execution));
     job_instance.cgroup =
@@ -810,7 +811,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
 }
 
 void JobManager::ActivateTaskStatusChangeAsync_(
-    uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    task_id_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   TaskStatusChangeQueueElem status_change{task_id, new_status, exit_code};
   if (reason.has_value()) status_change.reason = std::move(reason);

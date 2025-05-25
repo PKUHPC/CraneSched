@@ -65,6 +65,7 @@ void InitFromStdin(int argc, char** argv) {
   crane::grpc::supervisor::InitSupervisorRequest msg;
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
   if (!ok) {
+    fmt::print(stderr, "[Supervisor] Failed to recv message from Craned.\n");
     std::abort();
   }
 
@@ -107,6 +108,8 @@ void InitFromStdin(int argc, char** argv) {
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false);
   } else {
+    fmt::print(stderr, "[Supervisor] Invalid debug level: {}\n",
+               g_config.SupervisorDebugLevel);
     ok = false;
   }
 
