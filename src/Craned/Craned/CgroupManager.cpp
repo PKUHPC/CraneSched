@@ -199,7 +199,8 @@ CraneErrCode CgroupManager::Recover(
     cg_running_job_ids.merge(
         GetJobIdsFromCgroupV1_(CgConstant::Controller::DEVICES_CONTROLLER));
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_running_job_ids = GetJobIdsFromCgroupV2_(CgConstant::kRootCgroupFullPath);
+    cg_running_job_ids =
+        GetJobIdsFromCgroupV2_(CgConstant::kRootCgroupFullPath);
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
         GetJobBpfMapCgroupsV2_(CgConstant::kRootCgroupFullPath);
