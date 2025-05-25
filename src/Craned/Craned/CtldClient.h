@@ -123,7 +123,8 @@ class CtldClientStateMachine {
     bool consume;
   };
   std::list<SubscribeConfigureArg> m_configure_subscribe_cb_list_
-      ABSL_GUARDED_BY(m_mtx_);
+      ABSL_GUARDED_BY(m_subscribe_mutex_);
+  absl::Mutex m_subscribe_mutex_;
 
   absl::Mutex m_mtx_;
 };
