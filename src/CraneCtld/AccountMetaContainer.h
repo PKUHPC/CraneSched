@@ -39,6 +39,13 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
       std::shared_mutex>;
 
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, QosResource,
+      phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosResource>>, 4,
+      std::shared_mutex>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -74,13 +81,21 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
 
+  CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
+                                             const Qos& qos);
+
+  // lock user -> lock account -> lock qos
   std::array<std::mutex, kNumStripes> m_user_stripes_;
 
   std::array<std::mutex, kNumStripes> m_account_stripes_;
 
+  std::array<std::mutex, kNumStripes> m_qos_stripes_;
+
   ResourceMetaMap m_user_meta_map_;
 
   ResourceMetaMap m_account_meta_map_;
+
+  QosResourceMap m_qos_meta_map_;
 };
 
 }  // namespace Ctld
