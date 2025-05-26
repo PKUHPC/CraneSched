@@ -60,15 +60,15 @@ message ConfigureCranedRequest {
   google.protobuf.Timestamp token = 4;
 }
 
-//message CraneCtldRegisterRequest {
-//  int32 server_id = 1;
-//  string end_point = 2;
-//}
+// message CraneCtldRegisterRequest {
+//   int32 server_id = 1;
+//   string end_point = 2;
+// }
 //
-//message CraneCtldRegisterReply {
-//  bool ok = 1;
-//  bool already_registered = 2;
-//}
+// message CraneCtldRegisterReply {
+//   bool ok = 1;
+//   bool already_registered = 2;
+// }
 
 message CranedRegisterRequest {
   string craned_id = 1;
@@ -301,7 +301,7 @@ message QueryLeaderInfoReply {
   uint64 last_snapshot_log_term = 9;
 }
 
-message AddFollowerRequest{
+message AddFollowerRequest {
   oneof key {
     string host_name = 1;
     int32 server_id = 2;
@@ -313,19 +313,19 @@ message AddFollowerReply {
   string reason = 2;
 }
 
-message RemoveFollowerRequest{
+message RemoveFollowerRequest {
   oneof key {
     string host_name = 1;
     int32 server_id = 2;
   }
 }
 
-message RemoveFollowerReply{
+message RemoveFollowerReply {
   bool ok = 1;
   string reason = 2;
 }
 
-message YieldLeadershipRequest{
+message YieldLeadershipRequest {
   int32 next_server_id = 1;
 }
 
