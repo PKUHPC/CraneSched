@@ -60,6 +60,8 @@ class SupervisorKeeper {
 
   std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
 
+  std::set<task_id_t> GetRunningSteps();
+
  private:
   absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
       m_supervisor_map;

@@ -63,7 +63,7 @@ class CtldClientStateMachine {
 
   void SubscribeConfigure(
       std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
-      std::future<void>&& conf_future, bool consume);
+      std::future<void>&& conf_future);
 
   bool IsReadyNow();
 
@@ -118,7 +118,6 @@ class CtldClientStateMachine {
   struct SubscribeConfigureArg {
     std::function<void(const crane::grpc::ConfigureCranedRequest&)> cb;
     std::future<void> conf_future;
-    bool consume;
   };
   std::list<SubscribeConfigureArg> m_configure_subscribe_cb_list_
       ABSL_GUARDED_BY(m_subscribe_mutex_);
