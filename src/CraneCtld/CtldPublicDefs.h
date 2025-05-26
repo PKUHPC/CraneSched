@@ -1374,6 +1374,7 @@ struct QosResource {
   ResourceView resource;
   uint32_t jobs_count{};
   uint32_t submit_jobs_count{};
+  absl::Duration wall_time;
 };
 
 // Transaction

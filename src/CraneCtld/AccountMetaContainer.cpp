@@ -232,6 +232,7 @@ AccountMetaContainer::CheckAndMallocQosResource(const PdJobInScheduler& job) {
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
           auto& val = pair.second.at(job.qos);
           val.jobs_count++;
+          val.wall_time += task.time_limit;
         });
   }
 
@@ -457,6 +458,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
       if (qos.flags & QosFlags::DenyOnLimit) {
         if (val.jobs_count + 1 > qos.max_jobs) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+          return ;
+        }
+
+        if (val.wall_time + task.time_limit > qos.max_wall) {
+          result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
           return ;
         }
 
