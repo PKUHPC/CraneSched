@@ -500,9 +500,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
-    std::string slash = "/";
     std::filesystem::path cgroup_full_path =
-        CgConstant::kRootCgroupFullPath + slash + cgroup_string;
+        CgConstant::kRootCgroupFullPath / cgroup_string;
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_string,
                   std::strerror(errno));
