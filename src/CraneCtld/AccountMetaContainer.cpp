@@ -48,19 +48,19 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs_per_user == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
-  if (!CheckTres(resource_use, qos->max_tres_per_user))
+  if (!CheckTres_(resource_use, qos->max_tres_per_user))
     return CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
 
   if (qos->max_submit_jobs_per_account == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
-  if (!CheckTres(resource_use, qos->max_tres_per_account))
+  if (!CheckTres_(resource_use, qos->max_tres_per_account))
     return CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
 
   if (qos->max_submit_jobs == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
 
-  if (!CheckTres(resource_use, qos->max_tres))
+  if (!CheckTres_(resource_use, qos->max_tres))
     return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
 
   task.qos_priority = qos->priority;
@@ -388,7 +388,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (qos.flags & QosFlags::DenyOnLimit) {
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
-          if (!CheckTres(resource_use, qos.max_tres_per_user)) {
+          if (!CheckTres_(resource_use, qos.max_tres_per_user)) {
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
             return;
           }
@@ -417,7 +417,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
-            if (!CheckTres(resource_use, qos.max_tres_per_account)) {
+            if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
               return;
             }
@@ -445,7 +445,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
       if (qos.flags & QosFlags::DenyOnLimit) {
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
         resource_use += val.resource;
-        if (!CheckTres(resource_use, qos.max_tres))
+        if (!CheckTres_(resource_use, qos.max_tres))
           result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
       }
     });

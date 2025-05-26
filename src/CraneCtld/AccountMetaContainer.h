@@ -85,7 +85,7 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  bool CheckTres(const ResourceView& resource_req, const ResourceView& resource_total);
+  bool CheckTres_(const ResourceView& resource_req, const ResourceView& resource_total);
 
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
                                               const Qos& qos);
