@@ -106,27 +106,25 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
       std::unordered_map<task_id_t, pid_t> supervisor_pid;
       supervisor_pid.reserve(files.size());
       std::latch latch(files.size());
-      absl::Mutex mtx;
       for (const auto& file : files) {
-        g_thread_pool->detach_task(
-            [this, file, &latch, &mtx, &supervisor_pid]() {
-              std::shared_ptr stub = std::make_shared<SupervisorClient>();
-              auto sock_path = fmt::format("unix://{}", file.string());
-              stub->InitChannelAndStub(sock_path);
-              CraneExpected<std::pair<task_id_t, pid_t>> supervisor_status =
-                  stub->CheckStatus();
-              if (!supervisor_status) {
-                CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
-                            file.string());
-                std::filesystem::remove(file);
-                latch.count_down();
-                return;
-              }
-              absl::WriterMutexLock lk(&mtx);
-              m_supervisor_map.emplace(supervisor_status.value().first, stub);
-              supervisor_pid.emplace(supervisor_status.value());
-              latch.count_down();
-            });
+        g_thread_pool->detach_task([this, file, &latch, &supervisor_pid]() {
+          std::shared_ptr stub = std::make_shared<SupervisorClient>();
+          auto sock_path = fmt::format("unix://{}", file.string());
+          stub->InitChannelAndStub(sock_path);
+          CraneExpected<std::pair<task_id_t, pid_t>> supervisor_status =
+              stub->CheckStatus();
+          if (!supervisor_status) {
+            CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
+                        file.string());
+            std::filesystem::remove(file);
+            latch.count_down();
+            return;
+          }
+          absl::WriterMutexLock lk(&m_mutex);
+          m_supervisor_map.emplace(supervisor_status.value().first, stub);
+          supervisor_pid.emplace(supervisor_status.value());
+          latch.count_down();
+        });
       }
       latch.wait();
       return supervisor_pid;

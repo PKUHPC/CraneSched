@@ -92,10 +92,6 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-inline constexpr bool CgroupLimitDeviceRead = true;
-inline constexpr bool CgroupLimitDeviceWrite = true;
-inline constexpr bool CgroupLimitDeviceMknod = true;
-
 inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
 inline const char *kRootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
