@@ -555,8 +555,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
 
   if (g_config.Plugin.Enabled) {
     g_plugin_client->CreateCgroupHookAsync(job.job_id,
-                                           cg_unique_ptr->CgroupPathStr(),
-                                           res);
+                                           cg_unique_ptr->CgroupPathStr(), res);
   }
 
   CRANE_TRACE(
