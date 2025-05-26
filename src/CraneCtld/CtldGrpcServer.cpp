@@ -414,7 +414,8 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
       if ((requested_state == crane::grpc::CranedControlState::CRANE_WAKE ||
            requested_state == crane::grpc::CranedControlState::CRANE_POWERON) &&
           (current_state == crane::grpc::CranedPowerState::CRANE_POWER_IDLE ||
-           current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE)) {
+           current_state ==
+               crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE)) {
         response->add_not_modified_nodes(crane_id);
         response->add_not_modified_reasons(
             "Node is idle or running, don't need to wake up or poweron");
