@@ -297,6 +297,10 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
     }
+    if (task->TaskToCtld().has_signal_param()) {
+      mutable_task->mutable_signal_param()->CopyFrom(
+          task->TaskToCtld().signal_param());
+    }
   }
 
   return request;

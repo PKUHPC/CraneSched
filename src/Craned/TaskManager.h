@@ -314,15 +314,7 @@ class TaskManager {
                                             const uvw::timer_event&,
                                             uvw::timer_handle& h) {
       if (!instance) return;
-      int signal_number = 0;
-      if (instance->task.type() == crane::grpc::Batch) {
-        signal_number =
-            instance->task.batch_meta().signal_param().signal_number();
-      } else if (instance->IsCrun()) {
-        signal_number =
-            instance->task.interactive_meta().signal_param().signal_number();
-      }
-
+      int signal_number = instance->task.signal_param().signal_number();
       for (const auto& [_, pr_instance] : instance->processes) {
         KillProcessInstance_(pr_instance.get(), signal_number);
       }

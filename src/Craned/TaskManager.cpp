@@ -1111,26 +1111,16 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
     AddTerminationTimer_(instance, sec);
     CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
-    const crane::grpc::SignalParam* signal_param_ptr = nullptr;
-
-    if (instance->task.type() == crane::grpc::Batch) {
-      if (instance->task.batch_meta().has_signal_param()) {
-        signal_param_ptr = &instance->task.batch_meta().signal_param();
-      }
-    } else if (instance->IsCrun()) {
-      if (instance->task.interactive_meta().has_signal_param()) {
-        signal_param_ptr = &instance->task.interactive_meta().signal_param();
-      }
-    }
-
-    if (signal_param_ptr != nullptr) {
-      int64_t signal_sec = sec - signal_param_ptr->seconds_before_kill();
+    if (instance->task.has_signal_param()) {
+      auto signal_param = instance->task.signal_param();
+      int64_t signal_sec = sec - signal_param.seconds_before_kill();
       AddSignalTimer_(instance, signal_sec);
       CRANE_TRACE(
-          "Add a signal timer of seconds_before_kill {} signal_num {} for task "
+          "Add a signal timer of seconds_before_kill {} signal_num {} for "
+          "task "
           "#{}",
-          signal_param_ptr->seconds_before_kill(),
-          signal_param_ptr->signal_number(), task_id);
+          signal_param.seconds_before_kill(), signal_param.signal_number(),
+          task_id);
     }
 
     g_thread_pool->detach_task(
@@ -1548,27 +1538,15 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
             ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
         AddTerminationTimer_(task_instance, new_sec);
 
-        const crane::grpc::SignalParam* signal_param_ptr = nullptr;
-        if (task_instance->task.type() == crane::grpc::Batch) {
-          if (task_instance->task.batch_meta().has_signal_param()) {
-            signal_param_ptr = &task_instance->task.batch_meta().signal_param();
-          }
-        } else if (task_instance->IsCrun()) {
-          if (task_instance->task.interactive_meta().has_signal_param()) {
-            signal_param_ptr =
-                &task_instance->task.interactive_meta().signal_param();
-          }
-        }
-
-        if (signal_param_ptr != nullptr) {
-          int64_t signal_sec =
-              new_sec - signal_param_ptr->seconds_before_kill();
+        if (task_instance->task.has_signal_param()) {
+          auto signal_param = task_instance->task.signal_param();
+          int64_t signal_sec = new_sec - signal_param.seconds_before_kill();
           AddSignalTimer_(task_instance, signal_sec);
           CRANE_TRACE(
               "Add a new signal timer of seconds_before_kill {} signal_num "
               "{} new seconds {}, timelimt {}",
-              signal_param_ptr->seconds_before_kill(),
-              signal_param_ptr->signal_number(), signal_sec, new_sec);
+              signal_param.seconds_before_kill(), signal_param.signal_number(),
+              signal_sec, new_sec);
         }
       }
       elem.ok_prom.set_value(true);

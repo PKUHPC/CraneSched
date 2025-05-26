@@ -169,6 +169,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+  optional SignalParam signal_param = 38;
 }
 
 message TaskInEmbeddedDb {
@@ -243,6 +244,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  optional SignalParam signal_param = 25;
 }
 
 message BatchTaskAdditionalMeta {
@@ -250,7 +252,6 @@ message BatchTaskAdditionalMeta {
   optional bool open_mode_append = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
-  optional SignalParam signal_param = 5;
 }
 
 message X11Meta {
@@ -271,7 +272,6 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
-  optional SignalParam signal_param = 8;
 }
 
 message TaskInfo {
