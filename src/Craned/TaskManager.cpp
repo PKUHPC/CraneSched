@@ -1113,14 +1113,12 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
 
     const crane::grpc::SignalParam* signal_param_ptr = nullptr;
 
-    if (instance->task.payload_case() == crane::grpc::TaskToD::kBatchMeta) {
+    if (instance->task.type() == crane::grpc::Batch) {
       if (instance->task.batch_meta().has_signal_param()) {
         signal_param_ptr = &instance->task.batch_meta().signal_param();
       }
-    } else if (instance->task.payload_case() ==
-               crane::grpc::TaskToD::kInteractiveMeta) {
-      if (instance->IsCrun() &&
-          instance->task.interactive_meta().has_signal_param()) {
+    } else if (instance->IsCrun()) {
+      if (instance->task.interactive_meta().has_signal_param()) {
         signal_param_ptr = &instance->task.interactive_meta().signal_param();
       }
     }
@@ -1551,15 +1549,12 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
         AddTerminationTimer_(task_instance, new_sec);
 
         const crane::grpc::SignalParam* signal_param_ptr = nullptr;
-        if (task_instance->task.payload_case() ==
-            crane::grpc::TaskToD::kBatchMeta) {
+        if (task_instance->task.type() == crane::grpc::Batch) {
           if (task_instance->task.batch_meta().has_signal_param()) {
             signal_param_ptr = &task_instance->task.batch_meta().signal_param();
           }
-        } else if (task_instance->task.payload_case() ==
-                   crane::grpc::TaskToD::kInteractiveMeta) {
-          if (task_instance->IsCrun() &&
-              task_instance->task.interactive_meta().has_signal_param()) {
+        } else if (task_instance->IsCrun()) {
+          if (task_instance->task.interactive_meta().has_signal_param()) {
             signal_param_ptr =
                 &task_instance->task.interactive_meta().signal_param();
           }
