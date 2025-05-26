@@ -46,6 +46,13 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, uint32_t>>, 4,
       std::shared_mutex>;
 
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, QosResource,
+      phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosResource>>, 4,
+      std::shared_mutex>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -112,16 +119,19 @@ class AccountMetaContainer final {
 
   // Lock acquisition order:
   // Always acquire locks in the following order to avoid deadlocks:
-  // 1. Lock user(s) first.
+  // 1. Lock user first.
   // 2. Then lock account(s).
+  // 3. lock qos last.
   // For both users and accounts, acquire locks in ascending order by their IDs (from smallest to largest).
   std::array<std::mutex, kNumStripes> m_user_stripes_;
   std::array<std::mutex, kNumStripes> m_account_stripes_;
+  std::array<std::mutex, kNumStripes> m_qos_stripes_;
   std::vector<std::unique_lock<std::mutex>> LockAccountStripes_(
       const std::list<std::string>& account_chain);
 
   ResourceMetaMap m_user_meta_map_;
   ResourceMetaMap m_account_meta_map_;
+  QosResourceMap m_qos_meta_map_;
   UserToTaskNumMap m_user_to_task_map_;
 };
 
