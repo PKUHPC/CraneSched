@@ -385,16 +385,22 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
         if (iter == qos_to_resource_map.end()) return;
 
         auto& val = iter->second;
+
+        if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user) {
+          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+          return ;
+        }
+
         if (qos.flags & QosFlags::DenyOnLimit) {
+          if (val.jobs_count + 1 > qos.max_jobs_per_user) {
+            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+            return ;
+          }
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
-          if (!CheckTres_(resource_use, qos.max_tres_per_user)) {
+          if (!CheckTres_(resource_use, qos.max_tres_per_user))
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
-            return;
-          }
         }
-        if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user)
-          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
       });
 
   return result;
@@ -413,17 +419,23 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (iter == qos_to_resource_map.end()) return;
 
           auto& val = iter->second;
+
+          if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account) {
+            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+            return ;
+          }
+
           if (qos.flags & QosFlags::DenyOnLimit) {
+            if (val.jobs_count + 1 > qos.max_jobs_per_account) {
+              result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
+              return ;
+            }
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
-            if (!CheckTres_(resource_use, qos.max_tres_per_account)) {
+            if (!CheckTres_(resource_use, qos.max_tres_per_account))
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
-              return;
-            }
           }
-          if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
-            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
         });
   }
 
@@ -443,6 +455,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
         return;
       }
       if (qos.flags & QosFlags::DenyOnLimit) {
+        if (val.jobs_count + 1 > qos.max_jobs) {
+          result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+          return ;
+        }
+
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
         resource_use += val.resource;
         if (!CheckTres_(resource_use, qos.max_tres))
