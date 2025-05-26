@@ -20,6 +20,7 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/GrpcHelper.h"
 
 namespace Craned {
@@ -165,10 +166,10 @@ void CtldClientStateMachine::EvGrpcTimeout() {
 
 void CtldClientStateMachine::SubscribeConfigure(
     std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
-    std::future<void>&& conf_future, bool consume) {
+    std::future<void>&& conf_future) {
   absl::MutexLock lk(&m_subscribe_mutex_);
   m_configure_subscribe_cb_list_.emplace_back(
-      SubscribeConfigureArg{arg, std::move(conf_future), consume});
+      SubscribeConfigureArg{arg, std::move(conf_future)});
 }
 
 bool CtldClientStateMachine::IsReadyNow() {
@@ -192,22 +193,16 @@ void CtldClientStateMachine::NotifyConfigureSubscribe_(
   absl::MutexLock lk(&m_subscribe_mutex_);
   std::latch latch(m_configure_subscribe_cb_list_.size());
   absl::Mutex mtx;
-  std::vector<std::list<SubscribeConfigureArg>::iterator> cb_list_to_erase;
   for (auto it = m_configure_subscribe_cb_list_.begin();
        it != m_configure_subscribe_cb_list_.end(); ++it) {
-    g_thread_pool->detach_task(
-        [it, &configure_req, &latch, &mtx, &cb_list_to_erase, this] {
-          it->cb(configure_req);
-          it->conf_future.wait();
-          if (it->consume) {
-            absl::MutexLock lk(&mtx);
-            cb_list_to_erase.push_back(it);
-          }
-          latch.count_down();
-        });
+    g_thread_pool->detach_task([it, &configure_req, &latch, &mtx, this] {
+      it->cb(configure_req);
+      it->conf_future.wait();
+      latch.count_down();
+    });
   }
   latch.wait();
-  for (auto it : cb_list_to_erase) m_configure_subscribe_cb_list_.erase(it);
+  m_configure_subscribe_cb_list_.clear();
 }
 
 void CtldClientStateMachine::ActionConfigure_(
@@ -287,7 +282,7 @@ void CtldClient::Init() {
             exact_job_ids, arg.job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
 
-        std::set exact_task_ids = g_job_mgr->GetAllocatedJobs();
+        std::set exact_task_ids = g_supervisor_keeper->GetRunningSteps();
         std::set<task_id_t> lost_tasks{};
         std::set<task_id_t> invalid_tasks{};
         std::ranges::set_difference(

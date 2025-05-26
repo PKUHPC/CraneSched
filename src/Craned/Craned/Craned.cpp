@@ -754,7 +754,7 @@ void StartServer() {
       [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
         conf_promise.set_value(req);
       },
-      std::move(conf_done.get_future()), true);
+      std::move(conf_done.get_future()));
 
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
       g_supervisor_keeper->Init();

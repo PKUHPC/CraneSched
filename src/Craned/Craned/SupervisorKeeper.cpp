@@ -171,5 +171,10 @@ std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
     return nullptr;
   }
 }
+std::set<task_id_t> SupervisorKeeper::GetRunningSteps() {
+  absl::ReaderMutexLock lk(&m_mutex);
+  return m_supervisor_map | std::views::keys |
+         std::ranges::to<std::set<task_id_t>>();
+}
 
 }  // namespace Craned
