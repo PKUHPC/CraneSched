@@ -93,7 +93,7 @@ inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
 inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
-inline const char *kRootCgroupFullPath = "/sys/fs/cgroup";
+inline const std::filesystem::path kRootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -312,8 +312,6 @@ class BpfRuntimeInfo {
   size_t cgroup_count_;
 };
 #endif
-
-static std::optional<task_id_t> GetJobIdFromCg(const std::string &path);
 
 class Cgroup {
  public:
