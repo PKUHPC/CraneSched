@@ -318,6 +318,11 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
         return ;
       }
 
+      if (val.wall_time + task.time_limit > qos->max_wall) {
+        result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+        return ;
+      }
+
       ResourceView resource_use{task.requested_node_res_view * task.node_num};
       resource_use += val.resource;
       if (!CheckTres_(resource_use, qos->max_tres))
@@ -350,6 +355,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
           auto& val = pair.second[task.qos];
           val.resource += resource_use;
           val.jobs_count++;
+          val.wall_time += task.time_limit;
         });
   }
 }
@@ -390,6 +396,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         val.jobs_count--;
         val.resource -= resource_view;
         val.submit_jobs_count--;
+        val.wall_time -= task.time_limit;
       });
 
   for (const auto& account_name : task.account_chain) {
@@ -527,6 +534,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
       if (qos.flags & QosFlags::DenyOnLimit) {
         if (val.jobs_count + 1 > qos.max_jobs) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+          return ;
+        }
+
+        if (val.wall_time + task.time_limit > qos.max_wall) {
+          result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
           return ;
         }
 
