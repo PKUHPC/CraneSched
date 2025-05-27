@@ -24,17 +24,6 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
-  std::set<int> account_stripes;
-  {
-    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-    std::string account_name = task.account;
-    do {
-      task.account_chain.emplace_back(account_name);
-      account_stripes.insert(StripeForKey_(account_name));
-      account_name = account_map_ptr->at(account_name)->parent_account;
-    } while (!account_name.empty());
-  }
-
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -62,10 +51,14 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
+  std::set<int> account_stripes;
+  for (const auto& account_name : task.account_chain) {
+    account_stripes.insert(StripeForKey_(account_name));
+  }
+
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-
   std::list<std::unique_lock<std::mutex>> account_locks;
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
