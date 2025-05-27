@@ -19,7 +19,7 @@
 syntax = "proto3";
 
 package crane.grpc.plugin;
-option go_package = "/protos";
+option go_package = "CraneFrontEnd/generated/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/timestamp.proto";
@@ -92,21 +92,21 @@ message NodeEventHookReply {
 }
 
 message UpdatePowerStateHookRequest {
-    string craned_id = 1;
-    CranedControlState state = 2;
+  string craned_id = 1;
+  CranedControlState state = 2;
 }
 
 message UpdatePowerStateHookReply {
-    bool ok = 1;
+  bool ok = 1;
 }
 
 message RegisterCranedHookRequest {
-    string craned_id = 1;
-    repeated NetworkInterface network_interfaces = 2;
+  string craned_id = 1;
+  repeated NetworkInterface network_interfaces = 2;
 }
 
 message RegisterCranedHookReply {
-    bool ok = 1;
+  bool ok = 1;
 }
 
 service CranePluginD {

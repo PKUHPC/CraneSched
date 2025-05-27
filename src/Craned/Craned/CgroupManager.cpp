@@ -29,14 +29,16 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <dirent.h>
-
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
 namespace Craned {
+
+#ifdef CRANE_ENABLE_BPF
+BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
+#endif
 
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
@@ -183,13 +185,6 @@ CraneErrCode CgroupManager::Init() {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
   }
-
-  RmAllJobCgroups_();
-  if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-#ifdef CRANE_ENABLE_BPF
-    bpf_runtime_info.RmBpfDeviceMap();
-#endif
-  }
   return CraneErrCode::SUCCESS;
 }
 
@@ -198,16 +193,17 @@ CraneErrCode CgroupManager::Recover(
   std::set<task_id_t> cg_running_job_ids{};
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::CPU_CONTROLLER));
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::MEMORY_CONTROLLER));
     cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::DEVICES_CONTROLLER));
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_running_job_ids = GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath);
+    cg_running_job_ids =
+        GetJobIdsFromCgroupV2_(CgConstant::kRootCgroupFullPath);
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
-        GetJobBpfMapCgroupsV2(CgConstant::kRootCgroupFullPath);
+        GetJobBpfMapCgroupsV2_(CgConstant::kRootCgroupFullPath);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
       return CraneErrCode::ERR_EBPF;
@@ -504,9 +500,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
-    std::string slash = "/";
     std::filesystem::path cgroup_full_path =
-        CgConstant::kRootCgroupFullPath + slash + cgroup_string;
+        CgConstant::kRootCgroupFullPath / cgroup_string;
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_string,
                   std::strerror(errno));
@@ -555,8 +550,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
 
   if (g_config.Plugin.Enabled) {
     g_plugin_client->CreateCgroupHookAsync(job.job_id,
-                                           cg_unique_ptr->CgroupPathStr(),
-                                           res);
+                                           cg_unique_ptr->CgroupPathStr(), res);
   }
 
   CRANE_TRACE(
@@ -573,7 +567,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
@@ -598,7 +592,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
   return job_ids;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
     const std::string &root_cgroup_path) {
   std::set<task_id_t> job_ids;
   try {
@@ -617,7 +611,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
   return job_ids;
 }
 
-std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
+std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
     const std::string &root_cgroup_path) {
   std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
@@ -643,40 +637,12 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
   return cg_job_id_map;
 }
 
-void CgroupManager::RmAllJobCgroups_() {
-  std::set<task_id_t> job_ids;
-  if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    job_ids.merge(GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else {
-    CRANE_WARN("cgroup version is not supported.");
-  }
-  if (!job_ids.empty()) {
-    CRANE_INFO("Removed all cgroups for jobs: [{}].",
-               absl::StrJoin(job_ids, ", "));
-  }
-}
-
 #ifdef CRANE_ENABLE_BPF
 
 CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
+CgroupManager::GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
-      GetCgJobIdMapCgroupV2(root_cgroup_path);
+      GetCgJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
@@ -1201,7 +1167,6 @@ void BpfRuntimeInfo::CloseBpfObj() {
     bpf_obj_ = nullptr;
     bpf_prog_ = nullptr;
     dev_map_ = nullptr;
-    RmBpfDeviceMap();
   }
 }
 
@@ -1520,7 +1485,7 @@ void CgroupV2::Destroy() {
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  g_cg_mgr->bpf_runtime_info.CloseBpfObj();
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
 }
 
