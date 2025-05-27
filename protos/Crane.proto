@@ -840,14 +840,6 @@ message PowerStateChangeReply {
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
-  /* RPCs called from Craned */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
-
-  /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
-
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
@@ -892,6 +884,16 @@ service CraneCtld {
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
+}
+
+service CraneCtldForInternal {
+  /* RPCs called from Craned */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+
+  /* RPCs called from Cfored */
+  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
 }
 
 service Craned {

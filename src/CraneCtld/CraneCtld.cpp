@@ -28,12 +28,13 @@
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
-#include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
-#include "CtldGrpcServer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "RpcService/CranedKeeper.h"
+#include "RpcService/CtldForInternalServer.h"
+#include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
@@ -118,6 +119,13 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.CraneCtldListenPort =
           YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
+
+      if (config["CraneCtldForInternalListenPort"])
+        g_config.ListenConf.CraneCtldForInternalListenPort =
+            config["CraneCtldForInternalListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldForInternalListenPort =
+            kCtldForInternalDefaultPort;
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -794,6 +802,9 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+  g_ctld_for_internal_server =
+      std::make_unique<Ctld::CtldForInternalServer>(g_config.ListenConf);
 }
 
 void CreateFolders() {
@@ -826,6 +837,7 @@ int StartServer() {
   InitializeCtldGlobalVariables();
 
   g_ctld_server->Wait();
+  g_ctld_for_internal_server->Wait();
 
   DestroyCtldGlobalVariables();
 
