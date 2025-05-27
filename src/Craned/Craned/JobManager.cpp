@@ -42,9 +42,6 @@ EnvMap JobInstance::GetJobEnvMap(const JobToD& job) {
 }
 
 JobManager::JobManager() {
-  // Only called once. Guaranteed by singleton pattern.
-  m_instance_ptr_ = this;
-
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -160,7 +157,7 @@ JobManager::~JobManager() {
   CRANE_DEBUG("JobManager is being destroyed.");
   m_is_ending_now_ = true;
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  m_pending_thread_pool_tasks.wait();
+  m_pending_thread_pool_tasks_.wait();
 }
 
 bool JobManager::AllocJobs(std::vector<JobToD>&& jobs) {
@@ -279,10 +276,10 @@ bool JobManager::EvCheckSupervisorRunning_() {
     CRANE_TRACE("Supervisor for Job [{}] found to be exited",
                 absl::StrJoin(job_ids, ","));
 
-    m_pending_thread_pool_tasks.count_up();
+    m_pending_thread_pool_tasks_.count_up();
     g_thread_pool->detach_task([this, jobs = std::move(job_ids)] {
       FreeJobInstanceAllocation_(jobs);
-      m_pending_thread_pool_tasks.count_down();
+      m_pending_thread_pool_tasks_.count_down();
     });
   }
 
@@ -669,10 +666,10 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
                   execution->step_to_d.task_id());
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
     }
-    m_pending_thread_pool_tasks.count_up();
+    m_pending_thread_pool_tasks_.count_up();
     g_thread_pool->detach_task([this, execution = execution.release()] {
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
-      m_pending_thread_pool_tasks.count_down();
+      m_pending_thread_pool_tasks_.count_down();
     });
   }
 }
