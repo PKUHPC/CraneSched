@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -168,9 +168,11 @@ class CforedStreamWriter {
 
 class CtldForInternalServer;
 
-class CtldForInternalServiceImpl final : public crane::grpc::CraneCtldForInternal::Service {
-  public:
-   explicit CtldForInternalServiceImpl(CtldForInternalServer *server) : m_ctld_for_internal_server_(server) {}
+class CtldForInternalServiceImpl final
+    : public crane::grpc::CraneCtldForInternal::Service {
+ public:
+  explicit CtldForInternalServiceImpl(CtldForInternalServer *server)
+      : m_ctld_for_internal_server_(server) {}
 
   grpc::Status TaskStatusChange(
       grpc::ServerContext *context,
@@ -188,18 +190,19 @@ class CtldForInternalServiceImpl final : public crane::grpc::CraneCtldForInterna
       crane::grpc::CranedRegisterReply *response) override;
 
   grpc::Status CforedStream(
-        grpc::ServerContext *context,
-        grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                                 crane::grpc::StreamCforedRequest> *stream)
-        override;
+      grpc::ServerContext *context,
+      grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                               crane::grpc::StreamCforedRequest> *stream)
+      override;
 
-  private:
-   CtldForInternalServer *m_ctld_for_internal_server_;
+ private:
+  CtldForInternalServer *m_ctld_for_internal_server_;
 };
 
 class CtldForInternalServer {
  public:
-  explicit CtldForInternalServer(const Config::CraneCtldListenConf& listen_conf);
+  explicit CtldForInternalServer(
+      const Config::CraneCtldListenConf &listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
 
@@ -226,6 +229,6 @@ class CtldForInternalServer {
   friend class CtldForInternalServiceImpl;
 };
 
-} // namespace Ctld
+}  // namespace Ctld
 
 inline std::unique_ptr<Ctld::CtldForInternalServer> g_ctld_for_internal_server;

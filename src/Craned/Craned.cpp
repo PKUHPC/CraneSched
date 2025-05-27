@@ -197,7 +197,8 @@ void ParseConfig(int argc, char** argv) {
       }
 
       g_config.CraneCtldForInternalListenPort =
-          YamlValueOr(config["CraneCtldForInternalListenPort"], kCtldForInternalDefaultPort);
+          YamlValueOr(config["CraneCtldForInternalListenPort"],
+                      kCtldForInternalDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
