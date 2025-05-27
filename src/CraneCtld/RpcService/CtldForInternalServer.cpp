@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -239,8 +239,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             // g_task_scheduler->TerminateTask(), we should ignore this
             // callback since the task id has already been cleaned.
             auto iter =
-                m_ctld_for_internal_server_->m_cfored_running_tasks_.find(cfored_name);
-            if (iter != m_ctld_for_internal_server_->m_cfored_running_tasks_.end())
+                m_ctld_for_internal_server_->m_cfored_running_tasks_.find(
+                    cfored_name);
+            if (iter !=
+                m_ctld_for_internal_server_->m_cfored_running_tasks_.end())
               iter->second.erase(task_id);
             m_ctld_for_internal_server_->m_mtx_.Unlock();
           };
@@ -265,8 +267,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           } else {
             if (result.has_value()) {
               m_ctld_for_internal_server_->m_mtx_.Lock();
-              m_ctld_for_internal_server_->m_cfored_running_tasks_[cfored_name].emplace(
-                  result.value());
+              m_ctld_for_internal_server_->m_cfored_running_tasks_[cfored_name]
+                  .emplace(result.value());
               m_ctld_for_internal_server_->m_mtx_.Unlock();
             }
           }
@@ -327,11 +329,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
 void CtldForInternalServer::Shutdown() {
   m_server_->Shutdown(std::chrono::system_clock::now() +
-                   std::chrono::seconds(1));
+                      std::chrono::seconds(1));
 }
 
-CtldForInternalServer::CtldForInternalServer(const Config::CraneCtldListenConf &listen_conf) {
-
+CtldForInternalServer::CtldForInternalServer(
+    const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForInternalServiceImpl>(this);
 
   grpc::ServerBuilder builder;
@@ -340,12 +342,13 @@ CtldForInternalServer::CtldForInternalServer(const Config::CraneCtldListenConf &
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
-                                        listen_conf.CraneCtldForInternalListenPort,
-                                        listen_conf.Certs);
+    ServerBuilderAddTcpTlsListeningPort(
+        &builder, cranectld_listen_addr,
+        listen_conf.CraneCtldForInternalListenPort, listen_conf.Certs);
   } else {
-    ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
-                                             listen_conf.CraneCtldForInternalListenPort);
+    ServerBuilderAddTcpInsecureListeningPort(
+        &builder, cranectld_listen_addr,
+        listen_conf.CraneCtldForInternalListenPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
@@ -359,7 +362,6 @@ CtldForInternalServer::CtldForInternalServer(const Config::CraneCtldListenConf &
   CRANE_INFO("CraneCtldForInternal is listening on {}:{} and Tls is {}",
              cranectld_listen_addr, listen_conf.CraneCtldForInternalListenPort,
              listen_conf.UseTls);
-
 }
 
-} // namespace ctld
+}  // namespace Ctld

@@ -44,6 +44,8 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
 
+inline const char* const kDefaultHost = "0.0.0.0";
+
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";

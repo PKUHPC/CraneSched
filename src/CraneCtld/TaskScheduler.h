@@ -485,7 +485,7 @@ class TaskScheduler {
 
   CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
 
-  CraneExpected <std::future<task_id_t>> SubmitTaskToScheduler(
+  CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
