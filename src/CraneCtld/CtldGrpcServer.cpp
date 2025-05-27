@@ -1691,13 +1691,6 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
         return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
-
-    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-    std::string account_name = task->account;
-    do {
-      task->account_chain.emplace_back(account_name);
-      account_name = account_map_ptr->at(account_name)->parent_account;
-    } while (!account_name.empty());
   }
 
   if (!g_account_manager->CheckUserPermissionToPartition(
