@@ -44,6 +44,10 @@ class AccountMetaContainer final {
 
   CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
 
+  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+
+  void MallocQosResourceToRecoveredPendingTask(TaskInCtld& task);
+
   std::optional<std::string> CheckQosResource(const TaskInCtld& task);
 
   void MallocQosResource(const TaskInCtld& task);
