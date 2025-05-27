@@ -141,6 +141,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
   if (!result) return "QOSResourceLimit";
 
   for (const auto& account_name : task.account_chain) {
+    CRANE_ASSERT(m_account_meta_map_.contains(account_name));
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -166,6 +167,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
       });
 
   for (const auto& account_name : task.account_chain) {
+    CRANE_ASSERT(m_account_meta_map_.contains(account_name));
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
