@@ -1377,6 +1377,15 @@ CraneExpected<void> AccountManager::CheckQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
+  {
+    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+    std::string account_name = task->account;
+    do {
+      task->account_chain.emplace_back(account_name);
+      account_name = account_map_ptr->at(account_name)->parent_account;
+    } while (!account_name.empty());
+  }
+
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
     CRANE_ERROR(
