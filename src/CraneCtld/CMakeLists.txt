@@ -1,5 +1,3 @@
-
-add_subdirectory(RpcService)
 add_executable(cranectld
         CtldPublicDefs.h
         DbClient.h
@@ -18,6 +16,13 @@ add_executable(cranectld
         Security/VaultClient.cpp
         Security/VaultClient.h
 
+        RpcService/CranedKeeper.h
+        RpcService/CranedKeeper.cpp
+        RpcService/CtldGrpcServer.h
+        RpcService/CtldGrpcServer.cpp
+        RpcService/CtldForInternalServer.h
+        RpcService/CtldForInternalServer.cpp
+
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h)
@@ -34,8 +39,6 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
-
-        RpcService
 
         uvw
 
