@@ -28,10 +28,10 @@
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
-#include "CranedKeeper.h"
-#include "CtldForInternalServer.h"
+#include "RpcService/CranedKeeper.h"
+#include "RpcService/CtldForInternalServer.h"
 #include "CranedMetaContainer.h"
-#include "CtldGrpcServer.h"
+#include "RpcService/CtldGrpcServer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"

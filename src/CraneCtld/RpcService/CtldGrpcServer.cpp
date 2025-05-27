@@ -26,7 +26,6 @@
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
-#include "CtldForInternalServer.h"
 
 namespace Ctld {
 
@@ -88,111 +87,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
       response->mutable_code_list()->Add(std::move(res.error()));
   }
 
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::TaskStatusChange(
-    grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
-  g_task_scheduler->TaskStatusChangeWithReasonAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code(), std::move(reason));
-  response->set_ok(true);
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
-    grpc::ServerContext *context,
-    const crane::grpc::CranedTriggerReverseConnRequest *request,
-    google::protobuf::Empty *response) {
-  const auto &craned_id = request->craned_id();
-  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
-    return grpc::Status::OK;
-  }
-
-  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
-    CRANE_TRACE("Put craned {} into unavail.", craned_id);
-    g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
-  } else {
-    // Before configure, craned should be connected but not online
-    if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub != nullptr)
-        g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-          stub->SetRegToken(token);
-          stub->ConfigureCraned(craned_id, token);
-        });
-    } else {
-      CRANE_TRACE("Already online craned {} notify craned connected.",
-                  craned_id);
-    }
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::CranedRegister(
-    grpc::ServerContext *context,
-    const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedRegisterReply *response) {
-  CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
-
-  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
-    CRANE_WARN("Reject register request from already online node {}",
-               request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
-  if (stub == nullptr) {
-    CRANE_WARN("Craned {} to be ready is not connected.", request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  if (!stub->CheckToken(request->token())) {
-    CRANE_WARN("Reject register request from node {} with invalid token.",
-               request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  // Some job allocation lost
-  std::set<task_id_t> orphaned_job_ids;
-  if (!request->remote_meta().lost_jobs().empty()) {
-    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_jobs().begin(),
-                          request->remote_meta().lost_jobs().end());
-  if (!request->remote_meta().lost_tasks().empty()) {
-    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
-                          request->remote_meta().lost_tasks().end());
-
-  if (!orphaned_job_ids.empty())
-    g_thread_pool->detach_task(
-        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
-          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
-        });
-
-  stub->SetReady();
-  g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
-  response->set_ok(true);
   return grpc::Status::OK;
 }
 
@@ -1450,8 +1344,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     // main thread will access g_craned_keeper simultaneously and a race
     // condition will occur.
     g_craned_keeper->Shutdown();
-
-    g_ctld_for_internal_server->Shutdown();
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));

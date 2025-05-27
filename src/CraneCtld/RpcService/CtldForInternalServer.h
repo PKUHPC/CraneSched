@@ -173,9 +173,14 @@ class CtldForInternalServiceImpl final : public crane::grpc::CraneCtldForInterna
    explicit CtldForInternalServiceImpl(CtldForInternalServer *server) : m_ctld_for_internal_server_(server) {}
 
   grpc::Status TaskStatusChange(
-   grpc::ServerContext *context,
-   const crane::grpc::TaskStatusChangeRequest *request,
-   crane::grpc::TaskStatusChangeReply *response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::TaskStatusChangeRequest *request,
+      crane::grpc::TaskStatusChangeReply *response) override;
+
+  grpc::Status CranedTriggerReverseConn(
+      grpc::ServerContext *context,
+      const crane::grpc::CranedTriggerReverseConnRequest *request,
+      google::protobuf::Empty *response) override;
 
   grpc::Status CranedRegister(
       grpc::ServerContext *context,
@@ -183,10 +188,10 @@ class CtldForInternalServiceImpl final : public crane::grpc::CraneCtldForInterna
       crane::grpc::CranedRegisterReply *response) override;
 
   grpc::Status CforedStream(
-      grpc::ServerContext *context,
-      grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                               crane::grpc::StreamCforedRequest> *stream)
-      override;
+        grpc::ServerContext *context,
+        grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                                 crane::grpc::StreamCforedRequest> *stream)
+        override;
 
   private:
    CtldForInternalServer *m_ctld_for_internal_server_;

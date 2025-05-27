@@ -199,9 +199,9 @@ class CtldServer {
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
-  inline static std::mutex s_sigint_mtx;
-  inline static std::condition_variable s_sigint_cv;
-  static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
+  inline static std::mutex s_signal_cv_mtx_;
+  inline static std::condition_variable s_signal_cv_;
+  static void signal_handler_func(int) { s_signal_cv_.notify_one(); };
 
   friend class CraneCtldServiceImpl;
 };

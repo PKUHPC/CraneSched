@@ -20,7 +20,7 @@
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
-#include "CranedKeeper.h"
+#include "RpcService/CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
