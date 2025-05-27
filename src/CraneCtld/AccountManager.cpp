@@ -2609,7 +2609,7 @@ CraneExpectedRich<void> AccountManager::DeleteUser_(
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  if (res_user.deleted) g_account_meta_container->DeleteUserMeta(name);
+  g_account_meta_container->DeleteUserMeta(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
