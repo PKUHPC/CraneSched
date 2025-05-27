@@ -399,6 +399,11 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
           }
           ResourceView resource_use{task.requested_node_res_view * task.node_num};
           resource_use += val.resource;
+          // Compatible with the max_cpu_per_user parameter.
+          if (resource_use.CpuCount() > qos.max_cpus_per_user) {
+            result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
+            return ;
+          }
           if (!CheckTres_(resource_use, qos.max_tres_per_user))
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
         }
