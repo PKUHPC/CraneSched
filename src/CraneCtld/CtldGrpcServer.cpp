@@ -1679,7 +1679,7 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) {
     auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      CRANE_ERROR("{}", CraneErrStr(res));
       return std::unexpected(res);
     }
     std::future<task_id_t> future =
