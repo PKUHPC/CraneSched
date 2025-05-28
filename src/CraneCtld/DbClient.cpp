@@ -78,7 +78,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
       std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
     qos.max_jobs =
       std::numeric_limits<decltype(qos.max_jobs)>::max();
-    qos.max_wall = absl::Seconds(kTaskMaxTimeLimitSec);
+    qos.max_wall = absl::ZeroDuration();
     qos.max_tres.GetAllocatableRes().cpu_count =
       std::numeric_limits<decltype(qos.max_tres.GetAllocatableRes().cpu_count)>::max();
     qos.max_tres.GetAllocatableRes().memory_bytes =
