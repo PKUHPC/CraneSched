@@ -462,6 +462,10 @@ void AccountMetaContainer::DeleteAccountMeta(const std::string& account) {
   m_account_meta_map_.erase(account);
 }
 
+void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
+  m_qos_meta_map_.erase(qos);
+}
+
 bool AccountMetaContainer::CheckTres_(const ResourceView& resource_req,
                                      const ResourceView& resource_total) {
   if (!(resource_req.GetAllocatableRes() <= resource_total.GetAllocatableRes()))
