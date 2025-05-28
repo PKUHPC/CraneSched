@@ -104,8 +104,20 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   // TODO CRANE_NTASKS_PER_CORE IS NOT SET
   uint64_t gpus_per_node = 0;
   uint32_t alloc_node_num = this->task.node_num();
-  if (alloc_node_num != 0) {
-    gpus_per_node = this->task.total_gpus() / alloc_node_num;
+  // if (alloc_node_num != 0) {
+  //   gpus_per_node = this->task.total_gpus() / alloc_node_num;
+  // }
+
+  auto dedicated_res_gpus =
+      this->task.resources().dedicated_res_in_node().name_type_map().find(
+          "gpu");
+  if (dedicated_res_gpus !=
+      this->task.resources().dedicated_res_in_node().name_type_map().end()) {
+    auto type_slots_map = dedicated_res_gpus->second;
+    for (const auto& type_pair : type_slots_map.type_slots_map()) {
+      auto slots = type_pair.second;
+      gpus_per_node += slots.slots_size();
+    }
   }
 
   double cpus_on_node =

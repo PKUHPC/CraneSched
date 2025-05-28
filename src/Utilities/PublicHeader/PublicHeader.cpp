@@ -707,18 +707,16 @@ double ResourceView::CpuCount() const {
 }
 
 uint64_t ResourceView::GpuCount() const {
-  uint64_t total_sum = 0;
+  auto it = device_map.find("gpu");
+  if (it == device_map.end()) return 0;
 
-  for (const auto& [device_name, device_data] : device_map) {
-    if (device_name == "gpu") {
-      total_sum += device_data.first;
-      for (const auto& [_, type_total] : device_data.second) {
-        total_sum += type_total;
-      }
-    }
-  }
+  const auto& [untyped_count, type_map] = it->second;
 
-  return total_sum;
+  uint64_t type_sum =
+      std::accumulate(std::views::values(type_map).begin(),
+                      std::views::values(type_map).end(), static_cast<uint64_t>(0));
+
+  return untyped_count + type_sum;
 }
 
 uint64_t ResourceView::MemoryBytes() const {
