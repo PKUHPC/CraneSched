@@ -86,7 +86,7 @@ void ParseConfig(int argc, char** argv) {
       if (config["ClusterName"]) {
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
       } else {
-        fmt::print(stderr, "ClusterName is empty.");
+        fmt::print(stderr, "Cluster Name is empty.");
         std::exit(1);
       }
 

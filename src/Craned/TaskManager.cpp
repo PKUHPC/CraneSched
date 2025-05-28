@@ -104,9 +104,6 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   // TODO CRANE_NTASKS_PER_CORE IS NOT SET
   uint64_t gpus_per_node = 0;
   uint32_t alloc_node_num = this->task.node_num();
-  // if (alloc_node_num != 0) {
-  //   gpus_per_node = this->task.total_gpus() / alloc_node_num;
-  // }
 
   auto dedicated_res_gpus =
       this->task.resources().dedicated_res_in_node().name_type_map().find(
