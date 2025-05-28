@@ -211,9 +211,16 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "The current account has been explicitly added to the deny list for the partition",
         "",
 
-        // 70 - 71
+        // 70 - 75
         "",
         "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
+        "ERR_USER_HAS_TASK",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "ERR_CONVERT_TO_RESOURCE_VIEW",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
+
+        // 76
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
     };
 // clang-format on
 }  // namespace Internal
