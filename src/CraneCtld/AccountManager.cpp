@@ -2033,6 +2033,8 @@ CraneExpected<void> AccountManager::DeleteQos_(const std::string& name) {
   }
   m_qos_map_[name]->deleted = true;
 
+  g_account_meta_container->DeleteQosMeta(name);
+
   return {};
 }
 
