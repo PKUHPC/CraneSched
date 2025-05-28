@@ -45,6 +45,47 @@ std::string ReadableMemory(uint64_t memory_bytes) {
     return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
 }
 
+std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
+  static const LazyRE2 mem_regex = { R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)" } ;
+  std::string num_str, unit;
+  if (!RE2::FullMatch(mem, *mem_regex, &num_str, &unit)) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  double sz = 0.0;
+  try {
+    sz = std::stod(num_str);
+  } catch (const std::exception& e) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  uint64_t bytes = 0;
+  switch (unit[0]) {
+    case 'K':
+    case 'k':
+      bytes = sz * 1024;
+      break;
+    case 'M':
+    case 'm':
+      bytes = sz * 1024 * 1024;
+      break;
+    case 'G':
+    case 'g':
+      bytes = sz * 1024 * 1024 * 1024;
+      break;
+    case 'B':
+    case 'b':
+      bytes = sz;
+      break;
+    default:
+      bytes = sz * 1024 * 1024;
+  }
+
+  return bytes;
+}
+
 bool ParseNodeList(const std::string &node_str,
                    std::list<std::string> *nodelist) {
   static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
@@ -490,12 +531,12 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
             res->GetAllocatableRes().memory_sw_bytes = mem;
             continue;
           }
-          uint64_t value;
-          try {
-            value = std::stoull(kv[1]);
-          } catch (const std::exception& e) {
-            return false;
-          }
+
+          auto result = ParseMemStringAsByte(kv[1]);
+          if (!result) return false;
+
+          uint64_t value = result.value();
+
           if (value > std::numeric_limits<decltype(res->GetAllocatableRes().memory_bytes)>::max()) return false;
           res->GetAllocatableRes().memory_bytes = value;
           res->GetAllocatableRes().memory_sw_bytes = value;
