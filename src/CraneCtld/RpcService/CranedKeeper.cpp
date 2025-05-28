@@ -256,6 +256,8 @@ crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
     *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
         task->AllocatedRes().at(craned_id));
 
+    CRANE_ERROR("dbtag {}", mutable_res_in_node->DebugString());
+
     // Set type
     mutable_task->set_type(task->type);
     mutable_task->set_task_id(task->TaskId());
