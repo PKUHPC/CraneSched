@@ -80,6 +80,7 @@ class AccountMetaContainer final {
 
   bool UserHasTask(const std::string& username);
 
+  void DeleteQosMeta(const std::string& qos);
  private:
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
