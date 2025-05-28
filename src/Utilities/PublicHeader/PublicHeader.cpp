@@ -712,9 +712,9 @@ uint64_t ResourceView::GpuCount() const {
 
   const auto& [untyped_count, type_map] = it->second;
 
-  uint64_t type_sum =
-      std::accumulate(std::views::values(type_map).begin(),
-                      std::views::values(type_map).end(), static_cast<uint64_t>(0));
+  uint64_t type_sum = std::accumulate(std::views::values(type_map).begin(),
+                                      std::views::values(type_map).end(),
+                                      static_cast<uint64_t>(0));
 
   return untyped_count + type_sum;
 }
