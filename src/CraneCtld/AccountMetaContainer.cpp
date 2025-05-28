@@ -324,7 +324,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
 
       if (qos->max_wall > absl::ZeroDuration()) {
         if (val.wall_time + task.time_limit > qos->max_wall) {
-          result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+          result = false;
           return ;
         }
       }
@@ -361,24 +361,33 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
           auto& val = pair.second[task.qos];
           val.resource += resource_use;
           val.jobs_count++;
-          val.wall_time += task.time_limit;
         });
   }
+
+  CRANE_ASSERT(m_qos_meta_map_.contains(task.qos));
+  m_qos_meta_map_.if_contains(
+    task.qos,
+    [&](std::pair<const std::string, QosResource>& pair) {
+      auto& val = pair.second;
+      val.resource += resource_use;
+      val.jobs_count++;
+      val.wall_time += task.time_limit;
+    });
+
 }
 
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
+  CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         CRANE_ASSERT(val.submit_jobs_count > 0);
-        CRANE_ASSERT(resource_view <= val.resource);
         val.submit_jobs_count--;
       });
 
   for (const auto& account_name : task.account_chain) {
+    CRANE_ASSERT(m_account_meta_map_.contains(account_name));
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -388,10 +397,12 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
         });
   }
 
+  CRANE_ASSERT(m_qos_meta_map_.contains(task.qos));
   m_qos_meta_map_.if_contains(
   task.qos,
   [&](std::pair<const std::string, QosResource>& pair) {
     auto& val = pair.second;
+    CRANE_ASSERT(val.submit_jobs_count > 0);
     val.submit_jobs_count--;
   });
 }
@@ -400,7 +411,6 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
-
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -422,6 +432,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
           auto& val = pair.second[task.qos];
           CRANE_ASSERT(val.submit_jobs_count > 0);
           CRANE_ASSERT(val.jobs_count > 0);
+          CRANE_ASSERT(resource_view <= val.resource);
           val.resource -= resource_view;
           val.jobs_count--;
           val.submit_jobs_count--;
@@ -433,6 +444,9 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
     task.qos,
     [&](std::pair<const std::string, QosResource>& pair) {
       auto& val = pair.second;
+      CRANE_ASSERT(val.jobs_count > 0);
+      CRANE_ASSERT(val.submit_jobs_count > 0);
+      CRANE_ASSERT(resource_view <= val.resource);
       val.resource -= resource_view;
       val.wall_time -= task.time_limit;
       val.jobs_count--;
