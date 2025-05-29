@@ -13,8 +13,25 @@ add_executable(craned
         DeviceManager.h
         CranedServer.h
         CranedServer.cpp
+        CranedASyncServer.h
+        CranedASyncServer.cpp
+        CranedClient.h
+        CranedClient.cpp
         CranedPublicDefs.h
         Craned.cpp
+
+        Pmix/Pmix.cpp
+        Pmix/Pmix.h
+        Pmix/PmixState.cpp
+        Pmix/PmixState.h
+        Pmix/PmixColl.cpp
+        Pmix/PmixColl.h
+        Pmix/PmixCollRing.cpp
+        Pmix/PmixCollTree.cpp
+        Pmix/ReverseTree.cpp
+        Pmix/ReverseTree.h
+        Pmix/PmixDModex.cpp
+        Pmix/PmixDModex.h
 
         CranedPreCompiledHeader.h
 
@@ -24,6 +41,7 @@ target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 add_dependencies(craned libcgroup)
 target_include_directories(
         craned PRIVATE ${LIBCGROUP_PATH}/include/
+                       ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 if (CRANE_ENABLE_CGROUP_V2)
@@ -58,6 +76,10 @@ target_link_libraries(craned
 
         uvw
         subprocess
+
+        libpmix
+        fmt::fmt
+        phmap
 
         yaml-cpp
 
