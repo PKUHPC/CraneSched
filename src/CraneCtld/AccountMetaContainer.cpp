@@ -305,7 +305,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         CRANE_ASSERT(val.submit_jobs_count > 0);
-        CRANE_ASSERT(resource_view <= val.resource);
+        CRANE_ASSERT(resource_view.GetAllocatableRes() <= val.resource.GetAllocatableRes());
         val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.submit_jobs_count--;
       });
