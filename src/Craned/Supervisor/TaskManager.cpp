@@ -967,6 +967,34 @@ CraneErrCode ContainerInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
+const TaskExitInfo& ContainerInstance::HandleSigChld(pid_t pid, int status) {
+  m_exit_info.pid = pid;
+
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    m_exit_info.value = WEXITSTATUS(status);
+    if (m_exit_info.value > 128) {
+      // OCI runtime may return 128 + signal number
+      // See: https://tldp.org/LDP/abs/html/exitcodes.html
+      m_exit_info.is_terminated_by_signal = true;
+      m_exit_info.value -= 128;
+    } else {
+      // OCI runtime normal exiting
+      m_exit_info.is_terminated_by_signal = false;
+    }
+
+  } else if (WIFSIGNALED(status)) {
+    // OCI runtime is forced to exit by signal
+    // This is a undesired situation, but we should handle it gracefully.
+    m_exit_info.is_terminated_by_signal = true;
+    m_exit_info.value = WTERMSIG(status);
+    CRANE_WARN("OCI runtime for task #{} is killed by signal {}.",
+               step->step_to_super.task_id(), m_exit_info.value);
+  }
+
+  return m_exit_info;
+}
+
 CraneErrCode ProcessInstance::Prepare() {
   // Write script content into file
   auto sh_path =
@@ -1270,6 +1298,28 @@ CraneErrCode ProcessInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
+const TaskExitInfo& ProcessInstance::HandleSigChld(pid_t pid, int status) {
+  m_exit_info.pid = pid;
+
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    m_exit_info.is_terminated_by_signal = false;
+    m_exit_info.value = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    // Killed by signal WTERMSIG(status)
+    m_exit_info.is_terminated_by_signal = true;
+    m_exit_info.value = WTERMSIG(status);
+  }
+  /* Todo(More status tracing):
+   else if (WIFSTOPPED(status)) {
+    printf("stopped by signal %d\n", WSTOPSIG(status));
+  } else if (WIFCONTINUED(status)) {
+    printf("continued\n");
+  } */
+
+  return m_exit_info;
+}
+
 TaskManager::TaskManager()
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec, nullptr) {
   m_uvw_loop_ = uvw::loop::create();
@@ -1365,38 +1415,35 @@ void TaskManager::TaskStopAndDoStatusChange() {
     break;
   }
 
-  ProcSigchldInfo& sigchld_info = m_task_->sigchld_info;
+  const auto& exit_info = m_task_->GetExitInfo();
   if (m_step_.IsBatch() || m_step_.IsCrun()) {
     // For a Batch task, the end of the process means it is done.
-    if (sigchld_info.is_terminated_by_signal) {
+    if (exit_info.is_terminated_by_signal) {
       if (m_task_->cancelled_by_user)
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Cancelled,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
       else if (m_task_->terminated_by_timeout)
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::ExceedTimeLimit,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
       else
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Failed,
-            sigchld_info.value + ExitCode::kTerminationSignalBase,
-            std::nullopt);
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
     } else
       ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                sigchld_info.value, std::nullopt);
+                                exit_info.value, std::nullopt);
   } else /* Calloc */ {
     // For a COMPLETING Calloc task with a process running,
     // the end of this process means that this task is done.
-    if (sigchld_info.is_terminated_by_signal)
+    if (exit_info.is_terminated_by_signal)
       ActivateTaskStatusChange_(
           crane::grpc::TaskStatus::Completed,
-          sigchld_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
     else
       ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                sigchld_info.value, std::nullopt);
+                                exit_info.value, std::nullopt);
   }
 }
 
@@ -1471,6 +1518,7 @@ void TaskManager::LaunchExecution_() {
         m_step_.step_to_super.interactive_meta().cfored_name());
     m_step_.cfored_client = std::move(cfored_client);
   }
+
   err = m_task_->Spawn();
   if (err != CraneErrCode::SUCCESS) {
     ActivateTaskStatusChange_(
@@ -1499,9 +1547,11 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
     absl::Duration time_limit) {
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
+
   ChangeTaskTimeLimitQueueElem elem;
   elem.time_limit = time_limit;
   elem.ok_prom = std::move(ok_promise);
+
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
   m_change_task_time_limit_async_handle_->send();
   return ok_future;
@@ -1512,47 +1562,22 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
   elem.terminated_by_user = terminated_by_user;
-  m_task_terminate_queue_.enqueue(std::move(elem));
+  m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
-  return;
 }
 
 void TaskManager::EvSigchldCb_() {
   int status;
   pid_t pid;
+
   while (true) {
     pid = waitpid(-1, &status, WNOHANG
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      auto sigchld_info = std::make_unique<ProcSigchldInfo>();
-
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info->pid = pid;
-        sigchld_info->is_terminated_by_signal = false;
-        sigchld_info->value = WEXITSTATUS(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        // Killed by signal WTERMSIG(status)
-        sigchld_info->pid = pid;
-        sigchld_info->is_terminated_by_signal = true;
-        sigchld_info->value = WTERMSIG(status);
-
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
-      m_task_->sigchld_info = *sigchld_info;
-
+      const auto& exit_info = m_task_->HandleSigChld(pid, status);
+      CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Status: {}", pid,
+                  exit_info.is_terminated_by_signal, exit_info.value);
       if (m_step_.IsCrun())
         // TaskStatusChange of a crun task is triggered in
         // CforedManager.
