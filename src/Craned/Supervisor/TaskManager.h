@@ -17,6 +17,8 @@
  */
 
 #pragma once
+#include <sched.h>
+
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
@@ -53,9 +55,10 @@ struct CrunMetaInExecution : MetaInExecution {
   ~CrunMetaInExecution() override = default;
 };
 
-struct ProcSigchldInfo {
+struct TaskExitInfo {
   pid_t pid;
   bool is_terminated_by_signal;
+  int status;
   int value;
 };
 
@@ -71,6 +74,7 @@ class ExecutionInterface {
 
   void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
+  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info; }
 
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
@@ -82,13 +86,13 @@ class ExecutionInterface {
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
-  // TODO: SigChldHandler()
+
+  virtual const TaskExitInfo& HandleSigChld(pid_t pid, int status) = 0;
 
   // Set from TaskManager
   const StepInstance* step;
 
   PasswordEntry pwd;
-  ProcSigchldInfo sigchld_info{};
 
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
@@ -129,6 +133,7 @@ class ExecutionInterface {
 
   pid_t m_pid_{0};  // forked pid
   std::unique_ptr<MetaInExecution> m_meta_{nullptr};
+  TaskExitInfo m_exit_info{};
 
   EnvMap m_env_{};
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
@@ -150,6 +155,8 @@ class ContainerInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
+  const TaskExitInfo& HandleSigChld(pid_t pid, int status) override;
+
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
@@ -169,6 +176,8 @@ class ProcessInstance : public ExecutionInterface {
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
+
+  const TaskExitInfo& HandleSigChld(pid_t pid, int status) override;
 };
 
 class TaskManager {
@@ -282,7 +291,7 @@ class TaskManager {
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
 
-  std::atomic_bool m_supervisor_exit_;
+  std::atomic_bool m_supervisor_exit_{false};
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
