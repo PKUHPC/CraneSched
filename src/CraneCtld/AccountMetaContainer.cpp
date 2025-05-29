@@ -147,6 +147,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
+  std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -162,7 +163,6 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
         val.submit_jobs_count++;
       },
       QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
@@ -184,6 +184,14 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
         },
         QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
   }
+
+  m_qos_meta_map_.try_emplace_l(
+    task.qos,
+    [&](std::pair<const std::string, QosResource>& pair) {
+      auto& val = pair.second;
+      val.submit_jobs_count++;
+    },
+    QosResource{resource_view, 0, 1});
 }
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
@@ -204,6 +212,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
+  std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -219,7 +228,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
+        val.resource += resource_view;
         val.submit_jobs_count++;
         val.jobs_count++;
       },
@@ -240,9 +249,20 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto& val = iter->second;
           val.submit_jobs_count++;
           val.jobs_count++;
+          val.resource += resource_view;
         },
         QosToResourceMap{{task.qos, QosResource{resource_view, 1, 1}}});
   }
+
+  m_qos_meta_map_.try_emplace_l(
+    task.qos,
+    [&](std::pair<const std::string, QosResource>& pair) {
+      auto& val = pair.second;
+      val.submit_jobs_count++;
+      val.jobs_count++;
+      val.resource += resource_view;
+    },
+    QosResource{resource_view, 1, 1});
 }
 
 std::optional<std::string> AccountMetaContainer::CheckQosResource(
@@ -250,17 +270,18 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) return "InvalidQOS";
 
-  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
 
   std::set<int> account_stripes;
   for (const auto& account : task.account_chain) {
     account_stripes.insert(StripeForKey_(account));
   }
-
+  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
   std::list<std::unique_lock<std::mutex>> account_locks;
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
+  std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
