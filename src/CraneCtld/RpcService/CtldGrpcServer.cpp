@@ -1152,13 +1152,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
 
-  sec = qos_info->max_wall();
-  if (!CheckIfTimeLimitSecIsValid(sec)) {
-    response->set_ok(false);
-    response->set_code(CraneErrCode::ERR_TIME_LIMIT);
-    return grpc::Status::OK;
-  }
-  qos.max_wall = absl::Seconds(sec);
+  qos.max_wall = absl::Seconds(qos_info->max_wall());
 
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {

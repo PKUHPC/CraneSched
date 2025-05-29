@@ -134,6 +134,14 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
                                                 .jobs_count = 0,
                                                 .submit_jobs_count = 1}}});
   }
+
+  m_qos_meta_map_.try_emplace_l(
+    task.qos,
+    [&](std::pair<const std::string, QosResource>& pair) {
+      auto& val = pair.second;
+      val.submit_jobs_count++;
+    },
+    QosResource{resource_view, 0, 1});
 }
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
@@ -195,12 +203,23 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto& val = iter->second;
           val.submit_jobs_count++;
           val.jobs_count++;
+          val.resource += resource_view;
         },
         QosToResourceMap{
             {task.qos, QosResource{.resource = task.allocated_res_view,
                                    .jobs_count = 1,
                                    .submit_jobs_count = 1}}});
   }
+
+  m_qos_meta_map_.try_emplace_l(
+    task.qos,
+    [&](std::pair<const std::string, QosResource>& pair) {
+      auto& val = pair.second;
+      val.submit_jobs_count++;
+      val.jobs_count++;
+      val.resource += resource_view;
+    },
+    QosResource{resource_view, 1, 1});
 }
 
 std::expected<void, std::string>
