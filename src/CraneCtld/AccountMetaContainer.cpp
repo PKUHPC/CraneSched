@@ -70,6 +70,9 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   result = CheckQosSubmitResourceForAccount_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
+  CRANE_DEBUG("Malloc QOS {} submit resource for task of user {} and account {}.",
+    task.qos, task.Username(), task.account);
+
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   m_user_meta_map_.try_emplace_l(
@@ -107,9 +110,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
         QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
   }
 
-  CRANE_DEBUG("Malloc QOS resource for task {} of user {}. Ok: {}",
-              task.TaskId(), task.Username(), result == CraneErrCode::SUCCESS);
-
   return result;
 }
 
@@ -131,6 +131,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
+
+  CRANE_DEBUG("Malloc QOS {} submit resource for recover task {} of user {} and account {}.",
+      task.qos, task.TaskId(), task.Username(), task.account);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -188,6 +191,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
+
+  CRANE_DEBUG("Malloc QOS {} resource for recover task {} of user {} and account {}.",
+    task.qos, task.TaskId(), task.Username(), task.account);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -276,6 +282,9 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
 }
 
 void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
+  CRANE_DEBUG("Malloc QOS {} resource for task {} of user {} and account {}.",
+    task.qos, task.TaskId(), task.Username(), task.account);
+
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   m_user_meta_map_.if_contains(
@@ -297,6 +306,9 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
+  CRANE_DEBUG("Free QOS {} submit resource for task {} of user {} and account {}.",
+    task.qos, task.TaskId(), task.Username(), task.account);
+
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   m_user_meta_map_.if_contains(
@@ -321,8 +333,8 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
-  CRANE_DEBUG("Free QOS resource for task {} of user {}", task.TaskId(),
-              task.Username());
+  CRANE_DEBUG("Free QOS {} submit resource for task {} of user {} and account {}.",
+    task.qos, task.TaskId(), task.Username(), task.account);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -333,7 +345,6 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         CRANE_ASSERT(val.jobs_count > 0);
         CRANE_ASSERT(resource_view.GetAllocatableRes() <=
                      val.resource.GetAllocatableRes());
-        val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.jobs_count--;
         val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.submit_jobs_count--;
