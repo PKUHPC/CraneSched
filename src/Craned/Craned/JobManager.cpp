@@ -710,6 +710,7 @@ bool JobManager::FreeJobInstanceAllocation_(
     if (g_config.Plugin.Enabled && g_plugin_client) {
       g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupPathStr());
     }
+
     g_thread_pool->detach_task([cgroup]() {
       int cnt = 0;
 
@@ -811,6 +812,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
+    // TODO: Check if Supervisor is never spawned.
     g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
