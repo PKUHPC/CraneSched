@@ -85,6 +85,10 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   result = CheckQosSubmitResourceForQos_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
+  CRANE_DEBUG(
+      "Malloc QOS {} submit resource for task of user {} and account {}.",
+      task.qos, task.Username(), task.account);
+
   m_user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -429,6 +433,10 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
+  CRANE_DEBUG(
+      "Free QOS {} submit resource for task {} of user {} and account {}.",
+      task.qos, task.TaskId(), task.Username(), task.account);
+
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
