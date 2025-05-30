@@ -129,6 +129,13 @@ struct Config {
     std::string PlugindSockPath;
   };
 
+  struct ServerNode {
+    std::string HostName;
+    std::string RaftPort;
+    std::string ListenAddr;
+    std::string ListenPort;
+  };
+
   bool CompressedRpc{};
 
   std::string CraneClusterName;
@@ -149,6 +156,10 @@ struct Config {
   std::string DefaultPartition;
 
   Priority PriorityConfig;
+
+  std::vector<ServerNode> Servers;
+  int CurServerId = 0;
+  bool EnableRaft = false;
 
   // Database config
   std::string DbUser;

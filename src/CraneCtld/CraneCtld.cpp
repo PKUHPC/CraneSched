@@ -113,11 +113,79 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
                                               kDefaultCraneCtldMutexFile);
 
-      g_config.ListenConf.CraneCtldListenAddr =
-          YamlValueOr(config["CraneCtldListenAddr"], "0.0.0.0");
+      char hostname[HOST_NAME_MAX + 1];
+      int err = gethostname(hostname, HOST_NAME_MAX + 1);
+      if (err != 0) {
+        CRANE_ERROR("Error: get hostname.");
+        std::exit(1);
+      }
 
-      g_config.ListenConf.CraneCtldListenPort =
-          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
+      g_config.Hostname.assign(hostname);
+      CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
+
+      if (config["CraneCtldEnableRaft"])
+        g_config.EnableRaft = config["CraneCtldEnableRaft"].as<bool>();
+      CRANE_INFO("Raft mode enable: {}", g_config.EnableRaft);
+
+      if (config["ControlMachine"]) {
+        for (auto it = config["ControlMachine"].begin();
+             it != config["ControlMachine"].end(); ++it) {
+          auto node = it->as<YAML::Node>();
+          Ctld::Config::ServerNode raft_node;
+
+          if (node["hostname"])
+            raft_node.HostName = node["hostname"].as<std::string>();
+          else
+            std::exit(1);
+
+          if (node["raftPort"])
+            raft_node.RaftPort = node["raftPort"].as<std::string>();
+          else if (g_config.EnableRaft) {
+            CRANE_ERROR("Enable raft but RaftPort is empty");
+            std::exit(1);
+          }
+
+          raft_node.ListenAddr = YamlValueOr(node["listenAddr"], "0.0.0.0");
+          raft_node.ListenPort =
+              YamlValueOr(node["listenPort"], kCtldDefaultPort);
+
+          g_config.Servers.push_back(std::move(raft_node));
+        }
+
+        if (g_config.EnableRaft) {
+          int i = 0;
+          for (; i < g_config.Servers.size(); i++) {
+            if (g_config.Servers[i].HostName == g_config.Hostname) {
+              g_config.CurServerId = i;
+              break;
+            }
+          }
+          if (i == g_config.Servers.size()) {
+            CRANE_ERROR(
+                "Current node is not a control machine defined in config "
+                "file!");
+            std::exit(1);
+          }
+        } else {
+          if (g_config.Servers[0].HostName == g_config.Hostname) {
+            g_config.CurServerId = 0;
+          } else {
+            CRANE_ERROR(
+                "Raft not enable, the hostname of the first control machine "
+                "does not match the hostname of the local machine!");
+            std::exit(1);
+          }
+        }
+
+        g_config.ListenConf.CraneCtldListenAddr =
+            g_config.Servers[g_config.CurServerId].ListenAddr;
+        g_config.ListenConf.CraneCtldListenPort =
+            g_config.Servers[g_config.CurServerId].ListenPort;
+
+      } else {
+        CRANE_ERROR("Control machine info not found!");
+        std::exit(1);
+      }
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -681,17 +749,23 @@ void ParseConfig(int argc, char** argv) {
     CRANE_ERROR("Listening port is invalid.");
     std::exit(1);
   }
+  if (g_config.EnableRaft &&
+      !std::regex_match(g_config.Servers[g_config.CurServerId].RaftPort,
+                        regex_port)) {
+    CRANE_ERROR("Raft port is invalid.");
+    std::exit(1);
+  }
 }
 
 void DestroyCtldGlobalVariables() {
-  using namespace Ctld;
-
   g_task_scheduler.reset();
   g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
+
+  g_raft_server.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
@@ -704,16 +778,6 @@ void InitializeCtldGlobalVariables() {
   PasswordEntry::InitializeEntrySize();
 
   crane::InitializeNetworkFunctions();
-
-  char hostname[HOST_NAME_MAX + 1];
-  int err = gethostname(hostname, HOST_NAME_MAX + 1);
-  if (err != 0) {
-    CRANE_ERROR("Error: get hostname.");
-    std::exit(1);
-  }
-
-  g_config.Hostname.assign(hostname);
-  CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
@@ -738,13 +802,22 @@ void InitializeCtldGlobalVariables() {
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire
-  // information from account manager.
+  // information from the account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
 
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
+
+  if (g_config.EnableRaft)
+    g_raft_server = std::make_unique<RaftServerStuff>(
+        g_config.CurServerId, g_config.Servers[g_config.CurServerId].HostName,
+        std::stoi(g_config.Servers[g_config.CurServerId].RaftPort));
+  else
+    g_raft_server = std::make_unique<RaftServerStuffBase>();
+
+  g_raft_server->Init();
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
@@ -824,6 +897,13 @@ int StartServer() {
   CreateFolders();
 
   InitializeCtldGlobalVariables();
+
+  // if (g_config.EnableRaft && g_config.CurServerId > 0) {
+  //   g_thread_pool->detach_task([]() {
+  //     g_raft_server->RegisterToLeader(g_config.Servers[0].HostName,
+  //                                     g_config.Servers[0].ListenPort);
+  //   });
+  // }
 
   g_ctld_server->Wait();
 

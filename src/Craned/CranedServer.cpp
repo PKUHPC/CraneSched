@@ -535,6 +535,16 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::UpdateLeaderId(
+    grpc::ServerContext *context,
+    const crane::grpc::UpdateLeaderIdRequest *request,
+    google::protobuf::Empty *response) {
+  if (request->cur_leader_id() >= 0 &&
+      request->cur_leader_id() < g_config.ControlMachines.size())
+    g_ctld_client->SetLeaderId(request->cur_leader_id());
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 

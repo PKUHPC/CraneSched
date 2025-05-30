@@ -17,12 +17,18 @@ add_executable(cranectld
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
 
+        CraneStateMachine.cpp
+        CraneStateMachine.h
+        RaftServerStuff.cpp
+        RaftServerStuff.h
+
         Security/VaultClient.cpp
         Security/VaultClient.h
 
         CraneCtld.cpp
 
-        CtldPreCompiledHeader.h)
+        CtldPreCompiledHeader.h
+)
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
@@ -36,6 +42,8 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
+        Utility_EmbeddedDb
+        Utility_NuRaft
 
         uvw
 
@@ -62,18 +70,6 @@ target_link_libraries(cranectld PRIVATE
 
         Backward::Interface
 )
-
-if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
-    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_BERKELEY_DB)
-    target_include_directories(cranectld PRIVATE ${BERKELEY_DB_INCLUDE_DIR})
-    target_link_libraries(cranectld PRIVATE ${BERKELEY_DB_CXX_LIBRARIES})
-endif ()
-
-if (ENABLE_UNQLITE)
-    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_UNQLITE)
-    target_link_libraries(cranectld PRIVATE unqlite)
-endif ()
-
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
