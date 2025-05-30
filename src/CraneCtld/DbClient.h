@@ -267,6 +267,15 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
   sub_document& doc, const std::string& key,
   const DeviceMap& value);
 
+template <>
+void MongodbClient::DocumentAppendItem_<User::PartitionToResourceMap>(
+    document& doc, const std::string& key, const User::PartitionToResourceMap& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<ResourceView>(
+  sub_document& doc, const std::string& key,
+  const ResourceView& value);
+
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::MongodbClient> g_db_client;

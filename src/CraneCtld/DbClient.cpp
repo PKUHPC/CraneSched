@@ -681,6 +681,37 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
   }));
 }
 
+template <>
+void MongodbClient::DocumentAppendItem_<User::PartitionToResourceMap>(
+    document& doc, const std::string& key, const User::PartitionToResourceMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [partition, partition_resource] : value) {
+      mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
+        subDoc.append(kvp("max_jobs", static_cast<int64_t>(partition_resource.max_jobs)));
+        subDoc.append(kvp("max_submit_jobs", static_cast<int64_t>(partition_resource.max_submit_jobs)));
+        SubDocumentAppendItem_(subDoc, "max_tres", partition_resource.max_tres);
+        SubDocumentAppendItem_(subDoc, "max_tres_per_job", partition_resource.max_tres_per_job);
+        subDoc.append(kvp("max_wall", absl::ToInt64Seconds(partition_resource.max_wall)));
+        subDoc.append(kvp("max_wall_duration_per_job", absl::ToInt64Seconds(partition_resource.max_wall_duration_per_job)));
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<ResourceView>(
+  sub_document& doc, const std::string& key,
+  const ResourceView& value) {
+  doc.append(kvp(key, [&](sub_document valueDocument) {
+    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
+        allocDoc.append(kvp("cpu_count", value.CpuCount()));
+        allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
+        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
+    }));
+    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+  }));
+}
+
 template <typename... Ts, std::size_t... Is>
 bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
@@ -763,22 +794,24 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
+                                    "coordinator_accounts",
+                                    "partition_resource"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>,User::PartitionToResourceMap>
       values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.partition_resource};
   return DocumentConstructor_(fields, values);
 }
 

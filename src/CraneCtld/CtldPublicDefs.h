@@ -911,6 +911,8 @@ struct User {
   /* Map<account name, item> */
   using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
 
+  using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
+
   bool deleted = false;
   uid_t uid;
   std::string name;
@@ -918,7 +920,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  std::unordered_map<std::string, PartitionResource> partition_resource;
+  PartitionToResourceMap partition_resource;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
