@@ -27,15 +27,17 @@ namespace Craned {
 DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
     const std::optional<std::string>& str) {
   if (!str.has_value()) return DeviceEnvInjectorEnum::CommonDevice;
+
   static const std::unordered_map<std::string, DeviceEnvInjectorEnum>
-      EnvStrToEnumMap{
+      env_str_to_enum_map{
           {"common", DeviceEnvInjectorEnum::CommonDevice},
           {"nvidia", DeviceEnvInjectorEnum::Nvidia},
           {"hip", DeviceEnvInjectorEnum::Hip},
           {"ascend", DeviceEnvInjectorEnum::Ascend},
       };
-  if (const auto it = EnvStrToEnumMap.find(str.value());
-      it != EnvStrToEnumMap.end())
+
+  if (const auto it = env_str_to_enum_map.find(str.value());
+      it != env_str_to_enum_map.end())
     return it->second;
 
   return DeviceEnvInjectorEnum::InvalidInjector;
@@ -48,7 +50,8 @@ BasicDevice::BasicDevice(const std::string& device_name,
     : name(device_name), type(device_type), env_injector(env_injector) {
   device_file_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
-    device_file_metas.emplace_back(DeviceFileMeta{dev_path, 0, 0, 0});
+    device_file_metas.emplace_back(
+        DeviceFileMeta{.path = dev_path, .major = 0, .minor = 0, .op_type = 0});
   }
 }
 
@@ -61,7 +64,7 @@ bool BasicDevice::Init() {
 }
 
 BasicDevice::operator std::string() const {
-  std::vector<std::string> device_files;
+  std::vector<std::string> device_files(device_file_metas.size());
   for (const auto& device_meta : device_file_metas) {
     device_files.push_back(device_meta.path);
   }
@@ -83,7 +86,7 @@ CraneErrCode DeviceManager::GetDeviceFileMajorMinorOpType(
     device_file_meta->minor = minor(device_file_info.st_rdev);
     device_file_meta->op_type = op_type;
     return CraneErrCode::SUCCESS;
-  } else {
+  } else {  // NOLINT(readability-else-after-return)
     CRANE_ERROR("Failed to stat device file {} err:{}", device_file_meta->path,
                 std::strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
