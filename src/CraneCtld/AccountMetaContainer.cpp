@@ -195,8 +195,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
 
-  CRANE_DEBUG("Malloc QOS {} resource for recover task {} of user {} and account {}.",
-    task.qos, task.TaskId(), task.Username(), task.account);
+  CRANE_DEBUG(
+      "Malloc QOS {} resource for recover task {} of user {} and account {}.",
+      task.qos, task.TaskId(), task.Username(), task.account);
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
