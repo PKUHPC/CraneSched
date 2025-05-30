@@ -64,7 +64,7 @@ struct JobInstance {
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
   bool orphaned{false};
-  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
+  CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 

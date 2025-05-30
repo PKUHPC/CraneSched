@@ -348,8 +348,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
-  std::array<int, 2> supervisor_craned_pipe;
-  std::array<int, 2> craned_supervisor_pipe;
+  std::array<int, 2> supervisor_craned_pipe{};
+  std::array<int, 2> craned_supervisor_pipe{};
 
   if (pipe(supervisor_craned_pipe.data()) == -1) {
     CRANE_ERROR("Pipe creation failed!");
@@ -406,7 +406,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
           "migration.",
           step->step_to_d.task_id());
 
-      job->err_before_exec = CraneErrCode::ERR_CGROUP;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_CGROUP;
 
       // Ask child to suicide
       msg.set_ok(false);
@@ -415,7 +415,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
                     child_pid, step->step_to_d.task_id());
 
-        job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+        job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
         KillPid_(child_pid, SIGKILL);
       }
       close(craned_supervisor_fd);
@@ -438,7 +438,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
                   step->step_to_d.task_id(), child_pid,
                   strerror(ostream.GetErrno()));
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
 
       close(craned_supervisor_fd);
@@ -456,7 +456,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] Received false from subprocess {}",
                     step->step_to_d.task_id(), child_pid);
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
 
       close(craned_supervisor_fd);
@@ -507,7 +507,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
                   child_pid, step->step_to_d.task_id(),
                   strerror(ostream.GetErrno()));
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
 
       close(craned_supervisor_fd);
@@ -528,7 +528,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     step->step_to_d.task_id());
 
-      job->err_before_exec = CraneErrCode::ERR_PROTOBUF;
+      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
       KillPid_(child_pid, SIGKILL);
 
       close(craned_supervisor_fd);
@@ -546,7 +546,6 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
     if (!pid) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
                   step->step_to_d.task_id());
-      job->err_before_exec = CraneErrCode::ERR_SUPERVISOR;
       KillPid_(child_pid, SIGKILL);
       close(craned_supervisor_fd);
       close(supervisor_craned_fd);
@@ -638,11 +637,11 @@ CraneErrCode JobManager::ExecuteTaskAsync(
                 task_spec.task_id());
     return CraneErrCode::ERR_CGROUP;
   }
-  auto step = std::make_unique<StepInstance>();
 
   // Simply wrap the Task structure within an Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
+  auto step = std::make_unique<StepInstance>();
   step->step_to_d = task_spec;
   EvQueueExecuteTaskElem elem{.execution = std::move(step)};
 
@@ -650,7 +649,7 @@ CraneErrCode JobManager::ExecuteTaskAsync(
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
 
-  return CraneErrCode::SUCCESS;
+  return future.get();
 }
 
 void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
@@ -812,8 +811,14 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    // TODO: Check if Supervisor is never spawned.
-    g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
+    // If the supervisor is spawned, we need to remove it.
+    if (job_ptr->err_before_supervisor_ready == crane::grpc::SUCCESS) {
+      g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
+    } else {
+      CRANE_TRACE("Supervisor for job #{} is never ready, skipping removing.",
+                  job_ptr->job_id);
+    }
+
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
