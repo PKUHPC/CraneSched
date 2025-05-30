@@ -449,7 +449,7 @@ enum ErrCode {
 
   ERR_INVAILD_EX_NODE_LIST = 45;
   ERR_TIME_TIMIT_BEYOND = 46;
-  ERR_CPUS_PER_TASK_BEYOND = 47;
+  ERR_TRES_PER_TASK_BEYOND = 47;
   ERR_NO_ENOUGH_NODE = 48;
   ERR_SYSTEM_ERR = 49;
 
@@ -477,6 +477,14 @@ enum ErrCode {
   ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
   ERR_EBPF = 69;
   ERR_SUPERVISOR = 70;
+
+  ERR_MAX_JOB_COUNT_PER_ACCOUNT = 71;
+  ERR_USER_HAS_TASK = 72;
+  ERR_MAX_JOB_COUNT_PER_QOS = 73;
+  ERR_CONVERT_TO_RESOURCE_VIEW = 74;
+  ERR_MAX_TRES_PER_USER_BEYOND = 75;
+
+  ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 76;
 }
 
 enum EntityType {
@@ -495,16 +503,25 @@ enum ModifyField {
   Partition = 0;
   Qos = 1;
   DefaultQos = 2;
-  // account and qos
-  Description = 10;
+  Description = 3;  // account and qos
   // user
-  AdminLevel = 20;
-  DefaultAccount = 21;
+  AdminLevel = 4;
+  DefaultAccount = 5;
   // qos
-  Priority = 30;
-  MaxJobsPerUser = 31;
-  MaxCpusPerUser = 32;
-  MaxTimeLimitPerTask = 33;
+  Priority = 6;
+  MaxJobsPerUser = 7;
+  MaxCpusPerUser = 8;
+  MaxTimeLimitPerTask = 9;
+  MaxJobsPerAccount = 10;
+  MaxSubmitJobsPerUser = 11;
+  MaxSubmitJobsPerAccount = 12;
+  MaxJobs = 13;
+  MaxSubmitJobs = 14;
+  MaxWall = 15;
+  MaxTres = 16;
+  MaxTresPerUser = 17;
+  MaxTresPerAccount = 18;
+  FLags = 19;
 }
 
 message AccountInfo {
@@ -558,6 +575,16 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+  uint32 max_jobs_per_account = 7;
+  uint32 max_submit_jobs_per_user = 8;
+  uint32 max_submit_jobs_per_account = 9;
+  uint32 max_jobs = 10;
+  uint32 max_submit_jobs = 11;
+  uint32 max_wall = 12;
+  ResourceView max_tres = 13;
+  ResourceView max_tres_per_user = 14;
+  ResourceView max_tres_per_account = 15;
+  uint32 flags = 16;
 }
 
 message TimeInterval {

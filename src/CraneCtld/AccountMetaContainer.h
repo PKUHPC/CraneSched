@@ -21,33 +21,85 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "AccountManager.h"
+
 namespace Ctld {
+
+constexpr int kNumStripes = 128;
 
 class AccountMetaContainer final {
  public:
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
                                               QosResource>;
 
-  using UserResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string,  // username
-      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+  using ResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string, QosToResourceMap,
+      phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::shared_mutex>;
+
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, QosResource,
+      phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosResource>>, 4,
       std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosResource(TaskInCtld& task);
+  CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
+
+  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+
+  void MallocQosResourceToRecoveredPendingTask(TaskInCtld& task);
+
+  std::optional<std::string> CheckQosResource(const TaskInCtld& task);
+
+  void MallocQosResource(const TaskInCtld& task);
+
+  void FreeQosSubmitResource(const TaskInCtld& task);
 
   void FreeQosResource(const TaskInCtld& task);
 
-  void DeleteUserResource(const std::string& username);
+  // When a user/account object is deleted, resources need to be reset.
+  void DeleteUserMeta(const std::string& username);
+
+  void DeleteAccountMeta(const std::string& account);
+
+  void DeleteQosMeta(const std::string& qos);
 
  private:
-  UserResourceMetaMap user_meta_map_;
+  static int StripeForKey_(const std::string& key) {
+    return std::hash<std::string>{}(key) % kNumStripes;
+  }
+
+  static bool CheckTres_(const ResourceView& resource_req, const ResourceView& resource_total);
+
+  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+                                              const Qos& qos);
+
+  CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
+                                                 const Qos& qos);
+
+  CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
+                                             const Qos& qos);
+
+  // lock user -> lock account -> lock qos
+  std::array<std::mutex, kNumStripes> m_user_stripes_;
+
+  std::array<std::mutex, kNumStripes> m_account_stripes_;
+
+  std::array<std::mutex, kNumStripes> m_qos_stripes_;
+
+  ResourceMetaMap m_user_meta_map_;
+
+  ResourceMetaMap m_account_meta_map_;
+
+  QosResourceMap m_qos_meta_map_;
 };
 
-inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
-
 }  // namespace Ctld
+
+inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;

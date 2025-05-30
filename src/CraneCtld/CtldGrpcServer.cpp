@@ -618,6 +618,16 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_jobs_per_account = qos_info->max_jobs_per_account();
+  qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
+  qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
+
+  qos.max_jobs = qos_info->max_jobs();
+  qos.max_submit_jobs = qos_info->max_submit_jobs();
+  qos.max_tres = static_cast<ResourceView>(qos_info->max_tres());
+  qos.max_tres_per_user = static_cast<ResourceView>(qos_info->max_tres_per_user());
+  qos.max_tres_per_account = static_cast<ResourceView>(qos_info->max_tres_per_account());
+  qos.flags = qos_info->flags();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -626,6 +636,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
+
+  qos.max_wall = absl::Seconds(qos_info->max_wall());
 
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
@@ -848,9 +860,19 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  CraneExpected<void> modify_res;
+  if (request->modify_field() == crane::grpc::ModifyField::MaxTres ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerUser ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerAccount) {
+    modify_res =
+          g_account_manager->ModifyQosTres(request->uid(), request->name(),
+                                       request->modify_field(), request->value());
+  } else {
+    modify_res =
+             g_account_manager->ModifyQos(request->uid(), request->name(),
+                                          request->modify_field(), request->value());
+  }
 
   if (modify_res) {
     response->set_ok(true);
@@ -1066,9 +1088,19 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_description(qos.description);
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+    qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+    qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
+    qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->set_max_jobs(qos.max_jobs);
+    qos_info->set_max_submit_jobs(qos.max_submit_jobs);
+    qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
+    qos_info->mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    qos_info->mutable_max_tres_per_user()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    qos_info->mutable_max_tres_per_account()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->set_flags(qos.flags);
   }
 
   return grpc::Status::OK;
@@ -1639,9 +1671,9 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      CRANE_ERROR("{}", CraneErrStr(res));
       return std::unexpected(res);
     }
     std::future<task_id_t> future =
