@@ -411,7 +411,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
         task->reservation, task->TaskId(),
         {task->EndTime(), task->AllocatedRes()});
   }
-  g_account_meta_container->MallocQosResource(*task);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
