@@ -158,6 +158,7 @@ struct TaskInstance {
   std::string cgroup_path;
   CgroupInterface* cgroup{};
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> signal_timer{nullptr};
 
   // Task execution results
   bool orphaned{false};
@@ -301,6 +302,31 @@ class TaskManager {
     // Close handle before free
     instance->termination_timer->close();
     instance->termination_timer.reset();
+  }
+
+  void AddSignalTimer_(TaskInstance* instance, int64_t secs) {
+    if (instance->signal_timer) {
+      instance->signal_timer->close();
+      instance->signal_timer.reset();
+    }
+    auto signal_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    signal_handle->on<uvw::timer_event>(
+        [this, instance](const uvw::timer_event&, uvw::timer_handle& h) {
+          if (!instance) return;
+          int signal_number = instance->task.signal_param().signal_number();
+          for (const auto& [_, pr_instance] : instance->processes) {
+            KillProcessInstance_(pr_instance.get(), signal_number);
+          }
+        });
+    signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
+    instance->signal_timer = signal_handle;
+  }
+
+  static void DelSignalTimer_(TaskInstance* instance) {
+    if (instance->signal_timer) {
+      instance->signal_timer->close();
+      instance->signal_timer.reset();
+    }
   }
 
   /**
