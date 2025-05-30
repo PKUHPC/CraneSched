@@ -961,7 +961,9 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
         "max_tres",
         "max_tres_per_user",
         "max_tres_per_account",
-        "flags"
+        "flags",
+        "max_tres_per_job",
+        "max_wall_duration_per_job"
     };
 // clang-format on
 inline std::string_view CraneModifyFieldStr(

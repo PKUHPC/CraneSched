@@ -841,6 +841,28 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
         new_err_record->set_code(modify_res.error());
       }
       break;
+    case crane::grpc::ModifyField::MaxJobs:
+    case crane::grpc::ModifyField::MaxSubmitJobs:
+    case crane::grpc::ModifyField::MaxWall:
+    case crane::grpc::ModifyField::MaxWallDurationPerJob:
+      modify_res = g_account_manager->ModifyUserPartitionResource(request->uid(), request->modify_field(),
+        request->name(), request->partition(), request->value_list()[0]);
+      if (!modify_res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(request->value_list()[0]);
+        new_err_record->set_code(modify_res.error());
+      }
+      break;
+    case crane::grpc::ModifyField::MaxTres:
+    case crane::grpc::ModifyField::MaxTresPerJob:
+      modify_res = g_account_manager->ModifyUserTresPartitionResource(request->uid(), request->modify_field(),
+        request->name(), request->partition(), request->value_list()[0]);
+      if (!modify_res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(request->value_list()[0]);
+        new_err_record->set_code(modify_res.error());
+      }
+      break;
     default:
       std::unreachable();
     }

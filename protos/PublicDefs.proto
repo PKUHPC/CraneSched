@@ -522,6 +522,9 @@ enum ModifyField {
   MaxTresPerUser = 17;
   MaxTresPerAccount = 18;
   FLags = 19;
+  //  account/user-partition
+  MaxTresPerJob = 20;
+  MaxWallDurationPerJob = 21;
 }
 
 message AccountInfo {
