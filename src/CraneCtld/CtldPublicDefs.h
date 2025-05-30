@@ -813,6 +813,16 @@ struct Qos {
   }
 };
 
+struct PartitionResource {
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
+  ResourceView max_tres;
+  ResourceView max_tres_per_job;
+  absl::Duration max_wall;
+  absl::Duration max_wall_duration_per_job;
+};
+
+
 struct Account {
   bool deleted = false;
   bool blocked = false;
@@ -825,6 +835,7 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
+  std::unordered_map<std::string, PartitionResource> partition_resource;
 };
 
 struct User {
@@ -861,6 +872,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+  std::unordered_map<std::string, PartitionResource> partition_resource;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
