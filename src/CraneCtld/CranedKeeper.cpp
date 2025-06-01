@@ -76,6 +76,8 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   ExecuteTasksReply reply;
   ClientContext context;
   Status status;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   status = m_stub_->ExecuteTask(&context, request, &reply);
   if (!status.ok()) {
@@ -89,6 +91,7 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
 
     return failed_task_ids;
   }
+  UpdateLastActiveTime();
 
   failed_task_ids.assign(reply.failed_task_id_list().begin(),
                          reply.failed_task_id_list().end());
@@ -104,6 +107,8 @@ CraneErrCode CranedStub::TerminateTasks(
   Status status;
   TerminateTasksRequest request;
   TerminateTasksReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (const auto &id : task_ids) request.add_task_id_list(id);
 
@@ -115,6 +120,7 @@ CraneErrCode CranedStub::TerminateTasks(
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  UpdateLastActiveTime();
 
   return CraneErrCode::SUCCESS;
 }
@@ -128,6 +134,8 @@ CraneErrCode CranedStub::TerminateOrphanedTasks(
   Status status;
   TerminateOrphanedTaskRequest request;
   TerminateOrphanedTaskReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
 
@@ -139,6 +147,7 @@ CraneErrCode CranedStub::TerminateOrphanedTasks(
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  UpdateLastActiveTime();
 
   if (reply.ok())
     return CraneErrCode::SUCCESS;
@@ -170,6 +179,7 @@ CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  UpdateLastActiveTime();
 
   return CraneErrCode::SUCCESS;
 }
@@ -200,6 +210,7 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  UpdateLastActiveTime();
 
   return CraneErrCode::SUCCESS;
 }
@@ -214,6 +225,8 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
   ChangeTaskTimeLimitRequest request;
   ChangeTaskTimeLimitReply reply;
 
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
   request.set_task_id(task_id);
   request.set_time_limit_seconds(seconds);
   status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
@@ -224,6 +237,7 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
+  UpdateLastActiveTime();
   if (reply.ok())
     return CraneErrCode::SUCCESS;
   else
@@ -320,13 +334,17 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
 
   m_period_connect_thread_ =
       std::thread(&CranedKeeper::PeriodConnectCranedThreadFunc_, this);
+  m_period_check_timeout_thread_ =
+      std::thread(&CranedKeeper::PeriodCheckTimeoutThreadFunc_, this);
 }
 
 CranedKeeper::~CranedKeeper() {
   Shutdown();
 
   for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
-  m_period_connect_thread_.join();
+  if (m_period_connect_thread_.joinable()) m_period_connect_thread_.join();
+  if (m_period_check_timeout_thread_.joinable())
+    m_period_check_timeout_thread_.join();
 
   CRANE_TRACE("CranedKeeper has been closed.");
 }
@@ -373,6 +391,18 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
     }
 
     if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
+    if (tag->craned->m_shutting_down_) {
+      auto *craned = tag->craned;
+      CRANE_ASSERT(tag->type == CqTag::kEstablishedCraned);
+      if (m_craned_disconnected_cb_) {
+        g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
+          m_craned_disconnected_cb_(craned_id);
+        });
+      }
+      WriterLock lock(&m_connected_craned_mtx_);
+      m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+      continue;
+    }
     if (next_status == grpc::CompletionQueue::GOT_EVENT) {
       // If ok is false, the tag timed out.
       // However, we can also check timeout
@@ -568,7 +598,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     craned->m_disconnected_ = true;
     craned->m_registered_ = false;
 
-    next_tag_type = CqTag::kEstablishedCraned;
+    next_tag_type = std::nullopt;
     break;
   }
 
@@ -640,8 +670,7 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
-                                      const RegToken &token) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -755,10 +784,9 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
           m_connecting_craned_set_.emplace(*it);
-          g_thread_pool->detach_task(
-              [this, craned_id = it->first, token = it->second]() {
-                ConnectCranedNode_(craned_id, token);
-              });
+          g_thread_pool->detach_task([this, craned_id = it->first]() {
+            ConnectCranedNode_(craned_id);
+          });
           fetch_num--;
         }
         ++it;
@@ -769,4 +797,21 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
   }
 }
 
+void CranedKeeper::PeriodCheckTimeoutThreadFunc_() {
+  util::SetCurrentThreadName("CrndTimeoutThr");
+  while (!m_cq_closed_) {
+    std::this_thread::sleep_for(std::chrono::seconds(kCranedPingTimeoutSec));
+    absl::ReaderMutexLock lk(&m_connected_craned_mtx_);
+    auto now = std::chrono::steady_clock::now();
+    for (auto &[craned_id, stub] : m_connected_craned_id_stub_map_) {
+      if (stub->m_shutting_down_) continue;
+      if (stub->m_last_active_time_.load(std::memory_order_acquire) +
+              std::chrono::seconds(kCranedPingTimeoutSec) <
+          now) {
+        stub->m_shutting_down_ = true;
+        CRANE_DEBUG("Craned {} going to down because timeout", craned_id);
+      }
+    }
+  }
+}
 }  // namespace Ctld

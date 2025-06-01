@@ -28,6 +28,7 @@ namespace Craned {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 inline constexpr uint64_t kRegisterOperationTimeoutMs = 5'000;
+constexpr int64_t kCranedRpcTimeoutSeconds = 5;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;

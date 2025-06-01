@@ -30,6 +30,8 @@ CraneCtldLogFile: cranectld/cranectld.log
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
+# ping timeout in seconds
+CranedPingTimeout: 30
 
 # Craned settings
 # the listening address of control machine
@@ -46,6 +48,9 @@ CranedMutexFilePath: craned/craned.lock
 CranedCforedSockPath: craned/cfored.sock
 # whether the craned is running in the background
 CranedForeground: true
+# ping interval in seconds
+CranedPingInterval: 10
+
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:

@@ -50,8 +50,14 @@ void CranedMetaContainer::CranedUp(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
 
   // Then acquire craned meta lock.
-  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
+  CRANE_ASSERT(node_meta);
+  if (node_meta->alive) {
+    CRANE_TRACE("Craned {} is trying to up, but it's already alive, skip it.",
+                craned_id);
+    return;
+  }
+
   node_meta->alive = true;
 
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
@@ -80,10 +86,10 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   }
 
   // Then acquire craned meta lock.
-  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
   if (!node_meta->alive) {
-    CRANE_TRACE("Craned {} down, but it's not alive, skip clean.", craned_id);
+    CRANE_TRACE("Craned {} trying to down, but it's not alive, skip clean.",
+                craned_id);
     return;
   }
   node_meta->alive = false;
@@ -94,6 +100,8 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
     part_global_meta.alive_craned_cnt--;
   }
+
+  CRANE_INFO("Craned {} is down now.", craned_id);
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
@@ -274,6 +282,7 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
 void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;
+  HashMap<CranedId, absl::Time> craned_timeout_map;
 
   for (auto&& [craned_name, node_ptr] : config.Nodes) {
     CRANE_TRACE("Parsing node {}", craned_name);
@@ -298,6 +307,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     craned_meta.res_total += static_meta.res;
     craned_meta.res_avail += static_meta.res;
     craned_meta.res_in_use.SetToZero();
+
+    craned_timeout_map[craned_name] = absl::InfinitePast();
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {

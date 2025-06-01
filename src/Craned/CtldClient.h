@@ -49,6 +49,7 @@ class CtldClientStateMachine {
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
   void SetActionDisconnectedCb(std::function<void()>&& cb);
+  void SetActionTimeoutCb(std::function<void()>&& cb);
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
@@ -59,7 +60,7 @@ class CtldClientStateMachine {
   // Grpc Channel events
   void EvGrpcConnected();
   void EvGrpcConnectionFailed();
-  void EvGrpcTimeout();
+  void EvPingFailed();
 
   bool IsReadyNow();
 
@@ -96,11 +97,13 @@ class CtldClientStateMachine {
                        std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
   void ActionDisconnected_();
+  void ActionTimeout_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
   std::function<void(ConfigureArg const&)> m_action_configure_cb_;
   std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
+  std::function<void()> m_action_timeout_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
@@ -141,7 +144,17 @@ class CtldClient {
 
   void AddGrpcCtldDisconnectedCb(std::function<void()> cb);
 
+  void SetPingFailedCb(std::function<void()>&& cb);
+
   void StartGrpcCtldConnection() { m_connection_start_notification_.Notify(); }
+
+  void StartPingCtld() {
+    m_last_activate_time_.store(std::chrono::steady_clock::now(),
+                                std::memory_order_release);
+    m_ping_.store(true, std::memory_order_release);
+  }
+
+  void StopPingCtld() { m_ping_.store(false, std::memory_order_release); }
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -157,6 +170,7 @@ class CtldClient {
                        std::set<task_id_t> const& lost_tasks);
 
   void AsyncSendThread_();
+  void PingThread_();
 
   absl::Mutex m_task_status_change_mtx_;
 
@@ -164,6 +178,7 @@ class CtldClient {
       ABSL_GUARDED_BY(m_task_status_change_mtx_);
 
   std::thread m_async_send_thread_;
+  std::thread m_ping_thread_;
   std::atomic_bool m_thread_stop_{false};
 
   std::shared_ptr<Channel> m_ctld_channel_;
@@ -175,8 +190,12 @@ class CtldClient {
   std::atomic<bool> m_grpc_has_initialized_;
   std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;
   std::vector<std::function<void()>> m_on_ctld_disconnected_cb_chain_;
+  std::function<void()> m_ping_failed_cb_;
 
   absl::Notification m_connection_start_notification_;
+  std::atomic_bool m_ping_{false};
+  std::atomic<std::chrono::time_point<std::chrono::steady_clock>>
+      m_last_activate_time_;
 };
 
 }  // namespace Craned

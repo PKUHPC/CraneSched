@@ -622,7 +622,6 @@ void StartServer() {
   // Supervisor.WaitInitFinish();
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
-  g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
