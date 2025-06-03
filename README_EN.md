@@ -1,3 +1,11 @@
+## CraneSched Latest Updates
+
+[2025/04/08] Released v1.1.2: Upgraded build tools to GCC 15/Clang 20, added node draining/resuming events, partition-based account control, and integrated Vault.
+
+[2025/01/24] Released v1.1.0: Added X11 forwarding, user QoS limits, multiple GID support, cgroupv2 and Ascend NPU support, and optimized scheduling algorithm and event library.
+
+[2024/10/24] Released v1.0.0: Added job monitoring, plugin modules, device support, optimized scheduling algorithm, improved resource and job management, and IPv6 support.
+
 # CraneSched Introduction #
 
 [[中文](./README.md) | ENG]
