@@ -3404,21 +3404,22 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
       job_size_factor /= 3.0;
     }
   // fair_share_factor
-  if (bound.service_val_max != bound.service_val_min) {
-    FUNC("start11 {}", (bound.service_val_max - bound.service_val_min));
-    fair_share_factor =
-        1.0 - (task_service_val - bound.service_val_min) /
-                  (bound.service_val_max - bound.service_val_min);
-    FUNC("end11");
-  }
-
+    FUNC("start12");
+    if (bound.service_val_max != bound.service_val_min) {
+      FUNC("start11 {}", (bound.service_val_max - bound.service_val_min));
+      fair_share_factor =
+          1.0 - (task_service_val - bound.service_val_min) /
+                    (bound.service_val_max - bound.service_val_min);
+      FUNC("end11");
+    }
+  FUNC("start13");
   double priority =
       g_config.PriorityConfig.WeightAge * age_factor +
       g_config.PriorityConfig.WeightPartition * partition_factor +
       g_config.PriorityConfig.WeightJobSize * job_size_factor +
       g_config.PriorityConfig.WeightFairShare * fair_share_factor +
       g_config.PriorityConfig.WeightQOS * qos_factor;
-  FUNC("end");
+  FUNC("end {}", priority);
   return priority;
 }
 }  // namespace Ctld
