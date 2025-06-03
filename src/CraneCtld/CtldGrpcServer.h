@@ -319,6 +319,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::PowerStateChangeRequest *request,
       crane::grpc::PowerStateChangeReply *response) override;
 
+  grpc::Status EnableAutoPowerControl(
+      grpc::ServerContext *context,
+      const crane::grpc::EnableAutoPowerControlRequest *request,
+      crane::grpc::EnableAutoPowerControlReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };
