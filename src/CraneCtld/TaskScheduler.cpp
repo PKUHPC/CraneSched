@@ -3209,6 +3209,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     FUNC("before pending_reason, task ptr={}", (void*)task.get());
     if (!task) {
       FUNC("task is nullptr!");
+    }
       task->pending_reason = "";
       FUNC("after pending_reason");
       FUNC("start9{} ", task_priority_vec.size());
