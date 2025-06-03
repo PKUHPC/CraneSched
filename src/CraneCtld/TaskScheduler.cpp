@@ -3196,7 +3196,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       task->pending_reason = "Held";
       continue;
     }
-      FUNC("start2 {} ", task_id);
+    FUNC("start2 {} ", task_id);
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)
@@ -3216,189 +3216,190 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       task_priority_vec.emplace_back(task.get(), priority);
       FUNC("start10 {} ", task_priority_vec.size());
     }
-  FUNC("start6 {} ", task_priority_vec.size());
-  std::sort(task_priority_vec.begin(), task_priority_vec.end(),
-            [](const std::pair<TaskInCtld*, double>& a,
-               const std::pair<TaskInCtld*, double>& b) {
-              return a.second > b.second;
-            });
-      FUNC("start3 {} ", task_priority_vec.size());
-  size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
- FUNC("start4 {} ", id_vec_len);
-  std::vector<task_id_t> task_id_vec;
-  task_id_vec.reserve(id_vec_len);
- FUNC("start5 {} ", task_id_vec.size());
-  for (int i = 0; i < id_vec_len; i++)
-    task_id_vec.emplace_back(task_priority_vec[i].first->TaskId());
-  FUNC("end");
-  return task_id_vec;
-
-}
-
-void MultiFactorPriority::CalculateFactorBound_(
-    const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map, absl::Time now) {
-  FactorBound& bound = m_factor_bound_;
-  FUNC("start");
-  // Initialize the values of each max and min
-  bound.age_max = 0;
-  bound.age_min = std::numeric_limits<uint64_t>::max();
-
-  bound.qos_priority_max = 0;
-  bound.qos_priority_min = std::numeric_limits<uint32_t>::max();
-
-  bound.part_priority_max = 0;
-  bound.part_priority_min = std::numeric_limits<uint32_t>::max();
-
-  bound.nodes_alloc_max = 0;
-  bound.nodes_alloc_min = std::numeric_limits<uint32_t>::max();
-
-  bound.mem_alloc_max = 0;
-  bound.mem_alloc_min = std::numeric_limits<uint64_t>::max();
-
-  bound.cpus_alloc_max = 0;
-  bound.cpus_alloc_min = std::numeric_limits<double>::max();
-
-  bound.service_val_max = 0;
-  bound.service_val_min = std::numeric_limits<uint32_t>::max();
-
-  bound.acc_service_val_map.clear();
-
-  for (const auto& [task_id, task] : pending_task_map) {
-    uint64_t age = ToInt64Seconds(now - task->SubmitTime());
-    age = std::min(age, g_config.PriorityConfig.MaxAge);
-
-    bound.acc_service_val_map[task->account] = 0.0;
-
-    bound.age_min = std::min(age, bound.age_min);
-    bound.age_max = std::max(age, bound.age_max);
-
-    uint32_t nodes_alloc = task->node_num;
-    bound.nodes_alloc_min = std::min(nodes_alloc, bound.nodes_alloc_min);
-    bound.nodes_alloc_max = std::max(nodes_alloc, bound.nodes_alloc_max);
-
-    uint64_t mem_alloc = task->allocated_res_view.MemoryBytes();
-    bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
-    bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
-
-    double cpus_alloc = task->allocated_res_view.CpuCount();
-    bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
-    bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
-
-    uint32_t qos_priority = task->qos_priority;
-    bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
-    bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
-
-    uint32_t part_priority = task->partition_priority;
-    bound.part_priority_min = std::min(part_priority, bound.part_priority_min);
-    bound.part_priority_max = std::max(part_priority, bound.part_priority_max);
+    FUNC("start6 {} ", task_priority_vec.size());
+    std::sort(task_priority_vec.begin(), task_priority_vec.end(),
+              [](const std::pair<TaskInCtld*, double>& a,
+                 const std::pair<TaskInCtld*, double>& b) {
+                return a.second > b.second;
+              });
+    FUNC("start3 {} ", task_priority_vec.size());
+    size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
+    FUNC("start4 {} ", id_vec_len);
+    std::vector<task_id_t> task_id_vec;
+    task_id_vec.reserve(id_vec_len);
+    FUNC("start5 {} ", task_id_vec.size());
+    for (int i = 0; i < id_vec_len; i++)
+      task_id_vec.emplace_back(task_priority_vec[i].first->TaskId());
+    FUNC("end");
+    return task_id_vec;
   }
 
-  for (const auto& [task_id, task] : running_task_map) {
-    double service_val = 0;
-    if (bound.cpus_alloc_max != bound.cpus_alloc_min)
-      service_val +=
-          1.0 * (task->allocated_res_view.CpuCount() - bound.cpus_alloc_min) /
-          (bound.cpus_alloc_max - bound.cpus_alloc_min);
-    else
-      // += 1.0 here rather than 0.0 in case that the final service_val is 0.
-      // If the final service_val is 0, the running time of the task will not
-      // be ruled out in calculation. We must avoid that.
-      service_val += 1.0;
+  void MultiFactorPriority::CalculateFactorBound_(
+      const OrderedTaskMap& pending_task_map,
+      const UnorderedTaskMap& running_task_map, absl::Time now) {
+    FactorBound& bound = m_factor_bound_;
+    FUNC("start");
+    // Initialize the values of each max and min
+    bound.age_max = 0;
+    bound.age_min = std::numeric_limits<uint64_t>::max();
 
-    if (bound.nodes_alloc_max != bound.nodes_alloc_min)
-      service_val += 1.0 * (task->node_num - bound.nodes_alloc_min) /
-                     (bound.nodes_alloc_max - bound.nodes_alloc_min);
-    else
-      service_val += 1.0;
+    bound.qos_priority_max = 0;
+    bound.qos_priority_min = std::numeric_limits<uint32_t>::max();
 
-    if (bound.mem_alloc_max != bound.mem_alloc_min)
-      service_val +=
-          1.0 *
-          static_cast<double>(task->allocated_res_view.MemoryBytes() -
-                              bound.mem_alloc_min) /
-          static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
-    else
-      service_val += 1.0;
+    bound.part_priority_max = 0;
+    bound.part_priority_min = std::numeric_limits<uint32_t>::max();
 
-    uint64_t run_time = ToInt64Seconds(now - task->StartTime());
-    bound.acc_service_val_map[task->account] +=
-        service_val * static_cast<double>(run_time);
-  }
+    bound.nodes_alloc_max = 0;
+    bound.nodes_alloc_min = std::numeric_limits<uint32_t>::max();
 
-  for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {
-    bound.service_val_min = std::min(ser_val, bound.service_val_min);
-    bound.service_val_max = std::max(ser_val, bound.service_val_max);
-  }
-  FUNC("end");
-}
+    bound.mem_alloc_max = 0;
+    bound.mem_alloc_min = std::numeric_limits<uint64_t>::max();
 
-double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
-                                               absl::Time now) const {
-  FactorBound const& bound = m_factor_bound_;
-  FUNC("start");
-  uint64_t task_age = ToUnixSeconds(now) - task->SubmitTimeInUnixSecond();
-  task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
-  FUNC("start1");
-  uint32_t task_qos_priority = task->qos_priority;
-  uint32_t task_part_priority = task->partition_priority;
-  uint32_t task_nodes_alloc = task->node_num;
-  uint64_t task_mem_alloc = task->requested_node_res_view.MemoryBytes();
-  double task_cpus_alloc =
-      static_cast<double>(task->requested_node_res_view.CpuCount());
-  double task_service_val = bound.acc_service_val_map.at(task->account);
-  FUNC("start2");
-  double qos_factor{0};
-  double age_factor{0};
-  double partition_factor{0};
-  double job_size_factor{0};
-  double fair_share_factor{0};
+    bound.cpus_alloc_max = 0;
+    bound.cpus_alloc_min = std::numeric_limits<double>::max();
 
-  // age_factor
-  if (bound.age_max != bound.age_min) {
-    FUNC("start3 {}", static_cast<double>(bound.age_max - bound.age_min));
-    age_factor = 1.0 * static_cast<double>(task_age - bound.age_min) /
-                 static_cast<double>(bound.age_max - bound.age_min);
-    FUNC("end3");
-  }
-  // qos_factor
-  if (bound.qos_priority_min != bound.qos_priority_max) {
-    FUNC("start4 {}", (bound.qos_priority_max - bound.qos_priority_min));
-    qos_factor = 1.0 * (task_qos_priority - bound.qos_priority_min) /
-                 (bound.qos_priority_max - bound.qos_priority_min);
-    FUNC("end4");
-  }
+    bound.service_val_max = 0;
+    bound.service_val_min = std::numeric_limits<uint32_t>::max();
 
-  // partition_factor
-  if (bound.part_priority_max != bound.part_priority_min) {
-    FUNC("start5 {}", (bound.part_priority_max - bound.part_priority_min));
-    partition_factor = 1.0 * (task_part_priority - bound.part_priority_min) /
-                       (bound.part_priority_max - bound.part_priority_min);
-    FUNC("end5");
-  }
+    bound.acc_service_val_map.clear();
 
-  // job_size_factor
-  if (bound.cpus_alloc_max != bound.cpus_alloc_min) {
-    FUNC("start6 {}", (bound.cpus_alloc_max - bound.cpus_alloc_min));
-    job_size_factor += 1.0 * (task_cpus_alloc - bound.cpus_alloc_min) /
-                       (bound.cpus_alloc_max - bound.cpus_alloc_min);
-    FUNC("end6");
-  }
+    for (const auto& [task_id, task] : pending_task_map) {
+      uint64_t age = ToInt64Seconds(now - task->SubmitTime());
+      age = std::min(age, g_config.PriorityConfig.MaxAge);
 
-  if (bound.nodes_alloc_max != bound.nodes_alloc_min) {
-    FUNC("start7 {}", (bound.nodes_alloc_max - bound.nodes_alloc_min));
-    job_size_factor += 1.0 * (task_nodes_alloc - bound.nodes_alloc_min) /
+      bound.acc_service_val_map[task->account] = 0.0;
+
+      bound.age_min = std::min(age, bound.age_min);
+      bound.age_max = std::max(age, bound.age_max);
+
+      uint32_t nodes_alloc = task->node_num;
+      bound.nodes_alloc_min = std::min(nodes_alloc, bound.nodes_alloc_min);
+      bound.nodes_alloc_max = std::max(nodes_alloc, bound.nodes_alloc_max);
+
+      uint64_t mem_alloc = task->allocated_res_view.MemoryBytes();
+      bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
+      bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
+
+      double cpus_alloc = task->allocated_res_view.CpuCount();
+      bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
+      bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
+
+      uint32_t qos_priority = task->qos_priority;
+      bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
+      bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
+
+      uint32_t part_priority = task->partition_priority;
+      bound.part_priority_min =
+          std::min(part_priority, bound.part_priority_min);
+      bound.part_priority_max =
+          std::max(part_priority, bound.part_priority_max);
+    }
+
+    for (const auto& [task_id, task] : running_task_map) {
+      double service_val = 0;
+      if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+        service_val +=
+            1.0 * (task->allocated_res_view.CpuCount() - bound.cpus_alloc_min) /
+            (bound.cpus_alloc_max - bound.cpus_alloc_min);
+      else
+        // += 1.0 here rather than 0.0 in case that the final service_val is 0.
+        // If the final service_val is 0, the running time of the task will not
+        // be ruled out in calculation. We must avoid that.
+        service_val += 1.0;
+
+      if (bound.nodes_alloc_max != bound.nodes_alloc_min)
+        service_val += 1.0 * (task->node_num - bound.nodes_alloc_min) /
                        (bound.nodes_alloc_max - bound.nodes_alloc_min);
-    FUNC("end7");
+      else
+        service_val += 1.0;
+
+      if (bound.mem_alloc_max != bound.mem_alloc_min)
+        service_val +=
+            1.0 *
+            static_cast<double>(task->allocated_res_view.MemoryBytes() -
+                                bound.mem_alloc_min) /
+            static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
+      else
+        service_val += 1.0;
+
+      uint64_t run_time = ToInt64Seconds(now - task->StartTime());
+      bound.acc_service_val_map[task->account] +=
+          service_val * static_cast<double>(run_time);
+    }
+
+    for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {
+      bound.service_val_min = std::min(ser_val, bound.service_val_min);
+      bound.service_val_max = std::max(ser_val, bound.service_val_max);
+    }
+    FUNC("end");
   }
 
-  if (bound.mem_alloc_max != bound.mem_alloc_min) {
-    FUNC("start8 {}",
-         static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min));
-    job_size_factor +=
-        1.0 * static_cast<double>(task_mem_alloc - bound.mem_alloc_min) /
-        static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
-  }
+  double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld * task,
+                                                 absl::Time now) const {
+    FactorBound const& bound = m_factor_bound_;
+    FUNC("start");
+    uint64_t task_age = ToUnixSeconds(now) - task->SubmitTimeInUnixSecond();
+    task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
+    FUNC("start1");
+    uint32_t task_qos_priority = task->qos_priority;
+    uint32_t task_part_priority = task->partition_priority;
+    uint32_t task_nodes_alloc = task->node_num;
+    uint64_t task_mem_alloc = task->requested_node_res_view.MemoryBytes();
+    double task_cpus_alloc =
+        static_cast<double>(task->requested_node_res_view.CpuCount());
+    double task_service_val = bound.acc_service_val_map.at(task->account);
+    FUNC("start2");
+    double qos_factor{0};
+    double age_factor{0};
+    double partition_factor{0};
+    double job_size_factor{0};
+    double fair_share_factor{0};
+
+    // age_factor
+    if (bound.age_max != bound.age_min) {
+      FUNC("start3 {}", static_cast<double>(bound.age_max - bound.age_min));
+      age_factor = 1.0 * static_cast<double>(task_age - bound.age_min) /
+                   static_cast<double>(bound.age_max - bound.age_min);
+      FUNC("end3");
+    }
+    // qos_factor
+    if (bound.qos_priority_min != bound.qos_priority_max) {
+      FUNC("start4 {}", (bound.qos_priority_max - bound.qos_priority_min));
+      qos_factor = 1.0 * (task_qos_priority - bound.qos_priority_min) /
+                   (bound.qos_priority_max - bound.qos_priority_min);
+      FUNC("end4");
+    }
+
+    // partition_factor
+    if (bound.part_priority_max != bound.part_priority_min) {
+      FUNC("start5 {}", (bound.part_priority_max - bound.part_priority_min));
+      partition_factor = 1.0 * (task_part_priority - bound.part_priority_min) /
+                         (bound.part_priority_max - bound.part_priority_min);
+      FUNC("end5");
+    }
+
+    // job_size_factor
+    if (bound.cpus_alloc_max != bound.cpus_alloc_min) {
+      FUNC("start6 {}", (bound.cpus_alloc_max - bound.cpus_alloc_min));
+      job_size_factor += 1.0 * (task_cpus_alloc - bound.cpus_alloc_min) /
+                         (bound.cpus_alloc_max - bound.cpus_alloc_min);
+      FUNC("end6");
+    }
+
+    if (bound.nodes_alloc_max != bound.nodes_alloc_min) {
+      FUNC("start7 {}", (bound.nodes_alloc_max - bound.nodes_alloc_min));
+      job_size_factor += 1.0 * (task_nodes_alloc - bound.nodes_alloc_min) /
+                         (bound.nodes_alloc_max - bound.nodes_alloc_min);
+      FUNC("end7");
+    }
+
+    if (bound.mem_alloc_max != bound.mem_alloc_min) {
+      FUNC("start8 {}",
+           static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min));
+      job_size_factor +=
+          1.0 * static_cast<double>(task_mem_alloc - bound.mem_alloc_min) /
+          static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
+    }
     if (g_config.PriorityConfig.FavorSmall) {
       FUNC("start9");
       job_size_factor = 1.0 - job_size_factor / 3;
@@ -3407,7 +3408,7 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
       FUNC("start10");
       job_size_factor /= 3.0;
     }
-  // fair_share_factor
+    // fair_share_factor
     FUNC("start12");
     if (bound.service_val_max != bound.service_val_min) {
       FUNC("start11 {}", (bound.service_val_max - bound.service_val_min));
@@ -3416,14 +3417,14 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
                     (bound.service_val_max - bound.service_val_min);
       FUNC("end11");
     }
-  FUNC("start13");
-  double priority =
-      g_config.PriorityConfig.WeightAge * age_factor +
-      g_config.PriorityConfig.WeightPartition * partition_factor +
-      g_config.PriorityConfig.WeightJobSize * job_size_factor +
-      g_config.PriorityConfig.WeightFairShare * fair_share_factor +
-      g_config.PriorityConfig.WeightQOS * qos_factor;
-  FUNC("end {}", priority);
-  return priority;
-}
+    FUNC("start13");
+    double priority =
+        g_config.PriorityConfig.WeightAge * age_factor +
+        g_config.PriorityConfig.WeightPartition * partition_factor +
+        g_config.PriorityConfig.WeightJobSize * job_size_factor +
+        g_config.PriorityConfig.WeightFairShare * fair_share_factor +
+        g_config.PriorityConfig.WeightQOS * qos_factor;
+    FUNC("end {}", priority);
+    return priority;
+  }
 }  // namespace Ctld
