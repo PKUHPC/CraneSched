@@ -63,6 +63,7 @@
 #define CRANE_WARN(...) SPDLOG_WARN(__VA_ARGS__)
 #define CRANE_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
 #define CRANE_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+#define FUNC(fmt, ...) SPDLOG_INFO("[{}] " fmt, __func__, ##__VA_ARGS__)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
