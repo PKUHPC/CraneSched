@@ -1767,7 +1767,7 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 void TaskScheduler::CleanSubmitQueueCb_() {
   using SubmitQueueElem =
       std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
-
+  FUNC("start");
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
@@ -1852,6 +1852,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       rejected_tasks[i].second.set_value(0);
     }
   } while (false);
+  FUNC("end");
 }
 
 void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
@@ -2600,7 +2601,7 @@ void MinLoadFirst::NodeSelect(
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
-
+  FUNC("start");
   // Truncated by 1s.
   // We use the time now as the base time across the whole algorithm.
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
@@ -2623,7 +2624,7 @@ void MinLoadFirst::NodeSelect(
           &resv_id_node_info_map[reservation_id]);
     }
   }
-
+  FUNC("start1");
   {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2642,7 +2643,7 @@ void MinLoadFirst::NodeSelect(
                                              &node_info_in_a_partition);
     }
   }
-
+  FUNC("start2");
   std::vector<task_id_t> task_id_vec;
   task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
       *pending_task_map, running_tasks, g_config.ScheduledBatchSize, now);
@@ -2671,7 +2672,7 @@ void MinLoadFirst::NodeSelect(
         node_info_ptr = &iter->second;
       }
     }
-
+    FUNC("start3");
     NodeSelectionInfo& node_info = *node_info_ptr;
     std::list<CranedId> craned_ids;
     absl::Time expected_start_time;
@@ -2707,7 +2708,7 @@ void MinLoadFirst::NodeSelect(
             task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
             absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
       }
-
+      FUNC("start4");
       if (task->reservation == "") {
         // The start time and craned ids have been determined.
         // Modify the corresponding NodeSelectionInfo now.
@@ -2735,7 +2736,7 @@ void MinLoadFirst::NodeSelect(
             craned_ids, &node_info);
       }
     }
-
+    FUNC("start5");
     if (expected_start_time == now) {
       // The task can be started now.
 
@@ -2787,6 +2788,7 @@ void MinLoadFirst::NodeSelect(
       continue;
     }
   }
+  FUNC("end");
 }
 
 void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
@@ -3185,6 +3187,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
     const UnorderedTaskMap& running_task_map, size_t limit_num,
     absl::Time now) {
+  FUNC("start");
   CalculateFactorBound_(pending_task_map, running_task_map, now);
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
@@ -3218,13 +3221,14 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     task_id_vec.emplace_back(task_priority_vec[i].first->TaskId());
 
   return task_id_vec;
+  FUNC("end");
 }
 
 void MultiFactorPriority::CalculateFactorBound_(
     const OrderedTaskMap& pending_task_map,
     const UnorderedTaskMap& running_task_map, absl::Time now) {
   FactorBound& bound = m_factor_bound_;
-
+  FUNC("start");
   // Initialize the values of each max and min
   bound.age_max = 0;
   bound.age_min = std::numeric_limits<uint64_t>::max();
@@ -3315,12 +3319,13 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.service_val_min = std::min(ser_val, bound.service_val_min);
     bound.service_val_max = std::max(ser_val, bound.service_val_max);
   }
+  FUNC("end");
 }
 
 double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
                                                absl::Time now) const {
   FactorBound const& bound = m_factor_bound_;
-
+  FUNC("start");
   uint64_t task_age = ToUnixSeconds(now) - task->SubmitTimeInUnixSecond();
   task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
 
@@ -3383,6 +3388,7 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
       g_config.PriorityConfig.WeightQOS * qos_factor;
 
   return priority;
+  FUNC("end");
 }
 
 }  // namespace Ctld
