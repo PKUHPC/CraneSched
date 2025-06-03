@@ -3206,7 +3206,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     task->pending_reason = "";
     task_priority_vec.emplace_back(task.get(), priority);
   }
-
+  FUNC("start6 {} ", task_priority_vec.size());
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
             [](const std::pair<TaskInCtld*, double>& a,
                const std::pair<TaskInCtld*, double>& b) {
