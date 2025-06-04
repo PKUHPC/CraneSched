@@ -868,10 +868,9 @@ struct PartitionResource {
   absl::Duration max_wall_duration_per_job;
 };
 
+using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
 
 struct Account {
-
-  using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
 
   bool deleted = false;
   bool blocked = false;
@@ -913,8 +912,6 @@ struct User {
 
   /* Map<account name, item> */
   using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
-
-  using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
 
   bool deleted = false;
   uid_t uid;

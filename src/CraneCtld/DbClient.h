@@ -269,8 +269,8 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
   const DeviceMap& value);
 
 template <>
-void MongodbClient::DocumentAppendItem_<User::PartitionToResourceMap>(
-    document& doc, const std::string& key, const User::PartitionToResourceMap& value);
+void MongodbClient::DocumentAppendItem_<PartitionToResourceMap>(
+    document& doc, const std::string& key, const PartitionToResourceMap& value);
 
 template <>
 void MongodbClient::SubDocumentAppendItem_<ResourceView>(

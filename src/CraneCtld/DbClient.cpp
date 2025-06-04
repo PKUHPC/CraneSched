@@ -813,7 +813,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "coordinator_accounts",
                                     "partition_resource"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>,User::PartitionToResourceMap>
+             User::AccountToAttrsMap, std::list<std::string>,PartitionToResourceMap>
       values{user.deleted,
              user.uid,
              user.default_account,
@@ -851,6 +851,17 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
     for (auto&& user : account_view["coordinators"].get_array().value) {
       account->coordinators.emplace_back(user.get_string().value);
     }
+    for (const auto& partition_resource_item : account_view["partition_resource"].get_document().value) {
+      auto partition_resource = partition_resource_item.get_document().value;
+      PartitionResource resource;
+      resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
+      resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
+      ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
+      ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
+      resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
+      resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
+      account->partition_resource.emplace(partition_resource_item.key(), std::move(resource));
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -858,13 +869,13 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 11> fields{
+  std::array<std::string, 12> fields{
       "deleted",     "blocked",          "name",           "description",
       "users",       "child_accounts",   "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list", "coordinators"};
+      "default_qos", "allowed_qos_list", "coordinators", "partition_resource"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>, std::list<std::string>>
+             std::string, std::list<std::string>, std::list<std::string>, PartitionToResourceMap>
       values{false,
              account.blocked,
              account.name,
@@ -875,7 +886,8 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
              account.allowed_partition,
              account.default_qos,
              account.allowed_qos_list,
-             account.coordinators};
+             account.coordinators,
+             account.partition_resource};
 
   return DocumentConstructor_(fields, values);
 }
