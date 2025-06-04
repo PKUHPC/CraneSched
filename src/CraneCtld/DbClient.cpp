@@ -682,8 +682,8 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<User::PartitionToResourceMap>(
-    document& doc, const std::string& key, const User::PartitionToResourceMap& value) {
+void MongodbClient::DocumentAppendItem_<PartitionToResourceMap>(
+    document& doc, const std::string& key, const PartitionToResourceMap& value) {
   doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
     for (const auto& [partition, partition_resource] : value) {
       mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {

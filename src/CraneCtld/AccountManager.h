@@ -141,6 +141,10 @@ class AccountManager {
       uint32_t uid, const std::string& account_name,
       const std::string& default_qos,
       std::unordered_set<std::string>&& qos_list, bool force);
+  CraneExpected<void> ModifyAccountPartitioinResource(uint32_t uid, crane::grpc::ModifyField modify_field,
+    const std::string& account_name, const std::string& partition_name, const std::string& value);
+  CraneExpected<void> ModifyAccountTresPartitionResource(uint32_t uid, crane::grpc::ModifyField modify_field,
+    const std::string& account_name, const std::string& partition_name, const std::string& value);
 
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
@@ -329,7 +333,7 @@ class AccountManager {
   CraneExpected<void> ModifyUserTresPartitionResource_(crane::grpc::ModifyField modify_field,
     const User& user, const std::string& partition, const std::string& value);
 
-  void EmplacePartitionResource_(User& user, const std::string& partition);
+  void EmplaceUserPartitionResource_(User& user, const std::string& partition);
 
   CraneExpected<void> AddAccountAllowedPartition_(const std::string& name,
                                                   const std::string& partition);
@@ -345,6 +349,12 @@ class AccountManager {
   CraneExpectedRich<void> SetAccountAllowedQos_(
       const Account& account, const std::string& default_qos,
       std::unordered_set<std::string>&& qos_list);
+  CraneExpected<void> ModifyAccountPartitionResource_(crane::grpc::ModifyField modify_field,
+    const Account& account, const std::string& partition, int64_t value_number);
+  CraneExpected<void> ModifyAccountTresPartitionResource_(crane::grpc::ModifyField modify_field,
+    const Account& account, const std::string& partition, const std::string& value);
+
+  void EmpalceAccountPartitionResrouce_(Account& account, const std::string& partition);
 
   CraneExpected<void> DeleteAccountAllowedPartition_(
       const Account& account, const std::string& partition);
