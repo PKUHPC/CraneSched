@@ -78,14 +78,6 @@ ExecutionInterface::~ExecutionInterface() {
   }
 }
 
-void ExecutionInterface::TaskProcStopped() {
-  auto ok_to_free = step->cfored_client->TaskProcessStop(m_pid_);
-  if (ok_to_free) {
-    CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
-    step->cfored_client->TaskEnd(m_pid_);
-  }
-}
-
 EnvMap ExecutionInterface::GetChildProcessEnv_() const {
   std::unordered_map<std::string, std::string> env_map;
 
@@ -678,7 +670,7 @@ CraneErrCode ContainerInstance::Spawn() {
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
-  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+  std::array<int, 2> ctrl_sock_pair{};  // Socket pair for passing control msg
 
   std::vector<int> to_crun_pipe(2, -1);
   std::vector<int> from_crun_pipe(2, -1);
@@ -692,7 +684,7 @@ CraneErrCode ContainerInstance::Spawn() {
     }
   }
 
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair.data()) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -723,7 +715,7 @@ CraneErrCode ContainerInstance::Spawn() {
     ChildProcessReady child_process_ready;
 
     if (step->IsCrun()) {
-      auto& proto_ia_meta = step->step_to_super.interactive_meta();
+      const auto& proto_ia_meta = step->step_to_super.interactive_meta();
       auto port = SetupCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe,
                                    crun_pty_fd);
       msg.set_x11_port(port);
@@ -856,9 +848,6 @@ CraneErrCode ContainerInstance::Spawn() {
                      std::ranges::to<std::vector<const char*>>();
     argv_ptrs.push_back(nullptr);
 
-    // Exec
-    // fmt::print(stderr, "DEBUG\n");
-    // for (const auto& arg : argv) fmt::print(stderr, "\"{}\" ", arg);
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
@@ -873,10 +862,10 @@ CraneErrCode ContainerInstance::Spawn() {
 
 CraneErrCode ContainerInstance::Kill(int signum) {
   using json = nlohmann::json;
-  if (m_pid_) {
+  if (m_pid_ != 0) {
     // If m_pid_ not exists, no further operation.
     int rc = 0;
-    std::array<char, 256> buffer;
+    std::array<char, 256> buffer{};
     std::string cmd, ret, status;
     json jret;
 
@@ -920,10 +909,11 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 
   ContainerKill:
     // Try to stop gracefully.
-    // Note: Signum is configured in config.yaml instead of in the param.
+    // NOTE: It's admin's responsibility to ensure the command is safe.
+    // Note: Signal is configured in config.yaml instead of in the param.
     cmd = ParseOCICmdPattern_(g_config.Container.RuntimeKill);
     rc = system(cmd.c_str());
-    if (rc) {
+    if (rc != 0) {
       CRANE_TRACE(
           "[Subprocess] Failed to kill container for task #{}: error in {}",
           step->step_to_super.task_id(), cmd);
@@ -931,10 +921,10 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 
   ContainerDelete:
     // Delete the container
-    // Note: Admin could choose if --force is configured or not.
+    // NOTE: Admin could choose if --force is configured or not.
     cmd = ParseOCICmdPattern_(g_config.Container.RuntimeDelete);
     rc = system(cmd.c_str());
-    if (rc) {
+    if (rc != 0) {
       CRANE_TRACE(
           "[Subprocess] Failed to delete container for task #{}: error in {}",
           step->step_to_super.task_id(), cmd);
@@ -944,7 +934,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     // Kill runc process as the last resort.
     // Note: If runc is launched in `detached` mode, this will not work.
     rc = kill(-m_pid_, signum);
-    if (rc && (errno != ESRCH)) {
+    if ((rc != 0) && (errno != ESRCH)) {
       CRANE_TRACE("[Subprocess] Failed to kill pid {}. error: {}", m_pid_,
                   strerror(errno));
       return CraneErrCode::ERR_SYSTEM_ERR;
@@ -968,31 +958,31 @@ CraneErrCode ContainerInstance::Cleanup() {
 }
 
 const TaskExitInfo& ContainerInstance::HandleSigChld(pid_t pid, int status) {
-  m_exit_info.pid = pid;
+  m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
     // Exited with status WEXITSTATUS(status)
-    m_exit_info.value = WEXITSTATUS(status);
-    if (m_exit_info.value > 128) {
+    m_exit_info_.value = WEXITSTATUS(status);
+    if (m_exit_info_.value > 128) {
       // OCI runtime may return 128 + signal number
       // See: https://tldp.org/LDP/abs/html/exitcodes.html
-      m_exit_info.is_terminated_by_signal = true;
-      m_exit_info.value -= 128;
+      m_exit_info_.is_terminated_by_signal = true;
+      m_exit_info_.value -= 128;
     } else {
       // OCI runtime normal exiting
-      m_exit_info.is_terminated_by_signal = false;
+      m_exit_info_.is_terminated_by_signal = false;
     }
 
   } else if (WIFSIGNALED(status)) {
     // OCI runtime is forced to exit by signal
     // This is a undesired situation, but we should handle it gracefully.
-    m_exit_info.is_terminated_by_signal = true;
-    m_exit_info.value = WTERMSIG(status);
+    m_exit_info_.is_terminated_by_signal = true;
+    m_exit_info_.value = WTERMSIG(status);
     CRANE_WARN("OCI runtime for task #{} is killed by signal {}.",
-               step->step_to_super.task_id(), m_exit_info.value);
+               step->step_to_super.task_id(), m_exit_info_.value);
   }
 
-  return m_exit_info;
+  return m_exit_info_;
 }
 
 CraneErrCode ProcessInstance::Prepare() {
@@ -1299,16 +1289,16 @@ CraneErrCode ProcessInstance::Cleanup() {
 }
 
 const TaskExitInfo& ProcessInstance::HandleSigChld(pid_t pid, int status) {
-  m_exit_info.pid = pid;
+  m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
     // Exited with status WEXITSTATUS(status)
-    m_exit_info.is_terminated_by_signal = false;
-    m_exit_info.value = WEXITSTATUS(status);
+    m_exit_info_.is_terminated_by_signal = false;
+    m_exit_info_.value = WEXITSTATUS(status);
   } else if (WIFSIGNALED(status)) {
     // Killed by signal WTERMSIG(status)
-    m_exit_info.is_terminated_by_signal = true;
-    m_exit_info.value = WTERMSIG(status);
+    m_exit_info_.is_terminated_by_signal = true;
+    m_exit_info_.value = WTERMSIG(status);
   }
   /* Todo(More status tracing):
    else if (WIFSTOPPED(status)) {
@@ -1317,7 +1307,7 @@ const TaskExitInfo& ProcessInstance::HandleSigChld(pid_t pid, int status) {
     printf("continued\n");
   } */
 
-  return m_exit_info;
+  return m_exit_info_;
 }
 
 TaskManager::TaskManager()
@@ -1578,11 +1568,15 @@ void TaskManager::EvSigchldCb_() {
       const auto& exit_info = m_task_->HandleSigChld(pid, status);
       CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Status: {}", pid,
                   exit_info.is_terminated_by_signal, exit_info.value);
-      if (m_step_.IsCrun())
+      if (m_step_.IsCrun()) {
         // TaskStatusChange of a crun task is triggered in
         // CforedManager.
-        m_task_->TaskProcStopped();
-      else /* Batch / Calloc */ {
+        auto ok_to_free = m_step_.cfored_client->TaskProcessStop(pid);
+        if (ok_to_free) {
+          CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
+          m_step_.cfored_client->TaskEnd(pid);
+        }
+      } else /* Batch / Calloc */ {
         // If the TaskInstance has no process left,
         // send TaskStatusChange for this task.
         // See the comment of EvActivateTaskStatusChange_.
