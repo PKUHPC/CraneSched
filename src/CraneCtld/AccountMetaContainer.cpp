@@ -203,7 +203,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto& val = iter->second;
           val.submit_jobs_count++;
           val.jobs_count++;
-          val.resource += resource_view;
+          val.resource += task.allocated_res_view;
         },
         QosToResourceMap{
             {task.qos, QosResource{.resource = task.allocated_res_view,
@@ -217,9 +217,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
       auto& val = pair.second;
       val.submit_jobs_count++;
       val.jobs_count++;
-      val.resource += resource_view;
+      val.resource += task.allocated_res_view;
     },
-    QosResource{resource_view, 1, 1});
+    QosResource{task.allocated_res_view, 1, 1});
 }
 
 std::expected<void, std::string>
