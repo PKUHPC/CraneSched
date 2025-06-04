@@ -74,8 +74,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       "Malloc QOS {} submit resource for task of user {} and account {}.",
       task.qos, task.Username(), task.account);
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
   m_user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -83,15 +81,14 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{resource_view, 0, 1});
+                                      QosResource{ResourceView{}, 0, 1});
           return;
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
         val.submit_jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+      QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -101,14 +98,14 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{resource_view, 0, 1});
+                                        QosResource{ResourceView{}, 0, 1});
             return;
           }
 
           auto& val = iter->second;
           val.submit_jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+        QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
   }
 
   CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}",
@@ -142,8 +139,6 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
       "account {}.",
       task.qos, task.TaskId(), task.Username(), task.account);
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
   m_user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -151,15 +146,14 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{resource_view, 0, 1});
+                                      QosResource{ResourceView{}, 0, 1});
           return;
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
         val.submit_jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+      QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -169,14 +163,14 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{resource_view, 0, 1});
+                                        QosResource{ResourceView{}, 0, 1});
             return;
           }
 
           auto& val = iter->second;
           val.submit_jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
+        QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
   }
 }
 
@@ -202,8 +196,6 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   CRANE_DEBUG("Malloc QOS {} resource for recover task {} of user {} and account {}.",
     task.qos, task.TaskId(), task.Username(), task.account);
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
   m_user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -211,16 +203,16 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{resource_view, 1, 1});
+                                      QosResource{task.allocated_res_view, 1, 1});
           return;
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += resource_view.GetAllocatableRes();
+        val.resource.GetAllocatableRes() += task.allocated_res_view.GetAllocatableRes();
         val.submit_jobs_count++;
         val.jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{resource_view, 1, 1}}});
+      QosToResourceMap{{task.qos, QosResource{task.allocated_res_view, 1, 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -230,7 +222,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{resource_view, 1, 1});
+                                        QosResource{task.allocated_res_view, 1, 1});
             return;
           }
 
@@ -238,7 +230,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           val.submit_jobs_count++;
           val.jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{resource_view, 1, 1}}});
+        QosToResourceMap{{task.qos, QosResource{task.allocated_res_view, 1, 1}}});
   }
 }
 
@@ -299,6 +291,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         val.jobs_count++;
+        val.resource.GetAllocatableRes() += task.allocated_res_view.GetAllocatableRes();
       });
 
   for (const auto& account_name : task.account_chain) {
@@ -317,16 +310,11 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
       "Free QOS {} submit resource for task {} of user {} and account {}.",
       task.qos, task.TaskId(), task.Username(), task.account);
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         CRANE_ASSERT(val.submit_jobs_count > 0);
-        CRANE_ASSERT(resource_view.GetAllocatableRes() <=
-                     val.resource.GetAllocatableRes());
-        val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
         val.submit_jobs_count--;
       });
 
@@ -346,20 +334,15 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
       "Free QOS {} submit resource for task {} of user {} and account {}.",
       task.qos, task.TaskId(), task.Username(), task.account);
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-  CRANE_DEBUG("Free QOS resource {} for task {} of user {}",
-              util::ReadableResourceView(resource_view), task.TaskId(),
-              task.Username());
-
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         CRANE_ASSERT(val.jobs_count > 0);
-        CRANE_ASSERT(resource_view.GetAllocatableRes() <=
+        CRANE_ASSERT(task.allocated_res_view.GetAllocatableRes() <=
                      val.resource.GetAllocatableRes());
         val.jobs_count--;
-        val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
+        val.resource.GetAllocatableRes() -= task.allocated_res_view.GetAllocatableRes();
         val.submit_jobs_count--;
       });
 
