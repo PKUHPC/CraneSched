@@ -56,10 +56,10 @@ struct CrunMetaInExecution : MetaInExecution {
 };
 
 struct TaskExitInfo {
-  pid_t pid;
-  bool is_terminated_by_signal;
-  int status;
-  int value;
+  pid_t pid{0};
+  bool is_terminated_by_signal{false};
+  int status{0};
+  int value{0};
 };
 
 class ExecutionInterface {
@@ -72,9 +72,9 @@ class ExecutionInterface {
   ExecutionInterface& operator=(const ExecutionInterface&) = delete;
   virtual ~ExecutionInterface();
 
-  void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
+  void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
-  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info; }
+  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
@@ -107,41 +107,53 @@ class ExecutionInterface {
   };
 
   // Helper methods
+  // NOLINTBEGIN(readability-identifier-naming)
   CraneErrCode SetupCrunX11_();
+
   // Return error before fork.
   virtual CraneExpected<pid_t> Fork_(bool* launch_pty,
                                      std::vector<int>* to_crun_pipe,
                                      std::vector<int>* from_crun_pipe,
                                      int* crun_pty_fd);
+
   virtual uint16_t SetupCrunMsgFwd_(bool launch_pty,
                                     const std::vector<int>& to_crun_pipe,
                                     const std::vector<int>& from_crun_pipe,
                                     int crun_pty_fd);
+
   virtual void SetChildProcessSignalHandler_();
+
   virtual CraneErrCode SetChildProcessProperty_();
+
   virtual CraneErrCode SetChildProcessBatchFd_();
+
   virtual void SetupChildProcessCrunFd_(bool launch_pty,
                                         const std::vector<int>& to_crun_pipe,
                                         const std::vector<int>& from_crun_pipe,
                                         int crun_pty_fd);
+
   virtual void SetupChildProcessCrunX11_();
+
   virtual CraneErrCode SetChildProcessEnv_() const;
+
   virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
-
+  // NOLINTEND(readability-identifier-naming)
+  // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   pid_t m_pid_{0};  // forked pid
   std::unique_ptr<MetaInExecution> m_meta_{nullptr};
-  TaskExitInfo m_exit_info{};
+  TaskExitInfo m_exit_info_{};
 
-  EnvMap m_env_{};
+  EnvMap m_env_;
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
 
   // NOTE: This is not used currently.
   // As we are using `bash -c` to launch process, all arguments can be passed in
   // m_executable_.
   std::vector<std::string> m_arguments_;
+  // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
 class ContainerInstance : public ExecutionInterface {
@@ -190,6 +202,7 @@ class TaskManager {
   ~TaskManager();
   void Wait();
 
+  // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
   void AddTerminationTimer_(ExecutionInterface* instance, Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
@@ -216,18 +229,21 @@ class TaskManager {
 
   static void DelTerminationTimer_(ExecutionInterface* instance) {
     // Close handle before free
-    instance->termination_timer->close();
-    instance->termination_timer.reset();
+    if (instance->termination_timer) {
+      instance->termination_timer->close();
+      instance->termination_timer.reset();
+    }
   }
-
-  void TaskStopAndDoStatusChange();
 
   void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
+  void LaunchExecution_();
+  // NOLINTEND(readability-identifier-naming)
+
+  void TaskStopAndDoStatusChange();
 
   std::future<CraneExpected<pid_t>> ExecuteTaskAsync();
-  void LaunchExecution_();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
