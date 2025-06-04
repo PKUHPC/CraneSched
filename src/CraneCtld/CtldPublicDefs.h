@@ -870,6 +870,9 @@ struct PartitionResource {
 
 
 struct Account {
+
+  using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
+
   bool deleted = false;
   bool blocked = false;
   std::string name;
@@ -881,7 +884,7 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
-  std::unordered_map<std::string, PartitionResource> partition_resource;
+  PartitionToResourceMap partition_resource;
 };
 
 struct User {

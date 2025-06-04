@@ -227,7 +227,8 @@ class MongodbClient {
 
   DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
 
-  void QosResourceViewFromDb_(const bsoncxx::document::view& qos_view, const std::string& field, ResourceView* resource);
+  void ResourceViewFromDb_(const bsoncxx::document::view& value_view,
+                              ResourceView* resource);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};

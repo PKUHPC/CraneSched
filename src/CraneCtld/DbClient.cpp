@@ -786,7 +786,17 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
-
+    for (const auto& partition_resource_item : user_view["partition_resource"].get_document().value) {
+      auto partition_resource = partition_resource_item.get_document().value;
+      PartitionResource resource;
+      resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
+      resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
+      ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
+      ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
+      resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
+      resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
+      user->partition_resource.emplace(partition_resource_item.key(), std::move(resource));
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -897,9 +907,9 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_wall = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxWall()].get_int64().value);
     qos->flags = qos_view[Qos::FieldStringOfFlags()].get_int64().value;
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(), &qos->max_tres);
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(), &qos->max_tres_per_user);
-    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(), &qos->max_tres_per_account);
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTres()].get_document().value, &qos->max_tres);
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTresPerUser()].get_document().value, &qos->max_tres_per_user);
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTresPerAccount()].get_document().value, &qos->max_tres_per_account);
 
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -1116,15 +1126,14 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
-void MongodbClient::QosResourceViewFromDb_(
-    const bsoncxx::document::view& qos_view, const std::string& field,
+void MongodbClient::ResourceViewFromDb_(
+    const bsoncxx::document::view& value_view,
     ResourceView* resource) {
-  auto max_tres = qos_view[field].get_document().value;
-  auto allocatable_res = max_tres["allocatable_res"].get_document().value;
+  auto allocatable_res = value_view["allocatable_res"].get_document().value;
   resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(allocatable_res["cpu_count"].get_double().value);
   resource->GetAllocatableRes().memory_bytes = std::stoull(std::string(allocatable_res["mem"].get_string().value));
   resource->GetAllocatableRes().memory_sw_bytes = std::stoull(std::string(allocatable_res["mem_sw"].get_string().value));
-  for (auto &&device_item : max_tres["device_map"].get_document().value) {
+  for (auto &&device_item : value_view["device_map"].get_document().value) {
     auto device_doc = device_item.get_document().value;
     uint64_t untyped_req_count = device_doc["untyped_req_count"].get_int64().value;
     std::unordered_map<std::string, uint64_t> type_total;
