@@ -2507,7 +2507,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
     }
   }
 
-  // TODO: Move out to reduce the scope of the lock of crane_meta_map
   for (auto& [craned_id, time_res_vec] : node_time_res_vec_map) {
     node_selection_info_ref.InitCostAndTimeAvailResMap(
         craned_id, resv_meta->logical_part.res_total.at(craned_id),
