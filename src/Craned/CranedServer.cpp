@@ -20,6 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "CranedASyncServer.h"
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "TaskManager.h"
@@ -563,6 +564,7 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
              listen_conf.CranedListenPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
+    g_a_sync_server->Shutdown();
     p_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });

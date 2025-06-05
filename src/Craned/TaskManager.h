@@ -24,6 +24,7 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "Pmix/Pmix.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -167,6 +168,7 @@ struct TaskInstance {
   ProcSigchldInfo sigchld_info{};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes{};
+  std::unique_ptr<pmix::PmixServer> pmix_server_;
 };
 
 /**
@@ -247,7 +249,8 @@ class TaskManager {
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
   CraneErrCode SpawnProcessInInstance_(TaskInstance* instance,
-                                       ProcessInstance* process);
+                                       ProcessInstance* process,
+                                       int local_rank);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -418,6 +421,8 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   static inline TaskManager* s_instance_ptr_;
+
+  std::unique_ptr<pmix::PmixServer> m_pmix_server_;
 };
 }  // namespace Craned
 
