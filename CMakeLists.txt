@@ -120,7 +120,7 @@ option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
-option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" ON)
 
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
