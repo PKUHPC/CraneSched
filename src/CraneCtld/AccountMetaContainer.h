@@ -39,6 +39,13 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
       std::shared_mutex>;
 
+  using UserToTaskMap = phmap::parallel_flat_hash_map<
+    std::string, task_id_t,
+    phmap::priv::hash_default_hash<std::string>,
+    phmap::priv::hash_default_eq<std::string>,
+    std::allocator<std::pair<const std::string, task_id_t>>, 4,
+    std::shared_mutex>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -80,6 +87,8 @@ class AccountMetaContainer final {
   ResourceMetaMap m_user_meta_map_;
 
   ResourceMetaMap m_account_meta_map_;
+
+  UserToTaskMap m_user_to_task_map_;
 };
 
 }  // namespace Ctld
