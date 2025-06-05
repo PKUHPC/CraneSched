@@ -178,11 +178,6 @@ CranedASyncServer::CranedASyncServer(const Config::CranedListenConf &listen_conf
 
   m_server_ = builder.BuildAndStart();
   CRANE_INFO("CranedASync is listening on [{}:{}]", craned_listen_addr, kCranedAsyncDefaultPort);
-
-  g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
-    p_server->Shutdown();
-    CRANE_INFO("Grpc Server Shutdown() was called.");
-  });
 }
 
 } // namespace Craned
