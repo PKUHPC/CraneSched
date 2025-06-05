@@ -698,7 +698,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosResourceToRecoveredPendingTask(*task);
+  g_account_meta_container->MallocQosSubmitResource_(*task);
 
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
