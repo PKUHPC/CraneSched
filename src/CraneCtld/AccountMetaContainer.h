@@ -44,9 +44,9 @@ class AccountMetaContainer final {
 
   CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
 
-  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+  void MallocQosSubmitResource(const TaskInCtld& task);
 
-  void MallocQosResourceToRecoveredPendingTask(TaskInCtld& task);
+  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
 
   std::optional<std::string> CheckQosResource(const TaskInCtld& task);
 
@@ -72,6 +72,7 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
 
+  // lock user -> lock account
   std::array<std::mutex, kNumStripes> m_user_stripes_;
 
   std::array<std::mutex, kNumStripes> m_account_stripes_;

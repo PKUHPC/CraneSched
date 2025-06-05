@@ -59,7 +59,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
+  std::vector<std::unique_lock<std::mutex>> account_locks;
+  account_locks.reserve(account_stripes.size());
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
@@ -70,43 +71,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   result = CheckQosSubmitResourceForAccount_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  CRANE_DEBUG(
-      "Malloc QOS {} submit resource for task of user {} and account {}.",
-      task.qos, task.Username(), task.account);
-
-  m_user_meta_map_.try_emplace_l(
-      task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& qos_to_resource_map = pair.second;
-        auto iter = qos_to_resource_map.find(task.qos);
-        if (iter == qos_to_resource_map.end()) {
-          qos_to_resource_map.emplace(task.qos,
-                                      QosResource{ResourceView{}, 0, 1});
-          return;
-        }
-
-        auto& val = iter->second;
-        val.submit_jobs_count++;
-      },
-      QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
-
-  for (const auto& account_name : task.account_chain) {
-    m_account_meta_map_.try_emplace_l(
-        account_name,
-        [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& qos_to_resource_map = pair.second;
-          auto iter = qos_to_resource_map.find(task.qos);
-          if (iter == qos_to_resource_map.end()) {
-            qos_to_resource_map.emplace(task.qos,
-                                        QosResource{ResourceView{}, 0, 1});
-            return;
-          }
-
-          auto& val = iter->second;
-          val.submit_jobs_count++;
-        },
-        QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
-  }
+  MallocQosSubmitResource(task);
 
   CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}",
               util::ReadableResourceView(resource_view), task.Username(),
@@ -115,29 +80,10 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   return result;
 }
 
-void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
-    TaskInCtld& task) {
-  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
-  // Under normal circumstances, QoS must exist.
-  CRANE_ASSERT(qos);
-
-  std::set<int> account_stripes;
-  for (const auto& account_name : task.account_chain) {
-    account_stripes.insert(StripeForKey_(account_name));
-  }
-
-  // Lock the specified user/account to minimize the impact on other users and
-  // accounts.
-  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
-  for (const auto account_stripe : account_stripes) {
-    account_locks.emplace_back(m_account_stripes_[account_stripe]);
-  }
-
+void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
   CRANE_DEBUG(
-      "Malloc QOS {} submit resource for recover task {} of user {} and "
-      "account {}.",
-      task.qos, task.TaskId(), task.Username(), task.account);
+    "Malloc QOS {} submit resource for task of user {} and account {}.",
+    task.qos, task.Username(), task.account);
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
@@ -179,19 +125,6 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   // Under normal circumstances, QoS must exist.
   CRANE_ASSERT(qos);
-
-  std::set<int> account_stripes;
-  for (const auto& account_name : task.account_chain) {
-    account_stripes.insert(StripeForKey_(account_name));
-  }
-
-  // Lock the specified user/account to minimize the impact on other users and
-  // accounts.
-  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
-  for (const auto account_stripe : account_stripes) {
-    account_locks.emplace_back(m_account_stripes_[account_stripe]);
-  }
 
   CRANE_DEBUG("Malloc QOS {} resource for recover task {} of user {} and account {}.",
     task.qos, task.TaskId(), task.Username(), task.account);
@@ -246,7 +179,8 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
     account_stripes.insert(StripeForKey_(account));
   }
 
-  std::list<std::unique_lock<std::mutex>> account_locks;
+  std::vector<std::unique_lock<std::mutex>> account_locks;
+  account_locks.reserve(account_stripes.size());
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
