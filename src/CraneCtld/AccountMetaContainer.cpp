@@ -24,6 +24,15 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  {
+    const auto& user_ptr =
+        g_account_manager->GetExistedUserInfo(task.Username());
+    UserAddTask(task.Username());
+    if (!user_ptr) return CraneErrCode::ERR_INVALID_USER;
+  }
+
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -48,8 +57,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     CRANE_WARN("time-limit beyond the user's limit");
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
-
-  CraneErrCode result = CraneErrCode::SUCCESS;
 
   std::set<int> account_stripes;
   for (const auto& account_name : task.account_chain) {
@@ -78,8 +85,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
 void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
   CRANE_DEBUG(
-    "Malloc QOS {} submit resource for task of user {} and account {}.",
-    task.qos, task.Username(), task.account);
+      "Malloc QOS {} submit resource for task of user {} and account {}.",
+      task.qos, task.Username(), task.account);
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
@@ -122,8 +129,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   // Under normal circumstances, QoS must exist.
   CRANE_ASSERT(qos);
 
-  CRANE_DEBUG("Malloc QOS {} resource for recover task {} of user {} and account {}.",
-    task.qos, task.TaskId(), task.Username(), task.account);
+  CRANE_DEBUG(
+      "Malloc QOS {} resource for recover task {} of user {} and account {}.",
+      task.qos, task.TaskId(), task.Username(), task.account);
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
@@ -131,13 +139,14 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
         auto& qos_to_resource_map = pair.second;
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
-          qos_to_resource_map.emplace(task.qos,
-                                      QosResource{task.allocated_res_view, 1, 1});
+          qos_to_resource_map.emplace(
+              task.qos, QosResource{task.allocated_res_view, 1, 1});
           return;
         }
 
         auto& val = iter->second;
-        val.resource.GetAllocatableRes() += task.allocated_res_view.GetAllocatableRes();
+        val.resource.GetAllocatableRes() +=
+            task.allocated_res_view.GetAllocatableRes();
         val.submit_jobs_count++;
         val.jobs_count++;
       },
@@ -150,8 +159,8 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto& qos_to_resource_map = pair.second;
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
-            qos_to_resource_map.emplace(task.qos,
-                                        QosResource{task.allocated_res_view, 1, 1});
+            qos_to_resource_map.emplace(
+                task.qos, QosResource{task.allocated_res_view, 1, 1});
             return;
           }
 
@@ -159,7 +168,8 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           val.submit_jobs_count++;
           val.jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{task.allocated_res_view, 1, 1}}});
+        QosToResourceMap{
+            {task.qos, QosResource{task.allocated_res_view, 1, 1}}});
   }
 }
 
@@ -221,7 +231,8 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         val.jobs_count++;
-        val.resource.GetAllocatableRes() += task.allocated_res_view.GetAllocatableRes();
+        val.resource.GetAllocatableRes() +=
+            task.allocated_res_view.GetAllocatableRes();
       });
 
   for (const auto& account_name : task.account_chain) {
@@ -257,6 +268,8 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
           val.submit_jobs_count--;
         });
   }
+
+  UserReduceTask(task.Username());
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
@@ -272,7 +285,8 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
         CRANE_ASSERT(task.allocated_res_view.GetAllocatableRes() <=
                      val.resource.GetAllocatableRes());
         val.jobs_count--;
-        val.resource.GetAllocatableRes() -= task.allocated_res_view.GetAllocatableRes();
+        val.resource.GetAllocatableRes() -=
+            task.allocated_res_view.GetAllocatableRes();
         val.submit_jobs_count--;
       });
 
@@ -287,6 +301,7 @@ void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
           val.submit_jobs_count--;
         });
   }
+  UserReduceTask(task.Username());
 }
 
 void AccountMetaContainer::DeleteUserMeta(const std::string& username) {
@@ -295,6 +310,32 @@ void AccountMetaContainer::DeleteUserMeta(const std::string& username) {
 
 void AccountMetaContainer::DeleteAccountMeta(const std::string& account) {
   m_account_meta_map_.erase(account);
+}
+
+void AccountMetaContainer::UserAddTask(const std::string& username) {
+  m_user_to_task_map_.try_emplace_l(
+      username,
+      [&](std::pair<const std::string, uint32_t>& pair) { ++pair.second; }, 1);
+}
+
+void AccountMetaContainer::UserReduceTask(const std::string& username) {
+  CRANE_ASSERT(m_user_meta_map_.contains(username));
+
+  m_user_to_task_map_.if_contains(
+      username,
+      [&](std::pair<const std::string, uint32_t>& pair) { --pair.second; });
+}
+
+bool AccountMetaContainer::UserHasTask(const std::string& username) {
+  bool result = false;
+
+  m_user_to_task_map_.if_contains(
+    username,
+    [&](std::pair<const std::string, uint32_t>& pair) {
+      if (pair.second > 0) result = true;
+    });
+
+  return result;
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
