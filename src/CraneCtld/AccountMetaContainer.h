@@ -39,12 +39,11 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
       std::shared_mutex>;
 
-  using UserToTaskMap = phmap::parallel_flat_hash_map<
-    std::string, task_id_t,
-    phmap::priv::hash_default_hash<std::string>,
-    phmap::priv::hash_default_eq<std::string>,
-    std::allocator<std::pair<const std::string, task_id_t>>, 4,
-    std::shared_mutex>;
+  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
@@ -68,6 +67,12 @@ class AccountMetaContainer final {
 
   void DeleteAccountMeta(const std::string& account);
 
+  void UserAddTask(const std::string& username);
+
+  void UserReduceTask(const std::string& username);
+
+  bool UserHasTask(const std::string& username);
+
  private:
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
@@ -88,7 +93,7 @@ class AccountMetaContainer final {
 
   ResourceMetaMap m_account_meta_map_;
 
-  UserToTaskMap m_user_to_task_map_;
+  UserToTaskNumMap m_user_to_task_map_;
 };
 
 }  // namespace Ctld
