@@ -96,7 +96,20 @@ bool TaskScheduler::Init() {
                   task->TaskId());
 
       auto result = AcquireTaskAttributes(task.get());
+      if (result) {
+        const auto& user_ptr =
+                g_account_manager->GetExistedUserInfo(task->Username());
+        if (!user_ptr) {
+          CRANE_ERROR(
+          "The current user {} is not in the user list when recover the "
+          "task",
+          task->Username());
+          result = std::unexpected(CraneErrCode::ERR_INVALID_USER);
+        }
+        g_account_meta_container->UserAddTask(task->Username());
+      }
       if (!result || task->type == crane::grpc::Interactive) {
+        g_account_meta_container->UserReduceTask(task->Username());
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -173,6 +186,19 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
         mark_task_as_failed = true;
+      }
+
+      if (!mark_task_as_failed) {
+        const auto& user_ptr =
+            g_account_manager->GetExistedUserInfo(task->Username());
+        if (!user_ptr) {
+          CRANE_ERROR(
+              "The current user {} is not in the user list when submitting the "
+              "task",
+              task->Username());
+          mark_task_as_failed = true;
+        } else
+          g_account_meta_container->UserAddTask(task->Username());
       }
 
       if (!mark_task_as_failed) {
@@ -695,7 +721,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosSubmitResource_(*task);
+  g_account_meta_container->MallocQosSubmitResource(*task);
 
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -3845,22 +3871,6 @@ void TaskScheduler::QueryTasksInRam(
   LockGuard running_guard(&m_running_task_map_mtx_);
 
   ranges::for_each(id_filtered_job_rng, append_fn);
-}
-
-bool TaskScheduler::UserHasTasks(const std::string& username) {
-  {
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
-    for (const auto& task : m_pending_task_map_ | ranges::views::values) {
-      if (task->Username() == username) return true;
-    }
-  }
-
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  for (const auto& task : m_running_task_map_ | ranges::views::values) {
-    if (task->Username() == username) return true;
-  }
-
-  return false;
 }
 
 void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
