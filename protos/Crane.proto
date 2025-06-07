@@ -59,11 +59,11 @@ message CranedRegisterReply {
   bool ok = 1;
 }
 
-message CranedPingRequest{
+message CranedPingRequest {
   string craned_id = 1;
 }
 
-message CranedPingReply{
+message CranedPingReply {
   bool ok = 1;
 }
 
