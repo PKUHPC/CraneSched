@@ -282,7 +282,6 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
 void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;
-  HashMap<CranedId, absl::Time> craned_timeout_map;
 
   for (auto&& [craned_name, node_ptr] : config.Nodes) {
     CRANE_TRACE("Parsing node {}", craned_name);
@@ -307,8 +306,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     craned_meta.res_total += static_meta.res;
     craned_meta.res_avail += static_meta.res;
     craned_meta.res_in_use.SetToZero();
-
-    craned_timeout_map[craned_name] = absl::InfinitePast();
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {

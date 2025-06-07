@@ -341,8 +341,9 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
         EvCheckTimeoutCb_();
         return true;
       });
-  m_check_timeout_handle_->start(std::chrono::seconds(kCranedPingIntervalSec),
-                                 std::chrono::seconds(kCranedPingIntervalSec));
+  m_check_timeout_handle_->start(
+      std::chrono::seconds(g_config.CtldConf.CranedTimeout),
+      std::chrono::seconds(g_config.CtldConf.CranedTimeout));
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("CrndTimeoutThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -820,13 +821,12 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 }
 
 void CranedKeeper::EvCheckTimeoutCb_() {
-  std::this_thread::sleep_for(std::chrono::seconds(kCranedTimeoutSec));
   absl::ReaderMutexLock lk(&m_connected_craned_mtx_);
   auto now = std::chrono::steady_clock::now();
   for (auto &[craned_id, stub] : m_connected_craned_id_stub_map_) {
     if (stub->m_shutting_down_) continue;
     if (stub->m_last_active_time_.load(std::memory_order_acquire) +
-            std::chrono::seconds(kCranedTimeoutSec) <
+            std::chrono::seconds(g_config.CtldConf.CranedTimeout) <
         now) {
       stub->m_shutting_down_ = true;
       CRANE_DEBUG("Craned {} going to down because timeout", craned_id);
