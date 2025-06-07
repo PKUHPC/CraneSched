@@ -22,7 +22,7 @@
 // Precompiled header comes first.
 
 namespace Craned {
-
+using namespace std::literals;
 enum DeviceEnvInjectorEnum : uint8_t {
   CommonDevice = 0,
   Nvidia,
@@ -41,14 +41,13 @@ constexpr std::array<std::string_view,
         "hip",
         "ascend",
 };
-
-constexpr std::array<std::string_view,
-                     DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
+const inline std::array<std::vector<std::string_view>,
+                        DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
     DeviceEnvNameStr = {
-        "common",
-        "CUDA_VISIBLE_DEVICES",
-        "HIP_VISIBLE_DEVICES",
-        "ASCEND_RT_VISIBLE_DEVICES",
+        std::vector{"common"sv},
+        {"CUDA_VISIBLE_DEVICES"sv, "NVIDIA_VISIBLE_DEVICES"sv},
+        {"HIP_VISIBLE_DEVICES"sv},
+        {"ASCEND_RT_VISIBLE_DEVICES"sv, "ASCEND_VISIBLE_DEVICES"sv},
 };
 
 DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
@@ -88,9 +87,9 @@ struct BasicDevice {
   virtual ~BasicDevice() = default;
   virtual bool Init();
 
-  operator std::string() const;
+  explicit operator std::string() const;
 
-  // Todo: Add virtual function to get device status
+  // TODO: Add virtual function to get device status
 };
 
 class DeviceManager {
