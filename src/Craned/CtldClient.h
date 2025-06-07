@@ -128,7 +128,6 @@ class CtldClientStateMachine {
   std::thread m_uvw_thread_;
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
-  std::shared_ptr<uvw::async_handle> m_update_ping_handle_;
   std::shared_ptr<uvw::timer_handle> m_timeout_handle_;
   std::atomic_bool m_check_timeout_{false};
 };
