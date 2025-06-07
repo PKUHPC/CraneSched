@@ -80,7 +80,7 @@ constexpr int64_t kTaskMaxTimeStampSec =
     google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
 
 constexpr uint64_t kCranedPingIntervalSec = 10;
-constexpr uint64_t kCranedPingTimeoutSec = 30;
+constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 

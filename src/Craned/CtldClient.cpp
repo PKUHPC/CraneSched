@@ -22,8 +22,53 @@
 #include "JobManager.h"
 #include "TaskManager.h"
 #include "crane/GrpcHelper.h"
+#include "crane/String.h"
 
 namespace Craned {
+
+CtldClientStateMachine::CtldClientStateMachine() {
+  m_uvw_loop_ = uvw::loop::create();
+
+  m_timeout_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_timeout_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        if (m_check_timeout_) EvTimeout_();
+        return false;
+      });
+
+  m_timeout_handle_->start(
+      std::chrono::seconds(g_config.CranedConf.CtldTimeout),
+      std::chrono::seconds(g_config.CranedConf.CtldTimeout));
+
+  m_uvw_thread_ = std::thread([this] {
+    util::SetCurrentThreadName("CtldCSMTimeThr");
+    auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
+    idle_handle->on<uvw::idle_event>(
+        [this](const uvw::idle_event&, uvw::idle_handle& h) {
+          if (m_stopping_) {
+            h.parent().walk([](auto&& h) { h.close(); });
+            h.parent().stop();
+            return;
+          }
+          if (m_check_timeout_ && !m_timeout_handle_->active()) {
+            m_timeout_handle_->start(
+                std::chrono::seconds(g_config.CranedConf.CtldTimeout),
+                std::chrono::seconds(g_config.CranedConf.CtldTimeout));
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        });
+    if (idle_handle->start() != 0) {
+      CRANE_ERROR(
+          "Failed to start the idle event in CtldClientStateMachine loop.");
+    }
+    m_uvw_loop_->run();
+  });
+}
+
+CtldClientStateMachine::~CtldClientStateMachine() {
+  m_stopping_ = true;
+  if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+}
 
 void CtldClientStateMachine::SetActionRequestConfigCb(
     std::function<void(RegToken const&)>&& cb) {
@@ -157,18 +202,18 @@ void CtldClientStateMachine::EvGrpcConnectionFailed() {
 
 void CtldClientStateMachine::EvPingFailed() {
   absl::MutexLock lk(&m_mtx_);
+  CRANE_DEBUG("Ping failed, current state {}, starting handshake.",
+              StateToString(m_state_));
   m_last_op_time_ = std::chrono::steady_clock::now();
-
-  if (m_state_ != State::READY) {
-    CRANE_DEBUG(
-        "EvPingFailed triggered at incorrect state {}. Maybe disconnected at "
-        "same time, ignoring.",
-        StateToString(m_state_));
-    return;
-  }
 
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
+}
+
+void CtldClientStateMachine::EvPingSuccess() {
+  CRANE_DEBUG("CtldClient ping success.");
+  absl::MutexLock lk(&m_mtx_);
+  m_last_op_time_ = std::chrono::steady_clock::now();
 }
 
 bool CtldClientStateMachine::IsReadyNow() {
@@ -179,7 +224,7 @@ bool CtldClientStateMachine::IsReadyNow() {
 void CtldClientStateMachine::ActionRequestConfig_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-
+  m_check_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
   m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
   if (m_action_request_config_cb_)
@@ -227,11 +272,70 @@ void CtldClientStateMachine::ActionReady_() {
     g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
 }
 
+void CtldClientStateMachine::ActionTimeout_() {
+  if (m_action_timeout_cb_)
+    g_thread_pool->detach_task([this] { m_action_timeout_cb_(); });
+}
+
 void CtldClientStateMachine::ActionDisconnected_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
+  m_check_timeout_ = false;
   if (m_action_disconnected_cb_)
     g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
+}
+
+void CtldClientStateMachine::EvTimeout_() {
+  absl::MutexLock lk(&m_mtx_);
+  if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
+  if (m_last_op_time_.value() +
+          std::chrono::seconds(g_config.CranedConf.CtldTimeout) >
+      std::chrono::steady_clock::now())
+    return;
+  CRANE_DEBUG("CtldClient timeout, current state {}, starting handshake.",
+              StateToString(m_state_));
+  m_last_op_time_ = std::chrono::steady_clock::now();
+  m_state_ = State::REQUESTING_CONFIG;
+  ActionRequestConfig_();
+}
+
+CtldClient::CtldClient() {
+  m_uvw_loop_ = uvw::loop::create();
+
+  m_ping_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_ping_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle& h) {
+        if (m_ping_ctld_) {
+          auto success = Ping_();
+          if (!success) m_ping_ctld_ = false;
+
+          return success;
+        }
+        return false;
+      });
+
+  m_uvw_thread_ = std::thread([this] {
+    util::SetCurrentThreadName("PingCtldThr");
+    auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
+    idle_handle->on<uvw::idle_event>(
+        [this](const uvw::idle_event&, uvw::idle_handle& h) {
+          if (m_thread_stop_) {
+            h.parent().walk([](auto&& h) { h.close(); });
+            h.parent().stop();
+            return;
+          }
+          if (m_ping_ctld_ && !m_ping_handle_->active()) {
+            m_ping_handle_->start(
+                std::chrono::seconds(g_config.CranedConf.PingInterval),
+                std::chrono::seconds(g_config.CranedConf.PingInterval));
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        });
+    if (idle_handle->start() != 0) {
+      CRANE_ERROR("Failed to start the idle event in CtldClient loop.");
+    }
+    m_uvw_loop_->run();
+  });
 }
 
 CtldClient::~CtldClient() {
@@ -239,7 +343,7 @@ CtldClient::~CtldClient() {
 
   CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
-  if (m_ping_thread_.joinable()) m_ping_thread_.join();
+  if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -300,13 +404,14 @@ void CtldClient::Init() {
     g_ctld_client->StartPingCtld();
   });
 
-  g_ctld_client_sm->SetActionTimeoutCb([] {
-    // State machine will start a handshake, do noting here.
-  });
+  g_ctld_client_sm->SetActionTimeoutCb([] { g_ctld_client->StopPingCtld(); });
+  g_ctld_client_sm->SetActionDisconnectedCb(
+      [] { g_ctld_client->StopPingCtld(); });
 
   AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });
 
   AddGrpcCtldDisconnectedCb([] { g_ctld_client_sm->EvGrpcConnectionFailed(); });
+  SetPingSuccessCb([] { g_ctld_client_sm->EvPingSuccess(); });
   SetPingFailedCb([] { g_ctld_client_sm->EvPingFailed(); });
 }
 
@@ -331,7 +436,6 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
-  m_ping_thread_ = std::thread([this] { PingThread_(); });
 }
 
 void CtldClient::AddGrpcCtldConnectedCb(std::function<void()> cb) {
@@ -352,6 +456,9 @@ void CtldClient::AddGrpcCtldDisconnectedCb(std::function<void()> cb) {
   m_on_ctld_disconnected_cb_chain_.push_back(std::move(cb));
 }
 
+void CtldClient::SetPingSuccessCb(std::function<void()>&& cb) {
+  m_ping_success_cb_ = std::move(cb);
+}
 void CtldClient::SetPingFailedCb(std::function<void()>&& cb) {
   m_ping_failed_cb_ = std::move(cb);
 }
@@ -509,6 +616,9 @@ void CtldClient::AsyncSendThread_() {
 
     while (!changes.empty()) {
       grpc::ClientContext context;
+      context.set_deadline(std::chrono::system_clock::now() +
+                           std::chrono::seconds(kCranedRpcTimeoutSeconds));
+
       crane::grpc::TaskStatusChangeRequest request;
       crane::grpc::TaskStatusChangeReply reply;
       grpc::Status status;
@@ -552,51 +662,30 @@ void CtldClient::AsyncSendThread_() {
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     status_change.task_id, reply.ok());
         changes.pop_front();
-        m_last_activate_time_.store(std::chrono::steady_clock::now(),
-                                    std::memory_order_release);
       }
     }
   }
 }
 
-void CtldClient::PingThread_() {
-  std::chrono::time_point sleep_time =
-      std::chrono::steady_clock::now() +
-      std::chrono::seconds(kCranedPingIntervalSec);
-  while (!m_thread_stop_) {
-    std::this_thread::sleep_until(sleep_time);
-    auto now = std::chrono::steady_clock::now();
-    if (!m_ping_.load(std::memory_order_acquire)) {
-      sleep_time = now + std::chrono::seconds(kCranedPingIntervalSec);
-      continue;
-    }
-    auto next_ping_time =
-        m_last_activate_time_.load(std::memory_order_acquire) +
-        std::chrono::seconds(kCranedPingIntervalSec);
-    if (next_ping_time > now) {
-      sleep_time = next_ping_time;
-      continue;
-    }
-    grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(kCranedRpcTimeoutSeconds));
+bool CtldClient::Ping_() {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
 
-    crane::grpc::CranedPingRequest req;
-    req.set_craned_id(m_craned_id_);
-    crane::grpc::CranedPingReply reply;
-    CRANE_DEBUG("Sending CranedPing request to CraneCtlD.");
-    auto status = m_stub_->CranedPing(&context, req, &reply);
-    if (!status.ok()) {
-      CRANE_ERROR("Craned Ping failed: {}", status.error_message());
-      for (auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
-    }
-    if (reply.ok()) {
-      m_last_activate_time_.store(std::chrono::steady_clock::now(),
-                                  std::memory_order_release);
-    } else {
-      if (m_ping_failed_cb_) m_ping_failed_cb_();
-    }
+  crane::grpc::CranedPingRequest req;
+  req.set_craned_id(m_craned_id_);
+  crane::grpc::CranedPingReply reply;
+  CRANE_DEBUG("Sending CranedPing request to CraneCtlD.");
+  auto status = m_stub_->CranedPing(&context, req, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("Craned Ping failed: {}", status.error_message());
+    for (auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
   }
+  if (reply.ok()) {
+    if (m_ping_success_cb_) m_ping_success_cb_();
+  } else if (m_ping_failed_cb_)
+    m_ping_failed_cb_();
+  return reply.ok();
 }
 
 }  // namespace Craned

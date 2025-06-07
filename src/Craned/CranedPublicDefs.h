@@ -27,7 +27,7 @@
 namespace Craned {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
-inline constexpr uint64_t kRegisterOperationTimeoutMs = 5'000;
+constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
@@ -53,6 +53,11 @@ struct Partition {
 };
 
 struct Config {
+  struct CranedConfig {
+    uint32_t PingInterval;
+    uint32_t CtldTimeout;
+  };
+  CranedConfig CranedConf;
   struct CranedListenConf {
     std::string CranedListenAddr;
     std::string CranedListenPort;

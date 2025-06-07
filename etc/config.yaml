@@ -30,8 +30,9 @@ CraneCtldLogFile: cranectld/cranectld.log
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
-# ping timeout in seconds
-CranedPingTimeout: 30
+CraneCtld:
+  # ping timeout in seconds
+  CranedTimeout: 30
 
 # Craned settings
 # the listening address of control machine
@@ -48,8 +49,11 @@ CranedMutexFilePath: craned/craned.lock
 CranedCforedSockPath: craned/cfored.sock
 # whether the craned is running in the background
 CranedForeground: true
-# ping interval in seconds
-CranedPingInterval: 10
+Craned:
+  # ping interval in seconds
+  PingInterval: 15
+  # register operation timeout in seconds
+  CraneCtldTimeout: 5
 
 
 # Scheduling settings
@@ -99,7 +103,7 @@ Partitions:
   - name: GPU
     nodes: "cn[17-18]"
     priority: 3
-    # Optional default memory per cpu in MB, 0 lets scheduler to decide
+    # Optional default memory per cpu in MB, 0 lets scheduler decide
     DefaultMemPerCpu: 0
     # Optional maximum memory per cpu in MB, 0 indicates no limit
     MaxMemPerCpu: 0

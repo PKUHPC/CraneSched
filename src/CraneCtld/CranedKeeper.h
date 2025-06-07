@@ -196,7 +196,7 @@ class CranedKeeper {
 
   void PeriodConnectCranedThreadFunc_();
 
-  void PeriodCheckTimeoutThreadFunc_();
+  void EvCheckTimeoutCb_();
 
   std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
 
@@ -229,7 +229,10 @@ class CranedKeeper {
   std::vector<std::thread> m_cq_thread_vec_;
 
   std::thread m_period_connect_thread_;
-  std::thread m_period_check_timeout_thread_;
+  std::thread m_uvw_thread_;
+
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_check_timeout_handle_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };
