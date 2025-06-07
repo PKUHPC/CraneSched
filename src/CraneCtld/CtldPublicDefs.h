@@ -69,6 +69,11 @@ constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
 
 struct Config {
+  struct CraneCtldConf {
+    uint32_t CranedTimeout;
+  };
+
+  CraneCtldConf CtldConf;
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
