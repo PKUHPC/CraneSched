@@ -98,12 +98,12 @@ bool TaskScheduler::Init() {
       auto result = AcquireTaskAttributes(task.get());
       if (result) {
         const auto& user_ptr =
-                g_account_manager->GetExistedUserInfo(task->Username());
+            g_account_manager->GetExistedUserInfo(task->Username());
         if (!user_ptr) {
           CRANE_ERROR(
-          "The current user {} is not in the user list when recover the "
-          "task",
-          task->Username());
+              "The current user {} is not in the user list when recover the "
+              "task",
+              task->Username());
           result = std::unexpected(CraneErrCode::ERR_INVALID_USER);
         }
         g_account_meta_container->UserAddTask(task->Username());
