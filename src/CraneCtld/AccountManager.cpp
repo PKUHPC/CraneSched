@@ -2570,6 +2570,9 @@ void AccountManager::EmplaceUserPartitionResource_(User& user,
 CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
     const std::string& name, const std::string& partition) {
 
+  const Account* account = GetAccountInfoNoLock_(name);
+  Account res_account = *account;
+
   ResourceView resource;
   resource.GetAllocatableRes().cpu_count =
       static_cast<cpu_t>(std::numeric_limits<int32_t>::max() / 256);
@@ -2582,20 +2585,19 @@ CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
                         std::move(resource), absl::ZeroDuration(),
                         absl::Seconds(kTaskMaxTimeLimitSec)};
 
+  res_account.allowed_partition.emplace_back(partition);
+  res_account.partition_resource.emplace(partition, partition_resource);
+
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                     "$addToSet", name, "allowed_partition",
-                                     partition);
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$Set",
-          name, "partition_resource."+partition, partition_resource);
+        g_db_client->UpdateAccount(res_account);
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  m_account_map_[name]->allowed_partition.emplace_back(partition);
+  m_account_map_[name] = std::make_unique<Account>(std::move(res_account));
 
   return {};
 }
@@ -2694,6 +2696,17 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
                         std::move(resource), absl::ZeroDuration(),
                         absl::Seconds(kTaskMaxTimeLimitSec)};
 
+  Account res_account = account;
+  if (add_num > 0) {
+      res_account.allowed_partition.assign(
+        std::make_move_iterator(partition_list.begin()),
+        std::make_move_iterator(partition_list.end()));
+      res_account.partition_resource.clear();
+      for (const auto& partition : res_account.allowed_partition) {
+        res_account.partition_resource.emplace(partition, partition_resource);
+      }
+  }
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         for (const auto& par : deleted_partition) {
@@ -2701,14 +2714,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
         }
 
         if (add_num > 0) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$set", name, "allowed_partition",
-                                       partition_list);
-          for (const auto& partition : partition_list) {
-            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$set", name, "partition_resource."+partition,
-                                       partition_resource);
-          }
+          g_db_client->UpdateAccount(res_account);
         }
       };
 
@@ -2719,13 +2725,8 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
   for (const auto& par : deleted_partition) {
     DeleteAccountAllowedPartitionFromMapNoLock_(account.name, par);
   }
-  m_account_map_[name]->allowed_partition.assign(
-      std::make_move_iterator(partition_list.begin()),
-      std::make_move_iterator(partition_list.end()));
 
-  for (const auto& par : partition_list) {
-    m_account_map_[name]->partition_resource.emplace(par, partition_resource);
-  }
+  m_account_map_[name] = std::make_unique<Account>(std::move(res_account));
 
   return {};
 }
