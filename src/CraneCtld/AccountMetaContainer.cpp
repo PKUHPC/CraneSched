@@ -334,10 +334,9 @@ bool AccountMetaContainer::UserHasTask(const std::string& username) {
   bool result = false;
 
   m_user_to_task_map_.if_contains(
-    username,
-    [&](std::pair<const std::string, uint32_t>& pair) {
-      if (pair.second > 0) result = true;
-    });
+      username, [&](std::pair<const std::string, uint32_t>& pair) {
+        if (pair.second > 0) result = true;
+      });
 
   return result;
 }
