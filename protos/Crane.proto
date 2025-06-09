@@ -316,6 +316,7 @@ message ModifyAccountRequest {
   string name = 4;
   OperationType type = 5;
   bool force = 6;
+  string partition = 7;
 }
 
 message ModifyAccountReply {

@@ -692,6 +692,28 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
     }
+  } else if (request->modify_field() == crane::grpc::ModifyField::MaxJobs ||
+             request->modify_field() == crane::grpc::ModifyField::MaxSubmitJobs ||
+             request->modify_field() == crane::grpc::ModifyField::MaxWall ||
+             request->modify_field() == crane::grpc::ModifyField::MaxWallDurationPerJob) {
+    auto modify_res = g_account_manager->ModifyAccountPartitioinResource(
+        request->uid(), request->modify_field(), request->name(),
+        request->partition(), request->value_list()[0]);
+    if (!modify_res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(request->value_list()[0]);
+      new_err_record->set_code(modify_res.error());
+    }
+  } else if (request->modify_field() == crane::grpc::ModifyField::MaxTres ||
+             request->modify_field() == crane::grpc::ModifyField::MaxTresPerJob) {
+    auto modify_res = g_account_manager->ModifyAccountTresPartitionResource(
+        request->uid(), request->modify_field(), request->name(),
+        request->partition(), request->value_list()[0]);
+    if (!modify_res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(request->value_list()[0]);
+      new_err_record->set_code(modify_res.error());
+    }
   } else {  // other operations
     for (const auto &value : request->value_list()) {
       auto modify_res = g_account_manager->ModifyAccount(

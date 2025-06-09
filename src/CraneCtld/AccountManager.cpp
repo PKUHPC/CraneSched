@@ -2491,13 +2491,17 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource_(
   switch (modify_field) {
   case crane::grpc::MaxJobs:
     res_partition_resource.max_jobs = value_number;
+    break;
   case crane::grpc::MaxSubmitJobs:
     res_partition_resource.max_submit_jobs = value_number;
+    break;
   case crane::grpc::MaxWall:
     res_partition_resource.max_wall = absl::Seconds(value_number);
+    break;
   case crane::grpc::MaxWallDurationPerJob:
     res_partition_resource.max_wall_duration_per_job =
         absl::Seconds(value_number);
+    break;
   default:
     std::unreachable();
   }
@@ -2809,13 +2813,17 @@ CraneExpected<void> AccountManager::ModifyAccountPartitionResource_(
   switch (modify_field) {
   case crane::grpc::MaxJobs:
     res_partition_resource.max_jobs = value_number;
+    break;
   case crane::grpc::MaxSubmitJobs:
     res_partition_resource.max_submit_jobs = value_number;
+    break;
   case crane::grpc::MaxWall:
     res_partition_resource.max_wall = absl::Seconds(value_number);
+    break;
   case crane::grpc::MaxWallDurationPerJob:
     res_partition_resource.max_wall_duration_per_job =
         absl::Seconds(value_number);
+    break;
   default:
     std::unreachable();
   }
@@ -3189,13 +3197,13 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
                                      ".allowed_partition_qos_map." + partition,
                                  std::string(""));
     g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$unset", user,
-                                "partition_resource."+ name, std::string(""));
+                                "partition_resource."+ partition, std::string(""));
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
                                account->name, "allowed_partition", partition);
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$unset",
-                              account->name, "partition_resource", std::string(""));
+                              account->name, "partition_resource."+partition, std::string(""));
   return true;
 }
 
