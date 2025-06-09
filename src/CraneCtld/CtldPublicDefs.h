@@ -883,7 +883,7 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
-  PartitionToResourceMap partition_resource;
+  PartitionToResourceMap partition_to_resource_map;
 };
 
 struct User {
@@ -920,7 +920,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  PartitionToResourceMap partition_resource;
+  PartitionToResourceMap partition_to_resource_map;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

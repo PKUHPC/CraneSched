@@ -795,7 +795,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
       resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
       resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
-      user->partition_resource.emplace(partition_resource_item.key(), std::move(resource));
+      user->partition_to_resource_map.emplace(partition_resource_item.key(), std::move(resource));
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -811,7 +811,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
-                                    "partition_resource"};
+                                    "partition_to_resource_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>,PartitionToResourceMap>
       values{user.deleted,
@@ -821,7 +821,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts,
-             user.partition_resource};
+             user.partition_to_resource_map};
   return DocumentConstructor_(fields, values);
 }
 
@@ -860,7 +860,7 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
       ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
       resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
       resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
-      account->partition_resource.emplace(partition_resource_item.key(), std::move(resource));
+      account->partition_to_resource_map.emplace(partition_resource_item.key(), std::move(resource));
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -872,7 +872,7 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
   std::array<std::string, 12> fields{
       "deleted",     "blocked",          "name",           "description",
       "users",       "child_accounts",   "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list", "coordinators", "partition_resource"};
+      "default_qos", "allowed_qos_list", "coordinators", "partition_to_resource_map"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
              std::string, std::list<std::string>, std::list<std::string>, PartitionToResourceMap>
@@ -887,7 +887,7 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
              account.default_qos,
              account.allowed_qos_list,
              account.coordinators,
-             account.partition_resource};
+             account.partition_to_resource_map};
 
   return DocumentConstructor_(fields, values);
 }
