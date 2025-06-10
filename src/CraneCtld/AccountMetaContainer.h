@@ -53,6 +53,12 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosResource>>, 4,
       std::shared_mutex>;
 
+  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -81,6 +87,7 @@ class AccountMetaContainer final {
   bool UserHasTask(const std::string& username);
 
   void DeleteQosMeta(const std::string& qos);
+
  private:
   static int StripeForKey_(const std::string& key) {
     return std::hash<std::string>{}(key) % kNumStripes;
