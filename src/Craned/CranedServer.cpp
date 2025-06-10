@@ -294,7 +294,7 @@ grpc::Status CranedServiceImpl::UpdateLeaderId(
     g_ctld_client->SetLeaderId(request->cur_leader_id());
   else
     CRANE_ERROR("Invalid leader ID: {}. Valid range is [0, {})",
-+                request->cur_leader_id(), g_config.ControlMachines.size());
+                +request->cur_leader_id(), g_config.ControlMachines.size());
   return Status::OK;
 }
 

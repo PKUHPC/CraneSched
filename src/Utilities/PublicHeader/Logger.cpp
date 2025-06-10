@@ -69,10 +69,10 @@ void InitLogger(spdlog::level::level_enum level,
 }
 
 void AddLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path, const std::string& name) {
+               const std::string& log_file_path, const std::string& name) {
   std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-  log_file_path, 1048576 * 50 /*MB*/, 3);
+      log_file_path, 1048576 * 50 /*MB*/, 3);
   file_sink->set_level(level);
   sinks.push_back(file_sink);
 

@@ -31,11 +31,11 @@ namespace Ctld {
 
 class CraneStateMachine;
 
+using nuraft::buffer_serializer;
 using nuraft::cb_func;
+using nuraft::raft_params;
 using nuraft::raft_server;
 using nuraft::srv_config;
-using nuraft::raft_params;
-using nuraft::buffer_serializer;
 
 class RaftServerStuffBase {
  public:
