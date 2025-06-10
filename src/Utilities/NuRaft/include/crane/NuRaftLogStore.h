@@ -34,20 +34,26 @@
 namespace crane {
 namespace Internal {
 
-using namespace nuraft;
+using nuraft::buffer;
+using nuraft::log_entry;
+using nuraft::raft_server;
 
-class NuRaftLogStore : public log_store {
+class NuRaftLogStore : public nuraft::log_store {
  public:
   using log_index_t = uint64_t;
 
-  NuRaftLogStore(raft_server* server_ptr);
+  NuRaftLogStore();
 
   ~NuRaftLogStore() override;
 
   __nocopy__(NuRaftLogStore);
 
  public:
-  bool init(const std::string& db_backend, const std::string& db_path);
+  bool Init(const std::string& db_backend, const std::string& db_path);
+
+  void SetRaftServerBwdPointer(raft_server* ptr) {
+    m_raft_server_bwd_pointer_ = ptr;
+  }
 
   uint64_t next_slot() const override;
 
@@ -66,13 +72,13 @@ class NuRaftLogStore : public log_store {
 
   std::shared_ptr<std::vector<std::shared_ptr<log_entry>>> log_entries_ext(
       log_index_t start, log_index_t end,
-      int64 batch_size_hint_in_bytes = 0) override;
+      int64_t batch_size_hint_in_bytes = 0) override;
 
   std::shared_ptr<log_entry> entry_at(log_index_t index) override;
 
   log_index_t term_at(log_index_t index) override;
 
-  std::shared_ptr<buffer> pack(log_index_t index, int32 cnt) override;
+  std::shared_ptr<buffer> pack(log_index_t index, int32_t cnt) override;
 
   void apply_pack(log_index_t index, buffer& pack) override;
 
@@ -80,7 +86,10 @@ class NuRaftLogStore : public log_store {
 
   bool flush() override;
 
-  uint64_t last_durable_index() override { return m_last_durable_index_; }
+  uint64_t last_durable_index() override {
+    std::lock_guard<std::mutex> l(m_logs_lock_);
+    return m_last_durable_index_;
+  }
 
   bool ExternElemStore(const std::string& key, const void* data,
                        size_t len) const {
@@ -122,17 +131,6 @@ class NuRaftLogStore : public log_store {
 
     return buf;
   }
-
-  bool HasServersRun() const { return m_has_servers_run_; }
-
-  void get_all_keys() {
-    std::cout << "keys" << std::endl;
-    m_logs_db_->IterateAllKv(
-        [&](std::string&& key, std::vector<uint8_t>&& value) {
-          std::cout << key << std::endl;
-          return true;
-        });
-  };
 
  private:
   static std::shared_ptr<log_entry> make_clone_(
@@ -185,14 +183,12 @@ class NuRaftLogStore : public log_store {
   /**
    * Event awaiter
    */
-  EventAwaiter m_durable_ea_;
+  nuraft::EventAwaiter m_durable_ea_;
 
   /**
    *  log is durable after being written to db
    */
   std::unique_ptr<IEmbeddedDb> m_logs_db_;
-
-  bool m_has_servers_run_;
 };
 }  // namespace Internal
 }  // namespace crane

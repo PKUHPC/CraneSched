@@ -10,14 +10,24 @@
 #include "EmbeddedDbClient.h"
 #include "crane/EmbeddedDb.h"
 #include "crane/Lock.h"
+#include "crane/Pointer.h"
 
 namespace Ctld {
 
-using namespace nuraft;
+using nuraft::async_result;
+using nuraft::buffer;
+using nuraft::cluster_config;
+using nuraft::log_entry;
+using nuraft::snapshot;
 
-class CraneStateMachine : public state_machine {
+class CraneStateMachine : public nuraft::state_machine {
  public:
   using ValueMapType = std::unordered_map<std::string, std::vector<uint8_t>>;
+  using ValueMapConstPtr =
+      util::ScopeConstSharedPtr<ValueMapType, util::rw_mutex>;
+  using ValueMapExclusivePtr =
+      util::ScopeExclusivePtr<ValueMapType, util::rw_mutex>;
+
 #ifdef CRANE_HAVE_UNQLITE
   using UnqliteDb = crane::Internal::UnqliteDb;
 #endif
@@ -48,7 +58,7 @@ class CraneStateMachine : public state_machine {
   static bool dec_log(buffer &log, CraneCtldOpType *type, std::string *key,
                       std::vector<uint8_t> *value);
 
-  bool init(const std::string &db_path,
+  bool Init(const std::string &db_path,
             std::vector<std::shared_ptr<log_entry>> logs);
 
   std::shared_ptr<buffer> pre_commit(const uint64_t log_idx,
@@ -92,10 +102,12 @@ class CraneStateMachine : public state_machine {
   void create_snapshot(snapshot &s,
                        async_result<bool>::handler_type &when_done) override;
 
-  // Not allowed to transfer the leadership to other member
+  // Not allowed to transfer the leadership to another member
   bool allow_leadership_transfer() override { return false; }
 
-  ValueMapType *GetValueMapInstance(uint8_t db_index);
+  ValueMapConstPtr GetValueMapConstPtr(uint8_t db_index);
+
+  ValueMapExclusivePtr GetValueMapExclusivePtr(uint8_t db_index);
 
  private:
   struct snapshot_ctx {
@@ -104,6 +116,8 @@ class CraneStateMachine : public state_machine {
         : snapshot(s), log_index(i) {};
     uint64_t log_index;
     std::shared_ptr<nuraft::snapshot> snapshot;
+
+    ValueMapType var_value_map, fix_value_map, resv_value_map;
   };
 
   inline bool StoreValueToDB_(const std::string &key, uint64_t value) {
@@ -117,26 +131,29 @@ class CraneStateMachine : public state_machine {
     }
   }
 
-  bool RestoreFromDB();
+  bool RestoreFromDB_();
 
   void Apply_(buffer &data);
 
-  bool OnStore(ValueMapType &map, const std::string &key,
-               std::vector<uint8_t> &&data);
+  bool OnStore_(ValueMapType &map, const std::string &key,
+                std::vector<uint8_t> &&data);
 
-  bool OnDelete(ValueMapType &map, const std::string &key);
+  bool OnDelete_(ValueMapType &map, const std::string &key);
 
-  void create_snapshot_internal(std::shared_ptr<snapshot> ss);
+  void CreateSnapshotInternalNoLock_(std::shared_ptr<snapshot> ss);
 
-  void create_snapshot_sync(snapshot &s,
+  void PersistSnapshotNoLock_();
+
+  void CreateSnapshotSync_(snapshot &s,
+                           async_result<bool>::handler_type &when_done);
+
+  void CreateSnapshotAsync_(snapshot &s,
                             async_result<bool>::handler_type &when_done);
-
-  void create_snapshot_async(snapshot &s,
-                             async_result<bool>::handler_type &when_done);
   // Last committed Raft log number.
   std::atomic<uint64_t> last_committed_idx_;
 
   inline static std::string const s_last_commit_idx_key_str_{"LC"};
+  inline static std::string const s_saved_snapshot_obj_key_str_{"SO"};
 
   // snapshot
   std::unique_ptr<snapshot_ctx> m_snapshot_;
@@ -147,7 +164,11 @@ class CraneStateMachine : public state_machine {
   // If `true`, snapshot will be created asynchronously.
   bool async_snapshot_;
 
-  ValueMapType var_value_map_, fix_value_map_, resv_value_map_;
+  util::rw_mutex var_map_lock_, fix_map_lock_, resv_map_lock_;
+
+  ValueMapType var_value_map_ ABSL_GUARDED_BY(var_map_lock_),
+      fix_value_map_ ABSL_GUARDED_BY(fix_map_lock_),
+      resv_value_map_ ABSL_GUARDED_BY(resv_map_lock_);
   std::unique_ptr<crane::Internal::IEmbeddedDb> m_variable_db_, m_fixed_db_,
       m_resv_db_;
 };

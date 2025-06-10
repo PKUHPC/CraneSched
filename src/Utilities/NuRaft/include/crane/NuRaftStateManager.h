@@ -23,26 +23,31 @@
 namespace crane {
 namespace Internal {
 
-using namespace nuraft;
+using nuraft::cluster_config;
+using nuraft::srv_config;
+using nuraft::srv_state;
 
-class NuRaftStateManager : public state_mgr {
+class NuRaftStateManager : public nuraft::state_mgr {
  public:
-  NuRaftStateManager(int srv_id, const std::string& endpoint,
-                     raft_server* server_ptr)
+  explicit NuRaftStateManager(int srv_id, const std::string& endpoint)
       : m_id_(srv_id),
         m_endpoint_(endpoint),
-        m_log_store_(std::make_shared<NuRaftLogStore>(server_ptr)) {
+        m_log_store_(std::make_shared<NuRaftLogStore>()) {
     m_srv_config_ = std::make_shared<srv_config>(srv_id, endpoint);
 
     // Initial cluster config: contains only one server (myself).
     m_saved_config_ = std::make_shared<cluster_config>();
     m_saved_config_->get_servers().push_back(m_srv_config_);
 
-    m_log_store_->init(g_config.CraneEmbeddedDbBackend,
+    m_log_store_->Init(g_config.CraneEmbeddedDbBackend,
                        g_config.CraneCtldDbPath);
   }
 
   ~NuRaftStateManager() override = default;
+
+  void SetRaftServerBwdPointer(raft_server* server_ptr) {
+    m_log_store_->SetRaftServerBwdPointer(server_ptr);
+  }
 
   std::shared_ptr<cluster_config> load_config() override {
     auto buf = m_log_store_->ExternElemFetch(s_config_key_str_);
@@ -70,21 +75,19 @@ class NuRaftStateManager : public state_mgr {
     return m_saved_state_;
   }
 
-  std::shared_ptr<log_store> load_log_store() override { return m_log_store_; }
+  std::shared_ptr<nuraft::log_store> load_log_store() override {
+    return m_log_store_;
+  }
 
-  int32 server_id() override { return m_id_; }
+  int32_t server_id() override { return m_id_; }
 
   void system_exit(const int exit_code) override {
     CRANE_CRITICAL("The Raft server terminated abnormally, exit code : {}",
                    exit_code);
-    //    exit(exit_code);
+    exit(exit_code);
   }
 
   std::shared_ptr<srv_config> get_srv_config() const { return m_srv_config_; }
-
-  bool HasServersRun() const { return m_log_store_->HasServersRun(); }
-
-  void get_all_keys() { m_log_store_->get_all_keys(); }
 
  private:
   int m_id_;

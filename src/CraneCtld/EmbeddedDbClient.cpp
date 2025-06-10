@@ -25,11 +25,11 @@ std::expected<void, DbErrorCode> NuRaftMemoryDb::Store(txn_id_t txn_id,
                                                        const void* data,
                                                        size_t len) {
   CraneStateMachine::CraneCtldOpType type;
-  if (db_index_ == 0) {
+  if (db_index_ == kVarValueMapTableIndex) {
     type = CraneStateMachine::OP_VAR_STORE;
-  } else if (db_index_ == 1) {
+  } else if (db_index_ == kFixValueMapTableIndex) {
     type = CraneStateMachine::OP_FIX_STORE;
-  } else if (db_index_ == 2) {
+  } else if (db_index_ == kResvValueMapTableIndex) {
     type = CraneStateMachine::OP_RESV_STORE;
   } else {
     return std::unexpected(DbErrorCode::kOther);
@@ -43,8 +43,8 @@ std::expected<size_t, DbErrorCode> NuRaftMemoryDb::Fetch(txn_id_t txn_id,
                                                          const std::string& key,
                                                          void* buf,
                                                          size_t* len) {
-  auto* value_map =
-      g_raft_server->GetStateMachine()->GetValueMapInstance(db_index_);
+  auto value_map =
+      g_raft_server->GetStateMachine()->GetValueMapConstPtr(db_index_);
 
   if (!value_map->contains(key)) return std::unexpected(DbErrorCode::kNotFound);
 
@@ -63,11 +63,11 @@ std::expected<size_t, DbErrorCode> NuRaftMemoryDb::Fetch(txn_id_t txn_id,
 std::expected<void, DbErrorCode> NuRaftMemoryDb::Delete(
     txn_id_t txn_id, const std::string& key) {
   CraneStateMachine::CraneCtldOpType type;
-  if (db_index_ == 0) {
+  if (db_index_ == kVarValueMapTableIndex) {
     type = CraneStateMachine::OP_VAR_DELETE;
-  } else if (db_index_ == 1) {
+  } else if (db_index_ == kFixValueMapTableIndex) {
     type = CraneStateMachine::OP_FIX_DELETE;
-  } else if (db_index_ == 2) {
+  } else if (db_index_ == kResvValueMapTableIndex) {
     type = CraneStateMachine::OP_RESV_DELETE;
   } else {
     return std::unexpected(DbErrorCode::kOther);
@@ -79,13 +79,19 @@ std::expected<void, DbErrorCode> NuRaftMemoryDb::Delete(
 std::expected<void, DbErrorCode> NuRaftMemoryDb::IterateAllKv(
     IEmbeddedDb::KvIterFunc func) {
   auto value_map =
-      g_raft_server->GetStateMachine()->GetValueMapInstance(db_index_);
-  for (auto [k, v] : *value_map) {
-    std::string key = k;
-    if (!func(std::move(key), std::move(v))) {
-      value_map->erase(k);
+      g_raft_server->GetStateMachine()->GetValueMapExclusivePtr(db_index_);
+
+  for (auto it = value_map->begin(); it != value_map->end();) {
+    auto k = it->first;  // copy
+    auto v = it->second;
+
+    if (!func(std::move(k), std::move(v))) {  // move
+      it = value_map->erase(it);
+    } else {
+      ++it;
     }
   }
+
   return {};
 }
 
@@ -112,10 +118,10 @@ EmbeddedDbClient::~EmbeddedDbClient() {
 }
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
-  if (g_config.EnableRaft) {
-    m_variable_db_ = std::make_unique<NuRaftMemoryDb>(0);
-    m_fixed_db_ = std::make_unique<NuRaftMemoryDb>(1);
-    m_resv_db_ = std::make_unique<NuRaftMemoryDb>(2);
+  if (g_config.Raft.Enabled) {
+    m_variable_db_ = std::make_unique<NuRaftMemoryDb>(kVarValueMapTableIndex);
+    m_fixed_db_ = std::make_unique<NuRaftMemoryDb>(kFixValueMapTableIndex);
+    m_resv_db_ = std::make_unique<NuRaftMemoryDb>(kResvValueMapTableIndex);
   } else {
     if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
 #ifdef CRANE_HAVE_UNQLITE
@@ -157,14 +163,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 }
 
 bool EmbeddedDbClient::RestoreTaskID() {
-  bool ok;
   // Note: Normally, there is no race during the Init phase and leader switching
   // phase, as there will be no data access until this function is completed.
   // However, it costs little and prevents race condition, so we just leave it
   // here.
   absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
-  ok = FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(0, s_next_task_id_str_,
-                                                      &s_next_task_id_, 1u);
+  bool ok = FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(
+      0, s_next_task_id_str_, &s_next_task_id_, 1u);
   if (!ok) return false;
 
   ok = FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(0, s_next_task_db_id_str_,

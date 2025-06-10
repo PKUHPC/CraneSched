@@ -486,7 +486,7 @@ void CtldClient::AsyncSendThread_() {
 
     int cur_leader_id = m_cur_leader_id_.load(std::memory_order_relaxed);
     if (m_pre_leader_id_ != cur_leader_id) {  // if leader changed
-      FailTheCurrentConn(m_pre_leader_id_);
+      FailTheCurrentConn_(m_pre_leader_id_);
       m_pre_leader_id_ = cur_leader_id;
       prev_grpc_state = GRPC_CHANNEL_IDLE;
       prev_connected = false;
@@ -498,7 +498,7 @@ void CtldClient::AsyncSendThread_() {
 
     if (!connected) {
       if (prev_connected) {  // Edge triggered: grpc connected -> disconnected.
-        FailTheCurrentConn(m_pre_leader_id_);
+        FailTheCurrentConn_(m_pre_leader_id_);
       }
 
       std::chrono::time_point ddl =
@@ -587,7 +587,7 @@ void CtldClient::AsyncSendThread_() {
           // put them back into m_task_status_change_list_
           CRANE_INFO(
               "Pause TaskStatusChange and reconnect with the server to retry.");
-          FailTheCurrentConn(m_pre_leader_id_);
+          FailTheCurrentConn_(m_pre_leader_id_);
 
           if (status.error_code() == grpc::UNAVAILABLE) {
             // The previous leader is offline, try to connect to the next leader
@@ -621,7 +621,7 @@ void CtldClient::AsyncSendThread_() {
   }
 }
 
-void CtldClient::FailTheCurrentConn(int prev_leader_id) {
+void CtldClient::FailTheCurrentConn_(int prev_leader_id) {
   CRANE_TRACE("Channel to CraneCtlD #{} is disconnected.", prev_leader_id);
   for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
 }

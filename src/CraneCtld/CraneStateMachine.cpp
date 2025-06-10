@@ -95,11 +95,8 @@ bool CraneStateMachine::dec_log(buffer &log, CraneCtldOpType *type,
   return true;
 }
 
-bool CraneStateMachine::init(const std::string &db_path,
+bool CraneStateMachine::Init(const std::string &db_path,
                              std::vector<std::shared_ptr<log_entry>> logs) {
-  util::lock_guard lg(snapshots_lock_);
-  m_snapshot_ = std::make_unique<snapshot_ctx>();
-
   if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
 #ifdef CRANE_HAVE_UNQLITE
     m_variable_db_ = std::make_unique<UnqliteDb>();
@@ -135,7 +132,7 @@ bool CraneStateMachine::init(const std::string &db_path,
   result = m_resv_db_->Init(db_path + "resv_raft");
   if (!result) return false;
 
-  RestoreFromDB();
+  RestoreFromDB_();
 
   for (const auto &l : logs) {
     if (l->get_val_type() == nuraft::log_val_type::app_log &&
@@ -183,17 +180,24 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
 
   if (obj_id == 0) {
     // Object ID == 0: first object, put dummy data.
-    it = new ValueMapType::iterator(var_value_map_.begin());
+    it = new ValueMapType::iterator(m_snapshot_->var_value_map.begin());
     user_snp_ctx = it;
 
     data_out = buffer::alloc(sizeof(CraneCtldOpType));
     buffer_serializer bs(data_out);
     bs.put_u8(OP_UNKNOWN);
     is_last_obj = false;
-  } else if (obj_id % 3 == 1) {
+  }
+  /** The snapshot reading process cycles through three phases using obj_id % 3:
+   * - obj_id % 3 == 1: Read from var_value_map
+   * - obj_id % 3 == 2: Read from fix_value_map
+   * - obj_id % 3 == 0: Read from resv_value_map (last phase)
+   * Empty log entries with type switches are used to transition between phases
+   */
+  else if (obj_id % 3 == 1) {
     // Object ID %= 1: start read var_value_map_
-    if (*it == var_value_map_.end()) {
-      *it = fix_value_map_.begin();  // switch value map
+    if (*it == m_snapshot_->var_value_map.end()) {
+      *it = m_snapshot_->fix_value_map.begin();  // switch value map
       data_out = enc_log(OP_FIX_STORE, "", nullptr, 0);
       is_last_obj = false;
       return 0;
@@ -205,8 +209,8 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     ++(*it);
   } else if (obj_id % 3 == 2) {
     // Object ID %= 2: start read fix_value_map_
-    if (*it == fix_value_map_.end()) {
-      *it = resv_value_map_.begin();  // switch value map
+    if (*it == m_snapshot_->fix_value_map.end()) {
+      *it = m_snapshot_->resv_value_map.begin();  // switch value map
       data_out = enc_log(OP_RESV_STORE, "", nullptr, 0);
       is_last_obj = false;
       return 0;
@@ -218,7 +222,7 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     ++(*it);
   } else if (obj_id % 3 == 0) {
     // Object ID %= 3: start read resv_value_map_
-    if (*it == resv_value_map_.end()) {
+    if (*it == m_snapshot_->resv_value_map.end()) {
       data_out = enc_log(OP_RESV_STORE, "", nullptr, 0);
       is_last_obj = true;
       return 0;
@@ -237,12 +241,17 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
 void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
                                              buffer &data, bool is_first_obj,
                                              bool is_last_obj) {
+  static ValueMapType var_value_map, fix_value_map, resv_value_map;
+
   if (obj_id == 0) {
     util::lock_guard lg(snapshots_lock_);
     // Object ID == 0: it contains dummy value, create snapshot context.
     std::shared_ptr<buffer> snp_buf = s.serialize();
     auto ss_ptr = snapshot::deserialize(*snp_buf);
     m_snapshot_ = std::make_unique<snapshot_ctx>(ss_ptr, s.get_last_log_idx());
+    var_value_map.clear();
+    fix_value_map.clear();
+    resv_value_map.clear();
     obj_id = 1;
   } else if (obj_id % 3 == 1) {
     // Object ID %= 1: start write var_value_map_
@@ -255,7 +264,7 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
       obj_id = 2;
       return;
     }
-    var_value_map_[key] = std::move(value);
+    var_value_map[key] = std::move(value);
     obj_id += 3;
   } else if (obj_id % 3 == 2) {
     // Object ID %= 2: start write fix_value_map_
@@ -268,19 +277,23 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
       obj_id = 3;
       return;
     }
-    fix_value_map_[key] = std::move(value);
+    fix_value_map[key] = std::move(value);
     obj_id += 3;
   } else if (obj_id % 3 == 0) {
     // Object ID = 3: start write resv_value_map_
     if (is_last_obj) {
-      std::shared_ptr<buffer> snp_buf = s.serialize();
-      auto ss_ptr = snapshot::deserialize(*snp_buf);
-      create_snapshot_internal(ss_ptr);
+      {
+        util::lock_guard lg(snapshots_lock_);
 
-      std::cout << "snapshot (" << ss_ptr->get_last_log_term() << ", "
-                << ss_ptr->get_last_log_idx() << ") has been created logically"
-                << std::endl;
+        assert(m_snapshot_->log_index == s.get_last_log_idx());
+        m_snapshot_->var_value_map.swap(var_value_map);
+        m_snapshot_->fix_value_map.swap(fix_value_map);
+        m_snapshot_->resv_value_map.swap(resv_value_map);
+        CRANE_INFO("Snapshot ({}, {}) has been created logically",
+                   +s.get_last_log_term(), s.get_last_log_idx());
 
+        PersistSnapshotNoLock_();
+      }
       return;
     }
 
@@ -289,7 +302,7 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
     std::vector<uint8_t> value;
 
     dec_log(data, &type, &key, &value);
-    resv_value_map_[key] = std::move(value);
+    resv_value_map[key] = std::move(value);
     obj_id += 3;
   }
 }
@@ -299,7 +312,15 @@ bool CraneStateMachine::apply_snapshot(snapshot &s) {
 
   if (!m_snapshot_ || s.get_last_log_idx() != m_snapshot_->log_index)
     return false;
-  // Only one snapshot store on this state machine, so no action required.
+
+  util::write_lock_guard lg1(var_map_lock_);
+  util::write_lock_guard lg2(fix_map_lock_);
+  util::write_lock_guard lg3(resv_map_lock_);
+
+  var_value_map_ = m_snapshot_->var_value_map;
+  fix_value_map_ = m_snapshot_->fix_value_map;
+  resv_value_map_ = m_snapshot_->resv_value_map;
+
   return true;
 }
 
@@ -316,46 +337,99 @@ void CraneStateMachine::create_snapshot(
     snapshot &s, async_result<bool>::handler_type &when_done) {
   if (!async_snapshot_) {
     // Create a snapshot in a synchronous way (blocking the thread).
-    create_snapshot_sync(s, when_done);
+    CreateSnapshotSync_(s, when_done);
   } else {
     // Create a snapshot in an asynchronous way (in a different thread).
-    create_snapshot_async(s, when_done);
+    CreateSnapshotAsync_(s, when_done);
   }
 }
 
-CraneStateMachine::ValueMapType *CraneStateMachine::GetValueMapInstance(
+CraneStateMachine::ValueMapConstPtr CraneStateMachine::GetValueMapConstPtr(
     uint8_t db_index) {
-  if (db_index == 0)
-    return &var_value_map_;
-  else if (db_index == 1)
-    return &fix_value_map_;
-  else if (db_index == 2)
-    return &resv_value_map_;
-  else
-    return nullptr;
+  if (db_index == kVarValueMapTableIndex) {
+    var_map_lock_.lock_shared();
+    return ValueMapConstPtr{&var_value_map_, &var_map_lock_};
+  } else if (db_index == kFixValueMapTableIndex) {
+    fix_map_lock_.lock_shared();
+    return ValueMapConstPtr{&fix_value_map_, &fix_map_lock_};
+  } else if (db_index == kResvValueMapTableIndex) {
+    resv_map_lock_.lock_shared();
+    return ValueMapConstPtr{&resv_value_map_, &resv_map_lock_};
+  } else {
+    return ValueMapConstPtr{nullptr};
+  }
+}
+CraneStateMachine::ValueMapExclusivePtr
+CraneStateMachine::GetValueMapExclusivePtr(uint8_t db_index) {
+  if (db_index == kVarValueMapTableIndex) {
+    var_map_lock_.lock();
+    return ValueMapExclusivePtr{&var_value_map_, &var_map_lock_};
+  } else if (db_index == kFixValueMapTableIndex) {
+    fix_map_lock_.lock();
+    return ValueMapExclusivePtr{&fix_value_map_, &fix_map_lock_};
+  } else if (db_index == kResvValueMapTableIndex) {
+    resv_map_lock_.lock();
+    return ValueMapExclusivePtr{&resv_value_map_, &resv_map_lock_};
+  } else {
+    return ValueMapExclusivePtr{nullptr};
+  }
 }
 
-bool CraneStateMachine::RestoreFromDB() {
+bool CraneStateMachine::RestoreFromDB_() {
+  // restore last_committed_idx_
   size_t size = sizeof(last_committed_idx_);
   auto fetch_result = m_variable_db_->Fetch(0, s_last_commit_idx_key_str_,
                                             &last_committed_idx_, &size);
 
   if (fetch_result) {
     CRANE_TRACE("Found last_committed_idx_ = {}", last_committed_idx_.load());
-  } else if (fetch_result.error() == crane::Internal::DbErrorCode::kNotFound) {
+  } else if (fetch_result.error() == DbErrorCode::kNotFound) {
     CRANE_TRACE(
         "last_committed_idx_ not found in embedded db. Initialize it with "
-        "value 0");
+        "value 0.");
   } else {
     CRANE_ERROR("Unexpected error when fetching scalar key '{}'.",
                 s_last_commit_idx_key_str_);
+  }
+
+  // restore the snapshot object
+  // no need to lock
+  size_t n_bytes{0};
+
+  fetch_result = m_variable_db_->Fetch(0, s_saved_snapshot_obj_key_str_,
+                                       nullptr, &n_bytes);
+  if (!fetch_result) {
+    if (fetch_result.error() == DbErrorCode::kNotFound) {
+      CRANE_TRACE("Snapshot not found in embedded db. Initialize it by emtpy.");
+      m_snapshot_ = std::make_unique<snapshot_ctx>();
+      return true;
+    } else {
+      CRANE_ERROR("Unexpected error when fetching scalar key '{}'.",
+                  s_saved_snapshot_obj_key_str_);
+    }
+  } else {
+    std::shared_ptr<buffer> buf = buffer::alloc(n_bytes);
+
+    fetch_result = m_variable_db_->Fetch(0, s_saved_snapshot_obj_key_str_,
+                                         buf->data(), &n_bytes);
+    if (!fetch_result) {
+      CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
+                  s_saved_snapshot_obj_key_str_);
+    } else {
+      auto ss = snapshot::deserialize(*buf);
+      m_snapshot_ = std::make_unique<snapshot_ctx>(ss, ss->get_last_log_idx());
+    }
   }
 
   std::expected<void, DbErrorCode> result;
 
   result = m_variable_db_->IterateAllKv(
       [&](std::string &&key, std::vector<uint8_t> &&value) {
-        var_value_map_[key] = std::move(value);
+        if (key == s_last_commit_idx_key_str_ ||
+            key == s_saved_snapshot_obj_key_str_)
+          return true;
+
+        m_snapshot_->var_value_map[key] = std::move(value);
         return true;
       });
 
@@ -366,7 +440,7 @@ bool CraneStateMachine::RestoreFromDB() {
 
   result = m_fixed_db_->IterateAllKv(
       [&](std::string &&key, std::vector<uint8_t> &&value) {
-        fix_value_map_[key] = std::move(value);
+        m_snapshot_->fix_value_map[key] = std::move(value);
         return true;
       });
 
@@ -377,7 +451,7 @@ bool CraneStateMachine::RestoreFromDB() {
 
   result = m_resv_db_->IterateAllKv(
       [&](std::string &&key, std::vector<uint8_t> &&value) {
-        resv_value_map_[key] = std::move(value);
+        m_snapshot_->resv_value_map[key] = std::move(value);
         return true;
       });
 
@@ -385,6 +459,8 @@ bool CraneStateMachine::RestoreFromDB() {
     CRANE_ERROR("Failed to apply snapshots from reservation data!");
     return false;
   }
+
+  apply_snapshot(*m_snapshot_->snapshot);
   return true;
 }
 
@@ -395,32 +471,44 @@ void CraneStateMachine::Apply_(buffer &data) {
   dec_log(data, &type, &key, &value);
 
   switch (type) {
-  case OP_VAR_STORE:
-    OnStore(var_value_map_, key, std::move(value));
+  case OP_VAR_STORE: {
+    util::write_lock_guard lg(var_map_lock_);
+    OnStore_(var_value_map_, key, std::move(value));
     break;
-  case OP_VAR_DELETE:
-    OnDelete(var_value_map_, key);
+  }
+  case OP_VAR_DELETE: {
+    util::write_lock_guard lg(var_map_lock_);
+    OnDelete_(var_value_map_, key);
     break;
-  case OP_FIX_STORE:
-    OnStore(fix_value_map_, key, std::move(value));
+  }
+  case OP_FIX_STORE: {
+    util::write_lock_guard lg(fix_map_lock_);
+    OnStore_(fix_value_map_, key, std::move(value));
     break;
-  case OP_FIX_DELETE:
-    OnDelete(fix_value_map_, key);
+  }
+  case OP_FIX_DELETE: {
+    util::write_lock_guard lg(fix_map_lock_);
+    OnDelete_(fix_value_map_, key);
     break;
-  case OP_RESV_STORE:
-    OnStore(resv_value_map_, key, std::move(value));
+  }
+  case OP_RESV_STORE: {
+    util::write_lock_guard lg(resv_map_lock_);
+    OnStore_(resv_value_map_, key, std::move(value));
     break;
-  case OP_RESV_DELETE:
-    OnDelete(resv_value_map_, key);
+  }
+  case OP_RESV_DELETE: {
+    util::write_lock_guard lg(resv_map_lock_);
+    OnDelete_(resv_value_map_, key);
     break;
+  }
   default:
     break;
   }
 }
 
-bool CraneStateMachine::OnStore(CraneStateMachine::ValueMapType &map,
-                                const std::string &key,
-                                std::vector<uint8_t> &&data) {
+bool CraneStateMachine::OnStore_(CraneStateMachine::ValueMapType &map,
+                                 const std::string &key,
+                                 std::vector<uint8_t> &&data) {
   if (!data.empty()) {
     map[key] = std::move(data);
     return true;
@@ -428,8 +516,8 @@ bool CraneStateMachine::OnStore(CraneStateMachine::ValueMapType &map,
     return false;
 }
 
-bool CraneStateMachine::OnDelete(CraneStateMachine::ValueMapType &map,
-                                 const std::string &key) {
+bool CraneStateMachine::OnDelete_(CraneStateMachine::ValueMapType &map,
+                                  const std::string &key) {
   if (!map.contains(key)) return false;
 
   if (map.erase(key) == 0) {
@@ -439,40 +527,60 @@ bool CraneStateMachine::OnDelete(CraneStateMachine::ValueMapType &map,
   return true;
 }
 
-void CraneStateMachine::create_snapshot_internal(std::shared_ptr<snapshot> ss) {
-  util::lock_guard lg(snapshots_lock_);
+void CraneStateMachine::CreateSnapshotInternalNoLock_(
+    std::shared_ptr<snapshot> ss) {
   m_snapshot_ = std::make_unique<snapshot_ctx>(ss, ss->get_last_log_idx());
 
+  m_snapshot_->var_value_map = var_value_map_;
+  m_snapshot_->fix_value_map = fix_value_map_;
+  m_snapshot_->resv_value_map = resv_value_map_;
+}
+
+void CraneStateMachine::PersistSnapshotNoLock_() {
+  if (!m_snapshot_) return;
   txn_id_t var_txn_id, fix_txn_id, resv_txn_id;
 
   g_embedded_db_client->BeginDbTransaction(m_variable_db_.get(), &var_txn_id);
   m_variable_db_->Clear(var_txn_id);
-  for (const auto &[k, v] : var_value_map_) {
+  for (const auto &[k, v] : m_snapshot_->var_value_map) {
     m_variable_db_->Store(var_txn_id, k, v.data(), v.size());
   }
+  // save snapshot object
+  auto buf = m_snapshot_->snapshot->serialize();
+  m_variable_db_->Store(var_txn_id, s_saved_snapshot_obj_key_str_, buf->data(),
+                        buf->size());
   g_embedded_db_client->CommitDbTransaction(m_variable_db_.get(), var_txn_id);
 
   g_embedded_db_client->BeginDbTransaction(m_fixed_db_.get(), &fix_txn_id);
   m_fixed_db_->Clear(fix_txn_id);
-  for (const auto &[k, v] : fix_value_map_) {
+  for (const auto &[k, v] : m_snapshot_->fix_value_map) {
     m_fixed_db_->Store(fix_txn_id, k, v.data(), v.size());
   }
   g_embedded_db_client->CommitDbTransaction(m_fixed_db_.get(), fix_txn_id);
 
   g_embedded_db_client->BeginDbTransaction(m_resv_db_.get(), &resv_txn_id);
   m_resv_db_->Clear(resv_txn_id);
-  for (const auto &[k, v] : resv_value_map_) {
+  for (const auto &[k, v] : m_snapshot_->resv_value_map) {
     m_resv_db_->Store(resv_txn_id, k, v.data(), v.size());
   }
   g_embedded_db_client->CommitDbTransaction(m_resv_db_.get(), resv_txn_id);
 }
 
-void CraneStateMachine::create_snapshot_sync(
+void CraneStateMachine::CreateSnapshotSync_(
     snapshot &s,
     async_result<bool>::handler_type &when_done) {  // Clone snapshot from `s`.
   std::shared_ptr<buffer> snp_buf = s.serialize();
   std::shared_ptr<snapshot> ss = snapshot::deserialize(*snp_buf);
-  create_snapshot_internal(ss);
+  {
+    util::lock_guard lg(snapshots_lock_);
+    {
+      util::write_lock_guard lg1(var_map_lock_);
+      util::write_lock_guard lg2(fix_map_lock_);
+      util::write_lock_guard lg3(resv_map_lock_);
+      CreateSnapshotInternalNoLock_(ss);
+    }
+    PersistSnapshotNoLock_();
+  }
 
   std::shared_ptr<std::exception> except(nullptr);
   bool ret = true;
@@ -482,7 +590,7 @@ void CraneStateMachine::create_snapshot_sync(
               ss->get_last_log_term(), ss->get_last_log_idx());
 }
 
-void CraneStateMachine::create_snapshot_async(
+void CraneStateMachine::CreateSnapshotAsync_(
     snapshot &s,
     async_result<bool>::handler_type &when_done) {  // Clone snapshot from `s`.
   std::shared_ptr<buffer> snp_buf = s.serialize();
@@ -491,7 +599,16 @@ void CraneStateMachine::create_snapshot_async(
   // Note that this is a very naive and inefficient example
   // that creates a new thread for each snapshot creation.
   g_thread_pool->detach_task([this, ss, when_done]() {
-    create_snapshot_internal(ss);
+    {
+      util::lock_guard lg(snapshots_lock_);
+      {
+        util::write_lock_guard lg1(var_map_lock_);
+        util::write_lock_guard lg2(fix_map_lock_);
+        util::write_lock_guard lg3(resv_map_lock_);
+        CreateSnapshotInternalNoLock_(ss);
+      }
+      PersistSnapshotNoLock_();
+    }
 
     std::shared_ptr<std::exception> except(nullptr);
     bool ret = true;

@@ -26,12 +26,14 @@ namespace Internal {
 
 class NuRaftLoggerWrapper : public nuraft::logger {
  public:
-  void set_level(int level) override {
-    int rev_level = 6 - level;
-    m_level_ = spdlog::level::level_enum(rev_level);
+  void SetLevel(int level) {
+    m_level_ = static_cast<spdlog::level::level_enum>(level);
   }
 
-  int get_level() override { return 6 - m_level_; }
+  int get_level() override {
+    int res = 6 - m_level_;
+    return res;
+  }
 
   /**
    * @param level Level of given log.
@@ -46,24 +48,22 @@ class NuRaftLoggerWrapper : public nuraft::logger {
     auto spd_level = spdlog::level::level_enum(rev_level);
     switch (spd_level) {
     case spdlog::level::trace:
-      //      CRANE_TRACE("[{}:{}:{}] {}", source_file, func_name, line_number,
-      //                  log_line);
+      RAFT_TRACE("[{}:{}] {}", func_name, line_number, log_line);
       break;
     case spdlog::level::debug:
-      //      CRANE_DEBUG("[{}:{}:{}] {}", source_file, func_name, line_number,
-      //                  log_line);
+      RAFT_DEBUG("[{}:{}] {}", func_name, line_number, log_line);
       break;
     case spdlog::level::info:
-      CRANE_INFO("[{}:{}] {}", func_name, line_number, log_line);
+      RAFT_INFO("[{}:{}] {}", func_name, line_number, log_line);
       break;
     case spdlog::level::warn:
-      CRANE_WARN("[{}:{}] {}", func_name, line_number, log_line);
+      RAFT_WARN("[{}:{}] {}", func_name, line_number, log_line);
       break;
     case spdlog::level::err:
-      CRANE_ERROR("[{}:{}] {}", func_name, line_number, log_line);
+      RAFT_ERROR("[{}:{}] {}", func_name, line_number, log_line);
       break;
     case spdlog::level::critical:
-      CRANE_CRITICAL("[{}:{}] {}", func_name, line_number, log_line);
+      RAFT_CRITICAL("[{}:{}] {}", func_name, line_number, log_line);
       break;
     default:
       break;
@@ -71,7 +71,7 @@ class NuRaftLoggerWrapper : public nuraft::logger {
   }
 
  private:
-  spdlog::level::level_enum m_level_;
+  spdlog::level::level_enum m_level_ = spdlog::level::info;
 };
 
 }  // namespace Internal

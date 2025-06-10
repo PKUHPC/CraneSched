@@ -80,7 +80,12 @@ class EmbeddedDbClient {
  private:
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+#ifdef CRANE_HAVE_UNQLITE
   using UnqliteDb = crane::Internal::UnqliteDb;
+#endif
+#ifdef CRANE_HAVE_BERKELEY_DB
+  using BerkeleyDb = crane::Internal::BerkeleyDb;
+#endif
 
  public:
   struct DbSnapshot {

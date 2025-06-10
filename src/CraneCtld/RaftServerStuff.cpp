@@ -24,32 +24,33 @@ namespace Ctld {
 
 void RaftServerStuff::Init() {  // State manager.
   m_state_mgr_ = std::make_shared<crane::Internal::NuRaftStateManager>(
-      m_server_id_, m_endpoint_, m_raft_instance_.get());
+      m_server_id_, m_endpoint_);
   // State machine.
   m_state_machine_ = std::make_shared<CraneStateMachine>(true);
 
   m_logger_ = std::make_shared<crane::Internal::NuRaftLoggerWrapper>();
+  static_cast<crane::Internal::NuRaftLoggerWrapper *>(m_logger_.get())
+      ->SetLevel(int(StrToLogLevel(g_config.Raft.DebugLevel).value()));
 
   // ASIO options.
-  asio_service::options asio_opt;
+  nuraft::asio_service::options asio_opt;
   asio_opt.thread_pool_size_ = 4;
 
   // Raft parameters.
   raft_params params;
-  // heartbeat: 100 ms, election timeout: 200 - 400 ms.
-  params.heart_beat_interval_ = 100;
-  params.election_timeout_lower_bound_ = 200;
-  params.election_timeout_upper_bound_ = 400;
+  // heartbeat: A ms, election timeout: B - C ms.
+  params.heart_beat_interval_ = kHeartbeatIntervalMs;
+  params.election_timeout_lower_bound_ = kElectionTimeoutLowerMs;
+  params.election_timeout_upper_bound_ = kElectionTimeoutUpperMs;
 
-  // Upto 10 logs will be preserved ahead the last snapshot.
-  params.reserved_log_items_ = 10;
-  // Snapshot will be created for every 3000 log appends.
-  params.snapshot_distance_ = 3000;
-  // Client timeout: 3000 ms.
-  params.client_req_timeout_ = 3000;
+  // Up to X logs will be preserved ahead the last snapshot.
+  params.reserved_log_items_ = kReservedLogItems;
+  // Snapshot will be created for every X log appends.
+  params.snapshot_distance_ = kSnapshotDistance;
+  params.client_req_timeout_ = kClientRequestTimeoutMs;
   // According to this method, `append_log` function
   // should be handled differently.
-  params.return_method_ = raft_params::async_handler;  // or blocking
+  params.return_method_ = nuraft::raft_params::async_handler;  // or blocking
 
   params.auto_adjust_quorum_for_small_cluster_ = true;
   params.auto_forwarding_ = true;
@@ -57,7 +58,7 @@ void RaftServerStuff::Init() {  // State manager.
   raft_server::init_options init_options{};
   init_options.raft_callback_ = StatusChangeCallback;
 
-  GetStateMachine()->init(g_config.CraneCtldDbPath,
+  GetStateMachine()->Init(g_config.CraneCtldDbPath,
                           static_cast<crane::Internal::NuRaftLogStore *>(
                               m_state_mgr_->load_log_store().get())
                               ->all_log_entries());
@@ -71,10 +72,13 @@ void RaftServerStuff::Init() {  // State manager.
         "in the log file).");
   }
 
-  // Wait until Raft server is ready (upto 5 seconds).
-  const size_t MAX_TRY = 20;
+  static_cast<crane::Internal::NuRaftStateManager *>(m_state_mgr_.get())
+      ->SetRaftServerBwdPointer(m_raft_instance_.get());
+
+  // Wait until the Raft server is ready (up to 5 seconds).
+  constexpr size_t max_try = 20;
   CRANE_TRACE("init Raft instance");
-  for (size_t i = 0; i < MAX_TRY; ++i) {
+  for (size_t i = 0; i < max_try; ++i) {
     if (m_raft_instance_->is_initialized()) {
       CRANE_TRACE("Raft server init done!");
       return;
@@ -112,8 +116,7 @@ bool RaftServerStuff::AddServerAsync(int server_id,
   }
 
   srv_config srv_conf(server_id, endpoint);
-  std::shared_ptr<cmd_result<std::shared_ptr<buffer>>> ret =
-      m_raft_instance_->add_srv(srv_conf);
+  std::shared_ptr<raft_result> ret = m_raft_instance_->add_srv(srv_conf);
   if (!ret->get_accepted()) {
     CRANE_ERROR("Add Server failed: ret: {}, reason: {}.",
                 static_cast<int32_t>(ret->get_result_code()),
@@ -131,8 +134,8 @@ bool RaftServerStuff::AddServer(int server_id, const std::string &endpoint) {
   if (!res) return false;
 
   // Wait until add server done;
-  const size_t MAX_TRY = 40;
-  for (size_t i = 0; i < MAX_TRY; ++i) {
+  constexpr size_t max_try = 40;
+  for (size_t i = 0; i < max_try; ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     std::shared_ptr<srv_config> conf =
         m_raft_instance_->get_srv_config(server_id);
@@ -162,8 +165,9 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
 
   if (!ret->get_accepted()) {
     // Log append rejected, usually because this node is not a leader.
-    std::cout << "failed to replicate: " << ret->get_result_code() << ", "
-              << std::endl;
+    CRANE_ERROR("Failed to replicate log: result_code={}, result_str={}",
+                static_cast<int>(ret->get_result_code()),
+                ret->get_result_str());
     return false;
   }
   // Log append accepted, but that doesn't mean the log is committed.
@@ -323,8 +327,8 @@ void RaftServerStuff::GetNodeStatus(
 }
 
 void RaftServerStuff::handle_result(raft_result &result,
-                                    ptr<std::exception> &err) {
-  if (result.get_result_code() != cmd_result_code::OK) {
+                                    std::shared_ptr<std::exception> &err) {
+  if (result.get_result_code() != nuraft::cmd_result_code::OK) {
     // Something went wrong.
     // This means committing this log failed,
     // but the log itself is still in the log store.
@@ -368,7 +372,7 @@ cb_func::ReturnCode RaftServerStuff::StatusChangeCallback(cb_func::Type type,
         *static_cast<cb_func::ConnectionArgs *>(p->ctx);
     if (!ctx.isLeader) return cb_func::ReturnCode::Ok;
     if (role == crane::grpc::QueryLeaderInfoReply_RaftRole_Leader &&
-        g_task_scheduler) {
+        g_task_scheduler) {  // before become follower
       // async
       g_thread_pool->detach_task([id = ctx.srvId]() {
         // Although the following operations are time-consuming, this node is
