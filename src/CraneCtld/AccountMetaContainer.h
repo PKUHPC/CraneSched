@@ -44,14 +44,20 @@ class AccountMetaContainer final {
       std::allocator<std::pair<const std::string, QosResource>>, 4,
       std::shared_mutex>;
 
+  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
+      std::shared_mutex>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
   CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
 
-  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+  void MallocQosSubmitResource(const TaskInCtld& task);
 
-  void MallocQosResourceToRecoveredPendingTask(TaskInCtld& task);
+  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
 
   std::optional<std::string> CheckQosResource(const TaskInCtld& task);
 
@@ -67,6 +73,12 @@ class AccountMetaContainer final {
   void DeleteAccountMeta(const std::string& account);
 
   void DeleteQosMeta(const std::string& qos);
+
+  void UserAddTask(const std::string& username);
+
+  void UserReduceTask(const std::string& username);
+
+  bool UserHasTask(const std::string& username);
 
  private:
   static int StripeForKey_(const std::string& key) {
@@ -96,6 +108,8 @@ class AccountMetaContainer final {
   ResourceMetaMap m_account_meta_map_;
 
   QosResourceMap m_qos_meta_map_;
+
+  UserToTaskNumMap m_user_to_task_map_;
 };
 
 }  // namespace Ctld
