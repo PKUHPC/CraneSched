@@ -24,6 +24,16 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
+  auto user = g_account_manager->GetExistedUserInfo(task.Username());
+  if (!user) {
+    CRANE_ERROR("Unknown User '{}'", task.Username());
+    return CraneErrCode::ERR_INVALID_USER;
+  }
+  auto account = g_account_manager->GetExistedAccountInfo(task.account);
+  if (!account) {
+    CRANE_ERROR("Unknown Account '{}'", task.account);
+    return CraneErrCode::ERR_INVALID_ACCOUNT;
+  }
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -91,35 +101,58 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& qos_to_resource_map = pair.second;
-        auto iter = qos_to_resource_map.find(task.qos);
-        if (iter == qos_to_resource_map.end()) {
+      [&](std::pair<const std::string, MetaResource>& pair) {
+        auto& qos_to_resource_map = pair.second.qos_to_resource_map;
+        auto qos_iter = qos_to_resource_map.find(task.qos);
+        if (qos_iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{ResourceView{}, 0, 1});
-          return;
+                                        QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1});
+        } else {
+          auto& val = qos_iter->second;
+          val.submit_jobs_count++;
         }
-        auto& val = iter->second;
-        val.submit_jobs_count++;
+
+        // auto& partition_to_resource_map = pair.second.partition_to_resource_map;
+        // auto par_iter = partition_to_resource_map.find(task.partition_id);
+        // if (par_iter == partition_to_resource_map.end()) {
+        //   partition_to_resource_map.emplace(task.partition_id, PartitionResource{});
+        // } else {
+        //   auto& val = par_iter->second;
+        //   val.max_submit_jobs++;
+        // }
       },
-      QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
+      MetaResource{
+        .qos_to_resource_map=QosToResourceMap{{task.qos, QosResource {
+          .resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1, .wall_time=task.time_limit}}},
+        .partition_to_resource_map=PartitionToResourceMap{{task.partition_id, PartitionResource{
+          .max_tres = ResourceView{}, .max_tres_per_job = ResourceView{}, .max_jobs = 0, .max_submit_jobs = 1,
+          .max_wall = task.time_limit, .max_wall_duration_per_job = task.time_limit
+        }}}
+      });
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
         account_name,
-        [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& qos_to_resource_map = pair.second;
+        [&](std::pair<const std::string, MetaResource>& pair) {
+          auto& qos_to_resource_map = pair.second.qos_to_resource_map;
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{ResourceView{}, 0, 1});
+                                        QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1});
             return;
           }
 
           auto& val = iter->second;
           val.submit_jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{ResourceView{}, 0, 1}}});
+        MetaResource{
+        .qos_to_resource_map=QosToResourceMap{{task.qos, QosResource {
+          .resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1, .wall_time=task.time_limit}}},
+        .partition_to_resource_map=PartitionToResourceMap{{task.partition_id, PartitionResource{
+          .max_tres = ResourceView{}, .max_tres_per_job = ResourceView{}, .max_jobs = 0, .max_submit_jobs = 1,
+          .max_wall = task.time_limit, .max_wall_duration_per_job = task.time_limit
+        }}}
+      });
   }
 
   m_qos_meta_map_.try_emplace_l(
@@ -128,7 +161,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       auto& val = pair.second;
       val.submit_jobs_count++;
     },
-    QosResource{ResourceView{}, 0, 1});
+    QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1});
 
   return result;
 }
@@ -157,8 +190,8 @@ void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
 
   m_user_meta_map_.try_emplace_l(
       task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& qos_to_resource_map = pair.second;
+      [&](std::pair<const std::string, MetaResource>& pair) {
+        auto& qos_to_resource_map = pair.second.qos_to_resource_map;
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,

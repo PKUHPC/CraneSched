@@ -860,10 +860,10 @@ struct Qos {
 };
 
 struct PartitionResource {
-  uint32_t max_jobs;
-  uint32_t max_submit_jobs;
   ResourceView max_tres;
   ResourceView max_tres_per_job;
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
   absl::Duration max_wall;
   absl::Duration max_wall_duration_per_job;
 };
@@ -937,6 +937,14 @@ struct QosResource {
   uint32_t jobs_count;
   uint32_t submit_jobs_count;
   absl::Duration wall_time;
+};
+
+using QosToResourceMap = std::unordered_map<std::string,  // qos_name
+                                              QosResource>;
+
+struct MetaResource {
+  QosToResourceMap qos_to_resource_map;
+  PartitionToResourceMap partition_to_resource_map;
 };
 
 // clang-format off

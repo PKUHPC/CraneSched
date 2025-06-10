@@ -29,14 +29,12 @@ constexpr int kNumStripes = 128;
 
 class AccountMetaContainer final {
  public:
-  using QosToResourceMap = std::unordered_map<std::string,  // qos_name
-                                              QosResource>;
 
   using ResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string, QosToResourceMap,
+      std::string, MetaResource,
       phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
       std::shared_mutex>;
 
   using QosResourceMap = phmap::parallel_flat_hash_map<
