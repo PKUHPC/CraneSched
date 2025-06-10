@@ -24,6 +24,15 @@ namespace Ctld {
 
 CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  {
+    const auto& user_ptr =
+        g_account_manager->GetExistedUserInfo(task.Username());
+    UserAddTask(task.Username());
+    if (!user_ptr) return CraneErrCode::ERR_INVALID_USER;
+  }
+
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
@@ -59,7 +68,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
   }
 
-  CraneErrCode result = CraneErrCode::SUCCESS;
 
   std::set<int> account_stripes;
   for (const auto& account_name : task.account_chain) {
@@ -69,11 +77,11 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
+  std::vector<std::unique_lock<std::mutex>> account_locks;
+  account_locks.reserve(account_stripes.size());
   for (const auto account_stripe : account_stripes) {
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
-
   std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
   result = CheckQosSubmitResourceForUser_(task, *qos);
@@ -85,6 +93,13 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   result = CheckQosSubmitResourceForQos_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
+
+  MallocQosSubmitResource(task);
+
+  return result;
+}
+
+void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
   CRANE_DEBUG(
       "Malloc QOS {} submit resource for task of user {} and account {}.",
       task.qos, task.Username(), task.account);
@@ -99,6 +114,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
                                       QosResource{ResourceView{}, 0, 1});
           return;
         }
+
         auto& val = iter->second;
         val.submit_jobs_count++;
       },
@@ -129,73 +145,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
       val.submit_jobs_count++;
     },
     QosResource{ResourceView{}, 0, 1});
-
-  return result;
-}
-
-void AccountMetaContainer::MallocQosResourceToRecoveredPendingTask(
-    TaskInCtld& task) {
-  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
-  // Under normal circumstances, QoS must exist.
-  CRANE_ASSERT(qos);
-
-  std::set<int> account_stripes;
-  for (const auto& account_name : task.account_chain) {
-    account_stripes.insert(StripeForKey_(account_name));
-  }
-
-  // Lock the specified user/account to minimize the impact on other users and
-  // accounts.
-  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
-  for (const auto account_stripe : account_stripes) {
-    account_locks.emplace_back(m_account_stripes_[account_stripe]);
-  }
-  std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
-
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
-
-  m_user_meta_map_.try_emplace_l(
-      task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& qos_to_resource_map = pair.second;
-        auto iter = qos_to_resource_map.find(task.qos);
-        if (iter == qos_to_resource_map.end()) {
-          qos_to_resource_map.emplace(task.qos,
-                                      QosResource{resource_view, 0, 1});
-          return;
-        }
-
-        auto& val = iter->second;
-        val.submit_jobs_count++;
-      },
-      QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
-
-  for (const auto& account_name : task.account_chain) {
-    m_account_meta_map_.try_emplace_l(
-        account_name,
-        [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& qos_to_resource_map = pair.second;
-          auto iter = qos_to_resource_map.find(task.qos);
-          if (iter == qos_to_resource_map.end()) {
-            qos_to_resource_map.emplace(task.qos,
-                                        QosResource{resource_view, 0, 1});
-            return;
-          }
-
-          auto& val = iter->second;
-          val.submit_jobs_count++;
-        },
-        QosToResourceMap{{task.qos, QosResource{resource_view, 0, 1}}});
-  }
-
-  m_qos_meta_map_.try_emplace_l(
-    task.qos,
-    [&](std::pair<const std::string, QosResource>& pair) {
-      auto& val = pair.second;
-      val.submit_jobs_count++;
-    },
-    QosResource{resource_view, 0, 1});
 }
 
 void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
@@ -204,37 +153,27 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   // Under normal circumstances, QoS must exist.
   CRANE_ASSERT(qos);
 
-  std::set<int> account_stripes;
-  for (const auto& account_name : task.account_chain) {
-    account_stripes.insert(StripeForKey_(account_name));
-  }
-
-  // Lock the specified user/account to minimize the impact on other users and
-  // accounts.
-  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
-  std::list<std::unique_lock<std::mutex>> account_locks;
-  for (const auto account_stripe : account_stripes) {
-    account_locks.emplace_back(m_account_stripes_[account_stripe]);
-  }
-  std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
+  CRANE_DEBUG(
+      "Malloc QOS {} resource for recover task {} of user {} and account {}.",
+      task.qos, task.TaskId(), task.Username(), task.account);
 
   m_user_meta_map_.try_emplace_l(
-      task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& qos_to_resource_map = pair.second;
-        auto iter = qos_to_resource_map.find(task.qos);
-        if (iter == qos_to_resource_map.end()) {
-          qos_to_resource_map.emplace(task.qos,
-                                      QosResource{task.allocated_res_view, 1, 1});
-          return;
-        }
+       task.Username(),
+       [&](std::pair<const std::string, QosToResourceMap>& pair) {
+         auto& qos_to_resource_map = pair.second;
+         auto iter = qos_to_resource_map.find(task.qos);
+         if (iter == qos_to_resource_map.end()) {
+           qos_to_resource_map.emplace(task.qos,
+                                       QosResource{task.allocated_res_view, 1, 1});
+           return;
+         }
 
-        auto& val = iter->second;
-        val.resource += task.allocated_res_view;
-        val.submit_jobs_count++;
-        val.jobs_count++;
-      },
-      QosToResourceMap{{task.qos, QosResource{task.allocated_res_view, 1, 1}}});
+         auto& val = iter->second;
+         val.resource += task.allocated_res_view;
+         val.submit_jobs_count++;
+         val.jobs_count++;
+       },
+       QosToResourceMap{{task.qos, QosResource{task.allocated_res_view, 1, 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -430,9 +369,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
-  CRANE_DEBUG(
-      "Free QOS {} submit resource for task {} of user {} and account {}.",
-      task.qos, task.TaskId(), task.Username(), task.account);
+  ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
   m_user_meta_map_.if_contains(
@@ -489,6 +426,32 @@ void AccountMetaContainer::DeleteAccountMeta(const std::string& account) {
 void AccountMetaContainer::DeleteQosMeta(const std::string& qos) {
   m_qos_meta_map_.erase(qos);
 }
+
+void AccountMetaContainer::UserAddTask(const std::string& username) {
+  m_user_to_task_map_.try_emplace_l(
+      username,
+      [&](std::pair<const std::string, uint32_t>& pair) { ++pair.second; }, 1);
+}
+
+void AccountMetaContainer::UserReduceTask(const std::string& username) {
+  CRANE_ASSERT(m_user_meta_map_.contains(username));
+
+  m_user_to_task_map_.if_contains(
+      username,
+      [&](std::pair<const std::string, uint32_t>& pair) { --pair.second; });
+}
+
+bool AccountMetaContainer::UserHasTask(const std::string& username) {
+  bool result = false;
+
+  m_user_to_task_map_.if_contains(
+      username, [&](std::pair<const std::string, uint32_t>& pair) {
+        if (pair.second > 0) result = true;
+      });
+
+  return result;
+}
+
 
 bool AccountMetaContainer::CheckTres_(const ResourceView& resource_req,
                                      const ResourceView& resource_total) {

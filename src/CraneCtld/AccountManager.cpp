@@ -187,7 +187,7 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
 
-  if (g_task_scheduler->UserHasTasks(user->name))
+  if (g_account_meta_container->UserHasTask(user->name))
     return std::unexpected(CraneErrCode::ERR_USER_HAS_TASK);
 
   return DeleteUser_(*user, account);
