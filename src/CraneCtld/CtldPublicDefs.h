@@ -859,7 +859,7 @@ struct Qos {
   }
 };
 
-struct PartitionResource {
+struct PartitionResourceLimit {
   ResourceView max_tres;
   ResourceView max_tres_per_job;
   uint32_t max_jobs;
@@ -868,7 +868,7 @@ struct PartitionResource {
   absl::Duration max_wall_duration_per_job;
 };
 
-using PartitionToResourceMap = std::unordered_map<std::string, PartitionResource>;
+using PartitionToResourceLimitMap = std::unordered_map<std::string, PartitionResourceLimit>;
 
 struct Account {
 
@@ -883,7 +883,7 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
-  PartitionToResourceMap partition_to_resource_map;
+  PartitionToResourceLimitMap partition_to_resource_limit_map;
 };
 
 struct User {
@@ -920,7 +920,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  PartitionToResourceMap partition_to_resource_map;
+  PartitionToResourceLimitMap partition_to_resource_limit_map;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
@@ -944,7 +944,7 @@ using QosToResourceMap = std::unordered_map<std::string,  // qos_name
 
 struct MetaResource {
   QosToResourceMap qos_to_resource_map;
-  PartitionToResourceMap partition_to_resource_map;
+  PartitionToResourceLimitMap partition_to_resource_map;
 };
 
 // clang-format off
