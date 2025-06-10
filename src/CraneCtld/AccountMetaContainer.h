@@ -96,6 +96,12 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
                                              const Qos& qos);
 
+  CraneErrCode CheckPartitionSubmitResourceForUser_(const TaskInCtld& task,
+  const Qos& qos, const PartitionResourceLimit& partition_resource_limit);
+
+  CraneErrCode CheckPartitionSubmitResourceForAccount_(const TaskInCtld& task,
+  const Qos& qos, const PartitionResourceLimit& partition_resource_limit);
+
   // lock user -> lock account -> lock qos
   std::array<std::mutex, kNumStripes> m_user_stripes_;
 

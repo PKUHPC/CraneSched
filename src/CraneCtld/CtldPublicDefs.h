@@ -939,12 +939,23 @@ struct QosResource {
   absl::Duration wall_time;
 };
 
+struct PartitionResource {
+  ResourceView resource;
+  ResourceView resource_per_job;
+  uint32_t jobs_count;
+  uint32_t submit_jobs_count;
+  absl::Duration wall_time;
+  absl::Duration wall_time_per_job;
+};
+
 using QosToResourceMap = std::unordered_map<std::string,  // qos_name
                                               QosResource>;
 
+using PartitionToResourceMap = std::unordered_map<std::string, // partition_name
+                                              PartitionResource>;
 struct MetaResource {
   QosToResourceMap qos_to_resource_map;
-  PartitionToResourceLimitMap partition_to_resource_map;
+  PartitionToResourceMap partition_to_resource_map;
 };
 
 // clang-format off

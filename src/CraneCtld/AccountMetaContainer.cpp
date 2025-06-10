@@ -26,14 +26,17 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
     TaskInCtld& task) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  {
-    const auto& user_ptr =
-        g_account_manager->GetExistedUserInfo(task.Username());
-    UserAddTask(task.Username());
-    if (!user_ptr) return CraneErrCode::ERR_INVALID_USER;
-  }
 
-  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
+  const auto& user_ptr =
+        g_account_manager->GetExistedUserInfo(task.Username());
+  UserAddTask(task.Username());
+  if (!user_ptr) return CraneErrCode::ERR_INVALID_USER;
+
+  const auto& account_ptr = g_account_manager->GetExistedAccountInfo(
+      task.account);
+  if (!account_ptr) return CraneErrCode::ERR_INVALID_ACCOUNT;
+
+  const auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   if (!qos) {
     CRANE_ERROR("Unknown QOS '{}'", task.qos);
     return CraneErrCode::ERR_INVALID_QOS;
@@ -44,19 +47,10 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs_per_user == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
-  if (!CheckTres_(resource_use, qos->max_tres_per_user))
-    return CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
-
   if (qos->max_submit_jobs_per_account == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
-  if (!CheckTres_(resource_use, qos->max_tres_per_account))
-    return CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
-
   if (qos->max_submit_jobs == 0) return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
-
-  if (!CheckTres_(resource_use, qos->max_tres))
-    return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
 
   task.qos_priority = qos->priority;
 
@@ -90,6 +84,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
   result = CheckQosSubmitResourceForQos_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
+
+  // TryMallocPartitionSubmitResource(task, qos);
 
   MallocQosSubmitResource(task);
 
@@ -578,6 +574,25 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
       });
 
   return result;
+}
+
+CraneErrCode AccountMetaContainer::CheckPartitionSubmitResourceForUser_(
+    const TaskInCtld& task, const Qos& qos,
+    const PartitionResourceLimit& partition_resource_limit) {
+  if (qos.max_submit_jobs < UINT32_MAX || qos.max_submit_jobs_per_user < UINT32_MAX)
+    return CraneErrCode::SUCCESS;
+
+  if (partition_resource_limit.max_submit_jobs == 0)
+    return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+
+  m_user_meta_map_.if_contains(
+    task.Username(),
+    [&](std::pair<const std::string, MetaResource>& pair) {
+      auto& val = pair.second;
+      auto iter = val.partition_to_resource_map.find(task.partition_id);
+      if (iter == val.partition_to_resource_map.end()) return ;
+
+    });
 }
 
 }  // namespace Ctld
