@@ -1258,7 +1258,7 @@ void RaftLeaderInterceptor::Intercept(
   if (methods->QueryInterceptionHookPoint(
           grpc::experimental::InterceptionHookPoints::
               POST_RECV_INITIAL_METADATA)) {
-    if (g_config.EnableRaft && !g_raft_server->IsLeader()) {
+    if (g_config.Raft.Enabled && !g_raft_server->IsLeader()) {
       m_ctx_->TryCancel();
       return;
     }
@@ -1350,9 +1350,9 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
     grpc::ServerContext *context,
     const crane::grpc::AddFollowerRequest *request,
     crane::grpc::AddFollowerReply *response) {
-  if (!g_config.EnableRaft) {
+  if (!g_config.Raft.Enabled) {
     response->set_ok(false);
-    response->set_reason("Raft mode not enable in config file.");
+    response->set_reason("Raft mode not enabled in config file.");
     return grpc::Status::OK;
   }
 
@@ -1381,7 +1381,6 @@ grpc::Status CraneCtldServiceImpl::AddFollower(
     }
     break;
   }
-  case crane::grpc::AddFollowerRequest::KEY_NOT_SET:
   default:
     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
                         "either server_id or hostname must be set");
@@ -1431,7 +1430,6 @@ grpc::Status CraneCtldServiceImpl::RemoveFollower(
     }
     break;
   }
-  case crane::grpc::AddFollowerRequest::KEY_NOT_SET:
   default:
     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
                         "either server_id or hostname must be set");

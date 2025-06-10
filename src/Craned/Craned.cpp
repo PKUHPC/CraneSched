@@ -232,19 +232,24 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
-      if (config["ControlMachine"]) {
-        for (auto it = config["ControlMachine"].begin();
-             it != config["ControlMachine"].end(); ++it) {
-          auto node = it->as<YAML::Node>();
-          Craned::Config::ServerEndPoint server_node{};
+      if (config["CraneCtld"]) {
+        const auto& ctld_config = config["CraneCtld"];
 
-          if (node["hostname"])
-            server_node.HostName = node["hostname"].as<std::string>();
-          else
-            std::exit(1);
+        if (ctld_config["ControlMachines"]) {
+          for (auto it = ctld_config["ControlMachines"].begin();
+               it != ctld_config["ControlMachines"].end(); ++it) {
+            auto node = it->as<YAML::Node>();
+            Craned::Config::ServerEndPoint server_node{};
 
-          server_node.ListenPort =
-              YamlValueOr(node["listenPort"], kCtldDefaultPort);
+            if (node["hostname"])
+              server_node.HostName = node["hostname"].as<std::string>();
+            else {
+              CRANE_CRITICAL("ControlMachine node must have hostname.");
+              std::exit(1);
+            }
+
+            server_node.ListenPort =
+                YamlValueOr(node["listenPort"], kCtldDefaultPort);
 
           g_config.ControlMachines.push_back(std::move(server_node));
         }
@@ -253,8 +258,9 @@ void ParseConfig(int argc, char** argv) {
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
 
-      if (config["CraneCtldEnableRaft"])
-        g_config.EnableRaft = config["CraneCtldEnableRaft"].as<bool>();
+        if (ctld_config["Raft"] && ctld_config["Raft"]["Enabled"])
+          g_config.EnableRaft = ctld_config["Raft"]["Enabled"].as<bool>();
+      }
       CRANE_INFO("Raft mode enable: {}", g_config.EnableRaft);
 
       if (config["Nodes"]) {

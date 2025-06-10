@@ -284,9 +284,17 @@ grpc::Status CranedServiceImpl::UpdateLeaderId(
     grpc::ServerContext *context,
     const crane::grpc::UpdateLeaderIdRequest *request,
     google::protobuf::Empty *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
   if (request->cur_leader_id() >= 0 &&
       request->cur_leader_id() < g_config.ControlMachines.size())
     g_ctld_client->SetLeaderId(request->cur_leader_id());
+  else
+    CRANE_ERROR("Invalid leader ID: {}. Valid range is [0, {})",
++                request->cur_leader_id(), g_config.ControlMachines.size());
   return Status::OK;
 }
 

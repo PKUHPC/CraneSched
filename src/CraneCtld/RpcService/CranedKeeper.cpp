@@ -234,9 +234,11 @@ CraneErrCode CranedStub::UpdateLeaderId(int cur_leader_id) {
   CRANE_ASSERT(cur_leader_id >= 0);
   using crane::grpc::UpdateLeaderIdRequest;
 
-  ClientContext context;
   UpdateLeaderIdRequest request;
   google::protobuf::Empty reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   request.set_cur_leader_id(cur_leader_id);
   Status status = m_stub_->UpdateLeaderId(&context, request, &reply);
@@ -663,10 +665,14 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
 
 void CranedKeeper::BroadcastLeaderId(int cur_leader_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
+  std::latch latch(m_connected_craned_id_stub_map_.size());
   for (const auto &craned : m_connected_craned_id_stub_map_) {
-    if (m_cq_closed_) return;
-    craned.second->UpdateLeaderId(cur_leader_id);
+    g_thread_pool->detach_task([&craned, &latch, cur_leader_id] {
+      craned.second->UpdateLeaderId(cur_leader_id);
+      latch.count_down();
+    });
   }
+  latch.wait();
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,

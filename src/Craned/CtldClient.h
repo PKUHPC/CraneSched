@@ -163,9 +163,7 @@ class CtldClient {
 
   void AsyncSendThread_();
 
-  // int ConnectToServersAndFindLeader_(int tar_server_id);
-
-  void FailTheCurrentConn(int prev_leader_id);
+  void FailTheCurrentConn_(int prev_leader_id);
 
   absl::Mutex m_task_status_change_mtx_;
 

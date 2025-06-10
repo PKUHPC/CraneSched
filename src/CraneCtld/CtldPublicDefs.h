@@ -68,6 +68,21 @@ constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
 
+//*********************************************************
+// Persistent Storage Constants
+constexpr uint8_t kVarValueMapTableIndex = 0;
+constexpr uint8_t kFixValueMapTableIndex = 1;
+constexpr uint8_t kResvValueMapTableIndex = 2;
+
+//*********************************************************
+// Raft parameter Constants
+constexpr int kHeartbeatIntervalMs = 100;
+constexpr int kElectionTimeoutLowerMs = 200;
+constexpr int kElectionTimeoutUpperMs = 400;
+constexpr int kReservedLogItems = 10;
+constexpr int kSnapshotDistance = 10;
+constexpr int kClientRequestTimeoutMs = 3000;
+
 struct Config {
   struct Node {
     uint32_t cpu;
@@ -130,6 +145,12 @@ struct Config {
     std::string PlugindSockPath;
   };
 
+  struct RaftConfig {
+    bool Enabled{false};
+    std::string DebugLevel;
+    std::filesystem::path LogFile;
+  };
+
   struct ServerNode {
     std::string HostName;
     std::string RaftPort;
@@ -160,7 +181,7 @@ struct Config {
 
   std::vector<ServerNode> Servers;
   int CurServerId = 0;
-  bool EnableRaft = false;
+  RaftConfig Raft;
 
   // Database config
   std::string DbUser;

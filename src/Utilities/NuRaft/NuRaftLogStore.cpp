@@ -20,9 +20,8 @@
 namespace crane {
 namespace Internal {
 
-NuRaftLogStore::NuRaftLogStore(raft_server* server_ptr)
+NuRaftLogStore::NuRaftLogStore()
     : m_start_idx_(1),
-      m_raft_server_bwd_pointer_(server_ptr),
       m_last_durable_index_(0),
       m_durable_thread_stop_signal_(false) {
   // Dummy entry for index 0.
@@ -49,7 +48,7 @@ NuRaftLogStore::~NuRaftLogStore() {
   }
 }
 
-bool NuRaftLogStore::init(const std::string& db_backend,
+bool NuRaftLogStore::Init(const std::string& db_backend,
                           const std::string& db_path) {
   if (db_backend == "Unqlite") {
 #ifdef CRANE_HAVE_UNQLITE
@@ -73,8 +72,6 @@ bool NuRaftLogStore::init(const std::string& db_backend,
     CRANE_ERROR("Invalid embedded database backend: {}", db_backend);
     return false;
   }
-
-  m_has_servers_run_ = std::filesystem::exists(db_path + "_logs");
 
   auto result = m_logs_db_->Init(db_path + "_logs");
   if (!result) return false;
@@ -197,6 +194,7 @@ NuRaftLogStore::log_entries(uint64_t start, uint64_t end) {
       auto entry = m_logs_.find(i);
       if (entry == m_logs_.end()) {
         entry = m_logs_.find(0);
+        CRANE_ERROR("Log entry not found at index {}", i);
         assert(0);
       }
       src = entry->second;
@@ -208,7 +206,7 @@ NuRaftLogStore::log_entries(uint64_t start, uint64_t end) {
 
 std::shared_ptr<std::vector<std::shared_ptr<log_entry>>>
 NuRaftLogStore::log_entries_ext(uint64_t start, uint64_t end,
-                                int64 batch_size_hint_in_bytes) {
+                                int64_t batch_size_hint_in_bytes) {
   std::shared_ptr<std::vector<std::shared_ptr<log_entry>>> ret =
       std::make_shared<std::vector<std::shared_ptr<log_entry>>>();
 
@@ -224,6 +222,7 @@ NuRaftLogStore::log_entries_ext(uint64_t start, uint64_t end,
       auto entry = m_logs_.find(i);
       if (entry == m_logs_.end()) {
         entry = m_logs_.find(0);
+        CRANE_ERROR("Log entry not found at index {}", i);
         assert(0);
       }
       src = entry->second;
@@ -263,7 +262,7 @@ uint64_t NuRaftLogStore::term_at(uint64_t index) {
   return term;
 }
 
-std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32 cnt) {
+std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32_t cnt) {
   std::vector<std::shared_ptr<buffer>> logs;
 
   size_t size_total = 0;
@@ -280,13 +279,13 @@ std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32 cnt) {
   }
 
   std::shared_ptr<buffer> buf_out =
-      buffer::alloc(sizeof(int32) + cnt * sizeof(int32) + size_total);
+      buffer::alloc(sizeof(int32_t) + cnt * sizeof(int32_t) + size_total);
   buf_out->pos(0);
-  buf_out->put((int32)cnt);
+  buf_out->put(cnt);
 
   for (auto& entry : logs) {
     std::shared_ptr<buffer>& bb = entry;
-    buf_out->put((int32)bb->size());
+    buf_out->put(static_cast<int32_t>(bb->size()));
     buf_out->put(*bb);
   }
   return buf_out;
@@ -294,11 +293,11 @@ std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32 cnt) {
 
 void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
   pack.pos(0);
-  int32 num_logs = pack.get_int();
+  int32_t num_logs = pack.get_int();
 
-  for (int32 i = 0; i < num_logs; ++i) {
+  for (int32_t i = 0; i < num_logs; ++i) {
     uint64_t cur_idx = index + i;
-    int32 buf_size = pack.get_int();
+    int32_t buf_size = pack.get_int();
 
     std::shared_ptr<buffer> buf_local = buffer::alloc(buf_size);
     pack.get(buf_local);
@@ -416,6 +415,7 @@ void NuRaftLogStore::durable_thread_() {
                                      buf->size());
         if (res.has_value()) {
           m_logs_being_written_.pop();
+          m_last_durable_index_ = i;
           call_notification = true;
         } else {
           max_retry++;

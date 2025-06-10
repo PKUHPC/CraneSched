@@ -290,7 +290,7 @@ void CranedMetaContainer::MarkAllCranedDown() {
   if (!changed) return;
 
   for (auto& part_meta : *partition_meta_map | std::views::values) {
-    auto part_global_meta = part_meta.RawPtr()->partition_global_meta;
+    auto& part_global_meta = part_meta.RawPtr()->partition_global_meta;
     if (part_global_meta.alive_craned_cnt > 0) {
       part_global_meta.alive_craned_cnt = 0;
       part_global_meta.res_avail = part_global_meta.res_total;

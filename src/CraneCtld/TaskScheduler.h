@@ -637,6 +637,7 @@ class TaskScheduler {
       ABSL_GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_task_map_mtx_);
 
+  // The server is only available when this variable is true
   std::atomic<bool> m_task_map_ready_ = false;
 
   // Task Indexes

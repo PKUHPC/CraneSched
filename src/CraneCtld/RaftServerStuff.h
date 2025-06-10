@@ -31,11 +31,15 @@ namespace Ctld {
 
 class CraneStateMachine;
 
-using namespace nuraft;
+using nuraft::cb_func;
+using nuraft::raft_server;
+using nuraft::srv_config;
+using nuraft::raft_params;
+using nuraft::buffer_serializer;
 
 class RaftServerStuffBase {
  public:
-  using raft_result = cmd_result<std::shared_ptr<buffer>>;
+  using raft_result = nuraft::cmd_result<std::shared_ptr<nuraft::buffer>>;
 
   RaftServerStuffBase() = default;
 
@@ -128,13 +132,8 @@ class RaftServerStuff final : public RaftServerStuffBase {
 
   void GetNodeStatus(crane::grpc::QueryLeaderInfoReply* response) override;
 
-  // void get_all_keys() {
-  //   static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
-  //       ->get_all_keys();
-  // };
-
  private:
-  void handle_result(raft_result& result, ptr<std::exception>& err);
+  void handle_result(raft_result& result, std::shared_ptr<std::exception>& err);
 
   static cb_func::ReturnCode StatusChangeCallback(cb_func::Type type,
                                                   cb_func::Param* p);
@@ -145,19 +144,19 @@ class RaftServerStuff final : public RaftServerStuffBase {
   std::atomic<bool> m_exit_ = false;
 
   // State machine.
-  std::shared_ptr<state_machine> m_state_machine_;
+  std::shared_ptr<nuraft::state_machine> m_state_machine_;
 
   // State manager.
-  std::shared_ptr<state_mgr> m_state_mgr_;
+  std::shared_ptr<nuraft::state_mgr> m_state_mgr_;
 
   // Logger
-  std::shared_ptr<logger> m_logger_;
+  std::shared_ptr<nuraft::logger> m_logger_;
 
   // Raft launcher.
-  raft_launcher m_launcher_;
+  nuraft::raft_launcher m_launcher_;
 
   // Raft server instance.
-  std::shared_ptr<raft_server> m_raft_instance_;
+  std::shared_ptr<nuraft::raft_server> m_raft_instance_;
 };
 
 }  // namespace Ctld
