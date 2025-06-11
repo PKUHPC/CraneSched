@@ -416,7 +416,7 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosSubmitResource(*task);
+  g_account_meta_container->MallocMetaSubmitResource(*task);
 
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -427,7 +427,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
+  g_account_meta_container->MallocMetaResourceToRecoveredRunningTask(*task);
 
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
@@ -910,7 +910,7 @@ void TaskScheduler::ScheduleThread_() {
           if (task->reservation != "")
             g_meta_container->FreeResourceFromResv(task->reservation,
                                                    task->TaskId());
-          g_account_meta_container->FreeQosResource(*task);
+          g_account_meta_container->FreeMetaResource(*task);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1751,7 +1751,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
-    g_account_meta_container->FreeQosSubmitResource(*task);
+    g_account_meta_container->FreeMetaSubmitResource(*task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -1837,7 +1837,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
-        g_account_meta_container->FreeQosSubmitResource(*pair.first);
+        g_account_meta_container->FreeMetaSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(0);
       }
       break;
@@ -1870,7 +1870,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosSubmitResource(*rejected_tasks[i].first);
+      g_account_meta_container->FreeMetaSubmitResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
     }
   } while (false);
@@ -1987,7 +1987,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
     if (task->reservation != "")
       g_meta_container->FreeResourceFromResv(task->reservation, task->TaskId());
-    g_account_meta_container->FreeQosResource(*task);
+    g_account_meta_container->FreeMetaResource(*task);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2700,7 +2700,7 @@ void MinLoadFirst::NodeSelect(
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
     std::optional<std::string> has_reason =
-        g_account_meta_container->CheckQosResource(*task);
+        g_account_meta_container->CheckMetaResource(*task);
     if (has_reason) {
       task->pending_reason = has_reason.value();
       continue;
@@ -2783,7 +2783,7 @@ void MinLoadFirst::NodeSelect(
             task->reservation, task->TaskId(),
             {task->EndTime(), task->AllocatedRes()});
       }
-      g_account_meta_container->MallocQosResource(*task);
+      g_account_meta_container->MallocMetaResource(*task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the

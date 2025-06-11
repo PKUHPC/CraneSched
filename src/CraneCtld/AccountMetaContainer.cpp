@@ -22,7 +22,7 @@
 
 namespace Ctld {
 
-CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
+CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
     TaskInCtld& task) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
@@ -62,7 +62,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   for (const auto& account_name : task.account_chain) {
     account_stripes.insert(StripeForKey_(account_name));
   }
-
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
@@ -90,12 +89,12 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (result != CraneErrCode::SUCCESS) return result;
 
   // TODO: MallocSubmitResource
-  MallocQosSubmitResource(task);
+  MallocMetaSubmitResource(task);
 
   return result;
 }
 
-void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
+void AccountMetaContainer::MallocMetaSubmitResource(const TaskInCtld& task) {
   CRANE_DEBUG(
       "Malloc QOS {} submit resource for task of user {} and account {}.",
       task.qos, task.Username(), task.account);
@@ -171,7 +170,7 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
       meta_resource);
 }
 
-void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
+void AccountMetaContainer::MallocMetaResourceToRecoveredRunningTask(
     TaskInCtld& task) {
   CRANE_DEBUG(
       "Malloc QOS {} resource for recover task {} of user {} and account {}.",
@@ -255,7 +254,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
       meta_resource);
 }
 
-std::optional<std::string> AccountMetaContainer::CheckQosResource(
+std::optional<std::string> AccountMetaContainer::CheckMetaResource(
     const TaskInCtld& task) {
   const auto& user_ptr = g_account_manager->GetExistedUserInfo(task.Username());
   const auto& account_map = g_account_manager->GetAllAccountInfo();
@@ -432,7 +431,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
   return std::nullopt;
 }
 
-void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
+void AccountMetaContainer::MallocMetaResource(const TaskInCtld& task) {
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   m_user_meta_map_.if_contains(
@@ -485,7 +484,7 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
       });
 }
 
-void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
+void AccountMetaContainer::FreeMetaSubmitResource(const TaskInCtld& task) {
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
   m_user_meta_map_.if_contains(
       task.Username(),
@@ -532,7 +531,7 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
       });
 }
 
-void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
+void AccountMetaContainer::FreeMetaResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));

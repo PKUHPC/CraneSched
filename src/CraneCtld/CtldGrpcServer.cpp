@@ -1715,7 +1715,7 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
+    auto res = g_account_meta_container->TryMallocMetaSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("{}", CraneErrStr(res));
       g_account_meta_container->UserReduceTask(task->Username());

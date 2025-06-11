@@ -51,19 +51,19 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosSubmitResource(TaskInCtld& task);
+  CraneErrCode TryMallocMetaSubmitResource(TaskInCtld& task);
 
-  void MallocQosSubmitResource(const TaskInCtld& task);
+  void MallocMetaSubmitResource(const TaskInCtld& task);
 
-  void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
+  void MallocMetaResourceToRecoveredRunningTask(TaskInCtld& task);
 
-  std::optional<std::string> CheckQosResource(const TaskInCtld& task);
+  std::optional<std::string> CheckMetaResource(const TaskInCtld& task);
 
-  void MallocQosResource(const TaskInCtld& task);
+  void MallocMetaResource(const TaskInCtld& task);
 
-  void FreeQosSubmitResource(const TaskInCtld& task);
+  void FreeMetaSubmitResource(const TaskInCtld& task);
 
-  void FreeQosResource(const TaskInCtld& task);
+  void FreeMetaResource(const TaskInCtld& task);
 
   // When a user/account object is deleted, resources need to be reset.
   void DeleteUserMeta(const std::string& username);
