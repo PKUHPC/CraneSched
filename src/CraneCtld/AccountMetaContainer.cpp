@@ -302,6 +302,13 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
               return;
             }
           }
+          if (qos->max_wall == absl::ZeroDuration()) {
+            if (val.wall_time + task.time_limit > user_partition_limit.max_wall ||
+              val.wall_time + task.time_limit > user_partition_limit.max_wall_duration_per_job) {
+              result = "UserPartWallResourceLimit";
+              return ;
+            }
+          }
           ResourceView resource_use{task.requested_node_res_view *
                                     task.node_num};
           resource_use += val.resource;
@@ -367,6 +374,13 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
                 return;
               }
             }
+            if (qos->max_wall == absl::ZeroDuration()) {
+            if (val.wall_time + task.time_limit > partition_resource_limit.max_wall ||
+              val.wall_time + task.time_limit > partition_resource_limit.max_wall_duration_per_job) {
+              result = "AccPartWallResourceLimit";
+              return ;
+            }
+          }
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
