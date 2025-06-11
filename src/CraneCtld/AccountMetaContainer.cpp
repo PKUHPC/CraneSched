@@ -73,10 +73,16 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
   std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
   result = CheckQosSubmitResource_(task, *qos);
-  if (result != CraneErrCode::SUCCESS) return result;
+  if (result != CraneErrCode::SUCCESS) {
+    CRANE_DEBUG("Failed to check QoS submit resource for task of user {} and account {}.", task.Username(), task.account);
+    return result;
+  }
 
   result = CheckPartitionSubmitResource_(task, *qos, *user_ptr, account_map);
-  if (result != CraneErrCode::SUCCESS) return result;
+  if (result != CraneErrCode::SUCCESS) {
+    CRANE_DEBUG("Failed to check partition submit resource for task of user {} and account {}.", task.Username(), task.account);
+    return result;
+  }
 
   MallocMetaSubmitResource(task);
 
@@ -435,6 +441,8 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
 }
 
 void AccountMetaContainer::MallocMetaResource(const TaskInCtld& task) {
+  CRANE_DEBUG("Allocating meta resource for task {} of user {} and account {}.", task.TaskId(), task.Username(), task.account);
+
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
   m_user_meta_map_.if_contains(
@@ -488,6 +496,8 @@ void AccountMetaContainer::MallocMetaResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeMetaSubmitResource(const TaskInCtld& task) {
+  CRANE_DEBUG("Freeing meta submit resource for task {} of user {} and account {}.", task.TaskId(), task.Username(), task.account);
+
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
   m_user_meta_map_.if_contains(
       task.Username(),
@@ -535,6 +545,8 @@ void AccountMetaContainer::FreeMetaSubmitResource(const TaskInCtld& task) {
 }
 
 void AccountMetaContainer::FreeMetaResource(const TaskInCtld& task) {
+  CRANE_DEBUG("Freeing meta resource for task {} of user {} and account {}.",task.TaskId(), task.Username(), task.account);
+
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
