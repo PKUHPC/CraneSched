@@ -823,15 +823,21 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
 
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos, const User& user) {
-  if (qos.max_submit_jobs < UINT32_MAX ||
-      qos.max_submit_jobs_per_user < UINT32_MAX)
-    return CraneErrCode::SUCCESS;
-
   auto iter = user.partition_to_resource_limit_map.find(task.partition_id);
   if (iter == user.partition_to_resource_limit_map.end())
     return CraneErrCode::ERR_PARTITION_MISSING;
 
   const auto& partition_resource_limit = iter->second;
+
+  if (!(task.requested_node_res_view*task.node_num <= partition_resource_limit.max_tres_per_job))
+    return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+
+  if (task.time_limit > partition_resource_limit.max_wall_duration_per_job)
+    return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+
+  if (qos.max_submit_jobs < UINT32_MAX ||
+      qos.max_submit_jobs_per_user < UINT32_MAX)
+    return CraneErrCode::SUCCESS;
 
   if (partition_resource_limit.max_submit_jobs == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
@@ -885,6 +891,13 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitResourceForAccount_(
 
     const auto& partition_resource_limit =
         partition_resource_limit_iter->second;
+
+    if (!(task.requested_node_res_view*task.node_num <= partition_resource_limit.max_tres_per_job))
+      return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+
+    if (task.time_limit > partition_resource_limit.max_wall_duration_per_job)
+      return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+
     if (partition_resource_limit.max_submit_jobs == 0)
       return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
