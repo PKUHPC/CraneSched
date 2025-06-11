@@ -48,20 +48,10 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (qos->max_submit_jobs_per_user == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
-  if (!CheckTres_(resource_use, qos->max_tres_per_user))
-    return CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
-
   if (qos->max_submit_jobs_per_account == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
 
-  if (!CheckTres_(resource_use, qos->max_tres_per_account))
-    return CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
-
-  if (qos->max_submit_jobs == 0)
-    return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
-
-  if (!CheckTres_(resource_use, qos->max_tres))
-    return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+  if (qos->max_submit_jobs == 0) return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
 
   task.qos_priority = qos->priority;
 
@@ -81,6 +71,9 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (result != CraneErrCode::SUCCESS) return result;
 
   result = CheckQosSubmitResourceForAccount_(task, *qos);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  result = CheckQosSubmitResourceForQos_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
   MallocQosSubmitResource(task);
@@ -204,6 +197,7 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           val.submit_jobs_count++;
           val.jobs_count++;
           val.resource += task.allocated_res_view;
+          val.wall_time += task.time_limit;
         },
         QosToResourceMap{
             {task.qos, QosResource{.resource = task.allocated_res_view,
@@ -212,14 +206,18 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   }
 
   m_qos_meta_map_.try_emplace_l(
-    task.qos,
-    [&](std::pair<const std::string, QosResource>& pair) {
-      auto& val = pair.second;
-      val.submit_jobs_count++;
-      val.jobs_count++;
-      val.resource += task.allocated_res_view;
-    },
-    QosResource{task.allocated_res_view, 1, 1});
+      task.qos,
+      [&](std::pair<const std::string, QosResource>& pair) {
+        auto& val = pair.second;
+        val.submit_jobs_count++;
+        val.jobs_count++;
+        val.resource += task.allocated_res_view;
+        val.wall_time += task.time_limit;
+      },
+      QosResource{.resource = task.allocated_res_view,
+                  .jobs_count = 1,
+                  .submit_jobs_count = 1,
+                  .wall_time = task.time_limit});
 }
 
 std::expected<void, std::string>
@@ -408,20 +406,21 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
 
         if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_user) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
-          return ;
+          return;
         }
 
         if (qos.flags & QosFlags::DenyOnLimit) {
           if (val.jobs_count + 1 > qos.max_jobs_per_user) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
-            return ;
+            return;
           }
-          ResourceView resource_use{task.requested_node_res_view * task.node_num};
+          ResourceView resource_use{task.requested_node_res_view *
+                                    task.node_num};
           resource_use += val.resource;
           // Compatible with the max_cpu_per_user parameter.
           if (resource_use.CpuCount() > qos.max_cpus_per_user) {
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
-            return ;
+            return;
           }
           if (!CheckTres_(resource_use, qos.max_tres_per_user))
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
@@ -447,13 +446,13 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
 
           if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account) {
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
-            return ;
+            return;
           }
 
           if (qos.flags & QosFlags::DenyOnLimit) {
             if (val.jobs_count + 1 > qos.max_jobs_per_account) {
               result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
-              return ;
+              return;
             }
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
@@ -469,36 +468,35 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
     const TaskInCtld& task, const Qos& qos) {
-
   auto result = CraneErrCode::SUCCESS;
   m_qos_meta_map_.if_contains(
-    task.qos,
-    [&](std::pair<const std::string, QosResource>& pair) {
-      auto& val = pair.second;
-      if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
-        result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
-        return;
-      }
-      if (qos.flags & QosFlags::DenyOnLimit) {
-        if (val.jobs_count + 1 > qos.max_jobs) {
+      task.qos, [&](std::pair<const std::string, QosResource>& pair) {
+        auto& val = pair.second;
+        if (val.submit_jobs_count + 1 > qos.max_submit_jobs) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
-          return ;
+          return;
         }
-
-        // When max wall = 0, it means unlimited.
-        if (qos.max_wall > absl::ZeroDuration()) {
-          if (val.wall_time + task.time_limit > qos.max_wall) {
-            result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
-            return ;
+        if (qos.flags & QosFlags::DenyOnLimit) {
+          if (val.jobs_count + 1 > qos.max_jobs) {
+            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
+            return;
           }
-        }
 
-        ResourceView resource_use{task.requested_node_res_view * task.node_num};
-        resource_use += val.resource;
-        if (!CheckTres_(resource_use, qos.max_tres))
-          result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
-      }
-    });
+          // When max wall = 0, it means unlimited.
+          if (qos.max_wall > absl::ZeroDuration()) {
+            if (val.wall_time + task.time_limit > qos.max_wall) {
+              result = CraneErrCode::ERR_TIME_TIMIT_BEYOND;
+              return;
+            }
+          }
+
+          ResourceView resource_use{task.requested_node_res_view *
+                                    task.node_num};
+          resource_use += val.resource;
+          if (!CheckTres_(resource_use, qos.max_tres))
+            result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+        }
+      });
 
   return result;
 }
