@@ -249,7 +249,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
-  bool result = true;
+  std::string result;
 
   m_user_meta_map_.if_contains(
       task.Username(),
@@ -257,20 +257,20 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
         auto& val = pair.second[task.qos];
 
         if (val.jobs_count + 1 > qos->max_jobs_per_user) {
-          result = false;
+          result = "QosJobsAccountResourceLimit";
           return;
         }
 
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
         resource_use += val.resource;
         if (resource_use.CpuCount() > qos->max_cpus_per_user) {
-          result = false;
+          result = "QosCpuResourceLimit";
           return;
         }
-        if (!CheckTres_(resource_use, qos->max_tres_per_user)) result = false;
+        result = CheckTres_(resource_use, qos->max_tres_per_user);
       });
 
-  if (!result) return "QOSResourceLimit";
+  if (!result.empty()) return result;
 
   for (const auto& account_name : task.account_chain) {
     CRANE_ASSERT(m_account_meta_map_.contains(account_name));
@@ -280,20 +280,19 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
           auto& val = pair.second[task.qos];
 
           if (val.jobs_count + 1 > qos->max_jobs_per_account) {
-            result = false;
+            result = "QosJobsAccountResourceLimit";
             return;
           }
 
           ResourceView resource_use{task.requested_node_res_view *
                                     task.node_num};
           resource_use += val.resource;
-          if (!CheckTres_(resource_use, qos->max_tres_per_account))
-            result = false;
+          result = CheckTres_(resource_use, qos->max_tres_per_account);
         });
-    if (!result) break;
+    if (!result.empty()) break;
   }
 
-  if (!result) return "QOSResourceLimit";
+  if (!result.empty()) return result;
 
   CRANE_ASSERT(m_qos_meta_map_.contains(task.qos));
 
@@ -302,23 +301,23 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
         auto& val = pair.second;
 
         if (val.jobs_count + 1 > qos->max_jobs) {
-          result = false;
+          result = "QosJobsAccountResourceLimit";
           return;
         }
 
         if (qos->max_wall > absl::ZeroDuration()) {
           if (val.wall_time + task.time_limit > qos->max_wall) {
-            result = false;
+            result = "QosWallResourceLimit";
             return;
           }
         }
 
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
         resource_use += val.resource;
-        if (!CheckTres_(resource_use, qos->max_tres)) result = false;
+        result = CheckTres_(resource_use, qos->max_tres);
       });
 
-  if (!result) return "QOSResourceLimit";
+  if (!result.empty()) return result;
 
   return std::nullopt;
 }
@@ -469,14 +468,23 @@ bool AccountMetaContainer::UserHasTask(const std::string& username) {
   return result;
 }
 
-bool AccountMetaContainer::CheckTres_(const ResourceView& resource_req,
-                                      const ResourceView& resource_total) {
-  if (!(resource_req.GetAllocatableRes() <= resource_total.GetAllocatableRes()))
-    return false;
+std::string AccountMetaContainer::CheckTres_(
+    const ResourceView& resource_req, const ResourceView& resource_total) {
+  if (resource_req.CpuCount() > resource_total.CpuCount()) {
+    return "QosCpuResourceLimit";
+  }
+  if (resource_req.MemoryBytes() > resource_total.MemoryBytes()) {
+    return "QosMemResourceLimit";
+  }
 
-  const auto& device_req = resource_req.GetDeviceMap();
-  const auto& device_total = resource_total.GetDeviceMap();
+  if (!CheckGres_(resource_req.GetDeviceMap(), resource_total.GetDeviceMap()))
+    return "QosGresResourceLimit";
 
+  return "";
+}
+
+bool AccountMetaContainer::CheckGres_(const DeviceMap& device_req,
+                                      const DeviceMap& device_total) {
   for (const auto& [lhs_name, lhs_cnt] : device_req) {
     auto rhs_it = device_total.find(lhs_name);
     // Requests for unrecorded devices should not be restricted.
