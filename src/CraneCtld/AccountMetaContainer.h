@@ -29,19 +29,17 @@ constexpr int kNumStripes = 128;
 
 class AccountMetaContainer final {
  public:
-
   using ResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string, MetaResource,
+      std::string, MetaResourceStat,
       phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, MetaResource>>, 4,
+      std::allocator<std::pair<const std::string, MetaResourceStat>>, 4,
       std::shared_mutex>;
 
   using QosResourceMap = phmap::parallel_flat_hash_map<
-      std::string, QosResource,
-      phmap::priv::hash_default_hash<std::string>,
+      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosResource>>, 4,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
       std::shared_mutex>;
 
   using UserToTaskNumMap = phmap::parallel_flat_hash_map<
@@ -85,7 +83,11 @@ class AccountMetaContainer final {
     return std::hash<std::string>{}(key) % kNumStripes;
   }
 
-  static bool CheckTres_(const ResourceView& resource_req, const ResourceView& resource_total);
+  static std::string CheckTres_(const ResourceView& resource_req,
+                                const ResourceView& resource_total);
+
+  static bool CheckGres_(const DeviceMap& device_req,
+                         const DeviceMap& device_total);
 
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
                                               const Qos& qos);
@@ -97,10 +99,12 @@ class AccountMetaContainer final {
                                              const Qos& qos);
 
   CraneErrCode CheckPartitionSubmitResourceForUser_(const TaskInCtld& task,
-  const Qos& qos, const PartitionResourceLimit& partition_resource_limit);
+                                                    const Qos& qos,
+                                                    const User& user);
 
-  CraneErrCode CheckPartitionSubmitResourceForAccount_(const TaskInCtld& task,
-  const Qos& qos, const PartitionResourceLimit& partition_resource_limit);
+  CraneErrCode CheckPartitionSubmitResourceForAccount_(
+      const TaskInCtld& task, const Qos& qos,
+      const AccountManager::AccountMapMutexSharedPtr& account_map);
 
   // lock user -> lock account -> lock qos
   std::array<std::mutex, kNumStripes> m_user_stripes_;

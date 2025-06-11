@@ -682,40 +682,6 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<ResourceView>(
-  document& doc, const std::string& key,
-  const ResourceView& value) {
-  doc.append(kvp(key, [&](sub_document valueDocument) {
-    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
-        allocDoc.append(kvp("cpu_count", value.CpuCount()));
-        allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
-        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
-    }));
-    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
-  }));
-}
-
-template <>
-void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
-  sub_document& doc, const std::string& key,
-  const DeviceMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& [dev_name, pair_val] : value) {
-      uint64_t untyped_req_count = pair_val.first;
-      const auto& type_map = pair_val.second;
-      mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
-        devDoc.append(kvp("untyped_req_count", static_cast<int64_t>(untyped_req_count)));
-        devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
-          for (const auto& [type, total] : type_map) {
-            typeDoc.append(kvp(type, static_cast<int64_t>(total)));
-          }
-        }));
-      }));
-    }
-  }));
-}
-
-template <>
 void MongodbClient::DocumentAppendItem_<PartitionToResourceLimitMap>(
     document& doc, const std::string& key, const PartitionToResourceLimitMap& value) {
   doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
