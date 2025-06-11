@@ -89,6 +89,10 @@ class AccountMetaContainer final {
   static bool CheckGres_(const DeviceMap& device_req,
                          const DeviceMap& device_total);
 
+  CraneErrCode CheckQosSubmitResource_(const TaskInCtld& task, const Qos& qos);
+
+  CraneErrCode CheckPartitionSubmitResource_(const TaskInCtld& task, const Qos& qos, const User& user, const AccountManager::AccountMapMutexSharedPtr& account_map);
+
   CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
                                               const Qos& qos);
 

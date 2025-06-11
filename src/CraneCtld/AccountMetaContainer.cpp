@@ -72,23 +72,12 @@ CraneErrCode AccountMetaContainer::TryMallocMetaSubmitResource(
   }
   std::lock_guard qos_lock(m_qos_stripes_[StripeForKey_(task.qos)]);
 
-  // TODO: CheckQosSubmitResource and CheckPartitionSubmitResource
-  result = CheckQosSubmitResourceForUser_(task, *qos);
+  result = CheckQosSubmitResource_(task, *qos);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceForAccount_(task, *qos);
+  result = CheckPartitionSubmitResource_(task, *qos, *user_ptr, account_map);
   if (result != CraneErrCode::SUCCESS) return result;
 
-  result = CheckQosSubmitResourceForQos_(task, *qos);
-  if (result != CraneErrCode::SUCCESS) return result;
-
-  result = CheckPartitionSubmitResourceForUser_(task, *qos, *user_ptr);
-  if (result != CraneErrCode::SUCCESS) return result;
-
-  result = CheckPartitionSubmitResourceForAccount_(task, *qos, account_map);
-  if (result != CraneErrCode::SUCCESS) return result;
-
-  // TODO: MallocSubmitResource
   MallocMetaSubmitResource(task);
 
   return result;
@@ -677,6 +666,35 @@ bool AccountMetaContainer::CheckGres_(const DeviceMap& device_req,
   }
 
   return true;
+}
+
+CraneErrCode AccountMetaContainer::CheckQosSubmitResource_(
+    const TaskInCtld& task, const Qos& qos) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  result = CheckQosSubmitResourceForUser_(task, qos);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  result = CheckQosSubmitResourceForAccount_(task, qos);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  result = CheckQosSubmitResourceForQos_(task, qos);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  return result;
+}
+
+CraneErrCode AccountMetaContainer::CheckPartitionSubmitResource_(
+    const TaskInCtld& task, const Qos& qos, const User& user, const AccountManager::AccountMapMutexSharedPtr& account_map) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  result = CheckPartitionSubmitResourceForUser_(task, qos, user);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  result = CheckPartitionSubmitResourceForAccount_(task, qos, account_map);
+  if (result != CraneErrCode::SUCCESS) return result;
+
+  return result;
 }
 
 CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
