@@ -47,6 +47,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
       response->add_failed_task_id_list(task_to_d.task_id());
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
+  g_ctld_client->UpdateLastActiveTime();
 
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
@@ -71,6 +72,8 @@ grpc::Status CranedServiceImpl::TerminateTasks(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
+  g_ctld_client->UpdateLastActiveTime();
+
   CRANE_TRACE("Receive TerminateTasks for tasks {}",
               absl::StrJoin(request->task_id_list(), ","));
 
@@ -90,6 +93,7 @@ grpc::Status CranedServiceImpl::TerminateOrphanedTask(
     response->set_reason("CranedServer is not ready");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+  g_ctld_client->UpdateLastActiveTime();
   for (task_id_t job_id : request->task_id_list())
     g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
   response->set_ok(true);
@@ -106,6 +110,8 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+
+  g_ctld_client->UpdateLastActiveTime();
 
   CRANE_TRACE("Receive QueryTaskIdFromPort RPC from {}: port: {}",
               context->peer(), request->port());
@@ -210,6 +216,8 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
+  g_ctld_client->UpdateLastActiveTime();
+
   std::vector<JobToD> jobs;
   for (const auto &job : request->job_list()) {
     CRANE_TRACE("Allocating job #{}, uid {}", job.job_id(), job.uid());
@@ -233,6 +241,7 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
+  g_ctld_client->UpdateLastActiveTime();
   CRANE_TRACE("Receive ReleaseCgroupForTasks RPC for [{}]",
               absl::StrJoin(request->task_id_list(), ","));
   g_job_mgr->FreeJobs(
@@ -527,6 +536,8 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
+
+  g_ctld_client->UpdateLastActiveTime();
 
   bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
