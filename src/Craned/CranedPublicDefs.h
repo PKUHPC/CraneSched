@@ -54,8 +54,8 @@ struct Partition {
 
 struct Config {
   struct CranedConfig {
-    uint32_t PingInterval;
-    uint32_t CtldTimeout;
+    uint32_t PingIntervalSec;
+    uint32_t CtldTimeoutSec;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {

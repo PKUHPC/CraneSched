@@ -129,7 +129,7 @@ class CtldClientStateMachine {
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_timeout_handle_;
-  std::atomic_bool m_check_timeout_{false};
+  std::atomic_bool m_check_reg_timeout_{false};
 };
 
 class CtldClient {
@@ -168,6 +168,9 @@ class CtldClient {
 
   void StartPingCtld() { m_ping_ctld_ = true; }
   void StopPingCtld() { m_ping_ctld_ = false; }
+  void UpdateLastActiveTime() {
+    m_last_active_time_ = std::chrono::steady_clock::now();
+  }
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -212,6 +215,7 @@ class CtldClient {
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_ping_handle_;
   std::atomic_bool m_ping_ctld_{false};
+  std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
 };
 
 }  // namespace Craned

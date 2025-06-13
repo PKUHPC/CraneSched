@@ -32,13 +32,13 @@ CtldClientStateMachine::CtldClientStateMachine() {
   m_timeout_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_timeout_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        if (m_check_timeout_) EvTimeout_();
+        if (m_check_reg_timeout_) EvTimeout_();
         return false;
       });
 
   m_timeout_handle_->start(
-      std::chrono::seconds(g_config.CranedConf.CtldTimeout),
-      std::chrono::seconds(g_config.CranedConf.CtldTimeout));
+      std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec),
+      std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec));
 
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("CtldCSMTimeThr");
@@ -50,10 +50,10 @@ CtldClientStateMachine::CtldClientStateMachine() {
             h.parent().stop();
             return;
           }
-          if (m_check_timeout_ && !m_timeout_handle_->active()) {
+          if (m_check_reg_timeout_ && !m_timeout_handle_->active()) {
             m_timeout_handle_->start(
-                std::chrono::seconds(g_config.CranedConf.CtldTimeout),
-                std::chrono::seconds(g_config.CranedConf.CtldTimeout));
+                std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec),
+                std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec));
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
@@ -183,7 +183,7 @@ void CtldClientStateMachine::EvGrpcConnected() {
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::DISCONNECTED) {
-    CRANE_WARN("EvGrpcTimeout triggered at incorrect state {}. Ignoring.",
+    CRANE_WARN("EvGrpcConnected triggered at incorrect state {}. Ignoring.",
                StateToString(m_state_));
     return;
   }
@@ -224,7 +224,7 @@ bool CtldClientStateMachine::IsReadyNow() {
 void CtldClientStateMachine::ActionRequestConfig_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-  m_check_timeout_ = true;
+  m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
   m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
   if (m_action_request_config_cb_)
@@ -268,6 +268,7 @@ void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
 void CtldClientStateMachine::ActionReady_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
+  m_check_reg_timeout_ = false;
   if (m_action_ready_cb_)
     g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
 }
@@ -280,7 +281,7 @@ void CtldClientStateMachine::ActionTimeout_() {
 void CtldClientStateMachine::ActionDisconnected_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-  m_check_timeout_ = false;
+  m_check_reg_timeout_ = false;
   if (m_action_disconnected_cb_)
     g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
 }
@@ -289,7 +290,7 @@ void CtldClientStateMachine::EvTimeout_() {
   absl::MutexLock lk(&m_mtx_);
   if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
   if (m_last_op_time_.value() +
-          std::chrono::seconds(g_config.CranedConf.CtldTimeout) >
+          std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec) >
       std::chrono::steady_clock::now())
     return;
   CRANE_DEBUG("CtldClient timeout, current state {}, starting handshake.",
@@ -306,8 +307,16 @@ CtldClient::CtldClient() {
   m_ping_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (m_ping_ctld_) {
-          auto success = Ping_();
-          if (!success) m_ping_ctld_ = false;
+          if (m_last_active_time_.load(std::memory_order_acquire) +
+                  std::chrono::seconds(g_config.CranedConf.PingIntervalSec) >
+              std::chrono::steady_clock::now())
+            return true;
+
+          const auto success = Ping_();
+          if (!success)
+            m_ping_ctld_ = false;
+          else
+            UpdateLastActiveTime();
 
           return success;
         }
@@ -326,8 +335,8 @@ CtldClient::CtldClient() {
           }
           if (m_ping_ctld_ && !m_ping_handle_->active()) {
             m_ping_handle_->start(
-                std::chrono::seconds(g_config.CranedConf.PingInterval),
-                std::chrono::seconds(g_config.CranedConf.PingInterval));
+                std::chrono::seconds(g_config.CranedConf.PingIntervalSec),
+                std::chrono::seconds(g_config.CranedConf.PingIntervalSec));
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
@@ -336,6 +345,7 @@ CtldClient::CtldClient() {
     }
     m_uvw_loop_->run();
   });
+  m_last_active_time_ = std::chrono::steady_clock::time_point{};
 }
 
 CtldClient::~CtldClient() {
@@ -405,12 +415,12 @@ void CtldClient::Init() {
   });
 
   g_ctld_client_sm->SetActionTimeoutCb([] { g_ctld_client->StopPingCtld(); });
-  g_ctld_client_sm->SetActionDisconnectedCb(
-      [] { g_ctld_client->StopPingCtld(); });
-
   AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });
 
-  AddGrpcCtldDisconnectedCb([] { g_ctld_client_sm->EvGrpcConnectionFailed(); });
+  AddGrpcCtldDisconnectedCb([] {
+    g_ctld_client->StopPingCtld();
+    g_ctld_client_sm->EvGrpcConnectionFailed();
+  });
   SetPingSuccessCb([] { g_ctld_client_sm->EvPingSuccess(); });
   SetPingFailedCb([] { g_ctld_client_sm->EvPingFailed(); });
 }
@@ -679,7 +689,7 @@ bool CtldClient::Ping_() {
   auto status = m_stub_->CranedPing(&context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Craned Ping failed: {}", status.error_message());
-    for (auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
+    return false;
   }
   if (reply.ok()) {
     if (m_ping_success_cb_) m_ping_success_cb_();

@@ -424,6 +424,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       }
       WriterLock lock(&m_connected_craned_mtx_);
       m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+      m_tag_sync_allocator_->delete_object(tag);
       continue;
     }
     if (next_status == grpc::CompletionQueue::GOT_EVENT) {

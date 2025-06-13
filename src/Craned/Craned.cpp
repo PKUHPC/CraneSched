@@ -40,14 +40,14 @@ using Craned::Partition;
 void ParseCranedConfig(YAML::Node config) {
   Craned::Config::CranedConfig conf{};
   using util::YamlValueOr;
-  conf.PingInterval = kCranedPingIntervalSec;
-  conf.CtldTimeout = Craned::kCtldClientTimeoutSec;
+  conf.PingIntervalSec = kCranedPingIntervalSec;
+  conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
   if (config["Craned"]) {
     auto craned_config = config["Craned"];
     if (craned_config["PingInterval"])
-      conf.PingInterval = craned_config["PingInterval"].as<uint32_t>();
+      conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
     if (craned_config["CraneCtldTimeout"])
-      conf.CtldTimeout = craned_config["CraneCtldTimeout"].as<uint32_t>();
+      conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
   }
   g_config.CranedConf = std::move(conf);
 }
