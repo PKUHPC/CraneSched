@@ -785,8 +785,11 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos(
 
 CraneExpected<void> AccountManager::ModifyUserPartitionResource(
     uint32_t uid, crane::grpc::ModifyField modify_field,
-    const std::string& username, const std::string& partition,
+    const std::string& username, const std::string& account, const std::string& partition,
     const std::string& value) {
+
+  CraneExpected<void> result;
+
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -795,7 +798,16 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  if (!p->partition_to_resource_limit_map.contains(partition))
+  // Account might be empty. In that case, ues user->default_account.
+  std::string actual_account = account;
+  {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    result = CheckIfUserHasPermOnUserOfAccountNoLock_(*user_result.value(), p,
+                                                      &actual_account, false);
+    if (!result) return result;
+  }
+
+  if (!p->account_to_partition_limit_map.at(account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
   int64_t value_number;
@@ -810,13 +822,13 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource(
       return std::unexpected(CraneErrCode::ERR_TIME_LIMIT);
   }
 
-  return ModifyUserPartitionResource_(modify_field, *p, partition,
+  return ModifyUserPartitionResource_(modify_field, *p, account, partition,
                                       value_number);
 }
 
 CraneExpected<void> AccountManager::ModifyUserTresPartitionResource(
     uint32_t uid, crane::grpc::ModifyField modify_field,
-    const std::string& username, const std::string& partition,
+    const std::string& username, const std::string& account, const std::string& partition,
     const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -826,10 +838,11 @@ CraneExpected<void> AccountManager::ModifyUserTresPartitionResource(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  if (!p->partition_to_resource_limit_map.contains(partition))
+  if (!p->account_to_partition_limit_map.at(account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
-  return ModifyUserTresPartitionResource_(modify_field, *p, partition, value);
+  return ModifyUserTresPartitionResource_(modify_field, *p, account, partition,
+                                          value);
 }
 
 CraneExpected<void> AccountManager::ModifyAccount(
@@ -1877,6 +1890,8 @@ CraneExpected<void> AccountManager::AddUser_(const User& user,
     res_user = *stale_user;
     res_user.account_to_attrs_map[object_account] =
         user.account_to_attrs_map.at(object_account);
+    res_user.account_to_partition_limit_map[object_account] =
+      user.account_to_partition_limit_map.at(object_account);
     if (add_coordinator)
       res_user.coordinator_accounts.push_back(object_account);
   } else {
@@ -1889,14 +1904,14 @@ CraneExpected<void> AccountManager::AddUser_(const User& user,
            .allowed_partition_qos_map.empty()) {
     for (auto&& [partition, qos] : res_user.account_to_attrs_map[object_account]
                                        .allowed_partition_qos_map) {
-      EmplaceUserPartitionResource_(res_user, partition);
+      EmplaceUserPartitionResource_(res_user, object_account, partition);
       qos.first = account->default_qos;
       qos.second = account->allowed_qos_list;
     }
   } else {
     // Inherit
     for (const auto& partition : parent_allowed_partition) {
-      EmplaceUserPartitionResource_(res_user, partition);
+      EmplaceUserPartitionResource_(res_user, object_account, partition);
       res_user.account_to_attrs_map[object_account]
           .allowed_partition_qos_map[partition] =
           std::pair<std::string, std::list<std::string>>{
@@ -2065,6 +2080,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
       remove_coordinator_accounts.emplace_back(account);
 
     res_user.account_to_attrs_map.erase(account);
+    res_user.account_to_partition_limit_map.erase(account);
     if (res_user.default_account == account) {
       if (res_user.account_to_attrs_map.empty())
         res_user.deleted = true;
@@ -2164,7 +2180,7 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition_(
 
   User res_user(user);
 
-  EmplaceUserPartitionResource_(res_user, partition);
+  EmplaceUserPartitionResource_(res_user, account_name, partition);
 
   // Update the map
   res_user.account_to_attrs_map[account_name]
@@ -2188,8 +2204,8 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition_(
       .allowed_partition_qos_map =
       res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
-  m_user_map_[name]->partition_to_resource_limit_map =
-      res_user.partition_to_resource_limit_map;
+  m_user_map_[name]->account_to_partition_limit_map.at(account_name).emplace(partition,
+    res_user.account_to_partition_limit_map.at(account_name)[partition]);
 
   return {};
 }
@@ -2328,7 +2344,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
   res_user.account_to_attrs_map[account_name]
       .allowed_partition_qos_map.clear();  // clear the partitions
   for (const auto& par : partition_list) {
-    EmplaceUserPartitionResource_(res_user, par);
+    EmplaceUserPartitionResource_(res_user, account_name, par);
     res_user.account_to_attrs_map[account_name].allowed_partition_qos_map[par] =
         std::pair<std::string, std::list<std::string>>{
             account.default_qos,
@@ -2350,8 +2366,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
       .allowed_partition_qos_map =
       res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
-  m_user_map_[name]->partition_to_resource_limit_map =
-      res_user.partition_to_resource_limit_map;
+  m_user_map_[name]->account_to_partition_limit_map[account_name] =
+    res_user.account_to_partition_limit_map[account_name];
 
   return {};
 }
@@ -2419,7 +2435,8 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
 
         g_db_client->UpdateEntityOne(
             Ctld::MongodbClient::EntityType::USER, "$unset", name,
-            "partition_to_resource_limit_map." + partition, std::string(""));
+            "account_to_partition_limit_map." + account + ".partition_to_limit_map." +
+            partition , std::string(""));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2430,7 +2447,7 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
       ->account_to_attrs_map[account]
       .allowed_partition_qos_map.erase(partition);
 
-  m_user_map_[name]->partition_to_resource_limit_map.erase(partition);
+  m_user_map_[name]->account_to_partition_limit_map[account].erase(partition);
 
   return {};
 }
@@ -2484,12 +2501,12 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::ModifyUserPartitionResource_(
-    crane::grpc::ModifyField modify_field, const User& user,
+    crane::grpc::ModifyField modify_field, const User& user, const std::string& account,
     const std::string& partition, int64_t value_number) {
   User res_user = user;
 
   auto& res_partition_resource =
-      res_user.partition_to_resource_limit_map.at(partition);
+      res_user.account_to_partition_limit_map.at(account).at(partition);
 
   switch (modify_field) {
   case crane::grpc::MaxJobs:
@@ -2523,20 +2540,23 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource_(
 }
 
 CraneExpected<void> AccountManager::ModifyUserTresPartitionResource_(
-    crane::grpc::ModifyField modify_field, const User& user,
+    crane::grpc::ModifyField modify_field, const User& user, const std::string& account,
     const std::string& partition, const std::string& value) {
   User res_user = user;
+
+  auto& res_partition_to_limit =
+      res_user.account_to_partition_limit_map.at(account).at(partition);
 
   switch (modify_field) {
   case crane::grpc::ModifyField::MaxTres:
     if (!util::ConvertStringToResourceView(
             value,
-            &res_user.partition_to_resource_limit_map[partition].max_tres))
+            &res_partition_to_limit.max_tres))
       return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
     break;
   case crane::grpc::ModifyField::MaxTresPerJob:
     if (!util::ConvertStringToResourceView(
-            value, &res_user.partition_to_resource_limit_map[partition]
+            value, &res_partition_to_limit
                         .max_tres_per_job))
       return std::unexpected(CraneErrCode::ERR_CONVERT_TO_RESOURCE_VIEW);
     break;
@@ -2558,8 +2578,8 @@ CraneExpected<void> AccountManager::ModifyUserTresPartitionResource_(
 }
 
 void AccountManager::EmplaceUserPartitionResource_(
-    User& user, const std::string& partition) {
-  if (user.partition_to_resource_limit_map.contains(partition)) return;
+    User& user, const std::string& account, const std::string& partition) {
+  if (user.account_to_partition_limit_map.at(account).contains(partition)) return;
 
   ResourceView resource;
   resource.GetAllocatableRes().cpu_count =
@@ -2568,11 +2588,11 @@ void AccountManager::EmplaceUserPartitionResource_(
       std::numeric_limits<uint64_t>::max();
   resource.GetAllocatableRes().memory_sw_bytes =
       std::numeric_limits<uint64_t>::max();
-  user.partition_to_resource_limit_map.emplace(
+  user.account_to_partition_limit_map[account].emplace(
       partition, PartitionResourceLimit{
-                     resource, resource, std::numeric_limits<uint32_t>::max(),
-                     std::numeric_limits<uint32_t>::max(), absl::ZeroDuration(),
-                     absl::Seconds(kTaskMaxTimeLimitSec)});
+                     .max_tres=resource, .max_tres_per_job=resource, .max_jobs=std::numeric_limits<uint32_t>::max(),
+                     .max_submit_jobs=std::numeric_limits<uint32_t>::max(), .max_wall=absl::ZeroDuration(),
+                     .max_wall_duration_per_job=absl::Seconds(kTaskMaxTimeLimitSec)});
 }
 
 CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
@@ -3243,7 +3263,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
     m_user_map_[user]
         ->account_to_attrs_map[name]
         .allowed_partition_qos_map.erase(partition);
-    m_user_map_[user]->partition_to_resource_limit_map.erase(name);
+    m_user_map_[user]->account_to_partition_limit_map[name].erase(partition);
   }
   m_account_map_[account->name]->allowed_partition.remove(partition);
   m_account_map_[account->name]->partition_to_resource_limit_map.erase(

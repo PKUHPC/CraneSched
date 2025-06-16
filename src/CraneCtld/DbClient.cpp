@@ -682,8 +682,37 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<PartitionToResourceLimitMap>(
-    document& doc, const std::string& key, const PartitionToResourceLimitMap& value) {
+void MongodbClient::DocumentAppendItem_<Account::PartitionToResourceLimitMap>(
+    document& doc, const std::string& key, const Account::PartitionToResourceLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [partition, partition_resource] : value) {
+      mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
+        subDoc.append(kvp("max_jobs", static_cast<int64_t>(partition_resource.max_jobs)));
+        subDoc.append(kvp("max_submit_jobs", static_cast<int64_t>(partition_resource.max_submit_jobs)));
+        SubDocumentAppendItem_(subDoc, "max_tres", partition_resource.max_tres);
+        SubDocumentAppendItem_(subDoc, "max_tres_per_job", partition_resource.max_tres_per_job);
+        subDoc.append(kvp("max_wall", absl::ToInt64Seconds(partition_resource.max_wall)));
+        subDoc.append(kvp("max_wall_duration_per_job", absl::ToInt64Seconds(partition_resource.max_wall_duration_per_job)));
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<User::AccountToPartitionLimitMap>(document& doc,
+    const std::string& key, const User::AccountToPartitionLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [account, partition_to_limit_map] : value) {
+      mapValueDocument.append(kvp(account, [&](sub_document subDoc) {
+        SubDocumentAppendItem_(subDoc, "partition_to_limit_map", partition_to_limit_map);
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<User::PartitionToLimitMap>(
+    sub_document& doc, const std::string& key, const User::PartitionToLimitMap& value) {
   doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
     for (const auto& [partition, partition_resource] : value) {
       mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
@@ -786,16 +815,20 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
-    for (const auto& partition_resource_item : user_view["partition_to_resource_limit_map"].get_document().value) {
-      auto partition_resource = partition_resource_item.get_document().value;
-      PartitionResourceLimit resource;
-      resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
-      resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
-      ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
-      ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
-      resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
-      resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
-      user->partition_to_resource_limit_map.emplace(partition_resource_item.key(), std::move(resource));
+    for (const auto& account_to_limit_item : user_view["account_to_partition_limit_map"].get_document().value) {
+      User::PartitionToLimitMap  partition_to_limit_map;
+      for (const auto& partition_limit_item : account_to_limit_item.get_document().value) {
+        auto partition_resource = partition_limit_item.get_document().value;
+        PartitionResourceLimit resource;
+        resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
+        resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
+        ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
+        ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
+        resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
+        resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
+        partition_to_limit_map.emplace(partition_limit_item.key(), std::move(resource));
+      }
+      user->account_to_partition_limit_map.emplace(account_to_limit_item.key(), std::move(partition_to_limit_map));
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -811,9 +844,9 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
-                                    "partition_to_resource_limit_map"};
+                                    "account_to_partition_limit_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>,PartitionToResourceLimitMap>
+             User::AccountToAttrsMap, std::list<std::string>,User::AccountToPartitionLimitMap>
       values{user.deleted,
              user.uid,
              user.default_account,
@@ -821,7 +854,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts,
-             user.partition_to_resource_limit_map};
+             user.account_to_partition_limit_map};
   return DocumentConstructor_(fields, values);
 }
 
@@ -875,7 +908,7 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
       "default_qos", "allowed_qos_list", "coordinators", "partition_to_resource_limit_map"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>, std::list<std::string>, PartitionToResourceLimitMap>
+             std::string, std::list<std::string>, std::list<std::string>, Account::PartitionToResourceLimitMap>
       values{false,
              account.blocked,
              account.name,

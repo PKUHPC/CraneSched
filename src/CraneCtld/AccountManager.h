@@ -122,11 +122,13 @@ class AccountManager {
       uint32_t uid, const std::string& name, const std::string& partition,
       const std::string& account, const std::string& value, bool force);
   CraneExpected<void> ModifyUserPartitionResource(
-    uint32_t uid, crane::grpc::ModifyField modify_field, const std::string& username,
-    const std::string& partition, const std::string& value);
+      uint32_t uid, crane::grpc::ModifyField modify_field,
+      const std::string& username, const std::string& account,
+      const std::string& partition, const std::string& value);
   CraneExpected<void> ModifyUserTresPartitionResource(
-    uint32_t uid, crane::grpc::ModifyField modify_field, const std::string& username,
-    const std::string& partition, const std::string& value);
+      uint32_t uid, crane::grpc::ModifyField modify_field,
+      const std::string& username, const std::string& account,
+      const std::string& partition, const std::string& value);
 
   CraneExpected<void> ModifyAccount(crane::grpc::OperationType operation_type,
                                     uint32_t uid, const std::string& name,
@@ -328,12 +330,17 @@ class AccountManager {
                                             const std::string& account,
                                             const std::string& partition,
                                             bool force);
-  CraneExpected<void> ModifyUserPartitionResource_(crane::grpc::ModifyField modify_field,
-    const User& user, const std::string& partition, int64_t value_number);
-  CraneExpected<void> ModifyUserTresPartitionResource_(crane::grpc::ModifyField modify_field,
-    const User& user, const std::string& partition, const std::string& value);
+  CraneExpected<void> ModifyUserPartitionResource_(
+      crane::grpc::ModifyField modify_field, const User& user,
+      const std::string& account, const std::string& partition,
+      int64_t value_number);
+  CraneExpected<void> ModifyUserTresPartitionResource_(
+      crane::grpc::ModifyField modify_field, const User& user,
+      const std::string& account, const std::string& partition,
+      const std::string& value);
 
-  void EmplaceUserPartitionResource_(User& user, const std::string& partition);
+  static void EmplaceUserPartitionResource_(User& user, const std::string& account,
+                                     const std::string& partition);
 
   CraneExpected<void> AddAccountAllowedPartition_(const std::string& name,
                                                   const std::string& partition);

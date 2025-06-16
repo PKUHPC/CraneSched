@@ -269,10 +269,13 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
 
   CRANE_ASSERT(m_user_meta_map_.contains(task.Username()));
 
+  auto iter = user_ptr->account_to_partition_limit_map.find(task.account);
+  CRANE_ASSERT(iter != user_ptr->account_to_partition_limit_map.end());
   auto partition_iter =
-      user_ptr->partition_to_resource_limit_map.find(task.partition_id);
-  if (partition_iter == user_ptr->partition_to_resource_limit_map.end())
+      iter->second.find(task.partition_id);
+  if (partition_iter == iter->second.end())
     return "InvalidPartition";
+
   const auto& user_partition_limit = partition_iter->second;
   std::string result;
 
@@ -833,11 +836,14 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
 
 CraneErrCode AccountMetaContainer::CheckPartitionSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos, const User& user) {
-  auto iter = user.partition_to_resource_limit_map.find(task.partition_id);
-  if (iter == user.partition_to_resource_limit_map.end())
+  auto iter = user.account_to_partition_limit_map.find(task.account);
+  if (iter == user.account_to_partition_limit_map.end())
+    return CraneErrCode::ERR_USER_ACCOUNT_MISMATCH;
+  auto partition_iter = iter->second.find(task.partition_id);
+  if (partition_iter == iter->second.end())
     return CraneErrCode::ERR_PARTITION_MISSING;
 
-  const auto& partition_resource_limit = iter->second;
+  const auto& partition_resource_limit = partition_iter->second;
 
   if (!(task.requested_node_res_view*task.node_num <= partition_resource_limit.max_tres_per_job))
     return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;

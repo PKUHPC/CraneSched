@@ -868,9 +868,9 @@ struct PartitionResourceLimit {
   absl::Duration max_wall_duration_per_job;
 };
 
-using PartitionToResourceLimitMap = std::unordered_map<std::string, PartitionResourceLimit>;
-
 struct Account {
+
+  using PartitionToResourceLimitMap = std::unordered_map<std::string, PartitionResourceLimit>;
 
   bool deleted = false;
   bool blocked = false;
@@ -920,7 +920,13 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  PartitionToResourceLimitMap partition_to_resource_limit_map;
+
+  using PartitionToLimitMap = std::unordered_map<std::string, // partition
+      PartitionResourceLimit>;
+  using AccountToPartitionLimitMap = std::unordered_map<std::string, // account name
+    PartitionToLimitMap>;
+
+  AccountToPartitionLimitMap account_to_partition_limit_map;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
