@@ -60,16 +60,6 @@ message ConfigureCranedRequest {
   google.protobuf.Timestamp token = 4;
 }
 
-// message CraneCtldRegisterRequest {
-//   int32 server_id = 1;
-//   string end_point = 2;
-// }
-//
-// message CraneCtldRegisterReply {
-//   bool ok = 1;
-//   bool already_registered = 2;
-// }
-
 message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
@@ -990,9 +980,6 @@ service CraneCtld {
 }
 
 service CraneCtldForInternal {
-  //  /* RPCs called from Other CraneCtld */
-  //  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
-
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (CranedTriggerReverseConnResponse);

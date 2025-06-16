@@ -68,11 +68,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
-//  grpc::Status CraneCtldRegister(
-//      grpc::ServerContext *context,
-//      const crane::grpc::CraneCtldRegisterRequest *request,
-//      crane::grpc::CraneCtldRegisterReply *response) override;
-
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,
       const crane::grpc::SubmitBatchTaskRequest *request,

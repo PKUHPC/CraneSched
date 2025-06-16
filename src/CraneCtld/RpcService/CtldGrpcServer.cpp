@@ -31,24 +31,6 @@
 
 namespace Ctld {
 
-// grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
-//     grpc::ServerContext *context,
-//     const crane::grpc::CraneCtldRegisterRequest *request,
-//     crane::grpc::CraneCtldRegisterReply *response) {
-//   if (g_raft_server->CheckServerNodeExist(request->server_id())) {
-//     response->set_ok(true);
-//     response->set_already_registered(true);
-//     return grpc::Status::OK;
-//   }
-//
-//   if (g_raft_server->AddServer(request->server_id(), request->end_point())) {
-//     response->set_ok(true);
-//   } else {
-//     response->set_ok(false);
-//   }
-//   return grpc::Status::OK;
-// }
-
 grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
@@ -1260,7 +1242,9 @@ void RaftLeaderInterceptor::Intercept(
               POST_RECV_INITIAL_METADATA)) {
     if (g_config.Raft.Enabled && !g_raft_server->IsLeader()) {
       m_ctx_->TryCancel();
-      return;
+      return;  // Warning: Calling return can ensure that the request will not
+               // continue to execute, but it may also result in some resources
+               // not being released, which requires further verification.
     }
   }
   methods->Proceed();

@@ -24,7 +24,7 @@
 
 namespace Ctld {
 
-AccountManager::AccountManager() { InitDataMap_(); }
+AccountManager::AccountManager() { InitDataMap(); }
 
 CraneExpected<void> AccountManager::AddUser(uint32_t uid,
                                             const User& new_user) {
@@ -1621,25 +1621,31 @@ CraneExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
   return {};
 }
 
-void AccountManager::InitDataMap_() {
+void AccountManager::InitDataMap() {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   std::list<User> user_list;
   g_db_client->SelectAllUser(&user_list);
+  m_user_map_.clear();
+  m_user_map_.reserve(user_list.size());
   for (auto& user : user_list) {
     m_user_map_[user.name] = std::make_unique<User>(user);
   }
 
   std::list<Account> account_list;
   g_db_client->SelectAllAccount(&account_list);
+  m_account_map_.clear();
+  m_account_map_.reserve(account_list.size());
   for (auto& account : account_list) {
     m_account_map_[account.name] = std::make_unique<Account>(account);
   }
 
   std::list<Qos> qos_list;
   g_db_client->SelectAllQos(&qos_list);
+  m_qos_map_.clear();
+  m_qos_map_.reserve(qos_list.size());
   for (auto& qos : qos_list) {
     m_qos_map_[qos.name] = std::make_unique<Qos>(qos);
   }

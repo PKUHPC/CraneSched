@@ -944,13 +944,6 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  // if (g_config.EnableRaft && g_config.CurServerId > 0) {
-  //   g_thread_pool->detach_task([]() {
-  //     g_raft_server->RegisterToLeader(g_config.Servers[0].HostName,
-  //                                     g_config.Servers[0].ListenPort);
-  //   });
-  // }
-
   g_ctld_server->Wait();
   g_ctld_for_internal_server->Wait();
 

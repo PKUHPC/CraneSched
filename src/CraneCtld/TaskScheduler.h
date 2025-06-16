@@ -488,7 +488,7 @@ class TaskScheduler {
     m_running_task_map_.clear();
     m_node_to_tasks_map_.clear();
 
-    m_task_map_ready_.store(false, std::memory_order_acquire);
+    m_task_map_ready_.store(false, std::memory_order_release);
   }
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);

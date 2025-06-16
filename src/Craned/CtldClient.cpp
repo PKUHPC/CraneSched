@@ -321,7 +321,7 @@ void CtldClient::InitGrpcChannel(
     m_ctld_channels_.emplace_back(channel);
 
     // std::unique_ptr will automatically release the dangling stub.
-    m_stubs_.emplace_back(CraneCtld::NewStub(channel));
+    m_stubs_.emplace_back(CraneCtldForInternal::NewStub(channel));
   }
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
@@ -382,7 +382,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   if (!reply.ok()) {
     CRANE_WARN("CraneCtld #{} reject to config, current leader id: {}",
                m_pre_leader_id_, reply.cur_leader_id());
-    if (reply.cur_leader_id() >= 0)
+    if (reply.cur_leader_id() >= 0 &&
+        reply.cur_leader_id() < m_ctld_channels_.size())
       m_cur_leader_id_ = reply.cur_leader_id();
     else {
       int next_id = (m_pre_leader_id_ + 1) % m_ctld_channels_.size();

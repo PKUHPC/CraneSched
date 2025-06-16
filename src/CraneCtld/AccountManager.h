@@ -167,9 +167,9 @@ class AccountManager {
       uint32_t uid, const std::string& partition_name,
       const std::unordered_set<std::string>& accounts);
 
- private:
-  void InitDataMap_();
+  void InitDataMap();
 
+ private:
   CraneExpected<const User*> GetUserInfoByUidNoLock_(uint32_t uid);
 
   const User* GetUserInfoNoLock_(const std::string& name);

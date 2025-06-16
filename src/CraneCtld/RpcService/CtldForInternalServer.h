@@ -182,7 +182,7 @@ class CtldForInternalServiceImpl final
   grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext *context,
       const crane::grpc::CranedTriggerReverseConnRequest *request,
-      google::protobuf::Empty *response) override;
+      crane::grpc::CranedTriggerReverseConnResponse *response) override;
 
   grpc::Status CranedRegister(
       grpc::ServerContext *context,

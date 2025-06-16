@@ -52,6 +52,7 @@ class NuRaftLogStore : public nuraft::log_store {
   bool Init(const std::string& db_backend, const std::string& db_path);
 
   void SetRaftServerBwdPointer(raft_server* ptr) {
+    CRANE_ASSERT(ptr != nullptr);
     m_raft_server_bwd_pointer_ = ptr;
   }
 

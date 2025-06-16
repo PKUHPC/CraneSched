@@ -1,5 +1,7 @@
 #include "CraneStateMachine.h"
 
+#include <bit>
+
 namespace Ctld {
 
 CraneStateMachine::~CraneStateMachine() {
@@ -34,30 +36,15 @@ std::shared_ptr<buffer> CraneStateMachine::enc_log(CraneCtldOpType type,
                       key.size() /*key seat*/ +
                       sizeof(uint64_t) /*value len seat*/ + len /*value seat*/;
   std::shared_ptr<buffer> ret = buffer::alloc(total_size);
-  buffer_serializer bs(ret);
+  buffer_serializer::endianness endian = buffer_serializer::LITTLE;
+  if constexpr (std::endian::native == std::endian::big)
+    endian = buffer_serializer::BIG;
+  buffer_serializer bs(ret, endian);
 
-  // WARNING: We don't consider endian-safety in this example.
   bs.put_u8(type);
   bs.put_str(key);
   bs.put_u64(len);
   if (data) bs.put_raw(data, len);
-
-  //  if (key == "NI")
-  //    std::cout << "enc log： " << key << *(static_cast<const uint32_t
-  //    *>(data))
-  //              << std::endl;
-  //  else if (key == "NDI")
-  //    std::cout << "enc log： " << key << *(static_cast<const int64_t
-  //    *>(data))
-  //              << std::endl;
-  //  else if (payload.len > 0) {
-  //    std::string result(static_cast<const char *>(payload.data.get()),
-  //                       payload.len);
-  //    std::cout << result << std::endl;
-  //  }
-
-  //  std::cout << "enc log： " << (uint8_t)type << " " << key << " " << len
-  //            << std::endl;
 
   return ret;
 }
@@ -65,7 +52,10 @@ std::shared_ptr<buffer> CraneStateMachine::enc_log(CraneCtldOpType type,
 bool CraneStateMachine::dec_log(buffer &log, CraneCtldOpType *type,
                                 std::string *key, std::vector<uint8_t> *value) {
   // Decode from Raft log
-  buffer_serializer bs(log);
+  buffer_serializer::endianness endian = buffer_serializer::LITTLE;
+  if constexpr (std::endian::native == std::endian::big)
+    endian = buffer_serializer::BIG;
+  buffer_serializer bs(log, endian);
   *type = static_cast<CraneCtldOpType>(bs.get_u8());
   *key = bs.get_str();
   uint64_t len = bs.get_u64();
@@ -73,24 +63,6 @@ bool CraneStateMachine::dec_log(buffer &log, CraneCtldOpType *type,
     value->resize(len);
     memcpy(value->data(), bs.get_raw(len), len);
   }
-
-  //  uint32_t value1;
-  //  int64_t value2;
-  //  if (*key == "NI") {
-  //    std::memcpy(&value1, value->data(), sizeof(uint32_t));
-  //    std::cout << "dec log： " << *key << value1 << std::endl;
-  //  } else if (*key == "NDI") {
-  //    std::memcpy(&value2, value->data(), sizeof(int64_t));
-  //    std::cout << "dec log： " << *key << value2 << std::endl;
-  //  }
-  //  else if (payload.len > 0) {
-  //    std::string result(static_cast<const char *>(payload.data.get()),
-  //                       payload.len);
-  //    std::cout << result << std::endl;
-  //  }
-
-  //  std::cout << "dec log： " << type << " " << key << " " << len <<
-  //  std::endl;
 
   return true;
 }
@@ -290,7 +262,7 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
         m_snapshot_->fix_value_map.swap(fix_value_map);
         m_snapshot_->resv_value_map.swap(resv_value_map);
         CRANE_INFO("Snapshot ({}, {}) has been created logically",
-                   +s.get_last_log_term(), s.get_last_log_idx());
+                   s.get_last_log_term(), s.get_last_log_idx());
 
         PersistSnapshotNoLock_();
       }

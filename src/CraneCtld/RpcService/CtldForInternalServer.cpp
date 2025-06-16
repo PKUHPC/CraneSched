@@ -20,6 +20,7 @@
 
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "RaftServerStuff.h"
 #include "TaskScheduler.h"
 
 namespace Ctld {
@@ -44,25 +45,45 @@ grpc::Status CtldForInternalServiceImpl::TaskStatusChange(
 grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext *context,
     const crane::grpc::CranedTriggerReverseConnRequest *request,
-    google::protobuf::Empty *response) {
+    crane::grpc::CranedTriggerReverseConnResponse *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
+  response->set_cur_leader_id(g_raft_server->GetLeaderId());
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Reject register request from node {} because this CraneCtld is not "
+        "the leader.",
+        request->craned_id());
+    response->set_ok(false);
     return grpc::Status::OK;
   }
 
+  if (!g_task_scheduler->GetTaskMapReadyFlag()) {
+    CRANE_WARN(
+        "Reject register request from node {} because the data in the task "
+        "queue is not ready.",
+        request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  response->set_ok(true);
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     CRANE_TRACE("Put craned {} into unavail.", craned_id);
     g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
   } else {
-    // Before configure, craned should be connected but not online
+    // Before configuring, craned should be connected but not online
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (stub != nullptr)
         g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-          stub->SetRegToken(token);
           stub->ConfigureCraned(craned_id, token);
         });
     } else {
@@ -79,6 +100,15 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
   CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
+  response->set_cur_leader_id(g_raft_server->GetLeaderId());
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Reject register request from node {} because this CraneCtld is not "
+        "the leader.",
+        request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
 
   if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
