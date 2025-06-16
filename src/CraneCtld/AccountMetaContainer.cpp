@@ -283,7 +283,7 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
           auto& qos_to_resource_map = pair.second.qos_to_resource_map;
           auto& val = qos_to_resource_map[task.qos];
           if (val.jobs_count + 1 > qos->max_jobs_per_user) {
-            result = "QosJobsAccountResourceLimit";
+            result = "QosJobsAccountLimit";
             return;
           }
           ResourceView resource_use{task.requested_node_res_view *
@@ -304,13 +304,13 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
           if (qos->max_jobs == UINT32_MAX &&
               qos->max_jobs_per_user == UINT32_MAX) {
             if (val.jobs_count + 1 > user_partition_limit.max_jobs) {
-              result = "UserPartJobsAccountResourceLimit";
+              result = "UserPartitionJobsAccountLimit";
               return;
             }
           }
           if (qos->max_wall == absl::ZeroDuration() && user_partition_limit.max_wall > absl::ZeroDuration()) {
             if (val.wall_time + task.time_limit > user_partition_limit.max_wall) {
-              result = "UserPartWallResourceLimit";
+              result = "UserPartitionWallLimit";
               return ;
             }
           }
@@ -321,21 +321,21 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
               qos->max_tres_per_user.CpuCount() == UINT32_MAX / 256) {
             if (resource_use.CpuCount() >
                 user_partition_limit.max_tres.CpuCount()) {
-              result = "UserPartCpuResourceLimit";
+              result = "UserPartitionCpuResourceLimit";
               return;
             }
           }
           if (qos->max_tres_per_user.MemoryBytes() == UINT64_MAX) {
             if (resource_use.MemoryBytes() >
                 user_partition_limit.max_tres.MemoryBytes()) {
-              result = "UserPartMemResourceLimit";
+              result = "UserPartitionMemResourceLimit";
               return;
             }
           }
           // TODO: Gres limit rule override？
           if (!CheckGres_(resource_use.GetDeviceMap(),
                           user_partition_limit.max_tres.GetDeviceMap())) {
-            result = "UserPartGresResourceLimit";
+            result = "UserPartitionGresResourceLimit";
             return;
           }
         }  // end partition
@@ -359,7 +359,7 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
           {  // qos
             auto& val = pair.second.qos_to_resource_map[task.qos];
             if (val.jobs_count + 1 > qos->max_jobs_per_account) {
-              result = "QosJobsAccountResourceLimit";
+              result = "QosJobsAccountLimit";
               return;
             }
             ResourceView resource_use{task.requested_node_res_view *
@@ -375,13 +375,13 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
             if (qos->max_jobs == UINT32_MAX &&
                 qos->max_jobs_per_account == UINT32_MAX) {
               if (val.jobs_count + 1 > partition_resource_limit.max_jobs) {
-                result = "AccPartJobsAccountResourceLimit";
+                result = "AccPartitionJobsAccountLimit";
                 return;
               }
             }
             if (qos->max_wall == absl::ZeroDuration() && partition_resource_limit.max_wall > absl::ZeroDuration()) {
             if (val.wall_time + task.time_limit > partition_resource_limit.max_wall) {
-              result = "AccPartWallResourceLimit";
+              result = "AccPartitionWallLimit";
               return ;
             }
           }
@@ -391,20 +391,20 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
             if (qos->max_tres_per_account.CpuCount() == UINT32_MAX / 256) {
               if (resource_use.CpuCount() >
                   partition_resource_limit.max_tres.CpuCount()) {
-                result = "AccPartCpuResourceLimit";
+                result = "AccPartitionCpuResourceLimit";
                 return;
               }
             }
             if (qos->max_tres_per_account.MemoryBytes() == UINT64_MAX) {
               if (resource_use.MemoryBytes() >
                   partition_resource_limit.max_tres.MemoryBytes()) {
-                result = "AccPartMemResourceLimit";
+                result = "AccPartitionMemResourceLimit";
                 return;
               }
             }
             if (!CheckGres_(resource_use.GetDeviceMap(),
                             partition_resource_limit.max_tres.GetDeviceMap())) {
-              result = "AccPartGresResourceLimit";
+              result = "AccPartitionGresResourceLimit";
               return;
             }
           }  // end partition
@@ -419,12 +419,12 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
       task.qos, [&](std::pair<const std::string, MetaResource>& pair) {
         auto& val = pair.second;
         if (val.jobs_count + 1 > qos->max_jobs) {
-          result = "QosJobsAccountResourceLimit";
+          result = "QosJobsAccountLimit";
           return;
         }
         if (qos->max_wall > absl::ZeroDuration()) {
           if (val.wall_time + task.time_limit > qos->max_wall) {
-            result = "QosWallResourceLimit";
+            result = "QosWallLimit";
             return;
           }
         }
