@@ -80,7 +80,7 @@ constexpr int kHeartbeatIntervalMs = 100;
 constexpr int kElectionTimeoutLowerMs = 200;
 constexpr int kElectionTimeoutUpperMs = 400;
 constexpr int kReservedLogItems = 10;
-constexpr int kSnapshotDistance = 10;
+constexpr int kSnapshotDistance = 3000;
 constexpr int kClientRequestTimeoutMs = 3000;
 
 struct Config {

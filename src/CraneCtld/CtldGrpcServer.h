@@ -209,11 +209,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
-  // grpc::Status CraneCtldRegister(
-  //     grpc::ServerContext *context,
-  //     const crane::grpc::CraneCtldRegisterRequest *request,
-  //     crane::grpc::CraneCtldRegisterReply *response) override;
-
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,
       const crane::grpc::SubmitBatchTaskRequest *request,

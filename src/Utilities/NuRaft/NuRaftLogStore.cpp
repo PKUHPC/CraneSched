@@ -407,7 +407,8 @@ void NuRaftLogStore::durable_thread_() {
       } else
         return;
 
-      int max_retry = 0;
+      static constexpr int MAX_STORE_RETRIES = 5;
+      int retry = 0;
       while (!m_logs_being_written_.empty()) {
         log_index_t i = m_logs_being_written_.front();
         std::shared_ptr<buffer> buf = m_logs_[i]->serialize();
@@ -418,8 +419,12 @@ void NuRaftLogStore::durable_thread_() {
           m_last_durable_index_ = i;
           call_notification = true;
         } else {
-          max_retry++;
-          if (max_retry > 5) break;
+          retry++;
+          if (retry > MAX_STORE_RETRIES) {
+            CRANE_ERROR("Failed to store log entry after {} retries",
+                        MAX_STORE_RETRIES);
+            break;
+          }
         }
       }
 

@@ -70,11 +70,6 @@ class RaftServerStuffBase {
     return false;
   }
 
-  // virtual bool RegisterToLeader(const std::string& leader_hostname,
-  //                               const std::string& grpc_port) {
-  //   return false;
-  // }
-
   virtual void YieldLeadership(int next_leader_id) const {}
 
   virtual int GetLeaderId() const { return m_default_server_id_; }
@@ -113,9 +108,6 @@ class RaftServerStuff final : public RaftServerStuffBase {
   bool RemoveServer(int server_id) override;
 
   bool AppendLog(std::shared_ptr<nuraft::buffer> new_log) override;
-
-  // bool RegisterToLeader(const std::string& leader_hostname,
-  //                       const std::string& grpc_port) override;
 
   void YieldLeadership(int next_leader_id = -1) const override {
     if (next_leader_id == m_server_id_) return;
