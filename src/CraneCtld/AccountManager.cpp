@@ -807,7 +807,8 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource(
     if (!result) return result;
   }
 
-  if (!p->account_to_partition_limit_map.at(actual_account).contains(partition))
+  if (!p->account_to_partition_limit_map.contains(actual_account) ||
+    !p->account_to_partition_limit_map.at(actual_account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
   int64_t value_number;
@@ -849,7 +850,8 @@ CraneExpected<void> AccountManager::ModifyUserTresPartitionResource(
     if (!result) return result;
   }
 
-  if (!p->account_to_partition_limit_map.at(actual_account).contains(partition))
+  if (!p->account_to_partition_limit_map.contains(actual_account) ||
+  !p->account_to_partition_limit_map.at(actual_account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
   return ModifyUserTresPartitionResource_(modify_field, *p, actual_account, partition,

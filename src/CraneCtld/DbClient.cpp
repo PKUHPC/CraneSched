@@ -817,7 +817,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     }
     for (const auto& account_to_limit_item : user_view["account_to_partition_limit_map"].get_document().value) {
       User::PartitionToLimitMap  partition_to_limit_map;
-      for (const auto& partition_limit_item : account_to_limit_item.get_document().value) {
+      for (const auto& partition_limit_item : account_to_limit_item["partition_to_limit_map"].get_document().value) {
         auto partition_resource = partition_limit_item.get_document().value;
         PartitionResourceLimit resource;
         resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
