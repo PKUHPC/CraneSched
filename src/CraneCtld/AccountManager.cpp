@@ -807,7 +807,7 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource(
     if (!result) return result;
   }
 
-  if (!p->account_to_partition_limit_map.at(account).contains(partition))
+  if (!p->account_to_partition_limit_map.at(actual_account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
   int64_t value_number;
@@ -822,7 +822,7 @@ CraneExpected<void> AccountManager::ModifyUserPartitionResource(
       return std::unexpected(CraneErrCode::ERR_TIME_LIMIT);
   }
 
-  return ModifyUserPartitionResource_(modify_field, *p, account, partition,
+  return ModifyUserPartitionResource_(modify_field, *p, actual_account, partition,
                                       value_number);
 }
 
@@ -830,6 +830,8 @@ CraneExpected<void> AccountManager::ModifyUserTresPartitionResource(
     uint32_t uid, crane::grpc::ModifyField modify_field,
     const std::string& username, const std::string& account, const std::string& partition,
     const std::string& value) {
+
+  CraneExpected<void> result;
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -838,10 +840,19 @@ CraneExpected<void> AccountManager::ModifyUserTresPartitionResource(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  if (!p->account_to_partition_limit_map.at(account).contains(partition))
+  // Account might be empty. In that case, ues user->default_account.
+  std::string actual_account = account;
+  {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    result = CheckIfUserHasPermOnUserOfAccountNoLock_(*user_result.value(), p,
+                                                      &actual_account, false);
+    if (!result) return result;
+  }
+
+  if (!p->account_to_partition_limit_map.at(actual_account).contains(partition))
     return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
 
-  return ModifyUserTresPartitionResource_(modify_field, *p, account, partition,
+  return ModifyUserTresPartitionResource_(modify_field, *p, actual_account, partition,
                                           value);
 }
 
