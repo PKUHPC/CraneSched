@@ -99,14 +99,18 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(task.qos,
-                                      QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1});
+                                      QosResource{.resource = ResourceView{},
+                                                  .jobs_count = 0,
+                                                  .submit_jobs_count = 1});
           return;
         }
 
         auto& val = iter->second;
         val.submit_jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1}}});
+      QosToResourceMap{{task.qos, QosResource{.resource = ResourceView{},
+                                              .jobs_count = 0,
+                                              .submit_jobs_count = 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -116,14 +120,18 @@ void AccountMetaContainer::MallocQosSubmitResource(const TaskInCtld& task) {
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(task.qos,
-                                        QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1});
+                                        QosResource{.resource = ResourceView{},
+                                                    .jobs_count = 0,
+                                                    .submit_jobs_count = 1});
             return;
           }
 
           auto& val = iter->second;
           val.submit_jobs_count++;
         },
-        QosToResourceMap{{task.qos, QosResource{.resource=ResourceView{}, .jobs_count=0, .submit_jobs_count=1}}});
+        QosToResourceMap{{task.qos, QosResource{.resource = ResourceView{},
+                                                .jobs_count = 0,
+                                                .submit_jobs_count = 1}}});
   }
 }
 
@@ -144,7 +152,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
           qos_to_resource_map.emplace(
-              task.qos, QosResource{.resource=task.allocated_res_view, .jobs_count=1, .submit_jobs_count=1});
+              task.qos, QosResource{.resource = task.allocated_res_view,
+                                    .jobs_count = 1,
+                                    .submit_jobs_count = 1});
           return;
         }
 
@@ -154,7 +164,10 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
         val.submit_jobs_count++;
         val.jobs_count++;
       },
-      QosToResourceMap{{task.qos, QosResource{.resource=task.allocated_res_view, .jobs_count=1, .submit_jobs_count=1}}});
+      QosToResourceMap{
+          {task.qos, QosResource{.resource = task.allocated_res_view,
+                                 .jobs_count = 1,
+                                 .submit_jobs_count = 1}}});
 
   for (const auto& account_name : task.account_chain) {
     m_account_meta_map_.try_emplace_l(
@@ -164,7 +177,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           auto iter = qos_to_resource_map.find(task.qos);
           if (iter == qos_to_resource_map.end()) {
             qos_to_resource_map.emplace(
-                task.qos, QosResource{.resource=task.allocated_res_view, .jobs_count=1, .submit_jobs_count=1});
+                task.qos, QosResource{.resource = task.allocated_res_view,
+                                      .jobs_count = 1,
+                                      .submit_jobs_count = 1});
             return;
           }
 
@@ -173,7 +188,9 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
           val.jobs_count++;
         },
         QosToResourceMap{
-            {task.qos, QosResource{.resource=task.allocated_res_view, .jobs_count=1, .submit_jobs_count=1}}});
+            {task.qos, QosResource{.resource = task.allocated_res_view,
+                                   .jobs_count = 1,
+                                   .submit_jobs_count = 1}}});
   }
 }
 
