@@ -361,8 +361,8 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
           ResourceView resource_use{task.requested_node_res_view *
                                     task.node_num};
           resource_use += val.resource;
-          if (qos->max_cpus_per_user == UINT32_MAX / 256 &&
-              qos->max_tres_per_user.CpuCount() == UINT32_MAX / 256) {
+          if (qos->max_cpus_per_user == UINT32_MAX &&
+              qos->max_tres_per_user.CpuCount() == INT32_MAX / 256) {
             if (resource_use.CpuCount() >
                 user_partition_limit.max_tres.CpuCount()) {
               result = "UserPartitionCpuResourceLimit";
@@ -434,7 +434,7 @@ std::optional<std::string> AccountMetaContainer::CheckMetaResource(
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
-            if (qos->max_tres_per_account.CpuCount() == UINT32_MAX / 256) {
+            if (qos->max_tres_per_account.CpuCount() == INT32_MAX / 256) {
               if (resource_use.CpuCount() >
                   partition_resource_limit.max_tres.CpuCount()) {
                 result = "AccPartitionCpuResourceLimit";
