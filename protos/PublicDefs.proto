@@ -527,6 +527,15 @@ enum ModifyField {
   MaxWallDurationPerJob = 21;
 }
 
+message PartitionResourceLimit {
+  ResourceView max_tres = 1;
+  ResourceView max_tres_per_job = 2;
+  uint32 max_jobs = 3;
+  uint32 max_submit_jobs = 4;
+  uint64 max_wall = 5;
+  uint64 max_wall_duration_per_job = 6;
+}
+
 message AccountInfo {
   string name = 1;
   string description = 2;
@@ -538,6 +547,7 @@ message AccountInfo {
   repeated string allowed_qos_list = 8;
   repeated string coordinators = 9;
   bool blocked = 10;
+  map<string, PartitionResourceLimit> partition_resource_limit = 11;
 }
 
 // Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
@@ -562,6 +572,10 @@ message UserInfo {
     string default_qos = 3;
   }
 
+  message PartitionToResourceLimit {
+    map<string, PartitionResourceLimit> partition_resource_limit = 1;
+  }
+
   uint32 uid = 1;
   string name = 2;
   string account = 3;
@@ -569,6 +583,7 @@ message UserInfo {
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
   repeated string coordinator_accounts = 6;
   AdminLevel admin_level = 7;
+  map<string, PartitionToResourceLimit> account_to_partition_limit = 8;
 }
 
 message QosInfo {
