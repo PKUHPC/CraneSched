@@ -950,9 +950,12 @@ using QosToResourceMap = std::unordered_map<std::string,  // qos_name
 
 using PartitionToResourceMap = std::unordered_map<std::string, // partition_name
                                               MetaResource>;
+using AccountToPartitionLimitMap = std::unordered_map<std::string, PartitionToResourceMap>;
+
 struct MetaResourceStat {
   QosToResourceMap qos_to_resource_map;
   PartitionToResourceMap partition_to_resource_map;
+  AccountToPartitionLimitMap account_to_partition_limit_map;
 };
 
 // clang-format off

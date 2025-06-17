@@ -110,7 +110,7 @@ void AccountMetaContainer::MallocMetaSubmitResource(const TaskInCtld& task) {
           auto& val = qos_iter->second;
           val.submit_jobs_count++;
         }
-
+        // TODO: account_to_limit
         auto& partition_to_resource_map = pair.second.partition_to_resource_map;
         auto partition_iter = partition_to_resource_map.find(task.partition_id);
         if (partition_iter == partition_to_resource_map.end()) {
@@ -863,11 +863,14 @@ CraneErrCode AccountMetaContainer::CheckPartitionSubmitResourceForUser_(
   m_user_meta_map_.if_contains(
       task.Username(),
       [&](std::pair<const std::string, MetaResourceStat>& pair) {
-        auto& partition_to_resource_map = pair.second.partition_to_resource_map;
-        auto iter = partition_to_resource_map.find(task.partition_id);
-        if (iter == partition_to_resource_map.end()) return;
+        auto& account_to_partition_map = pair.second.account_to_partition_limit_map;
+        auto iter = account_to_partition_map.find(task.account);
+        if (iter == account_to_partition_map.end()) return;
+        auto& partition_to_resource_map = iter->second;
+        auto partition_iter = partition_to_resource_map.find(task.partition_id);
+        if (partition_iter == partition_to_resource_map.end()) return;
 
-        auto val = iter->second;
+        auto val = partition_iter->second;
         if (val.submit_jobs_count + 1 >
             partition_resource_limit.max_submit_jobs) {
           result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
