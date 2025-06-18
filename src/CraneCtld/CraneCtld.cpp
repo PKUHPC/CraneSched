@@ -19,6 +19,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
+#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -772,6 +773,7 @@ void InitializeCtldGlobalVariables() {
           return;
         }
         stub->ConfigureCraned(craned_id, token);
+        stub->CheckCranedConfig(craned_id);
       });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {

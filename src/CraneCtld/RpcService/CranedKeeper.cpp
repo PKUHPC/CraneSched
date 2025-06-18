@@ -539,6 +539,25 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   return nullptr;
 }
 
+void CranedStub::CheckCranedConfig(const CranedId &craned_id) {
+  using crane::grpc::ConfigHashReply;
+
+  ClientContext context;
+  google::protobuf::Empty request;
+  crane::grpc::ConfigHashReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  auto status = m_stub_->GetConfigHash(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("GetConfigHash RPC for Node {} returned with status not ok",
+                craned_id, status.error_message());
+  }
+  if (reply.hash_val() != g_config.ConfigHashVal) {
+    CRANE_ERROR("CranedNode #{} has diff config.", craned_id);
+  }
+}
+
 CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
   // CRANE_TRACE("Enter EstablishedCranedStateMachine_");

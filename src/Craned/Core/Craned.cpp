@@ -19,6 +19,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -126,6 +127,21 @@ void ParseConfig(int argc, char** argv) {
     try {
       using util::YamlValueOr;
       YAML::Node config = YAML::LoadFile(config_path);
+
+      // Calculate hash val
+      YAML::Emitter config_out;
+      config_out << config;
+      std::string normalized = config_out.c_str();
+      std::array<unsigned char, SHA256_DIGEST_LENGTH> hash;
+      SHA256(reinterpret_cast<const unsigned char*>(normalized.data()),
+             normalized.size(), hash.data());
+
+      std::string hexstr;
+      hexstr.reserve(SHA256_DIGEST_LENGTH * 2);
+      for (unsigned char c : hash) {
+        hexstr += std::format("{:02x}", c);
+      }
+      g_config.ConfigHashVal = std::move(hexstr);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
