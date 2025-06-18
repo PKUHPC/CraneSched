@@ -836,6 +836,10 @@ message PowerStateChangeReply {
   bool ok = 1;
 }
 
+message ConfigHashReply {
+  string hash_val = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -901,6 +905,7 @@ service Craned {
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
+  rpc GetConfigHash(google.protobuf.Empty) returns (ConfigHashReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

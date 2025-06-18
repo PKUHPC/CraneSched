@@ -19,6 +19,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
+#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -81,6 +82,21 @@ void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
+
+      // Calculate hash val
+      YAML::Emitter config_out;
+      config_out << config;
+      std::string normalized = config_out.c_str();
+      std::array<unsigned char, SHA256_DIGEST_LENGTH> hash;
+      SHA256(reinterpret_cast<const unsigned char*>(normalized.data()),
+             normalized.size(), hash.data());
+
+      std::string hexstr;
+      hexstr.reserve(SHA256_DIGEST_LENGTH * 2);
+      for (unsigned char c : hash) {
+        hexstr += std::format("{:02x}", c);
+      }
+      g_config.ConfigHashVal = std::move(hexstr);
 
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
@@ -767,6 +783,7 @@ void InitializeCtldGlobalVariables() {
           return;
         }
         stub->ConfigureCraned(craned_id, token);
+        stub->CheckCranedConfig(craned_id);
       });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {

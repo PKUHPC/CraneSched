@@ -50,6 +50,10 @@ class CranedServiceImpl : public Craned::Service {
                          const crane::grpc::ConfigureCranedRequest *request,
                          google::protobuf::Empty *response) override;
 
+  grpc::Status GetConfigHash(::grpc::ServerContext *context,
+                             const ::google::protobuf::Empty *request,
+                             ::crane::grpc::ConfigHashReply *response) override;
+
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
                            crane::grpc::ExecuteTasksReply *response) override;
