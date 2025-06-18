@@ -859,7 +859,7 @@ message EnableAutoPowerControlReply {
   repeated string not_modified_reasons = 3;
 }
 
-message ConfigHashReply {
+message ConfigHashCalcReply {
   string hash_val = 1;
 }
 
@@ -932,7 +932,7 @@ service Craned {
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
-  rpc GetConfigHash(google.protobuf.Empty) returns (ConfigHashReply);
+  rpc ConfigHashCalc(google.protobuf.Empty) returns (ConfigHashCalcReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
