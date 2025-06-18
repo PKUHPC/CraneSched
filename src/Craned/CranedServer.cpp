@@ -36,9 +36,9 @@ grpc::Status CranedServiceImpl::Configure(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::GetConfigHash(
+grpc::Status CranedServiceImpl::ConfigHashCalc(
     ::grpc::ServerContext *context, const ::google::protobuf::Empty *request,
-    ::crane::grpc::ConfigHashReply *response) {
+    ::crane::grpc::ConfigHashCalcReply *response) {
   response->set_hash_val(g_config.ConfigHashVal);
   return Status::OK;
 }

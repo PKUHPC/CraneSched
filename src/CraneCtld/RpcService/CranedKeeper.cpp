@@ -540,21 +540,24 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 }
 
 void CranedStub::CheckCranedConfig(const CranedId &craned_id) {
-  using crane::grpc::ConfigHashReply;
+  using crane::grpc::ConfigHashCalcReply;
 
   ClientContext context;
   google::protobuf::Empty request;
-  crane::grpc::ConfigHashReply reply;
+  crane::grpc::ConfigHashCalcReply reply;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  auto status = m_stub_->GetConfigHash(&context, request, &reply);
+  auto status = m_stub_->ConfigHashCalc(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("GetConfigHash RPC for Node {} returned with status not ok",
+    CRANE_ERROR("ConfigHashCalc RPC for Node {} returned with status not ok",
                 craned_id, status.error_message());
   }
   if (reply.hash_val() != g_config.ConfigHashVal) {
-    CRANE_ERROR("CranedNode #{} has diff config.", craned_id);
+    CRANE_ERROR(
+        "CranedNode #{} appears to have a diffrent config.yaml than the "
+        "CraneCtld.",
+        craned_id);
   }
 }
 
