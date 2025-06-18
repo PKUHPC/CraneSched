@@ -537,7 +537,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForUser_(
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
             return;
           }
-          if (!CheckTres_(resource_use, qos.max_tres_per_user))
+          if (!CheckTres_(resource_use, qos.max_tres_per_user).empty())
             result = CraneErrCode::ERR_MAX_TRES_PER_USER_BEYOND;
         }
       });
@@ -572,7 +572,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
             ResourceView resource_use{task.requested_node_res_view *
                                       task.node_num};
             resource_use += val.resource;
-            if (!CheckTres_(resource_use, qos.max_tres_per_account))
+            if (!CheckTres_(resource_use, qos.max_tres_per_account).empty())
               result = CraneErrCode::ERR_MAX_TRES_PER_ACCOUNT_BEYOND;
           }
         });
@@ -608,7 +608,7 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForQos_(
           ResourceView resource_use{task.requested_node_res_view *
                                     task.node_num};
           resource_use += val.resource;
-          if (!CheckTres_(resource_use, qos.max_tres))
+          if (!CheckTres_(resource_use, qos.max_tres).empty())
             result = CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
         }
       });
