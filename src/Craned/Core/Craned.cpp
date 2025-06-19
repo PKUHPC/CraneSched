@@ -139,7 +139,7 @@ void ParseConfig(int argc, char** argv) {
       std::string hexstr;
       hexstr.reserve(SHA256_DIGEST_LENGTH * 2);
       for (unsigned char c : hash) {
-      fmt::format_to(std::back_inserter(hexstr), "{:02x}", c);
+        fmt::format_to(std::back_inserter(hexstr), "{:02x}", c);
       }
       g_config.ConfigHashVal = std::move(hexstr);
 
