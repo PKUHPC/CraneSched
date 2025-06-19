@@ -439,7 +439,7 @@ void ParseConfig(int argc, char** argv) {
               node_list_str += *it;
             }
             part.nodelist_str = node_list_str;
-            for (auto&& node : name_list) {
+            for (auto&& node : host_list) {
               part.nodes.emplace(node);
               nodes_without_part.erase(node);
               CRANE_TRACE("Set the partition of node {} to {}", node, name);
@@ -450,19 +450,24 @@ void ParseConfig(int argc, char** argv) {
               std::exit(1);
             }
 
-            for (auto&& node : name_list) {
-              auto node_it = g_config.Nodes.find(node);
-              if (node_it != g_config.Nodes.end()) {
-                part.nodes.emplace(node_it->first);
-                nodes_without_part.erase(node_it->first);
-                CRANE_TRACE("Set the partition of node {} to {}",
-                            node_it->first, name);
-              } else {
-                CRANE_ERROR(
-                    "Unknown node '{}' found in partition '{}'. It is ignored "
-                    "and should be contained in the configuration file.",
-                    node, name);
-                std::exit(1);
+            if (name_list.size() == 1 && name_list.front() == "") {
+              CRANE_WARN("No nodes in partition '{}'.", name);
+            } else {
+              for (auto&& node : name_list) {
+                auto node_it = g_config.Nodes.find(node);
+                if (node_it != g_config.Nodes.end()) {
+                  part.nodes.emplace(node_it->first);
+                  nodes_without_part.erase(node_it->first);
+                  CRANE_TRACE("Set the partition of node {} to {}",
+                              node_it->first, name);
+                } else {
+                  CRANE_ERROR(
+                      "Unknown node '{}' found in partition '{}'. It is "
+                      "ignored "
+                      "and should be contained in the configuration file.",
+                      node, name);
+                  std::exit(1);
+                }
               }
             }
           }
@@ -510,7 +515,7 @@ void ParseConfig(int argc, char** argv) {
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }
-            part.default_mem_per_cpu = part_mem / part_cpu;
+            if (part_cpu != 0) part.default_mem_per_cpu = part_mem / part_cpu;
           }
 
           if (partition["MaxMemPerCpu"] &&
