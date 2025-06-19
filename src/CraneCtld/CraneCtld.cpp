@@ -429,16 +429,7 @@ void ParseConfig(int argc, char** argv) {
             std::list<std::string> host_list =
                 g_config.Nodes | ranges::views::keys |
                 ranges::to<std::list<std::string>>();
-            if (!util::HostNameListToStr_(host_list, &name_list)) {
-              CRANE_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
-            std::string node_list_str;
-            for (auto it = name_list.begin(); it != name_list.end(); ++it) {
-              if (it != name_list.begin()) node_list_str += ",";
-              node_list_str += *it;
-            }
-            part.nodelist_str = node_list_str;
+            part.nodelist_str = util::HostNameListToStr(host_list);
             for (auto&& node : host_list) {
               part.nodes.emplace(node);
               nodes_without_part.erase(node);
