@@ -546,12 +546,12 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CpuFreqGovernors"] && !config["CpuFreqGovernors"].IsNull()) {
         auto governors = config["CpuFreqGovernors"].as<std::string>();
-        g_config.CpuFreqGovernors = absl::StrSplit(
-          absl::StripAsciiWhitespace(absl::AsciiStrToLower(governors)), ',',  absl::SkipWhitespace());
+        governors.erase(std::ranges::remove(governors, ' ').begin(), governors.end());
+        g_config.CpuFreqGovernors = absl::StrSplit(absl::AsciiStrToLower(governors), ',');
       }
 
       if (config["CpuFreqDef"] && !config["CpuFreqDef"].IsNull()) {
-        g_config.CpuFreqDef = config["CpuFreqDef"].as<std::string>();
+        g_config.CpuFreqDef = absl::AsciiStrToLower(config["CpuFreqDef"].as<std::string>());
       }
 
       if (config["Plugin"]) {

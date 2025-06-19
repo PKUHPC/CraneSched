@@ -127,6 +127,12 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+message CpuFreq {
+  string low = 1; // "low", "medium", "high", "highm1" or number
+  string high = 2;
+  string governor = 3;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -165,6 +171,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+  CpuFreq cpu_freq = 38;
 }
 
 message TaskInEmbeddedDb {
@@ -478,6 +485,8 @@ enum ErrCode {
   ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
   ERR_EBPF = 69;
   ERR_SUPERVISOR = 70;
+
+  ERR_INVALID_CPU_FREQ_GOVERNOR = 80;
 }
 
 enum EntityType {
