@@ -550,8 +550,9 @@ void CranedStub::CheckCranedConfig(const CranedId &craned_id) {
 
   auto status = m_stub_->ConfigHashCalc(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("ConfigHashCalc RPC for Node {} returned with status not ok",
-                craned_id, status.error_message());
+    CRANE_ERROR(
+        "ConfigHashCalc RPC for Node {} returned with status not ok: {}",
+        craned_id, status.error_message());
   }
   if (reply.hash_val() != g_config.ConfigHashVal) {
     CRANE_ERROR(
