@@ -24,7 +24,6 @@ namespace Ctld {
 
 using grpc::ClientContext;
 using grpc::Status;
-
 CranedStub::CranedStub(CranedKeeper *craned_keeper)
     : m_craned_keeper_(craned_keeper),
       m_failure_retry_times_(0),
@@ -39,8 +38,9 @@ CranedStub::~CranedStub() {
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id,
                                  const RegToken &token) {
-  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
-              ProtoTimestampToString(token));
+  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                     "Configuring craned {} with token {}", craned_id,
+                     ProtoTimestampToString(token));
 
   this->SetRegToken(token);
 
@@ -57,7 +57,8 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
 
   auto status = m_stub_->Configure(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_ERROR(
+    CRANE_LOGGER_ERROR(
+        g_runtime_status.connection_logger,
         "ConfigureCraned RPC for Node {} returned with status not ok: {}. "
         "Resetting token.",
         craned_id, status.error_message());
@@ -360,6 +361,8 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
     }
     m_uvw_loop_->run();
   });
+  g_runtime_status.connection_logger = AddLogger(
+      "connection", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
 }
 
 CranedKeeper::~CranedKeeper() {
@@ -475,7 +478,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       } else {
         // END state of both state machine. Free the Craned client.
         if (tag->type == CqTag::kInitializingCraned) {
-          CRANE_TRACE("Failed connect to {}.", craned->m_craned_id_);
+          CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                             "Failed connect to {}.", craned->m_craned_id_);
 
           // When deleting craned, the destructor will call
           // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
@@ -484,15 +488,18 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
         } else if (tag->type == CqTag::kEstablishedCraned) {
           if (m_craned_disconnected_cb_) {
             g_thread_pool->detach_task(
-                [this, craned_id = craned->m_craned_id_]() {
+                [this, craned_id = craned->m_craned_id_] {
                   m_craned_disconnected_cb_(craned_id);
+                  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                                     "Craned {} disconnected.", craned_id);
                 });
           }
 
           WriterLock lock(&m_connected_craned_mtx_);
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
-          CRANE_ERROR("Unknown tag type: {}", (int)tag->type);
+          CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                             "Unknown tag type: {}", (int)tag->type);
         }
       }
 
@@ -513,8 +520,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
     {
-      CRANE_TRACE("CONNECTING -> READY. New craned {} connected.",
-                  craned->m_craned_id_);
+      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                         "CONNECTING -> READY. New craned {} connected.",
+                         craned->m_craned_id_);
 
       WriterLock lock(&m_connected_craned_mtx_);
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
@@ -548,14 +556,17 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     else
       next_tag_type = std::nullopt;
 
-    CRANE_TRACE("{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
-                (int)craned->m_prev_channel_state_,
-                craned->m_failure_retry_times_, craned->s_maximum_retry_times_);
+    CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                       "{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
+                       (int)craned->m_prev_channel_state_,
+                       craned->m_failure_retry_times_,
+                       craned->s_maximum_retry_times_);
     break;
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    CRANE_WARN("Unexpected InitializingCraned SHUTDOWN state!");
+    CRANE_LOGGER_WARN(g_runtime_status.connection_logger,
+                      "Unexpected InitializingCraned SHUTDOWN state!");
     next_tag_type = std::nullopt;
     break;
   }
@@ -569,8 +580,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     } else {
       // prev    current       next
       // Any  -> CONNECTING -> CONNECTING
-      CRANE_TRACE("{} -> CONNECTING -> CONNECTING",
-                  (int)craned->m_prev_channel_state_);
+      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                         "{} -> CONNECTING -> CONNECTING",
+                         (int)craned->m_prev_channel_state_);
       next_tag_type = CqTag::kInitializingCraned;
     }
     break;
@@ -579,7 +591,8 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   case GRPC_CHANNEL_IDLE:
     // InitializingCraned: BEGIN -> IDLE state switching is handled in
     // CranedKeeper::RegisterNewCraneds. Execution should never reach here.
-    CRANE_ERROR("Unexpected InitializingCraned IDLE state!");
+    CRANE_LOGGER_ERROR(g_runtime_status.connection_logger,
+                       "Unexpected InitializingCraned IDLE state!");
     break;
   }
 
@@ -603,12 +616,14 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     if (craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
       // prev          current       next
       // CONNECTING -> CONNECTING -> END
-      CRANE_TRACE("CONNECTING -> CONNECTING -> END");
+      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                         "CONNECTING -> CONNECTING -> END");
       next_tag_type = std::nullopt;
     } else {
       // prev    now
       // IDLE -> CONNECTING
-      CRANE_TRACE("IDLE -> CONNECTING");
+      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                         "IDLE -> CONNECTING");
       next_tag_type = CqTag::kEstablishedCraned;
     }
     break;

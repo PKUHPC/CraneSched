@@ -119,8 +119,8 @@ bool MongodbClient::InsertRecoveredJob(
           *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt) return true;
-
-  PrintError_("Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(g_runtime_status.db_logger,
+                     "Failed to insert in-memory TaskInCtld.");
   return false;
 }
 
@@ -133,7 +133,8 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
 
   if (ret != bsoncxx::stdx::nullopt) return true;
 
-  PrintError_("Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(g_runtime_status.db_logger,
+                     "Failed to insert in-memory TaskInCtld.");
   return false;
 }
 
@@ -156,7 +157,8 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
   if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
     return true;
 
-  PrintError_("Failed to insert in-memory TaskInCtld.");
+  CRANE_LOGGER_ERROR(g_runtime_status.db_logger,
+                     "Failed to insert in-memory TaskInCtld.");
   return false;
 }
 
@@ -372,7 +374,7 @@ bool MongodbClient::FetchJobRecords(
       task->set_exclusive(view["exclusive"].get_bool().value);
     }
   } catch (const bsoncxx::exception& e) {
-    PrintError_(e.what());
+    CRANE_LOGGER_ERROR(g_runtime_status.db_logger, e.what());
   }
 
   return true;
@@ -702,7 +704,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     }
 
   } catch (const bsoncxx::exception& e) {
-    PrintError_(e.what());
+    CRANE_LOGGER_ERROR(g_runtime_status.db_logger, e.what());
   }
 }
 
@@ -754,7 +756,7 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
       account->coordinators.emplace_back(user.get_string().value);
     }
   } catch (const bsoncxx::exception& e) {
-    PrintError_(e.what());
+    CRANE_LOGGER_ERROR(g_runtime_status.db_logger, e.what());
   }
 }
 
@@ -799,7 +801,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
   } catch (const bsoncxx::exception& e) {
-    PrintError_(e.what());
+    CRANE_LOGGER_ERROR(g_runtime_status.db_logger, e.what());
   }
 }
 
@@ -867,7 +869,7 @@ DeviceMap MongodbClient::JsonStringToDeviceMap(
       device_map[device_name] = {untyped_req_count, type_map};
     }
   } catch (const std::exception& e) {
-    PrintError_(e.what());
+    CRANE_LOGGER_ERROR(g_runtime_status.db_logger, e.what());
   }
 
   return device_map;
@@ -1085,10 +1087,14 @@ MongodbClient::MongodbClient() {
         fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
+  g_runtime_status.db_logger = AddLogger(
+      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+
   m_connect_uri_ = fmt::format(
       "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
       g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-  CRANE_TRACE(
+  CRANE_LOGGER_TRACE(
+      g_runtime_status.db_logger,
       "Mongodb connect uri: "
       "mongodb://{}:[passwd]@{}:{}/?replicaSet={}&maxPoolSize=1000",
       g_config.DbUser, g_config.DbHost, g_config.DbPort, g_config.DbRSName);

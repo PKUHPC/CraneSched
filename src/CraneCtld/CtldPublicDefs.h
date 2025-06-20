@@ -174,6 +174,9 @@ struct Config {
 
 struct RunTimeStatus {
   std::atomic_bool srv_ready{false};
+  std::shared_ptr<spdlog::async_logger> default_logger;
+  std::shared_ptr<spdlog::async_logger> connection_logger;
+  std::shared_ptr<spdlog::async_logger> db_logger;
 };
 
 }  // namespace Ctld
