@@ -246,6 +246,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  CpuFreq cpu_freq = 25;
 }
 
 message BatchTaskAdditionalMeta {

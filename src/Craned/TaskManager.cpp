@@ -1151,6 +1151,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup = cg;
   instance->cgroup_path = instance->cgroup->CgroupPathStr();
 
+  // TODO: cpu freq
+
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
@@ -1291,6 +1293,8 @@ void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
     }
 
     bool orphaned = instance->orphaned;
+
+    // TODO: reset cpu freq
 
     // Free the TaskInstance structure
     m_task_map_.erase(status_change.task_id);
