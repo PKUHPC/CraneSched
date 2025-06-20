@@ -61,6 +61,9 @@ std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
     return std::nullopt;
   }
 
+  if (unit.empty())
+    return sz * 1024 * 1024;
+
   uint64_t bytes = 0;
   switch (unit[0]) {
     case 'K':
@@ -453,6 +456,8 @@ std::string GenerateCommaSeparatedString(const int val) {
 }
 
 bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
+  DeviceMap tmp = *device_map;
+
   std::vector<std::string> items = absl::StrSplit(s, ":");
   std::string key = items[0];
   if (items.size() == 2) {
@@ -466,11 +471,11 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
         return false;
       }
     }
-    auto iter = device_map->find(key);
-    if (iter != device_map->end()) {
+    auto iter = tmp.find(key);
+    if (iter != tmp.end()) {
       iter->second.first = value;
     } else {
-      device_map->insert_or_assign(
+      tmp.insert_or_assign(
         key,
         std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
     }
@@ -486,32 +491,35 @@ bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
         return false;
       }
     }
-    auto iter = device_map->find(key);
-    if (iter != device_map->end()) {
+    auto iter = tmp.find(key);
+    if (iter != tmp.end()) {
       iter->second.second.insert_or_assign(type, value);
     } else {
-      device_map->insert_or_assign(
+      tmp.insert_or_assign(
         key,
         std::make_pair(UINT64_MAX, std::unordered_map<std::string, uint64_t>{{type,value}}));
     }
   } else {
     return false;
   }
+  *device_map = std::move(tmp);
+
   return true;
 }
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
+  ResourceView tmp = *res;
   std::vector<std::string> items = absl::StrSplit(s, ",");
   for (const auto& item : items) {
     if (item.starts_with("gres/") && item.size() > 5) {
-      if (!ConvertStringToDeviceMap(item.substr(5), &res->GetDeviceMap()))
+      if (!ConvertStringToDeviceMap(item.substr(5), &tmp.GetDeviceMap()))
         return false;
     } else {
       std::vector<std::string> kv = absl::StrSplit(item, "=");
       if (kv.size() == 2) {
         if (kv[0] == "cpu") {
           if (kv[1] == "-1") {
-            res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX/256);
+            tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX/256);
             continue;
           }
           double cpu_count;
@@ -523,12 +531,12 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
           if (cpu_count > static_cast<double>(INT32_MAX/256))
             return false;
 
-          res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
+          tmp.GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
         } else if (kv[0] == "mem") {
           if (kv[1] == "-1") {
-            uint64_t mem = std::numeric_limits<decltype(res->GetAllocatableRes().memory_bytes)>::max();
-            res->GetAllocatableRes().memory_bytes = mem;
-            res->GetAllocatableRes().memory_sw_bytes = mem;
+            uint64_t mem = std::numeric_limits<decltype(tmp.GetAllocatableRes().memory_bytes)>::max();
+            tmp.GetAllocatableRes().memory_bytes = mem;
+            tmp.GetAllocatableRes().memory_sw_bytes = mem;
             continue;
           }
 
@@ -537,9 +545,9 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
 
           uint64_t value = result.value();
 
-          if (value > std::numeric_limits<decltype(res->GetAllocatableRes().memory_bytes)>::max()) return false;
-          res->GetAllocatableRes().memory_bytes = value;
-          res->GetAllocatableRes().memory_sw_bytes = value;
+          if (value > std::numeric_limits<decltype(tmp.GetAllocatableRes().memory_bytes)>::max()) return false;
+          tmp.GetAllocatableRes().memory_bytes = value;
+          tmp.GetAllocatableRes().memory_sw_bytes = value;
         } else {
           return false;
         }
@@ -549,6 +557,7 @@ bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
     }
   }
 
+  *res = std::move(tmp);
   return true;
 }
 

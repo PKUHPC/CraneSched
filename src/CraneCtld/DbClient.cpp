@@ -670,10 +670,10 @@ void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
       uint64_t untyped_req_count = pair_val.first;
       const auto& type_map = pair_val.second;
       mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
-        devDoc.append(kvp("untyped_req_count", static_cast<int64_t>(untyped_req_count)));
+        devDoc.append(kvp("untyped_req_count", std::to_string(untyped_req_count)));
         devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
           for (const auto& [type, total] : type_map) {
-            typeDoc.append(kvp(type, static_cast<int64_t>(total)));
+            typeDoc.append(kvp(type, std::to_string(total)));
           }
         }));
       }));
@@ -1093,11 +1093,11 @@ void MongodbClient::QosResourceViewFromDb_(
   resource->GetAllocatableRes().memory_sw_bytes = std::stoull(std::string(allocatable_res["mem_sw"].get_string().value));
   for (auto &&device_item : max_tres["device_map"].get_document().value) {
     auto device_doc = device_item.get_document().value;
-    uint64_t untyped_req_count = device_doc["untyped_req_count"].get_int64().value;
+    uint64_t untyped_req_count = std::stoull(std::string(device_doc["untyped_req_count"].get_string().value));
     std::unordered_map<std::string, uint64_t> type_total;
     auto type_total_ele = device_doc["type_total"];
     for (auto&& sub_item : type_total_ele.get_document().value) {
-      uint64_t total = static_cast<uint64_t>(sub_item.get_int64().value);
+      uint64_t total = std::stoull(std::string(sub_item.get_string().value));
       type_total[std::string(sub_item.key())] = total;
     }
     resource->GetDeviceMap().emplace(std::string(device_item.key()),

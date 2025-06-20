@@ -382,7 +382,14 @@ void operator-=(DeviceMap& lhs, const DeviceMap& rhs) {
       ABSL_ASSERT(type_it != lhs_pair.second.end());
       ABSL_ASSERT(type_it->second >= type_count);
       type_it->second -= type_count;
+
+      // Drop empty type buckets
+      if (type_it->second == 0)
+        lhs_pair.second.erase(type_it);
     }
+    // Drop the whole device entry when both untyped and typed counts vanish
+    if (lhs_pair.first == 0 && lhs_pair.second.empty())
+      lhs.erase(lhs_it);
   }
 }
 
