@@ -213,7 +213,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 70 - 74
         "ERR_SUPERVISOR",
-        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
         "ERR_USER_HAS_TASK",
         "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
         "ERR_CONVERT_TO_RESOURCE_VIEW",

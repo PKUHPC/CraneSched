@@ -828,9 +828,6 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxCpusPerUser() {
     return "max_cpus_per_user";
   }
-  static constexpr const char* FieldStringOfMaxCpusPerAccount() {
-    return "max_cpus_per_account";
-  }
   static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
     return "max_submit_jobs_per_user";
   }
@@ -955,7 +952,9 @@ constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
 // clang-format on
 inline std::string_view CraneModifyFieldStr(
     crane::grpc::ModifyField modify_field) {
-  return CraneModifyFieldStrArr[static_cast<uint16_t>(modify_field)];
+  const auto idx = static_cast<uint16_t>(modify_field);
+  CRANE_ASSERT(idx < CraneModifyFieldStrArr.size());
+  return CraneModifyFieldStrArr[idx];
 }
 
 }  // namespace Ctld
