@@ -94,9 +94,8 @@ bool TaskScheduler::Init() {
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
-
-      auto result = AcquireTaskAttributes(task.get());
-      if (result) {
+      CraneExpected<void> result;
+      {
         const auto& user_ptr =
             g_account_manager->GetExistedUserInfo(task->Username());
         if (!user_ptr) {
@@ -108,6 +107,7 @@ bool TaskScheduler::Init() {
         }
         g_account_meta_container->UserAddTask(task->Username());
       }
+      if (result) result = AcquireTaskAttributes(task.get());
       if (!result || task->type == crane::grpc::Interactive) {
         g_account_meta_container->UserReduceTask(task->Username());
         task->SetStatus(crane::grpc::Failed);
