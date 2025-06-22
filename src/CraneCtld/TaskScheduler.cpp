@@ -1455,6 +1455,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
       !util::ParseHostList(request.craned_regex(), &craned_ids)) {
     return std::unexpected("Invalid craned_regex");
   }
+  uint32_t node_num = craned_ids.size();
 
   absl::Time start_time =
       absl::FromUnixSeconds(request.start_time_unix_seconds());
@@ -1484,10 +1485,21 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     const auto part_meta_ptr =
         all_partitions_meta_map->at(partition).GetExclusivePtr();
 
-    if (craned_ids.empty()) {
-      // If craned_ids is empty, use all nodes in the partition
+    if (node_num == 0) {
+      if (!request.node_num().has_value()) {
+        return std::unexpected("No nodes specified");
+      } else {
+        node_num = request.node_num().value();
+      }
+      // If craned_ids is empty, test all nodes in the partition
       for (CranedId const& craned_id : part_meta_ptr->craned_ids) {
         craned_ids.emplace_back(craned_id);
+      }
+      if (craned_ids.size() < node_num) {
+        return std::unexpected(
+            fmt::format("Not enough nodes in partition {}. "
+                        "Requested: {}, Available: {}",
+                        partition, node_num, craned_ids.size()));
       }
     } else {
       // Check if all nodes are in the partition
@@ -1498,8 +1510,9 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
         }
       }
     }
-  } else if (craned_ids.empty())
+  } else if (node_num == 0) {
     return std::unexpected("No nodes specified");
+  }
 
   std::vector<std::pair<CranedMetaContainer::CranedMetaPtr, ResourceInNode>>
       craned_meta_res_vec;
@@ -1507,10 +1520,16 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
   {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
+    bool allow_failure = node_num > craned_ids.size();
+
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
       if (!craned_meta) {
-        return std::unexpected(fmt::format("Node {} not found", craned_id));
+        if (!allow_failure) {
+          return std::unexpected(fmt::format("Node {} not found", craned_id));
+        } else {
+          continue;
+        }
       }
 
       // use static_meta in case of craned dead
@@ -1521,24 +1540,43 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
         absl::Time task_end_time = task->StartTime() + task->time_limit;
 
         if (task_end_time > start_time) {
-          return std::unexpected(
-              fmt::format("Node {} has running tasks "
-                          "that end after the reservation start time",
-                          craned_id));
+          if (!allow_failure) {
+            return std::unexpected(
+                fmt::format("Node {} has running tasks "
+                            "that end after the reservation start time",
+                            craned_id));
+          } else {
+            continue;
+          }
         }
       }
 
       for (const auto& resv :
            craned_meta->resv_in_node_map | std::views::values) {
         if (resv.start_time < end_time && resv.end_time > start_time) {
-          return std::unexpected(fmt::format(
-              "Node {} has reservations that overlap with the new reservation",
-              craned_id));
+          if (!allow_failure) {
+            return std::unexpected(
+                fmt::format("Node {} has reservations that overlap with the "
+                            "new reservation",
+                            craned_id));
+          } else {
+            continue;
+          }
         }
       }
       allocated_res.AddResourceInNode(craned_id, res_avail);
       craned_meta_res_vec.emplace_back(std::move(craned_meta),
                                        std::move(res_avail));
+      if (craned_meta_res_vec.size() >= node_num) {
+        break;
+      }
+    }
+
+    if (allow_failure && craned_meta_res_vec.size() < node_num) {
+      return std::unexpected(
+          fmt::format("Not enough nodes available for reservation. "
+                      "Requested: {}, Available: {}",
+                      node_num, craned_meta_res_vec.size()));
     }
   }
 
