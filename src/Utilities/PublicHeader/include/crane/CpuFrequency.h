@@ -19,13 +19,16 @@
 #pragma once
 
 #include <cstdint>
+#include <list>
 #include <string>
 #include <vector>
 
 namespace crane {
 
-inline constexpr std::string_view PATH_TO_CPU = "/sys/devices/system/cpu/";
-inline constexpr uint32_t FREQ_LIST_MAX = 64;
+inline constexpr std::string_view kPathToCpu = "/sys/devices/system/cpu/";
+inline constexpr uint32_t kFreqListMax = 64;
+inline constexpr uint32_t kGovNameLen = 24;
+inline constexpr uint32_t kInvalidFreq = 0xffffffff;
 
 // Governor flags
 enum GovernorFlag : uint8_t {
@@ -46,28 +49,43 @@ public:
 
   void CpuFreqValidateAndSet(const std::string& low, const std::string& high,
                              const std::string& governor,
-                             const std::vector<uint32_t> cpu_ids);
+                             const std::string& cpu_ids);
 
 private:
+  std::list<uint32_t> ParseCpuList_(const std::string& cpu_ids_str);
+
   bool DeriveAvailFreq_(uint32_t cpu_idx);
 
-  uint32_t CpuFreqGetScalingFreq_(uint32_t cpu_idx, const std::string& option);
+  static uint32_t CpuFreqGetScalingFreq_(uint32_t cpu_idx, const std::string& option);
+
+  void CpuFreqSetupData_(const std::string& low, const std::string& high,
+    const std::string& governor, int cpu_idx);
+
+  bool CpuFreqCurrentState_(int cpu_idx);
+
+  bool CpuFreqGetCurGov_(int cpu_idx);
+
+  uint32_t CpuFreqFreqSpecNum_(const std::string& value, int cpu_idx);
+
+  bool CpuFreqSetGob_(int cpu_idx, const std::string& governor);
+
+  int SetCpuOwnerLock_(int cpu_id, uint32_t job_id);
 
   struct CpuFreqData{
     uint8_t avail_governors;
     std::vector<uint32_t> avail_freq;
     bool org_set;
     std::string org_governor;
-    std::string org_frequency;
-    std::string org_min_freq;
-    std::string org_max_freq;
-    std::string new_frequency;
+    uint32_t org_frequency;
+    uint32_t org_min_freq;
+    uint32_t org_max_freq;
     std::string new_governor;
-    std::string new_min_freq;
-    std::string new_max_freq;
+    uint32_t new_frequency;
+    uint32_t new_min_freq;
+    uint32_t new_max_freq;
   };
 
   std::vector<CpuFreqData> m_cpu_freq_data_;
 };
 
-} // crane
+} // namespace crane
