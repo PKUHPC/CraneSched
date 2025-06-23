@@ -39,7 +39,7 @@
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
-void ParseCtldConfig(const YAML::Node config) {
+void ParseCtldConfig(const YAML::Node& config) {
   using util::YamlValueOr;
   Ctld::Config::CraneCtldConf ctld_config{};
   ctld_config.CranedTimeout = kCranedTimeoutSec;

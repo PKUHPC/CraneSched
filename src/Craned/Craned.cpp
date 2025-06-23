@@ -37,7 +37,7 @@
 using Craned::g_config;
 using Craned::Partition;
 
-void ParseCranedConfig(YAML::Node config) {
+void ParseCranedConfig(const YAML::Node& config) {
   Craned::Config::CranedConfig conf{};
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
