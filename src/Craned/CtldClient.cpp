@@ -687,6 +687,7 @@ bool CtldClient::Ping_() {
   auto status = m_stub_->CranedPing(&context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Craned Ping failed: {}", status.error_message());
+    if (m_ping_failed_cb_) m_ping_failed_cb_();
     return false;
   }
   if (reply.ok()) {
