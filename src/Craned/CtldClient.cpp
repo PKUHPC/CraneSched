@@ -306,21 +306,19 @@ CtldClient::CtldClient() {
   m_ping_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_ping_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
-        if (m_ping_ctld_) {
-          if (m_last_active_time_.load(std::memory_order_acquire) +
-                  std::chrono::seconds(g_config.CranedConf.PingIntervalSec) >
-              std::chrono::steady_clock::now())
-            return true;
+        if (!m_ping_ctld_) return false;
+        if (m_last_active_time_.load(std::memory_order_acquire) +
+                std::chrono::seconds(g_config.CranedConf.PingIntervalSec) >
+            std::chrono::steady_clock::now())
+          return true;
 
-          const auto success = Ping_();
-          if (!success)
-            m_ping_ctld_ = false;
-          else
-            UpdateLastActiveTime();
+        const auto success = Ping_();
+        if (!success)
+          m_ping_ctld_ = false;
+        else
+          UpdateLastActiveTime();
 
-          return success;
-        }
-        return false;
+        return success;
       });
 
   m_uvw_thread_ = std::thread([this] {
