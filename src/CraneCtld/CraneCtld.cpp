@@ -116,6 +116,14 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
+#ifdef CRANE_ENABLE_TESTS
+      g_runtime_status.test_logger = AddLogger(
+          "test", spdlog::level::trace,
+          g_config.CraneBaseDir /
+              YamlValueOr(config["CraneCtldLogFile"], "cranectld/test.log"),
+          true);
+#endif
+
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();

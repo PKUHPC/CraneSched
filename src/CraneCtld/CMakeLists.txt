@@ -74,6 +74,9 @@ if (ENABLE_UNQLITE)
     target_link_libraries(cranectld PRIVATE unqlite)
 endif ()
 
+if (CRANE_ENABLE_TESTS)
+    target_compile_definitions(cranectld PRIVATE CRANE_ENABLE_TESTS)
+endif ()
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
