@@ -27,7 +27,7 @@
 #include "crane/AtomicHashMap.h"
 namespace Craned {
 
-class SupervisorClient {
+class SupervisorStub {
  public:
   CraneExpected<pid_t> ExecuteTask();
   CraneExpected<EnvMap> QueryStepEnv();
@@ -49,6 +49,12 @@ class SupervisorKeeper {
   SupervisorKeeper() = default;
   ~SupervisorKeeper() { CRANE_DEBUG("Destroy SupervisorKeeper."); }
 
+  SupervisorKeeper(const SupervisorKeeper&) = delete;
+  SupervisorKeeper& operator=(const SupervisorKeeper&) = delete;
+
+  SupervisorKeeper(SupervisorKeeper&&) = delete;
+  SupervisorKeeper& operator=(SupervisorKeeper&&) = delete;
+
   /**
    * @brief Query all existing supervisor for task they hold.
    * @return job_id and pid from supervisors
@@ -58,14 +64,14 @@ class SupervisorKeeper {
   void AddSupervisor(task_id_t task_id);
   void RemoveSupervisor(task_id_t task_id);
 
-  std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
+  std::shared_ptr<SupervisorStub> GetStub(task_id_t task_id);
 
   std::set<task_id_t> GetRunningSteps();
 
  private:
-  absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
-      m_supervisor_map;
-  absl::Mutex m_mutex;
+  absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorStub>>
+      m_supervisor_map_;
+  absl::Mutex m_mutex_;
 };
 }  // namespace Craned
 
