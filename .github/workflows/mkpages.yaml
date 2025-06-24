@@ -1,0 +1,38 @@
+name: Deploy Documentation to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main  # 触发分支
+    paths:
+      - 'docs/**'      # 文档目录变更时触发
+      - 'mkdocs.yaml'   # 配置文件变更时触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  
+      pages: write      
+      id-token: write   
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install MkDocs and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mkdocs
+
+      # 使用 mkdocs gh-deploy 命令部署
+      - name: Deploy to GitHub Pages
+        run: |
+          mkdocs gh-deploy --force -t readthedocs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
