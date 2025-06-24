@@ -186,15 +186,6 @@ class CtldServer {
   inline void Wait() { m_server_->Wait(); }
 
  private:
-  template <typename K, typename V,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashMap = absl::flat_hash_map<K, V, Hash>;
-
-  template <typename K,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashSet = absl::flat_hash_set<K, Hash>;
-
-  using Mutex = util::mutex;
 
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
