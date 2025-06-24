@@ -1364,20 +1364,30 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
     return grpc::Status::OK;
   }
 
-  for (const auto &craned_id : request->craned_ids()) {
-    auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-    if (!craned_meta) {
-      response->add_not_modified_nodes(craned_id);
-      response->add_not_modified_reasons("Node not found");
-      continue;
-    }
-
-    if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
+  if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
+    for (const auto &craned_id : request->craned_ids()) {
       response->add_not_modified_nodes(craned_id);
       response->add_not_modified_reasons("Plugin is not enabled");
-      continue;
     }
+    return grpc::Status::OK;
+  }
 
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+  
+  std::vector<std::string> valid_nodes;
+  valid_nodes.reserve(request->craned_ids_size());
+  
+  for (const auto &craned_id : request->craned_ids()) {
+    auto it = craned_meta_map->find(craned_id);
+    if (it == craned_meta_map->end()) {
+      response->add_not_modified_nodes(craned_id);
+      response->add_not_modified_reasons("Node not found");
+    } else {
+      valid_nodes.emplace_back(craned_id);
+    }
+  }
+
+  for (const auto &craned_id : valid_nodes) {
     CRANE_INFO("Modifying auto power control status for node {}: enable={}",
                craned_id, request->enable());
 

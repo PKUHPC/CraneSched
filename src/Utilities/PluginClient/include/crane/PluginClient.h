@@ -80,7 +80,7 @@ class PluginClient {
 
   void UpdatePowerStateHookAsync(const std::string& craned_id,
                                  crane::grpc::CranedControlState state,
-                                 bool EnableAutoPowerControl = true);
+                                 bool enable_auto_power_control = true);
 
   void RegisterCranedHookAsync(
       const std::string& craned_id,
