@@ -22,6 +22,7 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldForInternalServer.h"
 #include "CtldPublicDefs.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
@@ -1347,6 +1348,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
+    g_ctld_for_internal_server->Shutdown();
   });
   signal_waiting_thread.detach();
 
