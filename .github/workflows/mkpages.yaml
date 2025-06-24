@@ -1,13 +1,22 @@
 name: Deploy Documentation to GitHub Pages
 
 on:
+  # 正确的事件触发器配置
   push:
     branches:
-      - main  # 触发分支
+      - main
     paths:
-      - 'docs/**'      # 文档目录变更时触发
-      - 'mkdocs.yaml'   # 配置文件变更时触发
-
+      - 'docs/**'
+      - 'mkdocs.yaml'
+      - '.github/workflows/**'
+  
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yaml'
+      - '.github/workflows/**' 
 jobs:
   deploy:
     runs-on: ubuntu-latest
