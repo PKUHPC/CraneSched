@@ -149,6 +149,7 @@ struct Config {
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::unordered_map<std::string, Partition> Partitions;
   std::string DefaultPartition;
+  uint64_t DebugFlags;
 
   Priority PriorityConfig;
 

@@ -554,7 +554,8 @@ void CranedStub::CheckCranedConfig(const CranedId &craned_id) {
         "ConfigHashCalc RPC for Node {} returned with status not ok: {}",
         craned_id, status.error_message());
   }
-  if (reply.hash_val() != g_config.ConfigHashVal) {
+  if (!(g_config.DebugFlags & DEBUG_FLAG_NO_CONF_HASH) &&
+      (reply.hash_val() != g_config.ConfigHashVal)) {
     CRANE_ERROR(
         "CranedNode #{} appears to have a diffrent config.yaml than the "
         "CraneCtld.",
