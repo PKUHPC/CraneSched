@@ -340,7 +340,7 @@ void AccountMetaContainer::UserAddTask(const std::string& username) {
 }
 
 void AccountMetaContainer::UserReduceTask(const std::string& username) {
-  CRANE_ASSERT(m_user_meta_map_.contains(username));
+  CRANE_ASSERT(m_user_to_task_map_.contains(username));
 
   m_user_to_task_map_.if_contains(
       username,
