@@ -568,6 +568,28 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      if (config["DebugFlags"] && !config["DebugFlags"].IsNull()) {
+        auto str = config["DebugFlags"].as<std::string>();
+        std::ranges::transform(str, str.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+
+        std::string_view debug_flags_view(str);
+
+        for (auto&& part : debug_flags_view | std::views::split(',')) {
+          std::string_view token(&*part.begin(), std::ranges::distance(part));
+          token = absl::StripAsciiWhitespace(token);
+          if (!token.empty()) {
+            auto it = g_debug_flag_set_map.find(token);
+            if (it != g_debug_flag_set_map.end())
+              g_config.DebugFlags |= it->second;
+            else {
+              CRANE_ERROR("Unknown DebugFlag: {}", token);
+              std::exit(1);
+            }
+          }
+        }
+      }
+
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];
 
