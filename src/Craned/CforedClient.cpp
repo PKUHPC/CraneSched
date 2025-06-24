@@ -307,7 +307,8 @@ void CforedClient::AsyncSendRecvThread_() {
       if (output_clean_thread.joinable()) output_clean_thread.join();
       break;
     }
-
+    // Ignore logging for Forwarding state
+    if (state == State::Forwarding) continue;
     CRANE_TRACE("Next state: {}", int(state));
     if (state == State::End) break;
   }
@@ -342,7 +343,8 @@ bool CforedClient::TaskProcessStop(task_id_t task_id) {
 
 void CforedClient::TaskOutPutForward(task_id_t task_id,
                                      const std::string& msg) {
-  CRANE_TRACE("Receive TaskOutputForward for task #{}: {}", task_id, msg);
+  CRANE_TRACE("Receive TaskOutputForward for task #{}, len: {}", task_id,
+              msg.size());
   m_output_queue_.enqueue({task_id, msg});
 }
 
@@ -503,7 +505,7 @@ void CforedManager::RegisterCb_() {
       }
 
       std::string output(buf, ret);
-      CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
+      CRANE_TRACE("Fwd task #{} output len: {}.", elem.task_id, output.size());
       m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
                                                            output);
     });
