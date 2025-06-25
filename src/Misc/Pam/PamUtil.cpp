@@ -327,8 +327,8 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   //    return false;
   //  }
 
-  std::unique_ptr<crane::grpc::Craned::Stub> stub =
-      crane::grpc::Craned::NewStub(channel);
+  std::unique_ptr<crane::grpc::CranedForPam::Stub> stub =
+      crane::grpc::CranedForPam::NewStub(channel);
 
   if (!stub) {
     pam_syslog(pamh, LOG_ERR, "[Crane] Failed to create Stub to %s",
@@ -383,8 +383,8 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   pam_syslog(pamh, LOG_ERR, "[Crane] Channel to %s created",
              craned_unix_socket_address.c_str());
 
-  std::unique_ptr<crane::grpc::Craned::Stub> stub =
-      crane::grpc::Craned::NewStub(channel);
+  std::unique_ptr<crane::grpc::CranedForPam::Stub> stub =
+      crane::grpc::CranedForPam::NewStub(channel);
 
   if (!stub) {
     pam_syslog(pamh, LOG_ERR, "[Crane] Failed to create Stub to %s",

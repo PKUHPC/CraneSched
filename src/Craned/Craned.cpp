@@ -27,6 +27,7 @@
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
+#include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -130,6 +131,9 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.CranedListenPort =
           YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
+
+      g_config.ListenConf.CranedForPamListenPort =
+        YamlValueOr(config["CranedForPamListenPort"], kCranedForPamDefaultPort);
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
@@ -625,10 +629,15 @@ void StartServer() {
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
+  g_craned_for_pam_server = std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
+
+
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
   g_server->Wait();
+
+  g_craned_for_pam_server->Wait();
 
   // Free global variables
   g_task_mgr->Wait();
@@ -636,6 +645,7 @@ void StartServer() {
   // CforedManager MUST be destructed after TaskManager.
   g_cfored_manager.reset();
   g_server.reset();
+  g_craned_for_pam_server.reset();
   g_ctld_client.reset();
   g_job_mgr.reset();
   g_cg_mgr.reset();

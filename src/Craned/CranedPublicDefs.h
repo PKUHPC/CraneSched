@@ -55,6 +55,7 @@ struct Config {
   struct CranedListenConf {
     std::string CranedListenAddr;
     std::string CranedListenPort;
+    std::string CranedForPamListenPort;
 
     bool UseTls{false};
     TlsCertificates TlsCerts;
