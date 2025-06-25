@@ -337,6 +337,7 @@ CtldForInternalServer::CtldForInternalServer(
   m_service_impl_ = std::make_unique<CtldForInternalServiceImpl>(this);
 
   grpc::ServerBuilder builder;
+  ServerBuilderSetKeepAliveArgs(&builder);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
