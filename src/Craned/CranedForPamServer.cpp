@@ -289,9 +289,10 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
+  chmod(g_config.CranedUnixSockPath.c_str(), 0600);
+
   CRANE_INFO("Craned for pam unix socket is listening on {}",
     listen_conf.UnixSocketForPamListenAddr);
-
 }
 
 
