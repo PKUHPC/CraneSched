@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -33,7 +33,7 @@ using grpc::ServerReaderWriter;
 using grpc::Status;
 
 class CranedForPamServiceImpl : public crane::grpc::CranedForPam::Service {
-public:
+ public:
   CranedForPamServiceImpl() = default;
 
   grpc::Status QueryTaskIdFromPortForward(
@@ -50,24 +50,23 @@ public:
       grpc::ServerContext *context,
       const ::crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
       crane::grpc::QueryTaskEnvVariablesForwardReply *response) override;
-
 };
 
 class CranedForPamServer {
-public:
-  explicit CranedForPamServer(const Config::CranedListenConf& listen_conf);
+ public:
+  explicit CranedForPamServer(const Config::CranedListenConf &listen_conf);
 
   void Shutdown() { m_server_->Shutdown(); }
 
   void Wait() { m_server_->Wait(); }
 
-private:
+ private:
   std::unique_ptr<CranedForPamServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
   friend class CranedForPamServiceImpl;
 };
 
-} // namespace Craned
+}  // namespace Craned
 
 inline std::unique_ptr<Craned::CranedForPamServer> g_craned_for_pam_server;

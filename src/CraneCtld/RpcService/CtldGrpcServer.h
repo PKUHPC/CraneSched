@@ -186,7 +186,6 @@ class CtldServer {
   inline void Wait() { m_server_->Wait(); }
 
  private:
-
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 

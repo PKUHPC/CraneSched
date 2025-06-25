@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -28,7 +28,6 @@ grpc::Status CranedForPamServiceImpl::QueryTaskIdFromPortForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
     crane::grpc::QueryTaskIdFromPortForwardReply *response) {
-
   bool ok;
   bool task_id_found = false;
   bool remote_is_craned = false;
@@ -275,14 +274,13 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
   return Status::OK;
 }
 
- CranedForPamServer::CranedForPamServer(
+CranedForPamServer::CranedForPamServer(
     const Config::CranedListenConf &listen_conf) {
-
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
 
-  ServerBuilderAddUnixInsecureListeningPort(&builder,
-                                            listen_conf.UnixSocketForPamListenAddr);
+  ServerBuilderAddUnixInsecureListeningPort(
+      &builder, listen_conf.UnixSocketForPamListenAddr);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
@@ -292,8 +290,7 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
   chmod(g_config.CranedUnixSockPath.c_str(), 0600);
 
   CRANE_INFO("Craned for pam unix socket is listening on {}",
-    listen_conf.UnixSocketForPamListenAddr);
+             listen_conf.UnixSocketForPamListenAddr);
 }
 
-
-} // namespace Craned
+}  // namespace Craned

@@ -69,7 +69,8 @@ inline const char* const kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
 inline const char* const kDefaultCranedScriptDir = "craned/scripts";
 inline const char* const kDefaultCranedUnixSockPath = "craned/craned.sock";
-inline const char* const kDefaultCranedForPamUnixSockPath = "craned/craned_pam.sock";
+inline const char* const kDefaultCranedForPamUnixSockPath =
+    "craned/craned_pam.sock";
 inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 
