@@ -37,7 +37,6 @@ CraneCtldForeground: true
 CranedListenAddr: 0.0.0.0
 # the port of control machine to listen
 CranedListenPort: 10010
-CranedForPamListenPort: 10014
 # debug level of craned
 CranedDebugLevel: trace
 # file path of craned log file (relative to CraneBaseDir)
