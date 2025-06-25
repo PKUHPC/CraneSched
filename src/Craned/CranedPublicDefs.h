@@ -55,12 +55,12 @@ struct Config {
   struct CranedListenConf {
     std::string CranedListenAddr;
     std::string CranedListenPort;
-    std::string CranedForPamListenPort;
 
     bool UseTls{false};
     TlsCertificates TlsCerts;
 
     std::string UnixSocketListenAddr;
+    std::string UnixSocketForPamListenAddr;
   };
 
   struct PluginConfig {
@@ -81,6 +81,7 @@ struct Config {
   std::filesystem::path CranedMutexFilePath;
   std::filesystem::path CranedScriptDir;
   std::filesystem::path CranedUnixSockPath;
+  std::filesystem::path CranedForPamUnixSockPath;
 
   bool CranedForeground{};
 

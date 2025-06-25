@@ -281,17 +281,16 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
 
-  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
+  ServerBuilderAddUnixInsecureListeningPort(&builder,
+                                            listen_conf.UnixSocketForPamListenAddr);
 
-  std::string craned_listen_addr = listen_conf.CranedListenAddr;
-  ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
-                                             listen_conf.CranedForPamListenPort);
+  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("Craned for pam is listening on [{}:{}]",
-    craned_listen_addr, listen_conf.CranedForPamListenPort);
+  CRANE_INFO("Craned for pam unix socket is listening on {}",
+    listen_conf.UnixSocketForPamListenAddr);
 
 }
 

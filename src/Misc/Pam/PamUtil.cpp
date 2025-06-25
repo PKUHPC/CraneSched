@@ -73,13 +73,13 @@ void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
     else
       g_pam_config.CraneBaseDir = kDefaultCraneBaseDir;
 
-    if (config["CranedUnixSockPath"])
+    if (config["CranedForPamUnixSockPath"])
       g_pam_config.CranedUnixSockPath =
           g_pam_config.CraneBaseDir +
-          config["CranedUnixSockPath"].as<std::string>();
+          config["CranedForPamUnixSockPath"].as<std::string>();
     else
       g_pam_config.CranedUnixSockPath =
-          g_pam_config.CraneBaseDir + kDefaultCranedUnixSockPath;
+          g_pam_config.CraneBaseDir + kDefaultCranedForPamUnixSockPath;
 
     *initialized = true;
   } catch (YAML::BadFile &e) {

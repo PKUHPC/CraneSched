@@ -115,6 +115,9 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
 
+      g_config.CranedForPamUnixSockPath =
+        g_config.CraneBaseDir / YamlValueOr(config["CranedForPamUnixSockPath"], kDefaultCranedForPamUnixSockPath);
+
       g_config.CranedScriptDir =
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedScriptDir"], kDefaultCranedScriptDir);
@@ -132,11 +135,11 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CranedListenPort =
           YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
 
-      g_config.ListenConf.CranedForPamListenPort =
-        YamlValueOr(config["CranedForPamListenPort"], kCranedForPamDefaultPort);
-
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
+
+      g_config.ListenConf.UnixSocketForPamListenAddr =
+        fmt::format("unix://{}", g_config.CranedForPamUnixSockPath);
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
