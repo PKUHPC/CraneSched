@@ -288,6 +288,7 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   ServerBuilderAddUnixInsecureListeningPort(&builder,
                                             listen_conf.UnixSocketListenAddr);
 
+
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
@@ -306,6 +307,8 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
+
+  chmod(g_config.CranedUnixSockPath.c_str(), 0600);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     g_craned_for_pam_server->Shutdown();
