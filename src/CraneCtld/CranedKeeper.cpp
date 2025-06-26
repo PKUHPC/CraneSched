@@ -297,6 +297,8 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
     }
+    mutable_task->set_submit_host(task->TaskToCtld().submit_host());
+    mutable_task->set_total_gpus(task->allocated_res_view.GpuCount());
   }
 
   return request;
