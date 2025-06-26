@@ -23,6 +23,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "RaftServerStuff.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -111,15 +112,36 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
 grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
     grpc::ServerContext *context,
     const crane::grpc::CranedTriggerReverseConnRequest *request,
-    google::protobuf::Empty *response) {
+    crane::grpc::CranedTriggerReverseConnResponse *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
+  response->set_cur_leader_id(g_raft_server->GetLeaderId());
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Reject register request from node {} because this CraneCtld is not "
+        "the leader.",
+        request->craned_id());
+    response->set_ok(false);
     return grpc::Status::OK;
   }
 
+  if (!g_task_scheduler->GetTaskMapReadyFlag()) {
+    CRANE_WARN(
+        "Reject register request from node {} because the data in the task "
+        "queue is not ready.",
+        request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  response->set_ok(true);
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     CRANE_TRACE("Put craned {} into unavail.", craned_id);
     g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
@@ -129,7 +151,6 @@ grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (stub != nullptr)
         g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-          stub->SetRegToken(token);
           stub->ConfigureCraned(craned_id, token);
         });
     } else {
@@ -146,6 +167,15 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
   CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
+  response->set_cur_leader_id(g_raft_server->GetLeaderId());
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Reject register request from node {} because this CraneCtld is not "
+        "the leader.",
+        request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
 
   if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
@@ -1240,7 +1270,6 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
@@ -1328,6 +1357,21 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
 
   response->set_ok(true);
   return grpc::Status::OK;
+}
+
+void RaftLeaderInterceptor::Intercept(
+    grpc::experimental::InterceptorBatchMethods *methods) {
+  if (methods->QueryInterceptionHookPoint(
+          grpc::experimental::InterceptionHookPoints::
+              POST_RECV_INITIAL_METADATA)) {
+    if (g_config.Raft.Enabled && !g_raft_server->IsLeader()) {
+      m_ctx_->TryCancel();
+      return;  // Warning: Calling return can ensure that the request will not
+               // continue to execute, but it may also result in some resources
+               // not being released, which requires further verification.
+    }
+  }
+  methods->Proceed();
 }
 
 grpc::Status CraneCtldServiceImpl::CforedStream(
@@ -1527,6 +1571,147 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   }
 }
 
+grpc::Status CraneCtldServiceImpl::QueryLeaderId(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLeaderIdRequest *request,
+    crane::grpc::QueryLeaderIdReply *response) {
+  response->set_leader_id(g_raft_server->GetLeaderId());
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryLeaderInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLeaderInfoRequest *request,
+    crane::grpc::QueryLeaderInfoReply *response) {
+  g_raft_server->GetNodeStatus(response);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::AddFollower(
+    grpc::ServerContext *context,
+    const crane::grpc::AddFollowerRequest *request,
+    crane::grpc::AddFollowerReply *response) {
+  if (!g_config.Raft.Enabled) {
+    response->set_ok(false);
+    response->set_reason("Raft mode not enabled in config file.");
+    return grpc::Status::OK;
+  }
+
+  bool found = false;
+  int server_id = 0;
+  std::string endpoint;
+
+  switch (request->key_case()) {
+  case crane::grpc::AddFollowerRequest::kServerId: {
+    server_id = request->server_id();
+    if (server_id >= 0 && server_id < g_config.Servers.size()) {
+      found = true;
+      endpoint = fmt::format("{}:{}", g_config.Servers[server_id].HostName,
+                             g_config.Servers[server_id].RaftPort);
+    }
+    break;
+  }
+  case crane::grpc::AddFollowerRequest::kHostName: {
+    for (const auto &server : g_config.Servers) {
+      if (server.HostName == request->host_name()) {
+        found = true;
+        endpoint = fmt::format("{}:{}", server.HostName, server.RaftPort);
+        break;
+      }
+      server_id++;
+    }
+    break;
+  }
+  default:
+    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                        "either server_id or hostname must be set");
+  }
+
+  if (!found) {
+    response->set_ok(false);
+    response->set_reason("Follower not found in config file.");
+    return grpc::Status::OK;
+  }
+
+  if (g_raft_server->CheckServerNodeExist(server_id)) {
+    response->set_ok(false);
+    response->set_reason("Follower already exists in the Raft cluster.");
+    return grpc::Status::OK;
+  }
+
+  if (g_raft_server->AddServer(server_id, endpoint)) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("AddFollower failed: internal error.");
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::RemoveFollower(
+    grpc::ServerContext *context,
+    const crane::grpc::RemoveFollowerRequest *request,
+    crane::grpc::RemoveFollowerReply *response) {
+  bool found = false;
+  int server_id = 0;
+
+  switch (request->key_case()) {
+  case crane::grpc::RemoveFollowerRequest::kServerId: {
+    server_id = request->server_id();
+    if (server_id >= 0 && server_id < g_config.Servers.size()) found = true;
+    break;
+  }
+  case crane::grpc::RemoveFollowerRequest::kHostName: {
+    for (const auto &server : g_config.Servers) {
+      if (server.HostName == request->host_name()) {
+        found = true;
+        break;
+      }
+      server_id++;
+    }
+    break;
+  }
+  default:
+    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                        "either server_id or hostname must be set");
+  }
+
+  if (!found) {
+    response->set_ok(false);
+    response->set_reason("Follower not found in config file.");
+    return grpc::Status::OK;
+  }
+
+  if (server_id == g_raft_server->GetLeaderId()) {
+    response->set_ok(false);
+    response->set_reason(
+        "Follower cannot be removed because it is the leader.");
+    return grpc::Status::OK;
+  }
+
+  if (g_raft_server->RemoveServer(server_id)) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Follower does not exist in the Raft cluster.");
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::YieldLeadership(
+    grpc::ServerContext *context,
+    const crane::grpc::YieldLeadershipRequest *request,
+    crane::grpc::YieldLeadershipReply *response) {
+  if (request->next_server_id() != -1 &&
+      !g_raft_server->CheckServerNodeExist(request->next_server_id())) {
+    response->set_ok(false);
+  } else {
+    g_raft_server->YieldLeadership(request->next_server_id());
+    response->set_ok(true);
+  }
+  return grpc::Status::OK;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
@@ -1547,6 +1732,12 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   builder.RegisterService(m_service_impl_.get());
 
+  std::vector<
+      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+      creators;
+  creators.push_back(std::make_unique<CraneCtldInterceptorFactory>());
+  builder.experimental().SetInterceptorCreators(std::move(creators));
+
   m_server_ = builder.BuildAndStart();
   if (!m_server_) {
     CRANE_ERROR("Cannot start gRPC server!");
@@ -1566,6 +1757,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
     CRANE_TRACE(
         "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
+
+    // raft_server MUST be shutdown before GrpcServer.
+    g_raft_server->Shutdown();
 
     // craned_keeper MUST be shutdown before GrpcServer.
     // Otherwise, once GrpcServer is shut down, the main thread stops and
