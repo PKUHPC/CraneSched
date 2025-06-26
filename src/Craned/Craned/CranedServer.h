@@ -50,49 +50,50 @@ class CranedServiceImpl : public Craned::Service {
                          const crane::grpc::ConfigureCranedRequest *request,
                          google::protobuf::Empty *response) override;
 
-  grpc::Status ExecuteTask(grpc::ServerContext *context,
-                           const crane::grpc::ExecuteTasksRequest *request,
-                           crane::grpc::ExecuteTasksReply *response) override;
+  grpc::Status ExecuteSteps(grpc::ServerContext *context,
+                            const crane::grpc::ExecuteStepsRequest *request,
+                            crane::grpc::ExecuteStepsReply *response) override;
 
-  grpc::Status TerminateTasks(
+  grpc::Status TerminateSteps(
       grpc::ServerContext *context,
-      const crane::grpc::TerminateTasksRequest *request,
-      crane::grpc::TerminateTasksReply *response) override;
+      const crane::grpc::TerminateStepsRequest *request,
+      crane::grpc::TerminateStepsReply *response) override;
 
-  grpc::Status TerminateOrphanedTask(
+  grpc::Status TerminateOrphanedStep(
       grpc::ServerContext *context,
-      const crane::grpc::TerminateOrphanedTaskRequest *request,
-      crane::grpc::TerminateOrphanedTaskReply *response) override;
+      const crane::grpc::TerminateOrphanedStepRequest *request,
+      crane::grpc::TerminateOrphanedStepReply *response) override;
 
-  grpc::Status QueryTaskIdFromPort(
+  grpc::Status QueryStepFromPort(
       grpc::ServerContext *context,
-      const crane::grpc::QueryTaskIdFromPortRequest *request,
+      const crane::grpc::QueryStepFromPortRequest *request,
+      crane::grpc::QueryStepFromPortReply *response) override;
       crane::grpc::QueryTaskIdFromPortReply *response) override;
 
-  grpc::Status QueryTaskEnvVariables(
+  grpc::Status QuerySshStepEnvVariables(
       grpc::ServerContext *context,
-      const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
-      crane::grpc::QueryTaskEnvVariablesReply *response) override;
+      const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
+      crane::grpc::QuerySshStepEnvVariablesReply *response) override;
 
-  grpc::Status CreateCgroupForTasks(
+  grpc::Status CreateCgroupForJobs(
       grpc::ServerContext *context,
-      const crane::grpc::CreateCgroupForTasksRequest *request,
-      crane::grpc::CreateCgroupForTasksReply *response) override;
+      const crane::grpc::CreateCgroupForJobsRequest *request,
+      crane::grpc::CreateCgroupForJobsReply *response) override;
 
-  grpc::Status ReleaseCgroupForTasks(
+  grpc::Status ReleaseCgroupForJobs(
       grpc::ServerContext *context,
-      const crane::grpc::ReleaseCgroupForTasksRequest *request,
-      crane::grpc::ReleaseCgroupForTasksReply *response) override;
+      const crane::grpc::ReleaseCgroupForJobsRequest *request,
+      crane::grpc::ReleaseCgroupForJobsReply *response) override;
 
-  grpc::Status ChangeTaskTimeLimit(
+  grpc::Status ChangeJobTimeLimit(
       grpc::ServerContext *context,
-      const crane::grpc::ChangeTaskTimeLimitRequest *request,
-      crane::grpc::ChangeTaskTimeLimitReply *response) override;
+      const crane::grpc::ChangeJobTimeLimitRequest *request,
+      crane::grpc::ChangeJobTimeLimitReply *response) override;
 
-  grpc::Status TaskStatusChange(
+  grpc::Status StepStatusChange(
       grpc::ServerContext *context,
-      const crane::grpc::TaskStatusChangeRequest *request,
-      crane::grpc::TaskStatusChangeReply *response) override;
+      const crane::grpc::StepStatusChangeRequest *request,
+      crane::grpc::StepStatusChangeReply *response) override;
 };
 
 class CranedServer {

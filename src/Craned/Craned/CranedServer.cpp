@@ -37,15 +37,15 @@ grpc::Status CranedServiceImpl::Configure(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ExecuteTask(
+grpc::Status CranedServiceImpl::ExecuteSteps(
     grpc::ServerContext *context,
-    const crane::grpc::ExecuteTasksRequest *request,
-    crane::grpc::ExecuteTasksReply *response) {
+    const crane::grpc::ExecuteStepsRequest *request,
+    crane::grpc::ExecuteStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
 
-    for (auto const &task_to_d : request->tasks())
-      response->add_failed_task_id_list(task_to_d.task_id());
+    for (auto const &step_to_d : request->tasks())
+      response->add_failed_task_id_list(step_to_d.task_id());
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
@@ -53,55 +53,55 @@ grpc::Status CranedServiceImpl::ExecuteTask(
               request->tasks_size());
 
   CraneErrCode err;
-  for (auto const &task_to_d : request->tasks()) {
-    err = g_job_mgr->ExecuteTaskAsync(task_to_d);
+  for (auto const &step_to_d : request->tasks()) {
+    err = g_job_mgr->ExecuteStepAsync(step_to_d);
     if (err != CraneErrCode::SUCCESS)
-      response->add_failed_task_id_list(task_to_d.task_id());
+      response->add_failed_task_id_list(step_to_d.task_id());
   }
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::TerminateTasks(
+grpc::Status CranedServiceImpl::TerminateSteps(
     grpc::ServerContext *context,
-    const crane::grpc::TerminateTasksRequest *request,
-    crane::grpc::TerminateTasksReply *response) {
+    const crane::grpc::TerminateStepsRequest *request,
+    crane::grpc::TerminateStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive TerminateTasks for tasks {}",
+  CRANE_TRACE("Receive TerminateSteps for steps {}",
               absl::StrJoin(request->task_id_list(), ","));
 
-  for (task_id_t id : request->task_id_list())
-    g_job_mgr->TerminateTaskAsync(id);
+  for (step_id_t id : request->task_id_list())
+    g_job_mgr->TerminateStepAsync(id);
   response->set_ok(true);
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::TerminateOrphanedTask(
+grpc::Status CranedServiceImpl::TerminateOrphanedStep(
     grpc::ServerContext *context,
-    const crane::grpc::TerminateOrphanedTaskRequest *request,
-    crane::grpc::TerminateOrphanedTaskReply *response) {
+    const crane::grpc::TerminateOrphanedStepRequest *request,
+    crane::grpc::TerminateOrphanedStepReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
   for (task_id_t job_id : request->task_id_list())
-    g_job_mgr->MarkTaskAsOrphanedAndTerminateAsync(job_id);
+    g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id);
   response->set_ok(true);
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
+grpc::Status CranedServiceImpl::QueryStepFromPort(
     grpc::ServerContext *context,
-    const crane::grpc::QueryTaskIdFromPortRequest *request,
-    crane::grpc::QueryTaskIdFromPortReply *response) {
+    const crane::grpc::QueryStepFromPortRequest *request,
+    crane::grpc::QueryStepFromPortReply *response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -202,10 +202,10 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::CreateCgroupForTasks(
+grpc::Status CranedServiceImpl::CreateCgroupForJobs(
     grpc::ServerContext *context,
-    const crane::grpc::CreateCgroupForTasksRequest *request,
-    crane::grpc::CreateCgroupForTasksReply *response) {
+    const crane::grpc::CreateCgroupForJobsRequest *request,
+    crane::grpc::CreateCgroupForJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
@@ -225,10 +225,10 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
+grpc::Status CranedServiceImpl::ReleaseCgroupForJobs(
     grpc::ServerContext *context,
-    const crane::grpc::ReleaseCgroupForTasksRequest *request,
-    crane::grpc::ReleaseCgroupForTasksReply *response) {
+    const crane::grpc::ReleaseCgroupForJobsRequest *request,
+    crane::grpc::ReleaseCgroupForJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
@@ -242,10 +242,10 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
+grpc::Status CranedServiceImpl::QueryStepFromPortForward(
     grpc::ServerContext *context,
-    const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
-    crane::grpc::QueryTaskIdFromPortForwardReply *response) {
+    const crane::grpc::QueryStepFromPortForwardRequest *request,
+    crane::grpc::QueryStepFromPortForwardReply *response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -344,8 +344,8 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     return Status::OK;
   }
 
-  crane::grpc::QueryTaskIdFromPortRequest request_to_remote_service;
-  crane::grpc::QueryTaskIdFromPortReply reply_from_remote_service;
+  crane::grpc::QueryStepFromPortRequest request_to_remote_service;
+  crane::grpc::QueryStepFromPortReply reply_from_remote_service;
   grpc::ClientContext context_of_remote_service;
   Status status_remote_service;
 
@@ -354,7 +354,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   if (remote_is_craned) {
     std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
         crane::grpc::Craned::NewStub(channel_of_remote_service);
-    status_remote_service = stub_of_remote_craned->QueryTaskIdFromPort(
+    status_remote_service = stub_of_remote_craned->QueryStepFromPort(
         &context_of_remote_service, request_to_remote_service,
         &reply_from_remote_service);
   } else {
@@ -428,10 +428,10 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryTaskEnvVariables(
+grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     grpc::ServerContext *context,
-    const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
-    crane::grpc::QueryTaskEnvVariablesReply *response) {
+    const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
+    crane::grpc::QuerySshStepEnvVariablesReply *response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -455,32 +455,32 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariables(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
+grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     grpc::ServerContext *context,
-    const crane::grpc::ChangeTaskTimeLimitRequest *request,
-    crane::grpc::ChangeTaskTimeLimitReply *response) {
+    const crane::grpc::ChangeJobTimeLimitRequest *request,
+    crane::grpc::ChangeJobTimeLimitReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  bool ok = g_job_mgr->ChangeTaskTimeLimitAsync(
+  bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::TaskStatusChange(
+grpc::Status CranedServiceImpl::StepStatusChange(
     grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
+    const crane::grpc::StepStatusChangeRequest *request,
+    crane::grpc::StepStatusChangeReply *response) {
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  g_job_mgr->TaskStopAndDoStatusChangeAsync(
+  g_job_mgr->StepStopAndDoStatusChangeAsync(
       request->task_id(), request->new_status(), request->exit_code(),
       request->reason());
   response->set_ok(true);
