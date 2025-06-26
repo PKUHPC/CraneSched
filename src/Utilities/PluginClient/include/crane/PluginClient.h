@@ -79,7 +79,8 @@ class PluginClient {
   void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
 
   void UpdatePowerStateHookAsync(const std::string& craned_id,
-                                 crane::grpc::CranedControlState state);
+                                 crane::grpc::CranedControlState state,
+                                 bool enable_auto_power_control = true);
 
   void RegisterCranedHookAsync(
       const std::string& craned_id,

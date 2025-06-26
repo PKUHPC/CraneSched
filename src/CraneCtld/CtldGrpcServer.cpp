@@ -383,7 +383,8 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   if (request->new_state() == crane::grpc::CRANE_POWEROFF ||
       request->new_state() == crane::grpc::CRANE_SLEEP ||
       request->new_state() == crane::grpc::CRANE_WAKE ||
-      request->new_state() == crane::grpc::CRANE_POWERON) {
+      request->new_state() == crane::grpc::CRANE_POWERON ||
+      request->new_state() == crane::grpc::CRANE_UNREGISTER_POWER) {
     if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
       for (const auto &crane_id : request->craned_ids()) {
         response->add_not_modified_nodes(crane_id);
@@ -394,6 +395,13 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     }
 
     for (const auto &crane_id : request->craned_ids()) {
+      if (request->new_state() == crane::grpc::CRANE_UNREGISTER_POWER) {
+        g_plugin_client->UpdatePowerStateHookAsync(crane_id,
+                                                   request->new_state());
+        response->add_modified_nodes(crane_id);
+        continue;
+      }
+
       auto craned_meta = g_meta_container->GetCranedMetaPtr(crane_id);
       if (!craned_meta) {
         response->add_not_modified_nodes(crane_id);
@@ -403,6 +411,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
 
       const auto requested_state = request->new_state();
       const auto current_state = craned_meta->power_state;
+
       if ((requested_state == crane::grpc::CranedControlState::CRANE_POWEROFF ||
            requested_state == crane::grpc::CranedControlState::CRANE_SLEEP) &&
           current_state == crane::grpc::CranedPowerState::CRANE_POWER_ACTIVE) {
@@ -1327,6 +1336,70 @@ grpc::Status CraneCtldServiceImpl::PowerStateChange(
   }
 
   response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
+    grpc::ServerContext *context,
+    const crane::grpc::EnableAutoPowerControlRequest *request,
+    crane::grpc::EnableAutoPowerControlReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  CRANE_INFO(
+      "Received enable auto power control request for {} nodes, enable: {}",
+      request->craned_ids_size(), request->enable());
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    for (const auto &craned_id : request->craned_ids()) {
+      response->add_not_modified_nodes(craned_id);
+      if (res.error() == CraneErrCode::ERR_INVALID_USER) {
+        response->add_not_modified_reasons("User is not a user of Crane");
+      } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
+        response->add_not_modified_reasons("User has insufficient privilege");
+      }
+    }
+    return grpc::Status::OK;
+  }
+
+  if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
+    for (const auto &craned_id : request->craned_ids()) {
+      response->add_not_modified_nodes(craned_id);
+      response->add_not_modified_reasons("Plugin is not enabled");
+    }
+    return grpc::Status::OK;
+  }
+
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+
+  std::vector<std::string> valid_nodes;
+  valid_nodes.reserve(request->craned_ids_size());
+
+  for (const auto &craned_id : request->craned_ids()) {
+    auto it = craned_meta_map->find(craned_id);
+    if (it == craned_meta_map->end()) {
+      response->add_not_modified_nodes(craned_id);
+      response->add_not_modified_reasons("Node not found");
+    } else {
+      valid_nodes.emplace_back(craned_id);
+    }
+  }
+
+  for (const auto &craned_id : valid_nodes) {
+    CRANE_INFO("Modifying auto power control status for node {}: enable={}",
+               craned_id, request->enable());
+
+    // Use CRANE_NONE as a placeholder to leave the control state unchanged
+    // while toggling auto-power control
+    g_plugin_client->UpdatePowerStateHookAsync(
+        craned_id, crane::grpc::CranedControlState::CRANE_NONE,
+        request->enable());
+
+    response->add_modified_nodes(craned_id);
+  }
+
   return grpc::Status::OK;
 }
 
