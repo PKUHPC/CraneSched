@@ -66,18 +66,18 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   }
 }
 
-std::vector<task_id_t> CranedStub::ExecuteTasks(
-    const crane::grpc::ExecuteTasksRequest &request) {
-  using crane::grpc::ExecuteTasksReply;
-  using crane::grpc::ExecuteTasksRequest;
+std::vector<task_id_t> CranedStub::ExecuteSteps(
+    const crane::grpc::ExecuteStepsRequest &request) {
+  using crane::grpc::ExecuteStepsReply;
+  using crane::grpc::ExecuteStepsRequest;
 
   std::vector<task_id_t> failed_task_ids;
 
-  ExecuteTasksReply reply;
+  ExecuteStepsReply reply;
   ClientContext context;
   Status status;
 
-  status = m_stub_->ExecuteTask(&context, request, &reply);
+  status = m_stub_->ExecuteSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
@@ -95,19 +95,19 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   return failed_task_ids;
 }
 
-CraneErrCode CranedStub::TerminateTasks(
+CraneErrCode CranedStub::TerminateSteps(
     const std::vector<task_id_t> &task_ids) {
-  using crane::grpc::TerminateTasksReply;
-  using crane::grpc::TerminateTasksRequest;
+  using crane::grpc::TerminateStepsReply;
+  using crane::grpc::TerminateStepsRequest;
 
   ClientContext context;
   Status status;
-  TerminateTasksRequest request;
-  TerminateTasksReply reply;
+  TerminateStepsRequest request;
+  TerminateStepsReply reply;
 
   for (const auto &id : task_ids) request.add_task_id_list(id);
 
-  status = m_stub_->TerminateTasks(&context, request, &reply);
+  status = m_stub_->TerminateSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
@@ -119,19 +119,19 @@ CraneErrCode CranedStub::TerminateTasks(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::TerminateOrphanedTasks(
+CraneErrCode CranedStub::TerminateOrphanedSteps(
     const std::vector<task_id_t> &task_ids) {
-  using crane::grpc::TerminateOrphanedTaskReply;
-  using crane::grpc::TerminateOrphanedTaskRequest;
+  using crane::grpc::TerminateOrphanedStepReply;
+  using crane::grpc::TerminateOrphanedStepRequest;
 
   ClientContext context;
   Status status;
-  TerminateOrphanedTaskRequest request;
-  TerminateOrphanedTaskReply reply;
+  TerminateOrphanedStepRequest request;
+  TerminateOrphanedStepReply reply;
 
   request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
 
-  status = m_stub_->TerminateOrphanedTask(&context, request, &reply);
+  status = m_stub_->TerminateOrphanedStep(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateOrphanedTasks RPC for Node {} returned status not ok: {}",
@@ -146,13 +146,13 @@ CraneErrCode CranedStub::TerminateOrphanedTasks(
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
-  using crane::grpc::CreateCgroupForTasksReply;
-  using crane::grpc::CreateCgroupForTasksRequest;
+CraneErrCode CranedStub::CreateCgroupForJobs(std::vector<JobToD> const &jobs) {
+  using crane::grpc::CreateCgroupForJobsReply;
+  using crane::grpc::CreateCgroupForJobsRequest;
 
   Status status;
-  CreateCgroupForTasksRequest request;
-  CreateCgroupForTasksReply reply;
+  CreateCgroupForJobsRequest request;
+  CreateCgroupForJobsReply reply;
 
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -162,7 +162,7 @@ CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
     job.SetJobToD(request.add_job_list());
   }
 
-  status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
+  status = m_stub_->CreateCgroupForJobs(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
         "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
@@ -174,14 +174,14 @@ CraneErrCode CranedStub::CreateCgroupForTasks(std::vector<JobToD> const &jobs) {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ReleaseCgroupForTasks(
+CraneErrCode CranedStub::ReleaseCgroupForJobs(
     const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs) {
-  using crane::grpc::ReleaseCgroupForTasksReply;
-  using crane::grpc::ReleaseCgroupForTasksRequest;
+  using crane::grpc::ReleaseCgroupForJobsReply;
+  using crane::grpc::ReleaseCgroupForJobsRequest;
 
   Status status;
-  ReleaseCgroupForTasksRequest request;
-  ReleaseCgroupForTasksReply reply;
+  ReleaseCgroupForJobsRequest request;
+  ReleaseCgroupForJobsReply reply;
 
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
@@ -192,7 +192,7 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
     request.add_uid_list(uid);
   }
 
-  status = m_stub_->ReleaseCgroupForTasks(&context, request, &reply);
+  status = m_stub_->ReleaseCgroupForJobs(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
@@ -204,19 +204,19 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
-                                             uint64_t seconds) {
-  using crane::grpc::ChangeTaskTimeLimitReply;
-  using crane::grpc::ChangeTaskTimeLimitRequest;
+CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
+                                            uint64_t seconds) {
+  using crane::grpc::ChangeJobTimeLimitReply;
+  using crane::grpc::ChangeJobTimeLimitRequest;
 
   ClientContext context;
   Status status;
-  ChangeTaskTimeLimitRequest request;
-  ChangeTaskTimeLimitReply reply;
+  ChangeJobTimeLimitRequest request;
+  ChangeJobTimeLimitReply reply;
 
   request.set_task_id(task_id);
   request.set_time_limit_seconds(seconds);
-  status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
+  status = m_stub_->ChangeJobTimeLimit(&context, request, &reply);
 
   if (!status.ok()) {
     CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
@@ -238,9 +238,9 @@ void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   }
 }
 
-crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
+crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
     const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
-  crane::grpc::ExecuteTasksRequest request;
+  crane::grpc::ExecuteStepsRequest request;
 
   for (TaskInCtld *task : tasks) {
     auto *mutable_task = request.add_tasks();

@@ -90,10 +90,10 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::TaskStatusChange(
+grpc::Status CraneCtldServiceImpl::StepStatusChange(
     grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
+    const crane::grpc::StepStatusChangeRequest *request,
+    crane::grpc::StepStatusChangeReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -101,7 +101,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChangeWithReasonAsync(
+  g_task_scheduler->StepStatusChangeWithReasonAsync(
       request->task_id(), request->craned_id(), request->new_status(),
       request->exit_code(), std::move(reason));
   response->set_ok(true);

@@ -336,8 +336,8 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
     return false;
   }
 
-  crane::grpc::QueryTaskIdFromPortForwardRequest request;
-  crane::grpc::QueryTaskIdFromPortForwardReply reply;
+  crane::grpc::QueryStepFromPortForwardRequest request;
+  crane::grpc::QueryStepFromPortForwardReply reply;
   ClientContext context;
   Status status;
 
@@ -345,7 +345,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   request.set_ssh_remote_port(port_to_query);
   request.set_uid(uid);
 
-  status = stub->QueryTaskIdFromPortForward(&context, request, &reply);
+  status = stub->QueryStepFromPortForward(&context, request, &reply);
   if (!status.ok()) {
     pam_syslog(pamh, LOG_ERR, "QueryTaskIdFromPort gRPC call failed: %s | %s",
                status.error_message().c_str(), status.error_details().c_str());
@@ -420,13 +420,13 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   }
 
   {
-    crane::grpc::QueryTaskEnvVariablesForwardRequest request;
-    crane::grpc::QueryTaskEnvVariablesForwardReply reply;
+    crane::grpc::QuerySshStepEnvVariablesForwardRequest request;
+    crane::grpc::QuerySshStepEnvVariablesForwardReply reply;
     ClientContext context;
 
     request.set_task_id(task_id);
 
-    status = stub->QueryTaskEnvVariablesForward(&context, request, &reply);
+    status = stub->QuerySshStepEnvVariablesForward(&context, request, &reply);
     if (!status.ok()) {
       pam_syslog(
           pamh, LOG_ERR,

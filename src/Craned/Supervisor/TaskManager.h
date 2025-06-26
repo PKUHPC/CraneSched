@@ -26,33 +26,38 @@
 #include "crane/PasswordEntry.h"
 
 namespace Supervisor {
+
 struct StepInstance {
   crane::grpc::TaskToD step_to_super;
   std::unique_ptr<CforedClient> cfored_client;
+
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
 };
 
 struct MetaInExecution {
-  std::string parsed_sh_script_path;
   virtual ~MetaInExecution() = default;
+
+  std::string parsed_sh_script_path;
 };
 
 struct BatchMetaInExecution : MetaInExecution {
+  ~BatchMetaInExecution() override = default;
+
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
-  ~BatchMetaInExecution() override = default;
 };
 
 struct CrunMetaInExecution : MetaInExecution {
+  ~CrunMetaInExecution() override = default;
+
   int task_input_fd;
   int task_output_fd;
 
   std::string x11_target;
   uint16_t x11_port;
   std::string x11_auth_path;
-  ~CrunMetaInExecution() override = default;
 };
 
 struct TaskExitInfo {
@@ -66,20 +71,22 @@ class ExecutionInterface {
  public:
   explicit ExecutionInterface(const StepInstance* step_spec)
       : step(step_spec) {}
+  virtual ~ExecutionInterface();
+
   ExecutionInterface(const ExecutionInterface&) = delete;
   ExecutionInterface(ExecutionInterface&&) = delete;
+
   ExecutionInterface& operator=(ExecutionInterface&&) = delete;
   ExecutionInterface& operator=(const ExecutionInterface&) = delete;
-  virtual ~ExecutionInterface();
 
   void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
-  // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
-  // this function.
-  [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
+  // Before we distinguish TaskToD/SpecToSuper and JobSpec,
+  // it's hard to remove this function.
+  [[deprecated]] virtual EnvMap GetChildProcessEnv() const;
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -87,7 +94,7 @@ class ExecutionInterface {
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
 
-  virtual const TaskExitInfo& HandleSigChld(pid_t pid, int status) = 0;
+  virtual const TaskExitInfo& HandleSigchld(pid_t pid, int status) = 0;
 
   // Set from TaskManager
   const StepInstance* step;
@@ -140,6 +147,7 @@ class ExecutionInterface {
 
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
+
   // NOLINTEND(readability-identifier-naming)
   // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   pid_t m_pid_{0};  // forked pid
@@ -167,7 +175,7 @@ class ContainerInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  const TaskExitInfo& HandleSigChld(pid_t pid, int status) override;
+  const TaskExitInfo& HandleSigchld(pid_t pid, int status) override;
 
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
@@ -189,17 +197,20 @@ class ProcessInstance : public ExecutionInterface {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  const TaskExitInfo& HandleSigChld(pid_t pid, int status) override;
+  const TaskExitInfo& HandleSigchld(pid_t pid, int status) override;
 };
 
 class TaskManager {
  public:
   explicit TaskManager();
+  ~TaskManager();
+
   TaskManager(const TaskManager&) = delete;
   TaskManager(TaskManager&&) = delete;
+
   TaskManager& operator=(const TaskManager&) = delete;
   TaskManager& operator=(TaskManager&&) = delete;
-  ~TaskManager();
+
   void Wait();
 
   // NOLINTBEGIN(readability-identifier-naming)

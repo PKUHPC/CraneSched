@@ -485,7 +485,7 @@ class TaskScheduler {
 
   CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
 
-  void TaskStatusChangeWithReasonAsync(uint32_t task_id,
+  void StepStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,

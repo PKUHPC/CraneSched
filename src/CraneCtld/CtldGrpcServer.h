@@ -189,10 +189,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::SubmitBatchTasksRequest *request,
       crane::grpc::SubmitBatchTasksReply *response) override;
 
-  grpc::Status TaskStatusChange(
+  grpc::Status StepStatusChange(
       grpc::ServerContext *context,
-      const crane::grpc::TaskStatusChangeRequest *request,
-      crane::grpc::TaskStatusChangeReply *response) override;
+      const crane::grpc::StepStatusChangeRequest *request,
+      crane::grpc::StepStatusChangeReply *response) override;
 
   grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext *context,
