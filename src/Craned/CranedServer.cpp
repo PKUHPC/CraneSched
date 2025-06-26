@@ -288,7 +288,6 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   ServerBuilderAddUnixInsecureListeningPort(&builder,
                                             listen_conf.UnixSocketListenAddr);
 
-
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
