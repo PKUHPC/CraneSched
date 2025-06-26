@@ -1373,10 +1373,10 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   }
 
   auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-  
+
   std::vector<std::string> valid_nodes;
   valid_nodes.reserve(request->craned_ids_size());
-  
+
   for (const auto &craned_id : request->craned_ids()) {
     auto it = craned_meta_map->find(craned_id);
     if (it == craned_meta_map->end()) {
