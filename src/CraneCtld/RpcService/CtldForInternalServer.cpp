@@ -328,8 +328,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 }
 
 void CtldForInternalServer::Shutdown() {
-  m_server_->Shutdown(std::chrono::system_clock::now() +
-                      std::chrono::seconds(1));
+  m_server_->Shutdown();
 }
 
 CtldForInternalServer::CtldForInternalServer(
