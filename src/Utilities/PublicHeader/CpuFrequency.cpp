@@ -22,6 +22,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sys/file.h>
 
 #include "absl/strings/str_split.h"
 #include "crane/Logger.h"
@@ -47,6 +48,9 @@ void CpuFrequency::Init(uint32_t cpu_num) {
   m_cpu_freq_data_.resize(cpu_num);
 
   for (uint32_t i = 0; i < cpu_num; ++i) {
+
+    CpuFreqData& freq_data = m_cpu_freq_data_[i];
+
     std::string gov_path =
         fmt::format("{}{}/cpufreq/scaling_available_governors", kPathToCpu, i);
     std::ifstream infile(gov_path);
@@ -58,23 +62,25 @@ void CpuFrequency::Init(uint32_t cpu_num) {
     }
 
     if (value == "performance") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_PERFORMANCE;
+      freq_data.avail_governors |= GOV_PERFORMANCE;
     } else if (value == "userspace") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_USERSPACE;
+      freq_data.avail_governors |= GOV_USERSPACE;
     } else if (value == "conservative") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_CONSERVATIVE;
+      freq_data.avail_governors |= GOV_CONSERVATIVE;
     } else if (value == "ondemand") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_ONDEMAND;
+      freq_data.avail_governors |= GOV_ONDEMAND;
     } else if (value == "powersave") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_POWERSAVE;
+      freq_data.avail_governors |= GOV_POWERSAVE;
     } else if (value == "conservative") {
-      m_cpu_freq_data_[i].avail_governors |= GOV_CONSERVATIVE;
+      freq_data.avail_governors |= GOV_CONSERVATIVE;
     }
+
     infile.close();
 
     std::string freq_path = fmt::format(
         "{}{}/cpufreq/scaling_available_frequencies", kPathToCpu, i);
-    std::ifstream freq_file(gov_path);
+
+    std::ifstream freq_file(freq_path);
     if (!freq_file.is_open()) {
       /* Do not log errors here; the scaling_available_frequencies file
        * does not exist when using the intel_pstate driver.
@@ -90,56 +96,153 @@ void CpuFrequency::Init(uint32_t cpu_num) {
           all_avail = true;
           break;
         }
-        m_cpu_freq_data_[i].avail_freq.emplace_back(freq);
+        freq_data.avail_freq.emplace_back(freq);
       }
       freq_file.close();
-      std::sort(m_cpu_freq_data_[i].avail_freq.begin(),
-                m_cpu_freq_data_[i].avail_freq.end());
+      std::ranges::sort(freq_data.avail_freq);
       if (!all_avail) CRANE_ERROR("all available frequencies not scanned");
     }
+
+    freq_data.new_frequency = kInvalidFreq;
+    freq_data.new_max_freq = kInvalidFreq;
+    freq_data.new_min_freq = kInvalidFreq;
+    freq_data.new_governor.clear();
   }
 }
 
 void CpuFrequency::CpuFreqValidateAndSet(const std::string& low,
                                          const std::string& high,
                                          const std::string& governor,
+                                         const uint32_t job_id,
                                          const std::string& cpu_ids_str) {
-  CRANE_DEBUG("cpu freq request: min={}, max={}, governor={}", low, high,
-              governor);
+
+  CRANE_DEBUG("task {} cpu {} freq request: min={}, max={}, governor={}",
+    job_id, cpu_ids_str, low, high, governor);
 
   if (m_cpu_freq_data_.empty()) return;
 
   std::list<uint32_t> cpu_ids = ParseCpuList_(cpu_ids_str);
   for (uint32_t cpu_idx : cpu_ids) {
     if (cpu_idx >= m_cpu_freq_data_.size()) {
-      CRANE_ERROR("index {} exceeds cpu count {}", cpu_idx, m_cpu_freq_data_.size());
-      return ;
+      CRANE_ERROR("index {} exceeds cpu count {}", cpu_idx,
+                  m_cpu_freq_data_.size());
+      return;
     }
   }
 
   for (uint32_t cpu_idx : cpu_ids) {
     CpuFreqSetupData_(low, high, governor, cpu_idx);
 
-
     auto& freq_data = m_cpu_freq_data_[cpu_idx];
 
-    if (freq_data.new_frequency == kInvalidFreq
-      && freq_data.new_min_freq == kInvalidFreq
-      && freq_data.new_max_freq == kInvalidFreq
-      && freq_data.new_governor.empty())
-        continue;
-    CRANE_DEBUG("cpu_freq: current_state cpu={} org_min={} org_freq={} org_max={} org_gpv={}"
-      , cpu_idx, freq_data.org_min_freq, freq_data.org_frequency,
-      freq_data.org_max_freq, freq_data.org_governor);
+    if (freq_data.new_frequency == kInvalidFreq &&
+        freq_data.new_min_freq == kInvalidFreq &&
+        freq_data.new_max_freq == kInvalidFreq &&
+        freq_data.new_governor.empty())
+      continue;
 
-    // TODO: set
-    // According to the kernel documentation, the maximum frequency must be set before the minimum frequency.
+    CRANE_DEBUG(
+        "cpu_freq: current_state cpu={} org_min={} org_freq={} org_max={} "
+        "org_gpv={}",
+        cpu_idx, freq_data.org_min_freq, freq_data.org_frequency,
+        freq_data.org_max_freq, freq_data.org_governor);
+
+    // According to the kernel documentation, the maximum frequency must be set
+    // before the minimum frequency.
     if (freq_data.new_max_freq != kInvalidFreq) {
-      uint32_t freq = freq_data.new_max_freq;
-      if (freq_data.org_frequency > freq) {
-        // uint32_t rc =
+      if (freq_data.org_frequency > freq_data.new_max_freq) {
+        if (!CpuFreqSetGov_(cpu_idx, "userspace", job_id)) return;
+
+        if (!CpuFreqSetScalingFreq_(cpu_idx, freq_data.new_max_freq,
+                                    "scaling_setspeed", job_id))
+          continue;
+
+        // If no new governor is specified, restore the original governor.
+        if (freq_data.new_governor.empty()) {
+          if (!CpuFreqSetGov_(cpu_idx, freq_data.org_governor, job_id)) continue;
+        }
+
+        // set scaling_max_freq
+        if (!CpuFreqSetScalingFreq_(cpu_idx, freq_data.new_max_freq,
+                                    "scaling_max_freq", job_id))
+          continue;
       }
     }
+
+    if (freq_data.new_min_freq != kInvalidFreq) {
+      if (freq_data.org_frequency < freq_data.new_min_freq) {
+        if (!CpuFreqSetGov_(cpu_idx, "userspace", job_id)) continue;
+        if (!CpuFreqSetScalingFreq_(cpu_idx, freq_data.new_min_freq,
+                                    "scaling_setspeed", job_id))
+          continue;
+        if (freq_data.new_governor.empty()) {
+          if (!CpuFreqSetGov_(cpu_idx, freq_data.org_governor, job_id)) continue;
+        }
+      }
+      if (CpuFreqSetScalingFreq_(cpu_idx, freq_data.new_min_freq,
+                                 "scaling_min_freq", job_id))
+        continue;
+    }
+
+    if (freq_data.new_frequency != kInvalidFreq) {
+      if (freq_data.org_frequency != freq_data.new_frequency) {
+        if (!CpuFreqSetGov_(cpu_idx, "userspace", job_id))
+          continue;
+      }
+      if (!CpuFreqSetScalingFreq_(cpu_idx, freq_data.new_frequency,
+                                  "scaling_setspeed", job_id))
+        continue;
+    }
+
+    if (!freq_data.new_governor.empty()) {
+      if (!CpuFreqSetGov_(cpu_idx, freq_data.new_governor, job_id)) continue;
+    }
+
+    CRANE_DEBUG("task {} set cpu freq", job_id);
+  }
+}
+
+void CpuFrequency::CpuFreqReset(uint32_t job_id) {
+
+  for (uint32_t i = 0; i < m_cpu_freq_data_.size(); i++) {
+    CpuFreqData& freq_data = m_cpu_freq_data_[i];
+
+    if (freq_data.new_frequency == kInvalidFreq
+      && freq_data.new_max_freq == kInvalidFreq
+      && freq_data.new_min_freq == kInvalidFreq
+      && freq_data.new_governor.empty())
+      continue;
+
+    int fd = TestCpuOwnerLock_(i, 0);
+    if (fd < 0)
+      continue;
+
+    if (freq_data.new_frequency != kInvalidFreq) {
+      if (!CpuFreqSetGov_(i, "userspace", job_id))
+        continue;
+      if (!CpuFreqSetScalingFreq_(i, freq_data.org_frequency,
+                                  "scaling_setspeed", job_id))
+        continue;
+    }
+
+    if (freq_data.new_max_freq != kInvalidFreq) {
+      if (!CpuFreqSetScalingFreq_(i, freq_data.org_frequency,
+                                  "scaling_max_freq", job_id))
+        continue;
+    }
+
+    if (freq_data.new_min_freq != kInvalidFreq) {
+      if (!CpuFreqSetScalingFreq_(i, freq_data.org_min_freq, "scaling_min_freq",
+                                  job_id))
+        continue;
+    }
+
+    if (!freq_data.new_governor.empty()) {
+      if (!CpuFreqSetGov_(i, freq_data.org_governor, job_id))
+        continue;
+    }
+
+    CRANE_DEBUG("task {} reset cpu {}");
   }
 }
 
@@ -206,63 +309,63 @@ uint32_t CpuFrequency::CpuFreqGetScalingFreq_(uint32_t cpu_idx,
 void CpuFrequency::CpuFreqSetupData_(const std::string& low,
                                      const std::string& high,
                                      const std::string& governor, int cpu_idx) {
-  uint32_t freq;
 
   if (!CpuFreqCurrentState_(cpu_idx))
     return ;
 
-  switch (governor) {
-    case "conservative":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_CONSERVATIVE)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-      break;
-    case "performance":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_PERFORMANCE)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-      break;
-    case "powersave":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_POWERSAVE)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-    break;
-    case "ondemand":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_ONDEMAND)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-      break;
-    case "userspace":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_USERSPACE)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-    case "schedutil":
-      if (m_cpu_freq_data_[cpu_idx].avail_governors & GOV_SCHEDUTIL)
-        m_cpu_freq_data_[cpu_idx].new_governor = governor ;
-    default:
-      CRANE_ERROR("Invalid governor {}", governor);
-  }
+  CpuFreqData& freq_data = m_cpu_freq_data_[cpu_idx];
 
-  if (governor == "userspace") {
-    if (high.empty()) return ;
-    // Power capping: Set the maximum, minimum, and current frequency to the same value under the userspace governor.
-    uint32_t freq = CpuFreqFreqSpecNum_(low, cpu_idx);
-    m_cpu_freq_data_[cpu_idx].new_frequency = freq;
-    m_cpu_freq_data_[cpu_idx].new_min_freq = freq;
-    m_cpu_freq_data_[cpu_idx].new_max_freq = freq;
+  if (governor == "conservative") {
+    if ((freq_data.avail_governors & GOV_CONSERVATIVE) != 0)
+      freq_data.new_governor = governor;
+  } else if (governor == "performance") {
+    if ((freq_data.avail_governors & GOV_PERFORMANCE) != 0)
+      freq_data.new_governor = governor;
+  } else if (governor == "powersave") {
+    if ((freq_data.avail_governors & GOV_POWERSAVE) != 0)
+      freq_data.new_governor = governor;
+  } else if (governor == "ondemand") {
+    if ((freq_data.avail_governors & GOV_ONDEMAND) != 0)
+      freq_data.new_governor = governor;
+  } else if (governor == "userspace") {
+    if ((freq_data.avail_governors & GOV_USERSPACE) != 0)
+      freq_data.new_governor = governor;
+  } else if (governor == "schedutil") {
+    if ((freq_data.avail_governors & GOV_SCHEDUTIL) != 0)
+      freq_data.new_governor = governor;
+  } else {
+    CRANE_ERROR("Invalid governor {}", governor);
     return ;
   }
 
-  if (!low.empty() && !high.empty()) {
+  // --cpu-freq=<frequency value or alias>
+  if (governor == "userspace") {
+    if (low.empty()) return ;
+    // Power capping: Set the maximum, minimum, and current frequency to the same value under the userspace governor.
     uint32_t freq = CpuFreqFreqSpecNum_(low, cpu_idx);
-    m_cpu_freq_data_[cpu_idx].new_min_freq = freq;
-    freq = CpuFreqFreqSpecNum_(high, cpu_idx);
-    m_cpu_freq_data_[cpu_idx].new_max_freq = freq;
+    freq_data.new_frequency = freq;
+    freq_data.new_min_freq = freq;
+    freq_data.new_max_freq = freq;
+    return ;
   }
 
-  if (governor.empty())
-    m_cpu_freq_data_[cpu_idx].new_governor = governor;
+  // --cpu-freq=<low-high:governor>
+  if (!low.empty() && !high.empty()) {
+    uint32_t freq = CpuFreqFreqSpecNum_(low, cpu_idx);
+    freq_data.new_min_freq = freq;
+    freq = CpuFreqFreqSpecNum_(high, cpu_idx);
+    freq_data.new_max_freq = freq;
+  }
 
-  if (m_cpu_freq_data_[cpu_idx].new_frequency != kInvalidFreq) {
-    if (m_cpu_freq_data_[cpu_idx].new_frequency < m_cpu_freq_data_[cpu_idx].org_min_freq)
-      m_cpu_freq_data_[cpu_idx].new_min_freq = m_cpu_freq_data_[cpu_idx].new_frequency;
-    if (m_cpu_freq_data_[cpu_idx].new_frequency > m_cpu_freq_data_[cpu_idx].org_max_freq)
-      m_cpu_freq_data_[cpu_idx].new_max_freq = m_cpu_freq_data_[cpu_idx].new_frequency;
+  // --cpu-freq=<governor> or <low-high:governor>
+  if (!governor.empty())
+    freq_data.new_governor = governor;
+
+  if (freq_data.new_frequency != kInvalidFreq) {
+    if (freq_data.new_frequency < freq_data.org_min_freq)
+      freq_data.new_min_freq = freq_data.new_frequency;
+    if (freq_data.new_frequency > freq_data.org_max_freq)
+      freq_data.new_max_freq = freq_data.new_frequency;
   }
 }
 
@@ -273,7 +376,7 @@ bool CpuFrequency::CpuFreqCurrentState_(int cpu_idx) {
   if (m_cpu_freq_data_[cpu_idx].org_set) return true;
 
   if (freq_file == -1) {
-    if (CpuFreqGetScalingFreq_(cpu_idx, "cpuinfo_cur_freq"))
+    if (CpuFreqGetScalingFreq_(cpu_idx, "cpuinfo_cur_freq") != 0U)
       freq_file = 0;
     else
       freq_file = 1;
@@ -352,41 +455,95 @@ uint32_t CpuFrequency::CpuFreqFreqSpecNum_(const std::string& value,
     return kInvalidFreq;
 
   size_t nfreq = m_cpu_freq_data_.size();
+  CpuFreqData& freq_data = m_cpu_freq_data_[cpu_idx];
 
-  switch (value) {
-  case "low":
-    return m_cpu_freq_data_[cpu_idx].avail_freq[0];
-  case "medium":
-    if (nfreq == 1) return m_cpu_freq_data_[cpu_idx].avail_freq[0];
+  if (value == "low")
+    return freq_data.avail_freq[0];
+
+  if (value == "medium") {
+    if (nfreq == 1) return freq_data.avail_freq[0];
     uint32_t fx = (nfreq - 1) / 2;
-    return m_cpu_freq_data_[cpu_idx].avail_freq[fx];
-
-  case "highm1":
-    if (nfreq == 1) return m_cpu_freq_data_[cpu_idx].avail_freq[0];
+    return freq_data.avail_freq[fx];
+  }
+  if (value == "highm1") {
+    if (nfreq == 1) return freq_data.avail_freq[0];
     uint32_t fx = nfreq - 2;
-    return m_cpu_freq_data_[cpu_idx].avail_freq[fx];
+    return freq_data.avail_freq[fx];
+  }
+  if (value == "high") {
+    return freq_data.avail_freq[nfreq - 1];
+  }
 
-  default:
+  try {
+    uint32_t freq = std::stoul(value);
+    return freq;
+  } catch (const std::exception& e) {
     return kInvalidFreq;
   }
+
+  return kInvalidFreq;
 }
 
-bool CpuFrequency::CpuFreqSetGob_(int cpu_idx, const std::string& governor) {
+bool CpuFrequency::CpuFreqSetGov_(int cpu_idx, const std::string& governor, uint32_t job_id) {
   std::string path =
       fmt::format("{}cpu{}/cpufreq/scaling_governor", kPathToCpu, cpu_idx);
 
-  // TODO: 加文件锁
-  // int fd = SetCpuOwnerLock_(cpu_idx, job_id);
+  int fd = SetCpuOwnerLock_(cpu_idx, job_id);
+  if (fd < 0) return false;
 
+  std::ofstream ofs(path, std::ios::out | std::ios::trunc);
+  if (ofs) {
+    ofs << governor << '\n';
+  } else {
+    CRANE_ERROR("{} Can not set CPU {} governor: {}", job_id, cpu_idx,
+                governor);
+
+    flock(fd, LOCK_UN);
+    close(fd);
+    return false;
+  }
+
+  flock(fd, LOCK_UN);
+  close(fd);
+
+  return true;
+}
+
+bool CpuFrequency::CpuFreqSetScalingFreq_(int cpu_idx, uint32_t freq,
+                                          const std::string& option, uint32_t job_id) {
+  std::string path = fmt::format("{}cpu{}/cpufreq/{}", kPathToCpu, cpu_idx, option);
+
+  int fd = SetCpuOwnerLock_(cpu_idx, job_id);
+  if (fd < 0)
+    return false;
+
+  std::ofstream ofs(path, std::ios::out | std::ios::trunc);
+  if (ofs) {
+    ofs << freq << '\n';
+  } else {
+    CRANE_ERROR("{} Can not set CPU {} option: {}", job_id, cpu_idx,
+                freq);
+
+    flock(fd, LOCK_UN);
+    close(fd);
+    return false;
+  }
+
+  flock(fd, LOCK_UN);
+  close(fd);
+
+  return true;
 }
 
 /*
-The purpose of this set of locks is to prevent race conditions when changing the CPU frequency or governor.
-Specifically, when a job ends, the CPU frequency should only be reset if it was the last job to set the CPU frequency.
-Due to the existence of gang scheduling and the cancellation of suspended/running jobs, timing issues may occur.
-_set_cpu_owner_lock - Set the specified job as the owner of the CPU; the file is locked on exit
-_test_cpu_owner_lock - Test whether the specified job owns the CPU
-*/
+ * The purpose of this set of locks is to prevent race conditions when changing
+ * the CPU frequency or governor. Specifically, when a job ends, the CPU
+ * frequency should only be reset if it was the last job to set the CPU
+ * frequency. Due to the existence of gang scheduling and the cancellation of
+ * suspended/running jobs, timing issues may occur. _set_cpu_owner_lock - Set
+ * the specified job as the owner of the CPU; the file is locked on exit
+ * _test_cpu_owner_lock - Test whether the specified job owns the CPU
+ */
 int CpuFrequency::SetCpuOwnerLock_(int cpu_id, uint32_t job_id) {
   // lock dir TODO: use config base dir
   std::string tmp = fmt::format("{}/cpu", kDefaultCraneBaseDir, cpu_id);
@@ -399,28 +556,80 @@ int CpuFrequency::SetCpuOwnerLock_(int cpu_id, uint32_t job_id) {
     return fd;
   }
 
-  int rc;
-  for (int i = 0; i< 10; i++) {
-    if (i)
-      usleep(1000);
-    rc = flock(fd, LOCK_EX | LOCK_NB);
-    if (rc == 0)
-      break;
-    if ((errno != EACCES) && (errno != EAGAIN))
-      break;
-  }
 
+  int rc = FdLockRetry_(fd);
   if (rc < 0) {
     CRANE_ERROR("flock {} error", tmp);
     close(fd);
     return -1;
   }
 
-  // TODO: write job id to file
-  // pwrite(fd, (void*)job_id, sizeof(job_id), 0);
-  // ftruncate(fd, sizeof(job_id));
+  ssize_t wr = pwrite(fd, &job_id, sizeof(job_id), 0);
+  if (wr != sizeof(job_id)) {
+    CRANE_ERROR("Failed to write job_id to {}: {}", tmp, strerror(errno));
+    close(fd);
+    return -1;
+  }
 
   return fd;
+}
+
+int CpuFrequency::TestCpuOwnerLock_(int cpu_id, uint32_t job_id) {
+  std::string tmp = fmt::format("{}/cpu", kDefaultCraneBaseDir);
+
+  if ((mkdir(tmp.c_str(), 0700) != 0) && (errno != EEXIST)) {
+    CRANE_ERROR("mkdir %s failed: %m", tmp);
+    return -1;
+  }
+
+  tmp = fmt::format("{}/cpu/{}", kDefaultCraneBaseDir, cpu_id);
+  int fd = open(tmp.c_str(), O_RDWR, 0600);
+
+  if (fd < 0) {
+    CRANE_ERROR("open {} error", tmp);
+    return -1;
+  }
+
+  int rc = FdLockRetry_(fd);
+  if (rc < 0) {
+    CRANE_ERROR("flock {} error", tmp);
+    close(fd);
+    return -1;
+  }
+
+  uint32_t in_job_id;
+  ssize_t n = pread(fd, &in_job_id, sizeof(in_job_id), 0);
+  if (n < 0) {
+    flock(fd, LOCK_UN);
+    close(fd);
+    return -1;
+  }
+
+  flock(fd, LOCK_UN);
+
+  if (job_id != in_job_id) {
+    CRANE_DEBUG("CPU %d now owned by job %u rather than job %u", cpu_id, in_job_id, job_id);
+    close(fd);
+    return -1;
+  }
+
+  close(fd);
+  CRANE_DEBUG("CPU {} owned by job {} as expected", cpu_id, job_id);
+
+  return fd;
+}
+
+int CpuFrequency::FdLockRetry_(int fd) {
+  int rc = -1;
+
+  for (int i = 0; i < 10; i++) {
+    if (i > 0) usleep(1000);
+    rc = flock(fd, LOCK_EX | LOCK_NB);
+    if (rc == 0) break;
+    if ((errno != EACCES) && (errno != EAGAIN)) break;
+  }
+
+  return rc;
 }
 
 } // namespace crane

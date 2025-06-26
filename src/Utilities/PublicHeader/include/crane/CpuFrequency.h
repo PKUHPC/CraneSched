@@ -48,28 +48,27 @@ public:
   void Init(uint32_t cpu_num);
 
   void CpuFreqValidateAndSet(const std::string& low, const std::string& high,
-                             const std::string& governor,
-                             const std::string& cpu_ids);
+                             const std::string& governor, uint32_t job_id,
+                             const std::string& cpu_ids_str);
+
+  void CpuFreqReset(uint32_t job_id);
 
 private:
-  std::list<uint32_t> ParseCpuList_(const std::string& cpu_ids_str);
+  static std::list<uint32_t> ParseCpuList_(const std::string& cpu_ids_str);
+  static uint32_t CpuFreqGetScalingFreq_(uint32_t cpu_idx, const std::string& option);
+  static bool CpuFreqSetGov_(int cpu_idx, const std::string& governor, uint32_t job_id);
+  static bool CpuFreqSetScalingFreq_(int cpu_idx, uint32_t freq, const std::string& option, uint32_t job_id);
+  static int SetCpuOwnerLock_(int cpu_id, uint32_t job_id);
+  static int FdLockRetry_(int fd);
 
   bool DeriveAvailFreq_(uint32_t cpu_idx);
-
-  static uint32_t CpuFreqGetScalingFreq_(uint32_t cpu_idx, const std::string& option);
-
   void CpuFreqSetupData_(const std::string& low, const std::string& high,
-    const std::string& governor, int cpu_idx);
-
+                         const std::string& governor, int cpu_idx);
   bool CpuFreqCurrentState_(int cpu_idx);
-
   bool CpuFreqGetCurGov_(int cpu_idx);
-
   uint32_t CpuFreqFreqSpecNum_(const std::string& value, int cpu_idx);
+  int TestCpuOwnerLock_(int cpu_id, uint32_t job_id);
 
-  bool CpuFreqSetGob_(int cpu_idx, const std::string& governor);
-
-  int SetCpuOwnerLock_(int cpu_id, uint32_t job_id);
 
   struct CpuFreqData{
     uint8_t avail_governors;
