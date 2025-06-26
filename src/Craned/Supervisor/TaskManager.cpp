@@ -78,7 +78,7 @@ ExecutionInterface::~ExecutionInterface() {
   }
 }
 
-EnvMap ExecutionInterface::GetChildProcessEnv_() const {
+EnvMap ExecutionInterface::GetChildProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
   // Job env from CraneD
@@ -588,7 +588,7 @@ CraneErrCode ContainerInstance::Prepare() {
   m_bundle_path_ = step->step_to_super.container();
   m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
   // FIXME: Some env like x11 port are assigned later in spawn.
-  m_env_ = GetChildProcessEnv_();
+  m_env_ = GetChildProcessEnv();
   // m_arguments_ is not applicable for container tasks.
 
   // Check relative path
@@ -957,7 +957,7 @@ CraneErrCode ContainerInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-const TaskExitInfo& ContainerInstance::HandleSigChld(pid_t pid, int status) {
+const TaskExitInfo& ContainerInstance::HandleSigchld(pid_t pid, int status) {
   m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
@@ -1228,7 +1228,7 @@ CraneErrCode ProcessInstance::Spawn() {
       SetupChildProcessCrunX11_();
     }
 
-    m_env_ = GetChildProcessEnv_();
+    m_env_ = GetChildProcessEnv();
 
     // Apply environment variables
     err = SetChildProcessEnv_();
@@ -1288,7 +1288,7 @@ CraneErrCode ProcessInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-const TaskExitInfo& ProcessInstance::HandleSigChld(pid_t pid, int status) {
+const TaskExitInfo& ProcessInstance::HandleSigchld(pid_t pid, int status) {
   m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
@@ -1450,8 +1450,10 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
 
 std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
   CRANE_INFO("[Job #{}] Executing task.", m_step_.step_to_super.task_id());
+
   std::promise<CraneExpected<pid_t>> pid_promise;
-  auto pid_future = pid_promise.get_future();
+  std::future<CraneExpected<pid_t>> pid_future = pid_promise.get_future();
+
   auto elem = ExecuteTaskElem{.pid_prom = std::move(pid_promise)};
 
   if (m_step_.step_to_super.container().length() != 0) {
@@ -1565,7 +1567,7 @@ void TaskManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      const auto& exit_info = m_task_->HandleSigChld(pid, status);
+      const auto& exit_info = m_task_->HandleSigchld(pid, status);
       CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Status: {}", pid,
                   exit_info.is_terminated_by_signal, exit_info.value);
       if (m_step_.IsCrun()) {
@@ -1768,7 +1770,7 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
       elem.set_value(std::unexpected(CraneErrCode::ERR_NON_EXISTENT));
       continue;
     }
-    elem.set_value(m_task_->GetChildProcessEnv_());
+    elem.set_value(m_task_->GetChildProcessEnv());
   }
 }
 

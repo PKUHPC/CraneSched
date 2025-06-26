@@ -29,7 +29,8 @@
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
-// TODO: Replace this with task execution info.
+
+// TODO: Replace this with tak execution info.
 using StepToD = crane::grpc::TaskToD;
 
 struct StepInstance {
@@ -92,7 +93,7 @@ class JobManager {
 
   bool FreeJobs(const std::set<task_id_t>& job_ids);
 
-  CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
+  CraneErrCode ExecuteStepAsync(StepToD const& step);
 
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 
@@ -102,13 +103,13 @@ class JobManager {
 
   std::set<task_id_t> GetAllocatedJobs();
 
-  void TerminateTaskAsync(task_id_t task_id);
+  void TerminateStepAsync(task_id_t task_id);
 
-  void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
+  void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
 
-  bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
+  bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
-  void TaskStopAndDoStatusChangeAsync(task_id_t job_id,
+  void StepStopAndDoStatusChangeAsync(task_id_t job_id,
                                       crane::grpc::TaskStatus new_status,
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
@@ -132,8 +133,8 @@ class JobManager {
     std::vector<JobToD> job_specs;
   };
 
-  struct EvQueueExecuteTaskElem {
-    std::unique_ptr<StepInstance> execution;
+  struct EvQueueExecuteStepElem {
+    std::unique_ptr<StepInstance> step_inst;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -148,8 +149,8 @@ class JobManager {
     std::promise<bool> ok_prom;
   };
 
-  struct TaskTerminateQueueElem {
-    uint32_t task_id{0};
+  struct StepTerminateQueueElem {
+    uint32_t step_id{0};
     bool terminated_by_user{false};  // If the task is canceled by user,
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
@@ -208,7 +209,7 @@ class JobManager {
   // Callback function to handle SIGINT sent by Ctrl+C
   void EvSigintCb_();
 
-  void EvCleanGrpcExecuteTaskQueueCb_();
+  void EvCleanGrpcExecuteStepQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
 
@@ -235,9 +236,9 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
   ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
+  std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
   // A custom event that handles the ExecuteTask RPC.
-  ConcurrentQueue<EvQueueExecuteTaskElem> m_grpc_execute_task_queue_;
+  ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
@@ -245,8 +246,8 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
-  ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
+  std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
+  ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;

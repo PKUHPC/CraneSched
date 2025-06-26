@@ -32,6 +32,7 @@
 #  define CRANE_VERSION_STRING "Unknown"
 #endif
 
+using job_id_t = uint32_t;
 using task_id_t = uint32_t;
 using step_id_t = uint32_t;
 

@@ -20,14 +20,16 @@
 
 #include "TaskManager.h"
 
-grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
+namespace Supervisor {
+
+grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
   std::future<CraneExpected<pid_t>> pid_future = g_task_mgr->ExecuteTaskAsync();
   pid_future.wait();
 
-  auto pid = pid_future.get();
+  CraneExpected<pid_t> pid = pid_future.get();
   if (pid.has_value()) {
     response->set_ok(true);
     response->set_pid(pid.value());
@@ -37,14 +39,14 @@ grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
   return Status::OK;
 }
 
-grpc::Status Supervisor::SupervisorServiceImpl::QueryEnvMap(
+grpc::Status SupervisorServiceImpl::QueryEnvMap(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::QueryStepEnvRequest* request,
     crane::grpc::supervisor::QueryStepEnvReply* response) {
   auto env_future = g_task_mgr->QueryStepEnvAsync();
   std::expected env_expt = env_future.get();
   if (env_expt.has_value()) {
-    auto grep_env = response->mutable_env();
+    auto* grep_env = response->mutable_env();
     for (auto& [key, value] : env_expt.value()) {
       (*grep_env)[key] = value;
     }
@@ -52,7 +54,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::QueryEnvMap(
   return Status::OK;
 }
 
-grpc::Status Supervisor::SupervisorServiceImpl::CheckStatus(
+grpc::Status SupervisorServiceImpl::CheckStatus(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::CheckStatusRequest* request,
     crane::grpc::supervisor::CheckStatusReply* response) {
@@ -62,7 +64,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::CheckStatus(
   return Status::OK;
 }
 
-grpc::Status Supervisor::SupervisorServiceImpl::ChangeTaskTimeLimit(
+grpc::Status SupervisorServiceImpl::ChangeTaskTimeLimit(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
     crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) {
@@ -77,7 +79,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status Supervisor::SupervisorServiceImpl::TerminateTask(
+grpc::Status SupervisorServiceImpl::TerminateTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TerminateTaskRequest* request,
     crane::grpc::supervisor::TerminateTaskReply* response) {
@@ -87,7 +89,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::TerminateTask(
   return Status::OK;
 }
 
-Supervisor::SupervisorServer::SupervisorServer() {
+SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
   auto unix_socket_path = fmt::format(
@@ -98,3 +100,4 @@ Supervisor::SupervisorServer::SupervisorServer() {
 
   m_server_ = builder.BuildAndStart();
 }
+}  // namespace Supervisor

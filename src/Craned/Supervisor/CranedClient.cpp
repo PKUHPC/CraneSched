@@ -42,7 +42,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
 void CranedClient::TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
                                          uint32_t exit_code,
                                          std::optional<std::string> reason) {
-  TaskStatusChangeQueueElem elem{.task_id = g_config.JobId,
+  StepStatusChangeQueueElem elem{.task_id = g_config.JobId,
                                  .new_status = new_status,
                                  .exit_code = exit_code,
                                  .reason = std::move(reason)};
@@ -64,21 +64,21 @@ void CranedClient::AsyncSendThread_() {
       continue;
     }
 
-    TaskStatusChangeQueueElem elem;
+    StepStatusChangeQueueElem elem;
     while (m_task_status_change_queue_.try_dequeue(elem)) {
       grpc::ClientContext context;
-      crane::grpc::TaskStatusChangeRequest request;
-      crane::grpc::TaskStatusChangeReply reply;
+      crane::grpc::StepStatusChangeRequest request;
+      crane::grpc::StepStatusChangeReply reply;
       grpc::Status status;
 
-      CRANE_TRACE("Sending TaskStatusChange for task #{}", elem.task_id);
+      CRANE_TRACE("Sending StepStatusChange for step #{}", elem.task_id);
 
       request.set_task_id(elem.task_id);
       request.set_new_status(elem.new_status);
       request.set_exit_code(elem.exit_code);
       if (elem.reason.has_value()) request.set_reason(elem.reason.value());
 
-      status = m_stub_->TaskStatusChange(&context, request, &reply);
+      status = m_stub_->StepStatusChange(&context, request, &reply);
       if (!status.ok()) {
         CRANE_ERROR(
             "Failed to send TaskStatusChange: "

@@ -25,7 +25,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
 
-message TaskStatusChangeRequest {
+message StepStatusChangeRequest {
   uint32 task_id = 1;
   string craned_id = 2;
   TaskStatus new_status = 3;
@@ -33,7 +33,7 @@ message TaskStatusChangeRequest {
   string reason = 5;
 }
 
-message TaskStatusChangeReply {
+message StepStatusChangeReply {
   bool ok = 1;
 }
 
@@ -90,51 +90,51 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
-message ExecuteTasksRequest {
+message ExecuteStepsRequest {
   repeated TaskToD tasks = 1;
 }
 
-message ExecuteTasksReply {
+message ExecuteStepsReply {
   repeated uint32 failed_task_id_list = 1;
 }
 
-message CreateCgroupForTasksRequest {
+message CreateCgroupForJobsRequest {
   repeated JobToD job_list = 1;
 }
 
-message CreateCgroupForTasksReply {}
+message CreateCgroupForJobsReply {}
 
-message ReleaseCgroupForTasksRequest {
+message ReleaseCgroupForJobsRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
 }
 
-message ReleaseCgroupForTasksReply {}
+message ReleaseCgroupForJobsReply {}
 
-message TerminateTasksRequest {
+message TerminateStepsRequest {
   repeated uint32 task_id_list = 1;
 }
 
-message TerminateTasksReply {
+message TerminateStepsReply {
   bool ok = 1;
   string reason = 2;
 }
 
-message TerminateOrphanedTaskRequest {
+message TerminateOrphanedStepRequest {
   repeated uint32 task_id_list = 1;
 }
 
-message TerminateOrphanedTaskReply {
+message TerminateOrphanedStepReply {
   bool ok = 1;
   string reason = 2;
 }
 
-message ChangeTaskTimeLimitRequest {
+message ChangeJobTimeLimitRequest {
   uint32 task_id = 1;
   int64 time_limit_seconds = 2;
 }
 
-message ChangeTaskTimeLimitReply {
+message ChangeJobTimeLimitReply {
   bool ok = 1;
 }
 
@@ -157,22 +157,22 @@ message CancelTaskReply {
   repeated string not_cancelled_reasons = 4;
 }
 
-message QueryTaskIdFromPortRequest {
+message QueryStepFromPortRequest {
   uint32 port = 1;
 }
 
-message QueryTaskIdFromPortReply {
+message QueryStepFromPortReply {
   bool ok = 1;
   uint32 task_id = 2;
 }
 
-message QueryTaskIdFromPortForwardRequest {
+message QueryStepFromPortForwardRequest {
   uint32 ssh_remote_port = 1;
   string ssh_remote_address = 2;
   uint32 uid = 3;
 }
 
-message QueryTaskIdFromPortForwardReply {
+message QueryStepFromPortForwardReply {
   bool ok = 1;
   bool from_user = 2;
   uint32 task_id = 3;
@@ -430,21 +430,21 @@ message MigrateSshProcToCgroupReply {
   bool ok = 1;
 }
 
-message QueryTaskEnvVariablesRequest {
+message QuerySshStepEnvVariablesRequest {
   uint32 task_id = 1;
 }
 
-message QueryTaskEnvVariablesReply {
+message QuerySshStepEnvVariablesReply {
   bool ok = 1;
   map<string /*name*/, string /*value*/> env_map = 2;
 }
 
-message QueryTaskEnvVariablesForwardRequest {
+message QuerySshStepEnvVariablesForwardRequest {
   uint32 task_id = 1;
   string execution_node = 2;
 }
 
-message QueryTaskEnvVariablesForwardReply {
+message QuerySshStepEnvVariablesForwardReply {
   bool ok = 1;
   map<string /*name*/, string /*value*/> env_map = 2;
 }
@@ -924,10 +924,10 @@ service CraneCtldForInternal {
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
-  rpc ExecuteTask(ExecuteTasksRequest) returns (ExecuteTasksReply);
+  rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
-  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
+  rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
+  rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
@@ -935,27 +935,27 @@ service Craned {
    If there are processes in this interactive task, kill all the processes and deallocate resources.
   If the task is a batch task, just kill it.
   */
-  rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
-  rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
-  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
+  rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
+  rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
+  rpc ChangeJobTimeLimit(ChangeJobTimeLimitRequest) returns (ChangeJobTimeLimitReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
-  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
+  rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
+  rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
 }
 
 service CranedForPam {
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
-  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
+  rpc QueryStepFromPortForward(QueryStepFromPortForwardRequest) returns (QueryStepFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
-  rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+  rpc QuerySshStepEnvVariablesForward(QuerySshStepEnvVariablesForwardRequest) returns (QuerySshStepEnvVariablesForwardReply);
 }
 
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
   rpc TaskIOStream(stream StreamTaskIORequest) returns (stream StreamTaskIOReply);
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+  rpc QueryTaskIdFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }

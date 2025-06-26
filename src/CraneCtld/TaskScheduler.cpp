@@ -686,7 +686,7 @@ void TaskScheduler::ScheduleThread_() {
             return;
           }
 
-          auto err = stub->CreateCgroupForTasks(cgroup_specs);
+          auto err = stub->CreateCgroupForJobs(cgroup_specs);
           if (err == CraneErrCode::SUCCESS) {
             bl.DecrementCount();
             return;
@@ -766,11 +766,11 @@ void TaskScheduler::ScheduleThread_() {
           craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(task.get());
       }
 
-      HashMap<CranedId, crane::grpc::ExecuteTasksRequest>
+      HashMap<CranedId, crane::grpc::ExecuteStepsRequest>
           craned_exec_requests_map;
       for (auto& [craned_id, tasks_raw_ptrs] :
            craned_task_to_exec_raw_ptrs_map) {
-        crane::grpc::ExecuteTasksRequest req;
+        crane::grpc::ExecuteStepsRequest req;
         for (TaskInCtld* task : tasks_raw_ptrs) {
           req.mutable_tasks()->Add(task->GetTaskToD(craned_id));
         }
@@ -844,7 +844,7 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
-        std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(tasks);
+        std::vector<task_id_t> failed_task_ids = stub->ExecuteSteps(tasks);
         for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
       }
@@ -916,7 +916,7 @@ void TaskScheduler::ScheduleThread_() {
             // If the craned is down, just ignore it.
             if (stub == nullptr || stub->Invalid()) return;
 
-            CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups_to_release);
+            CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups_to_release);
             if (err != CraneErrCode::SUCCESS)
               CRANE_ERROR(
                   "Failed to Release cgroup RPC for {} tasks on Node {}",
@@ -1048,7 +1048,7 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
   for (const CranedId& craned_id : craned_ids) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeTaskTimeLimit(task_id, secs);
+      CraneErrCode err = stub->ChangeJobTimeLimit(task_id, secs);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
                     task_id, craned_id);
@@ -1824,7 +1824,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
                       absl::StrJoin(task_ids_to_cancel, ","));
           auto stub = g_craned_keeper->GetCranedStub(id);
           if (stub && !stub->Invalid())
-            stub->TerminateTasks(task_ids_to_cancel);
+            stub->TerminateSteps(task_ids_to_cancel);
         });
   }
 
@@ -2090,7 +2090,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
-        CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);
+        CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                       cgroups.size(), craned_id);

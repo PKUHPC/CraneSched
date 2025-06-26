@@ -35,7 +35,7 @@ using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;
 
 struct TaskStatusChangeQueueElem {
-  task_id_t task_id{};
+  task_id_t step_id{};
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
