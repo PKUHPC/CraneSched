@@ -70,8 +70,8 @@ void CpuFrequency::Init(uint32_t cpu_num) {
       freq_data.avail_governors |= GOV_ONDEMAND;
     } else if (value == "powersave") {
       freq_data.avail_governors |= GOV_POWERSAVE;
-    } else if (value == "conservative") {
-      freq_data.avail_governors |= GOV_CONSERVATIVE;
+    } else if (value == "schedutil") {
+      freq_data.avail_governors |= GOV_SCHEDUTIL;
     }
 
     infile.close();
@@ -302,7 +302,8 @@ uint32_t CpuFrequency::CpuFreqGetScalingFreq_(uint32_t cpu_idx,
 
 void CpuFrequency::CpuFreqSetupData_(const std::string& low,
                                      const std::string& high,
-                                     const std::string& governor, int cpu_idx) {
+                                     const std::string& governor,
+                                     uint32_t cpu_idx) {
   if (!CpuFreqCurrentState_(cpu_idx)) return;
 
   CpuFreqData& freq_data = m_cpu_freq_data_[cpu_idx];
@@ -361,7 +362,7 @@ void CpuFrequency::CpuFreqSetupData_(const std::string& low,
   }
 }
 
-bool CpuFrequency::CpuFreqCurrentState_(int cpu_idx) {
+bool CpuFrequency::CpuFreqCurrentState_(uint32_t cpu_idx) {
   static int freq_file = -1;
   uint32_t freq;
 
@@ -397,7 +398,7 @@ bool CpuFrequency::CpuFreqCurrentState_(int cpu_idx) {
   return true;
 }
 
-bool CpuFrequency::CpuFreqGetCurGov_(int cpu_idx) {
+bool CpuFrequency::CpuFreqGetCurGov_(uint32_t cpu_idx) {
   std::string path =
       fmt::format("{}cpu{}/cpufreq/scaling_governor", kPathToCpu, cpu_idx);
 
@@ -441,7 +442,7 @@ bool CpuFrequency::CpuFreqGetCurGov_(int cpu_idx) {
 }
 
 uint32_t CpuFrequency::CpuFreqFreqSpecNum_(const std::string& value,
-                                           int cpu_idx) {
+                                           uint32_t cpu_idx) {
   if (m_cpu_freq_data_.empty() || m_cpu_freq_data_[cpu_idx].avail_freq.empty())
     return kInvalidFreq;
 
@@ -474,7 +475,7 @@ uint32_t CpuFrequency::CpuFreqFreqSpecNum_(const std::string& value,
   return kInvalidFreq;
 }
 
-bool CpuFrequency::CpuFreqSetGov_(int cpu_idx, const std::string& governor,
+bool CpuFrequency::CpuFreqSetGov_(uint32_t cpu_idx, const std::string& governor,
                                   uint32_t job_id) {
   std::string path =
       fmt::format("{}cpu{}/cpufreq/scaling_governor", kPathToCpu, cpu_idx);
@@ -500,7 +501,7 @@ bool CpuFrequency::CpuFreqSetGov_(int cpu_idx, const std::string& governor,
   return true;
 }
 
-bool CpuFrequency::CpuFreqSetScalingFreq_(int cpu_idx, uint32_t freq,
+bool CpuFrequency::CpuFreqSetScalingFreq_(uint32_t cpu_idx, uint32_t freq,
                                           const std::string& option,
                                           uint32_t job_id) {
   std::string path =
@@ -535,7 +536,7 @@ bool CpuFrequency::CpuFreqSetScalingFreq_(int cpu_idx, uint32_t freq,
  * the specified job as the owner of the CPU; the file is locked on exit
  * _test_cpu_owner_lock - Test whether the specified job owns the CPU
  */
-int CpuFrequency::SetCpuOwnerLock_(int cpu_id, uint32_t job_id) {
+int CpuFrequency::SetCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
   // lock dir TODO: use config base dir
   std::string tmp = fmt::format("{}/cpu", kDefaultCraneBaseDir, cpu_id);
   if (!util::os::CreateFolders(tmp)) return -1;
@@ -564,7 +565,7 @@ int CpuFrequency::SetCpuOwnerLock_(int cpu_id, uint32_t job_id) {
   return fd;
 }
 
-int CpuFrequency::TestCpuOwnerLock_(int cpu_id, uint32_t job_id) {
+int CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
   std::string tmp = fmt::format("{}/cpu", kDefaultCraneBaseDir);
 
   if ((mkdir(tmp.c_str(), 0700) != 0) && (errno != EEXIST)) {
