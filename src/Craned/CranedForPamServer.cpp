@@ -276,7 +276,6 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
 
 CranedForPamServer::CranedForPamServer(
     const Config::CranedListenConf &listen_conf) {
-
   m_service_impl_ = std::make_unique<CranedForPamServiceImpl>();
 
   grpc::ServerBuilder builder;
