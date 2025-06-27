@@ -1075,7 +1075,7 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
 
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
     std::unique_ptr<TaskInCtld> task) {
-   if (!task->password_entry->Valid()) {
+  if (!task->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
