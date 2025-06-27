@@ -211,7 +211,7 @@ void CpuFrequency::CpuFreqReset(uint32_t job_id) {
         freq_data.new_governor.empty())
       continue;
 
-    int fd = TestCpuOwnerLock_(i, 0);
+    int fd = TestCpuOwnerLock_(i, job_id);
     if (fd < 0) continue;
 
     if (freq_data.new_frequency != kInvalidFreq) {

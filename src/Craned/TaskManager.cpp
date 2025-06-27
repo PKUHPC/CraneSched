@@ -142,6 +142,9 @@ TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   s_instance_ptr_ = this;
 
+  m_cpu_freq_ = std::make_unique<crane::CpuFrequency>();
+  m_cpu_freq_->Init(g_config.CranedRes[g_config.CranedIdOfThisNode]->allocatable_res.CpuCount());
+
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -1151,7 +1154,12 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup = cg;
   instance->cgroup_path = instance->cgroup->CgroupPathStr();
 
-  // TODO: cpu freq
+  // TODO: test cpu freq
+  if (!instance->task.cpu_freq().governor().empty()) {
+    auto& cpu_freq = instance->task.cpu_freq();
+    m_cpu_freq_->CpuFreqValidateAndSet(cpu_freq.low(), cpu_freq.high(),
+      cpu_freq.governor(), instance->task.task_id(), "1-2,3");
+  }
 
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
@@ -1388,6 +1396,9 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
         elem.task_id);
+
+    // TODO: test cpu freq
+    m_cpu_freq_->CpuFreqReset(elem.task_id);
 
     auto iter = m_task_map_.find(elem.task_id);
     if (iter == m_task_map_.end()) {
