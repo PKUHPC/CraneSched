@@ -20,10 +20,10 @@
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
-#include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -1071,6 +1071,75 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
   pd_iter->second->mandated_priority = priority;
   m_pending_task_map_mtx_.Unlock();
   return CraneErrCode::SUCCESS;
+}
+
+CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
+    std::unique_ptr<TaskInCtld> task) {
+  if (!task->password_entry->Valid()) {
+    CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
+    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
+  }
+  task->SetUsername(task->password_entry->Username());
+
+  {  // Limit the lifecycle of user_scoped_ptr
+    auto user_scoped_ptr =
+        g_account_manager->GetExistedUserInfo(task->Username());
+    if (!user_scoped_ptr) {
+      CRANE_DEBUG("User '{}' not found in the account database",
+                  task->Username());
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+    }
+
+    if (task->account.empty()) {
+      task->account = user_scoped_ptr->default_account;
+      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
+    } else {
+      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
+        CRANE_DEBUG(
+            "Account '{}' is not in the user account list when submitting the "
+            "task",
+            task->account);
+        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+      }
+    }
+  }
+
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->Username(), task->account, task->partition_id)) {
+    CRANE_DEBUG(
+        "User '{}' doesn't have permission to use partition '{}' when using "
+        "account '{}'",
+        task->Username(), task->partition_id, task->account);
+    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
+  }
+
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
+      task->Username(), task->account);
+  if (!enable_res) {
+    return std::unexpected(enable_res.error());
+  }
+
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
+      task->partition_id, task->account);
+  if (!result) return std::unexpected(result.error());
+
+  task->SetSubmitTime(absl::Now());
+
+  result = TaskScheduler::HandleUnsetOptionalInTaskToCtld(task.get());
+  if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
+  if (result) result = TaskScheduler::CheckTaskValidity(task.get());
+  if (result) {
+    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    if (res != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      return std::unexpected(res);
+    }
+    std::future<task_id_t> future =
+        g_task_scheduler->SubmitTaskAsync(std::move(task));
+    return {std::move(future)};
+  }
+
+  return std::unexpected(result.error());
 }
 
 CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,

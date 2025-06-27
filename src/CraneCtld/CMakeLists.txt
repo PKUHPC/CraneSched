@@ -1,13 +1,9 @@
 add_executable(cranectld
         CtldPublicDefs.h
-        CtldGrpcServer.h
-        CtldGrpcServer.cpp
         DbClient.h
         DbClient.cpp
         TaskScheduler.h
         TaskScheduler.cpp
-        CranedKeeper.h
-        CranedKeeper.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
         AccountManager.h
@@ -19,6 +15,13 @@ add_executable(cranectld
 
         Security/VaultClient.cpp
         Security/VaultClient.h
+
+        RpcService/CranedKeeper.h
+        RpcService/CranedKeeper.cpp
+        RpcService/CtldGrpcServer.h
+        RpcService/CtldGrpcServer.cpp
+        RpcService/CtldForInternalServer.h
+        RpcService/CtldForInternalServer.cpp
 
         CraneCtld.cpp
 
