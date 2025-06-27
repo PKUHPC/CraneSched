@@ -178,12 +178,6 @@ class MongodbClient {
       const mongocxx::client_session::with_transaction_cb& callback);
 
  private:
-  static void PrintError_(
-      const char* msg,
-      const std::source_location loc = std::source_location::current()) {
-    CRANE_ERROR_LOC(loc, "MongodbError: {}\n", msg);
-  }
-
   bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>

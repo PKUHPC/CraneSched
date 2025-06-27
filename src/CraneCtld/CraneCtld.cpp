@@ -39,6 +39,18 @@
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
+void ParseCtldConfig(const YAML::Node& config) {
+  using util::YamlValueOr;
+  Ctld::Config::CraneCtldConf ctld_config{};
+  ctld_config.CranedTimeout = kCranedTimeoutSec;
+  if (config["CraneCtld"]) {
+    auto ctld_cfg = config["CraneCtld"];
+    if (ctld_cfg["CranedTimeout"])
+      ctld_config.CranedTimeout = ctld_cfg["CranedTimeout"].as<uint32_t>();
+  }
+  g_config.CtldConf = std::move(ctld_config);
+}
+
 void ParseConfig(int argc, char** argv) {
   using util::YamlValueOr;
   cxxopts::Options options("cranectld");
@@ -104,6 +116,14 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
+#ifdef CRANE_ENABLE_TESTS
+      g_runtime_status.test_logger = AddLogger(
+          "test", spdlog::level::trace,
+          g_config.CraneBaseDir /
+              YamlValueOr(config["CraneCtldLogFile"], "cranectld/test.log"),
+          true);
+#endif
+
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();
@@ -118,6 +138,8 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.CraneCtldListenPort =
           YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
+
+      ParseCtldConfig(config);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();

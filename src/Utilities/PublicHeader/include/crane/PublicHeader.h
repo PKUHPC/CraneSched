@@ -44,6 +44,9 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
 
+constexpr const char* kLogPattern =
+    "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
+
 inline const char* const kDefaultHost = "0.0.0.0";
 
 inline const char* const kCtldDefaultPort = "10011";
@@ -78,6 +81,9 @@ constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 constexpr int64_t kTaskMaxTimeStampSec =
     google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
+
+constexpr uint64_t kCranedPingIntervalSec = 10;
+constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 
