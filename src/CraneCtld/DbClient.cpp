@@ -64,9 +64,30 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_time_limit_per_task = absl::Seconds(kTaskMaxTimeLimitSec);
     qos.max_cpus_per_user =
         std::numeric_limits<decltype(qos.max_cpus_per_user)>::max();
-    qos.max_cpus_per_account =
-        std::numeric_limits<decltype(qos.max_cpus_per_account)>::max();
     qos.reference_count = 1;
+    qos.max_jobs_per_account =
+      std::numeric_limits<decltype(qos.max_jobs_per_account)>::max();
+    qos.max_submit_jobs =
+      std::numeric_limits<decltype(qos.max_submit_jobs)>::max();
+    qos.max_submit_jobs_per_user =
+      std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
+    qos.max_submit_jobs_per_account =
+      std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
+    qos.max_jobs =
+      std::numeric_limits<decltype(qos.max_jobs)>::max();
+    qos.max_wall = absl::ZeroDuration();
+    qos.max_tres.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres.GetAllocatableRes().memory_bytes)>::max();
+    qos.max_tres_per_user.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres_per_user.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres_per_user.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres_per_user.GetAllocatableRes().memory_bytes)>::max();
+    qos.max_tres_per_account.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres_per_account.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres_per_account.GetAllocatableRes().memory_bytes)>::max();
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -626,6 +647,100 @@ void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
   }));
 }
 
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceView>(
+  document& doc, const std::string& key,
+  const ResourceView& value) {
+  doc.append(kvp(key, [&](sub_document valueDocument) {
+    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
+        allocDoc.append(kvp("cpu_count", value.CpuCount()));
+        allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
+        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
+    }));
+    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
+  sub_document& doc, const std::string& key,
+  const DeviceMap& value) {
+  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
+    for (const auto& [dev_name, pair_val] : value) {
+      uint64_t untyped_req_count = pair_val.first;
+      const auto& type_map = pair_val.second;
+      mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
+        devDoc.append(kvp("untyped_req_count", static_cast<int64_t>(untyped_req_count)));
+        devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
+          for (const auto& [type, total] : type_map) {
+            typeDoc.append(kvp(type, static_cast<int64_t>(total)));
+          }
+        }));
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<Account::PartitionToResourceLimitMap>(
+    document& doc, const std::string& key, const Account::PartitionToResourceLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [partition, partition_resource] : value) {
+      mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
+        subDoc.append(kvp("max_jobs", static_cast<int64_t>(partition_resource.max_jobs)));
+        subDoc.append(kvp("max_submit_jobs", static_cast<int64_t>(partition_resource.max_submit_jobs)));
+        SubDocumentAppendItem_(subDoc, "max_tres", partition_resource.max_tres);
+        SubDocumentAppendItem_(subDoc, "max_tres_per_job", partition_resource.max_tres_per_job);
+        subDoc.append(kvp("max_wall", absl::ToInt64Seconds(partition_resource.max_wall)));
+        subDoc.append(kvp("max_wall_duration_per_job", absl::ToInt64Seconds(partition_resource.max_wall_duration_per_job)));
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<User::AccountToPartitionLimitMap>(document& doc,
+    const std::string& key, const User::AccountToPartitionLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [account, partition_to_limit_map] : value) {
+      mapValueDocument.append(kvp(account, [&](sub_document subDoc) {
+        SubDocumentAppendItem_(subDoc, "partition_to_limit_map", partition_to_limit_map);
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<User::PartitionToLimitMap>(
+    sub_document& doc, const std::string& key, const User::PartitionToLimitMap& value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& [partition, partition_resource] : value) {
+      mapValueDocument.append(kvp(partition, [&](sub_document subDoc) {
+        subDoc.append(kvp("max_jobs", static_cast<int64_t>(partition_resource.max_jobs)));
+        subDoc.append(kvp("max_submit_jobs", static_cast<int64_t>(partition_resource.max_submit_jobs)));
+        SubDocumentAppendItem_(subDoc, "max_tres", partition_resource.max_tres);
+        SubDocumentAppendItem_(subDoc, "max_tres_per_job", partition_resource.max_tres_per_job);
+        subDoc.append(kvp("max_wall", absl::ToInt64Seconds(partition_resource.max_wall)));
+        subDoc.append(kvp("max_wall_duration_per_job", absl::ToInt64Seconds(partition_resource.max_wall_duration_per_job)));
+      }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<ResourceView>(
+  sub_document& doc, const std::string& key,
+  const ResourceView& value) {
+  doc.append(kvp(key, [&](sub_document valueDocument) {
+    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
+        allocDoc.append(kvp("cpu_count", value.CpuCount()));
+        allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
+        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
+    }));
+    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+  }));
+}
+
 template <typename... Ts, std::size_t... Is>
 bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
@@ -700,7 +815,21 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
-
+    for (const auto& account_to_limit_item : user_view["account_to_partition_limit_map"].get_document().value) {
+      User::PartitionToLimitMap  partition_to_limit_map;
+      for (const auto& partition_limit_item : account_to_limit_item["partition_to_limit_map"].get_document().value) {
+        auto partition_resource = partition_limit_item.get_document().value;
+        PartitionResourceLimit resource;
+        resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
+        resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
+        ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
+        ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
+        resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
+        resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
+        partition_to_limit_map.emplace(partition_limit_item.key(), std::move(resource));
+      }
+      user->account_to_partition_limit_map.emplace(account_to_limit_item.key(), std::move(partition_to_limit_map));
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -708,22 +837,24 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
+                                    "coordinator_accounts",
+                                    "account_to_partition_limit_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>,User::AccountToPartitionLimitMap>
       values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.account_to_partition_limit_map};
   return DocumentConstructor_(fields, values);
 }
 
@@ -753,6 +884,17 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
     for (auto&& user : account_view["coordinators"].get_array().value) {
       account->coordinators.emplace_back(user.get_string().value);
     }
+    for (const auto& partition_resource_item : account_view["partition_to_resource_limit_map"].get_document().value) {
+      auto partition_resource = partition_resource_item.get_document().value;
+      PartitionResourceLimit resource;
+      resource.max_jobs = partition_resource["max_jobs"].get_int64().value;
+      resource.max_submit_jobs = partition_resource["max_submit_jobs"].get_int64().value;
+      ResourceViewFromDb_(partition_resource["max_tres"].get_document().value, &resource.max_tres);
+      ResourceViewFromDb_(partition_resource["max_tres_per_job"].get_document().value, &resource.max_tres_per_job);
+      resource.max_wall = absl::Seconds(partition_resource["max_wall"].get_int64().value);
+      resource.max_wall_duration_per_job = absl::Seconds(partition_resource["max_wall_duration_per_job"].get_int64().value);
+      account->partition_to_resource_limit_map.emplace(partition_resource_item.key(), std::move(resource));
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -760,13 +902,13 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 11> fields{
+  std::array<std::string, 12> fields{
       "deleted",     "blocked",          "name",           "description",
       "users",       "child_accounts",   "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list", "coordinators"};
+      "default_qos", "allowed_qos_list", "coordinators", "partition_to_resource_limit_map"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>, std::list<std::string>>
+             std::string, std::list<std::string>, std::list<std::string>, Account::PartitionToResourceLimitMap>
       values{false,
              account.blocked,
              account.name,
@@ -777,7 +919,8 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
              account.allowed_partition,
              account.default_qos,
              account.allowed_qos_list,
-             account.coordinators};
+             account.coordinators,
+             account.partition_to_resource_limit_map};
 
   return DocumentConstructor_(fields, values);
 }
@@ -794,10 +937,25 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->priority = qos_view[Qos::FieldStringOfPriority()].get_int64().value;
     qos->max_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxJobsPerUser()].get_int64().value;
+    qos->max_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxJobsPerAccount()].get_int64().value;
     qos->max_cpus_per_user =
         qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_user =
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
+    qos->max_jobs = qos_view[Qos::FieldStringOfMaxJobs()].get_int64().value;
+    qos->max_submit_jobs = qos_view[Qos::FieldStringOfMaxSubmitJobs()].get_int64().value;
+    qos->max_wall = absl::Seconds(
+        qos_view[Qos::FieldStringOfMaxWall()].get_int64().value);
+    qos->flags = qos_view[Qos::FieldStringOfFlags()].get_int64().value;
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTres()].get_document().value, &qos->max_tres);
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTresPerUser()].get_document().value, &qos->max_tres_per_user);
+    ResourceViewFromDb_(qos_view[Qos::FieldStringOfMaxTresPerAccount()].get_document().value, &qos->max_tres_per_account);
+
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -805,7 +963,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{
+  std::array<std::string, 18> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -814,9 +972,18 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
       Qos::FieldStringOfMaxTimeLimitPerTask(),
-  };
+      Qos::FieldStringOfMaxJobsPerAccount(),
+      Qos::FieldStringOfMaxSubmitJobsPerUser(),
+      Qos::FieldStringOfMaxSubmitJobsPerAccount(),
+      Qos::FieldStringOfMaxJobs(),
+      Qos::FieldStringOfMaxSubmitJobs(),
+      Qos::FieldStringOfMaxWall(),
+      Qos::FieldStringOfMaxTres(),
+      Qos::FieldStringOfMaxTresPerUser(),
+      Qos::FieldStringOfMaxTresPerAccount(),
+      Qos::FieldStringOfFlags()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t>
+             int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, ResourceView, ResourceView, ResourceView, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -824,7 +991,17 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             qos.max_jobs_per_account,
+             qos.max_submit_jobs_per_user,
+             qos.max_submit_jobs_per_account,
+             qos.max_jobs,
+             qos.max_submit_jobs,
+             absl::ToInt64Seconds(qos.max_wall),
+             qos.max_tres,
+             qos.max_tres_per_user,
+             qos.max_tres_per_account,
+             qos.flags};
 
   return DocumentConstructor_(fields, values);
 }
@@ -992,6 +1169,27 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              device_map_str};
 
   return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ResourceViewFromDb_(
+    const bsoncxx::document::view& value_view,
+    ResourceView* resource) {
+  auto allocatable_res = value_view["allocatable_res"].get_document().value;
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(allocatable_res["cpu_count"].get_double().value);
+  resource->GetAllocatableRes().memory_bytes = std::stoull(std::string(allocatable_res["mem"].get_string().value));
+  resource->GetAllocatableRes().memory_sw_bytes = std::stoull(std::string(allocatable_res["mem_sw"].get_string().value));
+  for (auto &&device_item : value_view["device_map"].get_document().value) {
+    auto device_doc = device_item.get_document().value;
+    uint64_t untyped_req_count = device_doc["untyped_req_count"].get_int64().value;
+    std::unordered_map<std::string, uint64_t> type_total;
+    auto type_total_ele = device_doc["type_total"];
+    for (auto&& sub_item : type_total_ele.get_document().value) {
+      uint64_t total = static_cast<uint64_t>(sub_item.get_int64().value);
+      type_total[std::string(sub_item.key())] = total;
+    }
+    resource->GetDeviceMap().emplace(std::string(device_item.key()),
+            std::make_pair(untyped_req_count, std::move(type_total)));
+  }
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {

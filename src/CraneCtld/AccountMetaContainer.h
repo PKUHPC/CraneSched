@@ -21,33 +21,111 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "AccountManager.h"
+
 namespace Ctld {
+
+constexpr int kNumStripes = 128;
 
 class AccountMetaContainer final {
  public:
-  using QosToResourceMap = std::unordered_map<std::string,  // qos_name
-                                              QosResource>;
-
-  using UserResourceMetaMap = phmap::parallel_flat_hash_map<
-      std::string,  // username
-      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+  using ResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResourceStat,
+      phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::allocator<std::pair<const std::string, MetaResourceStat>>, 4,
+      std::shared_mutex>;
+
+  using QosResourceMap = phmap::parallel_flat_hash_map<
+      std::string, MetaResource, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, MetaResource>>, 4,
+      std::shared_mutex>;
+
+  using UserToTaskNumMap = phmap::parallel_flat_hash_map<
+      std::string, uint32_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, uint32_t>>, 4,
       std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode TryMallocQosResource(TaskInCtld& task);
+  CraneErrCode TryMallocMetaSubmitResource(TaskInCtld& task);
 
-  void FreeQosResource(const TaskInCtld& task);
+  void MallocMetaSubmitResource(const TaskInCtld& task);
 
-  void DeleteUserResource(const std::string& username);
+  void MallocMetaResourceToRecoveredRunningTask(TaskInCtld& task);
+
+  std::optional<std::string> CheckMetaResource(const TaskInCtld& task);
+
+  void MallocMetaResource(const TaskInCtld& task);
+
+  void FreeMetaSubmitResource(const TaskInCtld& task);
+
+  void FreeMetaResource(const TaskInCtld& task);
+
+  // When a user/account object is deleted, resources need to be reset.
+  void DeleteUserMeta(const std::string& username);
+
+  void DeleteAccountMeta(const std::string& account);
+
+  void DeleteQosMeta(const std::string& qos);
+
+  void UserAddTask(const std::string& username);
+
+  void UserReduceTask(const std::string& username);
+
+  bool UserHasTask(const std::string& username);
 
  private:
-  UserResourceMetaMap user_meta_map_;
+  static int StripeForKey_(const std::string& key) {
+    return std::hash<std::string>{}(key) % kNumStripes;
+  }
+
+  static std::string CheckTres_(const ResourceView& resource_req,
+                                const ResourceView& resource_total);
+
+  static bool CheckGres_(const DeviceMap& device_req,
+                         const DeviceMap& device_total);
+
+  CraneErrCode CheckQosSubmitResource_(const TaskInCtld& task, const Qos& qos);
+
+  CraneErrCode CheckPartitionSubmitResource_(const TaskInCtld& task, const Qos& qos, const User& user, const AccountManager::AccountMapMutexSharedPtr& account_map);
+
+  CraneErrCode CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+                                              const Qos& qos);
+
+  CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
+                                                 const Qos& qos);
+
+  CraneErrCode CheckQosSubmitResourceForQos_(const TaskInCtld& task,
+                                             const Qos& qos);
+
+  CraneErrCode CheckPartitionSubmitResourceForUser_(const TaskInCtld& task,
+                                                    const Qos& qos,
+                                                    const User& user);
+
+  CraneErrCode CheckPartitionSubmitResourceForAccount_(
+      const TaskInCtld& task, const Qos& qos,
+      const AccountManager::AccountMapMutexSharedPtr& account_map);
+
+  // lock user -> lock account -> lock qos
+  std::array<std::mutex, kNumStripes> m_user_stripes_;
+
+  std::array<std::mutex, kNumStripes> m_account_stripes_;
+
+  std::array<std::mutex, kNumStripes> m_qos_stripes_;
+
+  ResourceMetaMap m_user_meta_map_;
+
+  ResourceMetaMap m_account_meta_map_;
+
+  QosResourceMap m_qos_meta_map_;
+
+  UserToTaskNumMap m_user_to_task_map_;
 };
 
-inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
-
 }  // namespace Ctld
+
+inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;

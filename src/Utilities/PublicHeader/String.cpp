@@ -45,6 +45,47 @@ std::string ReadableMemory(uint64_t memory_bytes) {
     return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
 }
 
+std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem) {
+  static const LazyRE2 mem_regex = { R"(^([0-9]+(?:\.?[0-9]*))([MmGgKkB]?)$)" } ;
+  std::string num_str, unit;
+  if (!RE2::FullMatch(mem, *mem_regex, &num_str, &unit)) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  double sz = 0.0;
+  try {
+    sz = std::stod(num_str);
+  } catch (const std::exception& e) {
+    CRANE_ERROR("invalid memory format: {}", mem);
+    return std::nullopt;
+  }
+
+  uint64_t bytes = 0;
+  switch (unit[0]) {
+    case 'K':
+    case 'k':
+      bytes = sz * 1024;
+      break;
+    case 'M':
+    case 'm':
+      bytes = sz * 1024 * 1024;
+      break;
+    case 'G':
+    case 'g':
+      bytes = sz * 1024 * 1024 * 1024;
+      break;
+    case 'B':
+    case 'b':
+      bytes = sz;
+      break;
+    default:
+      bytes = sz * 1024 * 1024;
+  }
+
+  return bytes;
+}
+
 bool ParseNodeList(const std::string &node_str,
                    std::list<std::string> *nodelist) {
   static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
@@ -409,6 +450,106 @@ std::string GenerateCommaSeparatedString(const int val) {
     val_vec.push_back(i);
   }
   return absl::StrJoin(val_vec, ",");
+}
+
+bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map) {
+  std::vector<std::string> items = absl::StrSplit(s, ":");
+  std::string key = items[0];
+  if (items.size() == 2) {
+    uint64_t value;
+    if (items[1] == "-1") {
+      value = UINT64_MAX;
+    } else {
+      try {
+        value = std::stoull(items[1]);
+      } catch (const std::exception& e) {
+        return false;
+      }
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
+      iter->second.first = value;
+    } else {
+      device_map->insert_or_assign(
+        key,
+        std::make_pair(value, std::unordered_map<std::string, uint64_t>{}));
+    }
+  } else if (items.size() == 3) {
+    std::string type = items[1];
+    uint64_t value;
+    if (items[2] == "-1") {
+      value = UINT64_MAX;
+    } else {
+      try {
+        value = std::stoull(items[2]);
+      } catch (const std::exception& e) {
+        return false;
+      }
+    }
+    auto iter = device_map->find(key);
+    if (iter != device_map->end()) {
+      iter->second.second.insert_or_assign(type, value);
+    } else {
+      device_map->insert_or_assign(
+        key,
+        std::make_pair(UINT64_MAX, std::unordered_map<std::string, uint64_t>{{type,value}}));
+    }
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool ConvertStringToResourceView(const std::string& s, ResourceView* res) {
+  std::vector<std::string> items = absl::StrSplit(s, ",");
+  for (const auto& item : items) {
+    if (item.starts_with("gres/") && item.size() > 5) {
+      if (!ConvertStringToDeviceMap(item.substr(5), &res->GetDeviceMap()))
+        return false;
+    } else {
+      std::vector<std::string> kv = absl::StrSplit(item, "=");
+      if (kv.size() == 2) {
+        if (kv[0] == "cpu") {
+          if (kv[1] == "-1") {
+            res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(INT32_MAX/256);
+            continue;
+          }
+          double cpu_count;
+          try {
+            cpu_count = std::stod(kv[1]);
+          } catch (const std::exception& e) {
+            return false;
+          }
+          if (cpu_count > static_cast<double>(INT32_MAX/256))
+            return false;
+
+          res->GetAllocatableRes().cpu_count = static_cast<cpu_t>(cpu_count);
+        } else if (kv[0] == "mem") {
+          if (kv[1] == "-1") {
+            uint64_t mem = std::numeric_limits<decltype(res->GetAllocatableRes().memory_bytes)>::max();
+            res->GetAllocatableRes().memory_bytes = mem;
+            res->GetAllocatableRes().memory_sw_bytes = mem;
+            continue;
+          }
+
+          auto result = ParseMemStringAsByte(kv[1]);
+          if (!result) return false;
+
+          uint64_t value = result.value();
+
+          if (value > std::numeric_limits<decltype(res->GetAllocatableRes().memory_bytes)>::max()) return false;
+          res->GetAllocatableRes().memory_bytes = value;
+          res->GetAllocatableRes().memory_sw_bytes = value;
+        } else {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 }  // namespace util

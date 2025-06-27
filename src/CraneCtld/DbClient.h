@@ -227,6 +227,9 @@ class MongodbClient {
 
   DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
 
+  void ResourceViewFromDb_(const bsoncxx::document::view& value_view,
+                              ResourceView* resource);
+
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
   const std::string m_account_collection_name_{"acct_table"};
@@ -254,6 +257,33 @@ template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceView>(
+  document& doc, const std::string& key,
+  const ResourceView& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
+  sub_document& doc, const std::string& key,
+  const DeviceMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<Account::PartitionToResourceLimitMap>(
+    document& doc, const std::string& key, const Account::PartitionToResourceLimitMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<User::AccountToPartitionLimitMap>(document& doc,
+    const std::string& key, const User::AccountToPartitionLimitMap& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<User::PartitionToLimitMap>(
+    sub_document& doc, const std::string& key, const User::PartitionToLimitMap& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<ResourceView>(
+  sub_document& doc, const std::string& key,
+  const ResourceView& value);
 
 }  // namespace Ctld
 

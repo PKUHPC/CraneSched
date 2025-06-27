@@ -627,6 +627,16 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_jobs_per_account = qos_info->max_jobs_per_account();
+  qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
+  qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
+
+  qos.max_jobs = qos_info->max_jobs();
+  qos.max_submit_jobs = qos_info->max_submit_jobs();
+  qos.max_tres = static_cast<ResourceView>(qos_info->max_tres());
+  qos.max_tres_per_user = static_cast<ResourceView>(qos_info->max_tres_per_user());
+  qos.max_tres_per_account = static_cast<ResourceView>(qos_info->max_tres_per_account());
+  qos.flags = qos_info->flags();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -635,6 +645,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
+
+  qos.max_wall = absl::Seconds(qos_info->max_wall());
 
   auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
@@ -688,6 +700,28 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
             absl::StrJoin(request->value_list(), ","));
 
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+    }
+  } else if (request->modify_field() == crane::grpc::ModifyField::MaxJobs ||
+             request->modify_field() == crane::grpc::ModifyField::MaxSubmitJobs ||
+             request->modify_field() == crane::grpc::ModifyField::MaxWall ||
+             request->modify_field() == crane::grpc::ModifyField::MaxWallDurationPerJob) {
+    auto modify_res = g_account_manager->ModifyAccountPartitioinResource(
+        request->uid(), request->modify_field(), request->name(),
+        request->partition(), request->value_list()[0]);
+    if (!modify_res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(request->value_list()[0]);
+      new_err_record->set_code(modify_res.error());
+    }
+  } else if (request->modify_field() == crane::grpc::ModifyField::MaxTres ||
+             request->modify_field() == crane::grpc::ModifyField::MaxTresPerJob) {
+    auto modify_res = g_account_manager->ModifyAccountTresPartitionResource(
+        request->uid(), request->modify_field(), request->name(),
+        request->partition(), request->value_list()[0]);
+    if (!modify_res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(request->value_list()[0]);
+      new_err_record->set_code(modify_res.error());
     }
   } else {  // other operations
     for (const auto &value : request->value_list()) {
@@ -838,6 +872,30 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
         new_err_record->set_code(modify_res.error());
       }
       break;
+    case crane::grpc::ModifyField::MaxJobs:
+    case crane::grpc::ModifyField::MaxSubmitJobs:
+    case crane::grpc::ModifyField::MaxWall:
+    case crane::grpc::ModifyField::MaxWallDurationPerJob:
+      modify_res = g_account_manager->ModifyUserPartitionResource(
+          request->uid(), request->modify_field(), request->name(), request->account(),
+          request->partition(), request->value_list()[0]);
+      if (!modify_res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(request->value_list()[0]);
+        new_err_record->set_code(modify_res.error());
+      }
+      break;
+    case crane::grpc::ModifyField::MaxTres:
+    case crane::grpc::ModifyField::MaxTresPerJob:
+      modify_res = g_account_manager->ModifyUserTresPartitionResource(
+          request->uid(), request->modify_field(), request->name(), request->account(),
+          request->partition(), request->value_list()[0]);
+      if (!modify_res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(request->value_list()[0]);
+        new_err_record->set_code(modify_res.error());
+      }
+      break;
     default:
       std::unreachable();
     }
@@ -857,9 +915,19 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  CraneExpected<void> modify_res;
+  if (request->modify_field() == crane::grpc::ModifyField::MaxTres ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerUser ||
+      request->modify_field() == crane::grpc::ModifyField::MaxTresPerAccount) {
+    modify_res =
+          g_account_manager->ModifyQosTres(request->uid(), request->name(),
+                                       request->modify_field(), request->value());
+  } else {
+    modify_res =
+             g_account_manager->ModifyQos(request->uid(), request->name(),
+                                          request->modify_field(), request->value());
+  }
 
   if (modify_res) {
     response->set_ok(true);
@@ -943,6 +1011,18 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     for (auto &&coord : account.coordinators) {
       coordinators->Add()->assign(coord);
     }
+
+    auto* partition_to_limit_map = account_info->mutable_partition_resource_limit();
+    for (const auto& [partition, limit] : account.partition_to_resource_limit_map) {
+      crane::grpc::PartitionResourceLimit partition_resource_limit;
+      partition_resource_limit.mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(limit.max_tres));
+      partition_resource_limit.mutable_max_tres_per_job()->CopyFrom(static_cast<crane::grpc::ResourceView>(limit.max_tres_per_job));
+      partition_resource_limit.set_max_jobs(limit.max_jobs);
+      partition_resource_limit.set_max_submit_jobs(limit.max_submit_jobs);
+      partition_resource_limit.set_max_wall(absl::ToInt64Seconds(limit.max_wall));
+      partition_resource_limit.set_max_wall_duration_per_job(absl::ToInt64Seconds(limit.max_wall_duration_per_job));
+      partition_to_limit_map->emplace(partition, std::move(partition_resource_limit));
+    }
   }
 
   return grpc::Status::OK;
@@ -1022,6 +1102,22 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
       for (auto &&coord : user.coordinator_accounts) {
         coordinated_accounts->Add()->assign(coord);
       }
+
+      auto* account_to_partiton_limit_map = user_info->mutable_account_to_partition_limit();
+      auto iter = user.account_to_partition_limit_map.find(account);
+      if (iter != user.account_to_partition_limit_map.end()) {
+        auto* partition_to_limit_map = (*account_to_partiton_limit_map)[account].mutable_partition_resource_limit();
+        for (const auto& [partition, partition_limit] : iter->second) {
+          crane::grpc::PartitionResourceLimit partition_resource_limit;
+          partition_resource_limit.mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(partition_limit.max_tres));
+          partition_resource_limit.mutable_max_tres_per_job()->CopyFrom(static_cast<crane::grpc::ResourceView>(partition_limit.max_tres_per_job));
+          partition_resource_limit.set_max_jobs(partition_limit.max_jobs);
+          partition_resource_limit.set_max_submit_jobs(partition_limit.max_submit_jobs);
+          partition_resource_limit.set_max_wall(absl::ToInt64Seconds(partition_limit.max_wall));
+          partition_resource_limit.set_max_wall_duration_per_job(absl::ToInt64Seconds(partition_limit.max_wall_duration_per_job));
+          partition_to_limit_map->emplace(partition, std::move(partition_resource_limit));
+        }
+      }
     }
   }
 
@@ -1075,9 +1171,19 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_description(qos.description);
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+    qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+    qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
+    qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->set_max_jobs(qos.max_jobs);
+    qos_info->set_max_submit_jobs(qos.max_submit_jobs);
+    qos_info->set_max_wall(absl::ToInt64Seconds(qos.max_wall));
+    qos_info->mutable_max_tres()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres));
+    qos_info->mutable_max_tres_per_user()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_user));
+    qos_info->mutable_max_tres_per_account()->CopyFrom(static_cast<crane::grpc::ResourceView>(qos.max_tres_per_account));
+    qos_info->set_flags(qos.flags);
   }
 
   return grpc::Status::OK;
@@ -1712,9 +1818,10 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    auto res = g_account_meta_container->TryMallocMetaSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      CRANE_ERROR("{}", CraneErrStr(res));
+      g_account_meta_container->UserReduceTask(task->Username());
       return std::unexpected(res);
     }
     std::future<task_id_t> future =
