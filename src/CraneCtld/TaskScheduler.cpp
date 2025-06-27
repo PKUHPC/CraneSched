@@ -1075,7 +1075,7 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
 
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
     std::unique_ptr<TaskInCtld> task) {
-  if (!task->password_entry->Valid()) {
+   if (!task->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
@@ -1123,13 +1123,17 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
       task->partition_id, task->account);
   if (!result) return std::unexpected(result.error());
 
-  result = g_task_scheduler->AcquireTaskAttributes(task.get());
-
-  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
-
   task->SetSubmitTime(absl::Now());
 
+  result = TaskScheduler::HandleUnsetOptionalInTaskToCtld(task.get());
+  if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
+  if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
+    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    if (res != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      return std::unexpected(res);
+    }
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
