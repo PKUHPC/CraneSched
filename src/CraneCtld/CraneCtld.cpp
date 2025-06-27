@@ -120,12 +120,8 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CraneCtldListenPort =
           YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
 
-      if (config["CraneCtldForInternalListenPort"])
-        g_config.ListenConf.CraneCtldForInternalListenPort =
-            config["CraneCtldForInternalListenPort"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldForInternalListenPort =
-            kCtldForInternalDefaultPort;
+      g_config.ListenConf.CraneCtldForInternalListenPort =
+          YamlValueOr(config["CraneCtldForInternalListenPort"], kCtldForInternalDefaultPort);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
