@@ -51,7 +51,7 @@ void CpuFrequency::Init(uint32_t cpu_num) {
     CpuFreqData& freq_data = m_cpu_freq_data_[i];
 
     std::string gov_path =
-        fmt::format("{}{}/cpufreq/scaling_available_governors", kPathToCpu, i);
+        fmt::format("{}cpu{}/cpufreq/scaling_available_governors", kPathToCpu, i);
     std::ifstream infile(gov_path);
     if (!infile.is_open()) continue;
     std::string value;
@@ -77,7 +77,7 @@ void CpuFrequency::Init(uint32_t cpu_num) {
     infile.close();
 
     std::string freq_path = fmt::format(
-        "{}{}/cpufreq/scaling_available_frequencies", kPathToCpu, i);
+        "{}cpu{}/cpufreq/scaling_available_frequencies", kPathToCpu, i);
 
     std::ifstream freq_file(freq_path);
     if (!freq_file.is_open()) {
@@ -281,7 +281,7 @@ bool CpuFrequency::DeriveAvailFreq_(uint32_t cpu_idx) {
 uint32_t CpuFrequency::CpuFreqGetScalingFreq_(uint32_t cpu_idx,
                                               const std::string& option) {
   std::string path =
-      fmt::format("{}{}/cpufreq/{}", kPathToCpu, cpu_idx, option);
+      fmt::format("{}cpu{}/cpufreq/{}", kPathToCpu, cpu_idx, option);
   uint32_t freq;
 
   std::ifstream infile(path);
