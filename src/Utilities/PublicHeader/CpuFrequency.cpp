@@ -446,8 +446,8 @@ uint32_t CpuFrequency::CpuFreqFreqSpecNum_(const std::string& value,
   if (m_cpu_freq_data_.empty() || m_cpu_freq_data_[cpu_idx].avail_freq.empty())
     return kInvalidFreq;
 
-  size_t nfreq = m_cpu_freq_data_.size();
   CpuFreqData& freq_data = m_cpu_freq_data_[cpu_idx];
+  size_t nfreq = freq_data.avail_freq.size();
 
   if (value == "low") return freq_data.avail_freq[0];
 
