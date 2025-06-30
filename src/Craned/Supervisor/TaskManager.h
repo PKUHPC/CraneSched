@@ -27,13 +27,34 @@
 
 namespace Supervisor {
 
-struct StepInstance {
-  crane::grpc::TaskToD step_to_super;
-  std::unique_ptr<CforedClient> cfored_client;
+class StepInstance {
+ public:
+  StepInstance() = default;
+  explicit StepInstance(const StepToSupv& step) : m_step_to_supv_(step) {};
 
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
+
+  const StepToSupv& GetStep() const { return m_step_to_supv_; }
+
+  void InitCforedClient() {
+    m_cfored_client_ = std::make_unique<CforedClient>();
+    m_cfored_client_->InitChannelAndStub(
+        m_step_to_supv_.interactive_meta().cfored_name());
+  }
+
+  [[nodiscard]] const CforedClient* GetCforedClient() const {
+    return m_cfored_client_.get();
+  }
+
+  [[nodiscard]] CforedClient* GetCforedClient() {
+    return m_cfored_client_.get();
+  }
+
+ private:
+  crane::grpc::TaskToD m_step_to_supv_;
+  std::unique_ptr<CforedClient> m_cfored_client_;
 };
 
 struct MetaInExecution {
@@ -52,8 +73,8 @@ struct BatchMetaInExecution : MetaInExecution {
 struct CrunMetaInExecution : MetaInExecution {
   ~CrunMetaInExecution() override = default;
 
-  int task_input_fd;
-  int task_output_fd;
+  int proc_stdin;
+  int proc_stdout;
 
   std::string x11_target;
   uint16_t x11_port;
@@ -67,17 +88,22 @@ struct TaskExitInfo {
   int value{0};
 };
 
-class ExecutionInterface {
+class ITaskInstance {
  public:
-  explicit ExecutionInterface(const StepInstance* step_spec)
-      : step(step_spec) {}
-  virtual ~ExecutionInterface();
+  explicit ITaskInstance(StepInstance* step_inst)
+      : m_parent_step_inst_(step_inst) {}
+  virtual ~ITaskInstance();
 
-  ExecutionInterface(const ExecutionInterface&) = delete;
-  ExecutionInterface(ExecutionInterface&&) = delete;
+  ITaskInstance(const ITaskInstance&) = delete;
+  ITaskInstance(ITaskInstance&&) = delete;
 
-  ExecutionInterface& operator=(ExecutionInterface&&) = delete;
-  ExecutionInterface& operator=(const ExecutionInterface&) = delete;
+  ITaskInstance& operator=(ITaskInstance&&) = delete;
+  ITaskInstance& operator=(const ITaskInstance&) = delete;
+
+  StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
+  const StepToSupv& GetParentStep() const {
+    return m_parent_step_inst_->GetStep();
+  }
 
   void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
@@ -95,9 +121,6 @@ class ExecutionInterface {
   virtual CraneErrCode Cleanup() = 0;
 
   virtual const TaskExitInfo& HandleSigchld(pid_t pid, int status) = 0;
-
-  // Set from TaskManager
-  const StepInstance* step;
 
   PasswordEntry pwd;
 
@@ -128,7 +151,7 @@ class ExecutionInterface {
                                     const std::vector<int>& from_crun_pipe,
                                     int crun_pty_fd);
 
-  virtual void SetChildProcessSignalHandler_();
+  virtual void ResetChildProcSigHandler_();
 
   virtual CraneErrCode SetChildProcessProperty_();
 
@@ -148,6 +171,8 @@ class ExecutionInterface {
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
+  StepInstance* m_parent_step_inst_;
+
   // NOLINTEND(readability-identifier-naming)
   // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   pid_t m_pid_{0};  // forked pid
@@ -164,10 +189,10 @@ class ExecutionInterface {
   // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
-class ContainerInstance : public ExecutionInterface {
+class ContainerInstance : public ITaskInstance {
  public:
-  explicit ContainerInstance(const StepInstance* step_spec)
-      : ExecutionInterface(step_spec) {}
+  explicit ContainerInstance(StepInstance* step_spec)
+      : ITaskInstance(step_spec) {}
   ~ContainerInstance() override = default;
 
   CraneErrCode Prepare() override;
@@ -186,11 +211,10 @@ class ContainerInstance : public ExecutionInterface {
   std::filesystem::path m_temp_path_;
 };
 
-class ProcessInstance : public ExecutionInterface {
+class ProcInstance : public ITaskInstance {
  public:
-  explicit ProcessInstance(const StepInstance* step_spec)
-      : ExecutionInterface(step_spec) {}
-  ~ProcessInstance() override = default;
+  explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  ~ProcInstance() override = default;
 
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
@@ -215,7 +239,7 @@ class TaskManager {
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
-  void AddTerminationTimer_(ExecutionInterface* instance, Duration duration) {
+  void AddTerminationTimer_(ITaskInstance* instance, Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -227,7 +251,7 @@ class TaskManager {
     instance->termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(ExecutionInterface* instance, int64_t secs) {
+  void AddTerminationTimer_(ITaskInstance* instance, int64_t secs) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -238,7 +262,7 @@ class TaskManager {
     instance->termination_timer = termination_handel;
   }
 
-  static void DelTerminationTimer_(ExecutionInterface* instance) {
+  static void DelTerminationTimer_(ITaskInstance* instance) {
     // Close handle before free
     if (instance->termination_timer) {
       instance->termination_timer->close();
@@ -271,7 +295,7 @@ class TaskManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   struct ExecuteTaskElem {
-    std::unique_ptr<ExecutionInterface> instance;
+    std::unique_ptr<ITaskInstance> instance;
     std::promise<CraneExpected<pid_t>> pid_prom;
   };
 
@@ -323,7 +347,7 @@ class TaskManager {
 
   StepInstance m_step_;
   // TODO: Support multiple tasks
-  std::unique_ptr<ExecutionInterface> m_task_;
+  std::unique_ptr<ITaskInstance> m_task_;
 };
 
 }  // namespace Supervisor

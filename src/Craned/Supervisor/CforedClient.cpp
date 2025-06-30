@@ -27,7 +27,7 @@ namespace Supervisor {
 using crane::grpc::StreamTaskIOReply;
 using crane::grpc::StreamTaskIORequest;
 
-CforedClient::CforedClient() : m_stopped_(false) {
+CforedClient::CforedClient() {
   m_loop_ = uvw::loop::create();
 
   std::shared_ptr<uvw::idle_handle> idle_handle =
@@ -44,32 +44,32 @@ CforedClient::CforedClient() : m_stopped_(false) {
   if (idle_handle->start() != 0) {
     CRANE_ERROR("Failed to start the idle event in CforedManager EvLoop.");
   }
-  m_ev_thread_ = std::thread([this] {
-    util::SetCurrentThreadName("CforedClient");
-    m_loop_->run();
-  });
-};
+}
 
 CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} is being destructed.", m_cfored_name_);
+
   m_stopped_ = true;
+
   if (m_fwd_thread_.joinable()) m_fwd_thread_.join();
   if (m_ev_thread_.joinable()) m_ev_thread_.join();
+
   m_cq_.Shutdown();
+
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-uint16_t CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
-                                    int task_output_fd, bool pty,
-                                    bool x11_fwd) {
+void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
+                                                    int proc_stdout, bool pty) {
   CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
-              pid, task_input_fd, task_output_fd, pty);
-  TaskFwdMeta meta = {.input_fd = task_input_fd,
-                      .output_fd = task_output_fd,
+              pid, proc_stdin, proc_stdout, pty);
+
+  TaskFwdMeta meta = {.proc_stdin = proc_stdin,
+                      .proc_stdout = proc_stdout,
                       .pid = pid,
                       .pty = pty};
 
-  auto poll_handle = m_loop_->resource<uvw::poll_handle>(task_output_fd);
+  auto poll_handle = m_loop_->resource<uvw::poll_handle>(proc_stdout);
   poll_handle->on<uvw::poll_event>(
       [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
         CRANE_TRACE("Detect task #{} output.", g_config.JobId);
@@ -77,7 +77,7 @@ uint16_t CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
         constexpr int MAX_BUF_SIZE = 4096;
         char buf[MAX_BUF_SIZE];
 
-        auto ret = read(meta.output_fd, buf, MAX_BUF_SIZE);
+        auto ret = read(meta.proc_stdout, buf, MAX_BUF_SIZE);
         bool read_finished{false};
 
         if (ret == 0) {
@@ -117,7 +117,7 @@ uint16_t CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
           CRANE_TRACE("Task #{} to cfored {} finished its output.",
                       g_config.JobId, m_cfored_name_);
           h.close();
-          close(meta.output_fd);
+          close(meta.proc_stdout);
 
           bool ok_to_free = this->TaskOutputFinish(meta.pid);
           if (ok_to_free) {
@@ -137,14 +137,14 @@ uint16_t CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
   if (ret < 0) {
     CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
   }
-  uint16_t x11_port = 0;
-  if (x11_fwd) {
-    CRANE_TRACE("Registering X11 forwarding.");
-    x11_port = SetupX11forwarding_();
-  }
+
   absl::MutexLock lock(&m_mtx_);
   m_fwd_meta_map[pid] = std::move(meta);
-  return x11_port;
+}
+
+uint16_t CforedClient::InitUvX11FwdHandler(pid_t pid) {
+  CRANE_TRACE("Registering X11 forwarding for pid {}.", pid);
+  return SetupX11forwarding_();
 }
 
 uint16_t CforedClient::SetupX11forwarding_() {
@@ -246,7 +246,14 @@ uint16_t CforedClient::SetupX11forwarding_() {
   return port;
 }
 
-bool CforedClient::TaskInputNoLock_(const std::string& msg, int fd) {
+void CforedClient::StartUvLoopThread() {
+  m_ev_thread_ = std::thread([this] {
+    util::SetCurrentThreadName("CforedClient");
+    m_loop_->run();
+  });
+}
+
+bool CforedClient::WriteStringToFd_(const std::string& msg, int fd) {
   ssize_t sz_sent = 0, sz_written;
   while (sz_sent != msg.size()) {
     sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -492,13 +499,14 @@ void CforedClient::AsyncSendRecvThread_() {
           CRANE_ASSERT(fwd_meta.x11_fd_info);
           if (!fwd_meta.x11_input_stopped)
             fwd_meta.x11_input_stopped =
-                !TaskInputNoLock_(*msg, fwd_meta.x11_fd_info->fd);
+                !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd);
         }
       } else {
         // CRANED_TASK_INPUT
         for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
           if (!fwd_meta.input_stopped)
-            fwd_meta.input_stopped = !TaskInputNoLock_(*msg, fwd_meta.input_fd);
+            fwd_meta.input_stopped =
+                !WriteStringToFd_(*msg, fwd_meta.proc_stdin);
         }
       }
 

@@ -26,36 +26,6 @@
 namespace Supervisor {
 
 class CforedClient {
-  template <class T>
-  using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
-
- public:
-  CforedClient();
-  ~CforedClient();
-
-  void InitChannelAndStub(const std::string& cfored_name);
-
-  uint16_t SetUpTaskFwd(pid_t pid, int task_input_fd, int task_output_fd,
-                        bool pty, bool x11_fwd);
-
-  bool TaskOutputFinish(pid_t pid);
-
-  bool TaskProcessStop(pid_t pid);
-
-  void TaskEnd(pid_t pid);
-
-  std::string CforedName() const { return m_cfored_name_; }
-
- private:
-  uint16_t SetupX11forwarding_();
-  bool TaskInputNoLock_(const std::string& msg, int fd);
-
-  void AsyncSendRecvThread_();
-
-  void TaskOutPutForward(const std::string& msg);
-
-  void TaskX11OutPutForward(std::unique_ptr<char[]>&& data, size_t len);
-
   struct X11FdInfo {
     int fd;
     uint16_t port;
@@ -65,16 +35,53 @@ class CforedClient {
   };
 
   struct TaskFwdMeta {
-    int input_fd{-1};
-    int output_fd{-1};
     pid_t pid{-1};
     bool pty{false};
-    std::shared_ptr<X11FdInfo> x11_fd_info{nullptr};
-    bool x11_input_stopped{false};
+
+    int proc_stdin{-1};
+    int proc_stdout{-1};
+
     bool input_stopped{false};
     bool output_stopped{false};
+
+    bool x11_input_stopped{false};
+    std::shared_ptr<X11FdInfo> x11_fd_info{nullptr};
+
     bool proc_stopped{false};
   };
+
+  template <class T>
+  using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+
+ public:
+  CforedClient();
+  ~CforedClient();
+
+  void InitChannelAndStub(const std::string& cfored_name);
+
+  void InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
+                                        int proc_stdout, bool pty);
+
+  uint16_t InitUvX11FwdHandler(pid_t pid);
+
+  void StartUvLoopThread();
+
+  bool TaskOutputFinish(pid_t pid);
+  bool TaskProcessStop(pid_t pid);
+  void TaskEnd(pid_t pid);
+
+  const std::string& CforedName() const { return m_cfored_name_; }
+
+ private:
+  uint16_t SetupX11forwarding_();
+
+  static bool WriteStringToFd_(const std::string& msg, int fd);
+
+  void AsyncSendRecvThread_();
+
+  void TaskOutPutForward(const std::string& msg);
+
+  void TaskX11OutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
   void CleanOutputQueueAndWriteToStreamThread_(
       grpc::ClientAsyncReaderWriter<crane::grpc::StreamTaskIORequest,
