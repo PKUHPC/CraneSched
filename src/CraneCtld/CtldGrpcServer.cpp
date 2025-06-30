@@ -627,6 +627,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_jobs_per_account = qos_info->max_jobs_per_account();
+  qos.max_submit_jobs_per_user = qos_info->max_submit_jobs_per_user();
+  qos.max_submit_jobs_per_account = qos_info->max_submit_jobs_per_account();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -1075,7 +1078,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_description(qos.description);
     qos_info->set_priority(qos.priority);
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+    qos_info->set_max_jobs_per_account(qos.max_jobs_per_account);
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+    qos_info->set_max_submit_jobs_per_user(qos.max_submit_jobs_per_user);
+    qos_info->set_max_submit_jobs_per_account(qos.max_submit_jobs_per_account);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
   }
@@ -1712,9 +1718,10 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      g_account_meta_container->UserReduceTask(task->Username());
       return std::unexpected(res);
     }
     std::future<task_id_t> future =
