@@ -24,6 +24,7 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "crane/CpuFrequency.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -418,6 +419,8 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   static inline TaskManager* s_instance_ptr_;
+
+  std::unique_ptr<crane::CpuFrequency> m_cpu_freq_;
 };
 }  // namespace Craned
 

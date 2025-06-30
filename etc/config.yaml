@@ -125,6 +125,9 @@ RejectJobsBeyondCapacity: false
 # Default value is false.
 JobFileAppend: false
 
+CpuFreqGovernors: "Conservative, OnDemand, Performance, PowerSave, SchedUtil, UserSpace"
+CpuFreqDef: "OnDemand"
+
 Plugin:
   # Toggle the plugin module in CraneSched
   Enabled: false

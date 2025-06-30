@@ -282,6 +282,13 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->set_cwd(task->cwd);
     mutable_task->set_get_user_env(task->get_user_env);
 
+    if (task->cpu_freq.cpu_freq) {
+      auto* mutable_cpu_freq = mutable_task->mutable_cpu_freq();
+      mutable_cpu_freq->set_low(task->cpu_freq.low);
+      mutable_cpu_freq->set_high(task->cpu_freq.high);
+      mutable_cpu_freq->set_governor(task->cpu_freq.governor);
+    }
+
     for (const auto &hostname : task->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 

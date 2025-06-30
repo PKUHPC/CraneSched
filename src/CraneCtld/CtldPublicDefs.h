@@ -165,6 +165,9 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
+
+  std::unordered_set<std::string> CpuFreqGovernors;
+  std::string CpuFreqDef;
 };
 
 struct RunTimeStatus {
@@ -357,6 +360,13 @@ struct BatchMetaInTask {
   std::string sh_script;
 };
 
+struct CpuFreq {
+  bool cpu_freq{false};
+  std::string low;
+  std::string high;
+  std::string governor;
+};
+
 struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
@@ -393,6 +403,8 @@ struct TaskInCtld {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   std::string reservation;
+
+  CpuFreq cpu_freq;
 
  private:
   /* ------------- [2] -------------
@@ -611,6 +623,13 @@ struct TaskInCtld {
     extra_attr = val.extra_attr();
 
     reservation = val.reservation();
+
+    if (!val.cpu_freq().low().empty() || !val.cpu_freq().governor().empty()) {
+      cpu_freq.cpu_freq = true;
+      cpu_freq.low = val.cpu_freq().low();
+      cpu_freq.high = val.cpu_freq().high();
+      cpu_freq.governor = val.cpu_freq().governor();
+    }
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {

@@ -1658,6 +1658,16 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
 CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
     std::unique_ptr<TaskInCtld> task) {
+
+  if (task->cpu_freq.cpu_freq) {
+    if (!task->cpu_freq.governor.empty() && !g_config.CpuFreqGovernors.contains(task->cpu_freq.governor)) {
+      CRANE_DEBUG("Governor {} is invalid.", task->cpu_freq.governor);
+      return std::unexpected(CraneErrCode::ERR_INVALID_CPU_FREQ_GOVERNOR);
+    }
+    if (task->cpu_freq.governor.empty() && !g_config.CpuFreqDef.empty())
+      task->cpu_freq.governor = g_config.CpuFreqDef;
+  }
+
   if (!task->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);

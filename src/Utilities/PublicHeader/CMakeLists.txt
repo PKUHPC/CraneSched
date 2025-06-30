@@ -10,7 +10,9 @@ add_library(Utility_PublicHeader
         include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h
         GrpcHelper.cpp
-        include/crane/GrpcHelper.h)
+        include/crane/GrpcHelper.h
+        CpuFrequency.cpp
+        include/crane/CpuFrequency.h)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog

@@ -544,6 +544,16 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      if (config["CpuFreqGovernors"] && !config["CpuFreqGovernors"].IsNull()) {
+        auto governors = config["CpuFreqGovernors"].as<std::string>();
+        governors.erase(std::ranges::remove(governors, ' ').begin(), governors.end());
+        g_config.CpuFreqGovernors = absl::StrSplit(absl::AsciiStrToLower(governors), ',');
+      }
+
+      if (config["CpuFreqDef"] && !config["CpuFreqDef"].IsNull()) {
+        g_config.CpuFreqDef = absl::AsciiStrToLower(config["CpuFreqDef"].as<std::string>());
+      }
+
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];
 
