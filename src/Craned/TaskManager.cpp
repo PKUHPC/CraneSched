@@ -1155,7 +1155,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup_path = instance->cgroup->CgroupPathStr();
 
   // TODO: test cpu freq
-  if (!instance->task.cpu_freq().governor().empty()) {
+  if (!instance->task.cpu_freq().low().empty() || !instance->task.cpu_freq().governor().empty()) {
     auto& cpu_freq = instance->task.cpu_freq();
     m_cpu_freq_->CpuFreqValidateAndSet(cpu_freq.low(), cpu_freq.high(),
       cpu_freq.governor(), instance->task.task_id(), "1-2,3");
