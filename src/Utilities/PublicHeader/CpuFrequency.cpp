@@ -211,8 +211,8 @@ void CpuFrequency::CpuFreqReset(uint32_t job_id) {
         freq_data.new_governor.empty())
       continue;
 
-    int fd = TestCpuOwnerLock_(i, job_id);
-    if (fd < 0) continue;
+    if (!TestCpuOwnerLock_(i, job_id))
+      continue;
 
     if (freq_data.new_frequency != kInvalidFreq) {
       if (!CpuFreqSetGov_(i, "userspace", job_id)) continue;
@@ -565,12 +565,12 @@ int CpuFrequency::SetCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
   return fd;
 }
 
-int CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
+bool CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
   std::string tmp = fmt::format("{}/cpu", kDefaultCraneBaseDir);
 
   if ((mkdir(tmp.c_str(), 0700) != 0) && (errno != EEXIST)) {
     CRANE_ERROR("mkdir %s failed: %m", tmp);
-    return -1;
+    return false;
   }
 
   tmp = fmt::format("{}/cpu/{}", kDefaultCraneBaseDir, cpu_id);
@@ -578,14 +578,14 @@ int CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
 
   if (fd < 0) {
     CRANE_ERROR("open {} error", tmp);
-    return -1;
+    return false;
   }
 
   int rc = FdLockRetry_(fd);
   if (rc < 0) {
     CRANE_ERROR("flock {} error", tmp);
     close(fd);
-    return -1;
+    return false;
   }
 
   uint32_t in_job_id;
@@ -593,7 +593,7 @@ int CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
   if (n < 0) {
     flock(fd, LOCK_UN);
     close(fd);
-    return -1;
+    return false;
   }
 
   flock(fd, LOCK_UN);
@@ -602,13 +602,13 @@ int CpuFrequency::TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id) {
     CRANE_DEBUG("CPU %d now owned by job %u rather than job %u", cpu_id,
                 in_job_id, job_id);
     close(fd);
-    return -1;
+    return false;
   }
 
   close(fd);
   CRANE_DEBUG("CPU {} owned by job {} as expected", cpu_id, job_id);
 
-  return fd;
+  return true;
 }
 
 int CpuFrequency::FdLockRetry_(int fd) {

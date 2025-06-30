@@ -63,7 +63,7 @@ class CpuFrequency {
                                      const std::string& option,
                                      uint32_t job_id);
   static int SetCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id);
-  static int TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id);
+  static bool TestCpuOwnerLock_(uint32_t cpu_id, uint32_t job_id);
   static int FdLockRetry_(int fd);
 
   bool DeriveAvailFreq_(uint32_t cpu_idx);
