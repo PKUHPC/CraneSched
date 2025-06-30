@@ -237,7 +237,7 @@ void CpuFrequency::CpuFreqReset(uint32_t job_id) {
       if (!CpuFreqSetGov_(i, freq_data.org_governor, job_id)) continue;
     }
 
-    CRANE_DEBUG("task {} reset cpu {}");
+    CRANE_DEBUG("task {} reset cpu {}", job_id, i);
   }
 }
 
