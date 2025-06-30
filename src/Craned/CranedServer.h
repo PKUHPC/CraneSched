@@ -69,25 +69,10 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::QueryTaskIdFromPortRequest *request,
       crane::grpc::QueryTaskIdFromPortReply *response) override;
 
-  grpc::Status QueryTaskIdFromPortForward(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
-      crane::grpc::QueryTaskIdFromPortForwardReply *response) override;
-
-  grpc::Status MigrateSshProcToCgroup(
-      grpc::ServerContext *context,
-      const crane::grpc::MigrateSshProcToCgroupRequest *request,
-      crane::grpc::MigrateSshProcToCgroupReply *response) override;
-
   grpc::Status QueryTaskEnvVariables(
       grpc::ServerContext *context,
       const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
       crane::grpc::QueryTaskEnvVariablesReply *response) override;
-
-  grpc::Status QueryTaskEnvVariablesForward(
-      grpc::ServerContext *context,
-      const ::crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
-      crane::grpc::QueryTaskEnvVariablesForwardReply *response) override;
 
   grpc::Status CreateCgroupForTasks(
       grpc::ServerContext *context,

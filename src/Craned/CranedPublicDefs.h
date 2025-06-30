@@ -60,6 +60,7 @@ struct Config {
     TlsCertificates TlsCerts;
 
     std::string UnixSocketListenAddr;
+    std::string UnixSocketForPamListenAddr;
   };
 
   struct PluginConfig {
@@ -72,7 +73,7 @@ struct Config {
   bool CompressedRpc{};
 
   std::string ControlMachine;
-  std::string CraneCtldListenPort;
+  std::string CraneCtldForInternalListenPort;
   std::string CranedDebugLevel;
 
   std::filesystem::path CraneBaseDir;
@@ -80,6 +81,7 @@ struct Config {
   std::filesystem::path CranedMutexFilePath;
   std::filesystem::path CranedScriptDir;
   std::filesystem::path CranedUnixSockPath;
+  std::filesystem::path CranedForPamUnixSockPath;
 
   bool CranedForeground{};
 
