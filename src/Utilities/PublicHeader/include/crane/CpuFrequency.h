@@ -74,17 +74,17 @@ class CpuFrequency {
   uint32_t CpuFreqFreqSpecNum_(const std::string& value, uint32_t cpu_idx);
 
   struct CpuFreqData {
-    uint8_t avail_governors;
-    std::vector<uint32_t> avail_freq;
-    bool org_set;
+    uint8_t avail_governors{0};
+    std::vector<uint32_t> avail_freq{0};
+    bool org_set{false};
     std::string org_governor;
-    uint32_t org_frequency;
-    uint32_t org_min_freq;
-    uint32_t org_max_freq;
+    uint32_t org_frequency{kInvalidFreq};
+    uint32_t org_min_freq{kInvalidFreq};
+    uint32_t org_max_freq{kInvalidFreq};
     std::string new_governor;
-    uint32_t new_frequency;
-    uint32_t new_min_freq;
-    uint32_t new_max_freq;
+    uint32_t new_frequency{kInvalidFreq};
+    uint32_t new_min_freq{kInvalidFreq};
+    uint32_t new_max_freq{kInvalidFreq};
   };
 
   std::vector<CpuFreqData> m_cpu_freq_data_;
