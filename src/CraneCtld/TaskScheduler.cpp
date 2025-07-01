@@ -2787,7 +2787,7 @@ void MinLoadFirst::NodeSelect(
       }
 
       std::optional<std::string> has_reason =
-    g_account_meta_container->CheckQosResource(*task);
+          g_account_meta_container->CheckQosResource(*task);
       if (has_reason) {
         task->pending_reason = has_reason.value();
         continue;
