@@ -950,7 +950,8 @@ service CranedForPam {
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryStepFromPortForward(QueryStepFromPortForwardRequest) returns (QueryStepFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
-  rpc QuerySshStepEnvVariablesForward(QuerySshStepEnvVariablesForwardRequest) returns (QuerySshStepEnvVariablesForwardReply);
+  rpc QuerySshStepEnvVariablesForward(QuerySshStepEnvVariablesForwardRequest)
+      returns (QuerySshStepEnvVariablesForwardReply);
 }
 
 service CraneForeD {

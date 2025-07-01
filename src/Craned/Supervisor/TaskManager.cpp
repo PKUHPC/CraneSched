@@ -214,7 +214,7 @@ CraneErrCode ITaskInstance::SetupCrunX11_() {
 
 CraneExpected<pid_t> ITaskInstance::Fork_(bool* launch_pty,
                                           std::vector<int>* to_crun_pipe,
-                                               std::vector<int>* from_crun_pipe,
+                                          std::vector<int>* from_crun_pipe,
                                           int* crun_pty_fd) {
   if (!m_parent_step_inst_->IsCrun()) return fork();
 
@@ -241,8 +241,10 @@ CraneExpected<pid_t> ITaskInstance::Fork_(bool* launch_pty,
   return fork();
 }
 
-uint16_t ITaskInstance::SetupCrunMsgFwd_(bool launch_pty, const std::vector<int>& to_crun_pipe,
-    const std::vector<int>& from_crun_pipe, int crun_pty_fd) {
+uint16_t ITaskInstance::SetupCrunMsgFwd_(bool launch_pty,
+                                         const std::vector<int>& to_crun_pipe,
+                                         const std::vector<int>& from_crun_pipe,
+                                         int crun_pty_fd) {
   auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
   if (launch_pty) {
     close(meta->proc_stdin);
