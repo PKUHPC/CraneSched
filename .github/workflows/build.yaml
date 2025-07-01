@@ -23,7 +23,10 @@ on:
         default: 'master'
 
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) }}
+  group: >-
+    ${{ github.event_name == 'pull_request'
+        && format('pr-{0}', github.event.pull_request.number)
+        || format('ref-{0}', github.ref) }}
   cancel-in-progress: true
 
 env:
