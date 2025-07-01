@@ -192,12 +192,14 @@ void CtldClientStateMachine::NotifyConfigureSubscribe_(
     const crane::grpc::ConfigureCranedRequest& configure_req) {
   absl::MutexLock lk(&m_subscribe_mutex_);
   std::latch latch(m_configure_subscribe_cb_list_.size());
-  absl::Mutex mtx;
   for (auto it = m_configure_subscribe_cb_list_.begin();
        it != m_configure_subscribe_cb_list_.end(); ++it) {
-    g_thread_pool->detach_task([it, &configure_req, &latch, &mtx, this] {
+    g_thread_pool->detach_task([it, &configure_req, &latch, this] {
       it->cb(configure_req);
-      it->conf_future.wait();
+      auto status = it->conf_future.wait_for(std::chrono::seconds(10));
+      if (status == std::future_status::timeout) {
+        CRANE_ERROR("Configure subscribe callback timeout.");
+      }
       latch.count_down();
     });
   }
