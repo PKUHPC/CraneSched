@@ -958,5 +958,5 @@ service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
   rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
   rpc TaskIOStream(stream StreamTaskIORequest) returns (stream StreamTaskIOReply);
-  rpc QueryTaskIdFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
+  rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
 }

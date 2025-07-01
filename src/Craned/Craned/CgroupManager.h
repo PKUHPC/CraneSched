@@ -265,9 +265,9 @@ constexpr ControllerFlags operator|(
 
 constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
-// In m any distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
-//  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
-//  handles this for us and no additional care needs to be taken.
+// In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
+// and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
+// handles this for us and no additional care needs to be taken.
 constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
 constexpr ControllerFlags CgV1PreferredControllers =

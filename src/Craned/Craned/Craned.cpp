@@ -77,6 +77,13 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   }
   g_config.Supervisor.DebugLevel =
       YamlValueOr(supervisor_config["DebugLevel"], "trace");
+  if (!StrToLogLevel(g_config.Supervisor.DebugLevel).has_value()) {
+    fmt::print(stderr,
+               "Illegal Supervisor debug-level: {}, should be one of trace,"
+               ", debug, info, warn, error, off.\n",
+               g_config.Supervisor.DebugLevel);
+    std::exit(1);
+  }
   g_config.Supervisor.LogDir =
       g_config.CraneBaseDir /
       YamlValueOr(supervisor_config["LogDir"], "supervisor");
@@ -158,12 +165,6 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      if (!StrToLogLevel(g_config.Supervisor.DebugLevel).has_value()) {
-        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.\n",
-                   g_config.Supervisor.DebugLevel);
-        std::exit(1);
-      }
-
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
@@ -202,6 +203,7 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
+
       g_config.ListenConf.UnixSocketForPamListenAddr =
           fmt::format("unix://{}", g_config.CranedForPamUnixSockPath);
 
@@ -712,6 +714,7 @@ void GlobalVariableInit() {
   g_job_mgr = std::make_unique<Craned::JobManager>();
   g_job_mgr->SetSigintCallback([] {
     g_server->Shutdown();
+    g_craned_for_pam_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
 

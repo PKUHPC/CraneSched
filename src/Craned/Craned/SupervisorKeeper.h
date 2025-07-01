@@ -57,7 +57,9 @@ class SupervisorKeeper {
 
   /**
    * @brief Query all existing supervisor for task they hold.
-   * @return job_id and pid from supervisors
+   * @return job_id and pid from supervisors. Error when socket file
+   * scanning fails, supervisors are unreachable, or task status queries fail
+   * with specific error codes.
    */
   CraneExpected<std::unordered_map<task_id_t, pid_t>> Init();
 
