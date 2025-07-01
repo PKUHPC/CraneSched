@@ -269,8 +269,9 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      g_config.CraneCtldForInternalListenPort = YamlValueOr(
-          config["CraneCtldForInternalListenPort"], kCtldDefaultPort);
+      g_config.CraneCtldForInternalListenPort =
+          YamlValueOr(config["CraneCtldForInternalListenPort"],
+                      kCtldForInternalDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
