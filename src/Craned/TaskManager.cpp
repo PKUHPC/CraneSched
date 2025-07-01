@@ -1214,7 +1214,11 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
                 task_id, strerror(errno));
   }
 
-  for (int local_rank = 0; local_rank< instance->task.ntasks_per_node(); local_rank++) {
+  for (int local_rank = 0; local_rank < instance->task.ntasks_per_node(); local_rank++) {
+
+    if (local_rank > 0 && !(instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix"))
+      continue;
+
     auto process =
       std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
