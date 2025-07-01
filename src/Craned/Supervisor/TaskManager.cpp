@@ -231,14 +231,26 @@ CraneExpected<pid_t> ITaskInstance::Fork_(bool* launch_pty,
   if (pipe(from_crun_pipe->data()) == -1) {
     CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                 m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    close(to_crun_pipe->at(0));
+    close(to_crun_pipe->at(1));
     return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
   meta->proc_stdin = to_crun_pipe->at(1);
   meta->proc_stdout = from_crun_pipe->at(0);
-  if (*launch_pty) return forkpty(crun_pty_fd, nullptr, nullptr, nullptr);
+  pid_t pid = -1;
+  if (*launch_pty)
+    pid = forkpty(crun_pty_fd, nullptr, nullptr, nullptr);
+  else
+    pid = fork();
 
-  // Crun without pty, use pipe to forward stdin/stdout.
-  return fork();
+  if (pid == -1) {
+    close(to_crun_pipe->at(0));
+    close(to_crun_pipe->at(1));
+    close(from_crun_pipe->at(0));
+    close(from_crun_pipe->at(1));
+  }
+
+  return pid;
 }
 
 uint16_t ITaskInstance::SetupCrunMsgFwd_(bool launch_pty,
@@ -320,7 +332,7 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
   rc = setgroups(gids.size(), gids.data());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setgroups() failed: {}\n",
-               m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+               strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -329,14 +341,14 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
                  m_parent_step_inst_->GetStep().gid());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setegid() failed: {}\n",
-               m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+               strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   rc = setresuid(pwd.Uid(), pwd.Uid(), pwd.Uid());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: seteuid() failed: {}\n",
-               m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+               strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
