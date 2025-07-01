@@ -135,7 +135,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   } else {
     std::unique_ptr<crane::grpc::CraneForeD::Stub> stub_of_remote_cfored =
         crane::grpc::CraneForeD::NewStub(channel_of_remote_service);
-    status_remote_service = stub_of_remote_cfored->QueryTaskIdFromPort(
+    status_remote_service = stub_of_remote_cfored->QueryStepFromPort(
         &context_of_remote_service, request_to_remote_service,
         &reply_from_remote_service);
   }

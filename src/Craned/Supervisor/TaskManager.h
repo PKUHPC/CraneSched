@@ -36,6 +36,12 @@ class StepInstance {
   bool IsCrun() const;
   bool IsCalloc() const;
 
+  bool RequiresPty() const { return m_step_to_supv_.interactive_meta().pty(); }
+  bool RequiresX11() const { return m_step_to_supv_.interactive_meta().x11(); }
+  bool RequiresX11Fwd() const {
+    return m_step_to_supv_.interactive_meta().x11_meta().enable_forwarding();
+  }
+
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
   void InitCforedClient() {
@@ -57,24 +63,29 @@ class StepInstance {
   std::unique_ptr<CforedClient> m_cfored_client_;
 };
 
-struct MetaInExecution {
-  virtual ~MetaInExecution() = default;
+struct TaskInstanceMeta {
+  virtual ~TaskInstanceMeta() = default;
 
   std::string parsed_sh_script_path;
 };
 
-struct BatchMetaInExecution : MetaInExecution {
-  ~BatchMetaInExecution() override = default;
+struct BatchInstanceMeta : TaskInstanceMeta {
+  ~BatchInstanceMeta() override = default;
 
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
 };
 
-struct CrunMetaInExecution : MetaInExecution {
-  ~CrunMetaInExecution() override = default;
+struct CrunInstanceMeta : TaskInstanceMeta {
+  ~CrunInstanceMeta() override = default;
 
-  int proc_stdin;
-  int proc_stdout;
+  bool pty{false};
+
+  int stdin_write;
+  int stdout_write;
+
+  int stdin_read;
+  int stdout_read;
 
   std::string x11_target;
   uint16_t x11_port;
@@ -105,6 +116,10 @@ class ITaskInstance {
     return m_parent_step_inst_->GetStep();
   }
 
+  CrunInstanceMeta* GetCrunInstanceMeta() const {
+    return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
+  }
+
   void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
@@ -132,8 +147,8 @@ class ITaskInstance {
   bool terminated_by_timeout{false};
 
  protected:
-  CrunMetaInExecution* GetCrunMeta() const {
-    return dynamic_cast<CrunMetaInExecution*>(this->m_meta_.get());
+  CrunInstanceMeta* GetCrunMeta() const {
+    return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
   };
 
   // Helper methods
@@ -141,15 +156,9 @@ class ITaskInstance {
   CraneErrCode SetupCrunX11_();
 
   // Return error before fork.
-  virtual CraneExpected<pid_t> Fork_(bool* launch_pty,
-                                     std::vector<int>* to_crun_pipe,
-                                     std::vector<int>* from_crun_pipe,
-                                     int* crun_pty_fd);
+  virtual CraneExpected<pid_t> ForkCrunAndInitMeta_();
 
-  virtual uint16_t SetupCrunMsgFwd_(bool launch_pty,
-                                    const std::vector<int>& to_crun_pipe,
-                                    const std::vector<int>& from_crun_pipe,
-                                    int crun_pty_fd);
+  virtual void SetupCrunFwdAtParent_(uint16_t* x11_port);
 
   virtual void ResetChildProcSigHandler_();
 
@@ -157,10 +166,7 @@ class ITaskInstance {
 
   virtual CraneErrCode SetChildProcessBatchFd_();
 
-  virtual void SetupChildProcessCrunFd_(bool launch_pty,
-                                        const std::vector<int>& to_crun_pipe,
-                                        const std::vector<int>& from_crun_pipe,
-                                        int crun_pty_fd);
+  virtual void SetupCrunFwdAtChild_();
 
   virtual void SetupChildProcessCrunX11_();
 
@@ -171,12 +177,14 @@ class ITaskInstance {
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
-  StepInstance* m_parent_step_inst_;
-
   // NOLINTEND(readability-identifier-naming)
   // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+
+  StepInstance* m_parent_step_inst_;
+
   pid_t m_pid_{0};  // forked pid
-  std::unique_ptr<MetaInExecution> m_meta_{nullptr};
+
+  std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
 
   EnvMap m_env_;
