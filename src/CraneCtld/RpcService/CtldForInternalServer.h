@@ -174,10 +174,10 @@ class CtldForInternalServiceImpl final
   explicit CtldForInternalServiceImpl(CtldForInternalServer *server)
       : m_ctld_for_internal_server_(server) {}
 
-  grpc::Status TaskStatusChange(
+  grpc::Status StepStatusChange(
       grpc::ServerContext *context,
-      const crane::grpc::TaskStatusChangeRequest *request,
-      crane::grpc::TaskStatusChangeReply *response) override;
+      const crane::grpc::StepStatusChangeRequest *request,
+      crane::grpc::StepStatusChangeReply *response) override;
 
   grpc::Status CranedTriggerReverseConn(
       grpc::ServerContext *context,

@@ -49,6 +49,8 @@ bool CreateFoldersForFile(std::string const& p);
 bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
                             mode_t permissions);
 
+bool SetFdNonBlocking(int fd);
+
 // Close file descriptors within [fd_begin, fd_end)
 void CloseFdRange(int fd_begin, int fd_end);
 

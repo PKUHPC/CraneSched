@@ -178,6 +178,11 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
 
+      g_config.CranedForPamUnixSockPath =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CranedForPamUnixSockPath"],
+                      kDefaultCranedForPamUnixSockPath);
+
       g_config.CranedScriptDir =
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedScriptDir"], kDefaultCranedScriptDir);
@@ -197,6 +202,8 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
+      g_config.ListenConf.UnixSocketForPamListenAddr =
+          fmt::format("unix://{}", g_config.CranedForPamUnixSockPath);
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
@@ -260,8 +267,8 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      g_config.CraneCtldListenPort =
-          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
+      g_config.CraneCtldForInternalListenPort = YamlValueOr(
+          config["CraneCtldForInternalListenPort"], kCtldDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();

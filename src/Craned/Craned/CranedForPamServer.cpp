@@ -20,14 +20,13 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
-#include "TaskManager.h"
 
 namespace Craned {
 
-grpc::Status CranedForPamServiceImpl::QueryTaskIdFromPortForward(
+grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
     grpc::ServerContext *context,
-    const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
-    crane::grpc::QueryTaskIdFromPortForwardReply *response) {
+    const crane::grpc::QueryStepFromPortForwardRequest *request,
+    crane::grpc::QueryStepFromPortForwardReply *response) {
   bool ok;
   bool task_id_found = false;
   bool remote_is_craned = false;
@@ -120,8 +119,8 @@ grpc::Status CranedForPamServiceImpl::QueryTaskIdFromPortForward(
     return Status::OK;
   }
 
-  crane::grpc::QueryTaskIdFromPortRequest request_to_remote_service;
-  crane::grpc::QueryTaskIdFromPortReply reply_from_remote_service;
+  crane::grpc::QueryStepFromPortRequest request_to_remote_service;
+  crane::grpc::QueryStepFromPortReply reply_from_remote_service;
   grpc::ClientContext context_of_remote_service;
   Status status_remote_service;
 
@@ -130,7 +129,7 @@ grpc::Status CranedForPamServiceImpl::QueryTaskIdFromPortForward(
   if (remote_is_craned) {
     std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
         crane::grpc::Craned::NewStub(channel_of_remote_service);
-    status_remote_service = stub_of_remote_craned->QueryTaskIdFromPort(
+    status_remote_service = stub_of_remote_craned->QueryStepFromPort(
         &context_of_remote_service, request_to_remote_service,
         &reply_from_remote_service);
   } else {
@@ -204,10 +203,10 @@ grpc::Status CranedForPamServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
+grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
     grpc::ServerContext *context,
-    const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
-    crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
+    const crane::grpc::QuerySshStepEnvVariablesForwardRequest *request,
+    crane::grpc::QuerySshStepEnvVariablesForwardReply *response) {
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
@@ -247,15 +246,15 @@ grpc::Status CranedForPamServiceImpl::QueryTaskEnvVariablesForward(
     return Status::OK;
   }
 
-  crane::grpc::QueryTaskEnvVariablesRequest request_to_remote_service;
-  crane::grpc::QueryTaskEnvVariablesReply reply_from_remote_service;
+  crane::grpc::QuerySshStepEnvVariablesRequest request_to_remote_service;
+  crane::grpc::QuerySshStepEnvVariablesReply reply_from_remote_service;
   grpc::ClientContext context_of_remote_service;
   Status status_remote_service;
 
   request_to_remote_service.set_task_id(request->task_id());
   std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
       crane::grpc::Craned::NewStub(channel_of_remote_service);
-  status_remote_service = stub_of_remote_craned->QueryTaskEnvVariables(
+  status_remote_service = stub_of_remote_craned->QuerySshStepEnvVariables(
       &context_of_remote_service, request_to_remote_service,
       &reply_from_remote_service);
   if (!status_remote_service.ok() || !reply_from_remote_service.ok()) {

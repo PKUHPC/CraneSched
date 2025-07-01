@@ -92,12 +92,15 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
 SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
-  auto unix_socket_path = fmt::format(
-      "unix://{}/task_{}.sock", kDefaultSupervisorUnixSockDir, g_config.JobId);
+  std::filesystem::path supervisor_sock_path =
+      std::filesystem::path(kDefaultSupervisorUnixSockDir) /
+      fmt::format("task_{}.sock", g_config.JobId);
+  auto unix_socket_path = fmt::format("unix://{}", supervisor_sock_path);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());
 
+  chmod(supervisor_sock_path.c_str(), 0600);
   m_server_ = builder.BuildAndStart();
 }
 }  // namespace Supervisor

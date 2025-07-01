@@ -11,6 +11,8 @@ add_executable(craned
         SupervisorKeeper.h
         CranedServer.h
         CranedServer.cpp
+        CranedForPamServer.h
+        CranedForPamServer.cpp
         CranedPublicDefs.h
         Craned.cpp
 
