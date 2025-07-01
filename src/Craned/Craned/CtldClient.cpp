@@ -393,7 +393,8 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   grpc::Status status =
       m_stub_->CranedTriggerReverseConn(&context, req, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+    CRANE_ERROR("Notify CranedConnected failed: {}, {}",
+                (int)status.error_code(), status.error_message());
     return false;
   }
   return true;
