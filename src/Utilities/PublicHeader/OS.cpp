@@ -111,6 +111,15 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 int GetFdOpenMax() { return static_cast<int>(sysconf(_SC_OPEN_MAX)); }
 
+bool SetFdNonBlocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    return false;
+  }
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  return true;
+}
+
 void CloseFdRange(int fd_begin, int fd_end) {
   int fd_max = std::min(GetFdOpenMax(), fd_end);
   for (int i = fd_begin; i < fd_max; i++) close(i);

@@ -68,7 +68,6 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::QueryStepFromPortRequest *request,
       crane::grpc::QueryStepFromPortReply *response) override;
-      crane::grpc::QueryTaskIdFromPortReply *response) override;
 
       grpc::Status QuerySshStepEnvVariables(
           grpc::ServerContext *context,

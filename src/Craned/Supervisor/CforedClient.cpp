@@ -64,11 +64,11 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
   CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
               pid, proc_stdin, proc_stdout, pty);
 
-  TaskFwdMeta meta = {.proc_stdin = proc_stdin,
-                      .proc_stdout = proc_stdout,
-                      .pid = pid,
-                      .pty = pty};
-
+  TaskFwdMeta meta = {.pid = pid,
+                      .pty = pty,
+                      .proc_stdin = proc_stdin,
+                      .proc_stdout = proc_stdout};
+  util::os::SetFdNonBlocking(proc_stdout);
   auto poll_handle = m_loop_->resource<uvw::poll_handle>(proc_stdout);
   poll_handle->on<uvw::poll_event>(
       [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {

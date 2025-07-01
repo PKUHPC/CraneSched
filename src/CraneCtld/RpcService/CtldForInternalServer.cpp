@@ -23,10 +23,10 @@
 #include "TaskScheduler.h"
 
 namespace Ctld {
-grpc::Status CtldForInternalServiceImpl::TaskStatusChange(
+grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
+    const crane::grpc::StepStatusChangeRequest *request,
+    crane::grpc::StepStatusChangeReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -34,9 +34,10 @@ grpc::Status CtldForInternalServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChangeWithReasonAsync(
+  // TODO: Set reason here.
+  g_task_scheduler->TaskStatusChangeAsync(
       request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code(), std::move(reason));
+      request->exit_code());
   response->set_ok(true);
   return grpc::Status::OK;
 }
