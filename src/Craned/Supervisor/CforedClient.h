@@ -38,8 +38,8 @@ class CforedClient {
     pid_t pid{-1};
     bool pty{false};
 
-    int proc_stdin{-1};
-    int proc_stdout{-1};
+    int stdin_write{-1};
+    int stdout_read{-1};
 
     bool input_stopped{false};
     bool output_stopped{false};
@@ -59,8 +59,8 @@ class CforedClient {
 
   void InitChannelAndStub(const std::string& cfored_name);
 
-  void InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
-                                        int proc_stdout, bool pty);
+  void InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+                                        int stdout_read, bool pty);
 
   uint16_t InitUvX11FwdHandler(pid_t pid);
 

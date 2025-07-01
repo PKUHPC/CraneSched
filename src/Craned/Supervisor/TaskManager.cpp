@@ -59,10 +59,10 @@ ITaskInstance::~ITaskInstance() {
   if (m_parent_step_inst_->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
-    close(crun_meta->proc_stdin);
+    close(crun_meta->stdin_read);
     // For crun pty job, avoid close same fd twice
-    if (crun_meta->proc_stdout != crun_meta->proc_stdin)
-      close(crun_meta->proc_stdout);
+    if (crun_meta->stdout_read != crun_meta->stdin_read)
+      close(crun_meta->stdout_read);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
@@ -212,81 +212,95 @@ CraneErrCode ITaskInstance::SetupCrunX11_() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<pid_t> ITaskInstance::Fork_(bool* launch_pty,
-                                          std::vector<int>* to_crun_pipe,
-                                          std::vector<int>* from_crun_pipe,
-                                          int* crun_pty_fd) {
+CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
   if (!m_parent_step_inst_->IsCrun()) return fork();
 
-  auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-  *launch_pty = m_parent_step_inst_->GetStep().interactive_meta().pty();
+  auto* meta = GetCrunInstanceMeta();
+  meta->pty = m_parent_step_inst_->GetStep().interactive_meta().pty();
   CRANE_DEBUG("Launch crun task #{} pty: {}",
-              m_parent_step_inst_->GetStep().task_id(), *launch_pty);
+              m_parent_step_inst_->GetStep().task_id(), meta->pty);
 
-  if (pipe(to_crun_pipe->data()) == -1) {
-    CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
-                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  int to_crun_pipe[2], from_crun_pipe[2];
+  int crun_pty_fd = -1;
+
+  if (!meta->pty) {
+    if (pipe(to_crun_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    }
+
+    if (pipe(from_crun_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+      close(to_crun_pipe[0]);
+      close(to_crun_pipe[1]);
+      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    }
   }
-  if (pipe(from_crun_pipe->data()) == -1) {
-    CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
-                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
-    close(to_crun_pipe->at(0));
-    close(to_crun_pipe->at(1));
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
-  }
-  meta->proc_stdin = to_crun_pipe->at(1);
-  meta->proc_stdout = from_crun_pipe->at(0);
+
   pid_t pid = -1;
-  if (*launch_pty)
-    pid = forkpty(crun_pty_fd, nullptr, nullptr, nullptr);
-  else
+  if (meta->pty) {
+    pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
+
+    if (pid > 0) {
+      meta->stdin_read = crun_pty_fd;
+      meta->stdout_read = crun_pty_fd;
+      meta->stdin_write = crun_pty_fd;
+      meta->stdout_write = crun_pty_fd;
+    }
+  } else {
     pid = fork();
 
-  if (pid == -1) {
-    close(to_crun_pipe->at(0));
-    close(to_crun_pipe->at(1));
-    close(from_crun_pipe->at(0));
-    close(from_crun_pipe->at(1));
+    meta->stdin_write = to_crun_pipe[1];
+    meta->stdin_read = to_crun_pipe[0];
+    meta->stdout_write = from_crun_pipe[1];
+    meta->stdout_read = from_crun_pipe[0];
+
+    if (pid == -1) {
+      close(to_crun_pipe[0]);
+      close(to_crun_pipe[1]);
+      close(from_crun_pipe[0]);
+      close(from_crun_pipe[1]);
+    }
   }
 
   return pid;
 }
 
-uint16_t ITaskInstance::SetupCrunMsgFwd_(bool launch_pty,
-                                         const std::vector<int>& to_crun_pipe,
-                                         const std::vector<int>& from_crun_pipe,
-                                         int crun_pty_fd) {
-  auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-  if (launch_pty) {
-    close(meta->proc_stdin);
-    close(meta->proc_stdout);
-    meta->proc_stdin = crun_pty_fd;
-    meta->proc_stdout = crun_pty_fd;
+void ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
+  auto* meta = dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
+
+  if (!meta->pty) {
+    // For non-pty tasks, pipe is used for stdin/stdout and one end should be
+    // closed.
+    close(meta->stdin_read);
+    close(meta->stdout_write);
   }
+  // For pty tasks, stdin_read and stdout_write are the same fd and should not
+  // be closed.
 
   const auto& parent_step = m_parent_step_inst_->GetStep();
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
   parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
-      m_pid_, meta->proc_stdin, meta->proc_stdout, launch_pty);
+      m_pid_, meta->stdin_write, meta->stdout_read, meta->pty);
 
-  bool x11_enable_fwd =
-      parent_step.interactive_meta().x11() &&
-      parent_step.interactive_meta().x11_meta().enable_forwarding();
-  if (x11_enable_fwd)
-    meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(m_pid_);
-  else
-    meta->x11_port = parent_step.interactive_meta().x11_meta().port();
+  if (m_parent_step_inst_->RequiresX11()) {
+    if (m_parent_step_inst_->RequiresX11Fwd())
+      meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(m_pid_);
+    else
+      meta->x11_port = parent_step.interactive_meta().x11_meta().port();
+
+    if (x11_port != nullptr) *x11_port = meta->x11_port;
+
+    CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
+                m_parent_step_inst_->RequiresX11Fwd(), meta->x11_port);
+  }
 
   // TODO: It's ok here to start the uv loop thread, since currently 1 task only
   //  corresponds to 1 step.
   parent_cfored_client->StartUvLoopThread();
-
-  close(to_crun_pipe[0]);
-  close(from_crun_pipe[1]);
-
-  return meta->x11_port;
 }
 
 void ITaskInstance::ResetChildProcSigHandler_() {
@@ -369,7 +383,7 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
 CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
   int stdout_fd, stderr_fd;
 
-  auto* meta = dynamic_cast<BatchMetaInExecution*>(m_meta_.get());
+  auto* meta = dynamic_cast<BatchInstanceMeta*>(m_meta_.get());
   const std::string& stdout_file_path = meta->parsed_output_file_pattern;
   const std::string& stderr_file_path = meta->parsed_error_file_pattern;
 
@@ -404,18 +418,14 @@ CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
   return CraneErrCode::SUCCESS;
 }
 
-void ITaskInstance::SetupChildProcessCrunFd_(
-    bool launch_pty, const std::vector<int>& to_crun_pipe,
-    const std::vector<int>& from_crun_pipe, int crun_pty_fd) {
-  if (!launch_pty) {
-    dup2(to_crun_pipe[0], STDIN_FILENO);
-    dup2(from_crun_pipe[1], STDOUT_FILENO);
-    dup2(from_crun_pipe[1], STDERR_FILENO);
+void ITaskInstance::SetupCrunFwdAtChild_() {
+  const auto* meta = GetCrunInstanceMeta();
+
+  if (!meta->pty) {
+    dup2(meta->stdin_read, STDIN_FILENO);
+    dup2(meta->stdout_write, STDOUT_FILENO);
+    dup2(meta->stdout_write, STDERR_FILENO);
   }
-  close(to_crun_pipe[0]);
-  close(to_crun_pipe[1]);
-  close(from_crun_pipe[0]);
-  close(from_crun_pipe[1]);
 }
 
 void ITaskInstance::SetupChildProcessCrunX11_() {
@@ -669,7 +679,7 @@ CraneErrCode ContainerInstance::Prepare() {
      * %u - Username
      * %x - Job name
      */
-    auto meta = std::make_unique<BatchMetaInExecution>();
+    auto meta = std::make_unique<BatchInstanceMeta>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
         m_parent_step_inst_->GetStep().batch_meta().output_file_pattern(),
         m_parent_step_inst_->GetStep().cwd());
@@ -687,7 +697,7 @@ CraneErrCode ContainerInstance::Prepare() {
 
     m_meta_ = std::move(meta);
   } else {
-    m_meta_ = std::make_unique<CrunMetaInExecution>();
+    m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
   m_meta_->parsed_sh_script_path = sh_path;
 
@@ -713,9 +723,6 @@ CraneErrCode ContainerInstance::Spawn() {
 
   std::array<int, 2> ctrl_sock_pair{};  // Socket pair for passing control msg
 
-  std::vector<int> to_crun_pipe(2, -1);
-  std::vector<int> from_crun_pipe(2, -1);
-
   if (this->m_parent_step_inst_->IsCrun() &&
       this->m_parent_step_inst_->GetStep().interactive_meta().x11()) {
     auto err = SetupCrunX11_();
@@ -730,13 +737,15 @@ CraneErrCode ContainerInstance::Spawn() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  bool launch_pty{false};
-  int crun_pty_fd;
-  auto pid_expt =
-      Fork_(&launch_pty, &to_crun_pipe, &from_crun_pipe, &crun_pty_fd);
-  if (!pid_expt) return pid_expt.error();
+  pid_t child_pid = -1;
+  if (m_parent_step_inst_->IsBatch())
+    child_pid = fork();
+  else {
+    auto pid_expt = ForkCrunAndInitMeta_();
+    if (!pid_expt) return pid_expt.error();
 
-  pid_t child_pid = pid_expt.value();
+    child_pid = pid_expt.value();
+  }
 
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}",
@@ -756,15 +765,15 @@ CraneErrCode ContainerInstance::Spawn() {
     ChildProcessReady child_process_ready;
 
     if (m_parent_step_inst_->IsCrun()) {
-      const auto& proto_ia_meta =
-          m_parent_step_inst_->GetStep().interactive_meta();
-      auto port = SetupCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                                   crun_pty_fd);
-      msg.set_x11_port(port);
-      CRANE_TRACE("Crun task x11 enabled: {}, forwarding: {}, port: {}",
-                  proto_ia_meta.x11(),
-                  proto_ia_meta.x11_meta().enable_forwarding(),
-                  this->GetCrunMeta()->x11_port);
+      if (m_parent_step_inst_->RequiresX11()) {
+        uint16_t x11_port;
+        SetupCrunFwdAtParent_(&x11_port);
+        msg.set_x11_port(x11_port);
+      } else
+        SetupCrunFwdAtParent_(nullptr);
+
+      CRANE_DEBUG("Task #{} has initialized crun forwarding.",
+                  m_parent_step_inst_->GetStep().task_id());
     }
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
@@ -852,8 +861,7 @@ CraneErrCode ContainerInstance::Spawn() {
     if (m_parent_step_inst_->IsBatch()) {
       SetChildProcessBatchFd_();
     } else if (m_parent_step_inst_->IsCrun()) {
-      SetupChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                               crun_pty_fd);
+      SetupCrunFwdAtChild_();
     }
 
     child_process_ready.set_ok(true);
@@ -1063,7 +1071,7 @@ CraneErrCode ProcInstance::Prepare() {
      * %u - Username
      * %x - Job name
      */
-    auto meta = std::make_unique<BatchMetaInExecution>();
+    auto meta = std::make_unique<BatchInstanceMeta>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
         m_parent_step_inst_->GetStep().batch_meta().output_file_pattern(),
         m_parent_step_inst_->GetStep().cwd());
@@ -1081,7 +1089,7 @@ CraneErrCode ProcInstance::Prepare() {
 
     m_meta_ = std::move(meta);
   } else {
-    m_meta_ = std::make_unique<CrunMetaInExecution>();
+    m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
 
   m_meta_->parsed_sh_script_path = sh_path;
@@ -1128,13 +1136,15 @@ CraneErrCode ProcInstance::Spawn() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  bool launch_pty{false};
-  int crun_pty_fd;
-  auto pid_expt =
-      Fork_(&launch_pty, &to_crun_pipe, &from_crun_pipe, &crun_pty_fd);
-  if (!pid_expt) return pid_expt.error();
+  pid_t child_pid = -1;
+  if (m_parent_step_inst_->IsBatch())
+    child_pid = fork();
+  else {
+    auto pid_expt = ForkCrunAndInitMeta_();
+    if (!pid_expt) return pid_expt.error();
 
-  pid_t child_pid = pid_expt.value();
+    child_pid = pid_expt.value();
+  }
 
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}",
@@ -1156,13 +1166,15 @@ CraneErrCode ProcInstance::Spawn() {
     ChildProcessReady child_process_ready;
 
     if (m_parent_step_inst_->IsCrun()) {
-      auto& proto_ia_meta = m_parent_step_inst_->GetStep().interactive_meta();
-      auto port = SetupCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                                   crun_pty_fd);
-      msg.set_x11_port(port);
-      CRANE_TRACE("Crun task x11 enabled: {}, forwarding: {}, port: {}",
-                  proto_ia_meta.x11(),
-                  proto_ia_meta.x11_meta().enable_forwarding(), port);
+      if (m_parent_step_inst_->RequiresX11()) {
+        uint16_t x11_port;
+        SetupCrunFwdAtParent_(&x11_port);
+        msg.set_x11_port(x11_port);
+      } else
+        SetupCrunFwdAtParent_(nullptr);
+
+      CRANE_DEBUG("Task #{} has initialized crun forwarding.",
+                  m_parent_step_inst_->GetStep().task_id());
     }
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
@@ -1250,8 +1262,7 @@ CraneErrCode ProcInstance::Spawn() {
     if (m_parent_step_inst_->IsBatch()) {
       if (SetChildProcessBatchFd_() != CraneErrCode::SUCCESS) std::abort();
     } else if (m_parent_step_inst_->IsCrun()) {
-      SetupChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                               crun_pty_fd);
+      SetupCrunFwdAtChild_();
     }
 
     child_process_ready.set_ok(true);

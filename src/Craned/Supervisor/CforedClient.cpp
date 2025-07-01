@@ -59,17 +59,19 @@ CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
-                                                    int proc_stdout, bool pty) {
+void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+                                                    int stdout_read, bool pty) {
   CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
-              pid, proc_stdin, proc_stdout, pty);
+              pid, stdin_write, stdout_read, pty);
+
+  util::os::SetFdNonBlocking(stdout_read);
 
   TaskFwdMeta meta = {.pid = pid,
                       .pty = pty,
-                      .proc_stdin = proc_stdin,
-                      .proc_stdout = proc_stdout};
-  util::os::SetFdNonBlocking(proc_stdout);
-  auto poll_handle = m_loop_->resource<uvw::poll_handle>(proc_stdout);
+                      .stdin_write = stdin_write,
+                      .stdout_read = stdout_read};
+
+  auto poll_handle = m_loop_->resource<uvw::poll_handle>(stdout_read);
   poll_handle->on<uvw::poll_event>(
       [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
         CRANE_TRACE("Detect task #{} output.", g_config.JobId);
@@ -77,7 +79,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
         constexpr int MAX_BUF_SIZE = 4096;
         char buf[MAX_BUF_SIZE];
 
-        auto ret = read(meta.proc_stdout, buf, MAX_BUF_SIZE);
+        auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
         bool read_finished{false};
 
         if (ret == 0) {
@@ -117,7 +119,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int proc_stdin,
           CRANE_TRACE("Task #{} to cfored {} finished its output.",
                       g_config.JobId, m_cfored_name_);
           h.close();
-          close(meta.proc_stdout);
+          close(meta.stdout_read);
 
           bool ok_to_free = this->TaskOutputFinish(meta.pid);
           if (ok_to_free) {
@@ -506,7 +508,7 @@ void CforedClient::AsyncSendRecvThread_() {
         for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
           if (!fwd_meta.input_stopped)
             fwd_meta.input_stopped =
-                !WriteStringToFd_(*msg, fwd_meta.proc_stdin);
+                !WriteStringToFd_(*msg, fwd_meta.stdin_write);
         }
       }
 
