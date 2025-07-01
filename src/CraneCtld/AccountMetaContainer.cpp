@@ -223,7 +223,8 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
         if (val.jobs_count + 1 > qos->max_jobs_per_user) result = false;
 
         ResourceView resource_use{task.requested_node_res_view * task.node_num};
-        if (val.resource.CpuCount() + resource_use.CpuCount() > qos->max_cpus_per_user)
+        if (val.resource.CpuCount() + resource_use.CpuCount() >
+            qos->max_cpus_per_user)
           result = false;
       });
 
