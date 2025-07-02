@@ -261,7 +261,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
           return;
         }
 
-        ResourceView resource_use{task.requested_node_res_view * task.node_num};
+        ResourceView resource_use{task.allocated_res_view};
         resource_use += val.resource;
         if (resource_use.CpuCount() > qos->max_cpus_per_user) {
           result = "QosCpuResourceLimit";
@@ -284,8 +284,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
             return;
           }
 
-          ResourceView resource_use{task.requested_node_res_view *
-                                    task.node_num};
+          ResourceView resource_use{task.allocated_res_view};
           resource_use += val.resource;
           result = CheckTres_(resource_use, qos->max_tres_per_account);
         });
@@ -312,7 +311,7 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
           }
         }
 
-        ResourceView resource_use{task.requested_node_res_view * task.node_num};
+        ResourceView resource_use{task.allocated_res_view};
         resource_use += val.resource;
         result = CheckTres_(resource_use, qos->max_tres);
       });

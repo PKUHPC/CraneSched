@@ -80,7 +80,6 @@ bool TaskScheduler::Init() {
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
-
       CraneExpected<void> result;
       {
         const auto& user_ptr =
@@ -2770,13 +2769,6 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
-    std::optional<std::string> has_reason =
-        g_account_meta_container->CheckQosResource(*task);
-    if (has_reason) {
-      task->pending_reason = has_reason.value();
-      continue;
-    }
-
     {
       auto all_partitions_meta_map =
           g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2791,6 +2783,13 @@ void MinLoadFirst::NodeSelect(
           &expected_start_time);
       if (!ok) {
         task->pending_reason = "Resource";
+        continue;
+      }
+
+      std::optional<std::string> has_reason =
+          g_account_meta_container->CheckQosResource(*task);
+      if (has_reason) {
+        task->pending_reason = has_reason.value();
         continue;
       }
 
