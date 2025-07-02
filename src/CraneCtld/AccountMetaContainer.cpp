@@ -49,6 +49,15 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
 
   if (qos->max_submit_jobs == 0) return CraneErrCode::ERR_MAX_JOB_COUNT_PER_QOS;
 
+  if (static_cast<double>(task.cpus_per_task) * task.node_num >
+      qos->max_cpus_per_user)
+    return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+
+  if (!CheckTres_(resource_use, qos->max_tres_per_user).empty()
+      || !CheckTres_(resource_use, qos->max_tres_per_account).empty()
+      || !CheckTres_(resource_use, qos->max_tres).empty())
+    return CraneErrCode::ERR_TRES_PER_TASK_BEYOND;
+
   task.qos_priority = qos->priority;
 
   if (task.time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
@@ -449,7 +458,7 @@ void AccountMetaContainer::UserAddTask(const std::string& username) {
 }
 
 void AccountMetaContainer::UserReduceTask(const std::string& username) {
-  CRANE_ASSERT(m_user_meta_map_.contains(username));
+  CRANE_ASSERT(m_user_to_task_map_.contains(username));
 
   m_user_to_task_map_.if_contains(
       username,
