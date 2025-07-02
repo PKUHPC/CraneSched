@@ -77,8 +77,8 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
           {task.qos, QosResource{.resource = std::move(resource_view),
                                  .jobs_per_user = 1}}});
 
-  CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}", task.TaskId(),
-              resource_str, task.Username(), result == CraneErrCode::SUCCESS);
+  CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}", resource_str,
+              task.Username(), result == CraneErrCode::SUCCESS);
 
   return result;
 }
