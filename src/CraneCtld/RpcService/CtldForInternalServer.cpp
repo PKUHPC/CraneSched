@@ -328,8 +328,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   }
 }
 
-void CtldForInternalServer::Shutdown() { m_server_->Shutdown(); }
-
 CtldForInternalServer::CtldForInternalServer(
     const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForInternalServiceImpl>(this);
