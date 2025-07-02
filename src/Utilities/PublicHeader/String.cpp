@@ -384,6 +384,12 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   return convert_result.ec == std::errc();
 }
 
+std::string ReadableResourceView(const ResourceView &resource) {
+  return fmt::format("cpu:{},mem:{},gres:[{}]", resource.CpuCount(),
+                     ReadableMemory(resource.MemoryBytes()),
+                     ReadableTypedDeviceMap(resource.GetDeviceMap()));
+}
+
 std::string ReadableTypedDeviceMap(const DeviceMap &device_map) {
   if (device_map.empty()) return "None";
 
