@@ -206,6 +206,10 @@ class CtldForInternalServer {
 
   inline void Wait() { m_server_->Wait(); }
 
+  template <typename T>
+  void Shutdown(const T &deadline) {
+    m_server_->Shutdown(deadline);
+  }
   void Shutdown();
 
  private:

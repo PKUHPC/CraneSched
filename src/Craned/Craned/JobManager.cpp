@@ -659,7 +659,9 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       CRANE_ERROR("Failed to find job #{} allocation",
                   execution->step_to_d.task_id());
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+      continue;
     }
+    elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
     m_pending_thread_pool_tasks_.count_up();
     g_thread_pool->detach_task([this, execution = execution.release()] {
