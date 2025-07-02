@@ -204,13 +204,17 @@ class CtldForInternalServer {
   explicit CtldForInternalServer(
       const Config::CraneCtldListenConf &listen_conf);
 
-  inline void Wait() { m_server_->Wait(); }
+  void Wait() { m_server_->Wait(); }
 
   template <typename T>
   void Shutdown(const T &deadline) {
     m_server_->Shutdown(deadline);
   }
-  void Shutdown();
+  template <typename Rep, typename Period>
+  void ShutdownWithin(std::chrono::duration<Rep, Period> duration) const {
+    auto now = std::chrono::system_clock::now();
+    m_server_->Shutdown(now + duration);
+  }
 
  private:
   template <typename K, typename V,
@@ -235,4 +239,4 @@ class CtldForInternalServer {
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::CtldForInternalServer> g_ctld_for_internal_server;
+inline std::unique_ptr<Ctld::CtldForInternalServer> g_internal_server;

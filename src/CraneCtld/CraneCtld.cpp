@@ -785,7 +785,7 @@ void InitializeCtldGlobalVariables() {
   g_task_scheduler = std::make_unique<TaskScheduler>();
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
-  g_ctld_for_internal_server =
+  g_internal_server =
       std::make_unique<Ctld::CtldForInternalServer>(g_config.ListenConf);
 
   ok = g_task_scheduler->Init();
@@ -828,7 +828,7 @@ int StartServer() {
   InitializeCtldGlobalVariables();
 
   g_ctld_server->Wait();
-  g_ctld_for_internal_server->Wait();
+  g_internal_server->Wait();
 
   DestroyCtldGlobalVariables();
 
