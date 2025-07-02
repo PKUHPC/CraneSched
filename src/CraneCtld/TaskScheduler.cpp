@@ -1152,9 +1152,10 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
+    auto res = g_account_meta_container->TryMallocQosSubmitResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+      g_account_meta_container->UserReduceTask(task->Username());
       return std::unexpected(res);
     }
     std::future<task_id_t> future =
