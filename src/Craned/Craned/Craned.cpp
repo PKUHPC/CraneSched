@@ -801,7 +801,22 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
+  std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
+  std::promise<void> conf_done;
+  auto config_future = conf_promise.get_future();
+
+  // FIXME: OnSubscribe might be triggerred more than once.
+  //  Use a future here is not appropriate.
+  //  Use an atomic variable + Wrapper function like HasBeenConfigured().
+  g_ctld_client_sm->SubscribeConfigure(
+      [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
+        conf_promise.set_value(req);
+      },
+      std::move(conf_done.get_future()));
+
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
+
+  auto grpc_config_req = config_future.get();
 
   // Make sure grpc server is ready to receive requests.
   g_craned_for_pam_server =
@@ -809,15 +824,6 @@ void StartServer() {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
-
-  std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
-  std::promise<void> conf_done;
-  auto config_future = conf_promise.get_future();
-  g_ctld_client_sm->SubscribeConfigure(
-      [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
-        conf_promise.set_value(req);
-      },
-      std::move(conf_done.get_future()));
 
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
       g_supervisor_keeper->Init();
@@ -836,7 +842,11 @@ void StartServer() {
   }
 
   std::unordered_map<task_id_t, JobToD> job_map;
+  job_map.reserve(grpc_config_req.job_map_size());
+
   std::unordered_map<task_id_t, Craned::StepToD> step_map;
+  step_map.reserve(grpc_config_req.job_tasks_map_size());
+
   std::unordered_set<task_id_t> running_jobs;
   std::vector<task_id_t> invalid_jobs;
 
@@ -852,9 +862,6 @@ void StartServer() {
     break;
   }
 
-  auto grpc_config_req = config_future.get();
-  job_map.reserve(grpc_config_req.job_map_size());
-  step_map.reserve(grpc_config_req.job_tasks_map_size());
   for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
     if (task_ids_supervisor.erase(job_id)) {
       running_jobs.emplace(job_id);
