@@ -46,6 +46,9 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
 
+constexpr const char* kLogPattern =
+    "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
+
 inline const char* const kDefaultHost = "0.0.0.0";
 
 inline const char* kCtldDefaultPort = "10011";

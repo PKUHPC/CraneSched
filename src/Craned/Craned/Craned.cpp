@@ -736,6 +736,58 @@ void GlobalVariableInit() {
   }
 }
 
+void GlobalVariableFini() {
+  /*
+   * JobMgr is ending
+   * g_server and g_craned_for_pam_server Shutdown() called
+   */
+  g_server->Wait();
+
+  /*
+   * No more status change from supervisor, clean up CtldClient, stop register
+   * this craned
+   */
+  g_ctld_client->Shutdown();
+  g_craned_for_pam_server->Wait();
+
+  g_server.reset();
+  g_craned_for_pam_server.reset();
+
+  /* Called from
+   * PAM_SERVER, G_SERVER
+   * CtldClient: ActionConfigureCb
+   */
+  g_job_mgr->Wait();
+
+  /*
+   * Called from JobMgr and CtldClient, wait all thread pool task finish before
+   * destruct.
+   */
+  g_thread_pool->wait();
+  g_job_mgr.reset();
+
+  // Called from JobMgr and G_SERVER
+  g_cg_mgr.reset();
+
+  g_ctld_client.reset();
+  // After ctld client destroyed, it is ok to destroy ctld client state machine
+  g_ctld_client_sm.reset();
+
+  /*
+   * Called from G_SERVER, JobMgr
+   * CtldClient: ActionConfigureCb
+   */
+  g_supervisor_keeper.reset();
+
+  g_thread_pool.reset();
+
+  // Plugin client must be destroyed after the thread pool.
+  // It may be called in the thread pool.
+  g_plugin_client.reset();
+
+  std::exit(0);
+}
+
 void StartServer() {
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
@@ -788,6 +840,18 @@ void StartServer() {
   std::unordered_set<task_id_t> running_jobs;
   std::vector<task_id_t> invalid_jobs;
 
+  while (true) {
+    if (config_future.wait_for(std::chrono::seconds(1)) ==
+        std::future_status::timeout) {
+      if (g_job_mgr->IsEnding()) {
+        CRANE_INFO("Exit when waiting for first configure request from ctld.");
+        GlobalVariableFini();
+      }
+      continue;
+    }
+    break;
+  }
+
   auto grpc_config_req = config_future.get();
   job_map.reserve(grpc_config_req.job_map_size());
   step_map.reserve(grpc_config_req.job_tasks_map_size());
@@ -819,32 +883,7 @@ void StartServer() {
   }
   g_server->FinishSupervisorRecovery();
   conf_done.set_value();
-  g_server->Wait();
-  g_craned_for_pam_server->Wait();
-  // CltdClient will call g_server->SetReady() in cb,set it to empty
-
-  g_server.reset();
-  g_craned_for_pam_server.reset();
-
-  // Free global variables
-  g_job_mgr->Wait();
-  g_job_mgr.reset();
-  g_cg_mgr.reset();
-
-  g_ctld_client.reset();
-  // After ctld client destroyed, it is ok to destroy ctld client state machine
-  g_ctld_client_sm.reset();
-
-  g_supervisor_keeper.reset();
-
-  g_thread_pool->wait();
-  g_thread_pool.reset();
-
-  // Plugin client must be destroyed after the thread pool.
-  // It may be called in the thread pool.
-  g_plugin_client.reset();
-
-  std::exit(0);
+  GlobalVariableFini();
 }
 
 void StartDaemon() {

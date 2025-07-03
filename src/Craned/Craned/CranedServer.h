@@ -41,6 +41,13 @@ enum class RequestSource : std::int8_t {
   SUPERVISOR = 2,
   INVALID
 };
+enum class CranedStatus : std::int8_t {
+  INITIALIZING = 0,
+  RUNNING,
+  RECONFIGURING,
+  CLEANING,
+  STOPPING,
+};
 
 class CranedServiceImpl : public Craned::Service {
  public:
@@ -99,19 +106,37 @@ class CranedServer {
  public:
   explicit CranedServer(const Config::CranedListenConf &listen_conf);
 
-  void Shutdown() { m_server_->Shutdown(); }
+  void Shutdown() {
+    m_status_ = CranedStatus::STOPPING;
+    m_server_->Shutdown();
+  }
 
   void Wait() { m_server_->Wait(); }
 
   void SetGrpcSrvReady(bool ready) {
-    m_grpc_srv_ready_.store(ready, std::memory_order_release);
+    if (m_status_ == CranedStatus::STOPPING) {
+      CRANE_DEBUG("Craned is stopping, SetGrpcSrvReady to {} not applied.",
+                  ready);
+    }
+    if (ready) {
+      CRANE_ASSERT(m_status_ == CranedStatus::INITIALIZING ||
+                   m_status_ == CranedStatus::RECONFIGURING);
+      m_status_ = CranedStatus::RUNNING;
+    } else {
+      CRANE_ASSERT(m_status_ == CranedStatus::RUNNING);
+      m_status_ = CranedStatus::RECONFIGURING;
+    }
+
+    m_status_ = ready ? CranedStatus::RUNNING : CranedStatus::RECONFIGURING;
   }
 
   [[nodiscard]] bool ReadyFor(RequestSource request_source) const {
-    if (!m_supervisor_recovered_.load(std::memory_order_acquire)) return false;
-
-    if (request_source == RequestSource::CTLD)
-      return m_grpc_srv_ready_.load(std::memory_order_acquire);
+    CRANE_ASSERT(request_source != RequestSource::INVALID);
+    if (m_status_ == CranedStatus::INITIALIZING) return false;
+    if (m_status_ == CranedStatus::RECONFIGURING ||
+        m_status_ == CranedStatus::STOPPING)
+      // Only PAM can send requests during recovery or stopping.
+      return request_source == RequestSource::PAM;
 
     return true;
   }
@@ -124,6 +149,8 @@ class CranedServer {
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
+
+  std::atomic<CranedStatus> m_status_{CranedStatus::INITIALIZING};
 
   std::atomic_bool m_grpc_srv_ready_{false};
 
