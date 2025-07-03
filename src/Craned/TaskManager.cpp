@@ -26,6 +26,8 @@
 #include <utmp.h>
 
 #include "CforedClient.h"
+#include "CranedASyncServer.h"
+#include "CranedClient.h"
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "crane/String.h"
@@ -111,6 +113,27 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   env_map.emplace("CRANE_QOS", this->task.qos());
 
   env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
+  env_map.emplace("CRANE_NODELIST", absl::StrJoin(this->task.allocated_nodes(), ","));
+  env_map.emplace("CRANED_NODENAME", g_config.CranedIdOfThisNode);
+  auto it = g_config.NodeList.find(g_config.CranedIdOfThisNode);
+  if (it != g_config.NodeList.end()) {
+    int index = std::distance(g_config.NodeList.begin(), it);
+    env_map.emplace("CRANE_NODEID", std::to_string(index));
+  } else {
+    CRANE_ERROR("Node{} id unknow", g_config.CranedIdOfThisNode);
+  }
+
+  std::vector<std::string> v(this->task.node_num(), std::to_string(this->task.ntasks_per_node()));
+  std::string tasks_per_node_str = std::accumulate(
+      std::next(v.begin()), v.end(), v[0],
+      [](const std::string& a, const std::string& b) { return a + "," + b; });
+  env_map.emplace("CRANE_TASKS_PER_NODE", tasks_per_node_str);
+  env_map.emplace("CRANE_CPUS_PER_TASK", std::to_string(this->task.cpus_per_task()));
+  std::vector<std::string> v2(this->task.node_num(), std::to_string(this->task.cpus_per_task()));
+  std::string cpus_per_node_str2 = std::accumulate(
+      std::next(v2.begin()), v2.end(), v2[0],
+      [](const std::string& a, const std::string& b) { return a + "," + b; });
+  env_map.emplace("CRANE_JOB_CPUS_PER_NODE", cpus_per_node_str2);
 
   if (this->IsCrun()) {
     auto const& ia_meta = this->task.interactive_meta();

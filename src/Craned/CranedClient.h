@@ -64,6 +64,8 @@ class CranedStub {
                           crane::grpc::PmixDModexResponseReply *reply,
                           AsyncGrpcCallback callback);
 
+  int GetNodeId() const { return m_node_id_; }
+
  private:
 
   CranedClient *m_craned_client_;
