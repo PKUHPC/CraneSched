@@ -24,6 +24,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include <ctime>
+#include <unistd.h>
+#include <sys/sysinfo.h>
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
@@ -37,12 +39,34 @@
 using Craned::g_config;
 using Craned::Partition;
 
+// Print CPU cores and memory information of current node similar to `slurmd -C`.
+static void PrintNodeInfo() {
+  char hostname[HOST_NAME_MAX + 1];
+  if (gethostname(hostname, sizeof(hostname)) != 0) {
+    perror("gethostname");
+    std::exit(1);
+  }
+
+  long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  if (cpu_count < 1) cpu_count = 1;
+
+  struct sysinfo info {};
+  if (sysinfo(&info) != 0) {
+    perror("sysinfo");
+    std::exit(1);
+  }
+  uint64_t mem_bytes = static_cast<uint64_t>(info.totalram) * info.mem_unit;
+  uint64_t mem_mb = mem_bytes / (1024 * 1024);
+
+  fmt::print("craned-NodeName={} CPUs={} RealMemory={}\n", hostname, cpu_count, mem_mb);
+}
+
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("craned");
 
   // clang-format off
   options.add_options()
-      ("C,config", "Path to configuration file",
+      ("c,config", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
@@ -54,6 +78,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
+      ("C,nodeinfo", "Print current node cpu and memory info")
       ;
   // clang-format on
 
@@ -72,6 +97,11 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("version") > 0) {
     fmt::print("Version: {}\n", CRANE_VERSION_STRING);
+    std::exit(0);
+  }
+
+  if (parsed_args.count("nodeinfo") > 0) {
+    PrintNodeInfo();
     std::exit(0);
   }
 
