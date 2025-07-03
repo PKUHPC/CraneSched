@@ -254,10 +254,15 @@ void CtldClientStateMachine::ActionDisconnected_() {
   g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
 }
 
-CtldClient::~CtldClient() {
-  m_thread_stop_ = true;
+void CtldClient::Shutdown() {
+  m_stopping_ = true;
+  m_step_status_change_mtx_.Lock();
+  CRANE_INFO("Cleaning up status changes in CtldClient");
+  SendStatusChanges_();
+}
 
-  CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
+CtldClient::~CtldClient() {
+  CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
@@ -454,7 +459,7 @@ void CtldClient::AsyncSendThread_() {
   // Variables for grpc channel maintaining.
   grpc_connectivity_state prev_grpc_state{GRPC_CHANNEL_IDLE};
   grpc_connectivity_state grpc_state;
-  bool prev_connected = false, connected;
+  bool prev_connected = false, connected = false;
 
   // Variable for TaskStatusChange sending part.
   absl::Condition cond(
@@ -464,7 +469,7 @@ void CtldClient::AsyncSendThread_() {
       &m_step_status_change_list_);
 
   while (true) {
-    if (m_thread_stop_) break;
+    if (m_stopping_) break;
 
     grpc_state = m_ctld_channel_->GetState(true);
     connected = prev_grpc_state == GRPC_CHANNEL_READY;
@@ -506,59 +511,64 @@ void CtldClient::AsyncSendThread_() {
         cond, absl::Milliseconds(50));
     if (!has_msg) {
       m_step_status_change_mtx_.Unlock();
-      continue;
+    } else {
+      SendStatusChanges_();
     }
+  }
+}
 
-    std::list<TaskStatusChangeQueueElem> changes;
-    changes.splice(changes.begin(), std::move(m_step_status_change_list_));
-    m_step_status_change_mtx_.Unlock();
+void CtldClient::SendStatusChanges_() {
+  std::list<TaskStatusChangeQueueElem> changes;
+  changes.splice(changes.begin(), std::move(m_step_status_change_list_));
+  m_step_status_change_mtx_.Unlock();
 
-    while (!changes.empty()) {
-      grpc::ClientContext context;
-      crane::grpc::StepStatusChangeRequest request;
-      crane::grpc::StepStatusChangeReply reply;
-      grpc::Status status;
+  while (!changes.empty()) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(5));
+    crane::grpc::StepStatusChangeRequest request;
+    crane::grpc::StepStatusChangeReply reply;
+    grpc::Status status;
 
-      auto status_change = changes.front();
+    auto status_change = changes.front();
 
-      CRANE_TRACE("Sending TaskStatusChange for task #{}",
-                  status_change.step_id);
+    CRANE_TRACE("Sending TaskStatusChange for task #{}", status_change.step_id);
 
-      request.set_craned_id(m_craned_id_);
-      request.set_task_id(status_change.step_id);
-      request.set_new_status(status_change.new_status);
-      request.set_exit_code(status_change.exit_code);
-      if (status_change.reason.has_value())
-        request.set_reason(status_change.reason.value());
+    request.set_craned_id(m_craned_id_);
+    request.set_task_id(status_change.step_id);
+    request.set_new_status(status_change.new_status);
+    request.set_exit_code(status_change.exit_code);
+    if (status_change.reason.has_value())
+      request.set_reason(status_change.reason.value());
 
-      status = m_stub_->StepStatusChange(&context, request, &reply);
-      if (!status.ok()) {
-        CRANE_ERROR(
-            "Failed to send TaskStatusChange: "
-            "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-            status_change.step_id, int(status_change.new_status),
-            status.error_message(), context.debug_error_string(),
-            int(status.error_code()));
+    status = m_stub_->StepStatusChange(&context, request, &reply);
+    if (!status.ok()) {
+      CRANE_ERROR(
+          "Failed to send TaskStatusChange: "
+          "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
+          status_change.step_id, int(status_change.new_status),
+          status.error_message(), context.debug_error_string(),
+          int(status.error_code()));
 
-        if (status.error_code() == grpc::UNAVAILABLE) {
-          // If some messages are not sent due to channel failure,
-          // put them back into m_task_status_change_list_
-          if (!changes.empty()) {
-            m_step_status_change_mtx_.Lock();
-            m_step_status_change_list_.splice(
-                m_step_status_change_list_.begin(), std::move(changes));
-            m_step_status_change_mtx_.Unlock();
-          }
-          // Sleep for a while to avoid too many retries.
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-          break;
-        } else
-          changes.pop_front();
-      } else {
-        CRANE_TRACE("StepStatusChange for step #{} sent. reply.ok={}",
-                    status_change.step_id, reply.ok());
+      if (status.error_code() == grpc::UNAVAILABLE) {
+        if (m_stopping_) return;
+        // If some messages are not sent due to channel failure,
+        // put them back into m_task_status_change_list_
+        if (!changes.empty()) {
+          m_step_status_change_mtx_.Lock();
+          m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
+                                            std::move(changes));
+          m_step_status_change_mtx_.Unlock();
+        }
+        // Sleep for a while to avoid too many retries.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        break;
+      } else
         changes.pop_front();
-      }
+    } else {
+      CRANE_TRACE("StepStatusChange for step #{} sent. reply.ok={}",
+                  status_change.step_id, reply.ok());
+      changes.pop_front();
     }
   }
 }

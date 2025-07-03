@@ -131,6 +131,7 @@ class CtldClientStateMachine {
 class CtldClient {
  public:
   CtldClient() = default;
+  void Shutdown();
   ~CtldClient();
 
   CtldClient(CtldClient const&) = delete;
@@ -174,13 +175,15 @@ class CtldClient {
 
   void AsyncSendThread_();
 
+  void SendStatusChanges_();
+
   absl::Mutex m_step_status_change_mtx_;
 
   std::list<TaskStatusChangeQueueElem> m_step_status_change_list_
       ABSL_GUARDED_BY(m_step_status_change_mtx_);
 
   std::thread m_async_send_thread_;
-  std::atomic_bool m_thread_stop_{false};
+  std::atomic_bool m_stopping_{false};
 
   std::shared_ptr<Channel> m_ctld_channel_;
 

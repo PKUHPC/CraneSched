@@ -157,7 +157,6 @@ JobManager::~JobManager() {
   CRANE_DEBUG("JobManager is being destroyed.");
   m_is_ending_now_ = true;
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
-  m_pending_thread_pool_tasks_.wait();
 }
 
 bool JobManager::AllocJobs(std::vector<JobToD>&& jobs) {
@@ -276,10 +275,8 @@ bool JobManager::EvCheckSupervisorRunning_() {
     CRANE_TRACE("Supervisor for Job [{}] found to be exited",
                 absl::StrJoin(job_ids, ","));
 
-    m_pending_thread_pool_tasks_.count_up();
     g_thread_pool->detach_task([this, jobs = std::move(job_ids)] {
       FreeJobInstanceAllocation_(jobs);
-      m_pending_thread_pool_tasks_.count_down();
     });
   }
 
@@ -663,10 +660,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
-    m_pending_thread_pool_tasks_.count_up();
     g_thread_pool->detach_task([this, execution = execution.release()] {
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
-      m_pending_thread_pool_tasks_.count_down();
     });
   }
 }
