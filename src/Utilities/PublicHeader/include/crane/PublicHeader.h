@@ -32,7 +32,9 @@
 #  define CRANE_VERSION_STRING "Unknown"
 #endif
 
+using job_id_t = uint32_t;
 using task_id_t = uint32_t;
+using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
@@ -43,6 +45,9 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
+
+constexpr const char* kLogPattern =
+    "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
 inline const char* const kDefaultHost = "0.0.0.0";
 
@@ -73,6 +78,11 @@ inline const char* const kDefaultCranedForPamUnixSockPath =
     "craned/craned_pam.sock";
 inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
+
+inline const char* const kDefaultContainerTempDir = "craned/container";
+
+inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
+inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 

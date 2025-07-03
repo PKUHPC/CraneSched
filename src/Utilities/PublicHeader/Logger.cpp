@@ -39,17 +39,17 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
 
 void InitLogger(spdlog::level::level_enum level,
                 const std::string& log_file_path, bool enable_console) {
-  spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v");
-
   std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, 1048576 * 50 /*MB*/, 3);
   file_sink->set_level(level);
+  file_sink->set_pattern(kLogPattern);
   sinks.push_back(file_sink);
 
   if (enable_console) {
     auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     console_sink->set_level(level);
+    console_sink->set_pattern(kLogPattern);
     sinks.push_back(console_sink);
   }
 
