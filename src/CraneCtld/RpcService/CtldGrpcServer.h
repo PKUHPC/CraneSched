@@ -76,6 +76,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                           const crane::grpc::ModifyTaskRequest *request,
                           crane::grpc::ModifyTaskReply *response) override;
 
+  grpc::Status ModifyTasksExtraAttrs(
+      grpc::ServerContext *context,
+      const crane::grpc::ModifyTasksExtraAttrsRequest *request,
+      crane::grpc::ModifyTasksExtraAttrsReply *response) override;
+
   grpc::Status ModifyNode(
       grpc::ServerContext *context,
       const crane::grpc::ModifyCranedStateRequest *request,
