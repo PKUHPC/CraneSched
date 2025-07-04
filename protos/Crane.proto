@@ -235,6 +235,17 @@ message ModifyTaskReply {
   repeated string not_modified_reasons = 4;
 }
 
+message ModifyTasksExtraAttrsRequest {
+  uint32 uid = 1;
+  map<uint32 /*taskid*/, string /*extraAttrs*/> extra_attrs_list = 2;
+}
+
+message ModifyTasksExtraAttrsReply {
+  repeated uint32 modified_tasks = 1;
+  repeated uint32 not_modified_tasks = 2;
+  repeated string not_modified_reasons = 3;
+}
+
 message ModifyCranedStateRequest {
   uint32 uid = 1;
   repeated string craned_ids = 2;
@@ -867,6 +878,7 @@ service CraneCtld {
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
+  rpc ModifyTasksExtraAttrs(ModifyTasksExtraAttrsRequest) returns (ModifyTasksExtraAttrsReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
