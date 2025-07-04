@@ -70,7 +70,7 @@ void ParseConfig(int argc, char** argv) {
 
   // clang-format off
   options.add_options()
-      ("c,config", "Path to configuration file",
+      ("f,config-file", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
@@ -109,7 +109,7 @@ void ParseConfig(int argc, char** argv) {
     std::exit(0);
   }
 
-  std::string config_path = parsed_args["config"].as<std::string>();
+  std::string config_path = parsed_args["config-file"].as<std::string>();
   std::unordered_map<std::string, std::vector<Craned::DeviceMetaInConfig>>
       each_node_device;
   if (std::filesystem::exists(config_path)) {
