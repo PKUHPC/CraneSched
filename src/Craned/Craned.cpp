@@ -29,6 +29,7 @@
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
+#include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -147,6 +148,11 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
 
+      g_config.CranedForPamUnixSockPath =
+          g_config.CraneBaseDir /
+          YamlValueOr(config["CranedForPamUnixSockPath"],
+                      kDefaultCranedForPamUnixSockPath);
+
       g_config.CranedScriptDir =
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedScriptDir"], kDefaultCranedScriptDir);
@@ -166,6 +172,9 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
+
+      g_config.ListenConf.UnixSocketForPamListenAddr =
+          fmt::format("unix://{}", g_config.CranedForPamUnixSockPath);
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
@@ -229,8 +238,9 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      g_config.CraneCtldListenPort =
-          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
+      g_config.CraneCtldForInternalListenPort =
+          YamlValueOr(config["CraneCtldForInternalListenPort"],
+                      kCtldForInternalDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -657,10 +667,15 @@ void StartServer() {
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
+  g_craned_for_pam_server =
+      std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
+
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
   g_server->Wait();
+
+  g_craned_for_pam_server->Wait();
 
   // Free global variables
   g_task_mgr->Wait();
@@ -668,6 +683,7 @@ void StartServer() {
   // CforedManager MUST be destructed after TaskManager.
   g_cfored_manager.reset();
   g_server.reset();
+  g_craned_for_pam_server.reset();
   g_ctld_client.reset();
   g_job_mgr.reset();
   g_cg_mgr.reset();

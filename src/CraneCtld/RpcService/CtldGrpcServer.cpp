@@ -22,6 +22,7 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldForInternalServer.h"
 #include "CtldPublicDefs.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
@@ -40,7 +41,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+  auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
     task_id_t id = result.value().get();
     if (id != 0) {
@@ -76,7 +77,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
 
-    auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+    auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
     results.emplace_back(std::move(result));
   }
 
@@ -87,111 +88,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
       response->mutable_code_list()->Add(std::move(res.error()));
   }
 
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::TaskStatusChange(
-    grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
-  g_task_scheduler->TaskStatusChangeWithReasonAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code(), std::move(reason));
-  response->set_ok(true);
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::CranedTriggerReverseConn(
-    grpc::ServerContext *context,
-    const crane::grpc::CranedTriggerReverseConnRequest *request,
-    google::protobuf::Empty *response) {
-  const auto &craned_id = request->craned_id();
-  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    CRANE_WARN("Reject register request from unknown node {}",
-               request->craned_id());
-    return grpc::Status::OK;
-  }
-
-  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
-    CRANE_TRACE("Put craned {} into unavail.", craned_id);
-    g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
-  } else {
-    // Before configure, craned should be connected but not online
-    if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub != nullptr)
-        g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-          stub->SetRegToken(token);
-          stub->ConfigureCraned(craned_id, token);
-        });
-    } else {
-      CRANE_TRACE("Already online craned {} notify craned connected.",
-                  craned_id);
-    }
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::CranedRegister(
-    grpc::ServerContext *context,
-    const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedRegisterReply *response) {
-  CRANE_ASSERT(g_meta_container->CheckCranedAllowed(request->craned_id()));
-
-  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
-    CRANE_WARN("Reject register request from already online node {}",
-               request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
-  if (stub == nullptr) {
-    CRANE_WARN("Craned {} to be ready is not connected.", request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  if (!stub->CheckToken(request->token())) {
-    CRANE_WARN("Reject register request from node {} with invalid token.",
-               request->craned_id());
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  // Some job allocation lost
-  std::set<task_id_t> orphaned_job_ids;
-  if (!request->remote_meta().lost_jobs().empty()) {
-    CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_jobs(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_jobs().begin(),
-                          request->remote_meta().lost_jobs().end());
-  if (!request->remote_meta().lost_tasks().empty()) {
-    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
-                          request->remote_meta().lost_tasks().end());
-
-  if (!orphaned_job_ids.empty())
-    g_thread_pool->detach_task(
-        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
-          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
-        });
-
-  stub->SetReady();
-  g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
-  response->set_ok(true);
   return grpc::Status::OK;
 }
 
@@ -1403,203 +1299,6 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CforedStream(
-    grpc::ServerContext *context,
-    grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
-                             crane::grpc::StreamCforedRequest> *stream) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-
-  using crane::grpc::InteractiveTaskType;
-  using crane::grpc::StreamCforedRequest;
-  using crane::grpc::StreamCtldReply;
-  using grpc::Status;
-
-  enum class StreamState {
-    kWaitRegReq = 0,
-    kWaitMsg,
-    kCleanData,
-  };
-
-  bool ok;
-
-  StreamCforedRequest cfored_request;
-
-  auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
-  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
-  std::string cfored_name;
-
-  CRANE_TRACE("CforedStream from {} created.", context->peer());
-
-  StreamState state = StreamState::kWaitRegReq;
-  while (true) {
-    switch (state) {
-    case StreamState::kWaitRegReq:
-      ok = stream->Read(&cfored_request);
-      if (ok) {
-        if (cfored_request.type() != StreamCforedRequest::CFORED_REGISTRATION) {
-          CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
-                      context->peer());
-          return Status::CANCELLED;
-        }
-
-        cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-        CRANE_INFO("Cfored {} registered.", cfored_name);
-
-        ok = stream_writer->WriteCforedRegistrationAck({});
-        if (ok) {
-          state = StreamState::kWaitMsg;
-        } else {
-          CRANE_ERROR(
-              "Failed to send msg to cfored {}. Connection is broken. "
-              "Exiting...",
-              cfored_name);
-          state = StreamState::kCleanData;
-        }
-
-      } else {
-        state = StreamState::kCleanData;
-      }
-
-      break;
-
-    case StreamState::kWaitMsg: {
-      ok = stream->Read(&cfored_request);
-      if (ok) {
-        switch (cfored_request.type()) {
-        case StreamCforedRequest::TASK_REQUEST: {
-          auto const &payload = cfored_request.payload_task_req();
-          auto task = std::make_unique<TaskInCtld>();
-          task->SetFieldsByTaskToCtld(payload.task());
-
-          auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-
-          meta.cb_task_res_allocated =
-              [writer_weak_ptr](task_id_t task_id,
-                                std::string const &allocated_craned_regex,
-                                std::list<std::string> const &craned_ids) {
-                if (auto writer = writer_weak_ptr.lock(); writer)
-                  writer->WriteTaskResAllocReply(
-                      task_id,
-                      {std::make_pair(allocated_craned_regex, craned_ids)});
-              };
-
-          meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
-              writer->WriteTaskCancelRequest(task_id);
-          };
-
-          meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
-                                       task_id_t task_id,
-                                       bool send_completion_ack) {
-            CRANE_TRACE("The completion callback of task #{} has been called.",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer) {
-              if (send_completion_ack)
-                writer->WriteTaskCompletionAckReply(task_id);
-            } else {
-              CRANE_ERROR(
-                  "Stream writer of ia task #{} has been destroyed. "
-                  "TaskCompletionAckReply will not be sent.",
-                  task_id);
-            }
-
-            m_ctld_server_->m_mtx_.Lock();
-
-            // If cfored disconnected, the cfored_name should have be
-            // removed from the map and the task completion callback is
-            // generated from cleaning the remaining tasks by calling
-            // g_task_scheduler->TerminateTask(), we should ignore this
-            // callback since the task id has already been cleaned.
-            auto iter =
-                m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
-            if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
-              iter->second.erase(task_id);
-            m_ctld_server_->m_mtx_.Unlock();
-          };
-
-          auto submit_result =
-              m_ctld_server_->SubmitTaskToScheduler(std::move(task));
-          std::expected<task_id_t, std::string> result;
-          if (submit_result.has_value()) {
-            result = std::expected<task_id_t, std::string>{
-                submit_result.value().get()};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_result.error()));
-          }
-          ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
-
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
-                cfored_name);
-            state = StreamState::kCleanData;
-          } else {
-            if (result.has_value()) {
-              m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
-                  result.value());
-              m_ctld_server_->m_mtx_.Unlock();
-            }
-          }
-        } break;
-
-        case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
-          auto const &payload = cfored_request.payload_task_complete_req();
-          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
-          if (g_task_scheduler->TerminatePendingOrRunningIaTask(
-                  payload.task_id()) != CraneErrCode::SUCCESS)
-            stream_writer->WriteTaskCompletionAckReply(payload.task_id());
-          else {
-            CRANE_TRACE(
-                "Termination of task #{} succeeded. "
-                "Leave TaskCompletionAck to TaskStatusChange.",
-                payload.task_id());
-          }
-        } break;
-
-        case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
-          stream_writer->WriteCforedGracefulExitAck();
-          stream_writer->Invalidate();
-          state = StreamState::kCleanData;
-        } break;
-
-        default:
-          CRANE_ERROR("Not expected cfored request type: {}",
-                      StreamCforedRequest_CforedRequestType_Name(
-                          cfored_request.type()));
-          return Status::CANCELLED;
-        }
-      } else {
-        state = StreamState::kCleanData;
-      }
-    } break;
-
-    case StreamState::kCleanData: {
-      CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
-      stream_writer->Invalidate();
-      m_ctld_server_->m_mtx_.Lock();
-
-      auto const &running_task_set =
-          m_ctld_server_->m_cfored_running_tasks_[cfored_name];
-      std::vector<task_id_t> running_tasks(running_task_set.begin(),
-                                           running_task_set.end());
-      m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
-      m_ctld_server_->m_mtx_.Unlock();
-
-      for (task_id_t task_id : running_tasks) {
-        g_task_scheduler->TerminateRunningTask(task_id);
-      }
-
-      return Status::OK;
-    }
-    }
-  }
-}
-
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
@@ -1649,80 +1348,12 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
+    g_ctld_for_internal_server->Shutdown();
   });
   signal_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
   signal(SIGTERM, &CtldServer::signal_handler_func);
-}
-
-CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
-    std::unique_ptr<TaskInCtld> task) {
-  if (!task->password_entry->Valid()) {
-    CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
-    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
-  }
-  task->SetUsername(task->password_entry->Username());
-
-  {  // Limit the lifecycle of user_scoped_ptr
-    auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
-    if (!user_scoped_ptr) {
-      CRANE_DEBUG("User '{}' not found in the account database",
-                  task->Username());
-      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
-    }
-
-    if (task->account.empty()) {
-      task->account = user_scoped_ptr->default_account;
-      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
-    } else {
-      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        CRANE_DEBUG(
-            "Account '{}' is not in the user account list when submitting the "
-            "task",
-            task->account);
-        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
-      }
-    }
-  }
-
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    CRANE_DEBUG(
-        "User '{}' doesn't have permission to use partition '{}' when using "
-        "account '{}'",
-        task->Username(), task->partition_id, task->account);
-    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
-  }
-
-  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
-      task->Username(), task->account);
-  if (!enable_res) {
-    return std::unexpected(enable_res.error());
-  }
-
-  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
-      task->partition_id, task->account);
-  if (!result) return std::unexpected(result.error());
-
-  task->SetSubmitTime(absl::Now());
-
-  result = TaskScheduler::HandleUnsetOptionalInTaskToCtld(task.get());
-  if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
-  if (result) result = TaskScheduler::CheckTaskValidity(task.get());
-  if (result) {
-    auto res = g_account_meta_container->TryMallocQosResource(*task);
-    if (res != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("The requested QoS resources have reached the user's limit.");
-      return std::unexpected(res);
-    }
-    std::future<task_id_t> future =
-        g_task_scheduler->SubmitTaskAsync(std::move(task));
-    return {std::move(future)};
-  }
-
-  return std::unexpected(result.error());
 }
 
 }  // namespace Ctld

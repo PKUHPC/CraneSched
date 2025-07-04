@@ -22,6 +22,7 @@ DomainSuffix: riley.local
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
 CraneCtldListenPort: 10011
+CraneCtldForInternalListenPort: 10013
 # debug level of cranectld
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
