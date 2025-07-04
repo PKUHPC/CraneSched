@@ -56,9 +56,12 @@ static void PrintNodeInfo() {
     std::exit(1);
   }
   uint64_t mem_bytes = static_cast<uint64_t>(info.totalram) * info.mem_unit;
-  uint64_t mem_mb = mem_bytes / (1024 * 1024);
+  uint64_t mem_gb = mem_bytes / (1024 * 1024 * 1024);  // Convert to GB
 
-  fmt::print("craned-NodeName={} CPUs={} RealMemory={}\n", hostname, cpu_count, mem_mb);
+  fmt::print("Nodes:\n");
+  fmt::print("  - name: {}\n", hostname);
+  fmt::print("    cpu: {}\n", cpu_count);
+  fmt::print("    memory: {}G\n", mem_gb);
 }
 
 void ParseConfig(int argc, char** argv) {
