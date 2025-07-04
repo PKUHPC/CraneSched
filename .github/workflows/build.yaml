@@ -38,7 +38,7 @@ jobs:
 
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: self-hosted
+    runs-on: ["self-hosted", "CraneSched"]
     defaults:
       run:
         shell: bash -leo pipefail {0}
