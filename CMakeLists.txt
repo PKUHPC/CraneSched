@@ -319,6 +319,9 @@ if(NOT PMIX_INCLUDE_DIR OR NOT PMIX_LIBRARY)
     message(FATAL_ERROR "Could not find PMIx in ${WITH_PMIX}")
 endif()
 
+message(STATUS "Found PMIx include: ${PMIX_INCLUDE_DIR}")
+message(STATUS "Found PMIx library: ${PMIX_LIBRARY}")
+
 add_library(libpmix SHARED IMPORTED)
 set_target_properties(libpmix PROPERTIES
         IMPORTED_LOCATION "${PMIX_LIBRARY}"
