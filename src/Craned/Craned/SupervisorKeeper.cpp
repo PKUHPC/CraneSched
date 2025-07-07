@@ -99,7 +99,8 @@ void SupervisorStub::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::supervisor::Supervisor::NewStub(m_channel_);
 }
 
-CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
+CraneExpected<std::unordered_map<task_id_t, pid_t>>
+SupervisorKeeper::InitAndGetRecoveredMap() {
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (!std::filesystem::exists(path) ||
@@ -123,9 +124,9 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
         std::shared_ptr stub = std::make_shared<SupervisorStub>();
         stub->InitChannelAndStub(sock_path);
 
-        CraneExpected<std::pair<task_id_t, pid_t>> supervisor_status =
+        CraneExpected<std::pair<task_id_t, pid_t>> supv_task_id_pid_pair =
             stub->CheckStatus();
-        if (!supervisor_status) {
+        if (!supv_task_id_pid_pair) {
           CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
                       file.string());
           std::filesystem::remove(file);
@@ -134,8 +135,8 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
         }
 
         absl::WriterMutexLock lk(&m_mutex_);
-        m_supervisor_map_.emplace(supervisor_status.value().first, stub);
-        supervisor_pid.emplace(supervisor_status.value());
+        m_supervisor_map_.emplace(supv_task_id_pid_pair.value().first, stub);
+        supervisor_pid.emplace(supv_task_id_pid_pair.value());
 
         latch.count_down();
       });

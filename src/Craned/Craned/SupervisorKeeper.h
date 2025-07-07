@@ -61,7 +61,7 @@ class SupervisorKeeper {
    * scanning fails, supervisors are unreachable, or task status queries fail
    * with specific error codes.
    */
-  CraneExpected<std::unordered_map<task_id_t, pid_t>> Init();
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> InitAndGetRecoveredMap();
 
   void AddSupervisor(task_id_t task_id);
   void RemoveSupervisor(task_id_t task_id);

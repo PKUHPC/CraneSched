@@ -63,9 +63,8 @@ class CtldClientStateMachine {
   void EvGrpcConnectionFailed();
   void EvGrpcTimeout();
 
-  void SubscribeConfigure(
-      std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg,
-      std::future<void>&& conf_future);
+  void AddOnConfigureOneShotCb(
+      std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg);
 
   bool IsReadyNow();
 
@@ -96,10 +95,9 @@ class CtldClientStateMachine {
 
   // State Actions:
   void ActionRequestConfig_();
-  void NotifyConfigureSubscribe_(
+  void CallOnConfigOneShotCb_(
       const crane::grpc::ConfigureCranedRequest& configure_req);
-  void ActionConfigure_(
-      const crane::grpc::ConfigureCranedRequest& configure_req);
+  void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
                        std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
@@ -117,13 +115,9 @@ class CtldClientStateMachine {
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
 
-  struct SubscribeConfigureArg {
-    std::function<void(const crane::grpc::ConfigureCranedRequest&)> cb;
-    std::future<void> conf_future;
-  };
-  std::list<SubscribeConfigureArg> m_configure_subscribe_cb_list_
-      ABSL_GUARDED_BY(m_subscribe_mutex_);
-  absl::Mutex m_subscribe_mutex_;
+  absl::Mutex m_cb_mutex_;
+  std::list<std::function<void(const crane::grpc::ConfigureCranedRequest&)>>
+      m_on_config_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
 
   absl::Mutex m_mtx_;
 };
