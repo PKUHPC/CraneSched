@@ -682,7 +682,7 @@ message StreamCrunRequest {
 
   message TaskIOForwardReq {
     uint32 task_id = 1;
-    string msg = 2;
+    bytes msg = 2;
   }
 
   message TaskX11ForwardReq {
@@ -735,7 +735,7 @@ message StreamCrunReply {
   }
 
   message TaskIOForwardReply {
-    string msg = 1;
+    bytes msg = 1;
   }
 
   message TaskX11ForwardReply {
@@ -769,7 +769,7 @@ message StreamTaskIORequest {
 
   message CranedTaskOutputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    bytes msg = 2;
   }
 
   message CranedUnRegisterReq {
@@ -804,7 +804,7 @@ message StreamTaskIOReply {
 
   message CranedTaskInputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    bytes msg = 2;
   }
 
   message CranedUnregisterReply {
@@ -836,18 +836,22 @@ message PowerStateChangeReply {
   bool ok = 1;
 }
 
+message EnableAutoPowerControlRequest {
+  uint32 uid = 1;
+  repeated string craned_ids = 2;
+  bool enable = 3;
+}
+
+message EnableAutoPowerControlReply {
+  repeated string modified_nodes = 1;
+  repeated string not_modified_nodes = 2;
+  repeated string not_modified_reasons = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
-  /* RPCs called from Craned */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
-
-  /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
-
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
@@ -862,6 +866,7 @@ service CraneCtld {
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
+  rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -894,6 +899,16 @@ service CraneCtld {
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
 }
 
+service CraneCtldForInternal {
+  /* RPCs called from Craned */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+
+  /* RPCs called from Cfored */
+  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
+}
+
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
@@ -914,11 +929,13 @@ service Craned {
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
+}
 
+service CranedForPam {
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
-  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
 }
 
