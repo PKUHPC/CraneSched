@@ -141,7 +141,7 @@ class CranedServer {
     return true;
   }
 
-  void FinishSupervisorRecovery() {
+  void MarkSupervisorAsRecovered() {
     CRANE_DEBUG("Craned finished recover.");
     m_supervisor_recovered_.store(true, std::memory_order_release);
   }
