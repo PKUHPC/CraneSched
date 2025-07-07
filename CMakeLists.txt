@@ -312,8 +312,8 @@ if(NOT WITH_PMIX)
     set(WITH_PMIX "/usr/local")
 endif()
 
-find_path(PMIX_INCLUDE_DIR pmix.h PATHS "${WITH_PMIX}/include")
-find_library(PMIX_LIBRARY pmix PATHS "${WITH_PMIX}/lib")
+find_path(PMIX_INCLUDE_DIR pmix.h PATHS "${WITH_PMIX}/include" NO_DEFAULT_PATH)
+find_library(PMIX_LIBRARY pmix PATHS "${WITH_PMIX}/lib" NO_DEFAULT_PATH)
 
 if(NOT PMIX_INCLUDE_DIR OR NOT PMIX_LIBRARY)
     message(FATAL_ERROR "Could not find PMIx in ${WITH_PMIX}")
