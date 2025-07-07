@@ -73,13 +73,13 @@ void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
     else
       g_pam_config.CraneBaseDir = kDefaultCraneBaseDir;
 
-    if (config["CranedUnixSockPath"])
+    if (config["CranedForPamUnixSockPath"])
       g_pam_config.CranedUnixSockPath =
           g_pam_config.CraneBaseDir +
-          config["CranedUnixSockPath"].as<std::string>();
+          config["CranedForPamUnixSockPath"].as<std::string>();
     else
       g_pam_config.CranedUnixSockPath =
-          g_pam_config.CraneBaseDir + kDefaultCranedUnixSockPath;
+          g_pam_config.CraneBaseDir + kDefaultCranedForPamUnixSockPath;
 
     *initialized = true;
   } catch (YAML::BadFile &e) {
@@ -327,8 +327,8 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   //    return false;
   //  }
 
-  std::unique_ptr<crane::grpc::Craned::Stub> stub =
-      crane::grpc::Craned::NewStub(channel);
+  std::unique_ptr<crane::grpc::CranedForPam::Stub> stub =
+      crane::grpc::CranedForPam::NewStub(channel);
 
   if (!stub) {
     pam_syslog(pamh, LOG_ERR, "[Crane] Failed to create Stub to %s",
@@ -383,8 +383,8 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   pam_syslog(pamh, LOG_ERR, "[Crane] Channel to %s created",
              craned_unix_socket_address.c_str());
 
-  std::unique_ptr<crane::grpc::Craned::Stub> stub =
-      crane::grpc::Craned::NewStub(channel);
+  std::unique_ptr<crane::grpc::CranedForPam::Stub> stub =
+      crane::grpc::CranedForPam::NewStub(channel);
 
   if (!stub) {
     pam_syslog(pamh, LOG_ERR, "[Crane] Failed to create Stub to %s",
