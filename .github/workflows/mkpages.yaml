@@ -1,7 +1,7 @@
 name: Deploy Documentation to GitHub Pages
 
 on:
-  # 正确的事件触发器配置
+  workflow_dispatch: {}
   push:
     branches:
       - main
