@@ -120,6 +120,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   if (it != g_config.NodeList.end()) {
     int index = std::distance(g_config.NodeList.begin(), it);
     env_map.emplace("CRANE_NODEID", std::to_string(index));
+    env_map.emplace("SLURM_NODEID", std::to_string(index));
   } else {
     CRANE_ERROR("Node{} id unknow", g_config.CranedIdOfThisNode);
   }
@@ -135,6 +136,15 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
       std::next(v2.begin()), v2.end(), v2[0],
       [](const std::string& a, const std::string& b) { return a + "," + b; });
   env_map.emplace("CRANE_JOB_CPUS_PER_NODE", cpus_per_node_str2);
+  env_map.emplace("CRANE_JOB_NUM_NODES", std::to_string(this->task.node_num()));
+  env_map.emplace("CRANE_NNODES", std::to_string(this->task.node_num()));
+
+  env_map.emplace("SLURM_JOB_NODELIST", absl::StrJoin(this->task.allocated_nodes(), ","));
+  env_map.emplace("SLURM_NODELIST", absl::StrJoin(this->task.allocated_nodes(), ","));
+  env_map.emplace("SLURM_JOB_NUM_NODES", std::to_string(this->task.node_num()));
+  env_map.emplace("SLURM_NNODES", std::to_string(this->task.node_num()));
+  env_map.emplace("SLURM_TASKS_PER_NODE", tasks_per_node_str);
+
 
   if (this->IsCrun()) {
     auto const& ia_meta = this->task.interactive_meta();
