@@ -2560,6 +2560,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
+    // TODO:  cores-per-socket node select
+
     if (task->reservation != "") {
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
@@ -2634,6 +2636,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
+    // TODO: cores-per-socket node select
+
     ResourceInNode feasible_res;
 
     // TODO: get feasible resource randomly (may cause start time change
@@ -3205,6 +3209,10 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
+
+      if (task->cores_per_socket > craned_meta->remote_meta.topology_info.core_count)
+        continue;
+
       if (task->requested_node_res_view <= craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
