@@ -1093,7 +1093,7 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(task_id_t task_id,
   }
 
   if (!found) {
-    CRANE_DEBUG("Task #{} not in Pd/Rn queue for comment change!", task_id);
+    CRANE_DEBUG("Task #{} not in Pd/Rn queue for extra_attrs change!", task_id);
     return CraneErrCode::ERR_NON_EXISTENT;
   }
 
