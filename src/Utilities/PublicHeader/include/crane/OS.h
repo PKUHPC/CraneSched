@@ -34,6 +34,12 @@ struct SystemRelInfo {
   std::string version;
 };
 
+struct TopologyInfo {
+  uint32_t socket_count;
+  uint32_t core_count;
+  uint32_t pu_count;
+};
+
 namespace util {
 
 namespace os {

@@ -203,6 +203,8 @@ struct CranedRemoteMeta {
 
   std::vector<crane::grpc::NetworkInterface> network_interfaces;
 
+  TopologyInfo topology_info;
+
   CranedRemoteMeta() = default;
 
   explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)
@@ -219,6 +221,10 @@ struct CranedRemoteMeta {
     for (const auto& interface : grpc_meta.network_interfaces()) {
       this->network_interfaces.emplace_back(interface);
     }
+
+    this->topology_info.socket_count = grpc_meta.topology_info().socket_count();
+    this->topology_info.core_count = grpc_meta.topology_info().core_count();
+    this->topology_info.pu_count = grpc_meta.topology_info().pu_count();
   }
 };
 
@@ -394,6 +400,8 @@ struct TaskInCtld {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   std::string reservation;
+
+  uint32_t cores_per_socket;
 
  private:
   /* ------------- [2] -------------
@@ -612,6 +620,8 @@ struct TaskInCtld {
     extra_attr = val.extra_attr();
 
     reservation = val.reservation();
+
+    cores_per_socket = val.cores_per_socket();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
