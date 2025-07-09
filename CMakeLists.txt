@@ -339,6 +339,9 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+find_package(HWLOC REQUIRED)
+
+
 if (CRANE_ENABLE_BPF)
     find_package(BPF 1.4.6 REQUIRED)
 endif ()

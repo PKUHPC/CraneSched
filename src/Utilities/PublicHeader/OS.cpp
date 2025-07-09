@@ -205,4 +205,20 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+bool GetCpuTopologyInfo(TopologyInfo* info) {
+  hwloc_topology_t topology;
+  if (hwloc_topology_init(&topology) != 0) return false;
+  if (hwloc_topology_load(topology) != 0) {
+    hwloc_topology_destroy(topology);
+    return false;
+  }
+
+  info->socket_count = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_SOCKET);
+  info->core_count   = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_CORE);
+  info->pu_count     = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);
+
+  hwloc_topology_destroy(topology);
+  return true;
+}
+
 }  // namespace util::os

@@ -581,9 +581,9 @@ message NetworkInterface {
 }
 
 message TopologyInfo {
-  string socket_count = 1;
-  string core_count = 2;
-  string pu_count = 3;
+  uint32 socket_count = 1;
+  uint32 core_count = 2;
+  uint32 pu_count = 3;
 }
 
 message CranedRemoteMeta {

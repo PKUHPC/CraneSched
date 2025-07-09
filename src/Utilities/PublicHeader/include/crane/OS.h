@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <hwloc.h>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -72,6 +73,8 @@ bool GetSystemReleaseInfo(SystemRelInfo* info);
 bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
+
+bool GetCpuTopologyInfo(TopologyInfo* info);
 
 }  // namespace os
 
