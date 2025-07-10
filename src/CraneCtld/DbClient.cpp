@@ -870,6 +870,19 @@ DeviceMap MongodbClient::JsonStringToDeviceMap(
   } catch (const std::exception& e) {
     PrintError_(e.what());
   }
+    for (const auto& device_entry : device_map) {
+        const std::string& name = device_entry.first;
+        const auto& pair = device_entry.second;
+        uint64_t untyped_req_count = pair.first;
+        const auto& type_map = pair.second;
+
+        CRANE_ERROR("JsonStringToDeviceMap Device: {}", name);
+        CRANE_ERROR("JsonStringToDeviceMap Untyped req count: {}", untyped_req_count);
+        CRANE_ERROR("JsonStringToDeviceMap Types");
+        for (const auto& type_entry : type_map) {
+            CRANE_ERROR("JsonStringToDeviceMap Type: {}, Total: {}",  type_entry.first, type_entry.second);
+        }
+    }
 
   return device_map;
 }
