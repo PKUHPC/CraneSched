@@ -2564,6 +2564,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
       continue;
 
+    if (task->threads_per_cores == 1) {
+      if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
+        continue;
+    } else if (task->threads_per_cores < craned_meta->remote_meta.topology_info.threads_per_core) {
+      continue;
+    }
+
     CRANE_DEBUG(
         "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
         craned_index, task->TaskId());
@@ -2644,6 +2651,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
     if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
       continue;
+
+    if (task->threads_per_cores == 1) {
+      if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
+        continue;
+    } else if (task->threads_per_cores < craned_meta->remote_meta.topology_info.threads_per_core) {
+      continue;
+    }
 
     CRANE_DEBUG(
         "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
