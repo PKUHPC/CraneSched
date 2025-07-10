@@ -403,6 +403,8 @@ struct TaskInCtld {
 
   uint32_t cores_per_socket;
 
+  uint32_t threads_per_cores;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -622,6 +624,8 @@ struct TaskInCtld {
     reservation = val.reservation();
 
     cores_per_socket = val.cores_per_socket();
+
+    threads_per_cores = val.threads_per_cores();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
