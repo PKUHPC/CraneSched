@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <hwloc.h>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -32,6 +33,12 @@ struct SystemRelInfo {
   std::string name;
   std::string release;
   std::string version;
+};
+
+struct TopologyInfo {
+  uint32_t socket_count;
+  uint32_t cores_per_socket;
+  uint32_t threads_per_core;
 };
 
 namespace util {
@@ -66,6 +73,8 @@ bool GetSystemReleaseInfo(SystemRelInfo* info);
 bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
+
+bool GetCpuTopologyInfo(TopologyInfo* info);
 
 }  // namespace os
 
