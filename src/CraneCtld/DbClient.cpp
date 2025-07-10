@@ -851,7 +851,6 @@ std::unordered_map<std::string, uint64_t> MongodbClient::ParseTypeMap(
 
 DeviceMap MongodbClient::JsonStringToDeviceMap(
     const std::string& device_map_str) {
-  CRANE_ERROR("JsonStringToDeviceMap device_map_str {}", device_map_str);
   DeviceMap device_map;
   if (device_map_str.empty()) {
     return device_map;
