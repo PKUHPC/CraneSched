@@ -240,6 +240,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  uint32 cores_per_socket = 25;
 }
 
 message BatchTaskAdditionalMeta {

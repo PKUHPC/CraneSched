@@ -297,6 +297,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
     }
+    mutable_task->set_cores_per_socket(task->TaskToCtld().cores_per_socket());
   }
 
   return request;
