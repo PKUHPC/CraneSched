@@ -37,8 +37,8 @@ struct SystemRelInfo {
 
 struct TopologyInfo {
   uint32_t socket_count;
-  uint32_t core_count;
-  uint32_t pu_count;
+  uint32_t cores_per_socket;
+  uint32_t threads_per_core;
 };
 
 namespace util {

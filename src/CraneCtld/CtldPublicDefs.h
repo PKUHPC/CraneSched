@@ -223,8 +223,8 @@ struct CranedRemoteMeta {
     }
 
     this->topology_info.socket_count = grpc_meta.topology_info().socket_count();
-    this->topology_info.core_count = grpc_meta.topology_info().core_count();
-    this->topology_info.pu_count = grpc_meta.topology_info().pu_count();
+    this->topology_info.cores_per_socket = grpc_meta.topology_info().cores_per_socket();
+    this->topology_info.threads_per_core = grpc_meta.topology_info().threads_per_core();
   }
 };
 

@@ -583,8 +583,8 @@ message NetworkInterface {
 
 message TopologyInfo {
   uint32 socket_count = 1;
-  uint32 core_count = 2;
-  uint32 pu_count = 3;
+  uint32 cores_per_socket = 2;
+  uint32 threads_per_core = 3;
 }
 
 message CranedRemoteMeta {

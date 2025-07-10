@@ -401,8 +401,8 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   const TopologyInfo& topo_info = g_config.CranedMeta.TopologyInfo;
   auto* grpc_topo_info = grpc_meta->mutable_topology_info();
   grpc_topo_info->set_socket_count(topo_info.socket_count);
-  grpc_topo_info->set_core_count(topo_info.core_count);
-  grpc_topo_info->set_pu_count(topo_info.pu_count);
+  grpc_topo_info->set_cores_per_socket(topo_info.cores_per_socket);
+  grpc_topo_info->set_threads_per_core(topo_info.threads_per_core);
 
   grpc_meta->mutable_craned_start_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.CranedStartTime));

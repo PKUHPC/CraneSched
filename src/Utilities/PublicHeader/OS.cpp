@@ -213,9 +213,12 @@ bool GetCpuTopologyInfo(TopologyInfo* info) {
     return false;
   }
 
+  uint32_t core_count = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_CORE);
+  uint32_t pu_count = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);
+
   info->socket_count = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_SOCKET);
-  info->core_count   = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_CORE);
-  info->pu_count     = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);
+  info->cores_per_socket = (info->socket_count > 0) ? core_count / info->socket_count : core_count;
+  info->threads_per_core = (core_count > 0) ? pu_count / core_count : pu_count;
 
   hwloc_topology_destroy(topology);
   return true;
