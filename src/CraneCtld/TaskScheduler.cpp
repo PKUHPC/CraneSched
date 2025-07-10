@@ -2560,6 +2560,14 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
+
+    if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
+      continue;
+
+    CRANE_DEBUG(
+        "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
+        craned_index, task->TaskId());
+
     if (task->reservation != "") {
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
@@ -2634,6 +2642,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
+    if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
+      continue;
+
+    CRANE_DEBUG(
+        "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
+        craned_id, task->TaskId());
+
     ResourceInNode feasible_res;
 
     // TODO: get feasible resource randomly (may cause start time change
