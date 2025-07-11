@@ -34,6 +34,15 @@ inline constexpr uint64_t kRegisterOperationTimeoutMs = 5'000;
 using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;
 
+enum class CallbackInvokeMode : std::uint8_t { sync = 0, async };
+
+template <typename CB>
+struct CallbackWrapper {
+  CB cb;
+  CallbackInvokeMode mode;
+  bool consume;
+};
+
 struct TaskStatusChangeQueueElem {
   task_id_t step_id{};
   crane::grpc::TaskStatus new_status{};

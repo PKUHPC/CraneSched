@@ -496,7 +496,7 @@ class CgroupManager {
 
   CraneErrCode Init();
 
-  CraneErrCode Recover(const std::unordered_set<task_id_t> &running_job_ids);
+  CraneErrCode Recover(std::unordered_map<task_id_t, JobToD> &running_jobs);
 
   bool Mounted(CgConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});

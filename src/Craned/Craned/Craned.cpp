@@ -672,6 +672,54 @@ void CreateRequiredDirectories() {
   if (!ok) std::exit(1);
 }
 
+void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
+  // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
+
+  // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
+      g_supervisor_keeper->InitAndGetRecoveredMap();
+
+  // JobId,supervisor pid
+  std::unordered_map<task_id_t, pid_t> job_supv_pid_map;
+  if (steps.has_value()) job_supv_pid_map = steps.value();
+
+  // All job ids from supervisor
+  auto supv_job_ids_view = job_supv_pid_map | std::views::keys;
+  std::unordered_set<task_id_t> supv_job_ids(supv_job_ids_view.begin(),
+                                             supv_job_ids_view.end());
+  if (!supv_job_ids.empty()) {
+    CRANE_TRACE("[Supervisor] job [{}] still running.",
+                absl::StrJoin(supv_job_ids, ","));
+  }
+
+  std::unordered_map<task_id_t, JobToD> job_map(
+      config_from_ctld.job_map().begin(), config_from_ctld.job_map().end());
+
+  std::unordered_map<task_id_t, Craned::StepStatus> step_map;
+  step_map.reserve(config_from_ctld.job_tasks_map_size());
+
+  for (const auto& [job_id, step_to_d] : config_from_ctld.job_tasks_map()) {
+    if (supv_job_ids.erase(job_id) > 0) {  // job_id is in supervisor recovery
+      step_map.emplace(
+          job_id, Craned::StepStatus{.step_to_d = step_to_d,
+                                     .super_pid = job_supv_pid_map.at(job_id)});
+    } else {
+      // Remove lost step's invalid job
+      job_map.erase(job_id);
+    }
+  }
+
+  g_cg_mgr->Recover(job_map);
+  g_job_mgr->Recover(std::move(job_map), std::move(step_map));
+
+  if (!supv_job_ids.empty()) {
+    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
+                absl::StrJoin(supv_job_ids, ","));
+  }
+
+  g_server->MarkSupervisorAsRecovered();
+}
+
 void GlobalVariableInit() {
   CreateRequiredDirectories();
 
@@ -722,6 +770,13 @@ void GlobalVariableInit() {
   g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
 
+  g_ctld_client_sm->AddActionConfigureCb(
+      [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
+        Recover(arg.req);
+      },
+      Craned::CallbackInvokeMode::sync, true);
+  g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
+
   g_ctld_client->Init();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
   g_ctld_client->AddGrpcCtldDisconnectedCb(
@@ -734,6 +789,12 @@ void GlobalVariableInit() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+
+  g_craned_for_pam_server =
+      std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
+
+  // Make sure all grpc server is ready to receive requests.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 }
 
 void WaitForStopAndDoGvarFini() {
@@ -801,90 +862,8 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
-  std::promise<crane::grpc::ConfigureCranedRequest> conf_promise;
-  auto config_fut = conf_promise.get_future();
-
-  g_ctld_client_sm->AddOnConfigureOneShotCb(
-      [&conf_promise](const crane::grpc::ConfigureCranedRequest& req) {
-        conf_promise.set_value(req);
-      });
-
-  g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
-
-  // Make sure grpc server is ready to receive requests.
-  g_craned_for_pam_server =
-      std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
-  // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
-  CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
-      g_supervisor_keeper->InitAndGetRecoveredMap();
-
-  // JobId,supervisor pid
-  std::unordered_map<task_id_t, pid_t> job_supv_pid_map;
-  if (steps.has_value()) job_supv_pid_map = steps.value();
-
-  // All job ids from supervisor
-  auto supv_job_ids_view = job_supv_pid_map | std::views::keys;
-  std::unordered_set<task_id_t> supv_job_ids(supv_job_ids_view.begin(),
-                                             supv_job_ids_view.end());
-  if (!supv_job_ids.empty()) {
-    CRANE_TRACE("[Supervisor] job [{}] still running.",
-                absl::StrJoin(supv_job_ids, ","));
-  }
-
-  while (true) {
-    if (config_fut.wait_for(std::chrono::seconds(1)) ==
-        std::future_status::timeout) {
-      if (g_job_mgr->IsEnding()) {
-        CRANE_INFO("Exit when waiting for first configure request from ctld.");
-        WaitForStopAndDoGvarFini();
-      }
-      continue;
-    }
-    break;
-  }
-  auto config_from_ctld = config_fut.get();
-
-  std::unordered_map<task_id_t, JobToD> job_map;
-  job_map.reserve(config_from_ctld.job_map_size());
-
-  std::unordered_map<task_id_t, Craned::StepToD> step_map;
-  step_map.reserve(config_from_ctld.job_tasks_map_size());
-
-  std::unordered_set<task_id_t> running_jobs;
-  std::vector<task_id_t> invalid_jobs;
-
-  for (const auto& [job_id, job_spec] : config_from_ctld.job_map()) {
-    if (supv_job_ids.erase(job_id) > 0) {  // job_id is in supervisor recovery
-      running_jobs.emplace(job_id);
-      job_map.emplace(job_id, job_spec);
-      step_map.emplace(job_id, config_from_ctld.job_tasks_map().at(job_id));
-    } else {
-      invalid_jobs.emplace_back(job_id);
-    }
-  }
-
-  g_cg_mgr->Recover(running_jobs);
-
-  std::unordered_map<task_id_t, Craned::StepStatus> job_status_map;
-  for (const auto& job_id : running_jobs) {
-    job_status_map.emplace(
-        // For now, each job only have one step
-        job_id, Craned::StepStatus{.job_to_d = job_map[job_id],
-                                   .step_to_d = step_map[job_id],
-                                   .super_pid = job_supv_pid_map[job_id]});
-  }
-  g_job_mgr->Recover(std::move(job_status_map));
-
-  if (!supv_job_ids.empty()) {
-    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
-                absl::StrJoin(supv_job_ids, ","));
-  }
-
-  g_server->MarkSupervisorAsRecovered();
   WaitForStopAndDoGvarFini();
 }
 

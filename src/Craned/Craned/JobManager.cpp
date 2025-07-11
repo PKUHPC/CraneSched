@@ -128,27 +128,39 @@ JobManager::JobManager() {
 }
 
 CraneErrCode JobManager::Recover(
-    std::unordered_map<task_id_t, StepStatus>&& job_status_map) {
-  for (auto& [job_id, step_status] : job_status_map) {
-    CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
-    uid_t uid = step_status.job_to_d.uid;
-    step_status.job_to_d.recovered = true;
-    auto job_instance = JobInstance(step_status.job_to_d);
-    auto execution = std::make_unique<StepInstance>(
-        StepInstance{.step_to_d = step_status.step_to_d,
-                     .supervisor_pid = step_status.super_pid});
-    // TODO:replace this with step_id
-    job_instance.step_map.emplace(0, std::move(execution));
-    job_instance.cgroup =
-        g_cg_mgr->AllocateAndGetJobCgroup(job_instance.job_to_d);
+    std::unordered_map<task_id_t, JobToD>&& job_map,
+    std::unordered_map<task_id_t, StepStatus>&& step_map) {
+  CRANE_INFO("Job allocation [{}] recovered.",
+             absl::StrJoin(job_map | std::views::keys, ","));
+  for (const auto& job_to_d : job_map | std::views::values) {
+    task_id_t job_id = job_to_d.job_id;
+    uid_t uid = job_to_d.uid;
+    auto job = JobInstance(job_to_d);
+    if (job_to_d.recovered) {
+      job.cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job.job_to_d);
+      CRANE_DEBUG("Recover existing cgroup for job  {}", job_id);
+    }
+    m_job_map_.Emplace(job_id, std::move(job));
 
-    m_job_map_.Emplace(job_id, std::move(job_instance));
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     if (uid_map->contains(uid)) {
       uid_map->at(uid).RawPtr()->emplace(job_id);
     } else {
       uid_map->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
     }
+  }
+
+  for (auto& [job_id, step_status] : step_map) {
+    auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
+    CRANE_ASSERT(job_instance);
+    auto step_inst = std::make_unique<StepInstance>(
+        StepInstance{.step_to_d = step_status.step_to_d,
+                     .supervisor_pid = step_status.super_pid});
+    // TODO:replace this with step_id
+    step_id_t step_id = 0;
+
+    job_instance->step_map.emplace(step_id, std::move(step_inst));
+    CRANE_TRACE("Job #{} running step #{} recovered.", job_id, step_id);
   }
   return CraneErrCode::SUCCESS;
 }
