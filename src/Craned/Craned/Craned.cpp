@@ -676,6 +676,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
 
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
+  std::vector ctld_job_ids = config_from_ctld.job_map() | std::views::keys |
+                             std::ranges::to<std::vector<task_id_t>>();
+  CRANE_DEBUG("CraneCtld claimed {} jobs are running on this node: [{}]",
+              ctld_job_ids.size(), absl::StrJoin(ctld_job_ids, ","));
+
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
       g_supervisor_keeper->InitAndGetRecoveredMap();
 
