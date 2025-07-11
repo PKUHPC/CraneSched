@@ -75,20 +75,42 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
       },
       QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 1}}});
 
+  CRANE_DEBUG("Malloc QOS resource for task {} of user {}. Ok: {}",
+              task.TaskId(), task.Username(), result == CraneErrCode::SUCCESS);
+
   return result;
 }
 
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
+  CRANE_DEBUG("Free QOS resource for task {} of user {}", task.TaskId(),
+              task.Username());
+
   user_meta_map_.modify_if(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& val = pair.second[task.qos];
-        CRANE_ASSERT(val.jobs_per_user > 0);
-        CRANE_ASSERT(resource_view <= val.resource);
-        val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
-        val.jobs_per_user--;
+        auto iter = pair.second.find(task.qos);
+        if (iter == pair.second.end()) {
+          CRANE_ERROR("Qos '{}' not found for user '{}', cannot free resource for task {}.",
+                   task.qos, task.Username(), task.TaskId());
+          return;
+        }
+        auto& val = iter->second;
+        if (val.jobs_per_user == 0) {
+          CRANE_ERROR("jobs_per_user == 0 when freeing qos resource for user '{}', qos '{}', task {}.",
+                    task.Username(), task.qos, task.TaskId());
+        } else {
+          val.jobs_per_user--;
+        }
+
+        if (val.resource.GetAllocatableRes() < (resource_view).GetAllocatableRes()) {
+          CRANE_ERROR("Insufficient allocatable resource when freeing for user '{}', qos '{}', task {}. ",
+                    task.Username(), task.qos, task.TaskId());
+          val.resource.GetAllocatableRes().SetToZero();
+        } else {
+          val.resource.GetAllocatableRes() -= (resource_view).GetAllocatableRes();
+        }
       });
 }
 
