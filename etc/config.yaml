@@ -130,6 +130,7 @@ Supervisor:
   Path: /usr/libexec/csupervisor
   # Supervisor log level
   DebugLevel: trace
+  # Relate to CraneBaseDir
   LogDir: supervisor
 
 Container:

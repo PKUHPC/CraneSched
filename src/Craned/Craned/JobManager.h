@@ -40,7 +40,6 @@ struct StepInstance {
 };
 
 struct StepStatus {
-  JobToD job_to_d;
   StepToD step_to_d;
   pid_t super_pid;
 };
@@ -82,8 +81,8 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErrCode Recover(
-      std::unordered_map<task_id_t, StepStatus>&& job_status_map);
+  CraneErrCode Recover(std::unordered_map<task_id_t, JobToD>&& job_map,
+                       std::unordered_map<task_id_t, StepStatus>&& step_map);
 
   ~JobManager();
 

@@ -187,9 +187,12 @@ CraneErrCode CgroupManager::Init() {
   }
   return CraneErrCode::SUCCESS;
 }
-
+/**
+ * @brief Destroy invalid cgroups, set `recovered` field for job with cgroup
+ * created.
+ */
 CraneErrCode CgroupManager::Recover(
-    const std::unordered_set<task_id_t> &running_job_ids) {
+    std::unordered_map<task_id_t, JobToD> &running_jobs) {
   std::set<task_id_t> cg_running_job_ids{};
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
     cg_running_job_ids.merge(
@@ -210,7 +213,7 @@ CraneErrCode CgroupManager::Recover(
     }
 
     for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (running_job_ids.contains(job_id)) continue;
+      if (running_jobs.contains(job_id)) continue;
       CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
       for (const auto &key : bpf_key_vec) {
         if (bpf_map__delete_elem(bpf_runtime_info.BpfDevMap(), &key,
@@ -227,7 +230,7 @@ CraneErrCode CgroupManager::Recover(
     return CraneErrCode::ERR_CGROUP;
   }
   for (auto job_id : cg_running_job_ids) {
-    if (!running_job_ids.contains(job_id)) {
+    if (!running_jobs.contains(job_id)) {
       CRANE_DEBUG("Removing cgroup for job #{}.", job_id);
       std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
       if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -240,7 +243,10 @@ CraneErrCode CgroupManager::Recover(
       if (cg_unique_ptr == nullptr) {
         CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
       }
+      cg_unique_ptr->KillAllProcesses();
       cg_unique_ptr->Destroy();
+    } else {
+      running_jobs.at(job_id).recovered = true;
     }
   }
   return CraneErrCode::SUCCESS;

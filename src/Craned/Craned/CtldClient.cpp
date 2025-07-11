@@ -39,9 +39,12 @@ void CtldClientStateMachine::SetActionDisconnectedCb(
   m_action_disconnected_cb_ = std::move(cb);
 }
 
-void CtldClientStateMachine::SetActionConfigureCb(
-    std::function<void(ConfigureArg const&)>&& cb) {
-  m_action_configure_cb_ = std::move(cb);
+void CtldClientStateMachine::AddActionConfigureCb(
+    std::function<void(ConfigureArg const&)>&& cb,
+    CallbackInvokeMode invoke_mode, bool consume) {
+  m_action_configure_cb_list_.emplace_back(CallbackWrapper{.cb = std::move(cb),
+                                                           .mode = invoke_mode,
+                                                           .consume = consume});
 }
 
 void CtldClientStateMachine::SetActionRegisterCb(
@@ -164,12 +167,6 @@ void CtldClientStateMachine::EvGrpcTimeout() {
   ActionRequestConfig_();
 }
 
-void CtldClientStateMachine::AddOnConfigureOneShotCb(
-    std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& cb) {
-  absl::MutexLock lk(&m_cb_mutex_);
-  m_on_config_cb_list_.push_back(cb);
-}
-
 bool CtldClientStateMachine::IsReadyNow() {
   absl::MutexLock lk(&m_mtx_);
   return m_state_ == State::READY;
@@ -186,36 +183,33 @@ void CtldClientStateMachine::ActionRequestConfig_() {
       [tok = m_reg_token_.value(), this] { m_action_request_config_cb_(tok); });
 }
 
-void CtldClientStateMachine::CallOnConfigOneShotCb_(
-    const crane::grpc::ConfigureCranedRequest& configure_req) {
-  absl::MutexLock lk(&m_cb_mutex_);
-  auto it = m_on_config_cb_list_.begin();
-  while (it != m_on_config_cb_list_.end()) {
-    g_thread_pool->detach_task(
-        [cb = std::move(*it), configure_req] { cb(configure_req); });
-    it = m_on_config_cb_list_.erase(it);  // Erase returns next iterator
-  }
-}
-
 void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& config_req) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-  auto job_ids = config_req.job_map() | std::ranges::views::keys |
-                 std::ranges::to<std::set<task_id_t>>();
-  auto task_ids = config_req.job_tasks_map() | std::ranges::views::keys |
-                  std::ranges::to<std::set<task_id_t>>();
-  if (!job_ids.empty())
-    CRANE_TRACE("Recv ctld job: [{}],task: [{}]", absl::StrJoin(job_ids, ","),
-                absl::StrJoin(task_ids, ","));
 
-  g_thread_pool->detach_task(
-      [tok = m_reg_token_.value(), job_ids = std::move(job_ids),
-       task_ids = std::move(task_ids), config_req, this] {
-        this->CallOnConfigOneShotCb_(config_req);
-        m_action_configure_cb_(
-            {.token = tok, .job_ids = job_ids, .step_ids = task_ids});
-      });
+  if (config_req.job_map_size() != 0)
+    CRANE_TRACE(
+        "Recv ctld job: [{}],task: [{}]",
+        absl::StrJoin(config_req.job_map() | std::ranges::views::keys, ","),
+        absl::StrJoin(config_req.job_tasks_map() | std::ranges::views::keys,
+                      ","));
+
+  absl::MutexLock lk(&m_cb_mutex_);
+  auto it = m_action_configure_cb_list_.begin();
+  while (it != m_action_configure_cb_list_.end()) {
+    auto& cb = *it;
+    if (cb.mode == CallbackInvokeMode::sync) {
+      cb.cb({config_req});
+    } else {
+      g_thread_pool->detach_task(
+          [cb = cb.cb, config_req] { cb({config_req}); });
+    }
+    if (cb.consume) {
+      it = m_action_configure_cb_list_.erase(it);
+    } else
+      ++it;
+  }
 }
 
 void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
@@ -265,18 +259,23 @@ void CtldClient::Init() {
   g_ctld_client_sm->SetActionRequestConfigCb(
       [this](RegToken const& token) { RequestConfigFromCtld_(token); });
 
-  g_ctld_client_sm->SetActionConfigureCb(
+  g_ctld_client_sm->AddActionConfigureCb(
       [](CtldClientStateMachine::ConfigureArg const& arg) {
+        auto token = arg.req.token();
+        auto job_ids = arg.req.job_map() | std::ranges::views::keys |
+                       std::ranges::to<std::set<task_id_t>>();
+        auto step_ids = arg.req.job_tasks_map() | std::ranges::views::keys |
+                        std::ranges::to<std::set<task_id_t>>();
         CRANE_DEBUG("Configuring action for token {}.",
-                    ProtoTimestampToString(arg.token));
+                    ProtoTimestampToString(token));
 
         std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
         std::set<task_id_t> lost_jobs{};
         std::set<task_id_t> invalid_jobs{};
-        std::ranges::set_difference(arg.job_ids, exact_job_ids,
+        std::ranges::set_difference(job_ids, exact_job_ids,
                                     std::inserter(lost_jobs, lost_jobs.end()));
         std::ranges::set_difference(
-            exact_job_ids, arg.job_ids,
+            exact_job_ids, job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
 
         std::set<task_id_t> lost_tasks{};
@@ -284,10 +283,10 @@ void CtldClient::Init() {
 
         std::set exact_step_ids = g_supervisor_keeper->GetRunningSteps();
         std::ranges::set_difference(
-            arg.step_ids, exact_step_ids,
+            step_ids, exact_step_ids,
             std::inserter(lost_tasks, lost_tasks.end()));
         std::ranges::set_difference(
-            arg.job_ids, exact_step_ids,
+            exact_step_ids, step_ids,
             std::inserter(invalid_tasks, invalid_tasks.end()));
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
@@ -303,7 +302,8 @@ void CtldClient::Init() {
                       absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(invalid_jobs);
         }
-      });
+      },
+      CallbackInvokeMode::async, false);
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
@@ -389,7 +389,7 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
       m_stub_->CranedTriggerReverseConn(&context, req, &reply);
   if (!status.ok()) {
     CRANE_ERROR("Notify CranedConnected failed: {}, {}",
-                (int)status.error_code(), status.error_message());
+                static_cast<int>(status.error_code()), status.error_message());
     return false;
   }
   return true;
@@ -536,9 +536,9 @@ void CtldClient::SendStatusChanges_() {
       CRANE_ERROR(
           "Failed to send TaskStatusChange: "
           "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-          status_change.step_id, int(status_change.new_status),
+          status_change.step_id, static_cast<int>(status_change.new_status),
           status.error_message(), context.debug_error_string(),
-          int(status.error_code()));
+          static_cast<int>(status.error_code()));
 
       if (status.error_code() == grpc::UNAVAILABLE) {
         if (m_stopping_) return;
