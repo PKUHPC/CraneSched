@@ -680,11 +680,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   g_cg_mgr->Recover(job_map);
 
   std::unordered_map<task_id_t, Craned::StepStatus> step_status_map;
-  for (const auto& job_id : job_map | std::views::keys) {
+  for (const auto& job_id : step_map | std::views::keys) {
     step_status_map.emplace(
         // For now, each job only have one step
-        job_id, Craned::StepStatus{.step_to_d = step_map[job_id],
-                                   .super_pid = job_supv_pid_map[job_id]});
+        job_id, Craned::StepStatus{.step_to_d = step_map.at(job_id),
+                                   .super_pid = job_supv_pid_map.at(job_id)});
   }
   g_job_mgr->Recover(std::move(job_map), std::move(step_status_map));
 

@@ -286,7 +286,7 @@ void CtldClient::Init() {
             step_ids, exact_step_ids,
             std::inserter(lost_tasks, lost_tasks.end()));
         std::ranges::set_difference(
-            job_ids, exact_step_ids,
+            exact_step_ids, step_ids,
             std::inserter(invalid_tasks, invalid_tasks.end()));
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
