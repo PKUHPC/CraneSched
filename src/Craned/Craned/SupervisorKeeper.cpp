@@ -126,7 +126,11 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
 
         CraneExpected<std::pair<task_id_t, pid_t>> supv_task_id_pid_pair =
             stub->CheckStatus();
-        if (!supv_task_id_pid_pair) {
+        if (supv_task_id_pid_pair) {
+          CRANE_DEBUG("Supervisor socket {} recovered, task_id: {}, pid: {}",
+                      file.string(), supv_task_id_pid_pair.value().first,
+                      supv_task_id_pid_pair.value().second);
+        } else {
           CRANE_ERROR("CheckTaskStatus for {} failed, removing it.",
                       file.string());
           std::filesystem::remove(file);
