@@ -21,11 +21,11 @@
 
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 #include <ctime>
-#include <unistd.h>
-#include <sys/sysinfo.h>
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
@@ -40,7 +40,8 @@
 using Craned::g_config;
 using Craned::Partition;
 
-// Print CPU cores and memory information of current node similar to `slurmd -C`.
+// Print CPU cores and memory information of current node similar to `slurmd
+// -C`.
 static void PrintNodeInfo() {
   char hostname[HOST_NAME_MAX + 1];
   if (gethostname(hostname, sizeof(hostname)) != 0) {
@@ -51,7 +52,7 @@ static void PrintNodeInfo() {
   long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
   if (cpu_count < 1) cpu_count = 1;
 
-  struct sysinfo info {};
+  struct sysinfo info{};
   if (sysinfo(&info) != 0) {
     perror("sysinfo");
     std::exit(1);
