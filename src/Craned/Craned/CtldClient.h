@@ -35,12 +35,12 @@ using grpc::Status;
 class CtldClientStateMachine {
  public:
   void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
+
   struct ConfigureArg {
-    RegToken token;
-    std::set<job_id_t> job_ids;
-    std::set<step_id_t> step_ids;
+    crane::grpc::ConfigureCranedRequest req;
   };
-  void SetActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb);
+  void AddActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb,
+                            CallbackInvokeMode invoke_mode, bool consume);
 
   struct RegisterArg {
     RegToken token;
@@ -62,9 +62,6 @@ class CtldClientStateMachine {
   void EvGrpcConnected();
   void EvGrpcConnectionFailed();
   void EvGrpcTimeout();
-
-  void AddOnConfigureOneShotCb(
-      std::function<void(const crane::grpc::ConfigureCranedRequest&)>&& arg);
 
   bool IsReadyNow();
 
@@ -95,8 +92,6 @@ class CtldClientStateMachine {
 
   // State Actions:
   void ActionRequestConfig_();
-  void CallOnConfigOneShotCb_(
-      const crane::grpc::ConfigureCranedRequest& configure_req);
   void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
                        std::set<task_id_t>&& lost_tasks);
@@ -104,20 +99,20 @@ class CtldClientStateMachine {
   void ActionDisconnected_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
-  std::function<void(ConfigureArg const&)> m_action_configure_cb_;
+  std::list<CallbackWrapper<std::function<void(ConfigureArg const&)>>>
+      m_action_configure_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
+
   std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
   std::function<void()> m_action_disconnected_cb_;
+
+  absl::Mutex m_cb_mutex_;
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
   std::optional<RegToken> m_reg_token_ ABSL_GUARDED_BY(m_mtx_);
   std::optional<std::chrono::time_point<std::chrono::steady_clock>>
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
-
-  absl::Mutex m_cb_mutex_;
-  std::list<std::function<void(const crane::grpc::ConfigureCranedRequest&)>>
-      m_on_config_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
 
   absl::Mutex m_mtx_;
 };
