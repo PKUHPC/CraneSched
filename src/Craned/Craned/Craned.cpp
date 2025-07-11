@@ -639,7 +639,7 @@ void CreateRequiredDirectories() {
 }
 
 void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
-  // FIXME: Ctld cancel job after ConfigureCranedRequest sent.
+  // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
 
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
   CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
@@ -661,32 +661,22 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   std::unordered_map<task_id_t, JobToD> job_map(
       config_from_ctld.job_map().begin(), config_from_ctld.job_map().end());
 
-  std::unordered_map<task_id_t, Craned::StepToD> step_map;
+  std::unordered_map<task_id_t, Craned::StepStatus> step_map;
   step_map.reserve(config_from_ctld.job_tasks_map_size());
 
-  std::vector<task_id_t> invalid_jobs;
-
-  for (const auto& [job_id, task_to_d] : config_from_ctld.job_tasks_map()) {
+  for (const auto& [job_id, step_to_d] : config_from_ctld.job_tasks_map()) {
     if (supv_job_ids.erase(job_id) > 0) {  // job_id is in supervisor recovery
-      step_map.emplace(job_id, task_to_d);
+      step_map.emplace(
+          job_id, Craned::StepStatus{.step_to_d = step_to_d,
+                                     .super_pid = job_supv_pid_map.at(job_id)});
     } else {
-      invalid_jobs.emplace_back(job_id);
+      // Remove lost step's invalid job
+      job_map.erase(job_id);
     }
-  }
-  for (auto job_id : invalid_jobs) {
-    job_map.erase(job_id);
   }
 
   g_cg_mgr->Recover(job_map);
-
-  std::unordered_map<task_id_t, Craned::StepStatus> step_status_map;
-  for (const auto& job_id : step_map | std::views::keys) {
-    step_status_map.emplace(
-        // For now, each job only have one step
-        job_id, Craned::StepStatus{.step_to_d = step_map.at(job_id),
-                                   .super_pid = job_supv_pid_map.at(job_id)});
-  }
-  g_job_mgr->Recover(std::move(job_map), std::move(step_status_map));
+  g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
   if (!supv_job_ids.empty()) {
     CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
