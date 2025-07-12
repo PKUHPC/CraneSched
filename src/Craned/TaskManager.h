@@ -370,6 +370,8 @@ class TaskManager {
 
   void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
+  void EvCleanTaskStopQueueCb_();
+
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -403,6 +405,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_query_running_task_async_handle_;
   ConcurrentQueue<std::promise<std::set<task_id_t>>>
       m_query_running_task_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_stop_queue_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
