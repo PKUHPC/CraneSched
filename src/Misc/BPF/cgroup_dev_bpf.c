@@ -1,5 +1,6 @@
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 #include <stdint.h>
 
 enum BPF_PERMISSION { ALLOW = 0, DENY };
@@ -34,7 +35,12 @@ struct {
 
 SEC("cgroup/dev")
 int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
-  struct BpfKey key = {bpf_get_current_cgroup_id(), ctx->major, ctx->minor};
+  // Using CO-RE to read ctx fields
+  uint32_t major = BPF_CORE_READ(ctx, major);
+  uint32_t minor = BPF_CORE_READ(ctx, minor);
+  uint32_t access_type = BPF_CORE_READ(ctx, access_type);
+
+  struct BpfKey key = {bpf_get_current_cgroup_id(), major, minor};
   // value.major in map(0,0,0) contains log level
   struct BpfKey log_key = {(uint64_t)0, (uint32_t)0, (uint32_t)0};
   struct BpfDeviceMeta *log_level_meta;
@@ -54,43 +60,43 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   meta = (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &key);
   if (!meta) {
     if (enable_logging) {
-      bpf_printk("BpfDeviceMeta not found for key cgroup ID: %d,\n",
+      bpf_printk("BpfDeviceMeta not found for key cgroup ID: %llu,\n",
                  key.cgroup_id);
-      bpf_printk("Access allowed for device major=%d, minor=%d\n", ctx->major,
-                 ctx->minor);
+      bpf_printk("Access allowed for device major=%d, minor=%d\n", major,
+                 minor);
     }
     return 1;
   }
 
-  short type = ctx->access_type & 0xFFFF;
-  short access = ctx->access_type >> 16;
+  short type = access_type & 0xFFFF;
+  short access = access_type >> 16;
 
   if (enable_logging)
     bpf_printk("meta Device major=%d, minor=%d, access_type=%d\n", meta->major,
                meta->minor, meta->access);
 
-  if (ctx->major == meta->major && ctx->minor == meta->minor) {
+  if (major == meta->major && minor == meta->minor) {
     if (meta->permission == DENY) {
       int flag = 1;
       if (access & BPF_DEVCG_ACC_READ)
         if (meta->access & BPF_DEVCG_ACC_READ) {
           if (enable_logging)
             bpf_printk("Read access denied for device major=%d, minor=%d\n",
-                       ctx->major, ctx->minor);
+                       major, minor);
           flag &= 0;
         }
       if (access & BPF_DEVCG_ACC_WRITE)
         if (meta->access & BPF_DEVCG_ACC_WRITE) {
           if (enable_logging)
             bpf_printk("Write access denied for device major=%d, minor=%d\n",
-                       ctx->major, ctx->minor);
+                       major, minor);
           flag &= 0;
         }
       if (access & BPF_DEVCG_ACC_MKNOD)
         if (meta->access & BPF_DEVCG_ACC_MKNOD) {
           if (enable_logging)
             bpf_printk("Write access denied for device major=%d, minor=%d\n",
-                       ctx->major, ctx->minor);
+                       major, minor);
           flag &= 0;
         }
       return flag;
@@ -98,8 +104,8 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   }
 
   if (enable_logging)
-    bpf_printk("Access allowed for device major=%d, minor=%d\n", ctx->major,
-               ctx->minor);
+    bpf_printk("Access allowed for device major=%d, minor=%d\n", major,
+               minor);
   return 1;
 }
 
