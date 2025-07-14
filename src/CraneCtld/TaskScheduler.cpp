@@ -1073,8 +1073,8 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(task_id_t task_id,
-                                                 std::string new_extra_attr) {
+CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
+    task_id_t task_id, const std::string& new_extra_attr) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
@@ -1093,7 +1093,8 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(task_id_t task_id,
   }
 
   if (!found) {
-    CRANE_DEBUG("Task #{} not in Pd/Rn queue for extra_attrs change!", task_id);
+    CRANE_DEBUG("Task #{} not in Pd/Rn queue for extra attribute change!",
+                task_id);
     return CraneErrCode::ERR_NON_EXISTENT;
   }
 
