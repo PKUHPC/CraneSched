@@ -576,11 +576,11 @@ void ParseConfig(int argc, char** argv) {
     CRANE_ERROR("Error when get system release info");
   }
 
-  if (bool ok = util::os::GetCpuTopologyInfo(&meta.TopologyInfo); !ok) {
+  if (bool ok = util::os::GetCpuTopologyInfo(&meta.TopologyInfoOfThisNode); !ok) {
     CRANE_ERROR("Error when get cpu topology info");
   } else {
     CRANE_INFO("Socket count: {}, Cores per Socket: {}, threads per core:{}",
-      meta.TopologyInfo.socket_count, meta.TopologyInfo.cores_per_socket, meta.TopologyInfo.threads_per_core);
+      meta.TopologyInfoOfThisNode.socket_count, meta.TopologyInfoOfThisNode.cores_per_socket, meta.TopologyInfoOfThisNode.threads_per_core);
   }
 
   g_config.CranedMeta.CranedStartTime = absl::Now();

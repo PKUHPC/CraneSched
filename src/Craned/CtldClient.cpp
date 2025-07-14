@@ -398,7 +398,7 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_sys_rel_info->set_release(sys_info.release);
   grpc_sys_rel_info->set_version(sys_info.version);
 
-  const TopologyInfo& topo_info = g_config.CranedMeta.TopologyInfo;
+  const TopologyInfo& topo_info = g_config.CranedMeta.TopologyInfoOfThisNode;
   auto* grpc_topo_info = grpc_meta->mutable_topology_info();
   grpc_topo_info->set_socket_count(topo_info.socket_count);
   grpc_topo_info->set_cores_per_socket(topo_info.cores_per_socket);
