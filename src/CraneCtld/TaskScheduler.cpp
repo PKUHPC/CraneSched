@@ -1073,6 +1073,38 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
+    task_id_t task_id, const std::string& new_extra_attr) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  TaskInCtld* task;
+  bool found = false;
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    found = true, task = pd_iter->second.get();
+  }
+  if (!found) {
+    auto rn_iter = m_running_task_map_.find(task_id);
+    if (rn_iter != m_running_task_map_.end()) {
+      found = true, task = rn_iter->second.get();
+    }
+  }
+
+  if (!found) {
+    CRANE_DEBUG("Task #{} not in Pd/Rn queue for extra attribute change!",
+                task_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  task->extra_attr = new_extra_attr;
+  task->MutableTaskToCtld()->set_extra_attr(new_extra_attr);
+  g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
+                                                 task->TaskToCtld());
+  return CraneErrCode::SUCCESS;
+}
+
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
     std::unique_ptr<TaskInCtld> task) {
   if (!task->password_entry->Valid()) {
