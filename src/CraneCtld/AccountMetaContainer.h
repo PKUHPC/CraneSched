@@ -84,6 +84,28 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
 
+
+  template<typename T>
+  static void CheckAndSubResource_(T& current, T need, const std::string& resource_name,
+                           const std::string& username, const std::string& qos, task_id_t task_id) {
+      if (current < need) {
+        if constexpr (std::is_same_v<T, AllocatableResource>) {
+          CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}.",
+                     resource_name, username, qos, task_id);
+          current.SetToZero();
+        } else if constexpr (std::is_same_v<T, uint32_t>) {
+          CRANE_ERROR("Insufficient {} when freeing for user/account '{}', qos '{}', task {}. cur={}, need={}",
+                     resource_name, username, qos, task_id, current, need);
+          current = 0;
+        } else {
+          CRANE_ERROR("Unknown type");
+        }
+        return;
+      }
+
+    current -= need;
+  }
+
   // lock user -> lock account
   std::array<std::mutex, kNumStripes> m_user_stripes_;
 
