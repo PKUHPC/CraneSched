@@ -403,7 +403,7 @@ struct TaskInCtld {
 
   uint32_t cores_per_socket;
 
-  uint32_t threads_per_cores;
+  uint32_t threads_per_core;
 
  private:
   /* ------------- [2] -------------
@@ -625,7 +625,7 @@ struct TaskInCtld {
 
     cores_per_socket = val.cores_per_socket();
 
-    threads_per_cores = val.threads_per_cores();
+    threads_per_core = val.threads_per_core();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {

@@ -166,7 +166,7 @@ message TaskToCtld {
   string reservation = 36;
   bool exclusive = 37;
   uint32 cores_per_socket = 38;
-  uint32 threads_per_cores = 39;
+  uint32 threads_per_core = 39;
 }
 
 message TaskInEmbeddedDb {
@@ -242,7 +242,7 @@ message TaskToD {
 
   bool get_user_env = 24;
   uint32 cores_per_socket = 25;
-  uint32 threads_per_cores = 26;
+  uint32 threads_per_core = 26;
 }
 
 message BatchTaskAdditionalMeta {
