@@ -2567,7 +2567,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (task->threads_per_core == 1) {
       if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
         continue;
-    } else if (task->threads_per_core < craned_meta->remote_meta.topology_info.threads_per_core) {
+    } else if (task->threads_per_core > craned_meta->remote_meta.topology_info.threads_per_core) {
       continue;
     }
 
@@ -2655,7 +2655,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (task->threads_per_core == 1) {
       if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
         continue;
-    } else if (task->threads_per_core < craned_meta->remote_meta.topology_info.threads_per_core) {
+    } else if (task->threads_per_core > craned_meta->remote_meta.topology_info.threads_per_core) {
       continue;
     }
 

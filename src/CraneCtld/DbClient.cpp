@@ -1005,7 +1005,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              device_map_str,
              static_cast<int64_t>(task_to_ctld.cores_per_socket()),
-             static_cast<int64_t>(task.task_to_ctld().threads_per_core())};
+             static_cast<int64_t>(task_to_ctld.threads_per_core())};
 
   return DocumentConstructor_(fields, values);
 }
