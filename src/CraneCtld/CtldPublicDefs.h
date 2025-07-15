@@ -204,21 +204,7 @@ struct CranedRemoteMeta {
   std::vector<crane::grpc::NetworkInterface> network_interfaces;
 
   CranedRemoteMeta() = default;
-  explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)
-      : dres_in_node(grpc_meta.dres_in_node()) {
-    this->sys_rel_info.name = grpc_meta.sys_rel_info().name();
-    this->sys_rel_info.release = grpc_meta.sys_rel_info().release();
-    this->sys_rel_info.version = grpc_meta.sys_rel_info().version();
-    this->craned_start_time =
-        absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
-    this->system_boot_time =
-        absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
-
-    this->network_interfaces.clear();
-    for (const auto& interface : grpc_meta.network_interfaces()) {
-      this->network_interfaces.emplace_back(interface);
-    }
-  }
+  explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta);
 };
 
 /**
@@ -467,324 +453,76 @@ struct TaskInCtld {
 
   // Helper function
  public:
+  // =================== Get Attr ==================
+  bool IsBatch() const { return type == crane::grpc::Batch; }
+  bool IsInteractive() const { return type == crane::grpc::Interactive; }
+  bool IsX11() const;
+  bool IsX11WithPty() const;
+  bool ShouldLaunchOnAllNodes() const;
+
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
 
   crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
-  void SetTaskId(task_id_t id) {
-    task_id = id;
-    runtime_attr.set_task_id(id);
-  }
+  // =================== Setter/Getter ===================
+
+  void SetTaskId(task_id_t id);
   task_id_t TaskId() const { return task_id; }
 
-  void SetTaskDbId(task_db_id_t id) {
-    task_db_id = id;
-    runtime_attr.set_task_db_id(id);
-  }
+  void SetTaskDbId(task_db_id_t id);
   task_id_t TaskDbId() const { return task_db_id; }
 
-  void SetUsername(std::string const& val) {
-    username = val;
-    runtime_attr.set_username(val);
-  }
+  void SetUsername(std::string const& val);
   std::string const& Username() const { return username; }
 
-  void SetCranedIds(std::list<CranedId>&& val) {
-    runtime_attr.mutable_craned_ids()->Assign(val.begin(), val.end());
-    craned_ids = val;
-  }
+  void SetCranedIds(std::list<CranedId>&& val);
   std::list<CranedId> const& CranedIds() const { return craned_ids; }
-  void CranedIdsClear() {
-    craned_ids.clear();
-    runtime_attr.mutable_craned_ids()->Clear();
-  }
+  void CranedIdsClear();
+  void CranedIdsAdd(CranedId const& i);
 
-  void CranedIdsAdd(CranedId const& i) {
-    craned_ids.emplace_back(i);
-    *runtime_attr.mutable_craned_ids()->Add() = i;
-  }
-
-  void SetStatus(crane::grpc::TaskStatus val) {
-    status = val;
-    runtime_attr.set_status(val);
-  }
+  void SetStatus(crane::grpc::TaskStatus val);
   crane::grpc::TaskStatus Status() const { return status; }
 
-  void SetExitCode(uint32_t val) {
-    exit_code = val;
-    runtime_attr.set_exit_code(val);
-  }
+  void SetExitCode(uint32_t val);
   uint32_t ExitCode() const { return exit_code; }
 
-  void SetSubmitTime(absl::Time const& val) {
-    submit_time = val;
-    runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(submit_time));
-  }
-  void SetSubmitTimeByUnixSecond(uint64_t val) {
-    submit_time = absl::FromUnixSeconds(val);
-    runtime_attr.mutable_submit_time()->set_seconds(val);
-  }
+  void SetSubmitTime(absl::Time const& val);
+  void SetSubmitTimeByUnixSecond(uint64_t val);
   absl::Time const& SubmitTime() const { return submit_time; }
   int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
 
-  void SetStartTime(absl::Time const& val) {
-    start_time = val;
-    runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
-  }
-  void SetStartTimeByUnixSecond(uint64_t val) {
-    start_time = absl::FromUnixSeconds(val);
-    runtime_attr.mutable_start_time()->set_seconds(val);
-  }
+  void SetStartTime(absl::Time const& val);
+  void SetStartTimeByUnixSecond(uint64_t val);
   absl::Time const& StartTime() const { return start_time; }
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
-  void SetEndTime(absl::Time const& val) {
-    SetEndTimeByUnixSecond(ToUnixSeconds(val));
-  }
-  void SetEndTimeByUnixSecond(uint64_t val) {
-    if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
-    end_time = absl::FromUnixSeconds(val);
-    runtime_attr.mutable_end_time()->set_seconds(val);
-  }
+  void SetEndTime(absl::Time const& val);
+  void SetEndTimeByUnixSecond(uint64_t val);
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
-  void SetHeld(bool val) {
-    held = val;
-    runtime_attr.set_held(val);
-  }
+  void SetHeld(bool val);
   bool const& Held() const { return held; }
 
-  void SetCachedPriority(const double val) {
-    cached_priority = val;
-    runtime_attr.set_cached_priority(val);
-  }
+  void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
-  void SetAllocatedRes(ResourceV2&& val) {
-    *runtime_attr.mutable_allocated_res() =
-        static_cast<crane::grpc::ResourceV2>(val);
-    allocated_res = std::move(val);
-  }
+  void SetAllocatedRes(ResourceV2&& val);
   ResourceV2 const& AllocatedRes() const { return allocated_res; }
 
-  void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
-    task_to_ctld = val;
+  void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val);
 
-    partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
-                                                  : val.partition_name();
-    requested_node_res_view = static_cast<ResourceView>(val.req_resources());
-
-    time_limit = absl::Seconds(val.time_limit().seconds());
-
-    type = val.type();
-
-    if (type == crane::grpc::Batch) {
-      meta.emplace<BatchMetaInTask>(BatchMetaInTask{
-          .sh_script = val.batch_meta().sh_script(),
-          .interpreter = val.batch_meta().interpreter(),
-          .output_file_pattern = val.batch_meta().output_file_pattern(),
-          .error_file_pattern = val.batch_meta().error_file_pattern(),
-      });
-    } else {
-      auto& ia_meta = std::get<InteractiveMetaInTask>(meta);
-      ia_meta.interactive_type = val.interactive_meta().interactive_type();
-    }
-
-    node_num = val.node_num();
-    ntasks_per_node = val.ntasks_per_node();
-    cpus_per_task = cpu_t(val.cpus_per_task());
-
-    uid = val.uid();
-    password_entry = std::make_unique<PasswordEntry>(uid);
-
-    // Note: gid is egid, which may be different from the
-    // primary group of the user in `password_entry`.
-    gid = val.gid();
-
-    account = val.account();
-    name = val.name();
-    qos = val.qos();
-
-    cmd_line = val.cmd_line();
-    cwd = val.cwd();
-    container = val.container();
-
-    for (auto& [k, v] : val.env()) env[k] = v;
-
-    get_user_env = val.get_user_env();
-
-    extra_attr = val.extra_attr();
-
-    reservation = val.reservation();
-  }
-
-  void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
-    runtime_attr = val;
-
-    task_id = runtime_attr.task_id();
-    task_db_id = runtime_attr.task_db_id();
-    username = runtime_attr.username();
-
-    exit_code = runtime_attr.exit_code();
-
-    status = runtime_attr.status();
-    held = runtime_attr.held();
-    cached_priority = runtime_attr.cached_priority();
-
-    if (status != crane::grpc::TaskStatus::Pending) {
-      craned_ids.assign(runtime_attr.craned_ids().begin(),
-                        runtime_attr.craned_ids().end());
-      allocated_craneds_regex = util::HostNameListToStr(craned_ids);
-
-      if (type == crane::grpc::Batch)
-        executing_craned_ids.emplace_back(craned_ids.front());
-      else {
-        const auto& int_meta = std::get<InteractiveMetaInTask>(meta);
-        if (int_meta.interactive_type == crane::grpc::Calloc)
-          // For calloc tasks we still need to execute a dummy empty task to
-          // set up a timer.
-          executing_craned_ids.emplace_back(CranedIds().front());
-        else
-          // For crun tasks we need to execute tasks on all allocated nodes.
-          for (auto const& craned_id : craned_ids)
-            executing_craned_ids.emplace_back(craned_id);
-      }
-
-      allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
-      allocated_res_view.SetToZero();
-      allocated_res_view += allocated_res;
-    }
-
-    nodes_alloc = craned_ids.size();
-    start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
-    end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
-    submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
-  }
+  void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val);
 
   // Helper function to set the fields of TaskInfo using info in
   // TaskInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
-  void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
-    task_info->set_type(type);
-    task_info->set_task_id(task_id);
-    task_info->set_name(name);
+  void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info);
 
-    task_info->set_account(account);
-    task_info->set_partition(partition_id);
-    task_info->set_qos(qos);
+  crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const;
 
-    task_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
-    task_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
-    task_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
-    task_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
-
-    task_info->set_uid(uid);
-    task_info->set_gid(gid);
-    task_info->set_username(username);
-    task_info->set_node_num(node_num);
-    task_info->set_cmd_line(cmd_line);
-    task_info->set_cwd(cwd);
-    task_info->mutable_req_nodes()->Assign(included_nodes.begin(),
-                                           included_nodes.end());
-    task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
-                                               excluded_nodes.end());
-
-    task_info->set_container(container);
-    task_info->set_extra_attr(extra_attr);
-
-    task_info->set_held(held);
-    task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
-                                                executing_craned_ids.end());
-
-    *task_info->mutable_req_res_view() =
-        static_cast<crane::grpc::ResourceView>(requested_node_res_view);
-
-    task_info->set_exit_code(runtime_attr.exit_code());
-    task_info->set_priority(cached_priority);
-
-    task_info->set_status(status);
-    if (Status() == crane::grpc::Pending) {
-      task_info->set_pending_reason(pending_reason);
-    } else {
-      task_info->set_craned_list(allocated_craneds_regex);
-    }
-    task_info->set_exclusive(task_to_ctld.exclusive());
-
-    *task_info->mutable_allocated_res_view() =
-        static_cast<crane::grpc::ResourceView>(allocated_res_view);
-  }
-
-  crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
-    crane::grpc::TaskToD task_to_d;
-    // Set time_limit
-    task_to_d.mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(this->time_limit)));
-
-    // TODO: remove this field
-    //  Set resources
-    auto* mutable_res_in_node = task_to_d.mutable_resources();
-    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        this->AllocatedRes().at(craned_id));
-
-    // Set type
-    task_to_d.set_type(this->type);
-
-    task_to_d.set_task_id(this->TaskId());
-    task_to_d.set_name(this->name);
-    task_to_d.set_account(this->account);
-    task_to_d.set_qos(this->qos);
-    task_to_d.set_partition(this->partition_id);
-
-    for (auto&& node : this->included_nodes) {
-      task_to_d.mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto&& node : this->excluded_nodes) {
-      task_to_d.mutable_excludes()->Add()->assign(node);
-    }
-
-    task_to_d.set_node_num(this->node_num);
-    task_to_d.set_ntasks_per_node(this->ntasks_per_node);
-    task_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
-
-    task_to_d.set_uid(this->uid);
-    task_to_d.set_gid(this->gid);
-    task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
-
-    task_to_d.set_cwd(this->cwd);
-    task_to_d.set_container(this->container);
-    task_to_d.set_get_user_env(this->get_user_env);
-
-    for (const auto& hostname : this->CranedIds())
-      task_to_d.mutable_allocated_nodes()->Add()->assign(hostname);
-
-    task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
-    task_to_d.mutable_time_limit()->set_seconds(
-        ToInt64Seconds(this->time_limit));
-
-    if (this->type == crane::grpc::Batch) {
-      auto* mutable_meta = task_to_d.mutable_batch_meta();
-      mutable_meta->CopyFrom(this->task_to_ctld.batch_meta());
-    } else {
-      const auto& proto_ia_meta = this->task_to_ctld.interactive_meta();
-      auto* mutable_meta = task_to_d.mutable_interactive_meta();
-      mutable_meta->CopyFrom(proto_ia_meta);
-    }
-    return task_to_d;
-  }
-
-  crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const {
-    crane::grpc::JobToD spec;
-    spec.set_job_id(task_id);
-    spec.set_uid(uid);
-    *spec.mutable_res() =
-        crane::grpc::ResourceInNode(allocated_res.at(craned_id));
-    spec.set_execution_node(executing_craned_ids.front());
-    return spec;
-  }
+  crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 };
 
 struct Qos {

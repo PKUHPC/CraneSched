@@ -35,32 +35,27 @@ using StepToD = crane::grpc::TaskToD;
 
 struct StepInstance {
   StepToD step_to_d;
-  pid_t supervisor_pid;
-  static EnvMap GetStepEnvMap(const StepToD& step);
+  pid_t supv_pid;
 };
 
-struct StepStatus {
-  StepToD step_to_d;
-  pid_t super_pid;
-};
+// Job allocation info, where allocation = job spec + execution info
+struct JobInD {
+  JobInD() = default;
+  explicit JobInD(crane::grpc::JobToD const& job_to_d)
+      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {}
 
-// Job allocation info
-// allocation = job spec + execution info
-struct JobInstance {
-  // Should never use, only for AtomicHashMap.
-  JobInstance() = default;
-  explicit JobInstance(const JobToD& job) : job_id(job.job_id), job_to_d(job) {}
+  ~JobInD() = default;
 
-  JobInstance(const JobInstance& other) = delete;
-  JobInstance(JobInstance&& other) = default;
+  JobInD(const JobInD& other) = delete;
+  JobInD& operator=(const JobInD& other) = delete;
 
-  ~JobInstance() = default;
+  JobInD(JobInD&& other) = default;
+  JobInD& operator=(JobInD&& other) noexcept = default;
 
-  JobInstance& operator=(const JobInstance& other) = delete;
-  JobInstance& operator=(JobInstance&& other) noexcept = default;
+  uid_t Uid() const { return job_to_d.uid(); }
 
-  task_id_t job_id;
-  JobToD job_to_d;
+  job_id_t job_id;
+  crane::grpc::JobToD job_to_d;
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
   bool orphaned{false};
@@ -68,7 +63,7 @@ struct JobInstance {
 
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
-  static EnvMap GetJobEnvMap(const JobToD& job);
+  EnvMap GetJobEnvMap();
 };
 
 /**
@@ -81,12 +76,13 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErrCode Recover(std::unordered_map<task_id_t, JobToD>&& job_map,
-                       std::unordered_map<task_id_t, StepStatus>&& step_map);
+  CraneErrCode Recover(
+      std::unordered_map<task_id_t, JobInD>&& job_map,
+      std::unordered_map<task_id_t, std::unique_ptr<StepInstance>>&& step_map);
 
   ~JobManager();
 
-  bool AllocJobs(std::vector<JobToD>&& jobs);
+  bool AllocJobs(std::vector<JobInD>&& jobs);
 
   CgroupInterface* GetCgForJob(task_id_t job_id);
 
@@ -98,7 +94,7 @@ class JobManager {
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
-  CraneExpected<JobToD> QueryJob(task_id_t job_id);
+  CraneExpected<JobInD*> QueryJob(job_id_t job_id);
 
   std::set<task_id_t> GetAllocatedJobs();
 
@@ -130,7 +126,7 @@ class JobManager {
 
   struct EvQueueAllocateJobElem {
     std::promise<bool> ok_prom;
-    std::vector<JobToD> job_specs;
+    std::vector<JobInD> job_specs;
   };
 
   struct EvQueueExecuteStepElem {
@@ -162,11 +158,11 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  bool FreeJobInstanceAllocation_(const std::vector<task_id_t>& job_ids);
+  bool FreeJobAllocation_(const std::vector<task_id_t>& job_ids);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
-  CraneErrCode SpawnSupervisor_(JobInstance* job, StepInstance* step);
+  CraneErrCode SpawnSupervisor_(JobInD* job, StepInstance* step);
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -196,9 +192,10 @@ class JobManager {
   static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, JobInstance> m_job_map_;
+  util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD> m_job_map_;
+
   util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<task_id_t>>
+                      absl::flat_hash_set<job_id_t>>
       m_uid_to_job_ids_map_;
 
   void EvCleanCheckSupervisorQueueCb_();

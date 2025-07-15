@@ -491,23 +491,3 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
-
-struct JobToD {
-  JobToD() = default;
-  JobToD(const JobToD& spce) = default;
-  explicit JobToD(const crane::grpc::JobToD& job_to_d);
-  JobToD(task_id_t job_id, uid_t uid, const ResourceInNode& res_in_node,
-         const CranedId& execution_node);
-
-  /**
-   * @brief set grpc struct,will move res_in_node field
-   * @param job_to_d grpc job_spce to set
-   */
-  void SetJobToD(crane::grpc::JobToD* job_to_d) const;
-  task_id_t job_id;
-  uid_t uid;
-  crane::grpc::ResourceInNode res_in_node;
-  std::string exec_node;
-  // Recovered on start,no need to apply res limit.
-  bool recovered{false};
-};

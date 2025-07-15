@@ -211,10 +211,11 @@ grpc::Status CranedServiceImpl::CreateCgroupForJobs(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  std::vector<JobToD> jobs;
-  for (const auto &job : request->job_list()) {
-    CRANE_TRACE("Allocating job #{}, uid {}", job.job_id(), job.uid());
-    jobs.emplace_back(job);
+  std::vector<JobInD> jobs;
+  for (const auto &job_to_d : request->job_list()) {
+    CRANE_TRACE("Allocating job #{}, uid {}", job_to_d.job_id(),
+                job_to_d.uid());
+    jobs.emplace_back(job_to_d);
   }
 
   bool ok = g_job_mgr->AllocJobs(std::move(jobs));

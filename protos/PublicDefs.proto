@@ -198,7 +198,6 @@ message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
   ResourceInNode res = 3;
-  string execution_node = 4;
 }
 
 message TaskToD {

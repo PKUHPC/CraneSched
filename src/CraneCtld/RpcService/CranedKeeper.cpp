@@ -146,7 +146,8 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::CreateCgroupForJobs(std::vector<JobToD> const &jobs) {
+CraneErrCode CranedStub::CreateCgroupForJobs(
+    std::vector<crane::grpc::JobToD> const &jobs) {
   using crane::grpc::CreateCgroupForJobsReply;
   using crane::grpc::CreateCgroupForJobsRequest;
 
@@ -159,7 +160,7 @@ CraneErrCode CranedStub::CreateCgroupForJobs(std::vector<JobToD> const &jobs) {
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (const auto &job : jobs) {
-    job.SetJobToD(request.add_job_list());
+    *request.add_job_list() = job;
   }
 
   status = m_stub_->CreateCgroupForJobs(&context, request, &reply);

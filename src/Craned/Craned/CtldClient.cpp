@@ -39,14 +39,6 @@ void CtldClientStateMachine::SetActionDisconnectedCb(
   m_action_disconnected_cb_ = std::move(cb);
 }
 
-void CtldClientStateMachine::AddActionConfigureCb(
-    std::function<void(ConfigureArg const&)>&& cb,
-    CallbackInvokeMode invoke_mode, bool consume) {
-  m_action_configure_cb_list_.emplace_back(CallbackWrapper{.cb = std::move(cb),
-                                                           .mode = invoke_mode,
-                                                           .consume = consume});
-}
-
 void CtldClientStateMachine::SetActionRegisterCb(
     std::function<void(RegisterArg const&)>&& cb) {
   m_action_register_cb_ = std::move(cb);
@@ -198,16 +190,17 @@ void CtldClientStateMachine::ActionConfigure_(
   absl::MutexLock lk(&m_cb_mutex_);
   auto it = m_action_configure_cb_list_.begin();
   while (it != m_action_configure_cb_list_.end()) {
-    auto& cb = *it;
-    if (cb.mode == CallbackInvokeMode::sync) {
-      cb.cb({config_req});
+    auto& cb_wrapper = *it;
+    if (cb_wrapper.mode == CallbackInvokeMode::SYNC) {
+      cb_wrapper.cb({config_req});
     } else {
       g_thread_pool->detach_task(
-          [cb = cb.cb, config_req] { cb({config_req}); });
+          [cb = cb_wrapper.cb, config_req] { cb({config_req}); });
     }
-    if (cb.consume) {
+
+    if (cb_wrapper.consume)
       it = m_action_configure_cb_list_.erase(it);
-    } else
+    else
       ++it;
   }
 }
@@ -303,7 +296,7 @@ void CtldClient::Init() {
           g_job_mgr->FreeJobs(invalid_jobs);
         }
       },
-      CallbackInvokeMode::async, false);
+      CallbackInvokeMode::ASYNC, false);
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {

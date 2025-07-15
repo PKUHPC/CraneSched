@@ -674,8 +674,10 @@ void CreateRequiredDirectories() {
 
 void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
-
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
+
+  using Craned::JobInD, Craned::StepInstance;
+
   std::vector ctld_job_ids = config_from_ctld.job_map() | std::views::keys |
                              std::ranges::to<std::vector<task_id_t>>();
   CRANE_DEBUG("CraneCtld claimed {} jobs are running on this node: [{}]",
@@ -697,24 +699,24 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                 absl::StrJoin(supv_job_ids, ","));
   }
 
-  std::unordered_map<task_id_t, JobToD> job_map(
+  std::unordered_map<task_id_t, JobInD> job_map(
       config_from_ctld.job_map().begin(), config_from_ctld.job_map().end());
 
-  std::unordered_map<task_id_t, Craned::StepStatus> step_map;
+  std::unordered_map<task_id_t, std::unique_ptr<StepInstance>> step_map;
   step_map.reserve(config_from_ctld.job_tasks_map_size());
 
   for (const auto& [job_id, step_to_d] : config_from_ctld.job_tasks_map()) {
     if (supv_job_ids.erase(job_id) > 0) {  // job_id is in supervisor recovery
-      step_map.emplace(
-          job_id, Craned::StepStatus{.step_to_d = step_to_d,
-                                     .super_pid = job_supv_pid_map.at(job_id)});
+      auto step_inst = std::make_unique<StepInstance>(
+          step_to_d, job_supv_pid_map.at(job_id));
+      step_map.emplace(job_id, std::move(step_inst));
     } else {
       // Remove lost step's invalid job
       job_map.erase(job_id);
     }
   }
 
-  g_cg_mgr->Recover(job_map);
+  g_cg_mgr->TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
   if (!supv_job_ids.empty()) {
@@ -779,7 +781,7 @@ void GlobalVariableInit() {
       [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
         Recover(arg.req);
       },
-      Craned::CallbackInvokeMode::sync, true);
+      Craned::CallbackInvokeMode::SYNC, true);
   g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
   g_ctld_client->Init();

@@ -602,31 +602,7 @@ void TaskScheduler::ScheduleThread_() {
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
 
-        // Task execute on all node, otherwise on the first node
-        bool launch_on_all_nodes;
-        if (task->type == crane::grpc::Batch) {
-          // For cbatch tasks whose --node > 1,
-          // only execute the command at the first allocated node.
-          launch_on_all_nodes = false;
-        } else {
-          const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-          if (meta.interactive_type == crane::grpc::Calloc)
-            // For calloc tasks we still need to execute a dummy empty task to
-            // set up a timer.
-            launch_on_all_nodes = false;
-          else {
-            // For crun tasks we need to execute tasks on all allocated
-            // nodes.
-
-            // Crun task with pty only launch on first node
-            if (task->TaskToCtld().interactive_meta().pty())
-              launch_on_all_nodes = false;
-            else
-              launch_on_all_nodes = true;
-          }
-        }
-
-        if (launch_on_all_nodes) {
+        if (task->ShouldLaunchOnAllNodes()) {
           for (auto const& craned_id : task->CranedIds())
             task->executing_craned_ids.emplace_back(craned_id);
         } else
@@ -656,16 +632,12 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<JobToD>> craned_cgroup_map;
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        for (CranedId const& craned_id : task->CranedIds()) {
-          JobToD job(task->TaskId(), task->uid,
-                     task->AllocatedRes().at(craned_id),
-                     task->executing_craned_ids.front());
-          craned_cgroup_map[craned_id].emplace_back(std::move(job));
-        }
+        for (CranedId const& craned_id : task->CranedIds())
+          craned_cgroup_map[craned_id].push_back(task->GetJobToD(craned_id));
       }
 
       Mutex thread_pool_mtx;
@@ -675,18 +647,18 @@ void TaskScheduler::ScheduleThread_() {
       absl::BlockingCounter bl(craned_cgroup_map.size());
       for (auto&& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
-        auto& cgroup_specs = iter.second;
+        auto& job_to_d_vec = iter.second;
 
         g_thread_pool->detach_task([&]() {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
-                      cgroup_specs.size(), craned_id);
+                      job_to_d_vec.size(), craned_id);
           if (stub == nullptr || stub->Invalid()) {
             bl.DecrementCount();
             return;
           }
 
-          auto err = stub->CreateCgroupForJobs(cgroup_specs);
+          auto err = stub->CreateCgroupForJobs(job_to_d_vec);
           if (err == CraneErrCode::SUCCESS) {
             bl.DecrementCount();
             return;
@@ -695,8 +667,8 @@ void TaskScheduler::ScheduleThread_() {
           thread_pool_mtx.Lock();
 
           failed_craned_set.emplace(craned_id);
-          for (const auto& spec : cgroup_specs)
-            failed_task_id_set.emplace(spec.job_id);
+          for (const auto& job_to_d : job_to_d_vec)
+            failed_task_id_set.emplace(job_to_d.job_id());
 
           thread_pool_mtx.Unlock();
 
