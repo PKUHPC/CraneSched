@@ -457,6 +457,12 @@ bool MongodbClient::FetchJobRecords(
         mutable_licenses->emplace(std::string(elem.key()),
                                   elem.get_int32().value);
       }
+      task->set_container(view["container"].get_string().value);
+      if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
+        task->set_wckey(view["wckey"].get_string().value.data());
+      } else {
+        task->set_wckey("");
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1563,7 +1569,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // req_licenses 40 licenses_alloc
 
   // clang-format off
-  std::array<std::string, 40> fields{
+  std::array<std::string, 41> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1580,6 +1586,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
     "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
+    // 40 - 44
+    "wckey"
   };
   // clang-format on
 
@@ -1591,7 +1599,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
+             bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
+             std::string>                                            /*40*/
       values{                                                        // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1629,7 +1638,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              true /* Mark the document having complete job info */,
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()}};
+                 runtime_attr.actual_licenses().end()}, task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1659,11 +1668,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
-  // licenses_alloc
+  // 35 mem_alloc     device_map     meta_container has_job_info licenses_alloc
+  // 40 wckey
 
   // clang-format off
-  std::array<std::string, 40> fields{
+  std::array<std::string, 41> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1679,7 +1688,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc"
+      "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
+      // 40 - 44
+       "wckey"
   };
   // clang-format on
 
@@ -1691,7 +1702,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
+             bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
+              std::string>                                           /*40-44*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1719,7 +1731,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), container_meta,
              true /* Mark the document having complete job info */,
-             task->licenses_count};
+             task->licenses_count, task->wckey};
 
   return DocumentConstructor_(fields, values);
 }
