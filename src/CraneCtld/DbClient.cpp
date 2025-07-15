@@ -664,6 +664,12 @@ bool MongodbClient::FetchJobStepRecords(
         mutable_licenses->emplace(std::string(elem.key()),
                                   elem.get_int32().value);
       }
+      task->set_container(view["container"].get_string().value);
+      if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
+        task->set_wckey(view["wckey"].get_string().value.data());
+      } else {
+        task->set_wckey("");
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1846,7 +1852,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
     // 40 - 44
-    "nodename_list"
+    "nodename_list"   "wckey"
   };
   // clang-format on
 
@@ -1859,7 +1865,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
              bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
-             bsoncxx::array::value>                                  /*40-44*/
+             bsoncxx::array::value, std::string>                     /*40-44*/
       values{                                                        // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1899,7 +1905,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              // 40-44
-             bsoncxx::array::value{nodename_list_array.view()}};
+             bsoncxx::array::value{nodename_list_array.view()}, task_to_ctld.wckey()
+            };
 
   return DocumentConstructor_(fields, values);
 }
@@ -1935,7 +1942,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_container  has_job_info licenses_alloc
-  // 40 nodename_list
+  // 40 nodename_list wckey
 
   // clang-format off
   std::array<std::string, 41> fields{
@@ -1956,7 +1963,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
       // 40 - 44
-      "nodename_list"
+      "nodename_list" "wckey"
   };
   // clang-format on
 
@@ -1969,7 +1976,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
              bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
-             bsoncxx::array::value>                                  /*40-44*/
+             bsoncxx::array::value, std::string>                     /*40-44*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1999,7 +2006,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              task->licenses_count,
              // 40-44
-             bsoncxx::array::value{nodename_list_array.view()}};
+             bsoncxx::array::value{nodename_list_array.view()}, task->wckey
+            };
 
   return DocumentConstructor_(fields, values);
 }

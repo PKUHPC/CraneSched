@@ -4087,6 +4087,12 @@ CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
+  if (g_config.MustNeedWckey && !task->MutableTaskToCtld()->has_wckey()) {
+    CRANE_ERROR("config wckey enabled, task wckey not set, err: {}",
+                CraneErrStr(CraneErrCode::ERR_INVALID_PARAM));
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
+
   return {};
 }
 

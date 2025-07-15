@@ -171,7 +171,6 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
-
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
 
@@ -181,6 +180,7 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+  optional string wckey = 42;
 }
 
 message TaskInEmbeddedDb {
@@ -468,6 +468,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  string wckey = 41;
 }
 
 message StepInfo {
