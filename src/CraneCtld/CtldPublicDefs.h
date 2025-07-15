@@ -166,6 +166,8 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
+  bool MustNeedWckey{false};
+  bool WckeyValid{false};
 };
 
 struct RunTimeStatus {
@@ -394,6 +396,7 @@ struct TaskInCtld {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   std::string reservation;
+  std::string wckey;
 
  private:
   /* ------------- [2] -------------
@@ -612,6 +615,11 @@ struct TaskInCtld {
     extra_attr = val.extra_attr();
 
     reservation = val.reservation();
+    if (g_config.WckeyValid) {
+      wckey = val.has_wckey() ? val.wckey() : "";
+    } else {
+      wckey = "";
+    }
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
@@ -707,6 +715,7 @@ struct TaskInCtld {
 
     *task_info->mutable_allocated_res_view() =
         static_cast<crane::grpc::ResourceView>(allocated_res_view);
+    task_info->set_wckey(wckey);
   }
 
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
@@ -852,6 +861,11 @@ struct User {
     bool blocked;
   };
 
+  struct Wckey {
+    std::string cluster; /* cluster associated */
+    std::string user;    /* user name */
+  };
+
   /* Map<account name, item> */
   using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
 
@@ -859,9 +873,11 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
+  std::string default_wckey;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+  std::unordered_map<std::string /*wckey name*/, Wckey> wckey_map;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

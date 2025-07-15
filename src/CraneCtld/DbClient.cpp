@@ -370,6 +370,12 @@ bool MongodbClient::FetchJobRecords(
         task->set_reservation(view["reservation"].get_string().value.data());
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
+      // task->set_wckey(view["wckey"].get_string().value.data());
+      if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
+        task->set_wckey(view["wckey"].get_string().value.data());
+      } else {
+        task->set_wckey("");
+      }
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -942,7 +948,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 35 mem_alloc      device_map
 
   // clang-format off
-  std::array<std::string, 37> fields{
+  std::array<std::string, 38> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -958,7 +964,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
-    "mem_alloc", "device_map"
+    "mem_alloc", "device_map", "wckey"
   };
   // clang-format on
 
@@ -969,7 +975,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string>                                 /*35-39*/
+             int64_t, std::string, std::string>                    /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1003,7 +1009,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             device_map_str};
+             device_map_str, task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1029,10 +1035,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map
+  // 35 mem_alloc     device_map     wckey
 
   // clang-format off
-  std::array<std::string, 37> fields{
+  std::array<std::string, 38> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1048,7 +1054,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map"
+      "mem_alloc", "device_map", "wckey"
   };
   // clang-format on
 
@@ -1059,7 +1065,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string>                                 /*35-39*/
+             int64_t, std::string, std::string>                    /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1085,7 +1091,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str};
+             device_map_str, task->wckey};
   return DocumentConstructor_(fields, values);
 }
 
