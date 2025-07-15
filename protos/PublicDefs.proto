@@ -166,8 +166,8 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
-
   bool hold = 38;
+  optional string wckey = 39;
 }
 
 message TaskInEmbeddedDb {
@@ -325,6 +325,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  string wckey = 41;
 }
 
 message PartitionInfo {

@@ -89,4 +89,8 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
+std::unordered_set<std::string> SplitStr(const std::string &s, char delim);
+
+std::string ToLower(const std::string &s);
+
 }  // namespace util
