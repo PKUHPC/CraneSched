@@ -35,6 +35,8 @@
 
 namespace Craned {
 
+class JobInD;
+
 namespace CgConstant {
 
 enum class CgroupVersion : uint64_t {
@@ -270,13 +272,13 @@ constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 // handles this for us and no additional care needs to be taken.
 constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-constexpr ControllerFlags CgV1PreferredControllers =
+constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
     CgConstant::Controller::DEVICES_CONTROLLER |
     CgConstant::Controller::BLOCK_CONTROLLER;
 
-constexpr ControllerFlags CgV2PreferredControllers =
+constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
     CgConstant::Controller::MEMORY_CONTORLLER_V2 |
     CgConstant::Controller::IO_CONTROLLER_V2;
@@ -453,7 +455,7 @@ class CgroupV2 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const JobToD &cg_spec);
+  bool RecoverFromCgSpec(const JobInD &job);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -496,7 +498,13 @@ class CgroupManager {
 
   CraneErrCode Init();
 
-  CraneErrCode Recover(std::unordered_map<task_id_t, JobToD> &running_jobs);
+  /**
+   * @brief Destroy cgroups which CraneCtld doesn't have records of
+   * corresponding running jobs and set `recovered` field for jobs with their
+   * cgroup created.
+   */
+  CraneErrCode TryToRecoverCgForJobs(
+      std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
   bool Mounted(CgConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
@@ -505,12 +513,13 @@ class CgroupManager {
   void ControllersMounted();
 
   /**
-   * \brief Allocate and return cgroup handle for job, should only called once
-   * per job.
+   * \brief Allocate and return cgroup handle for job, should only be called
+   * once per job.
    * \param job cgroup spec for job.
    * \return CgroupInterface ptr,null if error.
    */
-  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobToD &job);
+  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobInD &job,
+                                                           bool recovery_mode);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);

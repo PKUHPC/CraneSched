@@ -39,8 +39,19 @@ class CtldClientStateMachine {
   struct ConfigureArg {
     crane::grpc::ConfigureCranedRequest req;
   };
-  void AddActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb,
-                            CallbackInvokeMode invoke_mode, bool consume);
+
+  template <typename ConfigureCb>
+    requires std::invocable<ConfigureCb, ConfigureArg const&>
+  void AddActionConfigureCb(ConfigureCb&& cb, CallbackInvokeMode invoke_mode,
+                            bool consume) {
+    using FuncType = std::function<void(ConfigureArg const&)>;
+
+    m_action_configure_cb_list_.emplace_back(
+        CallbackWrapper<FuncType, ConfigureArg const&>{
+            .cb = FuncType(std::forward<ConfigureCb>(cb)),
+            .mode = invoke_mode,
+            .consume = consume});
+  }
 
   struct RegisterArg {
     RegToken token;
@@ -99,7 +110,9 @@ class CtldClientStateMachine {
   void ActionDisconnected_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
-  std::list<CallbackWrapper<std::function<void(ConfigureArg const&)>>>
+
+  std::list<CallbackWrapper<std::function<void(ConfigureArg const&)>,
+                            ConfigureArg const&>>
       m_action_configure_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
 
   std::function<void(RegisterArg const&)> m_action_register_cb_;

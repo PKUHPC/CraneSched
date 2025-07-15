@@ -17,6 +17,7 @@ add_executable(craned
         Craned.cpp
 
         CranedPreCompiledHeader.h
+        CranedPublicDefs.cpp
 )
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)

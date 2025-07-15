@@ -1,5 +1,6 @@
 add_executable(cranectld
         CtldPublicDefs.h
+        CtldPublicDefs.cpp
         DbClient.h
         DbClient.cpp
         TaskScheduler.h

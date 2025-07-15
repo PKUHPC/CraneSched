@@ -34,11 +34,12 @@ inline constexpr uint64_t kRegisterOperationTimeoutMs = 5'000;
 using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;
 
-enum class CallbackInvokeMode : std::uint8_t { sync = 0, async };
+enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
 
-template <typename CB>
+template <typename Cb, typename... Args>
+  requires std::invocable<Cb, Args...>
 struct CallbackWrapper {
-  CB cb;
+  Cb cb;
   CallbackInvokeMode mode;
   bool consume;
 };
