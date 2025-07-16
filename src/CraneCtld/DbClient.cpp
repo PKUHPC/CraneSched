@@ -835,7 +835,14 @@ std::unordered_map<std::string, uint64_t> MongodbClient::ParseTypeMap(
 
   for (const auto& element : type_map_view) {
     const std::string type_name = std::string(element.key());
-    uint64_t type_total = element.get_int64().value;
+    uint64_t type_total = 0;
+    if (element.type() == bsoncxx::type::k_int64) {
+      type_total = element.get_int64().value;
+    } else if (element.type() == bsoncxx::type::k_int32) {
+      type_total = element.get_int32().value;
+    } else {
+      PrintError_("type_map value: BSON type is not a number.");
+    }
     type_map[type_name] = type_total;
   }
 
@@ -856,8 +863,15 @@ DeviceMap MongodbClient::JsonStringToDeviceMap(
       const std::string device_name = std::string(device_entry.key());
       bsoncxx::document::view device_doc = device_entry.get_document().view();
 
-      uint64_t untyped_req_count =
-          device_doc["untyped_req_count"].get_int64().value;
+      auto untyped_elem = device_doc["untyped_req_count"];
+      uint64_t untyped_req_count = 0;
+      if (untyped_elem.type() == bsoncxx::type::k_int64) {
+        untyped_req_count = untyped_elem.get_int64().value;
+      } else if (untyped_elem.type() == bsoncxx::type::k_int32) {
+        untyped_req_count = untyped_elem.get_int32().value;
+      } else {
+        PrintError_("untyped_req_count: BSON type is not a number.");
+      }
 
       bsoncxx::document::view type_map_view =
           device_doc["type_map"].get_document().view();
