@@ -93,6 +93,7 @@ struct Config {
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
     std::vector<crane::NetworkInterface> NetworkInterfaces;
+    TopologyInfo TopologyInfoOfThisNode;
   };
 
   CranedMeta CranedMeta;

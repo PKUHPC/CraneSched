@@ -19,6 +19,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include <hwloc.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -32,6 +33,12 @@ struct SystemRelInfo {
   std::string name;
   std::string release;
   std::string version;
+};
+
+struct TopologyInfo {
+  uint32_t socket_count{0};
+  uint32_t cores_per_socket{0};
+  uint32_t threads_per_core{0};
 };
 
 namespace util {
@@ -66,6 +73,8 @@ bool GetSystemReleaseInfo(SystemRelInfo* info);
 bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
+
+bool GetCpuTopologyInfo(TopologyInfo* info);
 
 }  // namespace os
 
