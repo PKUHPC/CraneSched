@@ -576,7 +576,7 @@ void ParseConfig(int argc, char** argv) {
     CRANE_ERROR("Error when get system release info");
   }
 
-  if (bool ok = util::os::GetCpuTopologyInfo(&meta.TopologyInfoOfThisNode); !ok) {
+  if (!util::os::GetCpuTopologyInfo(&meta.TopologyInfoOfThisNode)) {
     CRANE_ERROR("Error when get cpu topology info");
   } else {
     CRANE_INFO("Socket count: {}, Cores per Socket: {}, threads per core:{}",

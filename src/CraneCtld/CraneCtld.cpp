@@ -383,6 +383,11 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          if (node["CoresPerSocket"]) {
+            node_ptr->topology_info.cores_per_socket = std::stoul(
+                node["CoresPerSocket"].as<std::string>());
+          }
+
           for (auto&& node_id : node_id_list) {
             g_config.Nodes[node_id] = node_ptr;
             g_config.Nodes[node_id]->dedicated_resource = resourceInNode;
