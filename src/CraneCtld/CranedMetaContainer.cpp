@@ -66,6 +66,14 @@ void CranedMetaContainer::CranedUp(
     node_meta->static_meta.topology_info.cores_per_socket =
       node_meta->remote_meta.topology_info.cores_per_socket;
 
+  if (node_meta->static_meta.topology_info.cores_per_socket > node_meta->remote_meta.topology_info.cores_per_socket)
+    CRANE_WARN(
+    "Configured cores_per_socket ({}) is greater than the actual hardware cores_per_socket ({}). "
+    "Please check your configuration or hardware. Using the configured value may cause resource allocation errors.",
+    node_meta->static_meta.topology_info.cores_per_socket,
+    node_meta->remote_meta.topology_info.cores_per_socket
+  );
+
   CRANE_INFO("Craned {} is up now.", craned_id);
 }
 
