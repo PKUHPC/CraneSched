@@ -19,12 +19,12 @@
 #pragma once
 
 #include <fcntl.h>
+#include <hwloc.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
-#include <hwloc.h>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"

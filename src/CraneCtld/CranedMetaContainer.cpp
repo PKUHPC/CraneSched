@@ -61,18 +61,21 @@ void CranedMetaContainer::CranedUp(
     part_global_meta.alive_craned_cnt++;
   }
 
-  // When the configuration file is not set, the actual hardware resources are used as the basis.
+  // When the configuration file is not set, the actual hardware resources are
+  // used as the basis.
   if (node_meta->static_meta.topology_info.cores_per_socket == 0)
     node_meta->static_meta.topology_info.cores_per_socket =
-      node_meta->remote_meta.topology_info.cores_per_socket;
+        node_meta->remote_meta.topology_info.cores_per_socket;
 
-  if (node_meta->static_meta.topology_info.cores_per_socket > node_meta->remote_meta.topology_info.cores_per_socket)
+  if (node_meta->static_meta.topology_info.cores_per_socket >
+      node_meta->remote_meta.topology_info.cores_per_socket)
     CRANE_WARN(
-    "Configured cores_per_socket ({}) is greater than the actual hardware cores_per_socket ({}). "
-    "Please check your configuration or hardware. Using the configured value may cause resource allocation errors.",
-    node_meta->static_meta.topology_info.cores_per_socket,
-    node_meta->remote_meta.topology_info.cores_per_socket
-  );
+        "Configured cores_per_socket ({}) is greater than the actual hardware "
+        "cores_per_socket ({}). "
+        "Please check your configuration or hardware. Using the configured "
+        "value may cause resource allocation errors.",
+        node_meta->static_meta.topology_info.cores_per_socket,
+        node_meta->remote_meta.topology_info.cores_per_socket);
 
   CRANE_INFO("Craned {} is up now.", craned_id);
 }
@@ -307,7 +310,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
-    static_meta.topology_info.cores_per_socket = node_ptr->topology_info.cores_per_socket;
+    static_meta.topology_info.cores_per_socket =
+        node_ptr->topology_info.cores_per_socket;
 
     craned_meta.res_total += static_meta.res;
     craned_meta.res_avail += static_meta.res;

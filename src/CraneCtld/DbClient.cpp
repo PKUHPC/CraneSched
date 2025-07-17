@@ -969,7 +969,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, int64_t>                       /*35-39*/
+             int64_t, std::string, int64_t>                        /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1060,7 +1060,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, int64_t>                                 /*35-39*/
+             int64_t, std::string, int64_t>                        /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1086,8 +1086,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str,
-             static_cast<int64_t>(task->cores_per_socket)};
+             device_map_str, static_cast<int64_t>(task->cores_per_socket)};
   return DocumentConstructor_(fields, values);
 }
 

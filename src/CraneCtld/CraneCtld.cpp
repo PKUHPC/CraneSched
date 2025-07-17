@@ -384,8 +384,8 @@ void ParseConfig(int argc, char** argv) {
           }
 
           if (node["CoresPerSocket"]) {
-            node_ptr->topology_info.cores_per_socket = std::stoul(
-                node["CoresPerSocket"].as<std::string>());
+            node_ptr->topology_info.cores_per_socket =
+                std::stoul(node["CoresPerSocket"].as<std::string>());
           }
 
           for (auto&& node_id : node_id_list) {

@@ -2519,9 +2519,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   absl::Time earliest_end_time = now + task->time_limit;
   ResourceView requested_node_res_view;
 
-  auto check_topology_info = [](const TaskInCtld& task, const TopologyInfo& topology_info) -> bool {
-    if (task.cores_per_socket > topology_info.cores_per_socket)
-      return false;
+  auto check_topology_info = [](const TaskInCtld& task,
+                                const TopologyInfo& topology_info) -> bool {
+    if (task.cores_per_socket > topology_info.cores_per_socket) return false;
 
     return true;
   };
@@ -2571,9 +2571,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
-          "Task #{} resource requirement (cores_per_socket={}) exceeds craned {}'s available (cores_per_socket={}). "
-          "Skipping this craned.",
-          task->TaskId(), task->cores_per_socket, craned_index, craned_meta->static_meta.topology_info.cores_per_socket);
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_index,
+            craned_meta->static_meta.topology_info.cores_per_socket);
       }
       continue;
     }
@@ -2656,9 +2658,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
-          "Task #{} resource requirement (cores_per_socket={}) exceeds craned {}'s available (cores_per_socket={}). "
-          "Skipping this craned.",
-          task->TaskId(), task->cores_per_socket, craned_id, craned_meta->static_meta.topology_info.cores_per_socket);
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_id,
+            craned_meta->static_meta.topology_info.cores_per_socket);
       }
       continue;
     }
