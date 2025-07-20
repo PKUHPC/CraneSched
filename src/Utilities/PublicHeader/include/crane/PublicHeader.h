@@ -65,6 +65,7 @@ inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
     "cranectld/cranectld.lock";
 inline const char* const kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
+inline const char* const kDefaultRaftLogPath = "cranectld/raft.log";
 inline const char* const kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
 inline const char* const kDefaultCranedScriptDir = "craned/scripts";

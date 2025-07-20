@@ -63,6 +63,11 @@ struct Config {
     std::string UnixSocketForPamListenAddr;
   };
 
+  struct ServerEndPoint {
+    std::string HostName;
+    std::string ListenPort;
+  };
+
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
@@ -72,7 +77,8 @@ struct Config {
   CranedListenConf ListenConf;
   bool CompressedRpc{};
 
-  std::string ControlMachine;
+  std::vector<ServerEndPoint> ControlMachines;
+  bool EnableRaft = false;
   std::string CraneCtldForInternalListenPort;
   std::string CranedDebugLevel;
 

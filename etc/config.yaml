@@ -1,6 +1,4 @@
 # Cluster settings (This must be identical across all nodes)
-# the hostname of node which is running cranectld
-ControlMachine: cn15
 # the name of this cluster
 ClusterName: pkuhpc_test
 
@@ -18,19 +16,43 @@ CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
 # Ctld settings
-# the listening address of control machine
-CraneCtldListenAddr: 0.0.0.0
-# the port of control machine to listen
-CraneCtldListenPort: 10011
-CraneCtldForInternalListenPort: 10013
-# debug level of cranectld
-CraneCtldDebugLevel: trace
-# file path of cranectld log file (relative to CraneBaseDir)
-CraneCtldLogFile: cranectld/cranectld.log
-# file path of cranectld lock file (relative to CraneBaseDir)
-CraneCtldMutexFilePath: cranectld/cranectld.lock
-# whether the cranectld is running in the background
-CraneCtldForeground: true
+CraneCtld:
+  CraneCtldForInternalListenPort: 10013
+  # debug level of cranectld
+  DebugLevel: trace
+  # file path of cranectld log file (relative to CraneBaseDir)
+  LogFile: cranectld/cranectld.log
+  # file path of cranectld lock file (relative to CraneBaseDir)
+  MutexFilePath: cranectld/cranectld.lock
+  # whether the cranectld is running in the background
+  Foreground: true
+
+  Raft:
+    # whether the cranectld is running in raft mode, When this parameter is false, the first ControlMachine is read by default as the Crannectld node
+    Enabled: false
+    # debug level of raft server
+    DebugLevel: info
+    # file path of raft log file (relative to CraneBaseDir)
+    LogFile: cranectld/raft.log
+
+  # Some address information of nodes which are running cranectld
+  # When the parameter 'CraneCtldEnablingRaft' is true, all the following parameters take effect, allowing for multiple crate nodes.
+  # otherwise there is only one CraneCtld, which defaults to the first one, and the parameter 'raftPort' is invalid.
+  ControlMachines:
+    - hostname: cn15
+      raftPort: 10009
+      listenAddr: 0.0.0.0
+      listenPort: 10011
+
+    - hostname: cn16
+      raftPort: 10009
+      listenAddr: 0.0.0.0
+      listenPort: 10011
+
+    - hostname: cn17
+      raftPort: 10009
+      listenAddr: 0.0.0.0
+      listenPort: 10011
 
 # Craned settings
 # the listening address of control machine

@@ -18,6 +18,8 @@
 
 #include "crane/Logger.h"
 
+static std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> console_sink;
+
 std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string& level) {
   if (level == "trace") {
@@ -48,7 +50,7 @@ void InitLogger(spdlog::level::level_enum level,
   sinks.push_back(file_sink);
 
   if (enable_console) {
-    auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+    console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     console_sink->set_level(level);
     sinks.push_back(console_sink);
   }
@@ -57,10 +59,37 @@ void InitLogger(spdlog::level::level_enum level,
   auto logger = std::make_shared<spdlog::async_logger>(
       "default", sinks.begin(), sinks.end(), spdlog::thread_pool(),
       spdlog::async_overflow_policy::block);
+  logger->set_level(level);
   spdlog::set_default_logger(logger);
 
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::set_level(level);
+}
+
+void AddLogger(spdlog::level::level_enum level,
+               const std::string& log_file_path, const std::string& name) {
+  std::vector<spdlog::sink_ptr> sinks;
+  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+      log_file_path, 1048576 * 50 /*MB*/, 3);
+  file_sink->set_level(level);
+  sinks.push_back(file_sink);
+
+  if (console_sink) {
+    sinks.push_back(console_sink);
+  }
+
+  auto logger = std::make_shared<spdlog::async_logger>(
+      name, sinks.begin(), sinks.end(), spdlog::thread_pool(),
+      spdlog::async_overflow_policy::block);
+
+  logger->set_level(level);
+  logger->flush_on(spdlog::level::err);
+
+  spdlog::register_logger(logger);
+
+  if (level < spdlog::get_level()) {
+    spdlog::set_level(level);
+  }
 }

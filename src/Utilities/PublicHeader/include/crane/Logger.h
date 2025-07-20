@@ -57,12 +57,22 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#define LOGGER_DEFAULT spdlog::get("default")
+#define LOGGER_RAFT spdlog::get("raft")
+
 #define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define CRANE_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
 #define CRANE_INFO(...) SPDLOG_INFO(__VA_ARGS__)
 #define CRANE_WARN(...) SPDLOG_WARN(__VA_ARGS__)
 #define CRANE_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
 #define CRANE_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+
+#define RAFT_TRACE(...) SPDLOG_LOGGER_TRACE(LOGGER_RAFT, __VA_ARGS__)
+#define RAFT_DEBUG(...) SPDLOG_LOGGER_DEBUG(LOGGER_RAFT, __VA_ARGS__)
+#define RAFT_INFO(...) SPDLOG_LOGGER_INFO(LOGGER_RAFT, __VA_ARGS__)
+#define RAFT_WARN(...) SPDLOG_LOGGER_WARN(LOGGER_RAFT, __VA_ARGS__)
+#define RAFT_ERROR(...) SPDLOG_LOGGER_ERROR(LOGGER_RAFT, __VA_ARGS__)
+#define RAFT_CRITICAL(...) SPDLOG_LOGGER_ERROR(LOGGER_RAFT, __VA_ARGS__)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
@@ -155,6 +165,9 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
 
 void InitLogger(spdlog::level::level_enum level,
                 const std::string &log_file_path, bool enable_console);
+
+void AddLogger(spdlog::level::level_enum level,
+               const std::string &log_file_path, const std::string &name);
 
 // Custom type formatting
 namespace fmt {

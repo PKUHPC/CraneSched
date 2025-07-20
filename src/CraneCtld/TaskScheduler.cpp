@@ -54,6 +54,168 @@ TaskScheduler::~TaskScheduler() {
 }
 
 bool TaskScheduler::Init() {
+  RestoreFromEmbeddedDb();
+
+  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
+  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
+  m_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CleanTaskTimerCb_();
+      });
+  m_task_timer_handle_->start(
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
+
+  m_task_timeout_async_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_task_timeout_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        TaskTimerAsyncCb_();
+      });
+
+  m_clean_task_timer_queue_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_release_loop](const uvw::async_event&,
+                                      uvw::async_handle&) {
+        CleanTaskTimerQueueCb_(loop);
+      });
+
+  m_task_release_thread_ = std::thread(
+      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
+  m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
+  m_cancel_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CancelTaskTimerCb_();
+      });
+  m_cancel_task_timer_handle_->start(
+      std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kCancelTaskTimeoutMs));
+
+  m_cancel_task_async_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
+  m_cancel_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelTaskAsyncCb_();
+      });
+
+  m_clean_cancel_queue_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
+  m_clean_cancel_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanCancelQueueCb_();
+      });
+
+  m_task_cancel_thread_ = std::thread(
+      [this, loop = std::move(uvw_cancel_loop)]() { CancelTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_submit_loop = uvw::loop::create();
+  m_submit_task_timer_handle_ = uvw_submit_loop->resource<uvw::timer_handle>();
+  m_submit_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        SubmitTaskTimerCb_();
+      });
+  m_submit_task_timer_handle_->start(
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
+
+  m_submit_task_async_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_submit_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        SubmitTaskAsyncCb_();
+      });
+
+  m_clean_submit_queue_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_clean_submit_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanSubmitQueueCb_();
+      });
+
+  m_task_submit_thread_ = std::thread(
+      [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
+  m_task_status_change_timer_handle_ =
+      uvw_task_status_change_loop->resource<uvw::timer_handle>();
+  m_task_status_change_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        TaskStatusChangeTimerCb_();
+      });
+  m_task_status_change_timer_handle_->start(
+      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS * 3),
+      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS));
+
+  m_task_status_change_async_handle_ =
+      uvw_task_status_change_loop->resource<uvw::async_handle>();
+  m_task_status_change_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        TaskStatusChangeAsyncCb_();
+      });
+
+  m_clean_task_status_change_handle_ =
+      uvw_task_status_change_loop->resource<uvw::async_handle>();
+  m_clean_task_status_change_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanTaskStatusChangeQueueCb_();
+      });
+
+  m_task_status_change_thread_ =
+      std::thread([this, loop = std::move(uvw_task_status_change_loop)]() {
+        TaskStatusChangeThread_(loop);
+      });
+
+  std::shared_ptr<uvw::loop> uvw_reservation_loop = uvw::loop::create();
+
+  m_clean_resv_timer_queue_handle_ =
+      uvw_reservation_loop->resource<uvw::async_handle>();
+  m_clean_resv_timer_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_reservation_loop](const uvw::async_event&,
+                                          uvw::async_handle&) {
+        CleanResvTimerQueueCb_(loop);
+      });
+
+  m_resv_clean_thread_ = std::thread(
+      [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
+
+  // TODO: Move this to Reservation Mini-Scheduler.
+  // Reservation should be recovered after creating m_resv_clean_thread_ thread.
+  std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
+      resv_req_map;
+  bool ok = g_embedded_db_client->RetrieveReservationInfo(&resv_req_map);
+  if (!ok) {
+    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
+    return false;
+  }
+
+  if (!resv_req_map.empty()) {
+    CRANE_INFO("{} reservation(s) recovered.", resv_req_map.size());
+    for (auto&& [resv_id, reservation_req] : resv_req_map) {
+      auto res = CreateResv_(reservation_req);
+      if (res) continue;
+
+      CRANE_ERROR("Failed to add reservation {}: {}", resv_id, res.error());
+
+      txn_id_t txn_id{0};
+      auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
+      if (!ok)
+        CRANE_ERROR("Failed to begin transaction for reservation {}.", resv_id);
+
+      ok = g_embedded_db_client->DeleteReservationInfo(txn_id, resv_id);
+      if (!ok)
+        CRANE_ERROR("Failed to delete reservation {} from resv DB.", resv_id);
+
+      ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
+      if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_id);
+    }
+  }
+
+  // Start schedule thread first.
+  m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
+
+  return true;
+}
+
+bool TaskScheduler::RestoreFromEmbeddedDb() {
   using crane::grpc::TaskInEmbeddedDb;
 
   bool ok;
@@ -227,161 +389,7 @@ bool TaskScheduler::Init() {
     }
   }
 
-  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
-  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
-  m_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        CleanTaskTimerCb_();
-      });
-  m_task_timer_handle_->start(
-      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
-      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
-
-  m_task_timeout_async_handle_ =
-      uvw_release_loop->resource<uvw::async_handle>();
-  m_task_timeout_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        TaskTimerAsyncCb_();
-      });
-
-  m_clean_task_timer_queue_handle_ =
-      uvw_release_loop->resource<uvw::async_handle>();
-  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
-      [this, loop = uvw_release_loop](const uvw::async_event&,
-                                      uvw::async_handle&) {
-        CleanTaskTimerQueueCb_(loop);
-      });
-
-  m_task_release_thread_ = std::thread(
-      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
-  m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
-  m_cancel_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        CancelTaskTimerCb_();
-      });
-  m_cancel_task_timer_handle_->start(
-      std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
-      std::chrono::milliseconds(kCancelTaskTimeoutMs));
-
-  m_cancel_task_async_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
-  m_cancel_task_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CancelTaskAsyncCb_();
-      });
-
-  m_clean_cancel_queue_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
-  m_clean_cancel_queue_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanCancelQueueCb_();
-      });
-
-  m_task_cancel_thread_ = std::thread(
-      [this, loop = std::move(uvw_cancel_loop)]() { CancelTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_submit_loop = uvw::loop::create();
-  m_submit_task_timer_handle_ = uvw_submit_loop->resource<uvw::timer_handle>();
-  m_submit_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        SubmitTaskTimerCb_();
-      });
-  m_submit_task_timer_handle_->start(
-      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
-      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
-
-  m_submit_task_async_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
-  m_submit_task_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        SubmitTaskAsyncCb_();
-      });
-
-  m_clean_submit_queue_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
-  m_clean_submit_queue_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanSubmitQueueCb_();
-      });
-
-  m_task_submit_thread_ = std::thread(
-      [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
-  m_task_status_change_timer_handle_ =
-      uvw_task_status_change_loop->resource<uvw::timer_handle>();
-  m_task_status_change_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        TaskStatusChangeTimerCb_();
-      });
-  m_task_status_change_timer_handle_->start(
-      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS * 3),
-      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS));
-
-  m_task_status_change_async_handle_ =
-      uvw_task_status_change_loop->resource<uvw::async_handle>();
-  m_task_status_change_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        TaskStatusChangeAsyncCb_();
-      });
-
-  m_clean_task_status_change_handle_ =
-      uvw_task_status_change_loop->resource<uvw::async_handle>();
-  m_clean_task_status_change_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanTaskStatusChangeQueueCb_();
-      });
-
-  m_task_status_change_thread_ =
-      std::thread([this, loop = std::move(uvw_task_status_change_loop)]() {
-        TaskStatusChangeThread_(loop);
-      });
-
-  std::shared_ptr<uvw::loop> uvw_reservation_loop = uvw::loop::create();
-
-  m_clean_resv_timer_queue_handle_ =
-      uvw_reservation_loop->resource<uvw::async_handle>();
-  m_clean_resv_timer_queue_handle_->on<uvw::async_event>(
-      [this, loop = uvw_reservation_loop](const uvw::async_event&,
-                                          uvw::async_handle&) {
-        CleanResvTimerQueueCb_(loop);
-      });
-
-  m_resv_clean_thread_ = std::thread(
-      [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
-
-  // TODO: Move this to Reservation Mini-Scheduler.
-  // Reservation should be recovered after creating m_resv_clean_thread_ thread.
-  std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
-      resv_req_map;
-  ok = g_embedded_db_client->RetrieveReservationInfo(&resv_req_map);
-  if (!ok) {
-    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
-    return false;
-  }
-
-  if (!resv_req_map.empty()) {
-    CRANE_INFO("{} reservation(s) recovered.", resv_req_map.size());
-    for (auto&& [resv_id, reservation_req] : resv_req_map) {
-      auto res = CreateResv_(reservation_req);
-      if (res) continue;
-
-      CRANE_ERROR("Failed to add reservation {}: {}", resv_id, res.error());
-
-      txn_id_t txn_id{0};
-      auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
-      if (!ok)
-        CRANE_ERROR("Failed to begin transaction for reservation {}.", resv_id);
-
-      ok = g_embedded_db_client->DeleteReservationInfo(txn_id, resv_id);
-      if (!ok)
-        CRANE_ERROR("Failed to delete reservation {} from resv DB.", resv_id);
-
-      ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
-      if (!ok) CRANE_ERROR("Failed to commit txn for reservation {}.", resv_id);
-    }
-  }
-
-  // Start schedule thread first.
-  m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
+  m_task_map_ready_.store(true, std::memory_order_release);
 
   return true;
 }
@@ -1839,6 +1847,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
+  if (approximate_size == 0) return;
 
   std::vector<SubmitQueueElem> accepted_tasks;
   std::vector<TaskInCtld*> accepted_task_ptrs;
@@ -1855,6 +1864,13 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   } else {
     accepted_size = approximate_size;
     rejected_size = 0;
+  }
+
+  if (!g_raft_server->IsLeader()) {
+    CRANE_WARN(
+        "Rejecting all tasks in submit queue because this node is not leader.");
+    accepted_size = 0;
+    rejected_size = approximate_size;
   }
 
   size_t accepted_actual_size;

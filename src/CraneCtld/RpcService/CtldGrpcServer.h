@@ -33,6 +33,37 @@ using grpc::Server;
 
 class CtldServer;
 
+/**
+ * Used to intercept requests arriving at follower nodes
+ */
+class RaftLeaderInterceptor final : public grpc::experimental::Interceptor {
+ public:
+  explicit RaftLeaderInterceptor(grpc::ServerContextBase *ctx) : m_ctx_(ctx) {}
+
+  void Intercept(grpc::experimental::InterceptorBatchMethods *methods) override;
+
+ private:
+  grpc::ServerContextBase *m_ctx_;
+};
+
+class CraneCtldInterceptorFactory final
+    : public grpc::experimental::ServerInterceptorFactoryInterface {
+ public:
+  grpc::experimental::Interceptor *CreateServerInterceptor(
+      grpc::experimental::ServerRpcInfo *info) override {
+    if (kBypassMethods.contains(info->method())) {
+      return nullptr;
+    }
+    return new RaftLeaderInterceptor(info->server_context());
+  }
+
+ private:
+  inline static const std::unordered_set<std::string> kBypassMethods = {
+      "/crane.grpc.CraneCtld/CranedTriggerReverseConn",
+      "/crane.grpc.CraneCtld/CranedRegister",
+      "/crane.grpc.CraneCtld/QueryLeaderId"};
+};
+
 class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
@@ -167,6 +198,30 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::EnableAutoPowerControlRequest *request,
       crane::grpc::EnableAutoPowerControlReply *response) override;
+
+  grpc::Status QueryLeaderId(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLeaderIdRequest *request,
+      crane::grpc::QueryLeaderIdReply *response) override;
+
+  grpc::Status QueryLeaderInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLeaderInfoRequest *request,
+      crane::grpc::QueryLeaderInfoReply *response) override;
+
+  grpc::Status AddFollower(grpc::ServerContext *context,
+                           const crane::grpc::AddFollowerRequest *request,
+                           crane::grpc::AddFollowerReply *response) override;
+
+  grpc::Status RemoveFollower(
+      grpc::ServerContext *context,
+      const crane::grpc::RemoveFollowerRequest *request,
+      crane::grpc::RemoveFollowerReply *response) override;
+
+  grpc::Status YieldLeadership(
+      grpc::ServerContext *context,
+      const crane::grpc::YieldLeadershipRequest *request,
+      crane::grpc::YieldLeadershipReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;

@@ -37,9 +37,20 @@ message TaskStatusChangeReply {
   bool ok = 1;
 }
 
+message QueryLeaderIdRequest {}
+
+message QueryLeaderIdReply {
+  int32 leader_id = 1;
+}
+
 message CranedTriggerReverseConnRequest {
   string craned_id = 1;
   google.protobuf.Timestamp token = 2;
+}
+
+message CranedTriggerReverseConnResponse {
+  bool ok = 1;
+  int32 cur_leader_id = 2;
 }
 
 message ConfigureCranedRequest {
@@ -57,6 +68,7 @@ message CranedRegisterRequest {
 
 message CranedRegisterReply {
   bool ok = 1;
+  int32 cur_leader_id = 2;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -110,6 +122,10 @@ message ReleaseCgroupForTasksRequest {
 }
 
 message ReleaseCgroupForTasksReply {}
+
+message UpdateLeaderIdRequest {
+  int32 cur_leader_id = 1;
+}
 
 message TerminateTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -246,6 +262,65 @@ message ModifyCranedStateReply {
   repeated string modified_nodes = 2;
   repeated string not_modified_nodes = 3;
   repeated string not_modified_reasons = 4;
+}
+
+message QueryLeaderInfoRequest {}
+
+message QueryLeaderInfoReply {
+  enum RaftRole {
+    Leader = 0;
+    Follower = 1;
+    Offline = 2;
+  }
+
+  message RaftServer {
+    int32 id = 1;
+    string end_point = 2;
+    RaftRole role = 3;
+  }
+
+  repeated RaftServer server_list = 1;
+
+  int32 server_id = 2;
+  int32 leader_id = 3;
+  uint64 start_index = 4;
+  uint64 next_slot = 5;
+  uint64 committed_log_idx = 6;
+  uint64 cur_term = 7;
+  uint64 last_snapshot_log_idx = 8;
+  uint64 last_snapshot_log_term = 9;
+}
+
+message AddFollowerRequest {
+  oneof key {
+    string host_name = 1;
+    int32 server_id = 2;
+  }
+}
+
+message AddFollowerReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message RemoveFollowerRequest {
+  oneof key {
+    string host_name = 1;
+    int32 server_id = 2;
+  }
+}
+
+message RemoveFollowerReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message YieldLeadershipRequest {
+  int32 next_server_id = 1;
+}
+
+message YieldLeadershipReply {
+  bool ok = 1;
 }
 
 message AddAccountRequest {
@@ -866,7 +941,11 @@ service CraneCtld {
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
+  rpc QueryLeaderInfo(QueryLeaderInfoRequest) returns (QueryLeaderInfoReply);
+  rpc AddFollower(AddFollowerRequest) returns (AddFollowerReply);
+  rpc RemoveFollower(RemoveFollowerRequest) returns (RemoveFollowerReply);
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
+  rpc YieldLeadership(YieldLeadershipRequest) returns (YieldLeadershipReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -894,6 +973,7 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc QueryLeaderId(QueryLeaderIdRequest) returns (QueryLeaderIdReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
@@ -902,7 +982,7 @@ service CraneCtld {
 service CraneCtldForInternal {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
+  rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (CranedTriggerReverseConnResponse);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
@@ -916,6 +996,8 @@ service Craned {
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
+
+  rpc UpdateLeaderId(UpdateLeaderIdRequest) returns (google.protobuf.Empty);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

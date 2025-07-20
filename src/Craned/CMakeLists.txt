@@ -37,6 +37,12 @@ if (CRANE_ENABLE_BPF)
     target_compile_definitions(craned PRIVATE -DCRANE_ENABLE_BPF)
 endif ()
 
+#find_package(PkgConfig REQUIRED)
+#pkg_check_modules(SYSTEMD REQUIRED systemd)
+#
+#include_directories(${SYSTEMD_INCLUDE_DIRS})
+#link_directories(${SYSTEMD_LIBRARY_DIRS})
+
 target_link_libraries(craned
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
         concurrentqueue
@@ -64,6 +70,7 @@ target_link_libraries(craned
         yaml-cpp
 
         Backward::Interface
+        #        ${SYSTEMD_LIBRARIES}
 
         $<$<BOOL:${CRANE_ENABLE_BPF}>:BPF::BPF>
 )

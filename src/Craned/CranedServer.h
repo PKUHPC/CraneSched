@@ -88,6 +88,10 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
+
+  grpc::Status UpdateLeaderId(grpc::ServerContext *context,
+                              const crane::grpc::UpdateLeaderIdRequest *request,
+                              google::protobuf::Empty *response) override;
 };
 
 class CranedServer {
