@@ -251,12 +251,12 @@ void ParseConfig(int argc, char** argv) {
             server_node.ListenPort =
                 YamlValueOr(node["listenPort"], kCtldDefaultPort);
 
-          g_config.ControlMachines.push_back(std::move(server_node));
+            g_config.ControlMachines.push_back(std::move(server_node));
+          }
         }
-      }
-      g_config.CraneCtldForInternalListenPort =
-          YamlValueOr(config["CraneCtldForInternalListenPort"],
-                      kCtldForInternalDefaultPort);
+        g_config.CraneCtldForInternalListenPort =
+            YamlValueOr(config["CraneCtldForInternalListenPort"],
+                        kCtldForInternalDefaultPort);
 
         if (ctld_config["Raft"] && ctld_config["Raft"]["Enabled"])
           g_config.EnableRaft = ctld_config["Raft"]["Enabled"].as<bool>();
