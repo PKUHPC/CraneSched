@@ -2523,6 +2523,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                                 const TopologyInfo& topology_info) -> bool {
     if (task.cores_per_socket > topology_info.cores_per_socket) return false;
 
+    if (task.threads_per_core > topology_info.threads_per_core) return false;
+
     return true;
   };
 
@@ -2571,11 +2573,14 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
-            "Task #{} resource requirement (cores_per_socket={}) exceeds "
-            "craned {}'s available (cores_per_socket={}). "
+            "Task #{} resource requirement (cores_per_socket={}, "
+            "threads_per_core={}) exceeds "
+            "craned {}'s available (cores_per_socket={}, threads_per_core={}). "
             "Skipping this craned.",
-            task->TaskId(), task->cores_per_socket, craned_index,
-            craned_meta->static_meta.topology_info.cores_per_socket);
+            task->TaskId(), task->cores_per_socket, task->threads_per_core,
+            craned_index,
+            craned_meta->static_meta.topology_info.cores_per_socket,
+            craned_meta->static_meta.topology_info.threads_per_core);
       }
       continue;
     }
