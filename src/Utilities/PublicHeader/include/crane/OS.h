@@ -19,12 +19,12 @@
 #pragma once
 
 #include <fcntl.h>
+#include <hwloc.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
-#include <hwloc.h>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -36,9 +36,9 @@ struct SystemRelInfo {
 };
 
 struct TopologyInfo {
-  uint32_t socket_count;
-  uint32_t cores_per_socket;
-  uint32_t threads_per_core;
+  uint32_t socket_count{0};
+  uint32_t cores_per_socket{0};
+  uint32_t threads_per_core{0};
 };
 
 namespace util {

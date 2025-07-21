@@ -73,6 +73,7 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+    TopologyInfo topology_info;
   };
 
   struct Partition {
@@ -192,6 +193,8 @@ struct CranedStaticMeta {
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
   ResourceInNode res;
+
+  TopologyInfo topology_info;
 };
 
 struct CranedRemoteMeta {
@@ -223,8 +226,10 @@ struct CranedRemoteMeta {
     }
 
     this->topology_info.socket_count = grpc_meta.topology_info().socket_count();
-    this->topology_info.cores_per_socket = grpc_meta.topology_info().cores_per_socket();
-    this->topology_info.threads_per_core = grpc_meta.topology_info().threads_per_core();
+    this->topology_info.cores_per_socket =
+        grpc_meta.topology_info().cores_per_socket();
+    this->topology_info.threads_per_core =
+        grpc_meta.topology_info().threads_per_core();
   }
 };
 

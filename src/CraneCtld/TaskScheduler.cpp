@@ -2519,6 +2519,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   absl::Time earliest_end_time = now + task->time_limit;
   ResourceView requested_node_res_view;
 
+  auto check_topology_info = [](const TaskInCtld& task,
+                                const TopologyInfo& topology_info) -> bool {
+    if (task.cores_per_socket > topology_info.cores_per_socket) return false;
+
+    return true;
+  };
+
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
@@ -2561,19 +2568,17 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
-    if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
-      continue;
-
-    if (task->threads_per_core == 1) {
-      if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
-        continue;
-    } else if (task->threads_per_core > craned_meta->remote_meta.topology_info.threads_per_core) {
+    if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_index,
+            craned_meta->static_meta.topology_info.cores_per_socket);
+      }
       continue;
     }
-
-    CRANE_DEBUG(
-        "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
-        craned_index, task->TaskId());
 
     if (task->reservation != "") {
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
@@ -2649,19 +2654,18 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
-    if (task->cores_per_socket > craned_meta->remote_meta.topology_info.cores_per_socket)
-      continue;
 
-    if (task->threads_per_core == 1) {
-      if (craned_meta->remote_meta.topology_info.threads_per_core != 1)
-        continue;
-    } else if (task->threads_per_core > craned_meta->remote_meta.topology_info.threads_per_core) {
+    if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_id,
+            craned_meta->static_meta.topology_info.cores_per_socket);
+      }
       continue;
     }
-
-    CRANE_DEBUG(
-        "The number of cores per CPU socket on this Craned {} is sufficient for the task {}.",
-        craned_id, task->TaskId());
 
     ResourceInNode feasible_res;
 
