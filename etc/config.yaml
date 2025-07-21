@@ -73,7 +73,9 @@ Nodes:
   - name: "cn[15-16]"
     cpu: 2
     memory: 2G
+    Sockets: 2
     CoresPerSocket: 8
+    ThreadsPerCore: 2
 
   - name: "cn[17-18]"
     cpu: 2

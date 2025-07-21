@@ -206,6 +206,9 @@ absl::Time GetSystemBootTime() {
 }
 
 bool GetCpuTopologyInfo(TopologyInfo* info) {
+
+  if (info == nullptr) return false;
+
   hwloc_topology_t topology;
   if (hwloc_topology_init(&topology) != 0) return false;
   if (hwloc_topology_load(topology) != 0) {

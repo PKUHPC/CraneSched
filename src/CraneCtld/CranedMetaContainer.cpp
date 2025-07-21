@@ -18,6 +18,8 @@
 
 #include "CranedMetaContainer.h"
 
+#include <yaml-cpp/node/detail/node.h>
+
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -61,21 +63,39 @@ void CranedMetaContainer::CranedUp(
     part_global_meta.alive_craned_cnt++;
   }
 
+  uint32_t hw_sockets = node_meta->remote_meta.topology_info.socket_count;
+  uint32_t hw_cps = node_meta->remote_meta.topology_info.cores_per_socket;
+  uint32_t hw_threads = node_meta->remote_meta.topology_info.threads_per_core;
+  if (hw_sockets == 0 || hw_cps == 0 || hw_threads == 0) {
+    CRANE_ERROR("Failed to detect Craned {} cpu hardware.", craned_id);
+  }
+
   // When the configuration file is not set, the actual hardware resources are
   // used as the basis.
-  if (node_meta->static_meta.topology_info.cores_per_socket == 0)
-    node_meta->static_meta.topology_info.cores_per_socket =
-        node_meta->remote_meta.topology_info.cores_per_socket;
+  if (node_meta->static_meta.topology_info.socket_count == 0)
+    node_meta->static_meta.topology_info.socket_count = hw_sockets;
 
-  if (node_meta->static_meta.topology_info.cores_per_socket >
-      node_meta->remote_meta.topology_info.cores_per_socket)
+  if (node_meta->static_meta.topology_info.cores_per_socket == 0)
+    node_meta->static_meta.topology_info.cores_per_socket = hw_cps;
+
+  if (node_meta->static_meta.topology_info.threads_per_core == 0)
+    node_meta->static_meta.topology_info.threads_per_core = hw_threads;
+
+  if (node_meta->static_meta.topology_info.cores_per_socket > hw_cps ||
+      node_meta->static_meta.topology_info.socket_count > hw_sockets ||
+      node_meta->static_meta.topology_info.threads_per_core > hw_threads)
     CRANE_WARN(
-        "Configured cores_per_socket ({}) is greater than the actual hardware "
-        "cores_per_socket ({}). "
+        "Configured cpu hardware (sockets: {}, cores_per_socket: {}, "
+        "threads_per_core: {}) is "
+        "greater than the actual hardware "
+        "(sockets: {}, cores_per_socket: {}, threads_per_core: {}) on Craned "
+        "{}. "
         "Please check your configuration or hardware. Using the configured "
         "value may cause resource allocation errors.",
+        node_meta->static_meta.topology_info.socket_count,
         node_meta->static_meta.topology_info.cores_per_socket,
-        node_meta->remote_meta.topology_info.cores_per_socket);
+        node_meta->static_meta.topology_info.threads_per_core, hw_sockets,
+        hw_cps, hw_threads, craned_id);
 
   CRANE_INFO("Craned {} is up now.", craned_id);
 }
@@ -310,8 +330,13 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(
         g_config.CranedListenConf.CranedListenPort.c_str(), nullptr, 10);
+    static_meta.topology_info.socket_count =
+        node_ptr->topology_info.socket_count =
+            node_ptr->topology_info.socket_count;
     static_meta.topology_info.cores_per_socket =
         node_ptr->topology_info.cores_per_socket;
+    static_meta.topology_info.threads_per_core =
+        node_ptr->topology_info.threads_per_core;
 
     craned_meta.res_total += static_meta.res;
     craned_meta.res_avail += static_meta.res;
