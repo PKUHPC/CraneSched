@@ -82,6 +82,7 @@ void SetCurrentThreadName(const std::string &name);
 
 bool ConvertStringToInt64(const std::string &s, int64_t *val);
 
+std::string ReadableResourceView(const ResourceView &resource);
 std::string ReadableTypedDeviceMap(const DeviceMap &dedicated_resource);
 std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
 
