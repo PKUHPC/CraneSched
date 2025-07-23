@@ -19,11 +19,8 @@ else ()
     set(BPF_COMPILER ${CMAKE_C_COMPILER})
 endif ()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND BPF_COMPILE_OPTIONS -g)
-endif ()
-
-list(APPEND BPF_COMPILE_OPTIONS -O2)
+# always use -g for BPF CO-RE
+list(APPEND BPF_COMPILE_OPTIONS -O2 -g)
 
 add_custom_command(
         OUTPUT ${BPF_OBJECT_FILE}
