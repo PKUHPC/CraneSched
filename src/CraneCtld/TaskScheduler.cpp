@@ -2551,6 +2551,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   absl::Time earliest_end_time = now + task->time_limit;
   ResourceView requested_node_res_view;
 
+  auto check_topology_info = [](const TaskInCtld& task,
+                                const TopologyInfo& topology_info) -> bool {
+    if (task.cores_per_socket > topology_info.cores_per_socket) return false;
+
+    return true;
+  };
+
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
@@ -2592,6 +2599,19 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
+
+    if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_index,
+            craned_meta->static_meta.topology_info.cores_per_socket);
+      }
+      continue;
+    }
+
     if (task->reservation != "") {
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
       if (iter == craned_meta->resv_in_node_map.end() ||
@@ -2666,6 +2686,19 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
+
+    if (!check_topology_info(*task, craned_meta->static_meta.topology_info)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} resource requirement (cores_per_socket={}) exceeds "
+            "craned {}'s available (cores_per_socket={}). "
+            "Skipping this craned.",
+            task->TaskId(), task->cores_per_socket, craned_id,
+            craned_meta->static_meta.topology_info.cores_per_socket);
+      }
+      continue;
+    }
+
     ResourceInNode feasible_res;
 
     // TODO: get feasible resource randomly (may cause start time change

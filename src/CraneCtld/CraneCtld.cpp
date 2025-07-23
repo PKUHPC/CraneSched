@@ -383,6 +383,38 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          if (node["Sockets"]) {
+            auto sockets = std::stoul(node["Sockets"].as<std::string>());
+            if (sockets == 0) {
+              CRANE_ERROR("Sockets must be greater than 0 for node {}",
+                          node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->topology_info.socket_count = sockets;
+          }
+
+          if (node["CoresPerSocket"]) {
+            auto cores_per_socket =
+                std::stoul(node["CoresPerSocket"].as<std::string>());
+            if (cores_per_socket == 0) {
+              CRANE_ERROR("CoresPerSocket must be greater than 0 for node {}",
+                          node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->topology_info.cores_per_socket = cores_per_socket;
+          }
+
+          if (node["ThreadsPerCore"]) {
+            auto threads_per_core =
+                std::stoul(node["ThreadsPerCore"].as<std::string>());
+            if (threads_per_core == 0) {
+              CRANE_ERROR("ThreadsPerCore must be greater than 0 for node {}",
+                          node["name"].Scalar());
+              std::exit(1);
+            }
+            node_ptr->topology_info.threads_per_core = threads_per_core;
+          }
+
           for (auto&& node_id : node_id_list) {
             g_config.Nodes[node_id] = node_ptr;
             g_config.Nodes[node_id]->dedicated_resource = resourceInNode;

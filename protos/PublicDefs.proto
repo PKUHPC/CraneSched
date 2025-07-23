@@ -165,6 +165,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+  uint32 cores_per_socket = 38;
 }
 
 message TaskInEmbeddedDb {
@@ -239,6 +240,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  uint32 cores_per_socket = 25;
 }
 
 message BatchTaskAdditionalMeta {
@@ -579,6 +581,12 @@ message NetworkInterface {
   repeated string ipv6_addresses = 4;
 }
 
+message TopologyInfo {
+  uint32 socket_count = 1;
+  uint32 cores_per_socket = 2;
+  uint32 threads_per_core = 3;
+}
+
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;
@@ -588,4 +596,5 @@ message CranedRemoteMeta {
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
+  TopologyInfo topology_info = 9;
 }

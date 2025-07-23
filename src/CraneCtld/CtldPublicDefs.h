@@ -73,6 +73,7 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+    TopologyInfo topology_info;
   };
 
   struct Partition {
@@ -192,6 +193,8 @@ struct CranedStaticMeta {
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
   ResourceInNode res;
+
+  TopologyInfo topology_info;
 };
 
 struct CranedRemoteMeta {
@@ -202,6 +205,8 @@ struct CranedRemoteMeta {
   absl::Time system_boot_time;
 
   std::vector<crane::grpc::NetworkInterface> network_interfaces;
+
+  TopologyInfo topology_info;
 
   CranedRemoteMeta() = default;
 
@@ -219,6 +224,12 @@ struct CranedRemoteMeta {
     for (const auto& interface : grpc_meta.network_interfaces()) {
       this->network_interfaces.emplace_back(interface);
     }
+
+    this->topology_info.socket_count = grpc_meta.topology_info().socket_count();
+    this->topology_info.cores_per_socket =
+        grpc_meta.topology_info().cores_per_socket();
+    this->topology_info.threads_per_core =
+        grpc_meta.topology_info().threads_per_core();
   }
 };
 
@@ -394,6 +405,8 @@ struct TaskInCtld {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   std::string reservation;
+
+  uint32_t cores_per_socket;
 
  private:
   /* ------------- [2] -------------
@@ -612,6 +625,8 @@ struct TaskInCtld {
     extra_attr = val.extra_attr();
 
     reservation = val.reservation();
+
+    cores_per_socket = val.cores_per_socket();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
