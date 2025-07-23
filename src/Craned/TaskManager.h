@@ -249,8 +249,6 @@ class TaskManager {
   CraneErrCode SpawnProcessInInstance_(TaskInstance* instance,
                                        ProcessInstance* process);
 
-  const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
-
   // Ask TaskManager to stop its event loop.
   void ActivateShutdownAsync_();
 

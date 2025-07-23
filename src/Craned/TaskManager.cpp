@@ -251,12 +251,6 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
-  auto iter = m_task_map_.find(task_id);
-  if (iter == m_task_map_.end()) return nullptr;
-  return iter->second.get();
-}
-
 void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   m_task_stop_queue_.enqueue(task_id);
   m_task_stop_async_handle_->send();
@@ -1122,8 +1116,10 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
     AddTerminationTimer_(instance, sec);
     CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
-    g_thread_pool->detach_task(
-        [this, instance]() { LaunchTaskInstanceMt_(instance); });
+    // g_thread_pool->detach_task(
+    //     [this, instance]() { LaunchTaskInstanceMt_(instance); });
+
+    LaunchTaskInstanceMt_(instance);
   }
 }
 
