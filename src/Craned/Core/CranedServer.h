@@ -36,12 +36,8 @@ using grpc::Status;
 
 using crane::grpc::Craned;
 
-enum class RequestSource : std::int8_t {
-  CTLD = 0,
-  PAM = 1,
-  SUPERVISOR = 2,
-  INVALID
-};
+enum class RequestSource : std::int8_t { CTLD = 0, PAM, SUPERVISOR, INVALID };
+
 enum class CranedStatus : std::int8_t {
   INITIALIZING = 0,
   RUNNING,
@@ -107,6 +103,16 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::StepStatusChangeRequest *request,
       crane::grpc::StepStatusChangeReply *response) override;
+
+  grpc::Status AttachInContainerTask(
+      grpc::ServerContext *context,
+      const crane::grpc::AttachInContainerTaskRequest *request,
+      crane::grpc::AttachInContainerTaskReply *response) override;
+
+  grpc::Status ExecInContainerTask(
+      grpc::ServerContext *context,
+      const crane::grpc::ExecInContainerTaskRequest *request,
+      crane::grpc::ExecInContainerTaskReply *response) override;
 };
 
 class CranedServer {

@@ -292,6 +292,7 @@ class MongodbClient {
       crane::grpc::StepInEmbeddedDb const& step);
 
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
+  ContainerMetaInTask BsonToContainerMeta(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
@@ -327,6 +328,11 @@ template <>
 void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
                                                    const std::string& key,
                                                    const DeviceMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
+    document& doc, const std::string& key,
+    const std::optional<ContainerMetaInTask>& value);
 
 }  // namespace Ctld
 
