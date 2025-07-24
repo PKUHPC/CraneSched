@@ -50,6 +50,9 @@ T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
 using CertPair = std::pair<std::string,   // CN
                            std::string>;  // serial number
 
+uint32_t Crc32Of(std::string_view data, uint32_t seed = 0);
+uint32_t Adler32Of(std::string_view data, uint32_t seed = 1);
+
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
@@ -95,9 +98,11 @@ std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
 std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
-std::string GenerateCommaSeparatedString(const int val);
+std::string GenerateCommaSeparatedString(int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
+
+std::string SlugDns1123(std::string_view s, size_t max_len);
 
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string &cert_pem);
