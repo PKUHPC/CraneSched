@@ -19,11 +19,17 @@
 #pragma once
 #include <sched.h>
 
+#include <string_view>
+
+#include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
+#include "cri/api.pb.h"
 
 namespace Craned::Supervisor {
 
@@ -48,7 +54,6 @@ class StepInstance {
   uid_t uid;
   std::vector<gid_t> gids;
 
-  std::string container;
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
   bool pty;
   bool x11;
@@ -67,8 +72,7 @@ class StepInstance {
         // TODO: Set task_id here
         task_ids({0}),
         uid(step.uid()),
-        gids(step.gid().begin(), step.gid().end()),
-        container(step.container()) {
+        gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
         step.type() == crane::grpc::TaskType::Interactive
             ? std::optional(step.interactive_meta().interactive_type())
@@ -80,6 +84,7 @@ class StepInstance {
   };
   ~StepInstance() = default;
 
+  [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsBatch() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
@@ -87,21 +92,51 @@ class StepInstance {
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
+  // Cfored client in step
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(
         m_step_to_supv_.interactive_meta().cfored_name());
   }
-
   [[nodiscard]] const CforedClient* GetCforedClient() const {
     return m_cfored_client_.get();
   }
-
   [[nodiscard]] CforedClient* GetCforedClient() {
     return m_cfored_client_.get();
   }
-
   void StopCforedClient() { m_cfored_client_.reset(); }
+
+  // CRI client in step
+  void InitCriClient() {
+    CRANE_ASSERT(g_config.Container.Enabled);
+    m_cri_client_ = std::make_unique<cri::CriClient>();
+    m_cri_client_->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                      g_config.Container.ImageEndpoint);
+  }
+  [[nodiscard]] const cri::CriClient* GetCriClient() const {
+    return m_cri_client_.get();
+  }
+  [[nodiscard]] cri::CriClient* GetCriClient() { return m_cri_client_.get(); }
+  void StopCriClient() { m_cri_client_.reset(); }
+
+  // Just a convenient method for iteration on the map.
+  auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
+
+  ITaskInstance* GetTaskInstance(task_id_t task_id) {
+    if (!m_task_map_.contains(task_id)) return nullptr;
+    return m_task_map_.at(task_id).get();
+  }
+
+  const ITaskInstance* GetTaskInstance(task_id_t task_id) const {
+    if (!m_task_map_.contains(task_id)) return nullptr;
+    return m_task_map_.at(task_id).get();
+  }
+
+  void AddTaskInstance(task_id_t task_id,
+                       std::unique_ptr<ITaskInstance>&& task);
+  std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
+
+  bool AllTaskFinished() const;
 
   EnvMap GetStepProcessEnv() const;
 
@@ -109,15 +144,9 @@ class StepInstance {
   void InitOomBaseline();
   bool EvaluateOomOnExit();
 
-  void AddTaskInstance(task_id_t task_id,
-                       std::unique_ptr<ITaskInstance>&& task);
-  ITaskInstance* GetTaskInstance(task_id_t task_id);
-  const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
-  std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
-  bool AllTaskFinished() const;
-
  private:
   crane::grpc::StepToD m_step_to_supv_;
+  std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
@@ -153,16 +182,15 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
-  int status{0};
   int value{0};
 };
+
+using TaskExecId = std::variant<std::string, pid_t>;
 
 class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
-      : m_parent_step_inst_(step_inst),
-        // TODO: use task id instead
-        task_id(0) {}
+      : m_parent_step_inst_(step_inst) {}
   virtual ~ITaskInstance();
 
   ITaskInstance(const ITaskInstance&) = delete;
@@ -180,8 +208,6 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  void TaskProcStopped();
-  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
@@ -195,13 +221,10 @@ class ITaskInstance {
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
 
-  virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                          int status) = 0;
+  virtual std::optional<TaskExecId> GetExecId() const = 0;
 
-  task_id_t task_id;
-
+  task_id_t task_id{};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
-
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
@@ -232,6 +255,11 @@ class ITaskInstance {
 
   virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
+  /* Perform file name substitutions
+   * %j - Job ID
+   * %u - Username
+   * %x - Job name
+   */
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
@@ -240,8 +268,7 @@ class ITaskInstance {
 
   StepInstance* m_parent_step_inst_;
 
-  pid_t m_pid_{0};  // forked pid
-
+  // TODO: Move this into ProcessInstance
   std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
 
@@ -261,21 +288,68 @@ class ContainerInstance : public ITaskInstance {
       : ITaskInstance(step_spec) {}
   ~ContainerInstance() override = default;
 
+  ContainerInstance(const ContainerInstance&) = delete;
+  ContainerInstance(ContainerInstance&&) = delete;
+
+  ContainerInstance& operator=(ContainerInstance&&) = delete;
+  ContainerInstance& operator=(const ContainerInstance&) = delete;
+
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                  int status) override;
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_container_id_.empty()) return std::nullopt;
+    return m_container_id_;
+  }
+
+  const TaskExitInfo& HandleContainerExited(
+      const cri::api::ContainerStatus& status);
 
  private:
-  CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
-                                      const std::string& dst) const;
-  std::string ParseOCICmdPattern_(const std::string& cmd) const;
+  static constexpr std::string_view kContainerLogDirPattern = "{}.out";
+  static constexpr std::string_view kContainerLogFile = "container.log";
 
-  std::filesystem::path m_bundle_path_;
-  std::filesystem::path m_temp_path_;
+  static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
+  static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
+  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
+
+  inline static cri::api::IDMapping MakeIdMapping_(uid_t kernel_id,
+                                                   uid_t userspace_id,
+                                                   size_t size);
+  inline static std::string MakeHashId_(job_id_t job_id,
+                                        const std::string& job_name,
+                                        const std::string& node_name);
+
+  CraneErrCode SetPodSandboxConfig_();
+  CraneErrCode SetContainerConfig_();
+
+  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
+                                     cri::api::ContainerConfig* config);
+  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
+                                     cri::api::PodSandboxConfig* config);
+  CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
+
+  std::string m_image_id_;
+  std::string m_pod_id_;
+  std::string m_container_id_;
+
+  cri::api::PodSandboxConfig m_pod_config_;
+  cri::api::ContainerConfig m_container_config_;
+
+  // These are used for keep-id mounts in rootless containers.
+  cri::api::IDMapping m_mount_uid_mapping_;
+  cri::api::IDMapping m_mount_gid_mapping_;
+
+  // This is a workaround for CRI which only supports only one id
+  // mapping in user namespace. See:
+  // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
+  // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
+  cri::api::IDMapping m_userns_uid_mapping_;
+  cri::api::IDMapping m_userns_gid_mapping_;
+
+  std::filesystem::path m_data_path_;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -283,13 +357,25 @@ class ProcInstance : public ITaskInstance {
   explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
   ~ProcInstance() override = default;
 
+  ProcInstance(const ProcInstance&) = delete;
+  ProcInstance(ProcInstance&&) = delete;
+
+  ProcInstance& operator=(ProcInstance&&) = delete;
+  ProcInstance& operator=(const ProcInstance&) = delete;
+
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                  int status) override;
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_pid_ == 0) return std::nullopt;
+    return m_pid_;
+  }
+  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid, int status);
+
+ private:
+  pid_t m_pid_{0};  // forked pid
 };
 
 class TaskManager {
@@ -304,7 +390,6 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void Wait();
-
   void ShutdownSupervisor();
 
   // NOLINTBEGIN(readability-identifier-naming)
@@ -322,14 +407,14 @@ class TaskManager {
   }
 
   void AddTerminationTimer_(int64_t secs) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
+    auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handle->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
           EvTaskTimerCb_();
         });
-    termination_handel->start(std::chrono::seconds(secs),
+    termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
-    m_step_.termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handle;
   }
 
   void DelTerminationTimer_() {
@@ -342,8 +427,17 @@ class TaskManager {
 
   void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
                    uint32_t exit_code, std::optional<std::string> reason);
-  void LaunchExecution_(ITaskInstance* task);
+  CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
+
+  // Just like a SIGCHLD sig handler (implictly set by uvw).
+  // Will be called in CliClient thread.
+  void HandleCriEvents(
+      std::vector<std::pair<task_id_t, cri::api::ContainerStatus>>&& events) {
+    m_cri_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
+                                    events.size());
+    m_cri_event_handle_->send();
+  }
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
 
@@ -376,12 +470,19 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
-  void EvTaskTimerCb_();
+
+  // Container exited
+  void EvCleanCriEventQueueCb_();
+
+  // Handle stopped tasks
   void EvCleanTaskStopQueueCb_();
 
+  // Handle task termination requests
+  void EvTaskTimerCb_();
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
 
@@ -390,14 +491,22 @@ class TaskManager {
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
+  // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
   std::shared_ptr<uvw::timer_handle> m_sigchld_timer_handle_;
   std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
   ConcurrentQueue<std::pair<pid_t, int>> m_sigchld_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_stop_queue_;
+  // Handle event stream for ContainerInstance
+  std::shared_ptr<uvw::async_handle> m_cri_event_handle_;
+  ConcurrentQueue<std::pair<task_id_t, cri::api::ContainerStatus>>
+      m_cri_event_queue_;
 
+  // Task is already terminated
+  std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_stopped_queue_;
+
+  // Task is requested to be terminated
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_task_timer_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
@@ -417,7 +526,7 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
-  std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
+  std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
 };
 
 }  // namespace Craned::Supervisor

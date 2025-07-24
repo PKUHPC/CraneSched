@@ -591,11 +591,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
       container_conf->set_temp_dir(g_config.Container.TempDir);
-      container_conf->set_runtime_bin(g_config.Container.RuntimeBin);
-      container_conf->set_state_cmd(g_config.Container.RuntimeState);
-      container_conf->set_run_cmd(g_config.Container.RuntimeRun);
-      container_conf->set_kill_cmd(g_config.Container.RuntimeKill);
-      container_conf->set_delete_cmd(g_config.Container.RuntimeDelete);
+      container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
+      container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
     }
 
     if (g_config.Plugin.Enabled) {
@@ -894,7 +891,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
 
   // Check if the step is acceptable.
   if (step->IsDaemon()) {
-    if (!step->step_to_d.container().empty() && !g_config.Container.Enabled) {
+    if (step->step_to_d.has_container_meta() && !g_config.Container.Enabled) {
       CRANE_ERROR("Container support is disabled but job #{} requires it.",
                   job_id);
       ActivateTaskStatusChangeAsync_(

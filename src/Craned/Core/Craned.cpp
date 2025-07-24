@@ -30,9 +30,7 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <algorithm>
 #include <array>
-#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CgroupManager.h"
@@ -42,6 +40,7 @@
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -606,45 +605,24 @@ void ParseConfig(int argc, char** argv) {
                 g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
                                                     kDefaultContainerTempDir);
 
-            if (container_config["RuntimeBin"]) {
-              g_config.Container.RuntimeBin =
-                  container_config["RuntimeBin"].as<std::string>();
+            if (container_config["RuntimeEndpoint"]) {
+              g_config.Container.RuntimeEndpoint =
+                  container_config["RuntimeEndpoint"].as<std::string>();
             } else {
-              CRANE_ERROR("RuntimeBin is not configured.");
+              CRANE_ERROR("RuntimeEndpoint is not configured.");
               std::exit(1);
             }
 
-            if (container_config["RuntimeState"]) {
-              g_config.Container.RuntimeState =
-                  container_config["RuntimeState"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeState is not configured.");
-              std::exit(1);
-            }
+            // In most cases, ImageEndpoint is the same as RuntimeEndpoint.
+            g_config.Container.ImageEndpoint =
+                YamlValueOr(container_config["ImageEndpoint"],
+                            g_config.Container.RuntimeEndpoint.string());
 
-            if (container_config["RuntimeKill"]) {
-              g_config.Container.RuntimeKill =
-                  container_config["RuntimeKill"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeKill is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeDelete"]) {
-              g_config.Container.RuntimeDelete =
-                  container_config["RuntimeDelete"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeDelete is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeRun"]) {
-              g_config.Container.RuntimeRun =
-                  container_config["RuntimeRun"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeRun is not configured.");
-              std::exit(1);
-            }
+            // Prepend unix protocol
+            g_config.Container.RuntimeEndpoint =
+                fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
+            g_config.Container.ImageEndpoint =
+                fmt::format("unix://{}", g_config.Container.ImageEndpoint);
           }
         }
 
@@ -652,10 +630,10 @@ void ParseConfig(int argc, char** argv) {
           const auto& plugin_config = config["Plugin"];
           g_config.Plugin.Enabled =
               YamlValueOr<bool>(plugin_config["Enabled"], false);
-          g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          YamlValueOr(plugin_config["PlugindSockPath"],
-                                      kDefaultPlugindUnixSockPath));
+          g_config.Plugin.PlugindSockPath = fmt::format(
+              "unix://{}", g_config.CraneBaseDir /
+                               YamlValueOr(plugin_config["PlugindSockPath"],
+                                           kDefaultPlugindUnixSockPath));
         }
       }
     } catch (YAML::BadFile& e) {
@@ -983,6 +961,13 @@ void GlobalVariableInit() {
        !CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
+  }
+
+  // If Container is enabled, connect to CRI runtime.
+  if (g_config.Container.Enabled) {
+    g_cri_client = std::make_unique<cri::CriClient>();
+    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                     g_config.Container.ImageEndpoint);
   }
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);

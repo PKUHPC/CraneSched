@@ -25,6 +25,7 @@
 #include "EmbeddedDbClient.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
+#include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -147,7 +148,7 @@ bool TaskScheduler::Init() {
 
       bool mark_task_as_failed = false;
 
-      if (task->type != crane::grpc::Batch) {
+      if (task->type == crane::grpc::Interactive) {
         CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
         mark_task_as_failed = true;
       }
@@ -1636,6 +1637,177 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
+crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
+    const crane::grpc::AttachInContainerTaskRequest& request) {
+  crane::grpc::AttachInContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If tty is requested, tty must be enabled when creating the container
+    if (request.tty() && !std::get<ContainerMetaInTask>(task->meta).tty) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "TTY not enabled when creating this container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If stdin is requested, stdin must be enabled when creating the container
+    if (request.stdin() && !std::get<ContainerMetaInTask>(task->meta).stdin) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "STDIN not opened when creating this container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to attach.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
+      response.set_ok(false);
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
+    response.set_ok(false);
+    return response;
+  }
+
+  return stub->AttachInContainerTask(request);
+}
+
+crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
+    const crane::grpc::ExecInContainerTaskRequest& request) {
+  crane::grpc::ExecInContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // Validate command
+    if (request.command_size() == 0) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Command cannot be empty.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to exec.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
+      response.set_ok(false);
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
+    response.set_ok(false);
+    return response;
+  }
+
+  return stub->ExecInContainerTask(request);
+}
+
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(
     const crane::grpc::CreateReservationRequest& request) {
   crane::grpc::CreateReservationReply reply;
@@ -3004,6 +3176,14 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
+  bool no_task_types_constraint = request->filter_task_types().empty();
+  std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
+                                         request->filter_task_types().end());
+  auto task_rng_filter_task_type = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_types_constraint || req_task_types.contains(task.type);
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
@@ -3020,6 +3200,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
+                      ranges::views::filter(task_rng_filter_task_type) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -3613,7 +3794,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
-  if (task->type == crane::grpc::Batch) {
+  if (task->IsBatch()) {
     auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
     if (!batch_meta->has_open_mode_append())
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
