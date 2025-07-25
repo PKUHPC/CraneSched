@@ -1,6 +1,3 @@
-
-add_subdirectory(RpcService)
-
 add_executable(cranectld
         CtldPublicDefs.h
         DbClient.h
@@ -40,10 +37,8 @@ target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
 
-        RpcService
         Utility_PublicHeader
         Utility_PluginClient
-        Utility_VaultClient
         uvw
 
         cxxopts
