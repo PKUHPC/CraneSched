@@ -34,9 +34,17 @@ struct SystemRelInfo {
   std::string version;
 };
 
+struct NodeSpecInfo {
+  std::string name;
+  int64_t cpu;
+  double memory_gb;
+};
+
 namespace util {
 
 namespace os {
+
+bool GetNodeInfo(NodeSpecInfo* info);
 
 bool DeleteFile(std::string const& p);
 

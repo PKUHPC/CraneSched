@@ -30,6 +30,37 @@
 
 namespace util::os {
 
+bool GetNodeInfo(NodeSpecInfo* info) {
+  if (!info) return false;
+
+  char hostname[HOST_NAME_MAX + 1];
+  if (gethostname(hostname, sizeof(hostname)) != 0) {
+    int err = errno;
+    fmt::print(stderr, "gethostname failed: errno={} ({})\n", err,
+               strerror(err));
+    return false;
+  }
+
+  int64_t cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  cpu_count = std::max<int64_t>(cpu_count, 1);
+
+  struct sysinfo sys_info{};
+  if (sysinfo(&sys_info) != 0) {
+    int err = errno;
+    fmt::print(stderr, "sysinfo failed: errno={} ({})\n", err, strerror(err));
+    return false;
+  }
+
+  uint64_t mem_bytes = sys_info.totalram * sys_info.mem_unit;
+  double mem_gb = static_cast<double>(mem_bytes) / (1024 * 1024 * 1024);
+
+  info->name = hostname;
+  info->cpu = cpu_count;
+  info->memory_gb = mem_gb;
+
+  return true;
+}
+
 bool DeleteFile(std::string const& p) {
   std::error_code ec;
   bool ok = std::filesystem::remove(p, ec);

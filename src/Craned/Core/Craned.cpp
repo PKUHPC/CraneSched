@@ -21,10 +21,10 @@
 
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <ctime>
 #include <cxxopts.hpp>
 
@@ -39,32 +39,6 @@
 
 using Craned::g_config;
 using Craned::Partition;
-
-// Print CPU cores and memory information of current node similar to `slurmd
-// -C`.
-static void PrintNodeInfo() {
-  char hostname[HOST_NAME_MAX + 1];
-  if (gethostname(hostname, sizeof(hostname)) != 0) {
-    perror("gethostname");
-    std::exit(1);
-  }
-
-  long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
-  if (cpu_count < 1) cpu_count = 1;
-
-  struct sysinfo info{};
-  if (sysinfo(&info) != 0) {
-    perror("sysinfo");
-    std::exit(1);
-  }
-  uint64_t mem_bytes = static_cast<uint64_t>(info.totalram) * info.mem_unit;
-  uint64_t mem_gb = mem_bytes / (1024 * 1024 * 1024);  // Convert to GB
-
-  fmt::print("Nodes:\n");
-  fmt::print("  - name: {}\n", hostname);
-  fmt::print("    cpu: {}\n", cpu_count);
-  fmt::print("    memory: {}G\n", mem_gb);
-}
 
 void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   using util::YamlValueOr;
@@ -129,7 +103,18 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (parsed_args.count("nodeinfo") > 0) {
-    PrintNodeInfo();
+    // Print CPU cores and memory information of current node.
+    // Similar to `slurmd -C`.
+    NodeSpecInfo node;
+    if (!util::os::GetNodeInfo(&node)) {
+      fmt::print(stderr, "Failed to get node info. Exiting...\n");
+      std::exit(1);
+    }
+
+    fmt::print("Nodes:\n");
+    fmt::print("  - name: {}\n", node.name);
+    fmt::print("    cpu: {}\n", node.cpu);
+    fmt::print("    memory: {:.2f}G\n", node.memory_gb);
     std::exit(0);
   }
 

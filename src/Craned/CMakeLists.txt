@@ -1,2 +1,2 @@
-add_subdirectory(Craned)
+add_subdirectory(Core)
 add_subdirectory(Supervisor)
