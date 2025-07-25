@@ -99,21 +99,16 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
   grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-  pem_key_cert_pair.cert_chain = certs.ServerCertContent;
-  pem_key_cert_pair.private_key = certs.ServerKeyContent;
+  pem_key_cert_pair.cert_chain = certs.CertContent;
+  pem_key_cert_pair.private_key = certs.KeyContent;
 
   grpc::SslServerCredentialsOptions ssl_opts;
-  // pem_root_certs is actually the certificate of server side rather than
-  // CA certificate. CA certificate is not needed.
-  // Since we use the same cert/key pair for both cranectld/craned,
-  // pem_root_certs is set to the same certificate.
-  ssl_opts.pem_root_certs = certs.ServerCertContent;
+  ssl_opts.pem_root_certs = certs.CaContent;
   ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
   ssl_opts.client_certificate_request =
-      GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+      GRPC_SSL_REQUEST_CLIENT_CERTIFICATE_AND_VERIFY;
 
-  builder->AddListeningPort(listen_addr_port,
-                            grpc::SslServerCredentials(ssl_opts));
+  builder->AddListeningPort(listen_addr_port, grpc::SslServerCredentials(ssl_opts));
 }
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
@@ -135,9 +130,9 @@ void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
-                            const TlsCertificates& certs) {
+                            const std::string& domain_suffix) {
   args->SetSslTargetNameOverride(
-      fmt::format("{}.{}", hostname, certs.DomainSuffix));
+      fmt::format("{}.{}", hostname, domain_suffix));
 }
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
@@ -165,9 +160,9 @@ static void SetSslCredOpts(grpc::SslCredentialsOptions* opts,
   // CA certificate. CA certificate is not needed.
   // Since we use the same cert/key pair for both cranectld/craned,
   // pem_root_certs is set to the same certificate.
-  opts->pem_root_certs = certs.ServerCertContent;
-  opts->pem_cert_chain = certs.ServerCertContent;
-  opts->pem_private_key = certs.ServerKeyContent;
+  opts->pem_root_certs = certs.CertContent;
+  opts->pem_cert_chain = certs.CertContent;
+  opts->pem_private_key = certs.KeyContent;
 }
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
@@ -183,23 +178,23 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs) {
+    const TlsCertificates& certs, const std::string& domain_suffix) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
   std::string target =
-      fmt::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
+      fmt::format("{}.{}:{}", hostname, domain_suffix, port);
   return grpc::CreateChannel(target, grpc::SslCredentials(ssl_opts));
 }
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const grpc::ChannelArguments& args) {
+    const TlsCertificates& certs, const std::string& domain_suffix, const grpc::ChannelArguments& args) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
   std::string target =
-      fmt::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
+      fmt::format("{}.{}:{}", hostname, domain_suffix, port);
   return grpc::CreateCustomChannel(target, grpc::SslCredentials(ssl_opts),
                                    args);
 }

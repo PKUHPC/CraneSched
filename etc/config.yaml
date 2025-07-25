@@ -12,10 +12,14 @@ CraneBaseDir: /var/crane/
 
 # Tls settings
 UseTls: false
-ServerCertFilePath: /etc/crane/server.crt
-ServerKeyFilePath: /etc/crane/server.key
-CaCertFilePath: /etc/crane/ca.crt
-DomainSuffix: riley.local
+SSL:
+  InternalCertFilePath: /etc/crane/tls/internal.pem
+  InternalKeyFilePath: /etc/crane/tls/internal.key
+  ExternalCertFilePath: /etc/crane/tls/external.pem
+  ExternalKeyFilePath: /etc/crane/tls/external.key
+  ExternalCaFilePath: /etc/crane/tls/external_ca.pem
+  #  Nodes: "cn[15-18]"
+  DomainSuffix: riley.local
 
 # Ctld settings
 # the listening address of control machine
