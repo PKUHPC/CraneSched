@@ -422,68 +422,64 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
   return crc;
 }
 
-std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem) {
+std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
   // Load the certificate content into a BIO (memory buffer).
-  BIO *bio = BIO_new_mem_buf(cert_pem.data(), cert_pem.size());
-  if (!bio) return std::unexpected(false);
+  std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),  &BIO_free);
+  if (!bio) {
+    CRANE_ERROR("Failed to create BIO");
+    return std::nullopt;
+  }
 
   // Read a PEM-formatted certificate.
-  X509 *cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+  std::unique_ptr<X509, decltype(&X509_free)> cert(PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
   if (!cert) {
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to parse PEM certificate");
+    return std::nullopt;
   }
 
   // Retrieve Subject information.
-  X509_NAME *subject = X509_get_subject_name(cert);
+  X509_NAME *subject = X509_get_subject_name(cert.get());
   if (!subject) {
-    X509_free(cert);
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to get subject name");
+    return std::nullopt;
   }
 
   char cn[256];
   int len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn, sizeof(cn));
   if (len <= 0) {
-    X509_free(cert);
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to get common name");
+    return std::nullopt;
   }
 
-  ASN1_INTEGER *serial = X509_get_serialNumber(cert);
+  ASN1_INTEGER *serial = X509_get_serialNumber(cert.get());
   if (!serial) {
-    X509_free(cert);
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to get serial number");
+    return std::nullopt;
   }
 
-  BIGNUM *bn = ASN1_INTEGER_to_BN(serial, nullptr);
+  std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
   if (!bn) {
-    X509_free(cert);
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to convert serial to BIGNUM");
+    return std::nullopt;
   }
 
-  char *hex = BN_bn2hex(bn);
+  char *hex = BN_bn2hex(bn.get());
   if (!hex) {
-    BN_free(bn);
-    X509_free(cert);
-    BIO_free(bio);
-    return std::unexpected(false);
+    CRANE_ERROR("Failed to convert serial to hex");
+    return std::nullopt;
   }
+
   std::string serial_number = std::string(hex);
   std::regex re("(.{2})");
   serial_number = std::regex_replace(serial_number, re, "$1:");
-  serial_number.pop_back();  // remove the last colon
+  if (!serial_number.empty())
+    serial_number.pop_back();  // remove the last colon
 
-  std::transform(serial_number.begin(), serial_number.end(),
+  std::ranges::transform(serial_number,
                  serial_number.begin(), ::tolower);
 
   // free the memory
   OPENSSL_free(hex);
-  BN_free(bn);
-  X509_free(cert);
-  BIO_free(bio);
 
   return CertPair{cn, serial_number};
 }

@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
+#include "Security/VaultClient.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -1200,7 +1201,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
   if (!op_user->serial_number.empty())
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
 
-  std::string common_name = std::format("{}.{}", uid, g_config.DomainSuffix);
+  std::string common_name = std::format("{}.{}", uid, g_config.ListenConf.tls_config.DomainSuffix);
   auto sign_response =
       g_vault_client->Sign(csr_content, common_name, alt_names);
   if (!sign_response)
@@ -1212,7 +1213,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      op_user->name, "serial_number",
                                      sign_response->serial_number);
-      };
+  };
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback)) {
@@ -1221,7 +1222,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
 
   m_user_map_[op_user->name]->serial_number = sign_response->serial_number;
 
-  CRANE_DEBUG("The user {} successfully signed the certificate.",
+  CRANE_INFO("The user {} successfully signed the certificate.",
               op_user->name);
 
   return sign_response->certificate;
@@ -1270,14 +1271,14 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!p_target_user->serial_number.empty() &&
       !g_vault_client->RevokeCert(p_target_user->serial_number)) {
     return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
-  }
+      }
 
   // Save the serial number in the database.
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      p_target_user->name, "serial_number", "");
-      };
+  };
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback))

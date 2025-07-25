@@ -23,6 +23,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -1649,6 +1650,85 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::SignUserCertificate(
+    grpc::ServerContext *context,
+    const crane::grpc::SignUserCertificateRequest *request,
+    crane::grpc::SignUserCertificateResponse *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (!g_config.ListenConf.tls_config.AllowedNodes.empty()) {
+    std::string client_address = context->peer();
+    std::vector<std::string> str_list = absl::StrSplit(client_address, ":");
+    std::string hostname;
+    bool resolve_result = false;
+    if (str_list[0] == "ipv4") {
+      ipv4_t addr;
+      if (!crane::StrToIpv4(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv4 address: {}", str_list[1]);
+      } else {
+        resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
+      }
+    } else {
+      ipv6_t addr;
+      if (!crane::StrToIpv6(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv6 address: {}", str_list[1]);
+      } else {
+        resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
+      }
+    }
+
+    // Parse hostname or hostname.DomainSuffix.
+    std::vector<std::string> name_list = absl::StrSplit(hostname, ".");
+    if (!resolve_result ||
+        !g_config.ListenConf.tls_config.AllowedNodes.contains(name_list[0])) {
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
+      return grpc::Status::OK;
+        }
+  }
+
+  auto result = g_account_manager->SignUserCertificate(
+      request->uid(), request->csr_content(), request->alt_names());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+  } else {
+    response->set_ok(true);
+    response->set_certificate(result.value());
+    response->set_external_certificate(
+        g_config.ListenConf.tls_config.ExternalCerts.CertContent);
+  }
+
+  return grpc::Status::OK;
+}
+
+// TODO: Add a check for certificate validity for some methods
+std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
+    const grpc::ServerContext *context, uint32_t uid) {
+  if (!g_config.ListenConf.UseTls) return std::nullopt;
+
+  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
+  if (cert.empty()) return "Certificate is empty";
+
+  std::string certificate = std::string(cert[0].data(), cert[0].size());
+
+  auto result = util::ParseCertificate(certificate);
+  if (!result) return "Certificate is invalid";
+
+  if (!g_vault_client->IsCertAllowed(result.value().second))
+    return "Certificate has expired";
+
+  std::vector<std::string> cn_parts = absl::StrSplit(result.value().first, '.');
+  if (cn_parts.empty() || cn_parts[0].empty())
+    return "Certificate is invalid";
+
+  if (static_cast<uint32_t>(std::stoul(cn_parts[0])) != uid)
+    return "Uid mismatch";
+
+  return std::nullopt;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
 
@@ -1686,7 +1766,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.Certs);
+                                        listen_conf.tls_config.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);

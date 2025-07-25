@@ -23,7 +23,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
-#include "crane/VaultClient.h"
+#include "Security/VaultClient.h"
 
 namespace Ctld {
 

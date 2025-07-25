@@ -99,6 +99,6 @@ std::string GenerateCommaSeparatedString(const int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
 
-std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem);
+std::optional<CertPair> ParseCertificate(const std::string &cert_pem);
 
 }  // namespace util

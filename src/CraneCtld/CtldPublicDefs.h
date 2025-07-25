@@ -92,7 +92,13 @@ struct Config {
     std::string CraneCtldForInternalListenPort;
 
     bool UseTls{false};
-    TlsCertificates Certs;
+    struct TlsCertsConfig {
+      TlsCertificates InternalCerts;
+      TlsCertificates ExternalCerts;
+      std::unordered_set<std::string> AllowedNodes;
+      std::string DomainSuffix;
+    };
+    TlsCertsConfig tls_config;
   };
   CraneCtldListenConf ListenConf;
 
@@ -610,6 +616,8 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+  // TODO: add to ad
+  std::string serial_number;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

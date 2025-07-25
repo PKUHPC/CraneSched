@@ -875,7 +875,8 @@ message SignUserCertificateResponse {
 }
 
 message ResetUserCredentialRequest {
-  repeated string user_list = 1;
+  uint32 uid = 1;
+  repeated string user_list = 2;
 }
 
 message ResetUserCredentialReply {
@@ -935,6 +936,9 @@ service CraneCtld {
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
+
+  /* RPCS called from PKI request */
+  rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 }
 
 service CraneCtldForInternal {

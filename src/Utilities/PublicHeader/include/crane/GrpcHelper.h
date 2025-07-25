@@ -23,11 +23,12 @@
 #include <spdlog/fmt/bundled/format.h>
 
 struct TlsCertificates {
-  std::string DomainSuffix;
-  std::string ServerCertFilePath;
-  std::string ServerCertContent;
-  std::string ServerKeyFilePath;
-  std::string ServerKeyContent;
+  std::string CertFilePath;
+  std::string CertContent;
+  std::string KeyFilePath;
+  std::string KeyContent;
+  std::string CaFilePath;
+  std::string CaContent;
 };
 
 std::string_view GrpcConnStateStr(grpc_connectivity_state state);
@@ -72,7 +73,7 @@ void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
-                            const TlsCertificates& certs);
+                            const std::string& domain_suffix);
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
     const std::string& socket_addr);
@@ -90,8 +91,9 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs);
+    const TlsCertificates& certs, const std::string& domain_suffix);
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const grpc::ChannelArguments& args);
+    const TlsCertificates& certs, const std::string& domain_suffix,
+    const grpc::ChannelArguments& args);
