@@ -785,4 +785,3 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
   return lhs.device_map <= rhs.device_map &&
          lhs.allocatable_res <= rhs.allocatable_res;
 }
-
