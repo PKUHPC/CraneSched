@@ -20,6 +20,7 @@
 
 #include <cerrno>
 
+#include "CranedPublicDefs.h"
 #include "crane/String.h"
 namespace Craned {
 
@@ -43,14 +44,14 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   SetGrpcClientKeepAliveChannelArgs(&channel_args);
-  // Todo: Use cfored listen config
-  if (g_config.ListenConf.UseTls) {
+
+  // TODO: superviser use CforedListenConf
+  if (g_config.ListenConf.UseTls)
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
-  } else {
+        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts, g_config.ListenConf.DomainSuffix);
+  else
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
-  }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = crane::grpc::CraneForeD::NewStub(m_cfored_channel_);

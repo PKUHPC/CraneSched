@@ -20,10 +20,12 @@
 
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"

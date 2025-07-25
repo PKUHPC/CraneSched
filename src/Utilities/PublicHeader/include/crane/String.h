@@ -20,10 +20,13 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <charconv>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <list>
@@ -42,6 +45,9 @@ template <typename T = std::string, typename YamlNode, typename DefaultType>
 T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
   return node ? node.template as<T>() : default_value;
 }
+
+using CertPair = std::pair<std::string,   // CN
+                           std::string>;  // serial number
 
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
@@ -89,5 +95,7 @@ std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
+
+std::optional<CertPair> ParseCertificate(const std::string &cert_pem);
 
 }  // namespace util

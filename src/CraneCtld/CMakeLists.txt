@@ -39,7 +39,6 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
-
         uvw
 
         cxxopts
