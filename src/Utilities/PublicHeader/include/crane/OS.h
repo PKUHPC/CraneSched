@@ -42,9 +42,6 @@ namespace os {
 
 bool DeleteFile(std::string const& p);
 
-bool SaveFile(std::string const& p, std::string const& content,
-              mode_t permissions);
-
 bool CreateFolders(std::string const& p);
 
 bool CreateFoldersForFile(std::string const& p);
