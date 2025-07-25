@@ -44,13 +44,11 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   SetGrpcClientKeepAliveChannelArgs(&channel_args);
-  // Todo: Use cfored listen config
+
+  // TODO: superviser use CforedListenConf
   if (g_config.ListenConf.UseTls)
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort,
-        g_config.ListenConf.TlsCerts.CranedTlsCerts,
-        g_config.ListenConf.TlsCerts.CforedClientTlsCerts,
-        g_config.DomainSuffix);
+        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts, g_config.ListenConf.DomainSuffix);
   else
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
