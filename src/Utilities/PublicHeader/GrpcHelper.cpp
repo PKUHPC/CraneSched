@@ -91,6 +91,7 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
                             grpc::InsecureServerCredentials());
 }
 
+// TODO: internal and external must be separate
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
