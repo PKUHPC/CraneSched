@@ -491,12 +491,12 @@ class TaskScheduler {
   CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
-  void TaskStatusChangeWithReasonAsync(uint32_t task_id,
+  void StepStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string>&& reason) {
-    // Todo: Add reason implementation here!
+    // TODO: Add reason implementation here!
     TaskStatusChangeAsync(task_id, craned_index, new_status, exit_code);
   }
 

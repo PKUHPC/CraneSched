@@ -32,7 +32,9 @@
 #  define CRANE_VERSION_STRING "Unknown"
 #endif
 
+using job_id_t = uint32_t;
 using task_id_t = uint32_t;
+using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
@@ -43,6 +45,9 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
+
+constexpr const char* kLogPattern =
+    "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
 inline const char* const kDefaultHost = "0.0.0.0";
 
@@ -73,6 +78,11 @@ inline const char* const kDefaultCranedForPamUnixSockPath =
     "craned/craned_pam.sock";
 inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
+
+inline const char* const kDefaultContainerTempDir = "craned/container";
+
+inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
+inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
@@ -481,23 +491,3 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
-
-struct JobToD {
-  JobToD() = default;
-  JobToD(const JobToD& spce) = default;
-  explicit JobToD(const crane::grpc::JobToD& job_to_d);
-  JobToD(task_id_t job_id, uid_t uid, const ResourceInNode& res_in_node,
-         const CranedId& execution_node);
-
-  /**
-   * @brief set grpc struct,will move res_in_node field
-   * @param job_to_d grpc job_spce to set
-   */
-  void SetJobToD(crane::grpc::JobToD* job_to_d) const;
-  task_id_t job_id;
-  uid_t uid;
-  crane::grpc::ResourceInNode res_in_node;
-  std::string exec_node;
-  // Recovered on start,no need to apply res limit.
-  bool recovered{false};
-};

@@ -1386,9 +1386,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     // condition will occur.
     g_craned_keeper->Shutdown();
 
-    p_server->Shutdown(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
-    g_ctld_for_internal_server->Shutdown();
+    auto ddl = std::chrono::seconds(1);
+    p_server->Shutdown(std::chrono::system_clock::now() + ddl);
+    g_internal_server->ShutdownWithin(ddl);
   });
   signal_waiting_thread.detach();
 

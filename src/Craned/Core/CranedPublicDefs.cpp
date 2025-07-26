@@ -16,16 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-syntax = "proto3";
+#include "CranedPublicDefs.h"
 
-package crane.grpc.subprocess;
-option go_package = "/protos/subprocess";
-
-message CanStartMessage {
-  bool ok = 1;
-  uint32 x11_port = 2;
-}
-
-message ChildProcessReady {
-  bool ok = 1;
-}
+namespace Craned {}  // namespace Craned

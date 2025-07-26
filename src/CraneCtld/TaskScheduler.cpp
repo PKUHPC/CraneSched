@@ -110,8 +110,7 @@ bool TaskScheduler::Init() {
                 task->TaskId());
           }
 
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+          ok = g_embedded_db_client->PurgeEndedTasks({task_db_id});
           if (!ok) {
             CRANE_ERROR(
                 "PurgeEndedTasks failed for task #{} when recovering "
@@ -166,7 +165,7 @@ bool TaskScheduler::Init() {
       } else {
         // If a batch task failed to requeue the task into pending queue due to
         // insufficient resource or other reasons or the task is an interactive
-        // task, Mark it as FAILED and move it to the ended queue.
+        // task , Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
@@ -603,31 +602,7 @@ void TaskScheduler::ScheduleThread_() {
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
 
-        // Task execute on all node, otherwise on the first node
-        bool launch_on_all_nodes;
-        if (task->type == crane::grpc::Batch) {
-          // For cbatch tasks whose --node > 1,
-          // only execute the command at the first allocated node.
-          launch_on_all_nodes = false;
-        } else {
-          const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-          if (meta.interactive_type == crane::grpc::Calloc)
-            // For calloc tasks we still need to execute a dummy empty task to
-            // set up a timer.
-            launch_on_all_nodes = false;
-          else {
-            // For crun tasks we need to execute tasks on all allocated
-            // nodes.
-
-            // Crun task with pty only launch on first node
-            if (task->TaskToCtld().interactive_meta().pty())
-              launch_on_all_nodes = false;
-            else
-              launch_on_all_nodes = true;
-          }
-        }
-
-        if (launch_on_all_nodes) {
+        if (task->ShouldLaunchOnAllNodes()) {
           for (auto const& craned_id : task->CranedIds())
             task->executing_craned_ids.emplace_back(craned_id);
         } else
@@ -657,16 +632,12 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<JobToD>> craned_cgroup_map;
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        for (CranedId const& craned_id : task->CranedIds()) {
-          JobToD job(task->TaskId(), task->uid,
-                     task->AllocatedRes().at(craned_id),
-                     task->executing_craned_ids.front());
-          craned_cgroup_map[craned_id].emplace_back(std::move(job));
-        }
+        for (CranedId const& craned_id : task->CranedIds())
+          craned_cgroup_map[craned_id].push_back(task->GetJobToD(craned_id));
       }
 
       Mutex thread_pool_mtx;
@@ -676,18 +647,18 @@ void TaskScheduler::ScheduleThread_() {
       absl::BlockingCounter bl(craned_cgroup_map.size());
       for (auto&& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
-        auto& cgroup_specs = iter.second;
+        auto& job_to_d_vec = iter.second;
 
         g_thread_pool->detach_task([&]() {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
-                      cgroup_specs.size(), craned_id);
+                      job_to_d_vec.size(), craned_id);
           if (stub == nullptr || stub->Invalid()) {
             bl.DecrementCount();
             return;
           }
 
-          auto err = stub->CreateCgroupForTasks(cgroup_specs);
+          auto err = stub->CreateCgroupForJobs(job_to_d_vec);
           if (err == CraneErrCode::SUCCESS) {
             bl.DecrementCount();
             return;
@@ -696,8 +667,8 @@ void TaskScheduler::ScheduleThread_() {
           thread_pool_mtx.Lock();
 
           failed_craned_set.emplace(craned_id);
-          for (const auto& spec : cgroup_specs)
-            failed_task_id_set.emplace(spec.job_id);
+          for (const auto& job_to_d : job_to_d_vec)
+            failed_task_id_set.emplace(job_to_d.job_id());
 
           thread_pool_mtx.Unlock();
 
@@ -767,12 +738,15 @@ void TaskScheduler::ScheduleThread_() {
           craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(task.get());
       }
 
-      HashMap<CranedId, crane::grpc::ExecuteTasksRequest>
+      HashMap<CranedId, crane::grpc::ExecuteStepsRequest>
           craned_exec_requests_map;
       for (auto& [craned_id, tasks_raw_ptrs] :
            craned_task_to_exec_raw_ptrs_map) {
-        craned_exec_requests_map[craned_id] =
-            CranedStub::NewExecuteTasksRequests(craned_id, tasks_raw_ptrs);
+        crane::grpc::ExecuteStepsRequest req;
+        for (TaskInCtld* task : tasks_raw_ptrs) {
+          req.mutable_tasks()->Add(task->GetTaskToD(craned_id));
+        }
+        craned_exec_requests_map.emplace(craned_id, std::move(req));
       }
 
       // Move tasks into running queue.
@@ -825,7 +799,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // TODO: Refactor here! Add filter chain for post-scheduling stage.
       absl::Time post_sched_time_point = absl::Now();
-      for (auto const& [craned_id, _] : craned_exec_requests_map) {
+      for (auto const& craned_id :
+           craned_exec_requests_map | std::ranges::views::keys) {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
@@ -841,7 +816,7 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
-        std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(tasks);
+        std::vector<task_id_t> failed_task_ids = stub->ExecuteSteps(tasks);
         for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
       }
@@ -913,7 +888,7 @@ void TaskScheduler::ScheduleThread_() {
             // If the craned is down, just ignore it.
             if (stub == nullptr || stub->Invalid()) return;
 
-            CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups_to_release);
+            CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups_to_release);
             if (err != CraneErrCode::SUCCESS)
               CRANE_ERROR(
                   "Failed to Release cgroup RPC for {} tasks on Node {}",
@@ -1045,7 +1020,7 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
   for (const CranedId& craned_id : craned_ids) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeTaskTimeLimit(task_id, secs);
+      CraneErrCode err = stub->ChangeJobTimeLimit(task_id, secs);
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
                     task_id, craned_id);
@@ -1821,7 +1796,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
                       absl::StrJoin(task_ids_to_cancel, ","));
           auto stub = g_craned_keeper->GetCranedStub(id);
           if (stub && !stub->Invalid())
-            stub->TerminateTasks(task_ids_to_cancel);
+            stub->TerminateSteps(task_ids_to_cancel);
         });
   }
 
@@ -2080,23 +2055,23 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
-  absl::BlockingCounter bl(craned_cgroups_map.size());
+  std::latch counter(craned_cgroups_map.size());
   for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-    g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+    g_thread_pool->detach_task([&counter, &craned_id, &cgroups]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
-        CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);
+        CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                       cgroups.size(), craned_id);
         }
       }
-      bl.DecrementCount();
+      counter.count_down();
     });
   }
-  bl.Wait();
+  counter.wait();
 
   ProcessFinalTasks_(task_raw_ptr_vec);
 }
@@ -2555,7 +2530,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
             craned_index)) {
-      // Todo: Performance issue! We can use cached available node set
+      // TODO: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
       continue;
     }

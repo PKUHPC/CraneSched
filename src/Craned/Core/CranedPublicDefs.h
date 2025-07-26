@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -32,8 +34,18 @@ inline constexpr uint64_t kRegisterOperationTimeoutMs = 5'000;
 using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;
 
+enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
+
+template <typename Cb, typename... Args>
+  requires std::invocable<Cb, Args...>
+struct CallbackWrapper {
+  Cb cb;
+  CallbackInvokeMode mode;
+  bool consume;
+};
+
 struct TaskStatusChangeQueueElem {
-  task_id_t task_id{};
+  task_id_t step_id{};
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
@@ -62,12 +74,29 @@ struct Config {
     std::string UnixSocketListenAddr;
     std::string UnixSocketForPamListenAddr;
   };
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+    std::string RuntimeState;
+    std::string RuntimeRun;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+  };
+  ContainerConfig Container;
 
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct SupervisorConfig {
+    std::filesystem::path Path;
+    std::string DebugLevel;
+    std::filesystem::path LogDir;
+  };
+  SupervisorConfig Supervisor;
 
   CranedListenConf ListenConf;
   bool CompressedRpc{};
@@ -94,7 +123,6 @@ struct Config {
     absl::Time SystemBootTime;
     std::vector<crane::NetworkInterface> NetworkInterfaces;
   };
-
   CranedMeta CranedMeta;
 
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;

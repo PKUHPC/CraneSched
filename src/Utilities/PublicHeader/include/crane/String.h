@@ -29,7 +29,6 @@
 #include <list>
 #include <ranges>
 #include <string>
-#include <vector>
 
 #include "crane/PublicHeader.h"
 

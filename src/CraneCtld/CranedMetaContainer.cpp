@@ -217,7 +217,6 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
-
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;

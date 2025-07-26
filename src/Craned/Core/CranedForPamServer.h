@@ -36,20 +36,20 @@ class CranedForPamServiceImpl : public crane::grpc::CranedForPam::Service {
  public:
   CranedForPamServiceImpl() = default;
 
-  grpc::Status QueryTaskIdFromPortForward(
+  grpc::Status QueryStepFromPortForward(
       grpc::ServerContext *context,
-      const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
-      crane::grpc::QueryTaskIdFromPortForwardReply *response) override;
+      const crane::grpc::QueryStepFromPortForwardRequest *request,
+      crane::grpc::QueryStepFromPortForwardReply *response) override;
 
   grpc::Status MigrateSshProcToCgroup(
       grpc::ServerContext *context,
       const crane::grpc::MigrateSshProcToCgroupRequest *request,
       crane::grpc::MigrateSshProcToCgroupReply *response) override;
 
-  grpc::Status QueryTaskEnvVariablesForward(
+  grpc::Status QuerySshStepEnvVariablesForward(
       grpc::ServerContext *context,
-      const ::crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
-      crane::grpc::QueryTaskEnvVariablesForwardReply *response) override;
+      const ::crane::grpc::QuerySshStepEnvVariablesForwardRequest *request,
+      crane::grpc::QuerySshStepEnvVariablesForwardReply *response) override;
 };
 
 class CranedForPamServer {

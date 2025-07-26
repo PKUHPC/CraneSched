@@ -31,8 +31,6 @@ Checks: >
   -hicpp-vararg,
   -hicpp-braces-around-statements,
 
-WarningsAsErrors: "*"
-
 CheckOptions:
   - { key: readability-identifier-naming.GlobalVariableCase,         value: lower_case }
   - { key: readability-identifier-naming.GlobalVariablePrefix,       value: "g_" }
@@ -65,6 +63,10 @@ CheckOptions:
   - { key: readability-identifier-naming.PublicMemberCase,           value: lower_case }
   - { key: readability-identifier-naming.PublicMemberPrefix,         value: "" }
   - { key: readability-identifier-naming.PublicMemberSuffix,         value: "" }
+
+  - { key: readability-identifier-naming.ProtectedMemberCase,        value: lower_case }
+  - { key: readability-identifier-naming.ProtectedMemberPrefix,      value: "m_" }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,      value: "_" }
 
   - { key: readability-identifier-naming.PrivateMemberCase,          value: lower_case }
   - { key: readability-identifier-naming.PrivateMemberPrefix,        value: "m_" }

@@ -68,22 +68,23 @@ class CranedStub {
     m_token_.reset();
   }
 
-  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequests(
+  static crane::grpc::ExecuteStepsRequest NewExecuteTasksRequests(
       const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
 
-  std::vector<task_id_t> ExecuteTasks(
-      const crane::grpc::ExecuteTasksRequest &request);
+  std::vector<task_id_t> ExecuteSteps(
+      const crane::grpc::ExecuteStepsRequest &request);
 
-  CraneErrCode CreateCgroupForTasks(std::vector<JobToD> const &jobs);
+  CraneErrCode CreateCgroupForJobs(
+      std::vector<crane::grpc::JobToD> const &jobs);
 
-  CraneErrCode ReleaseCgroupForTasks(
+  CraneErrCode ReleaseCgroupForJobs(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
-  CraneErrCode TerminateTasks(const std::vector<task_id_t> &task_ids);
+  CraneErrCode TerminateSteps(const std::vector<task_id_t> &task_ids);
 
-  CraneErrCode TerminateOrphanedTasks(const std::vector<task_id_t> &task_ids);
+  CraneErrCode TerminateOrphanedSteps(const std::vector<task_id_t> &task_ids);
 
-  CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
+  CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);

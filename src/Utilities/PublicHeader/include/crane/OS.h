@@ -34,11 +34,21 @@ struct SystemRelInfo {
   std::string version;
 };
 
+struct NodeSpecInfo {
+  std::string name;
+  int64_t cpu;
+  double memory_gb;
+};
+
 namespace util {
 
 namespace os {
 
+bool GetNodeInfo(NodeSpecInfo* info);
+
 bool DeleteFile(std::string const& p);
+
+bool DeleteFolders(std::string const& p);
 
 bool CreateFolders(std::string const& p);
 
@@ -46,6 +56,8 @@ bool CreateFoldersForFile(std::string const& p);
 
 bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
                             mode_t permissions);
+
+bool SetFdNonBlocking(int fd);
 
 // Close file descriptors within [fd_begin, fd_end)
 void CloseFdRange(int fd_begin, int fd_end);

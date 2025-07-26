@@ -29,14 +29,17 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <dirent.h>
-
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
+#include "JobManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
 namespace Craned {
+
+#ifdef CRANE_ENABLE_BPF
+BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
+#endif
 
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
@@ -183,39 +186,38 @@ CraneErrCode CgroupManager::Init() {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
   }
-
-  RmAllJobCgroups_();
-  if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-#ifdef CRANE_ENABLE_BPF
-    bpf_runtime_info.RmBpfDeviceMap();
-#endif
-  }
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CgroupManager::Recover(
-    const std::unordered_set<task_id_t> &running_job_ids) {
-  std::set<task_id_t> cg_running_job_ids{};
+CraneErrCode CgroupManager::TryToRecoverCgForJobs(
+    std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld) {
+  std::set<job_id_t> rn_job_ids_with_cg;
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
-    cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
-    cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
-    cg_running_job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
+    // FIXME: What about the case of inconsistency?
+
+    rn_job_ids_with_cg.merge(
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::CPU_CONTROLLER));
+    rn_job_ids_with_cg.merge(
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::MEMORY_CONTROLLER));
+    rn_job_ids_with_cg.merge(
+        GetJobIdsFromCgroupV1_(CgConstant::Controller::DEVICES_CONTROLLER));
+
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_running_job_ids = GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath);
+    rn_job_ids_with_cg =
+        GetJobIdsFromCgroupV2_(CgConstant::kRootCgroupFullPath);
+
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
-        GetJobBpfMapCgroupsV2(CgConstant::kRootCgroupFullPath);
+        GetJobBpfMapCgroupsV2_(CgConstant::kRootCgroupFullPath);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
       return CraneErrCode::ERR_EBPF;
     }
 
     for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (running_job_ids.contains(job_id)) continue;
-      CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
+      if (rn_jobs_from_ctld.contains(job_id)) continue;
+
+      CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
       for (const auto &key : bpf_key_vec) {
         if (bpf_map__delete_elem(bpf_runtime_info.BpfDevMap(), &key,
                                  sizeof(BpfKey), BPF_ANY) < 0) {
@@ -230,23 +232,38 @@ CraneErrCode CgroupManager::Recover(
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
   }
-  for (auto job_id : cg_running_job_ids) {
-    if (!running_job_ids.contains(job_id)) {
-      CRANE_DEBUG("Removing cgroup for job #{}.", job_id);
-      std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
-      if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true);
-      } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true);
-      }
-      if (cg_unique_ptr == nullptr) {
-        CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
-      }
-      cg_unique_ptr->Destroy();
+
+  for (job_id_t job_id : rn_job_ids_with_cg) {
+    if (rn_jobs_from_ctld.contains(job_id)) {
+      JobInD &job = rn_jobs_from_ctld.at(job_id);
+
+      CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
+      job.cgroup = AllocateAndGetJobCgroup(job, true);
+      continue;
     }
+
+    CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
+    std::unique_ptr<CgroupInterface> cg_ptr;
+
+    if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1)
+      cg_ptr = CreateOrOpen_(job_id, CG_V1_REQUIRED_CONTROLLERS,
+                             NO_CONTROLLER_FLAG, true);
+    else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2)
+      cg_ptr = CreateOrOpen_(job_id, CG_V2_REQUIRED_CONTROLLERS,
+                             NO_CONTROLLER_FLAG, true);
+    else
+      std::unreachable();
+
+    if (!cg_ptr) {
+      // FIXME: Clean incomplete cgroups!
+      CRANE_ERROR("Failed to reopen cgroup of job #{}.", job_id);
+      continue;
+    }
+
+    cg_ptr->KillAllProcesses();
+    cg_ptr->Destroy();
   }
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -395,8 +412,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 
   // Try to fill in the struct cgroup from /proc, if it exists.
   bool has_cgroup = retrieve;
-  if (retrieve && (ECGROUPNOTEXIST == cgroup_get_cgroup(native_cgroup))) {
-    has_cgroup = false;
+  // FIXME: Might have problem here for remaining cgroups.
+  if (retrieve && ECGROUPNOTEXIST == cgroup_get_cgroup(native_cgroup)) {
     cgroup_free(&native_cgroup);
     return nullptr;
   }
@@ -504,9 +521,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
-    std::string slash = "/";
     std::filesystem::path cgroup_full_path =
-        CgConstant::kRootCgroupFullPath + slash + cgroup_string;
+        CgConstant::kRootCgroupFullPath / cgroup_string;
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_string,
                   std::strerror(errno));
@@ -523,25 +539,24 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 }
 
 std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
-    const JobToD &job) {
-  crane::grpc::ResourceInNode res = job.res_in_node;
-  bool recover = job.recovered;
+    const JobInD &job, bool recovery_mode) {
+  const crane::grpc::ResourceInNode &res = job.job_to_d.res();
   auto job_id = job.job_id;
 
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    cg_unique_ptr = CreateOrOpen_(job_id, CgV1PreferredControllers,
-                                  NO_CONTROLLER_FLAG, recover);
+    cg_unique_ptr = CreateOrOpen_(job_id, CG_V1_REQUIRED_CONTROLLERS,
+                                  NO_CONTROLLER_FLAG, recovery_mode);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_unique_ptr = CreateOrOpen_(job_id, CgV2PreferredControllers,
-                                  NO_CONTROLLER_FLAG, recover);
+    cg_unique_ptr = CreateOrOpen_(job_id, CG_V2_REQUIRED_CONTROLLERS,
+                                  NO_CONTROLLER_FLAG, recovery_mode);
   } else {
     CRANE_WARN("cgroup version is not supported.");
     return nullptr;
   }
 
   // If just recover cgroup, do not trigger plugin and apply res limit.
-  if (recover) {
+  if (recovery_mode) {
 #ifdef CRANE_ENABLE_BPF
     if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
       return cg_unique_ptr;
@@ -572,7 +587,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
@@ -597,7 +612,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
   return job_ids;
 }
 
-std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
     const std::string &root_cgroup_path) {
   std::set<task_id_t> job_ids;
   try {
@@ -616,7 +631,7 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
   return job_ids;
 }
 
-std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
+std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
     const std::string &root_cgroup_path) {
   std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
@@ -642,40 +657,12 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
   return cg_job_id_map;
 }
 
-void CgroupManager::RmAllJobCgroups_() {
-  std::set<task_id_t> job_ids;
-  if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::CPU_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::MEMORY_CONTROLLER));
-    job_ids.merge(
-        GetJobIdsFromCgroupV1(CgConstant::Controller::DEVICES_CONTROLLER));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    job_ids.merge(GetJobIdsFromCgroupV2(CgConstant::kRootCgroupFullPath));
-    for (auto job_id : job_ids) {
-      CreateOrOpen_(job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true)
-          ->Destroy();
-    }
-  } else {
-    CRANE_WARN("cgroup version is not supported.");
-  }
-  if (!job_ids.empty()) {
-    CRANE_INFO("Removed all cgroups for jobs: [{}].",
-               absl::StrJoin(job_ids, ", "));
-  }
-}
-
 #ifdef CRANE_ENABLE_BPF
 
 CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
+CgroupManager::GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
-      GetCgJobIdMapCgroupV2(root_cgroup_path);
+      GetCgJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
@@ -1200,7 +1187,6 @@ void BpfRuntimeInfo::CloseBpfObj() {
     bpf_obj_ = nullptr;
     bpf_prog_ = nullptr;
     dev_map_ = nullptr;
-    RmBpfDeviceMap();
   }
 }
 
@@ -1390,7 +1376,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const JobToD &cg_spec) {
+bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
   if (!g_cg_mgr->bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
@@ -1414,7 +1400,7 @@ bool CgroupV2::RecoverFromCgSpec(const JobToD &cg_spec) {
 
   std::unordered_set<std::string> all_request_slots;
   for (const auto &[_, type_slots_map] :
-       cg_spec.res_in_node.dedicated_res_in_node().name_type_map()) {
+       job.job_to_d.res().dedicated_res_in_node().name_type_map()) {
     for (const auto &[__, slots] : type_slots_map.type_slots_map())
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
@@ -1519,7 +1505,7 @@ void CgroupV2::Destroy() {
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  g_cg_mgr->bpf_runtime_info.CloseBpfObj();
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
 }
 

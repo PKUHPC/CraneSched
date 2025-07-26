@@ -188,7 +188,7 @@ class CtldServer {
    */
   explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
 
-  inline void Wait() { m_server_->Wait(); }
+  void Wait() { m_server_->Wait(); }
 
  private:
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;

@@ -30,6 +30,37 @@
 
 namespace util::os {
 
+bool GetNodeInfo(NodeSpecInfo* info) {
+  if (!info) return false;
+
+  char hostname[HOST_NAME_MAX + 1];
+  if (gethostname(hostname, sizeof(hostname)) != 0) {
+    int err = errno;
+    fmt::print(stderr, "gethostname failed: errno={} ({})\n", err,
+               strerror(err));
+    return false;
+  }
+
+  int64_t cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  cpu_count = std::max<int64_t>(cpu_count, 1);
+
+  struct sysinfo sys_info{};
+  if (sysinfo(&sys_info) != 0) {
+    int err = errno;
+    fmt::print(stderr, "sysinfo failed: errno={} ({})\n", err, strerror(err));
+    return false;
+  }
+
+  uint64_t mem_bytes = sys_info.totalram * sys_info.mem_unit;
+  double mem_gb = static_cast<double>(mem_bytes) / (1024 * 1024 * 1024);
+
+  info->name = hostname;
+  info->cpu = cpu_count;
+  info->memory_gb = mem_gb;
+
+  return true;
+}
+
 bool DeleteFile(std::string const& p) {
   std::error_code ec;
   bool ok = std::filesystem::remove(p, ec);
@@ -37,6 +68,17 @@ bool DeleteFile(std::string const& p) {
   if (!ok) CRANE_ERROR("Failed to remove file {}: {}", p, ec.message());
 
   return ok;
+}
+
+bool DeleteFolders(std::string const& p) {
+  std::error_code ec;
+  std::filesystem::remove_all(p, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to remove folder {}: {}", p, ec.message());
+    return false;
+  }
+
+  return true;
 }
 
 bool CreateFolders(std::string const& p) {
@@ -73,7 +115,7 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
     dir_path = dir_path.parent_path();
 
     fs::path current_dir;
-    for (auto& part : dir_path) {
+    for (const auto& part : dir_path) {
       current_dir /= part;
       if (!fs::exists(current_dir)) {
         if (mkdir(current_dir.c_str(), permissions) != 0) {
@@ -97,7 +139,17 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
   return true;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 int GetFdOpenMax() { return static_cast<int>(sysconf(_SC_OPEN_MAX)); }
+
+bool SetFdNonBlocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    return false;
+  }
+  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  return true;
+}
 
 void CloseFdRange(int fd_begin, int fd_end) {
   int fd_max = std::min(GetFdOpenMax(), fd_end);
@@ -137,7 +189,7 @@ void SetCloseOnExecFromFd(int fd_begin) {
   }
 }
 
-bool SetMaxFileDescriptorNumber(unsigned long num) {
+bool SetMaxFileDescriptorNumber(uint64_t num) {
   struct rlimit rlim{};
   rlim.rlim_cur = num;
   rlim.rlim_max = num;
@@ -147,26 +199,33 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
 
 bool CheckProxyEnvironmentVariable() {
   bool has_proxy = false;
+
+  // NOLINTBEGIN
   const char* HTTP_PROXY = std::getenv("HTTP_PROXY");
   if (HTTP_PROXY) {
     has_proxy = true;
     CRANE_WARN("HTTP_PROXY is set to {}", HTTP_PROXY);
   }
+
   const char* http_proxy = std::getenv("http_proxy");
   if (http_proxy) {
     has_proxy = true;
     CRANE_WARN("http_proxy is set to {}", http_proxy);
   }
+
   const char* HTTPS_PROXY = std::getenv("HTTPS_PROXY");
   if (HTTPS_PROXY) {
     has_proxy = true;
     CRANE_WARN("HTTPS_PROXY is set to {}", HTTPS_PROXY);
   }
+
   const char* https_proxy = std::getenv("https_proxy");
   if (https_proxy) {
     has_proxy = true;
     CRANE_WARN("https_proxy is set to {}", https_proxy);
   }
+  // NOLINTEND
+
   return has_proxy;
 }
 
@@ -174,12 +233,14 @@ bool GetSystemReleaseInfo(SystemRelInfo* info) {
 #if defined(__linux__) || defined(__unix__)
   utsname utsname_info{};
 
+  // NOLINTBEGIN(hicpp-no-array-decay)
   if (uname(&utsname_info) != -1) {
     info->name = utsname_info.sysname;
     info->release = utsname_info.release;
     info->version = utsname_info.version;
     return true;
   }
+  // NOLINTEND(hicpp-no-array-decay)
 
   return false;
 
@@ -190,7 +251,7 @@ bool GetSystemReleaseInfo(SystemRelInfo* info) {
 
 absl::Time GetSystemBootTime() {
 #if defined(__linux__) || defined(__unix__)
-  struct sysinfo system_info;
+  struct sysinfo system_info{};
   if (sysinfo(&system_info) != 0) {
     CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
     return {};

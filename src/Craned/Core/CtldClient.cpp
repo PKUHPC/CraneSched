@@ -20,7 +20,7 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
-#include "TaskManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/GrpcHelper.h"
 
 namespace Craned {
@@ -37,11 +37,6 @@ void CtldClientStateMachine::SetActionReadyCb(std::function<void()>&& cb) {
 void CtldClientStateMachine::SetActionDisconnectedCb(
     std::function<void()>&& cb) {
   m_action_disconnected_cb_ = std::move(cb);
-}
-
-void CtldClientStateMachine::SetActionConfigureCb(
-    std::function<void(ConfigureArg const&)>&& cb) {
-  m_action_configure_cb_ = std::move(cb);
 }
 
 void CtldClientStateMachine::SetActionRegisterCb(
@@ -65,7 +60,6 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
       request.token() == m_reg_token_.value()) {
     m_state_ = State::CONFIGURING;
     ActionConfigure_(request);
-
     return true;
   } else {
     if (!request.ok())
@@ -86,8 +80,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
 }
 
 void CtldClientStateMachine::EvConfigurationDone(
-    std::optional<std::set<task_id_t>> lost_jobs,
-    std::optional<std::set<task_id_t>> lost_tasks) {
+    std::optional<std::set<job_id_t>> lost_jobs,
+    std::optional<std::set<step_id_t>> lost_steps) {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
@@ -97,10 +91,10 @@ void CtldClientStateMachine::EvConfigurationDone(
     return;
   }
 
-  if (lost_jobs.has_value() && lost_tasks.has_value()) {
+  if (lost_jobs.has_value() && lost_steps.has_value()) {
     m_state_ = State::REGISTERING;
     ActionRegister_(std::move(lost_jobs.value()),
-                    std::move(lost_tasks.value()));
+                    std::move(lost_steps.value()));
   } else {
     m_state_ = State::REQUESTING_CONFIG;
     ActionRequestConfig_();
@@ -182,23 +176,33 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 }
 
 void CtldClientStateMachine::ActionConfigure_(
-    const crane::grpc::ConfigureCranedRequest& configure_req) {
+    const crane::grpc::ConfigureCranedRequest& config_req) {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-  auto job_ids = configure_req.job_map() | std::ranges::views::keys |
-                 std::ranges::to<std::set<task_id_t>>();
-  auto task_ids = configure_req.job_tasks_map() | std::ranges::views::keys |
-                  std::ranges::to<std::set<task_id_t>>();
-  if (!job_ids.empty())
-    CRANE_TRACE("Recv ctld job: [{}],task: [{}]", absl::StrJoin(job_ids, ","),
-                absl::StrJoin(task_ids, ","));
 
-  g_thread_pool->detach_task([tok = m_reg_token_.value(),
-                              job_ids = std::move(job_ids),
-                              task_ids = std::move(task_ids), this] mutable {
-    m_action_configure_cb_(
-        {.token = tok, .job_ids = job_ids, .task_ids = task_ids});
-  });
+  if (config_req.job_map_size() != 0)
+    CRANE_TRACE(
+        "Recv ctld job: [{}],task: [{}]",
+        absl::StrJoin(config_req.job_map() | std::ranges::views::keys, ","),
+        absl::StrJoin(config_req.job_tasks_map() | std::ranges::views::keys,
+                      ","));
+
+  absl::MutexLock lk(&m_cb_mutex_);
+  auto it = m_action_configure_cb_list_.begin();
+  while (it != m_action_configure_cb_list_.end()) {
+    auto& cb_wrapper = *it;
+    if (cb_wrapper.mode == CallbackInvokeMode::SYNC) {
+      cb_wrapper.cb({config_req});
+    } else {
+      g_thread_pool->detach_task(
+          [cb = cb_wrapper.cb, config_req] { cb({config_req}); });
+    }
+
+    if (cb_wrapper.consume)
+      it = m_action_configure_cb_list_.erase(it);
+    else
+      ++it;
+  }
 }
 
 void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
@@ -209,7 +213,7 @@ void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
   g_thread_pool->detach_task(
       [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] mutable {
         m_action_register_cb_(
-            {.token = tok, .lost_jobs = lost_jobs, .lost_tasks = lost_tasks});
+            {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_tasks});
       });
 }
 
@@ -227,10 +231,15 @@ void CtldClientStateMachine::ActionDisconnected_() {
   g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
 }
 
-CtldClient::~CtldClient() {
-  m_thread_stop_ = true;
+void CtldClient::Shutdown() {
+  m_stopping_ = true;
+  m_step_status_change_mtx_.Lock();
+  CRANE_INFO("Cleaning up status changes in CtldClient");
+  SendStatusChanges_();
+}
 
-  CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
+CtldClient::~CtldClient() {
+  CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
@@ -243,53 +252,55 @@ void CtldClient::Init() {
   g_ctld_client_sm->SetActionRequestConfigCb(
       [this](RegToken const& token) { RequestConfigFromCtld_(token); });
 
-  g_ctld_client_sm->SetActionConfigureCb(
+  g_ctld_client_sm->AddActionConfigureCb(
       [](CtldClientStateMachine::ConfigureArg const& arg) {
+        auto token = arg.req.token();
+        auto job_ids = arg.req.job_map() | std::ranges::views::keys |
+                       std::ranges::to<std::set<task_id_t>>();
+        auto step_ids = arg.req.job_tasks_map() | std::ranges::views::keys |
+                        std::ranges::to<std::set<task_id_t>>();
         CRANE_DEBUG("Configuring action for token {}.",
-                    ProtoTimestampToString(arg.token));
+                    ProtoTimestampToString(token));
 
         std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
         std::set<task_id_t> lost_jobs{};
         std::set<task_id_t> invalid_jobs{};
-        std::ranges::set_difference(arg.job_ids, exact_job_ids,
+        std::ranges::set_difference(job_ids, exact_job_ids,
                                     std::inserter(lost_jobs, lost_jobs.end()));
         std::ranges::set_difference(
-            exact_job_ids, arg.job_ids,
+            exact_job_ids, job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
 
-        std::set exact_task_ids = g_task_mgr->QueryRunningTasksAsync();
         std::set<task_id_t> lost_tasks{};
         std::set<task_id_t> invalid_tasks{};
+
+        std::set exact_step_ids = g_supervisor_keeper->GetRunningSteps();
         std::ranges::set_difference(
-            arg.task_ids, exact_task_ids,
+            step_ids, exact_step_ids,
             std::inserter(lost_tasks, lost_tasks.end()));
         std::ranges::set_difference(
-            exact_task_ids, arg.job_ids,
+            exact_step_ids, step_ids,
             std::inserter(invalid_tasks, invalid_tasks.end()));
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
         if (!invalid_tasks.empty()) {
           CRANE_DEBUG("Terminating orphaned tasks: [{}].",
                       absl::StrJoin(invalid_tasks, ","));
-          std::latch latch(invalid_tasks.size());
           for (auto task_id : invalid_tasks) {
-            g_thread_pool->detach_task([task_id, &latch] {
-              g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(task_id).wait();
-              latch.count_down();
-            });
+            g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(task_id);
           }
-          latch.wait();
         }
         if (!invalid_jobs.empty()) {
           CRANE_DEBUG("Freeing invalid jobs: [{}].",
                       absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(invalid_jobs);
         }
-      });
+      },
+      CallbackInvokeMode::ASYNC, false);
 
   g_ctld_client_sm->SetActionRegisterCb(
       [this](CtldClientStateMachine::RegisterArg const& arg) {
-        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_tasks);
+        CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
 
   AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });
@@ -338,18 +349,18 @@ void CtldClient::AddGrpcCtldDisconnectedCb(std::function<void()> cb) {
   m_on_ctld_disconnected_cb_chain_.push_back(std::move(cb));
 }
 
-void CtldClient::TaskStatusChangeAsync(
+void CtldClient::StepStatusChangeAsync(
     TaskStatusChangeQueueElem&& task_status_change) {
-  absl::MutexLock lock(&m_task_status_change_mtx_);
-  m_task_status_change_list_.emplace_back(std::move(task_status_change));
+  absl::MutexLock lock(&m_step_status_change_mtx_);
+  m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
-std::set<task_id_t> CtldClient::GetAllTaskStatusChangeId() {
-  absl::MutexLock lock(&m_task_status_change_mtx_);
-  return m_task_status_change_list_ |
+std::set<task_id_t> CtldClient::GetAllStepStatusChangeId() {
+  absl::MutexLock lock(&m_step_status_change_mtx_);
+  return m_step_status_change_list_ |
          std::ranges::views::transform(
              [](const TaskStatusChangeQueueElem& elem) {
-               return elem.task_id;
+               return elem.step_id;
              }) |
          std::ranges::to<std::set<task_id_t>>();
 }
@@ -370,15 +381,16 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   grpc::Status status =
       m_stub_->CranedTriggerReverseConn(&context, req, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+    CRANE_ERROR("Notify CranedConnected failed: {}, {}",
+                static_cast<int>(status.error_code()), status.error_message());
     return false;
   }
   return true;
 }
 
 bool CtldClient::CranedRegister_(RegToken const& token,
-                                 std::set<task_id_t> const& lost_jobs,
-                                 std::set<task_id_t> const& lost_tasks) {
+                                 std::set<job_id_t> const& lost_jobs,
+                                 std::set<step_id_t> const& lost_steps) {
   CRANE_DEBUG("Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
@@ -403,7 +415,7 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_meta->mutable_system_boot_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
   grpc_meta->mutable_lost_jobs()->Assign(lost_jobs.begin(), lost_jobs.end());
-  grpc_meta->mutable_lost_tasks()->Assign(lost_tasks.begin(), lost_tasks.end());
+  grpc_meta->mutable_lost_tasks()->Assign(lost_steps.begin(), lost_steps.end());
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
@@ -430,17 +442,17 @@ void CtldClient::AsyncSendThread_() {
   // Variables for grpc channel maintaining.
   grpc_connectivity_state prev_grpc_state{GRPC_CHANNEL_IDLE};
   grpc_connectivity_state grpc_state;
-  bool prev_connected = false, connected;
+  bool prev_connected = false, connected = false;
 
   // Variable for TaskStatusChange sending part.
   absl::Condition cond(
-      +[](decltype(m_task_status_change_list_)* queue) {
+      +[](decltype(m_step_status_change_list_)* queue) {
         return !queue->empty();
       },
-      &m_task_status_change_list_);
+      &m_step_status_change_list_);
 
   while (true) {
-    if (m_thread_stop_) break;
+    if (m_stopping_) break;
 
     grpc_state = m_ctld_channel_->GetState(true);
     connected = prev_grpc_state == GRPC_CHANNEL_READY;
@@ -478,63 +490,68 @@ void CtldClient::AsyncSendThread_() {
     // i.e. this thread is maintaining grpc channel and sending rpc at the same
     // time.
 
-    bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
+    bool has_msg = m_step_status_change_mtx_.LockWhenWithTimeout(
         cond, absl::Milliseconds(50));
     if (!has_msg) {
-      m_task_status_change_mtx_.Unlock();
-      continue;
+      m_step_status_change_mtx_.Unlock();
+    } else {
+      SendStatusChanges_();
     }
+  }
+}
 
-    std::list<TaskStatusChangeQueueElem> changes;
-    changes.splice(changes.begin(), std::move(m_task_status_change_list_));
-    m_task_status_change_mtx_.Unlock();
+void CtldClient::SendStatusChanges_() {
+  std::list<TaskStatusChangeQueueElem> changes;
+  changes.splice(changes.begin(), std::move(m_step_status_change_list_));
+  m_step_status_change_mtx_.Unlock();
 
-    while (!changes.empty()) {
-      grpc::ClientContext context;
-      crane::grpc::TaskStatusChangeRequest request;
-      crane::grpc::TaskStatusChangeReply reply;
-      grpc::Status status;
+  while (!changes.empty()) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(5));
+    crane::grpc::StepStatusChangeRequest request;
+    crane::grpc::StepStatusChangeReply reply;
+    grpc::Status status;
 
-      auto status_change = changes.front();
+    auto status_change = changes.front();
 
-      CRANE_TRACE("Sending TaskStatusChange for task #{}",
-                  status_change.task_id);
+    CRANE_TRACE("Sending TaskStatusChange for task #{}", status_change.step_id);
 
-      request.set_craned_id(m_craned_id_);
-      request.set_task_id(status_change.task_id);
-      request.set_new_status(status_change.new_status);
-      request.set_exit_code(status_change.exit_code);
-      if (status_change.reason.has_value())
-        request.set_reason(status_change.reason.value());
+    request.set_craned_id(m_craned_id_);
+    request.set_task_id(status_change.step_id);
+    request.set_new_status(status_change.new_status);
+    request.set_exit_code(status_change.exit_code);
+    if (status_change.reason.has_value())
+      request.set_reason(status_change.reason.value());
 
-      status = m_stub_->TaskStatusChange(&context, request, &reply);
-      if (!status.ok()) {
-        CRANE_ERROR(
-            "Failed to send TaskStatusChange: "
-            "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-            status_change.task_id, int(status_change.new_status),
-            status.error_message(), context.debug_error_string(),
-            int(status.error_code()));
+    status = m_stub_->StepStatusChange(&context, request, &reply);
+    if (!status.ok()) {
+      CRANE_ERROR(
+          "Failed to send TaskStatusChange: "
+          "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
+          status_change.step_id, static_cast<int>(status_change.new_status),
+          status.error_message(), context.debug_error_string(),
+          static_cast<int>(status.error_code()));
 
-        if (status.error_code() == grpc::UNAVAILABLE) {
-          // If some messages are not sent due to channel failure,
-          // put them back into m_task_status_change_list_
-          if (!changes.empty()) {
-            m_task_status_change_mtx_.Lock();
-            m_task_status_change_list_.splice(
-                m_task_status_change_list_.begin(), std::move(changes));
-            m_task_status_change_mtx_.Unlock();
-          }
-          // Sleep for a while to avoid too many retries.
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-          break;
-        } else
-          changes.pop_front();
-      } else {
-        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                    status_change.task_id, reply.ok());
+      if (status.error_code() == grpc::UNAVAILABLE) {
+        if (m_stopping_) return;
+        // If some messages are not sent due to channel failure,
+        // put them back into m_task_status_change_list_
+        if (!changes.empty()) {
+          m_step_status_change_mtx_.Lock();
+          m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
+                                            std::move(changes));
+          m_step_status_change_mtx_.Unlock();
+        }
+        // Sleep for a while to avoid too many retries.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        break;
+      } else
         changes.pop_front();
-      }
+    } else {
+      CRANE_TRACE("StepStatusChange for step #{} sent. reply.ok={}",
+                  status_change.step_id, reply.ok());
+      changes.pop_front();
     }
   }
 }

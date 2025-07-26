@@ -29,13 +29,13 @@
 
 #include <libcgroup.h>
 
-#include "crane/AtomicHashMap.h"
-
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>
 #endif
 
 namespace Craned {
+
+class JobInD;
 
 namespace CgConstant {
 
@@ -94,9 +94,8 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-inline const char *kTaskCgPathPrefix = "Crane_Task_";
-inline const char *kRootCgroupFullPath = "/sys/fs/cgroup";
-
+inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
+inline const std::filesystem::path kRootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -269,17 +268,17 @@ constexpr ControllerFlags operator|(
 constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
 // In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
-//  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
-//  handles this for us and no additional care needs to be taken.
+// and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
+// handles this for us and no additional care needs to be taken.
 constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-constexpr ControllerFlags CgV1PreferredControllers =
+constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER |
     CgConstant::Controller::MEMORY_CONTROLLER |
     CgConstant::Controller::DEVICES_CONTROLLER |
     CgConstant::Controller::BLOCK_CONTROLLER;
 
-constexpr ControllerFlags CgV2PreferredControllers =
+constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
     CgConstant::Controller::MEMORY_CONTORLLER_V2 |
     CgConstant::Controller::IO_CONTROLLER_V2;
@@ -419,7 +418,6 @@ class CgroupV2 : public CgroupInterface {
 #endif
 
   ~CgroupV2() override {}
-
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -455,8 +453,9 @@ class CgroupV2 : public CgroupInterface {
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
+
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const JobToD &cg_spec);
+  bool RecoverFromCgSpec(const JobInD &job);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -499,7 +498,13 @@ class CgroupManager {
 
   CraneErrCode Init();
 
-  CraneErrCode Recover(const std::unordered_set<task_id_t> &running_job_ids);
+  /**
+   * @brief Destroy cgroups which CraneCtld doesn't have records of
+   * corresponding running jobs and set `recovered` field for jobs with their
+   * cgroup created.
+   */
+  CraneErrCode TryToRecoverCgForJobs(
+      std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
   bool Mounted(CgConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
@@ -508,12 +513,13 @@ class CgroupManager {
   void ControllersMounted();
 
   /**
-   * \brief Allocate and return cgroup handle for job, should only called once
-   * per job.
+   * \brief Allocate and return cgroup handle for job, should only be called
+   * once per job.
    * \param job cgroup spec for job.
    * \return CgroupInterface ptr,null if error.
    */
-  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobToD &job);
+  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobInD &job,
+                                                           bool recovery_mode);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
@@ -521,12 +527,12 @@ class CgroupManager {
   CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid) const;
 
   void SetCgroupVersion(CgConstant::CgroupVersion v) { m_cg_version_ = v; }
-
   [[nodiscard]] CgConstant::CgroupVersion GetCgroupVersion() const {
     return m_cg_version_;
   }
+
 #ifdef CRANE_ENABLE_BPF
-  BpfRuntimeInfo bpf_runtime_info;
+  static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
   inline static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -541,20 +547,18 @@ class CgroupManager {
                             CgConstant::Controller controller, bool required,
                             bool has_cgroup, bool &changed_cgroup);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV1(
+  static std::set<task_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV2(
+  static std::set<task_id_t> GetJobIdsFromCgroupV2_(
       const std::string &root_cgroup_path);
 
-  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
+  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2_(
       const std::string &root_cgroup_path);
-
-  void RmAllJobCgroups_();
 
 #ifdef CRANE_ENABLE_BPF
   CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
+  GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path);
 #endif
 
   ControllerFlags m_mounted_controllers_;

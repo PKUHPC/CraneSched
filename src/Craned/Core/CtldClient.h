@@ -35,17 +35,28 @@ using grpc::Status;
 class CtldClientStateMachine {
  public:
   void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
+
   struct ConfigureArg {
-    RegToken token;
-    std::set<task_id_t> job_ids;
-    std::set<task_id_t> task_ids;
+    crane::grpc::ConfigureCranedRequest req;
   };
-  void SetActionConfigureCb(std::function<void(ConfigureArg const&)>&& cb);
+
+  template <typename ConfigureCb>
+    requires std::invocable<ConfigureCb, ConfigureArg const&>
+  void AddActionConfigureCb(ConfigureCb&& cb, CallbackInvokeMode invoke_mode,
+                            bool consume) {
+    using FuncType = std::function<void(ConfigureArg const&)>;
+
+    m_action_configure_cb_list_.emplace_back(
+        CallbackWrapper<FuncType, ConfigureArg const&>{
+            .cb = FuncType(std::forward<ConfigureCb>(cb)),
+            .mode = invoke_mode,
+            .consume = consume});
+  }
 
   struct RegisterArg {
     RegToken token;
-    std::set<task_id_t> lost_jobs;
-    std::set<task_id_t> lost_tasks;
+    std::set<job_id_t> lost_jobs;
+    std::set<step_id_t> lost_steps;
   };
 
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
@@ -54,8 +65,8 @@ class CtldClientStateMachine {
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
-  void EvConfigurationDone(std::optional<std::set<task_id_t>> lost_jobs,
-                           std::optional<std::set<task_id_t>> lost_tasks);
+  void EvConfigurationDone(std::optional<std::set<job_id_t>> lost_jobs,
+                           std::optional<std::set<step_id_t>> lost_steps);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
 
   // Grpc Channel events
@@ -92,18 +103,23 @@ class CtldClientStateMachine {
 
   // State Actions:
   void ActionRequestConfig_();
-  void ActionConfigure_(
-      const crane::grpc::ConfigureCranedRequest& configure_req);
+  void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
                        std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
   void ActionDisconnected_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
-  std::function<void(ConfigureArg const&)> m_action_configure_cb_;
+
+  std::list<CallbackWrapper<std::function<void(ConfigureArg const&)>,
+                            ConfigureArg const&>>
+      m_action_configure_cb_list_ ABSL_GUARDED_BY(m_cb_mutex_);
+
   std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
   std::function<void()> m_action_disconnected_cb_;
+
+  absl::Mutex m_cb_mutex_;
 
   State m_state_ ABSL_GUARDED_BY(m_mtx_) = State::DISCONNECTED;
 
@@ -117,6 +133,7 @@ class CtldClientStateMachine {
 class CtldClient {
  public:
   CtldClient() = default;
+  void Shutdown();
   ~CtldClient();
 
   CtldClient(CtldClient const&) = delete;
@@ -145,9 +162,9 @@ class CtldClient {
 
   void StartGrpcCtldConnection() { m_connection_start_notification_.Notify(); }
 
-  void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
+  void StepStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
-  [[nodiscard]] std::set<task_id_t> GetAllTaskStatusChangeId();
+  [[nodiscard]] std::set<step_id_t> GetAllStepStatusChangeId();
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
@@ -155,18 +172,20 @@ class CtldClient {
   bool RequestConfigFromCtld_(RegToken const& token);
 
   bool CranedRegister_(RegToken const& token,
-                       std::set<task_id_t> const& lost_jobs,
-                       std::set<task_id_t> const& lost_tasks);
+                       std::set<job_id_t> const& lost_jobs,
+                       std::set<step_id_t> const& lost_steps);
 
   void AsyncSendThread_();
 
-  absl::Mutex m_task_status_change_mtx_;
+  void SendStatusChanges_();
 
-  std::list<TaskStatusChangeQueueElem> m_task_status_change_list_
-      ABSL_GUARDED_BY(m_task_status_change_mtx_);
+  absl::Mutex m_step_status_change_mtx_;
+
+  std::list<TaskStatusChangeQueueElem> m_step_status_change_list_
+      ABSL_GUARDED_BY(m_step_status_change_mtx_);
 
   std::thread m_async_send_thread_;
-  std::atomic_bool m_thread_stop_{false};
+  std::atomic_bool m_stopping_{false};
 
   std::shared_ptr<Channel> m_ctld_channel_;
 
