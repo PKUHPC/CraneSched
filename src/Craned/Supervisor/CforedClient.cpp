@@ -334,7 +334,7 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   // Todo: Use cfored listen config
   if (g_config.CforedListenConf.UseTls) {
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort, g_config.CforedListenConf.TlsCerts);
+        cfored_name, kCforedDefaultPort, g_config.CforedListenConf.TlsCerts, g_config.CforedListenConf.DomainSuffix);
   } else {
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
