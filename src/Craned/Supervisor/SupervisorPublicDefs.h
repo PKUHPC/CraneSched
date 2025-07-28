@@ -40,6 +40,7 @@ struct Config {
   struct CforedListenConf {
     bool UseTls{false};
     TlsCertificates TlsCerts;
+    std::string DomainSuffix;
   };
   CforedListenConf CforedListenConf;
   struct ContainerConfig {
