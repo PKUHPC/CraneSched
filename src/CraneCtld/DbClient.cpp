@@ -703,6 +703,8 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       user->coordinator_accounts.emplace_back(acc.get_string().value);
     }
 
+    user->serial_number = user_view["serial_number"].get_string().value;
+
     for (auto&& account_to_attrs_map_item :
          user_view["account_to_attrs_map"].get_document().view()) {
       User::PartToAllowedQosMap temp;
@@ -733,22 +735,24 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
+                                    "coordinator_accounts",
+                                     "serial_number"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>, std::string>
       values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.serial_number};
   return DocumentConstructor_(fields, values);
 }
 
