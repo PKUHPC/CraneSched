@@ -854,6 +854,9 @@ void InitializeCtldGlobalVariables() {
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();
     if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
+  } else if (g_config.ListenConf.UseTls) {
+    CRANE_ERROR("[Security] TLS is enabled but Vault is not enabled.");
+    std::exit(1);
   }
 
   // Account manager must be initialized before Task Scheduler
