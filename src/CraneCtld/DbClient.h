@@ -101,6 +101,7 @@ class MongodbClient {
     ACCOUNT = 0,
     USER = 1,
     QOS = 2,
+    WCKEY = 3,
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
@@ -132,6 +133,7 @@ class MongodbClient {
 
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
+  bool InsertWckey(const Ctld::Wckey& new_wckey);
   bool InsertAccount(const Account& new_account);
   bool InsertQos(const Qos& new_qos);
 
@@ -173,6 +175,7 @@ class MongodbClient {
   };
 
   void SelectAllUser(std::list<User>* user_list);
+  void SelectAllWckey(std::list<Ctld::Wckey>* wckey_list);
   void SelectAllAccount(std::list<Account>* account_list);
   void SelectAllQos(std::list<Qos>* qos_list);
 
@@ -223,6 +226,8 @@ class MongodbClient {
     case EntityType::QOS:
       coll_name = m_qos_collection_name_;
       break;
+    case EntityType::WCKEY:
+      return true;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
@@ -238,7 +243,86 @@ class MongodbClient {
     return true;
   }
 
+  using FilterValue = std::variant<std::string, int32_t, int64_t, double, bool>;
+  using FilterFields = std::vector<std::pair<std::string, FilterValue>>;
+  template <typename T>
+  bool UpdateEntityOneByFields(EntityType type, const std::string& opt,
+                               const FilterFields& filter_fields,
+                               const std::string& key, const T& value) {
+    using bsoncxx::builder::basic::kvp;
+    std::string coll_name;
+    document filter, updateItem;
+
+    for (const auto& [fname, fvalue] : filter_fields) {
+      std::visit([&](auto&& arg) { filter.append(kvp(fname, arg)); }, fvalue);
+    }
+
+    if (opt == "$set") {
+      updateItem.append(kvp("$set", [&](sub_document subDocument) {
+        SubDocumentAppendItem_(subDocument, key, value);
+        subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+      }));
+    } else {
+      updateItem.append(
+          kvp(opt,
+              [&](sub_document subDocument) {
+                SubDocumentAppendItem_(subDocument, key, value);
+              }),
+          kvp("$set", [](sub_document subDocument) {
+            subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+          }));
+    }
+    CRANE_ERROR("dbtag val, filter {}, updateItem:{}",
+                bsoncxx::to_json(filter.view()),
+                bsoncxx::to_json(updateItem.view()));
+
+    switch (type) {
+    case EntityType::ACCOUNT:
+      coll_name = m_account_collection_name_;
+      break;
+    case EntityType::USER:
+      coll_name = m_user_collection_name_;
+      break;
+    case EntityType::QOS:
+      coll_name = m_qos_collection_name_;
+      break;
+    case EntityType::WCKEY:
+      coll_name = m_wckey_collection_name_;
+      break;
+    }
+
+    bsoncxx::stdx::optional<mongocxx::result::update> result =
+        (*GetClient_())[m_db_name_][coll_name].update_one(
+            *GetSession_(), filter.view(), updateItem.view());
+
+    if (!result || !result->modified_count()) {
+      std::string filter_str = "{";
+      for (size_t i = 0; i < filter_fields.size(); ++i) {
+        filter_str += std::visit(
+            [&](auto&& arg) -> std::string {
+              if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, bool>) {
+                return std::format("{}:{}", filter_fields[i].first,
+                                   arg ? "true" : "false");
+              } else {
+                return std::format("{}:{}", filter_fields[i].first, arg);
+              }
+            },
+            filter_fields[i].second);
+        if (i != filter_fields.size() - 1) filter_str += ", ";
+      }
+      filter_str += "}";
+
+      CRANE_ERROR(
+          "Update date in database fail(filter:{}, opt:{}, key:{}, value:{}, "
+          "{})",
+          filter_str, opt, key, value, result ? result->modified_count() : -1);
+      return false;
+    }
+    return true;
+  }
+
   bool UpdateUser(const User& user);
+  bool UpdateWckey(const Wckey& wckey);
   bool UpdateAccount(const Account& account);
   bool UpdateQos(const Qos& qos);
 
@@ -279,6 +363,11 @@ class MongodbClient {
 
   document UserToDocument_(const User& user);
 
+  bsoncxx::builder::basic::document WckeyToDocument_(const Ctld::Wckey& wckey);
+
+  void ViewToWckey_(const bsoncxx::document::view& wckey_view,
+                    Ctld::Wckey* wckey);
+
   void ViewToAccount_(const bsoncxx::document::view& account_view,
                       Account* account);
 
@@ -314,6 +403,7 @@ class MongodbClient {
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
+  const std::string m_wckey_collection_name_{"wckey_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;

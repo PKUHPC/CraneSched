@@ -468,7 +468,8 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
-  string wckey = 41;
+  bool wckey_valid = 41;
+  string wckey = 42;
 }
 
 message StepInfo {
@@ -693,6 +694,11 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+  ERR_INVALID_WCKEY = 85;
+  ERR_WCKEY_ALREADY_EXISTS = 86;
+  ERR_INVALID_CLUSTER = 87;
+  ERR_IS_DEFAULT_WCKEY = 88;
+  ERR_NO_DEFAULT_WCKEY = 89;
 }
 
 enum EntityType {
@@ -757,6 +763,11 @@ message UserInfo {
     repeated string qos_list = 2;
     string default_qos = 3;
   }
+   message Wckey {
+    string name = 1;
+    string cluster = 2;
+    bool is_def = 3;
+  }
 
   uint32 uid = 1;
   string name = 2;
@@ -765,6 +776,7 @@ message UserInfo {
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
   repeated string coordinator_accounts = 6;
   AdminLevel admin_level = 7;
+  repeated Wckey wckey_list = 8;
 }
 
 message QosInfo {
@@ -774,6 +786,13 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+}
+
+message WckeyInfo {
+  string name = 1;
+  string cluster = 2;
+  string user_name = 3;
+  bool is_def = 4;
 }
 
 message TimeInterval {

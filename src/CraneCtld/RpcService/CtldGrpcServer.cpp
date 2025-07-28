@@ -1055,6 +1055,32 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::AddWckey(
+    grpc::ServerContext *context, const crane::grpc::AddWckeyRequest *request,
+    crane::grpc::AddWckeyReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  Wckey wckey;
+  const crane::grpc::WckeyInfo *wckey_info = &request->wckey();
+
+  wckey.user_name = wckey_info->user_name();
+  wckey.cluster = wckey_info->cluster();
+  wckey.name = wckey_info->name();
+
+  CraneExpected<void> result =
+      g_account_manager->AddUserWckey(request->uid(), wckey);
+  if (result) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_code(result.error());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext* context,
     const crane::grpc::ModifyAccountRequest* request,
@@ -1285,6 +1311,26 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyWckey(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyWckeyRequest *request,
+    crane::grpc::ModifyWckeyReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  auto modify_res =
+      g_account_manager->ModifyWckey(request->uid(), request->name(),
+                                     request->cluster(), request->user_name());
+  if (modify_res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_code(modify_res.error());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryAccountInfoRequest* request,
@@ -1439,7 +1485,56 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
       for (auto&& coord : user.coordinator_accounts) {
         coordinated_accounts->Add()->assign(coord);
       }
+      auto *wckey_list = user_info->mutable_wckey_list();
+      for (const auto &[cluster, wckeys] : user.wckey_map) {
+        for (const auto &wckey_name : wckeys) {
+          auto *wckey = wckey_list->Add();
+          wckey->set_cluster(cluster);
+          wckey->set_name(wckey_name);
+          auto it = user.default_wckey_map.find(cluster);
+          if (it != user.default_wckey_map.end() && it->second == wckey_name) {
+            wckey->set_is_def(true);
+          } else {
+            wckey->set_is_def(false);
+          }
+        }
+      }
     }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryWckeyInfoRequest *request,
+    crane::grpc::QueryWckeyInfoReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  std::vector<Wckey> res_wckey_list;
+  auto res = g_account_manager->QueryAllWckeyInfo(request->uid());
+  if (!res) {
+    auto *new_err_record = response->mutable_rich_error_list()->Add();
+    new_err_record->set_code(res.error());
+    new_err_record->set_description("");
+  } else {
+    res_wckey_list = std::move(res.value());
+  }
+
+  if (response->rich_error_list().empty()) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+  }
+
+  for (const auto &wckey : res_wckey_list) {
+    auto *wckey_info = response->mutable_wckey_list()->Add();
+    wckey_info->set_name(wckey.name);
+    wckey_info->set_cluster(wckey.cluster);
+    wckey_info->set_user_name(wckey.user_name);
+    wckey_info->set_is_def(wckey.is_def);
   }
 
   return grpc::Status::OK;
@@ -1603,6 +1698,29 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteWckey(
+    grpc::ServerContext *context,
+    const crane::grpc::DeleteWckeyRequest *request,
+    crane::grpc::DeleteWckeyReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  auto res =
+      g_account_manager->DeleteWckey(request->uid(), request->name(),
+                                     request->cluster(), request->user_name());
+  if (!res) {
+    auto *new_err_record = response->mutable_rich_error();
+    new_err_record->set_description("");
+    new_err_record->set_code(res.error());
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
   }
 
   return grpc::Status::OK;

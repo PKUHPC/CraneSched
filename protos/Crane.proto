@@ -322,6 +322,16 @@ message AddQosReply {
   ErrCode code = 2;
 }
 
+message AddWckeyRequest {
+  uint32 uid = 1;
+  WckeyInfo wckey = 2;
+}
+
+message AddWckeyReply {
+  bool ok = 1;
+  ErrCode code = 2;
+}
+
 message DeleteAccountRequest {
   uint32 uid = 1;
   repeated string account_list = 2;
@@ -352,6 +362,18 @@ message DeleteQosRequest {
 message DeleteQosReply {
   bool ok = 1;
   repeated RichError rich_error_list = 2;
+}
+
+message DeleteWckeyRequest {
+  uint32 uid = 1;
+  string name = 2;
+  string cluster = 3;
+  string user_name = 4;
+}
+
+message DeleteWckeyReply {
+  bool ok = 1;
+  RichError rich_error = 2;
 }
 
 message ModifyAccountRequest {
@@ -396,6 +418,18 @@ message ModifyQosReply {
   ErrCode code = 2;
 }
 
+message ModifyWckeyRequest {
+  uint32 uid = 1;
+  string name = 2;
+  string cluster = 3;
+  string user_name = 4; 
+}
+
+message ModifyWckeyReply {
+  bool ok = 1;
+  ErrCode code = 2;
+}
+
 message QueryAccountInfoRequest {
   uint32 uid = 1;
   repeated string account_list = 2;
@@ -416,6 +450,17 @@ message QueryUserInfoRequest {
 message QueryUserInfoReply {
   bool ok = 1;
   repeated UserInfo user_list = 2;
+  repeated RichError rich_error_list = 3;
+}
+
+message QueryWckeyInfoRequest {
+  uint32 uid = 1;
+  repeated string wckey_list = 2;
+}
+
+message QueryWckeyInfoReply {
+  bool ok = 1;
+  repeated WckeyInfo wckey_list = 2;
   repeated RichError rich_error_list = 3;
 }
 
@@ -1031,18 +1076,22 @@ service CraneCtld {
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
   rpc AddUser(AddUserRequest) returns (AddUserReply);
   rpc AddQos(AddQosRequest) returns (AddQosReply);
+  rpc AddWckey(AddWckeyRequest) returns (AddWckeyReply);
 
   rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
   rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
+  rpc DeleteWckey(DeleteWckeyRequest) returns (DeleteWckeyReply);
 
   rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
   rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
   rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
+  rpc QueryWckeyInfo(QueryWckeyInfoRequest) returns (QueryWckeyInfoReply);
 
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
+  rpc ModifyWckey(ModifyWckeyRequest) returns (ModifyWckeyReply);
 
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 

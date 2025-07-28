@@ -647,21 +647,18 @@ void ParseConfig(int argc, char** argv) {
         auto val = config["AccountingStorageEnforce"].as<std::string>();
         std::unordered_set<std::string> items = util::SplitStr(val, ',');
         if (items.contains("wckeys")) g_config.MustNeedWckey = true;
-        // CRANE_ERROR("dbtag WCKey {}, set {}", g_config.MustNeedWckey, items);
       }
-      if (config["TrackWCKeyUser"]) {
-        auto val = config["TrackWCKeyUser"].as<std::string>();
+      if (config["TrackWCKey"]) {
+        auto val = config["TrackWCKey"].as<std::string>();
         val = util::ToLower(val);
         if (val == "yes") {
           g_config.WckeyValid = true;
         } else if (val == "no") {
           g_config.WckeyValid = false;
         } else {
-          CRANE_ERROR(
-              "Illegal TrackWCKeyUser val format, Please input yes or no");
+          CRANE_ERROR("Illegal TrackWCKey val format, Please input yes or no");
           std::exit(1);
         }
-        // CRANE_ERROR("dbtag WckeyValid {}", g_config.WckeyValid);
       }
 
       if (config["IgnoreConfigInconsistency"] &&
