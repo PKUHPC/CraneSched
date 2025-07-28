@@ -601,23 +601,34 @@ struct User {
     bool blocked;
   };
 
-  struct Wckey {
-    std::string cluster; /* cluster associated */
-    std::string user;    /* user name */
-  };
-
   /* Map<account name, item> */
   using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
+  using WckeyMap =
+      std::unordered_map<std::string, std::unordered_set<std::string>>;
 
   bool deleted = false;
   uid_t uid;
   std::string name;
   std::string default_account;
-  std::string default_wckey;
+  std::unordered_map<std::string, std::string> default_wckey_map;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  std::unordered_map<std::string /*wckey name*/, Wckey> wckey_map;
+  WckeyMap wckey_map;
+};
+
+struct Wckey {
+  bool deleted = false;
+  std::string name;
+  std::string cluster; /* cluster associated */
+  uid_t uid;
+  std::string user_name; /* user name */
+  bool is_def = false;
+
+  bool operator==(const Wckey& other) const {
+    return name == other.name && cluster == other.cluster && uid == other.uid &&
+           user_name == other.user_name && is_def == other.is_def;
+  }
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

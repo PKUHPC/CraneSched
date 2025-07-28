@@ -3055,12 +3055,6 @@ CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
-  if (g_config.MustNeedWckey && !task->MutableTaskToCtld()->has_wckey()) {
-    CRANE_ERROR("config wckey enabled, task wckey not set, err: {}",
-                CraneErrStr(CraneErrCode::ERR_INVALID_PARAM));
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-  }
-
   return {};
 }
 
@@ -3120,6 +3114,25 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
+  }
+
+  if (g_config.MustNeedWckey) {
+    if (task->MutableTaskToCtld()->has_wckey()) {
+      task->wckey = task->MutableTaskToCtld()->wckey();
+      auto wckey_scoped_ptr = g_account_manager->GetExistedWckeyInfo(
+          task->wckey, g_config.CraneClusterName, task->Username());
+      if (!wckey_scoped_ptr) {
+        CRANE_DEBUG("Wckey '{}' not found in the wckey database", task->wckey);
+        return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+      }
+    } else {
+      auto result = g_account_manager->GetExistedDefaultWckeyName(
+          g_config.CraneClusterName, task->Username());
+      if (!result) return std::unexpected(result.error());
+      task->wckey = "*" + result.value();
+    }
+  } else {
+    task->wckey = "";
   }
 
   return {};

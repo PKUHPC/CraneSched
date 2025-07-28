@@ -371,6 +371,7 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
+
       if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
         task->set_wckey(view["wckey"].get_string().value.data());
       } else {
@@ -403,6 +404,20 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt)
+    return true;
+  else
+    return false;
+}
+
+bool MongodbClient::InsertWckey(const Ctld::Wckey& new_wckey) {
+  document doc = WckeyToDocument_(new_wckey);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].insert_one(
           *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
@@ -452,6 +467,8 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
     break;
   case EntityType::QOS:
     coll = m_qos_collection_name_;
+  case EntityType::WCKEY:
+    coll = m_wckey_collection_name_;
     break;
   }
   document filter;
@@ -491,6 +508,16 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
   }
 }
 
+void MongodbClient::SelectAllWckey(std::list<Ctld::Wckey>* wckey_list) {
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].find({});
+  for (auto view : cursor) {
+    Ctld::Wckey wckey;
+    ViewToWckey_(view, &wckey);
+    wckey_list->emplace_back(wckey);
+  }
+}
+
 void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_account_collection_name_].find({});
@@ -521,6 +548,26 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
       (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
           *GetSession_(), filter.view(), setDocument.view());
+
+  if (!update_result || !update_result->modified_count()) {
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::UpdateWckey(const Wckey& wckey) {
+  document doc = WckeyToDocument_(wckey), set_document, filter;
+
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+  set_document.append(kvp("$set", doc));
+
+  filter.append(kvp("name", wckey.name));
+  filter.append(kvp("cluster", wckey.cluster));
+  filter.append(kvp("user_name", wckey.user_name));
+
+  auto update_result =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].update_one(
+          *GetSession_(), filter.view(), set_document.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -608,6 +655,32 @@ void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
             SubDocumentAppendItem_(itemDoc, "allowed_partition_qos_map",
                                    mapItem.second.allowed_partition_qos_map);
           }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<
+    std::unordered_map<std::string, std::string>>(
+    document& doc, const std::string& key,
+    const std::unordered_map<std::string, std::string>& value) {
+  doc.append(kvp(key, [&value](sub_document subdoc) {
+    for (const auto& [k, v] : value) {
+      subdoc.append(kvp(k, v));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<User::WckeyMap>(
+    document& doc, const std::string& key, const User::WckeyMap& value) {
+  doc.append(kvp(key, [&value](sub_document subdoc) {
+    for (const auto& [map_key, set_val] : value) {
+      subdoc.append(kvp(map_key, [&set_val](sub_array arr) {
+        for (const auto& v : set_val) {
+          arr.append(v);
+        }
+      }));
     }
   }));
 }
@@ -706,7 +779,34 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
-
+    user->default_wckey_map.clear();
+    if (auto elem = user_view["default_wckey_map"];
+        elem && elem.type() == bsoncxx::type::k_document) {
+      auto doc_view = elem.get_document().view();
+      for (auto&& kv : doc_view) {
+        std::string k = std::string(kv.key());
+        if (kv.type() == bsoncxx::type::k_utf8) {
+          user->default_wckey_map[k] = std::string(kv.get_string().value);
+        }
+      }
+    }
+    user->wckey_map.clear();
+    if (auto wckey_map_elem = user_view["wckey_map"];
+        wckey_map_elem && wckey_map_elem.type() == bsoncxx::type::k_document) {
+      auto wckey_map_doc = wckey_map_elem.get_document().view();
+      for (auto&& elem : wckey_map_doc) {
+        std::string map_key = std::string(elem.key());
+        if (elem.type() == bsoncxx::type::k_array) {
+          std::unordered_set<std::string> val_set;
+          for (auto&& arr_elem : elem.get_array().value) {
+            if (arr_elem.type() == bsoncxx::type::k_utf8) {
+              val_set.insert(std::string(arr_elem.get_string().value));
+            }
+          }
+          user->wckey_map[map_key] = std::move(val_set);
+        }
+      }
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -714,23 +814,54 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 9> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
+                                    "coordinator_accounts",
+                                    "default_wckey_map",
+                                    "wckey_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>,
+             std::unordered_map<std::string, std::string>, User::WckeyMap>
       values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.default_wckey_map,
+             user.wckey_map};
   return DocumentConstructor_(fields, values);
+}
+
+bsoncxx::builder::basic::document MongodbClient::WckeyToDocument_(
+    const Ctld::Wckey& wckey) {
+  std::array<std::string, 6> fields{
+      "deleted", "name", "cluster", "uid", "user_name", "is_def",
+  };
+  std::tuple<bool, std::string, std::string, int64_t, std::string, bool> values{
+      wckey.deleted,   wckey.name,
+      wckey.cluster,   static_cast<int64_t>(wckey.uid),
+      wckey.user_name, wckey.is_def};
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToWckey_(const bsoncxx::document::view& wckey_view,
+                                 Ctld::Wckey* wckey) {
+  try {
+    wckey->deleted = wckey_view["deleted"].get_bool().value;
+    wckey->name = wckey_view["name"].get_string().value;
+    wckey->cluster = wckey_view["cluster"].get_string().value;
+    wckey->uid = wckey_view["uid"].get_int64().value;
+    wckey->user_name = wckey_view["user_name"].get_string().value;
+    wckey->is_def = wckey_view["is_def"].get_bool().value;
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
+  }
 }
 
 void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
