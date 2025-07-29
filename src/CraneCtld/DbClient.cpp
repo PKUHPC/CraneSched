@@ -301,7 +301,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container      wckey
 
   try {
     for (auto view : cursor) {
@@ -1058,7 +1058,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container     wckey
 
   // clang-format off
   std::array<std::string, 39> fields{
