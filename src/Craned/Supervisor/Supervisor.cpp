@@ -167,6 +167,21 @@ void GlobalVariableInit() {
   signal(SIGALRM, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
 
+  std::filesystem::path oom_adj_file =
+      fmt::format("/proc/{}/oom_adj", getpid());
+
+  std::ofstream oom_adj_file_stream(oom_adj_file);
+  if (!oom_adj_file_stream.is_open()) {
+    std::exit(1);
+  }
+
+  oom_adj_file_stream << "-17";
+  oom_adj_file_stream.close();
+
+  if (oom_adj_file_stream.fail()) {
+    std::exit(1);
+  }
+
   PasswordEntry::InitializeEntrySize();
 
   g_thread_pool =
