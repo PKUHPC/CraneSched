@@ -763,11 +763,6 @@ message UserInfo {
     repeated string qos_list = 2;
     string default_qos = 3;
   }
-   message Wckey {
-    string name = 1;
-    string cluster = 2;
-    bool is_def = 3;
-  }
 
   uint32 uid = 1;
   string name = 2;
@@ -776,7 +771,6 @@ message UserInfo {
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
   repeated string coordinator_accounts = 6;
   AdminLevel admin_level = 7;
-  repeated Wckey wckey_list = 8;
 }
 
 message QosInfo {

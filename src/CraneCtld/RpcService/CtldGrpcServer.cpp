@@ -1485,20 +1485,6 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
       for (auto&& coord : user.coordinator_accounts) {
         coordinated_accounts->Add()->assign(coord);
       }
-      auto *wckey_list = user_info->mutable_wckey_list();
-      for (const auto &[cluster, wckeys] : user.wckey_map) {
-        for (const auto &wckey_name : wckeys) {
-          auto *wckey = wckey_list->Add();
-          wckey->set_cluster(cluster);
-          wckey->set_name(wckey_name);
-          auto it = user.default_wckey_map.find(cluster);
-          if (it != user.default_wckey_map.end() && it->second == wckey_name) {
-            wckey->set_is_def(true);
-          } else {
-            wckey->set_is_def(false);
-          }
-        }
-      }
     }
   }
 

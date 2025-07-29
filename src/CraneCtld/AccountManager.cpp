@@ -2242,9 +2242,6 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
           }
 
           g_db_client->UpdateEntityOne(
-              MongodbClient::EntityType::USER, "$addToSet", res_wckey.user_name,
-              "wckey_map." + res_wckey.cluster, res_wckey.name);
-          g_db_client->UpdateEntityOne(
               MongodbClient::EntityType::USER, "$set", res_wckey.user_name,
               "default_wckey_map." + res_wckey.cluster, res_wckey.name);
         } else {
@@ -2259,9 +2256,6 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
                 "is_def", false);
           }
 
-          g_db_client->UpdateEntityOne(
-              MongodbClient::EntityType::USER, "$addToSet", res_wckey.user_name,
-              "wckey_map." + res_wckey.cluster, res_wckey.name);
           g_db_client->UpdateEntityOne(
               MongodbClient::EntityType::USER, "$set", res_wckey.user_name,
               "default_wckey_map." + res_wckey.cluster, res_wckey.name);
@@ -2278,7 +2272,6 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
   m_wckey_map_[{res_wckey.name, res_wckey.cluster, res_wckey.user_name}] =
       std::make_unique<Wckey>(res_wckey);
 
-  m_user_map_[user->name]->wckey_map[res_wckey.cluster].insert(res_wckey.name);
   m_user_map_[user->name]->default_wckey_map[res_wckey.cluster] =
       res_wckey.name;
 
@@ -2432,8 +2425,6 @@ CraneExpected<void> AccountManager::DeleteWckey_(const std::string& name,
         g_db_client->UpdateEntityOneByFields(MongodbClient::EntityType::WCKEY,
                                              "$set", filter_fields, "deleted",
                                              true);
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$pull",
-                                     user_name, "wckey_map." + cluster, name);
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2441,7 +2432,6 @@ CraneExpected<void> AccountManager::DeleteWckey_(const std::string& name,
   }
 
   m_wckey_map_[{name, cluster, user_name}]->deleted = true;
-  m_user_map_[user_name]->wckey_map[cluster].erase(name);
 
   return {};
 }
