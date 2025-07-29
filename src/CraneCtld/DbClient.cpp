@@ -387,7 +387,7 @@ bool MongodbClient::FetchJobRecords(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_container  has_job_info nodename_list
-
+  // 40 wckey
   try {
     for (auto view : cursor) {
       auto* task = task_list->Add();
@@ -1696,7 +1696,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_container  has_job_info licenses_alloc
-  // 40 nodename_list
+  // 40 nodename_list wckey
 
   // clang-format off
   std::array<std::string, 41> fields{
