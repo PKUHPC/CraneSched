@@ -227,7 +227,10 @@ class MongodbClient {
       coll_name = m_qos_collection_name_;
       break;
     case EntityType::WCKEY:
-      return true;
+      CRANE_ERROR(
+          "UpdateEntityOne does not support WCKEY. Use UpdateEntityOneByFields "
+          "instead.");
+      return false;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
@@ -272,9 +275,6 @@ class MongodbClient {
             subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
           }));
     }
-    CRANE_ERROR("dbtag val, filter {}, updateItem:{}",
-                bsoncxx::to_json(filter.view()),
-                bsoncxx::to_json(updateItem.view()));
 
     switch (type) {
     case EntityType::ACCOUNT:

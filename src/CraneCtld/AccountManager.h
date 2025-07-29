@@ -157,7 +157,7 @@ class AccountManager {
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
-  CraneExpected<void> ModifyWckey(uint32_t uid, const std::string& name,
+  CraneExpected<void> ModifyDefaultWckey(uint32_t uid, const std::string& name,
                                   const std::string& cluster,
                                   const std::string& user_name);
 

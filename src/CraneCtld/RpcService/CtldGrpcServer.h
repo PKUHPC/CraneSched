@@ -302,9 +302,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                          const crane::grpc::ModifyQosRequest *request,
                          crane::grpc::ModifyQosReply *response) override;
 
-  grpc::Status ModifyWckey(grpc::ServerContext *context,
-                           const crane::grpc::ModifyWckeyRequest *request,
-                           crane::grpc::ModifyWckeyReply *response) override;
+  grpc::Status ModifyDefaultWckey(
+      grpc::ServerContext *context,
+      const crane::grpc::ModifyDefaultWckeyRequest *request,
+      crane::grpc::ModifyDefaultWckeyReply *response) override;
 
   grpc::Status QueryAccountInfo(
       grpc::ServerContext *context,

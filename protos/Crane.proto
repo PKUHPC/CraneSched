@@ -418,14 +418,14 @@ message ModifyQosReply {
   ErrCode code = 2;
 }
 
-message ModifyWckeyRequest {
+message ModifyDefaultWckeyRequest {
   uint32 uid = 1;
   string name = 2;
   string cluster = 3;
   string user_name = 4; 
 }
 
-message ModifyWckeyReply {
+message ModifyDefaultWckeyReply {
   bool ok = 1;
   ErrCode code = 2;
 }
@@ -1091,7 +1091,7 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  rpc ModifyWckey(ModifyWckeyRequest) returns (ModifyWckeyReply);
+  rpc ModifyDefaultWckey(ModifyDefaultWckeyRequest) returns (ModifyDefaultWckeyReply);
 
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 

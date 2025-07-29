@@ -1311,15 +1311,15 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyWckey(
+grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
     grpc::ServerContext *context,
-    const crane::grpc::ModifyWckeyRequest *request,
-    crane::grpc::ModifyWckeyReply *response) {
+    const crane::grpc::ModifyDefaultWckeyRequest *request,
+    crane::grpc::ModifyDefaultWckeyReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
   auto modify_res =
-      g_account_manager->ModifyWckey(request->uid(), request->name(),
+      g_account_manager->ModifyDefaultWckey(request->uid(), request->name(),
                                      request->cluster(), request->user_name());
   if (modify_res) {
     response->set_ok(true);

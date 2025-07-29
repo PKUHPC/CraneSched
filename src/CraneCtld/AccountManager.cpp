@@ -196,6 +196,11 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
+  // validate user existence under write lock
+  user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
+  if (user_exist == nullptr) {
+    return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
+  }
   const Wckey* find_wckey = GetWckeyInfoNoLock_(
       new_wckey.name, new_wckey.cluster, new_wckey.user_name);
   // Avoid duplicate insertion
@@ -387,11 +392,10 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
 
 CraneExpected<std::string> AccountManager::GetExistedDefaultWckeyName(
     const std::string& cluster, const std::string& user_name) {
-  m_rw_user_mutex_.lock_shared();
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(user_name);
   if (!user) {
-    m_rw_user_mutex_.unlock_shared();
     return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   }
   auto it = user->default_wckey_map.find(cluster);
@@ -1169,7 +1173,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   return {};
 }
 
-CraneExpected<void> AccountManager::ModifyWckey(uint32_t uid,
+CraneExpected<void> AccountManager::ModifyDefaultWckey(uint32_t uid,
                                                 const std::string& name,
                                                 const std::string& cluster,
                                                 const std::string& user_name) {
@@ -1986,7 +1990,7 @@ const Wckey* AccountManager::GetExistedWckeyInfoNoLock_(
     const std::string& name, const std::string& cluster,
     const std::string& user_name) {
   const Wckey* wckey = GetWckeyInfoNoLock_(name, cluster, user_name);
-  if (wckey) return wckey;
+  if (wckey && !wckey->deleted) return wckey;
   return nullptr;
 }
 

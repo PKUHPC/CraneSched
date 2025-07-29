@@ -885,6 +885,7 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
     break;
   case EntityType::QOS:
     coll = m_qos_collection_name_;
+    break;
   case EntityType::WCKEY:
     coll = m_wckey_collection_name_;
     break;
