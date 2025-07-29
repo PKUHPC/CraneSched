@@ -27,6 +27,16 @@
 
 namespace Supervisor {
 
+inline const char* MemoryEvents = "memory.events";
+inline const char* MemoryOomControl = "memory.oom_control";
+
+enum class TerminatedBy : uint8_t {
+  NONE = 0,
+  CANCELLED_BY_USER,
+  TERMINATION_BY_TIMEOUT,
+  TERMINATION_BY_OOM
+};
+
 class StepInstance {
  public:
   StepInstance() = default;
@@ -143,8 +153,7 @@ class ITaskInstance {
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
   bool orphaned{false};
-  bool cancelled_by_user{false};
-  bool terminated_by_timeout{false};
+  TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
   CrunInstanceMeta* GetCrunMeta() const {

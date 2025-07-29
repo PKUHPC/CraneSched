@@ -1468,18 +1468,24 @@ void TaskManager::TaskStopAndDoStatusChange() {
   if (m_step_.IsBatch() || m_step_.IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (exit_info.is_terminated_by_signal) {
-      if (m_task_->cancelled_by_user)
+      switch (m_task_->terminated_by) {
+      case TerminatedBy::CANCELLED_BY_USER: {
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Cancelled,
             exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-      else if (m_task_->terminated_by_timeout)
+        break;
+      }
+      case TerminatedBy::TERMINATION_BY_TIMEOUT: {
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::ExceedTimeLimit,
             exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-      else
+        break;
+      }
+      default:
         ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Failed,
             exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+      }
     } else
       ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
                                 exit_info.value, std::nullopt);
@@ -1714,12 +1720,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (m_step_.IsCrun()) sig = SIGHUP;
 
     if (elem.mark_as_orphaned) m_task_->orphaned = true;
-    if (elem.terminated_by_timeout) m_task_->terminated_by_timeout = true;
+    if (elem.terminated_by_timeout)
+      m_task_->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
     if (elem.terminated_by_user) {
       // If termination request is sent by user, send SIGKILL to ensure that
       // even freezing processes will be terminated immediately.
       sig = SIGKILL;
-      m_task_->cancelled_by_user = true;
+      m_task_->terminated_by = TerminatedBy::CANCELLED_BY_USER;
     }
 
     if (m_task_->GetPid()) {

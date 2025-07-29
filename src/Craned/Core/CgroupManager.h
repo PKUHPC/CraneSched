@@ -496,21 +496,22 @@ class CgroupManager {
   CgroupManager &operator=(const CgroupManager &) = delete;
   CgroupManager &operator=(CgroupManager &&) = delete;
 
-  CraneErrCode Init();
+  static CraneErrCode Init();
 
   /**
    * @brief Destroy cgroups which CraneCtld doesn't have records of
    * corresponding running jobs and set `recovered` field for jobs with their
    * cgroup created.
    */
-  CraneErrCode TryToRecoverCgForJobs(
+  static CraneErrCode TryToRecoverCgForJobs(
       std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
-  bool Mounted(CgConstant::Controller controller) const {
-    return bool(m_mounted_controllers_ & ControllerFlags{controller});
+  [[nodiscard]] static bool Mounted(CgConstant::Controller controller) {
+    return static_cast<bool>(m_mounted_controllers_ &
+                             ControllerFlags{controller});
   }
 
-  void ControllersMounted();
+  static void ControllersMounted();
 
   /**
    * \brief Allocate and return cgroup handle for job, should only be called
@@ -518,34 +519,36 @@ class CgroupManager {
    * \param job cgroup spec for job.
    * \return CgroupInterface ptr,null if error.
    */
-  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(const JobInD &job,
-                                                           bool recovery_mode);
+  static std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
+      const JobInD &job, bool recovery_mode);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
-  CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid) const;
+  static CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid);
 
-  void SetCgroupVersion(CgConstant::CgroupVersion v) { m_cg_version_ = v; }
-  [[nodiscard]] CgConstant::CgroupVersion GetCgroupVersion() const {
+  static void SetCgroupVersion(CgConstant::CgroupVersion v) {
+    m_cg_version_ = v;
+  }
+  [[nodiscard]] static CgConstant::CgroupVersion GetCgroupVersion() {
     return m_cg_version_;
   }
 
 #ifdef CRANE_ENABLE_BPF
-  static BpfRuntimeInfo bpf_runtime_info;
+  inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
-  inline static std::string CgroupStrByTaskId_(task_id_t task_id);
-  inline static std::optional<task_id_t> GetJobIdFromCg_(
-      const std::string &path);
+  static std::string CgroupStrByTaskId_(task_id_t task_id);
+  static std::optional<task_id_t> GetJobIdFromCg_(const std::string &path);
 
-  std::unique_ptr<CgroupInterface> CreateOrOpen_(
+  static std::unique_ptr<CgroupInterface> CreateOrOpen_(
       task_id_t job_id, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
-  int InitializeController_(struct cgroup &cgroup,
-                            CgConstant::Controller controller, bool required,
-                            bool has_cgroup, bool &changed_cgroup);
+  static int InitializeController_(struct cgroup &cgroup,
+                                   CgConstant::Controller controller,
+                                   bool required, bool has_cgroup,
+                                   bool &changed_cgroup);
 
   static std::set<task_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
@@ -557,15 +560,14 @@ class CgroupManager {
       const std::string &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
-  CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
+  inline static CraneExpected<
+      std::unordered_map<task_id_t, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path);
 #endif
 
-  ControllerFlags m_mounted_controllers_;
+  inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 
-  CgConstant::CgroupVersion m_cg_version_{};
+  inline static CgConstant::CgroupVersion m_cg_version_;
 };
 
 }  // namespace Craned
-
-inline std::unique_ptr<Craned::CgroupManager> g_cg_mgr;

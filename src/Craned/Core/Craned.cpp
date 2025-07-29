@@ -701,7 +701,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     }
   }
 
-  g_cg_mgr->TryToRecoverCgForJobs(job_map);
+  Craned::CgroupManager::TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
   if (!supv_job_ids.empty()) {
@@ -729,23 +729,22 @@ void GlobalVariableInit() {
 
   using Craned::CgroupManager;
   using Craned::CgConstant::Controller;
-  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
-  g_cg_mgr->Init();
-  if (g_cg_mgr->GetCgroupVersion() ==
+  CgroupManager::Init();
+  if (CgroupManager::GetCgroupVersion() ==
           Craned::CgConstant::CgroupVersion::CGROUP_V1 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::BLOCK_CONTROLLER))) {
+      (!CgroupManager::Mounted(Controller::CPU_CONTROLLER) ||
+       !CgroupManager::Mounted(Controller::MEMORY_CONTROLLER) ||
+       !CgroupManager::Mounted(Controller::DEVICES_CONTROLLER) ||
+       !CgroupManager::Mounted(Controller::BLOCK_CONTROLLER))) {
     CRANE_ERROR(
         "Failed to initialize cpu,memory,devices,block cgroups controller.");
     std::exit(1);
   }
-  if (g_cg_mgr->GetCgroupVersion() ==
+  if (CgroupManager::GetCgroupVersion() ==
           Craned::CgConstant::CgroupVersion::CGROUP_V2 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2) ||
-       !g_cg_mgr->Mounted(Controller::IO_CONTROLLER_V2))) {
+      (!CgroupManager::Mounted(Controller::CPU_CONTROLLER_V2) ||
+       !CgroupManager::Mounted(Controller::MEMORY_CONTORLLER_V2) ||
+       !CgroupManager::Mounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
@@ -818,9 +817,6 @@ void WaitForStopAndDoGvarFini() {
    */
   g_thread_pool->wait();
   g_job_mgr.reset();
-
-  // Called from JobMgr and G_SERVER
-  g_cg_mgr.reset();
 
   g_ctld_client.reset();
   // After ctld client destroyed, it is ok to destroy ctld client state machine

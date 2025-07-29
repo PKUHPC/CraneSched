@@ -170,18 +170,21 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 
   auto begin = std::chrono::steady_clock::now();
 
-  for (auto& job : jobs) {
-    task_id_t job_id = job.job_id;
-    uid_t uid = job.Uid();
-    CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
-                uid);
-    m_job_map_.Emplace(job_id, std::move(job));
+  {
+    auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+    auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    for (auto& job : jobs) {
+      task_id_t job_id = job.job_id;
+      uid_t uid = job.Uid();
+      CRANE_TRACE("Create lazily allocated cgroups for job #{}, uid {}", job_id,
+                  uid);
+      job_map_ptr->emplace(job_id, std::move(job));
 
-    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
-    if (uid_map->contains(uid)) {
-      uid_map->at(uid).RawPtr()->emplace(job_id);
-    } else {
-      uid_map->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+      if (uid_map_ptr->contains(uid)) {
+        uid_map_ptr->at(uid).RawPtr()->emplace(job_id);
+      } else {
+        uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+      }
     }
   }
 
@@ -201,14 +204,14 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   if (job->cgroup) return job->cgroup.get();
 
   std::unique_ptr<CgroupInterface> cg =
-      g_cg_mgr->AllocateAndGetJobCgroup(*job.get(), false);
+      CgroupManager::AllocateAndGetJobCgroup(*job.get(), false);
   job->cgroup = std::move(cg);
 
   return job->cgroup.get();
 }
 
 // Wait for supervisor exit and release cgroup
-bool JobManager::FreeJobs(const std::set<task_id_t>& job_ids) {
+bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   // We do noting here,just check if supervisor exist and remove its cgroup
   CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   {
@@ -746,7 +749,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 
   if (!job->cgroup) {
-    job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(*job, false);
+    job->cgroup = CgroupManager::AllocateAndGetJobCgroup(*job, false);
   }
   if (!job->cgroup) {
     CRANE_ERROR("Failed to get cgroup for job#{}", job_id);

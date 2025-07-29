@@ -37,9 +37,9 @@
 
 namespace Craned {
 
-#ifdef CRANE_ENABLE_BPF
-BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
-#endif
+// #ifdef CRANE_ENABLE_BPF
+// BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
+// #endif
 
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
@@ -715,7 +715,7 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) const {
+CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) {
   static constexpr LazyRE2 cg_pattern(R"(.*/Crane_Task_(\d+).*)");
   std::string job_id_str;
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
@@ -776,7 +776,7 @@ CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) const {
 bool Cgroup::SetControllerValue(CgConstant::Controller controller,
                                 CgConstant::ControllerFile controller_file,
                                 uint64_t value) {
-  if (!g_cg_mgr->Mounted(controller)) {
+  if (!CgroupManager::Mounted(controller)) {
     CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.",
                 CgConstant::GetControllerFileStringView(controller_file),
                 CgConstant::GetControllerStringView(controller));
@@ -813,7 +813,7 @@ bool Cgroup::SetControllerValue(CgConstant::Controller controller,
 bool Cgroup::SetControllerStr(CgConstant::Controller controller,
                               CgConstant::ControllerFile controller_file,
                               const std::string &str) {
-  if (!g_cg_mgr->Mounted(controller)) {
+  if (!CgroupManager::Mounted(controller)) {
     CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
                 CgConstant::GetControllerFileStringView(controller_file),
                 CgConstant::GetControllerStringView(controller));
@@ -888,7 +888,7 @@ bool Cgroup::ModifyCgroup_(CgConstant::ControllerFile controller_file) {
 bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
                                CgConstant::ControllerFile controller_file,
                                const std::vector<std::string> &strs) {
-  if (!g_cg_mgr->Mounted(controller)) {
+  if (!CgroupManager::Mounted(controller)) {
     CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
                 CgConstant::GetControllerFileStringView(controller_file),
                 CgConstant::GetControllerStringView(controller));
@@ -1231,7 +1231,7 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
     : CgroupInterface(path, handle, id) {
 #ifdef CRANE_ENABLE_BPF
-  if (g_cg_mgr->bpf_runtime_info.InitializeBpfObj()) {
+  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
     CRANE_TRACE("Bpf object initialization succeed");
   } else {
     CRANE_TRACE("Bpf object initialization failed");
@@ -1299,7 +1299,7 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1338,12 +1338,12 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     }
   }
   {
-    absl::MutexLock lk(g_cg_mgr->bpf_runtime_info.BpfMutex());
+    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.GetCgroupId(), bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__update_elem(g_cg_mgr->bpf_runtime_info.BpfDevMap(), &key,
-                               sizeof(BpfKey), &bpf_devices[i],
+      if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                               &key, sizeof(BpfKey), &bpf_devices[i],
                                sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
         CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
                     bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
@@ -1354,8 +1354,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
     // No need to attach ebpf prog twice.
     if (!m_bpf_attached_) {
-      if (bpf_prog_attach(g_cg_mgr->bpf_runtime_info.BpfProgFd(), cgroup_fd,
-                          BPF_CGROUP_DEVICE, 0) < 0) {
+      if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
+                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
         CRANE_ERROR("Failed to attach BPF program");
         close(cgroup_fd);
         return false;
@@ -1377,7 +1377,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
 #ifdef CRANE_ENABLE_BPF
 bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
-  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1427,15 +1427,15 @@ bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
 }
 
 bool CgroupV2::EraseBpfDeviceMap() {
-  if (!g_cg_mgr->bpf_runtime_info.Valid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
-  absl::MutexLock lk(g_cg_mgr->bpf_runtime_info.BpfMutex());
+  absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
   for (const auto &bpf_meta : m_cgroup_bpf_devices) {
     struct BpfKey key = {m_cgroup_info_.GetCgroupId(), bpf_meta.major,
                          bpf_meta.minor};
-    if (bpf_map__delete_elem(g_cg_mgr->bpf_runtime_info.BpfDevMap(), &key,
+    if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(), &key,
                              sizeof(BpfKey), BPF_ANY) < 0) {
       CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
                   bpf_meta.major, bpf_meta.minor, key.cgroup_id);
@@ -1549,10 +1549,11 @@ bool DedicatedResourceAllocator::Allocate(
   if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
                            CgConstant::kCgLimitDeviceWrite,
                            CgConstant::kCgLimitDeviceMknod)) {
-    if (g_cg_mgr->GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
+    if (CgroupManager::GetCgroupVersion() ==
+        CgConstant::CgroupVersion::CGROUP_V1) {
       CRANE_WARN("Allocate devices access failed in Cgroup V1.");
       return false;
-    } else if (g_cg_mgr->GetCgroupVersion() ==
+    } else if (CgroupManager::GetCgroupVersion() ==
                CgConstant::CgroupVersion::CGROUP_V2) {
       CRANE_WARN("Allocate devices access failed in Cgroup V2.");
       return false;
