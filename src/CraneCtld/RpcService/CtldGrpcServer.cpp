@@ -1761,11 +1761,8 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
       }
     }
 
-    // TODO: localhost?
-    // Parse hostname or hostname.DomainSuffix.
-    std::vector<std::string> name_list = absl::StrSplit(hostname, ".");
     if (!resolve_result ||
-        !g_config.ListenConf.tls_config.AllowedNodes.contains(name_list[0])) {
+        !g_config.ListenConf.tls_config.AllowedNodes.contains(hostname)) {
       CRANE_DEBUG("user {}'hostname {} not allowed.", request->uid(), hostname);
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
@@ -1788,7 +1785,6 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
-// TODO: Add a check for certificate validity for some methods
 std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
     const grpc::ServerContext *context, uint32_t uid) {
   if (!g_config.ListenConf.UseTls) return std::nullopt;

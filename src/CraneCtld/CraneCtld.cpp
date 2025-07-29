@@ -128,14 +128,15 @@ void ParseConfig(int argc, char** argv) {
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-if (config["UseTls"] && config["UseTls"].as<bool>()) {
+      if (config["UseTls"] && config["UseTls"].as<bool>()) {
         auto& tls_config = g_config.ListenConf.tls_config;
         g_config.ListenConf.UseTls = true;
 
         const auto& ssl_config = config["SSL"];
 
         if (ssl_config["DomainSuffix"])
-          tls_config.DomainSuffix = ssl_config["DomainSuffix"].as<std::string>();
+          tls_config.DomainSuffix =
+              ssl_config["DomainSuffix"].as<std::string>();
 
         if (ssl_config["Nodes"]) {
           std::string nodes = ssl_config["Nodes"].as<std::string>();
@@ -144,24 +145,30 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
                                    &name_list)) {
             CRANE_ERROR("Illegal login node name string format.");
             std::exit(1);
-                                   }
-          tls_config.AllowedNodes = std::unordered_set<std::string>(
-               std::make_move_iterator(name_list.begin()),  std::make_move_iterator(name_list.end()));
+          }
+          for (const auto& name : name_list) {
+            tls_config.AllowedNodes.insert(name);
+            tls_config.AllowedNodes.insert(fmt::format("{}.{}", name, tls_config.DomainSuffix));
+          }
+          // todo: localhost?
+          tls_config.AllowedNodes.insert("localhost");
         }
 
         if (ssl_config["InternalCertFilePath"]) {
-          tls_config.InternalCerts.CertFilePath = ssl_config["InternalCertFilePath"].as<std::string>();
+          tls_config.InternalCerts.CertFilePath =
+              ssl_config["InternalCertFilePath"].as<std::string>();
 
           try {
-            tls_config.InternalCerts.CertContent = util::ReadFileIntoString(
-                tls_config.InternalCerts.CertFilePath);
+            tls_config.InternalCerts.CertContent =
+                util::ReadFileIntoString(tls_config.InternalCerts.CertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read internal cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_config.InternalCerts.CertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by InternalCertFilePath "
+                "UseTls is true, but the file specified by "
+                "InternalCertFilePath "
                 "is empty");
           }
         } else {
@@ -170,11 +177,12 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
         }
 
         if (ssl_config["InternalKeyFilePath"]) {
-          tls_config.InternalCerts.KeyFilePath = ssl_config["InternalKeyFilePath"].as<std::string>();
+          tls_config.InternalCerts.KeyFilePath =
+              ssl_config["InternalKeyFilePath"].as<std::string>();
 
           try {
-            tls_config.InternalCerts.KeyContent = util::ReadFileIntoString(
-                tls_config.InternalCerts.KeyFilePath);
+            tls_config.InternalCerts.KeyContent =
+                util::ReadFileIntoString(tls_config.InternalCerts.KeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read internal key file error: {}", e.what());
             std::exit(1);
@@ -190,11 +198,12 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
         }
 
         if (ssl_config["InternalCaFilePath"]) {
-          tls_config.InternalCerts.CaFilePath = ssl_config["InternalCaFilePath"].as<std::string>();
+          tls_config.InternalCerts.CaFilePath =
+              ssl_config["InternalCaFilePath"].as<std::string>();
 
           try {
-            tls_config.InternalCerts.CaContent = util::ReadFileIntoString(
-                tls_config.InternalCerts.CaFilePath);
+            tls_config.InternalCerts.CaContent =
+                util::ReadFileIntoString(tls_config.InternalCerts.CaFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read internal ca file error: {}", e.what());
             std::exit(1);
@@ -210,18 +219,20 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
         }
 
         if (ssl_config["ExternalCertFilePath"]) {
-          tls_config.ExternalCerts.CertFilePath = ssl_config["ExternalCertFilePath"].as<std::string>();
+          tls_config.ExternalCerts.CertFilePath =
+              ssl_config["ExternalCertFilePath"].as<std::string>();
 
           try {
-            tls_config.ExternalCerts.CertContent = util::ReadFileIntoString(
-                tls_config.ExternalCerts.CertFilePath);
+            tls_config.ExternalCerts.CertContent =
+                util::ReadFileIntoString(tls_config.ExternalCerts.CertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read external cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_config.ExternalCerts.CertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ExternalCertFilePath "
+                "UseTls is true, but the file specified by "
+                "ExternalCertFilePath "
                 "is empty");
           }
         } else {
@@ -230,11 +241,12 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
         }
 
         if (ssl_config["ExternalKeyFilePath"]) {
-          tls_config.ExternalCerts.KeyFilePath = ssl_config["ExternalKeyFilePath"].as<std::string>();
+          tls_config.ExternalCerts.KeyFilePath =
+              ssl_config["ExternalKeyFilePath"].as<std::string>();
 
           try {
-            tls_config.ExternalCerts.KeyContent = util::ReadFileIntoString(
-                tls_config.ExternalCerts.KeyFilePath);
+            tls_config.ExternalCerts.KeyContent =
+                util::ReadFileIntoString(tls_config.ExternalCerts.KeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read external key file error: {}", e.what());
             std::exit(1);
@@ -250,11 +262,12 @@ if (config["UseTls"] && config["UseTls"].as<bool>()) {
         }
 
         if (ssl_config["ExternalCaFilePath"]) {
-          tls_config.ExternalCerts.CaFilePath = ssl_config["ExternalCaFilePath"].as<std::string>();
+          tls_config.ExternalCerts.CaFilePath =
+              ssl_config["ExternalCaFilePath"].as<std::string>();
 
           try {
-            tls_config.ExternalCerts.CaContent = util::ReadFileIntoString(
-                tls_config.ExternalCerts.CaFilePath);
+            tls_config.ExternalCerts.CaContent =
+                util::ReadFileIntoString(tls_config.ExternalCerts.CaFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read external ca file error: {}", e.what());
             std::exit(1);
