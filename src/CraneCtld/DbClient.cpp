@@ -1181,20 +1181,6 @@ void MongodbClient::DocumentAppendItem_<
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<User::WckeyMap>(
-    document& doc, const std::string& key, const User::WckeyMap& value) {
-  doc.append(kvp(key, [&value](sub_document subdoc) {
-    for (const auto& [map_key, set_val] : value) {
-      subdoc.append(kvp(map_key, [&set_val](sub_array arr) {
-        for (const auto& v : set_val) {
-          arr.append(v);
-        }
-      }));
-    }
-  }));
-}
-
-template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value) {
