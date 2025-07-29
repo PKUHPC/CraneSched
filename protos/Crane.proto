@@ -422,7 +422,7 @@ message ModifyDefaultWckeyRequest {
   uint32 uid = 1;
   string name = 2;
   string cluster = 3;
-  string user_name = 4; 
+  string user_name = 4;
 }
 
 message ModifyDefaultWckeyReply {

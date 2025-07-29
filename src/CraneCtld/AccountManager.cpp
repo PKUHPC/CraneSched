@@ -1173,10 +1173,9 @@ CraneExpected<void> AccountManager::ModifyQos(
   return {};
 }
 
-CraneExpected<void> AccountManager::ModifyDefaultWckey(uint32_t uid,
-                                                const std::string& name,
-                                                const std::string& cluster,
-                                                const std::string& user_name) {
+CraneExpected<void> AccountManager::ModifyDefaultWckey(
+    uint32_t uid, const std::string& name, const std::string& cluster,
+    const std::string& user_name) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     const User* p_target_user = GetExistedUserInfoNoLock_(user_name);

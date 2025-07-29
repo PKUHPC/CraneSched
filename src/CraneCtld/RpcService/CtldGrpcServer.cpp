@@ -1318,9 +1318,9 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  auto modify_res =
-      g_account_manager->ModifyDefaultWckey(request->uid(), request->name(),
-                                     request->cluster(), request->user_name());
+  auto modify_res = g_account_manager->ModifyDefaultWckey(
+      request->uid(), request->name(), request->cluster(),
+      request->user_name());
   if (modify_res) {
     response->set_ok(true);
   } else {
