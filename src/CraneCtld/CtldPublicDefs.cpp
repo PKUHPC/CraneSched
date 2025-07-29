@@ -304,7 +304,6 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   }
   task_info->set_wckey(wckey);
 }
-}
 
 crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
   crane::grpc::TaskToD task_to_d;

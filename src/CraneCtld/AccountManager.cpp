@@ -178,10 +178,6 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) return result;
-    user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
-    if (user_exist == nullptr) {
-      return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
-    }
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -286,17 +282,17 @@ CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) return result;
-
-    const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
-    if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
-    auto it = p_target_user->default_wckey_map.find(cluster);
-    if (it != p_target_user->default_wckey_map.end() && it->second == name) {
-      return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_WCKEY);
-    }
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
+
+  const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
+  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  auto it = p_target_user->default_wckey_map.find(cluster);
+  if (it != p_target_user->default_wckey_map.end() && it->second == name) {
+    return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_WCKEY);
+  }
 
   const Wckey* wckey = GetExistedWckeyInfoNoLock_(name, cluster, user_name);
   if (!wckey) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
@@ -1142,8 +1138,6 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
     const std::string& user_name) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
-    const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
-    if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
@@ -1159,6 +1153,9 @@ CraneExpected<void> AccountManager::ModifyDefaultWckey(
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
+
+  const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
+  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   const Wckey* p = GetExistedWckeyInfoNoLock_(name, cluster, user_name);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);

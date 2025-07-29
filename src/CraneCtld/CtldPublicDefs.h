@@ -603,8 +603,6 @@ struct User {
 
   /* Map<account name, item> */
   using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
-  using WckeyMap =
-      std::unordered_map<std::string, std::unordered_set<std::string>>;
 
   bool deleted = false;
   uid_t uid;
