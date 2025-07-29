@@ -1288,7 +1288,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 9> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
@@ -1298,7 +1298,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "cert_number",
                                    "default_wckey_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>, std::string>
+             User::AccountToAttrsMap, std::list<std::string>, std::string, std::unordered_map<std::string, std::string>>
       values{user.deleted,
              user.uid,
              user.default_account,
