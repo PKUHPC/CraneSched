@@ -1269,9 +1269,8 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!result) return result;
 
   if (!p_target_user->serial_number.empty() &&
-      !g_vault_client->RevokeCert(p_target_user->serial_number)) {
+      !g_vault_client->RevokeCert(p_target_user->serial_number))
     return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
-      }
 
   // Save the serial number in the database.
   mongocxx::client_session::with_transaction_cb callback =
