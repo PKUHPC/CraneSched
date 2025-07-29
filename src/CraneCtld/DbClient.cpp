@@ -790,23 +790,6 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
         }
       }
     }
-    user->wckey_map.clear();
-    if (auto wckey_map_elem = user_view["wckey_map"];
-        wckey_map_elem && wckey_map_elem.type() == bsoncxx::type::k_document) {
-      auto wckey_map_doc = wckey_map_elem.get_document().view();
-      for (auto&& elem : wckey_map_doc) {
-        std::string map_key = std::string(elem.key());
-        if (elem.type() == bsoncxx::type::k_array) {
-          std::unordered_set<std::string> val_set;
-          for (auto&& arr_elem : elem.get_array().value) {
-            if (arr_elem.type() == bsoncxx::type::k_utf8) {
-              val_set.insert(std::string(arr_elem.get_string().value));
-            }
-          }
-          user->wckey_map[map_key] = std::move(val_set);
-        }
-      }
-    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -814,18 +797,17 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 9> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
-                                    "default_wckey_map",
-                                    "wckey_map"};
+                                    "default_wckey_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>,
-             std::unordered_map<std::string, std::string>, User::WckeyMap>
+             std::unordered_map<std::string, std::string>>
       values{user.deleted,
              user.uid,
              user.default_account,
@@ -833,8 +815,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts,
-             user.default_wckey_map,
-             user.wckey_map};
+             user.default_wckey_map};
   return DocumentConstructor_(fields, values);
 }
 

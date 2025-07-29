@@ -614,7 +614,6 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  WckeyMap wckey_map;
 };
 
 struct Wckey {
