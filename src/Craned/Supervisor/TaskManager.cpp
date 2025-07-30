@@ -1529,23 +1529,6 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
 }
 
 void TaskManager::LaunchExecution_() {
-  m_task_->pwd.Init(m_task_->GetParentStep().uid());
-  if (!m_task_->pwd.Valid()) {
-    CRANE_DEBUG("[Job #{}] Failed to look up password entry for uid {} of task",
-                m_task_->GetParentStep().task_id(),
-                m_task_->GetParentStep().uid());
-    ActivateTaskStatusChange_(
-        crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
-        fmt::format(
-            "[Job #{}] Failed to look up password entry for uid {} of task",
-            m_task_->GetParentStep().task_id(),
-            m_task_->GetParentStep().uid()));
-    return;
-  }
-
-  // Calloc tasks have no scripts to run. Just return.
-  if (m_step_.IsCalloc()) return;
-
   // Prepare for execution
   CraneErrCode err = m_task_->Prepare();
   if (err != CraneErrCode::SUCCESS) {
@@ -1803,6 +1786,26 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     int64_t sec = m_step_.GetStep().time_limit().seconds();
     AddTerminationTimer_(m_task_.get(), sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
+
+    m_task_->pwd.Init(m_task_->GetParentStep().uid());
+    if (!m_task_->pwd.Valid()) {
+      CRANE_DEBUG(
+          "[Job #{}] Failed to look up password entry for uid {} of task",
+          m_task_->GetParentStep().task_id(), m_task_->GetParentStep().uid());
+      ActivateTaskStatusChange_(
+          crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
+          fmt::format(
+              "[Job #{}] Failed to look up password entry for uid {} of task",
+              m_task_->GetParentStep().task_id(),
+              m_task_->GetParentStep().uid()));
+      return;
+    }
+
+    // Calloc tasks have no scripts to run. Just return.
+    if (m_step_.IsCalloc()) {
+      elem.pid_prom.set_value(0);
+      return;
+    }
 
     LaunchExecution_();
     if (!m_task_->GetPid()) {
