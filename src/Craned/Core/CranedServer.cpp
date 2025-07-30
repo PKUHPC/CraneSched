@@ -25,6 +25,7 @@
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/String.h"
 
 namespace Craned {
 
@@ -44,21 +45,17 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     crane::grpc::ExecuteStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-
-    for (auto const &step_to_d : request->tasks())
-      response->add_failed_task_id_list(step_to_d.task_id());
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
-              request->tasks_size());
-
-  CraneErrCode err;
-  for (auto const &step_to_d : request->tasks()) {
-    err = g_job_mgr->ExecuteStepAsync(step_to_d);
-    if (err != CraneErrCode::SUCCESS)
-      response->add_failed_task_id_list(step_to_d.task_id());
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
+
+  CRANE_INFO("Receive ExecuteSteps for steps [{}]",
+             util::JobStepsToString(job_steps_map));
+  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map));
 
   return Status::OK;
 }
@@ -73,11 +70,16 @@ grpc::Status CranedServiceImpl::TerminateSteps(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive TerminateSteps for steps {}",
-              absl::StrJoin(request->task_id_list(), ","));
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
+  }
+  CRANE_TRACE("Receive TerminateSteps for steps [{}]",
+              util::JobStepsToString(job_steps_map));
 
-  for (step_id_t id : request->task_id_list())
-    g_job_mgr->TerminateStepAsync(id);
+  for (const auto [job_id, steps] : job_steps_map)
+    for (const auto step_id : steps)
+      g_job_mgr->TerminateStepAsync(job_id, step_id);
   response->set_ok(true);
 
   return Status::OK;
@@ -92,8 +94,17 @@ grpc::Status CranedServiceImpl::TerminateOrphanedStep(
     response->set_reason("CranedServer is not ready");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  for (task_id_t job_id : request->task_id_list())
-    g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id);
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
+  }
+  CRANE_TRACE("Receive TerminateOrphanedStep for steps [{}]",
+              util::JobStepsToString(job_steps_map));
+
+  for (const auto [job_id, steps] : job_steps_map)
+    for (const auto step_id : steps)
+      g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
+
   response->set_ok(true);
 
   return Status::OK;
@@ -209,17 +220,16 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::CreateCgroupForJobs(
-    grpc::ServerContext *context,
-    const crane::grpc::CreateCgroupForJobsRequest *request,
-    crane::grpc::CreateCgroupForJobsReply *response) {
+grpc::Status CranedServiceImpl::AllocJobs(
+    grpc::ServerContext *context, const crane::grpc::AllocJobsRequest *request,
+    crane::grpc::AllocJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
   std::vector<JobInD> jobs;
-  for (const auto &job_to_d : request->job_list()) {
+  for (const auto &job_to_d : request->jobs()) {
     CRANE_TRACE("Allocating job #{}, uid {}", job_to_d.job_id(),
                 job_to_d.uid());
     jobs.emplace_back(job_to_d);
@@ -233,6 +243,17 @@ grpc::Status CranedServiceImpl::CreateCgroupForJobs(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::AllocSteps(
+    grpc::ServerContext *context, const crane::grpc::AllocStepsRequest *request,
+    crane::grpc::AllocStepsReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>());
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::FreeSteps(
     grpc::ServerContext *context, const crane::grpc::FreeStepsRequest *request,
     crane::grpc::FreeStepsReply *response) {
@@ -241,40 +262,48 @@ grpc::Status CranedServiceImpl::FreeSteps(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive FreeSteps RPC for [{}].",
-              absl::StrJoin(request->job_id_list(), ","));
+  std::ptrdiff_t num_steps{0};
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
+    num_steps += steps.steps().size();
+  }
+  CRANE_TRACE("Receive FreeSteps RPC for [{}]",
+              util::JobStepsToString(job_steps_map));
 
-  std::latch latch(request->job_id_list().size());
-  for (job_id_t job_id : request->job_id_list()) {
-    g_thread_pool->detach_task([&latch, job_id] {
-      auto stub = g_supervisor_keeper->GetStub(job_id);
-      if (!stub) {
-        CRANE_ERROR("[Job #{}.{}]Failed to get stub.", job_id, 0);
-      } else {
-        stub->ShutdownSupervisor();
-      }
-      g_supervisor_keeper->RemoveSupervisor(job_id);
-      latch.count_down();
-    });
+  std::latch latch(num_steps);
+  for (auto [job_id, step_ids] : job_steps_map) {
+    for (step_id_t step_id : step_ids)
+      g_thread_pool->detach_task([&latch, job_id, step_id] {
+        auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
+        if (!stub) {
+          CRANE_ERROR("[Step #{}.{}]Failed to get stub.", job_id, step_id);
+        } else {
+          stub->ShutdownSupervisor();
+        }
+        g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
+        latch.count_down();
+      });
   }
   latch.wait();
+  g_job_mgr->CleanUpJobAndStepsAsync(job_steps_map);
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ReleaseCgroupForJobs(
-    grpc::ServerContext *context,
-    const crane::grpc::ReleaseCgroupForJobsRequest *request,
-    crane::grpc::ReleaseCgroupForJobsReply *response) {
+grpc::Status CranedServiceImpl::FreeJobs(
+    grpc::ServerContext *context, const crane::grpc::FreeJobsRequest *request,
+    crane::grpc::FreeJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive ReleaseCgroupForTasks RPC for [{}]",
-              absl::StrJoin(request->task_id_list(), ","));
+  CRANE_TRACE("Receive ReleaseCgroupForTasks RPC for Job [{}]",
+              absl::StrJoin(request->job_id_list(), ","));
+
   g_job_mgr->FreeJobs(
-      std::set(request->task_id_list().begin(), request->task_id_list().end()));
+      std::set(request->job_id_list().begin(), request->job_id_list().end()));
 
   return Status::OK;
 }
@@ -288,7 +317,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  auto stub = g_supervisor_keeper->GetStub(request->task_id());
+  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kDaemonStepId);
   if (!stub) {
     CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
     response->set_ok(false);
@@ -332,8 +361,8 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
   g_job_mgr->StepStopAndDoStatusChangeAsync(
-      request->task_id(), request->new_status(), request->exit_code(),
-      request->reason());
+      request->job_id(), request->step_id(), request->new_status(),
+      request->exit_code(), request->reason());
   response->set_ok(true);
   return Status::OK;
 }

@@ -127,7 +127,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
 
 void CtldClientStateMachine::EvConfigurationDone(
     std::optional<std::set<job_id_t>> lost_jobs,
-    std::optional<std::set<step_id_t>> lost_steps) {
+    std::optional<std::unordered_map<job_id_t, std::set<step_id_t>>>
+        lost_steps) {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
@@ -262,13 +263,6 @@ void CtldClientStateMachine::ActionConfigure_(
                      "Ctld client state machine has entered state {}",
                      StateToString(m_state_));
 
-  if (config_req.job_map_size() != 0)
-    CRANE_LOGGER_TRACE(
-        m_logger_, "Recv ctld job: [{}],task: [{}]",
-        absl::StrJoin(config_req.job_map() | std::ranges::views::keys, ","),
-        absl::StrJoin(config_req.job_tasks_map() | std::ranges::views::keys,
-                      ","));
-
   absl::MutexLock lk(&m_cb_mutex_);
   auto it = m_action_configure_cb_list_.begin();
   while (it != m_action_configure_cb_list_.end()) {
@@ -287,16 +281,17 @@ void CtldClientStateMachine::ActionConfigure_(
   }
 }
 
-void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
-                                             std::set<task_id_t>&& lost_tasks) {
+void CtldClientStateMachine::ActionRegister_(
+    std::set<task_id_t>&& lost_jobs,
+    std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps) {
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ctld client state machine has entered state {}",
                      StateToString(m_state_));
   if (m_action_register_cb_)
     g_thread_pool->detach_task(
-        [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] mutable {
+        [tok = m_reg_token_.value(), lost_jobs, lost_steps, this] mutable {
           m_action_register_cb_(
-              {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_tasks});
+              {.token = tok, .lost_jobs = lost_jobs, .lost_steps = lost_steps});
         });
 }
 
@@ -388,41 +383,64 @@ void CtldClient::Init() {
 
   g_ctld_client_sm->AddActionConfigureCb(
       [](CtldClientStateMachine::ConfigureArg const& arg) {
+        // FIXME: step recovery
         auto token = arg.req.token();
-        auto job_ids = arg.req.job_map() | std::ranges::views::keys |
-                       std::ranges::to<std::set<task_id_t>>();
-        auto step_ids = arg.req.job_tasks_map() | std::ranges::views::keys |
-                        std::ranges::to<std::set<task_id_t>>();
-        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
-                           "Configuring action for token {}.",
-                           ProtoTimestampToString(token));
 
-        std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
+        std::map<job_id_t, std::set<step_id_t>> job_steps_id_map;
+        for (const auto& [job_id, job_steps] : arg.req.job_steps()) {
+          job_steps_id_map[job_id] = job_steps.steps() | std::views::keys |
+                                     std::ranges::to<std::set>();
+        }
+        auto job_ids = job_steps_id_map | std::views::keys;
+
+        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                           "Configuring action for token {}. Steps [{}]",
+                           ProtoTimestampToString(token),
+                           util::JobStepsToString(job_steps_id_map), ",");
+
+        // std::map keys are ordered, so we can use set difference.
+        std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
+
+        for (auto status_change_steps =
+                 g_ctld_client->GetAllFinishStepStatusChangeId();
+             auto& [k, v] : status_change_steps) {
+          exact_job_steps[k].insert(v.begin(), v.end());
+        }
+        auto exact_job_ids = exact_job_steps | std::views::keys;
         std::set<task_id_t> lost_jobs{};
         std::set<task_id_t> invalid_jobs{};
+        std::set<job_id_t> valid_jobs{};
+
         std::ranges::set_difference(job_ids, exact_job_ids,
                                     std::inserter(lost_jobs, lost_jobs.end()));
         std::ranges::set_difference(
             exact_job_ids, job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
+        std::ranges::set_intersection(
+            job_ids, exact_job_ids,
+            std::inserter(valid_jobs, valid_jobs.end()));
 
-        std::set<task_id_t> lost_tasks{};
-        std::set<task_id_t> invalid_tasks{};
+        std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
+        std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
+        for (auto job_id : valid_jobs) {
+          const auto& ctld_steps = job_steps_id_map.at(job_id);
+          const auto& craned_steps = exact_job_steps.at(job_id);
+          std::ranges::set_difference(
+              ctld_steps, craned_steps,
+              std::inserter(lost_steps[job_id], lost_steps[job_id].end()));
+          std::ranges::set_difference(
+              craned_steps, ctld_steps,
+              std::inserter(invalid_steps[job_id],
+                            invalid_steps[job_id].end()));
+        }
 
-        std::set exact_step_ids = g_supervisor_keeper->GetRunningSteps();
-        std::ranges::set_difference(
-            step_ids, exact_step_ids,
-            std::inserter(lost_tasks, lost_tasks.end()));
-        std::ranges::set_difference(
-            exact_step_ids, step_ids,
-            std::inserter(invalid_tasks, invalid_tasks.end()));
-
-        g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_tasks);
-        if (!invalid_tasks.empty()) {
-          CRANE_DEBUG("Terminating orphaned tasks: [{}].",
-                      absl::StrJoin(invalid_tasks, ","));
-          for (auto task_id : invalid_tasks) {
-            g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(task_id);
+        g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+        if (!invalid_steps.empty()) {
+          CRANE_DEBUG("Terminating orphaned : [{}].",
+                      util::JobStepsToString(invalid_steps));
+          for (auto [job_id, steps] : invalid_steps) {
+            for (auto step_id : steps)
+              g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
           }
         }
         if (!invalid_jobs.empty()) {
@@ -489,19 +507,34 @@ void CtldClient::SetPingFailedCb(std::function<void()>&& cb) {
 }
 
 void CtldClient::StepStatusChangeAsync(
-    TaskStatusChangeQueueElem&& task_status_change) {
+    StepStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_step_status_change_mtx_);
+
+  CRANE_TRACE(
+      "[Step #{}.{}] Step status change added to queue, status {},code {}.",
+      task_status_change.job_id, task_status_change.step_id,
+      util::StepStatusToString(task_status_change.new_status),
+      task_status_change.exit_code);
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
-std::set<task_id_t> CtldClient::GetAllStepStatusChangeId() {
+std::map<job_id_t, std::set<step_id_t>>
+CtldClient::GetAllFinishStepStatusChangeId() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
-  return m_step_status_change_list_ |
-         std::ranges::views::transform(
-             [](const TaskStatusChangeQueueElem& elem) {
-               return elem.step_id;
-             }) |
-         std::ranges::to<std::set<task_id_t>>();
+  std::map<job_id_t, std::set<step_id_t>> finished_steps;
+  for (auto& elem : m_step_status_change_list_) {
+    switch (elem.new_status) {
+    case crane::grpc::TaskStatus::Cancelled:
+    case crane::grpc::TaskStatus::Failed:
+    case crane::grpc::TaskStatus::Completed:
+    case crane::grpc::TaskStatus::ExceedTimeLimit:
+      finished_steps[elem.job_id].emplace(elem.step_id);
+      break;
+    default:
+      break;
+    }
+  }
+  return finished_steps;
 }
 
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
@@ -529,9 +562,9 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   return true;
 }
 
-bool CtldClient::CranedRegister_(RegToken const& token,
-                                 std::set<job_id_t> const& lost_jobs,
-                                 std::set<step_id_t> const& lost_steps) {
+bool CtldClient::CranedRegister_(
+    RegToken const& token, std::set<job_id_t> const& lost_jobs,
+    std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps) {
   CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger, "Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
@@ -557,7 +590,11 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_meta->mutable_system_boot_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
   grpc_meta->mutable_lost_jobs()->Assign(lost_jobs.begin(), lost_jobs.end());
-  grpc_meta->mutable_lost_tasks()->Assign(lost_steps.begin(), lost_steps.end());
+  auto& grpc_lost_steps = *grpc_meta->mutable_lost_steps();
+  for (const auto& [job_id, step_ids] : lost_steps) {
+    grpc_lost_steps[job_id].mutable_steps()->Assign(step_ids.begin(),
+                                                    step_ids.end());
+  }
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
@@ -595,7 +632,10 @@ void CtldClient::AsyncSendThread_() {
       &m_step_status_change_list_);
 
   while (true) {
-    if (m_stopping_) break;
+    {
+      absl::MutexLock lock(&m_step_status_change_mtx_);
+      if (m_step_status_change_list_.empty() && m_stopping_) break;
+    }
 
     grpc_state = m_ctld_channel_->GetState(true);
     connected = prev_grpc_state == GRPC_CHANNEL_READY;
@@ -649,7 +689,7 @@ void CtldClient::AsyncSendThread_() {
 }
 
 void CtldClient::SendStatusChanges_() {
-  std::list<TaskStatusChangeQueueElem> changes;
+  std::list<StepStatusChangeQueueElem> changes;
   changes.splice(changes.begin(), std::move(m_step_status_change_list_));
   m_step_status_change_mtx_.Unlock();
 
@@ -664,10 +704,12 @@ void CtldClient::SendStatusChanges_() {
 
     auto status_change = changes.front();
 
-    CRANE_TRACE("Sending TaskStatusChange for task #{}", status_change.step_id);
+    CRANE_TRACE("[Step #{}.{}] Sending TaskStatusChange.", status_change.job_id,
+                status_change.step_id);
 
     request.set_craned_id(m_craned_id_);
-    request.set_task_id(status_change.step_id);
+    request.set_job_id(status_change.job_id);
+    request.set_step_id(status_change.step_id);
     request.set_new_status(status_change.new_status);
     request.set_exit_code(status_change.exit_code);
     if (status_change.reason.has_value())
@@ -677,12 +719,18 @@ void CtldClient::SendStatusChanges_() {
     if (!status.ok()) {
       CRANE_ERROR(
           "Failed to send TaskStatusChange: "
-          "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-          status_change.step_id, static_cast<int>(status_change.new_status),
+          "{{Step: #{}.{}, NewStatus: {}}}, reason: {} | {}, code: {}",
+          status_change.job_id, status_change.step_id,
+          util::StepStatusToString(status_change.new_status),
           status.error_message(), context.debug_error_string(),
           static_cast<int>(status.error_code()));
 
-      if (m_stopping_) return;
+      if (m_stopping_) {
+        CRANE_INFO(
+            "Failed to send StepStatusChange but stopping, drop all status "
+            "change.");
+        return;
+      }
       // If some messages are not sent due to channel failure,
       // put them back into m_task_status_change_list_
       if (!changes.empty()) {
@@ -696,8 +744,8 @@ void CtldClient::SendStatusChanges_() {
       break;
 
     } else {
-      CRANE_TRACE("StepStatusChange for step #{} sent. reply.ok={}",
-                  status_change.step_id, reply.ok());
+      CRANE_TRACE("[Step #{}.{}] StepStatusChange sent. reply.ok={}",
+                  status_change.job_id, status_change.step_id, reply.ok());
       changes.pop_front();
     }
   }

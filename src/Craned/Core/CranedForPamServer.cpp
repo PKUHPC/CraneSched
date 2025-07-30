@@ -216,13 +216,12 @@ grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
   }
 
   // First query local device related env list
-  auto job_expt = g_job_mgr->QueryJob(request->task_id());
-  if (!job_expt) {
+  auto job = g_job_mgr->QueryJob(request->task_id());
+  if (!job) {
     response->set_ok(false);
     return Status::OK;
   }
 
-  JobInD *job = job_expt.value();
   for (const auto &[name, value] : job->GetJobEnvMap()) {
     response->mutable_env_map()->emplace(name, value);
   }

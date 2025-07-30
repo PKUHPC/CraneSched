@@ -82,19 +82,21 @@ class CranedServiceImpl : public Craned::Service {
       const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
       crane::grpc::QuerySshStepEnvVariablesReply *response) override;
 
-  grpc::Status CreateCgroupForJobs(
-      grpc::ServerContext *context,
-      const crane::grpc::CreateCgroupForJobsRequest *request,
-      crane::grpc::CreateCgroupForJobsReply *response) override;
+  grpc::Status AllocJobs(grpc::ServerContext *context,
+                         const crane::grpc::AllocJobsRequest *request,
+                         crane::grpc::AllocJobsReply *response) override;
+
+  grpc::Status FreeJobs(grpc::ServerContext *context,
+                        const crane::grpc::FreeJobsRequest *request,
+                        crane::grpc::FreeJobsReply *response) override;
+
+  grpc::Status AllocSteps(grpc::ServerContext *context,
+                          const crane::grpc::AllocStepsRequest *request,
+                          crane::grpc::AllocStepsReply *response) override;
 
   grpc::Status FreeSteps(grpc::ServerContext *context,
                          const crane::grpc::FreeStepsRequest *request,
                          crane::grpc::FreeStepsReply *response) override;
-
-  grpc::Status ReleaseCgroupForJobs(
-      grpc::ServerContext *context,
-      const crane::grpc::ReleaseCgroupForJobsRequest *request,
-      crane::grpc::ReleaseCgroupForJobsReply *response) override;
 
   grpc::Status ChangeJobTimeLimit(
       grpc::ServerContext *context,

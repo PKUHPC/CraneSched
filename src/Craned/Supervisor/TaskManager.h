@@ -49,7 +49,7 @@ class StepInstance {
   std::vector<task_id_t> task_ids;
 
   uid_t uid;
-  gid_t gid;
+  std::vector<gid_t> gids;
 
   std::string container;
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
@@ -60,11 +60,12 @@ class StepInstance {
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
-        job_id(step.task_id()),
-        step_id(0),
-        task_ids({}),
+        job_id(step.job_id()),
+        step_id(step.step_id()),
+        // TODO: Set task_id here
+        task_ids({0}),
         uid(step.uid()),
-        gid(step.gid()),
+        gids(step.gid().begin(), step.gid().end()),
         container(step.container()) {
     interactive_type =
         step.type() == crane::grpc::TaskType::Interactive
@@ -80,6 +81,7 @@ class StepInstance {
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
+  bool IsDaemon() const;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -109,7 +111,7 @@ class StepInstance {
   bool AllTaskFinished() const;
 
  private:
-  crane::grpc::TaskToD m_step_to_supv_;
+  crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
@@ -154,7 +156,8 @@ class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
       : m_parent_step_inst_(step_inst),
-        task_id(step_inst->GetStep().task_id()) {}
+        // TODO: use task id instead
+        task_id(0) {}
   virtual ~ITaskInstance();
 
   ITaskInstance(const ITaskInstance&) = delete;

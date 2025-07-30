@@ -405,6 +405,32 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   return false;
 }
 
+bool MongodbClient::InsertSteps(const std::vector<StepInCtld*>& steps) {
+  if (steps.empty()) return false;
+  std::vector<bsoncxx::document::value> documents;
+
+  for (const auto& step : steps) {
+    document doc = StepInCtldToDocument_(step);
+    documents.push_back(doc.extract());
+  }
+
+  mongocxx::options::insert insert_options;
+  insert_options.ordered(false);  // unordered to speed up the operation
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
+        (*GetClient_())[m_db_name_][m_step_collection_name_].insert_many(
+            *GetSession_(), documents, insert_options);
+    if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == steps.size())
+      return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory StepInCtld.");
+  return false;
+}
+
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
@@ -760,6 +786,64 @@ void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
           }));
     }
   }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<std::vector<gid_t>>(
+    document& doc, const std::string& key, const std::vector<gid_t>& value) {
+  using bsoncxx::builder::basic::array;
+  array arr_builder;
+
+  for (const auto& v : value) {
+    arr_builder.append(static_cast<int32_t>(v));
+  }
+  doc.append(kvp(key, arr_builder));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<DedicatedResourceInNode>(
+    document& doc, const std::string& key,
+    const DedicatedResourceInNode& value) {
+  document sub_doc{};
+  for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
+    document type_doc{};
+    for (const auto& [type, slots] : type_slots_map.type_slots_map) {
+      array gpu_array{};
+      for (const auto& dev_id : slots) {
+        gpu_array.append(dev_id);
+      }
+      type_doc.append(kvp(type, gpu_array));
+    }
+    sub_doc.append(kvp(name, type_doc));
+  }
+  doc.append(kvp(key, sub_doc.view()));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceInNode>(
+    document& doc, const std::string& key, const ResourceInNode& value) {
+  document sub_doc{};
+  sub_doc.append(
+      kvp("cpu", static_cast<double>(value.allocatable_res.cpu_count)));
+  sub_doc.append(kvp(
+      "memory", static_cast<std::int64_t>(value.allocatable_res.memory_bytes)));
+
+  DocumentAppendItem_(sub_doc, "gres", value.dedicated_res);
+  doc.append(kvp(key, sub_doc));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
+                                                    const std::string& key,
+                                                    const ResourceV2& value) {
+  using bsoncxx::builder::basic::array;
+  array arr_builder;
+  for (const auto& [node, res] : value.EachNodeResMap()) {
+    document node_doc{};
+    DocumentAppendItem_(node_doc, node, res);
+    arr_builder.append(node_doc);
+  }
+  doc.append(kvp(key, arr_builder));
 }
 
 template <typename... Ts, std::size_t... Is>
@@ -1232,6 +1316,86 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), task->container};
   return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
+  std::string script;
+  if (step->type == crane::grpc::Batch)
+    script = step->StepToCtld().batch_meta().sh_script();
+
+  bsoncxx::builder::stream::document env_doc;
+  for (const auto& entry : step->env) {
+    env_doc << entry.first << entry.second;
+  }
+
+  std::string env_str = bsoncxx::to_json(env_doc.view());
+
+  // 0  job_id        step_db_id    step_id         mod_time      deleted
+  // 5  cpus_req      mem_req       step_name       env           id_user
+  // 10 id_group      nodelist      nodes_alloc     node_inx      time_eligible
+  // 15 time_start    time_end      time_suspended  script        state
+  // 20 timelimit     time_submit   work_dir        submit_line   exit_code
+  // 25 get_user_env  type          extra_attr      res_alloc     step_type
+  // 30 container
+
+  // clang-format off
+  std::array<std::string, 31> fields{
+      // 0 - 4
+      "job_id",  "step_db_id", "step_id", "mod_time",    "deleted",
+      // 5 - 9
+      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+      // 10 - 14
+      "id_group", "nodelist",   "nodes_alloc", "node_inx",  "time_eligible",
+      // 15 - 19
+       "time_start", "time_end", "time_suspended","script", "state",
+      // 20 - 24
+       "timelimit", "time_submit", "work_dir","submit_line", "exit_code",
+      // 25 - 29
+        "get_user_env","type", "extra_attr", "res_alloc", "step_type",
+      // 30 - 30
+    "container",
+  };
+
+  // clang-format on
+  std::tuple<int32_t, step_db_id_t, int32_t, int64_t, bool,      /*0-4*/
+             double, int64_t, std::string, std::string, int32_t, /*5-9*/
+             std::vector<gid_t>, std::string, int32_t, int32_t,
+             int64_t,                                             /*10-14*/
+             int64_t, int64_t, int64_t, std::string, int32_t,     /*15-19*/
+             int64_t, int64_t, std::string, std::string, int32_t, /*20-24*/
+             bool, int32_t, std::string, ResourceV2, int32_t,     /*25-29*/
+             std::string>                                         /*30-30*/
+      values{                                                     // 0-4
+             static_cast<int32_t>(step->job_id), step->StepDbId(),
+             static_cast<int32_t>(step->StepId()),
+             absl::ToUnixSeconds(absl::Now()), false,
+             // 5-9
+             step->requested_node_res_view.CpuCount(),
+             static_cast<int64_t>(step->requested_node_res_view.MemoryBytes()),
+             step->name, env_str, static_cast<int32_t>(step->uid),
+             // 10-14
+             step->gids, util::HostNameListToStr(step->CranedIds()),
+             static_cast<int32_t>(step->CranedIds().size()), 0, 0,
+             // 15-19
+             ToUnixSeconds(step->StartTime()), ToUnixSeconds(step->EndTime()),
+             0, script, step->Status(),
+             // 20-24
+             absl::ToInt64Seconds(step->time_limit),
+             ToUnixSeconds(step->SubmitTime()), step->StepToCtld().cwd(),
+             step->StepToCtld().cmd_line(), step->ExitCode(),
+             // 25-29
+             step->get_user_env, step->type, step->StepToCtld().extra_attr(),
+             step->AllocatedRes(), step->StepType(),
+             // 30-30
+             step->container};
+
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
+    crane::grpc::StepInEmbeddedDb const& step) {
+  // TODO: Implement this  function
+  return {};
 }
 
 MongodbClient::MongodbClient() {

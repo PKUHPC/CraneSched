@@ -59,14 +59,16 @@ CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
+                                                    int stdin_write,
                                                     int stdout_read, bool pty) {
-  CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
-              pid, stdin_write, stdout_read, pty);
+  CRANE_DEBUG(
+      "[Task #{}] Setting up task fwd forinput_fd:{} output_fd:{} pty:{}",
+      task_id, stdin_write, stdout_read, pty);
 
   util::os::SetFdNonBlocking(stdout_read);
 
-  TaskFwdMeta meta = {.pid = pid,
+  TaskFwdMeta meta = {.task_id = task_id,
                       .pty = pty,
                       .stdin_write = stdin_write,
                       .stdout_read = stdout_read};
@@ -79,40 +81,41 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
     err = poll_handle->init();
     if (err == 0) break;
     if (err != UV_EINTR && err != UV_EAGAIN) {
-      CRANE_ERROR("[Proc #{}] Failed to init poll_handle for output fd {}: {}",
-                  pid, stdout_read, uv_strerror(err));
+      CRANE_ERROR("[Task #{}] Failed to init poll_handle for output fd {}: {}",
+                  task_id, stdout_read, uv_strerror(err));
       return false;
     }
 
     if (retry_cnt++ > 3) {
       CRANE_ERROR(
-          "[Proc #{}] Failed to init poll_handle for output fd {}: {} after "
+          "[Task #{}] Failed to init poll_handle for output fd {}: {} after "
           "3 times.",
-          pid, stdout_read, uv_strerror(err));
+          task_id, stdout_read, uv_strerror(err));
       return false;
     }
 
     CRANE_DEBUG(
-        "[Proc #{}] Recoverable error {} when initializing poll_handle "
+        "[Task #{}] Recoverable error {} when initializing poll_handle "
         "for output fd {}, retrying...",
-        pid, uv_strerror(err), stdout_read);
+        task_id, uv_strerror(err), stdout_read);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
   if (err != 0) {
     CRANE_ERROR(
-        "[Proc #{}] failed to init poll_handle for output fd {}. "
+        "[Task #{}] failed to init poll_handle for output fd {}. "
         "Close poll handle and fd.",
-        pid, stdout_read);
+        task_id, stdout_read);
 
     if (poll_handle) poll_handle->close();
     close(stdout_read);
     return false;
     // TODO: handle failed status
   }
-  auto poll_cb = [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
-    CRANE_TRACE("Detect task #{} output.", g_config.JobId);
+  auto poll_cb = [this, task_id, meta](const uvw::poll_event&,
+                                       uvw::poll_handle& h) {
+    CRANE_TRACE("[Task #{}] Detect output.", task_id);
 
     constexpr int MAX_BUF_SIZE = 4096;
     char buf[MAX_BUF_SIZE];
@@ -126,15 +129,15 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
       } else {
         // For pty,do nothing, process exit on return -1 and error set to
         // EIO
-        CRANE_TRACE("Read EOF from pty task #{} on cfored {}", g_config.JobId,
+        CRANE_TRACE("[Task #{}] Read EOF from pty on cfored {}", task_id,
                     m_cfored_name_);
       }
     }
 
     if (ret == -1) {
       if (!meta.pty) {
-        CRANE_ERROR("Error when reading task #{} output, error {}",
-                    g_config.JobId, std::strerror(errno));
+        CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
+                    std::strerror(errno));
         return;
       }
 
@@ -147,23 +150,23 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
         // Read before the process begin.
         return;
       } else {
-        CRANE_ERROR("Error when reading task #{} output, error {}",
-                    g_config.JobId, std::strerror(errno));
+        CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
+                    std::strerror(errno));
         return;
       }
     }
 
     if (read_finished) {
-      CRANE_TRACE("Task #{} to cfored {} finished its output.", g_config.JobId,
+      CRANE_TRACE("[Task #{}] to cfored {} finished its output.", task_id,
                   m_cfored_name_);
       h.close();
       close(meta.stdout_read);
 
-      bool ok_to_free = this->TaskOutputFinish(meta.pid);
+      bool ok_to_free = this->TaskOutputFinish(meta.task_id);
       if (ok_to_free) {
         CRANE_TRACE("It's ok to begin unregister task #{} on {}",
                     g_config.JobId, m_cfored_name_);
-        TaskEnd(meta.pid);
+        TaskEnd(meta.task_id);
       }
       return;
     }
@@ -193,7 +196,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
   }
 
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid] = std::move(meta);
+  m_fwd_meta_map[task_id] = std::move(meta);
   return true;
 }
 
@@ -637,20 +640,20 @@ void CforedClient::AsyncSendRecvThread_() {
   }
 }
 
-bool CforedClient::TaskOutputFinish(pid_t pid) {
+bool CforedClient::TaskOutputFinish(task_id_t task_id) {
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid].output_stopped = true;
-  return m_fwd_meta_map[pid].proc_stopped;
+  m_fwd_meta_map[task_id].output_stopped = true;
+  return m_fwd_meta_map[task_id].proc_stopped;
 };
 
-bool CforedClient::TaskProcessStop(pid_t pid) {
+bool CforedClient::TaskProcessStop(task_id_t task_id) {
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid].proc_stopped = true;
-  return m_fwd_meta_map[pid].output_stopped;
+  m_fwd_meta_map[task_id].proc_stopped = true;
+  return m_fwd_meta_map[task_id].output_stopped;
 }
 
-void CforedClient::TaskEnd(pid_t pid) {
-  g_task_mgr->TaskStopAndDoStatusChange(g_config.JobId);
+void CforedClient::TaskEnd(task_id_t task_id) {
+  g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {

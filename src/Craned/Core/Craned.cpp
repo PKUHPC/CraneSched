@@ -785,53 +785,95 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
 
   using Craned::JobInD, Craned::StepInstance;
+  std::map<job_id_t, std::set<step_id_t>> ctld_step_ids;
 
-  std::vector ctld_job_ids = config_from_ctld.job_map() | std::views::keys |
-                             std::ranges::to<std::vector<task_id_t>>();
-  CRANE_DEBUG("CraneCtld claimed {} jobs are running on this node: [{}]",
-              ctld_job_ids.size(), absl::StrJoin(ctld_job_ids, ","));
-
-  CraneExpected<std::unordered_map<task_id_t, pid_t>> steps =
-      g_supervisor_keeper->InitAndGetRecoveredMap();
-
-  // JobId,supervisor pid
-  std::unordered_map<task_id_t, pid_t> job_supv_pid_map;
-  if (steps.has_value()) job_supv_pid_map = steps.value();
-
-  // All job ids from supervisor
-  auto supv_job_ids_view = job_supv_pid_map | std::views::keys;
-  std::unordered_set<task_id_t> supv_job_ids(supv_job_ids_view.begin(),
-                                             supv_job_ids_view.end());
-  if (!supv_job_ids.empty()) {
-    CRANE_TRACE("[Supervisor] job [{}] still running.",
-                absl::StrJoin(supv_job_ids, ","));
+  for (const auto& [job_id, job_steps] : config_from_ctld.job_steps()) {
+    ctld_step_ids[job_id] =
+        job_steps.steps() | std::views::keys | std::ranges::to<std::set>();
   }
 
-  std::unordered_map<task_id_t, JobInD> job_map(
-      config_from_ctld.job_map().begin(), config_from_ctld.job_map().end());
+  CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
+              util::JobStepsToString(ctld_step_ids));
 
-  std::unordered_map<task_id_t, std::unique_ptr<StepInstance>> step_map;
-  step_map.reserve(config_from_ctld.job_tasks_map_size());
+  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t>>
+      steps = g_supervisor_keeper->InitAndGetRecoveredMap();
 
-  for (const auto& [job_id, step_to_d] : config_from_ctld.job_tasks_map()) {
-    if (supv_job_ids.erase(job_id) > 0) {  // job_id is in supervisor recovery
-      auto step_inst = std::make_unique<StepInstance>(
-          step_to_d, job_supv_pid_map.at(job_id));
-      step_map.emplace(job_id, std::move(step_inst));
-    } else {
-      // Remove lost step's invalid job
-      job_map.erase(job_id);
+  // JobId,supervisor pid
+  absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t> step_supv_pid_map;
+  if (steps.has_value()) step_supv_pid_map = steps.value();
+
+  // All job ids from supervisor
+  std::map<job_id_t, std::set<step_id_t>> supv_step_ids;
+  for (const auto& [job_id, step_id] : step_supv_pid_map | std::views::keys) {
+    supv_step_ids[job_id].emplace(step_id);
+  }
+
+  if (!supv_step_ids.empty()) {
+    CRANE_TRACE("[Supervisor] step [{}] still running.",
+                util::JobStepsToString(supv_step_ids));
+  }
+
+  auto supv_jobs =
+      supv_step_ids | std::views::keys | std::ranges::to<std::set<job_id_t>>();
+  auto ctld_joss =
+      ctld_step_ids | std::views::keys | std::ranges::to<std::set<job_id_t>>();
+  std::set<job_id_t> lost_jobs;
+  std::set<job_id_t> valid_jobs;
+  std::ranges::set_difference(ctld_joss, supv_jobs,
+                              std::inserter(lost_jobs, lost_jobs.end()));
+  std::ranges::set_intersection(ctld_joss, supv_jobs,
+                                std::inserter(valid_jobs, valid_jobs.end()));
+  CRANE_INFO("Job [{}] is lost when craned down. Valid jobs [{}].",
+             absl::StrJoin(lost_jobs, ","), absl::StrJoin(valid_jobs, ","));
+  std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
+  std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
+  std::unordered_map<job_id_t, std::set<step_id_t>> valid_steps{};
+  for (auto job_id : valid_jobs) {
+    const auto& ctld_steps = ctld_step_ids.at(job_id);
+    const auto& craned_steps = supv_step_ids.at(job_id);
+    std::ranges::set_difference(
+        ctld_steps, craned_steps,
+        std::inserter(lost_steps[job_id], lost_steps[job_id].end()));
+    std::ranges::set_difference(
+        craned_steps, ctld_steps,
+        std::inserter(invalid_steps[job_id], invalid_steps[job_id].end()));
+    std::ranges::set_intersection(
+        craned_steps, ctld_steps,
+        std::inserter(valid_steps[job_id], valid_steps[job_id].end()));
+  }
+  CRANE_INFO("Step [{}] is lost when craned down. Valid steps [{}].",
+             util::JobStepsToString(lost_steps),
+             util::JobStepsToString(valid_steps));
+
+  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                      std::unique_ptr<StepInstance>>
+      step_map;
+  step_map.reserve(supv_step_ids.size());
+
+  for (const auto& [job_id, job_steps] : valid_steps) {
+    auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
+    for (const auto& step_id : job_steps) {
+      auto step_inst =
+          std::make_unique<StepInstance>(proto_job_steps.steps().at(step_id));
+      step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
+  }
+  std::unordered_map<job_id_t, JobInD> job_map;
+  job_map.reserve(valid_jobs.size());
+  for (const auto& job_id : valid_jobs) {
+    job_map.emplace(job_id,
+                    JobInD{config_from_ctld.job_steps().at(job_id).job()});
   }
 
   TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
-  for (const auto& job_id : supv_job_ids)
-    g_supervisor_keeper->RemoveSupervisor(job_id);
+  for (const auto& [job_id, step_ids] : invalid_steps)
+    for (auto step_id : step_ids)
+      g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
 
-  if (!supv_job_ids.empty()) {
-    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
-                absl::StrJoin(supv_job_ids, ","));
+  if (!invalid_steps.empty()) {
+    CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
+               util::JobStepsToString(invalid_steps));
   }
 
   g_server->MarkSupervisorAsRecovered();

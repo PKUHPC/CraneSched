@@ -119,6 +119,9 @@ class MongodbClient {
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
+  /* ----- Method of operating the step table ----------- */
+  bool InsertSteps(const std::vector<StepInCtld*>& steps);
+
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
   bool InsertAccount(const Account& new_account);
@@ -281,10 +284,15 @@ class MongodbClient {
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
 
+  document StepInCtldToDocument_(StepInCtld* step);
+  document StepInEmbeddedDbToDocument_(
+      crane::grpc::StepInEmbeddedDb const& step);
+
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
+  const std::string m_step_collection_name_{"step_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
