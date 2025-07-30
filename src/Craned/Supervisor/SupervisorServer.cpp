@@ -18,6 +18,7 @@
 
 #include "SupervisorServer.h"
 
+#include "CranedClient.h"
 #include "TaskManager.h"
 
 namespace Craned::Supervisor {
@@ -26,6 +27,7 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
+  g_config.StepExecuted.store(true);
   std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
   code_future.wait();
 
@@ -56,7 +58,7 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
     crane::grpc::supervisor::CheckStatusReply* response) {
   response->set_job_id(g_config.JobId);
   response->set_supervisor_pid(getpid());
-  response->set_ok(true);
+  response->set_ok(g_config.StepExecuted);
   return Status::OK;
 }
 
@@ -96,15 +98,13 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
 SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
-  std::filesystem::path supervisor_sock_path =
-      std::filesystem::path(kDefaultSupervisorUnixSockDir) /
-      fmt::format("task_{}.sock", g_config.JobId);
-  auto unix_socket_path = fmt::format("unix://{}", supervisor_sock_path);
+  auto unix_socket_path =
+      fmt::format("unix://{}", g_config.SupervisorUnixSockPath);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());
 
-  chmod(supervisor_sock_path.c_str(), 0600);
+  chmod(g_config.SupervisorUnixSockPath.c_str(), 0600);
   m_server_ = builder.BuildAndStart();
 }
 }  // namespace Craned::Supervisor
