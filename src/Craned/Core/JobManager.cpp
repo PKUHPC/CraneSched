@@ -530,7 +530,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     auto code = stub->ExecuteTask();
     if (code != CraneErrCode::SUCCESS) {
       CRANE_ERROR("[Job #{}] Supervisor failed to execute task, code:{}.",
-                  task_id, code);
+                  task_id, static_cast<int>(code));
       KillPid_(child_pid, SIGKILL);
       close(craned_supervisor_fd);
       close(supervisor_craned_fd);
