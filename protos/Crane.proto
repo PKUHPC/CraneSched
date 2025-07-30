@@ -910,56 +910,24 @@ message SendPmixRingMsgReq {
   repeated PmixProc pmix_procs = 2;
   bytes msg = 3;
 }
+message BroadcastPmixPortRequest {
+  repeated string craned_ids = 1;
+  uint32 task_id = 2;
+  uint32 port = 3;
 
-message SendPmixRingMsgReply {
+message BroadcastPmixPortReply {
   bool ok = 1;
 }
 
-message PmixTreeUpwardForwardReq {
-  uint32 seq = 1;
-  repeated PmixProc pmix_procs = 2;
-  string peer_host = 3;
-  bytes msg = 4;
+message ReceivePmixPortRequest {
+  uint32 task_id = 1;
+  uint32 port = 2;
+  string craned_id = 3;
 }
 
-message PmixTreeUpwardForwardReply {
+message ReceivePmixPortReply {
   bool ok = 1;
 }
-
-message PmixTreeDownwardForwardReq {
-  uint32 seq = 1;
-  repeated PmixProc pmix_procs = 2;
-  string peer_host = 3;
-  bytes msg = 4;
-}
-
-message PmixTreeDownwardForwardReply {
-  bool ok = 1;
-}
-
-message PmixDModexRequestReq {
-  uint32 seq_num = 1;
-  string craned_id = 2;
-  PmixProc pmix_proc = 3;
-  string local_namespace = 4;
-  int32 status = 5;
-}
-
-message PmixDModexRequestReply {
-  bool ok = 1;
-}
-
-message PmixDModexResponseReq {
-  uint32 seq_num = 1;
-  string craned_id = 2;
-  bytes data = 3;
-  int32 status = 4;
-}
-
-message PmixDModexResponseReply {
-  bool ok = 1;
-}
-
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
@@ -1024,6 +992,7 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
@@ -1037,6 +1006,7 @@ service Craned {
   rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
@@ -1053,6 +1023,8 @@ service Craned {
   rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
+  /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 }
 
 service CranedForPam {

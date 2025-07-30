@@ -130,7 +130,7 @@ bool Coll::PmixCollTreeLocal_(const std::string& data,
   default:
     CRANE_ERROR("{:p}: local contrib while active collective, state = {}", static_cast<void*>(this), ToString(m_tree_.state));
     m_tree_.state = CollTreeState::SYNC;
-    // TODO: 发送关闭作业通知
+    g_pmix_server->GetCranedClient()->TerminateTasks();
     return false;
   }
 
@@ -212,7 +212,7 @@ bool Coll::ProgressCollect_() {
     CRANE_DEBUG("{:p}: send data to {}", static_cast<void*>(this), m_tree_.parent_host);
     m_tree_.upfwd_status = CollTreeSndState::ACTIVE;
 
-    crane::grpc::PmixTreeUpwardForwardReq request{};
+    crane::grpc::pmix::PmixTreeUpwardForwardReq request{};
 
     for (size_t i = 0; i < m_pset_.nprocs; i++) {
       auto proc = m_pset_.procs[i];
@@ -224,8 +224,8 @@ bool Coll::ProgressCollect_() {
     request.set_msg(m_tree_.upfwd_buf);
 
     auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::PmixTreeUpwardForwardReply>();
-    auto stub = g_craned_client->GetCranedStub(m_tree_.parent_host);
+    auto reply = std::make_shared<crane::grpc::pmix::PmixTreeUpwardForwardReply>();
+    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_tree_.parent_host);
     if (!stub) {
       CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.upfwd_buf, this->m_tree_.parent_host);
       this->m_tree_.upfwd_buf.clear();
@@ -292,7 +292,7 @@ bool Coll::ProgressUpFwd_() {
   default:
     CRANE_ERROR("Bad collective ufwd state {}", ToString(m_tree_.upfwd_status));
     m_tree_.state = CollTreeState::SYNC;
-    // TODO: 发送关闭作业通知
+    g_pmix_server->GetCranedClient()->TerminateTasks();
     return false;
   }
 
@@ -304,7 +304,7 @@ bool Coll::ProgressUpFwd_() {
   m_tree_.downfwd_cb_wait = m_tree_.childrn_cnt;
 
   for (const auto& host : m_tree_.childrn_hosts) {
-    crane::grpc::PmixTreeDownwardForwardReq request{};
+    crane::grpc::pmix::PmixTreeDownwardForwardReq request{};
 
     for (size_t i = 0; i < m_pset_.nprocs; i++) {
       auto proc = m_pset_.procs[i];
@@ -316,9 +316,9 @@ bool Coll::ProgressUpFwd_() {
     request.set_msg(m_tree_.downfwd_buf);
 
     auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::PmixTreeDownwardForwardReply>();
+    auto reply = std::make_shared<crane::grpc::pmix::PmixTreeDownwardForwardReply>();
 
-    auto stub = g_craned_client->GetCranedStub(host);
+    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(host);
     if (!stub) {
       CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.upfwd_buf, this->m_tree_.parent_host);
       this->m_tree_.downfwd_buf.clear();
@@ -393,7 +393,7 @@ bool Coll::ProgressUpFwdWsc_() {
   default:
     CRANE_ERROR("Bad collective ufwd state {}", ToString(m_tree_.upfwd_status));
     m_tree_.state = CollTreeState::SYNC;
-    // TODO: 发送关闭作业通知
+    g_pmix_server->GetCranedClient()->TerminateTasks();
     return false;
   }
 
@@ -448,7 +448,7 @@ bool Coll::ProgressDownFwd_() {
     break;
   default:
     m_tree_.state = CollTreeState::SYNC;
-    // TODO：kill job
+    g_pmix_server->GetCranedClient()->TerminateTasks();
     return false;
   }
 
@@ -526,8 +526,7 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
 error:
   ResetCollTree_();
 error2:
-  // TODO: kill job;
-
+  g_pmix_server->GetCranedClient()->TerminateTasks();
   return false;
 }
 bool Coll::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
@@ -597,8 +596,7 @@ bool Coll::PmixCollTreeParent(const CranedId& peer_host, uint32_t seq,
 error:
   ResetCollTree_();
 error2:
-  // TODO: kill job
-
+  g_pmix_server->GetCranedClient()->TerminateTasks();
   return false;
 }
 
@@ -631,7 +629,7 @@ void Coll::ResetCollTree_() {
     default:
       m_tree_.state = CollTreeState::SYNC;
       CRANE_ERROR("unknown state {}", ToString(m_tree_.state));
-      // TODO: kill job
+      g_pmix_server->GetCranedClient()->TerminateTasks();
   }
 }
 

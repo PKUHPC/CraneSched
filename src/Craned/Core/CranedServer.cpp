@@ -338,6 +338,41 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::BroadcastPmixPort(
+    grpc::ServerContext *context,
+    const crane::grpc::BroadcastPmixPortRequest *request,
+    crane::grpc::BroadcastPmixPortReply *response) {
+  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+  g_ctld_client->BroadcastPmixPort(*request, response);
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ReceivePmixPort(
+    grpc::ServerContext *context,
+    const crane::grpc::ReceivePmixPortRequest *request,
+    crane::grpc::ReceivePmixPortReply *response) {
+
+  auto stub = g_supervisor_keeper->GetStub(request->task_id());
+  if (!stub) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  auto result = stub->ReceivePmixPort(request->task_id(), request->port(), request->craned_id());
+  if (result != CraneErrCode::SUCCESS) {
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
+  }
+
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 

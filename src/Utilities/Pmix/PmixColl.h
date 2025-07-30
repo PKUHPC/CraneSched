@@ -31,6 +31,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "crane/PublicHeader.h"
+#include "protos/Pmix.pb.h"
+
 namespace pmix {
 
 #define PMIX_COLL_RING_CTX_NUM 3
@@ -118,7 +121,7 @@ class Coll : public std::enable_shared_from_this<Coll> {
                             pmix_modex_cbfunc_t cbfunc, void* cbdata);
 
   bool ProcessRingRequest(
-      const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+      const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
       const std::string& msg);
 
   bool PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
@@ -223,7 +226,7 @@ class Coll : public std::enable_shared_from_this<Coll> {
 
   void ResetCollRing_(CollRingCtx& coll_ring_ctx);
 
-  bool PmixCollRingNeighbor_(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
+  bool PmixCollRingNeighbor_(const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
 
   std::mutex m_lock_;
   uint32_t m_seq_{};

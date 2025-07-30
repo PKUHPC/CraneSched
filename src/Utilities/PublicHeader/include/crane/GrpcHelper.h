@@ -68,6 +68,9 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(
     grpc::ServerBuilder* builder, const std::string& address,
     const std::string& port, const TlsCertificates& certs);
 
+void ServerBuilderAddTcpInsecureListeningRandomPort(
+    grpc::ServerBuilder* builder, const std::string& address, int* select_port);
+
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,

@@ -494,6 +494,18 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
+void CtldClient::BroadcastPmixPort(
+    const crane::grpc::BroadcastPmixPortRequest& request,
+    crane::grpc::BroadcastPmixPortReply* response) {
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
+
+  grpc::Status status =
+      m_stub_->BroadcastPmixPort(&context, request, response);
+}
+
 std::set<task_id_t> CtldClient::GetAllStepStatusChangeId() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
   return m_step_status_change_list_ |

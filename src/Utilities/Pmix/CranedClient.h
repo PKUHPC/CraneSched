@@ -18,26 +18,30 @@
 
 #pragma once
 
-#include <list>
-
-#include "PmixColl.h"
 #include "crane/Lock.h"
-#include "parallel_hashmap/phmap.h"
+#include "crane/Network.h"
+#include "crane/PublicHeader.h"
+#include "protos/Crane.grpc.pb.h"
+#include "protos/Crane.pb.h"
 
 namespace pmix {
 
-class PmixState {
- public:
-  PmixState() = default;
+class CranedClient {
+public:
+  CranedClient() = default;
 
-  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
-                         size_t nprocs);
- private:
+  ~CranedClient() = default;
 
-  util::rw_mutex m_mutex_;
-  std::list<std::shared_ptr<Coll>> m_coll_list_;
+  void InitChannelAndStub(const std::string& endpoint);
+
+  bool TerminateTasks();
+
+  bool BroadcastPmixPort(uint32_t pmix_port);
+
+private:
+  std::shared_ptr<grpc::Channel> m_channel_;
+
+  std::unique_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
 
 } // namespace pmix
-
-inline std::unique_ptr<pmix::PmixState> g_pmix_state;

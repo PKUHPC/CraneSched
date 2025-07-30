@@ -16,20 +16,34 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#pragma once
-
-#include <inttypes.h>
-#include <list>
-
-#define REVERSE_TREE_WIDTH 7
-#define REVERSE_TREE_CHILDREN_TIMEOUT 60 /* seconds */
-#define REVERSE_TREE_PARENT_RETRY 5 /* count, 1 sec per attempt */
+#include "PmixState.h"
 
 namespace pmix {
 
-void ReverseTreeInfo(int rank, int num_nodes, int width, int *parent, int *num_children, int *depth, int *total_depth);
+std::shared_ptr<Coll> PmixState::PmixStateCollGet(
+    CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
 
-int ReverseTreeDirectChildren(int rank, int num_nodes, int width, int depth, std::vector<int>* children);
+  util::write_lock_guard lock_guard(m_mutex_);
 
+  for (const auto& coll : m_coll_list_) {
+    if (coll->GetProcNum() != nprocs) continue;
+    if (coll->GetType() != type) continue;
+    if (!coll->GetProcNum()) return coll;
+
+    for (size_t i = 0; i < nprocs; i++) {
+      const auto& proc = coll->GetProcs(i);
+      if (std::strcmp(proc.nspace, procs[i].nspace) == 0 &&
+          proc.rank == procs[i].rank)
+        return coll;
+    }
+  }
+
+  std::shared_ptr<Coll> coll = std::make_shared<Coll>();
+  if (!coll->PmixCollInit(type, procs, nprocs)) return nullptr;
+
+  m_coll_list_.emplace_back(coll);
+
+  return coll;
 }
 
+} // namespace pmix

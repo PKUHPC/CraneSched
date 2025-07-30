@@ -34,20 +34,19 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
   std::set<std::string> hostname_set;
 
   for (const auto& proc : procs) {
-    auto pmix_namespace = g_pmix_server->PmixNamespaceGet(proc.nspace);
-    if (!pmix_namespace) return false;
+    if (g_pmix_server->GetNSpace() != proc.nspace) return false;
 
     if (proc.rank == PMIX_RANK_WILDCARD) {
-      for (const auto& hostname : pmix_namespace->hostlist) {
+      for (const auto& hostname : g_pmix_server->GetNodeList()) {
         hostname_set.emplace(hostname);
       }
     } else {
-      if (proc.rank > pmix_namespace->task_map.size()) {
+      if (proc.rank > g_pmix_server->GetTaskMap().size()) {
         CRANE_ERROR("The rank is out of the task number range.");
         return false;
       }
-      uint32_t node_id = pmix_namespace->task_map[proc.rank];
-      hostname_set.insert(pmix_namespace->hostlist[node_id]);
+      uint32_t node_id = g_pmix_server->GetTaskMap()[proc.rank];
+      hostname_set.insert(g_pmix_server->GetNodeList()[node_id]);
     }
   }
 
