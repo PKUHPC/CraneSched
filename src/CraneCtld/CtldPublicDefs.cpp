@@ -201,6 +201,8 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
+
+  SetHeld(val.hold());
 }
 
 void TaskInCtld::SetFieldsByRuntimeAttr(
