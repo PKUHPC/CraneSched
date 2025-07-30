@@ -27,7 +27,7 @@ namespace Supervisor {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
-using StepToSupv = crane::grpc::TaskToD;
+using StepToSupv = crane::grpc::StepToD;
 
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
@@ -83,6 +83,7 @@ struct Config {
   step_id_t StepId;
   StepToSupv StepSpec;
   std::atomic_int TaskCount;
+  std::atomic_bool StepExecuted{false};
 };
 
 inline Config g_config;
