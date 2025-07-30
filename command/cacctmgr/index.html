@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cacctmgr 管理用户/账户信息 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cacctmgr \u7ba1\u7406\u7528\u6237/\u8d26\u6237\u4fe1\u606f";
+        var mkdocs_page_input_path = "command/cacctmgr.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cacctmgr 管理用户/账户信息</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">主要参数</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#_2">主要命令</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">cacctmgr 管理用户/账户信息</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cacctmgr">cacctmgr 管理用户/账户信息</h1>
+<p><strong>cacctmgr 可以管理账户/用户信息，包括添加账户/用户、删除账户/用户、查找账户/用户。</strong></p>
+<p>CraneSched作业调度系统中有四个用户角色： </p>
+<ul>
+<li><strong>系统管理员（Admin）</strong>：一般为root用户，可以增删查改任何账户和用户信息</li>
+<li><strong>平台管理员（Operator）</strong>：对账户系统具有完全权限</li>
+<li><strong>账户调度员（Coordinator）</strong>：对与自身同一账户下的用户以及对自身账户的子账户具有操作权限，包括添加用户</li>
+<li><strong>普通用户(None)</strong>： 除了查询功能外不具备其他权限，能够查询与自身同一账户下的信息，不可以修改所有用户和账户信息</li>
+</ul>
+<h3 id="_1"><strong>主要参数</strong></h3>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>--json</strong> 以 json 格式输出</li>
+<li><strong>-C/--config string</strong>： 配置文件路径（默认为"/etc/crane/config.yaml"）</li>
+<li><strong>-v/ --version cacctmgr</strong> 命令的版本</li>
+</ul>
+<h3 id="_2"><strong>主要命令</strong></h3>
+<ul>
+<li><strong>help</strong>：显示帮助</li>
+<li><strong>add</strong>: 添加实体（实体包括QoS、账户、用户）</li>
+<li><strong>block</strong>：禁用该实体，使其无法使用</li>
+<li><strong>delete</strong>：删除实体</li>
+<li><strong>modify</strong>：修改实体</li>
+<li><strong>show</strong>：显示一类实体的所有记录</li>
+<li><strong>unblock</strong>：解除禁用</li>
+<li><strong>completion：</strong>自动补全适用于指定 Shell 的脚本</li>
+</ul>
+<h1 id="1">1. 添加</h1>
+<h2 id="11-qos"><strong>1.1 添加qos</strong></h2>
+<h3 id="_3"><strong>主要参数</strong></h3>
+<ul>
+<li>
+<p><strong>-D/--description string</strong>： qos描述信息</p>
+</li>
+<li>
+<p><strong>-h/--help</strong>： 帮助</p>
+</li>
+<li>
+<p><strong>-c/--max_cpus_per_user uint32</strong>： 默认为10</p>
+</li>
+<li>
+<p><strong>-J/--max_jobs_per_user uint32</strong></p>
+</li>
+<li>
+<p><strong>-T/--max_time_limit_per_task</strong> <strong>uint</strong>： 以秒为单位的时间（默认3600）</p>
+</li>
+<li>
+<p><strong>-N/--name string</strong>：qos的名称</p>
+</li>
+<li>
+<p><strong>-P/--priority uint32</strong>：默认为1000</p>
+</li>
+<li>
+<p>例：</p>
+</li>
+<li>
+<p><code>SQL
+    cacctmgr add  qos -N=test-qos -D="test qos"</code></p>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/addqos.png" /></p>
+</li>
+</ul>
+<h2 id="12">1.<strong>2</strong> <strong>添加账户</strong></h2>
+<h3 id="_4"><strong>主要参数</strong></h3>
+<ul>
+<li><strong>-Q/--default_qos string</strong>： 账户默认qos</li>
+<li><strong>-D/--description string</strong>：账号描述信息</li>
+<li><strong>-h/--help</strong>： 帮助</li>
+<li><strong>-N/--name string</strong>： 账户的名称</li>
+<li><strong>-P/--parent string：</strong>此账户的父账户</li>
+<li><strong>-p/--partition strings</strong>： 该账号可以访问的分区列表</li>
+<li><strong>-q/--qos_list strings</strong>：账号可以访问的qos列表</li>
+<li>例：（添加账户PKU并添加PKU的子账户ComputingCentre）</li>
+</ul>
+<pre><code class="language-SQL">cacctmgr add account -N=PKU -D=school -p=CPU,GPU -q=test-qos
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/addaccount.png" /></p>
+<pre><code class="language-SQL">cacctmgr add account -N=ComputingCentre -D=department -P=PKU
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/addaccount2.png" /></p>
+<h2 id="13">1.<strong>3</strong> <strong>添加用户</strong></h2>
+<p>系统管理员可以添加任意账户的用户， 账户管理员可以添加同一账号下的新用户。<strong>添加的用户需要先有uid（先使用useradd在linux系统添加该用户）</strong>。</p>
+<h3 id="_5"><strong>主要参数</strong></h3>
+<ul>
+<li>
+<p><strong>-A/--account string</strong>： 此用户所属的父账户</p>
+</li>
+<li>
+<p><strong>-c/--coordinate</strong>：设置用户是否为父账号的账户调度员（coordinator）</p>
+</li>
+<li>
+<p><strong>-h/--help</strong>： 帮助</p>
+</li>
+<li>
+<p><strong>-L/--level string</strong>：设置用户权限(none/operator/admin) (默认为 "none")</p>
+</li>
+<li>
+<p><strong>-N/--name string</strong>： 用户的名称</p>
+</li>
+<li>
+<p><strong>-p/--partition strings</strong>： 该用户可以访问的分区列表</p>
+</li>
+<li>
+<p>例：</p>
+</li>
+<li>
+<p><code>SQL
+    useradd CS</code></p>
+</li>
+<li>
+<p><code>Plaintext
+    cacctmgr add user -N=CS -A=PKU -p=CPU,GPU -L=admin
+    # -p参数指明用户可用分区为CPU和GPU（分区必须同时为父账户PKU的可用分区），分区的allowed_qos_list与default_qos信息不支持指定，默认从父账户PKU中继承</code></p>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/adduser.png" /></p>
+</li>
+<li>
+<p><code>Plaintext
+    cacctmgr add user -N=lab -A=ComputingCentre
+    # 未指明-p参数，partition与qos信息都从父账户ComputingCentre中继承</code></p>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/adduser2.png" /></p>
+</li>
+</ul>
+<h1 id="2">2. 删除</h1>
+<h2 id="21">2.1 <strong>删除用户</strong></h2>
+<pre><code class="language-Plaintext">cacctmgr delete user -N lab
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/deleteuser.png" /></p>
+<h2 id="22">2.2 <strong>删除账户</strong></h2>
+<p>仅系统管理员可以删除账户，删除账户时会检查账户下是否还有子账户或者用户，如果有则不允许删除，防止产生游离的用户，需要将其子账户和用户都设置在新账户下。</p>
+<pre><code class="language-Plaintext">cacctmgr delete account -N ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/deleteaccount.png" /></p>
+<h2 id="23-qos">2<strong>.3 </strong>删除qos</h2>
+<pre><code class="language-Plaintext">cacctmgr delete qos -N test-qos
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/deleteqos.png" /></p>
+<h1 id="3">3. 禁用</h1>
+<h2 id="31">3.1 <strong>阻止用户或账户</strong></h2>
+<h3 id="_6"><strong>主要命令</strong></h3>
+<ul>
+<li><strong>account</strong>： 阻止账户</li>
+<li><strong>user</strong>：阻止账户下的用户</li>
+</ul>
+<pre><code class="language-Plaintext">cacctmgr block user lab -A=ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/blockuser.png" /></p>
+<pre><code class="language-Plaintext">cacctmgr block account ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/blockaccount.png" /></p>
+<h1 id="4">4. 解禁</h1>
+<h2 id="41">4.1 解除阻止用户或账户</h2>
+<h3 id="_7"><strong>主要命令</strong></h3>
+<ul>
+<li><strong>account</strong>： 解除阻止账户</li>
+<li><strong>user</strong>：解除阻止账户下的用户</li>
+</ul>
+<pre><code class="language-Plaintext">cacctmgr unblock user lab -A=ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/unlockuser.png" /></p>
+<pre><code class="language-Plaintext">cacctmgr unblock account ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/unlockaccount.png" /></p>
+<h1 id="5">5. 查询</h1>
+<h2 id="51">5.1 <strong>查找用户</strong></h2>
+<p>所有用户均可以使用查询功能</p>
+<pre><code class="language-Plaintext">cacctmgr find user lab
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/finduser.png" /></p>
+<pre><code class="language-Plaintext">cacctmgr find user CS
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/finduser2.png" /></p>
+<pre><code class="language-Bash">cacctmgr show user
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/showuser.png" /></p>
+<h2 id="52">5.2 <strong>查找账户</strong></h2>
+<pre><code class="language-Plaintext">cacctmgr find account ComputingCentre
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/findaccount.png" /></p>
+<pre><code class="language-Plaintext">cacctmgr find account PKU
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/findaccount2.png" /></p>
+<pre><code class="language-Bash">cacctmgr show account
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/showaccount.png" /></p>
+<h2 id="53-qos">5.3 <strong>查找qos</strong></h2>
+<pre><code class="language-Plaintext">cacctmgr find qos test-qos
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/findqos.png" /></p>
+<pre><code class="language-Bash">cacctmgr show qos
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/showqos.png" /></p>
+<h1 id="6">6. 修改</h1>
+<h2 id="61">6.1 <strong>修改账户</strong></h2>
+<p>系统管理员可以修改任意信息， 账户管理员可以修改本身账户的信息，但不能更改账户的父账户。</p>
+<h3 id="_8"><strong>主要参数</strong></h3>
+<ul>
+<li>
+<p><strong>--add_allowed_partition string</strong>：将新项添加到允许的分区列表</p>
+</li>
+<li>
+<p><strong>--add_allowed_qos_list strings</strong>：将新项添加到允许的qos列表</p>
+</li>
+<li>
+<p><strong>-Q/--default_qos string</strong>： 修改账户默认qos</p>
+</li>
+<li>
+<p><strong>--delete_allowed_partition string</strong>：从允许的分区列表中删除特定项目</p>
+</li>
+<li>
+<p><strong>--delete_allowed_qos_list strings</strong>：从允许的qos列表中删除特定项</p>
+</li>
+<li>
+<p><strong>-D/--description string</strong>：修改账户的描述信息</p>
+</li>
+<li>
+<p><strong>-F/--force</strong>： 强制操作</p>
+</li>
+<li>
+<p><strong>-h/--help</strong>： 帮助</p>
+</li>
+<li>
+<p><strong>-N/--name string</strong>：需要进行修改的账户名称</p>
+</li>
+<li>
+<p><strong>--set_allowed_partition strings</strong>：设置允许的分区列表的内容</p>
+</li>
+<li>
+<p><strong>--set_allowed_qos_list strings</strong>：设置允许的qos列表的内容</p>
+</li>
+<li>
+<p>例：</p>
+</li>
+<li>
+<p><code>Plaintext
+    cacctmgr modify account -N=ComputingCentre -D="Located in PKU"</code></p>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/modifyaccount.png" /></p>
+</li>
+</ul>
+<h2 id="62">6.2 <strong>修改用户</strong></h2>
+<p>系统管理员可以修改任意信息， 账户管理员可以修改同账户下用户的信息，但不能更改用户的账户。</p>
+<h3 id="_9"><strong>主要参数</strong></h3>
+<ul>
+<li>
+<p><strong>-A/--account string</strong>：设置用户使用的帐号</p>
+</li>
+<li>
+<p><strong>--add_allowed_partition strings</strong>：将新项添加到允许的分区列表</p>
+</li>
+<li>
+<p><strong>--add_allowed_qos_list string</strong>：将新项添加到允许的qos列表</p>
+</li>
+<li>
+<p><strong>-L/--admin_level string</strong>：设置用户管理权限（none/operator/admin）</p>
+</li>
+<li>
+<p><strong>-Q/--default_qos string</strong>： 修改账户默认qos</p>
+</li>
+<li>
+<p><strong>--delete_allowed_partition strings</strong>：从允许的分区列表中删除特定项目</p>
+</li>
+<li>
+<p><strong>--delete_allowed_qos_list string</strong>：从允许的qos列表中删除特定项目</p>
+</li>
+<li>
+<p><strong>-F/--force</strong>： 强制操作</p>
+</li>
+<li>
+<p><strong>-h/--help</strong>： 帮助</p>
+</li>
+<li>
+<p><strong>-N/--name string</strong>：需要进行修改的用户名称</p>
+</li>
+<li>
+<p><strong>-D/--default-account</strong> <strong>string</strong>：修改用户的默认账号</p>
+</li>
+<li>
+<p><strong>-p/--partition string</strong>：被修改的分区，如果不显式设置该参数，默认修改所有分区</p>
+</li>
+<li>
+<p><strong>--set_allowed_partition strings</strong>：设置允许的分区列表的内容</p>
+</li>
+<li>
+<p><strong>--set_allowed_qos_list strings</strong>：设置允许的qos列表的内容</p>
+</li>
+<li>
+<p>例</p>
+<ul>
+<li>
+<p><code>SQL
+  cacctmgr modify user -N=lab -A=ComputingCentre -L=operator --delete-allowed-partition GPU</code></p>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/modifyuser.png" /></p>
+</li>
+</ul>
+</li>
+<li>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/modifyuser2.png" /></p>
+</li>
+</ul>
+<h2 id="63-qos">6.3 修改qos</h2>
+<h3 id="_10"><strong>主要参数</strong></h3>
+<ul>
+<li><strong>-D/--description string</strong>：修改qos的描述信息</li>
+<li><strong>-h/--help</strong>： 帮助</li>
+<li><strong>-c/--max_cpus_per_user uint32</strong>：(默认10)</li>
+<li><strong>-J/--max_jobs_per_user uint32</strong></li>
+<li><strong>-T/--max_time_limit_per_task</strong> <strong>uint</strong>：以秒为单位的时间（默认 3600）</li>
+<li><strong>-N/--name string</strong>： 需要进行修改的qos名称</li>
+<li><strong>-P/--priority uint32</strong>：(默认1000)</li>
+</ul>
+<h1 id="7">7<strong>. 显示</strong></h1>
+<h2 id="71">7.1 显示<strong>账户树</strong></h2>
+<p>系统管理员会显示数据库所有根账户的账户树， 账户管理员和用户会显示本身账户的账户树。</p>
+<pre><code class="language-Plaintext">cacctmgr show accounts
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/showaccounts.png" /></p>
+<h2 id="72">7.2 显示用户</h2>
+<p>系统管理员会显示所有用户， 账户管理员和用户会显示同一账户下的所有用户。</p>
+<pre><code class="language-Plaintext">cacctmgr show users
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacctmgr/showuser2.png" /></p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../cacct/" class="btn btn-neutral float-left" title="cacct 查看作业信息"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../calloc/" class="btn btn-neutral float-right" title="calloc 提交交互式任务">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../cacct/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../calloc/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

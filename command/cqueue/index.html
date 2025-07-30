@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cqueue 查看作业队列 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cqueue \u67e5\u770b\u4f5c\u4e1a\u961f\u5217";
+        var mkdocs_page_input_path = "command/cqueue.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cqueue 查看作业队列</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">主要参数</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">cqueue 查看作业队列</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cqueue">cqueue 查看作业队列</h1>
+<p><strong>cqueue可以查看队列中的作业信息。</strong></p>
+<p>查看集群中所有队列的作业信息（包括状态pending、running、cancelled），默认输出100条信息。</p>
+<pre><code class="language-bash">cqueue
+</code></pre>
+<p><strong>cqueue运行结果展示</strong></p>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue.png" /></p>
+<ul>
+<li><strong>主要输出项</strong></li>
+<li><strong>JobId</strong>：作业号</li>
+<li><strong>Partition</strong>：作业所在分区</li>
+<li><strong>Name</strong>: 作业名</li>
+<li><strong>User</strong>：作业所属用户</li>
+<li><strong>Account</strong>：作业所属账户</li>
+<li><strong>Status</strong>：作业状态</li>
+<li><strong>Type</strong>： 作业类型</li>
+<li><strong>TimeLimit</strong>：作业时间限制</li>
+<li><strong>Nodes</strong>：作业所分配节点数</li>
+<li><strong>NodeList</strong>： 作业运行的节点名</li>
+</ul>
+<h4 id="_1"><strong>主要参数</strong></h4>
+<ul>
+<li><strong>-A/--Account</strong> <strong>string</strong>：指定查询作业所属账户，指定多个账户时用逗号隔开</li>
+<li><strong>-C/--config</strong> <strong>string</strong>：配置文件路径</li>
+<li><strong>-o/--format</strong> <strong>string</strong>：指定输出格式。由百分号（%）后接一个字符或字符串标识。 在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符或字符串（不区分大小写）：</li>
+<li><strong>%a/%Account：</strong> 显示作业关联的账户</li>
+<li><strong>%c/%AllocCpus：</strong>显示作业已分配的 CPU 数量</li>
+<li><strong>%e/%CpuPerNode：</strong>显示作业每个节点请求的 CPU 数量</li>
+<li><strong>%h/%ElapsedTime：</strong>显示作业自启动以来的已用时间</li>
+<li><strong>%j/%JobId：</strong>显示作业 ID</li>
+<li><strong>%k/%Comment：</strong>显示作业的备注</li>
+<li><strong>%l/%NodeList：</strong>显示作业正在运行的节点列表</li>
+<li><strong>%m/%TimeLimit：</strong>显示作业的时间限制</li>
+<li><strong>%n/%MemPerNode：</strong>显示作业每个节点请求的内存量</li>
+<li><strong>%N/%NodeNum：</strong>显示作业请求的节点数量</li>
+<li><strong>%n/%Name：</strong>显示作业名称</li>
+<li><strong>%P/%Partition：</strong>显示作业运行所在的分区</li>
+<li><strong>%p/%Priority：</strong>显示作业的优先级</li>
+<li><strong>%Q/%QOS</strong>：显示作业的服务质量（QoS）级别</li>
+<li><strong>%R/%Reason：</strong>显示作业挂起的原因</li>
+<li><strong>%r/%ReqNodes：</strong>显示作业请求的节点</li>
+<li><strong>%S/%StartTime：</strong>显示作业的开始时间</li>
+<li><strong>%s/%SubmitTime：</strong>显示作业的提交时间</li>
+<li><strong>%t/%State：</strong>显示作业的当前状态</li>
+<li><strong>%T/%JobType：</strong>显示作业类型</li>
+<li><strong>%u/%Uid：显示作业的 UID</strong></li>
+<li><strong>%U/%User：</strong>显示提交作业的用户</li>
+<li><strong>%x/%ExcludeNodes：</strong>显示作业排除的节点</li>
+<li>每个格式标识符或字符串可用宽度说明符修改（如 "%.5j" ）。 若指定宽度，则会被格式化为至少达到该宽度。 若格式无效或无法识别，程序会报错并终止。 <ul>
+<li>例：<strong>--format "%.5j %.20n %t"</strong> 会输出作业 ID（最小宽度 5）、名称（最小宽度 20）和状态。</li>
+</ul>
+</li>
+<li><strong>-F/--full</strong>: 显示完整的内容，如果未指定，默认每项输出30个字符</li>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-i/--iterate</strong> <strong>uint</strong>：指定间隔秒数刷新查询结果。如 -i=3表示每隔三秒输出一次查询结果</li>
+<li><strong>-j/--job</strong> <strong>string</strong>：指定查询作业号，指定多个作业号时用逗号隔开。如 -j=2,3,4</li>
+<li><strong>--json：</strong>json格式输出命令执行结果</li>
+<li><strong>-m/--MaxVisibleLines</strong> <strong>uint32</strong>：指定输出结果的最大条数。如-m=500表示最多输出500行查询结果</li>
+<li><strong>-n/--name</strong> <strong>string</strong>：指定查询作业名，指定多个作业名时用逗号隔开</li>
+<li><strong>-N/--noHeader</strong>：输出隐藏表头</li>
+<li><strong>-p/--partition</strong> <strong>string</strong>：指定查询作业所在分区，指定多个分区时用逗号隔开</li>
+<li><strong>-q/--qos</strong> <strong>string</strong>：指定查询作业的QoS，指定多个QoS时用逗号隔开</li>
+<li><strong>--self：</strong>查看当前用户提交的作业</li>
+<li><strong>-S/--start</strong>：显示作业的开始时间（pending作业显示预期开始时间）</li>
+<li><strong>-t/--state</strong> <strong>string</strong>：指定查询作业状态，指定多个状态时用逗号隔开</li>
+<li><strong>-u/--user</strong> <strong>string</strong>：指定查询作业所属用户，指定多个用户时用逗号隔开</li>
+<li><strong>-v/--version：</strong>查询版本号</li>
+</ul>
+<p>例：</p>
+<pre><code class="language-SQL">cqueue -h
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_h.png" /></p>
+<pre><code class="language-SQL">cqueue -N
+</code></pre>
+<p><img alt="cqueue" src="../images/cqueue/cqueue_H.png" /></p>
+<pre><code class="language-SQL">cqueue -S
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_S.png" /></p>
+<pre><code class="language-SQL">cqueue -j 30674,30675
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_j.png" /></p>
+<pre><code class="language-SQL">cqueue -t Pending
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_t.png" /></p>
+<pre><code class="language-Bash">cqueue -t r
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_tr.png" /></p>
+<pre><code class="language-SQL">cqueue -u cranetest
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_u.png" /></p>
+<pre><code class="language-SQL">cqueue -A CraneTest
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_A.png" /></p>
+<pre><code class="language-SQL">cqueue -i 3
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_i.png" /></p>
+<pre><code class="language-SQL">cqueue -p CPU
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_p.png" /></p>
+<pre><code class="language-SQL">cqueue -m 3
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_m.png" /></p>
+<pre><code class="language-SQL">cqueue -o=&quot;%n %u %.5j %.5t %.3T %.5T&quot;
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_o.png" /></p>
+<p>format中的指定列的对应缩写对照：</p>
+<ul>
+<li>j-TaskId；n-Name；t-State；p-Partition；u-User；a-Account；T-Type；I-NodeIndex；l-TimeLimit；N-Nodes</li>
+</ul>
+<pre><code class="language-Bash">cqueue -n test
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_n1.png" /></p>
+<pre><code class="language-Bash">cqueue -N
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_N2.png" /></p>
+<pre><code class="language-Bash">cqueue -q test_qos
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_q.png" /></p>
+<pre><code class="language-Bash">cqueue --self
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_self.png" /></p>
+<pre><code class="language-Bash">cqueue -t Running -S 2024-01-02T15:04:05~2024-01-11T11:12:41
+</code></pre>
+<p><img alt="cqueue" src="../../images/cqueue/cqueue_tRunning.png" /></p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../cinfo/" class="btn btn-neutral float-left" title="cinfo 查看节点与分区状态"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../crun/" class="btn btn-neutral float-right" title="crun 提交交互式任务">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../cinfo/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../crun/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

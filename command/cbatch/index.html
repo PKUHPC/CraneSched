@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cbatch 提交批处理作业 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cbatch \u63d0\u4ea4\u6279\u5904\u7406\u4f5c\u4e1a";
+        var mkdocs_page_input_path = "command/cbatch.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cbatch 提交批处理作业</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">常用环境变量</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">cbatch 提交批处理作业</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cbatch">cbatch 提交批处理作业</h1>
+<p><strong>cbatch主要是将用户描述整个计算过程的脚本传递给作业调度系统，并为作业分配作业号，等待作业调度系统为其分配资源并执行。</strong></p>
+<p>CraneSched系统中必须有用户和账号才能提交作业，添加用户和账户请参考<a href="https://e26ruh1viz.feishu.cn/wiki/wikcn3TaZVHvVsA2Wwk171RVBex">cacctmgr教程</a>。</p>
+<p>首先介绍一个简单的单节点作业的例子:</p>
+<p>下列作业将申请一个节点，一个CPU核心，并在计算节点上运行hostname并退出</p>
+<pre><code class="language-bash">#!/bin/bash
+#CBATCH --ntasks-per-node 1
+#CBATCH --nodes 1
+#CBATCH -c 1
+#CBATCH --mem 20M
+#CBATCH --time 0:3:1
+#CBATCH -o job.out
+#CBATCH -p CPU
+#CBATCH -J Test_Job
+
+hostname
+</code></pre>
+<p>假设上面作业脚本的文件名为cbatch_test.sh，通过cbatch命令提交：</p>
+<pre><code class="language-bash">cbatch cbatch_test.sh
+</code></pre>
+<p><strong>cbatch运行结果展示</strong></p>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_run1.png" /></p>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_run2.png" /></p>
+<p><strong>主要参数：</strong></p>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-A/--account string</strong>：提交作业的账户</li>
+<li><strong>-D/--chdir string</strong>：任务工作路径</li>
+<li><strong>-C/--config string</strong>：配置文件路径(默认 "/etc/crane/config.yaml")</li>
+<li><strong>-c/--cpus-per-task</strong> <strong>float</strong>: 每个节点申请的CPU核心数</li>
+<li><strong>-e/--error string：</strong>指定脚本错误日志定向路径</li>
+<li><strong>-x/--exclude string ：</strong>功能是从分配中排除特定节点（用逗号分隔的列表 ），用于节点分配管控场景，指定不想参与分配的节点。</li>
+<li><strong>--export string ：</strong>作用为传播环境变量，在涉及环境变量传递，让变量在相关任务、作业等执行环境中生效时使用。</li>
+<li><strong>--extra-attr string ：</strong>可设置作业的额外属性（json格式 ），用于给作业附加自定义的属性信息，方便识别、管理等。</li>
+<li><strong>--get-user-env ：</strong>会加载用户的登录环境变量，让作业等执行时能使用用户登录时的环境变量配置。</li>
+<li><strong>--gres string ：</strong>指定每个任务所需的通用资源，格式如 gpu:a100:1（指定使用 1 块 a100 型号 GPU ）或 gpu:1（指定使用 1 块 GPU ，不限具体型号 ），用于 GPU 等资源分配场景。</li>
+<li><strong>-J/--job-name string</strong>：作业名</li>
+<li><strong>--json</strong>：以 JSON 格式输出</li>
+<li><strong>--mail-type string：</strong>当特定事件发生时，向用户发送邮件通知，支持的值有：无（NONE）、开始（BEGIN）、结束（END）、失败（FAIL）、达到时间限制（TIMELIMIT）、所有事件（ALL）（默认是无（NONE) ）</li>
+<li><strong>--mail-user string：</strong>通知接收者的邮件地址</li>
+<li><strong>--mem string：</strong>最大实际内存量，支持 GB（G，g）、MB（M，m）、KB（K，k）和字节（B）为单位，默认单位是 MB</li>
+<li><strong>-w/--nodelist string ：</strong>要分配给作业的节点（逗号分隔的列表 ）</li>
+<li><strong>-N/--nodes uint32 ：</strong>作业要运行的节点数量（格式 N = min[-max] ，默认 1 ）</li>
+<li><strong>--ntasks-per-node uint32 ：</strong>每个节点要调用的任务数量（默认 1 ）</li>
+<li><strong>--open-mode string ：</strong>设置打开输出和错误文件的模式，支持的值：append（追加 ）、truncate（截断 ，默认 ）</li>
+<li><strong>-o/ --output</strong> <strong>string</strong> ：脚本标准输出的重定向路径</li>
+<li><strong>-p/ --partition string</strong> ：请求的分区</li>
+<li><strong>-q/--qos</strong> <strong>string</strong> ：作业使用的服务质量（QoS ）</li>
+<li><strong>--repeat uint32</strong> ：多次提交作业（默认 1 ）</li>
+<li><strong>-r/--reservation string ：</strong>使用预留资源</li>
+<li><strong>-t /--time string ：</strong>时间限制 ，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示 5 天 1 秒 ）或 "hours:minutes:seconds"（如 10:1:2 表示 10 小时 1 分钟 2 秒 ）</li>
+<li><strong>-v /--version ：</strong>cbatch 的版本</li>
+<li><strong>--wrap string ：</strong>将命令字符串包装到 sh 脚本中并提交</li>
+</ul>
+<p>例：</p>
+<pre><code class="language-Plain">cbatch cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_test.png" /></p>
+<pre><code class="language-Plain">cbatch -h
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_h.png" /></p>
+<pre><code class="language-Plain">cbatch -A=acct-test cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_A1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_A2.png" /></p>
+<pre><code class="language-Plain">cbatch -x crane01,crane02 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_x1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_x2.png" /></p>
+<pre><code class="language-Plain">cbatch -J testjob01 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_j1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_j2.png" /></p>
+<pre><code class="language-Plain">cbatch -w crane01,crane03 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_w1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_w2.png" /></p>
+<pre><code class="language-Plain">cbatch -p GPU cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_p1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_p2.png" /></p>
+<pre><code class="language-Plain">cbatch -t 00:25:25 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_t1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_t2.png" /></p>
+<pre><code class="language-C">cbatch -c 2 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_c1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_c2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_c3.png" /></p>
+<pre><code class="language-C">cbatch --mem 123M cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_mem1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_mem2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_mem3.png" /></p>
+<pre><code class="language-C">cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_N1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_N2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_N3.png" /></p>
+<pre><code class="language-Bash">cbatch -D /path test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_D1.png" /></p>
+<pre><code class="language-Bash">cbatch -e error.log test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_e.png" /></p>
+<pre><code class="language-Bash">cbatch --export ALL test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_export.png" /></p>
+<pre><code class="language-Bash">cbatch --get-user-env test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_get_user.png" /></p>
+<pre><code class="language-Bash">cbatch -o output.out test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_o.png" /></p>
+<pre><code class="language-Bash">cbatch -q qos_test test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_q.png" /></p>
+<pre><code class="language-Bash">cbatch --repeat 3 test.sh
+</code></pre>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_repeat.png" /></p>
+<h4 id="_1">常用环境变量</h4>
+<table>
+<thead>
+<tr>
+<th>变量名</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CRANE_JOB_NODELIST</strong></td>
+<td>作业分配的节点列表</td>
+</tr>
+<tr>
+<td><strong>%j</strong></td>
+<td>作业号</td>
+</tr>
+</tbody>
+</table>
+<p><strong>下面介绍提交一个跨节点多核心的例子：</strong></p>
+<p>c下列作业将在三个节点上运行，每个节点使用4个CPU核心。</p>
+<pre><code class="language-Plaintext">#!/bin/bash
+#CBATCH -o crane_test%j.out
+#CBATCH -p CPU
+#CBATCH -J &quot;crane_test&quot;
+#CBATCH --nodes 3
+#CBATCH --ntasks-per-node 4
+#CBATCH -c 4
+#CBATCH --time 50:00:00
+
+# 生成作业分配的节点的machinefile
+echo &quot;$CRANE_JOB_NODELIST&quot; | tr &quot;;&quot; &quot;\n&quot; &gt; crane.hosts
+
+#加载MPI运行环境
+module load mpich/4.0 
+
+#执行跨节点并行任务
+mpirun -n 13 -machinefile crane.hosts helloWorld &gt; log
+</code></pre>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../calloc/" class="btn btn-neutral float-left" title="calloc 提交交互式任务"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../ccancel/" class="btn btn-neutral float-right" title="ccancel 取消作业">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../calloc/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../ccancel/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

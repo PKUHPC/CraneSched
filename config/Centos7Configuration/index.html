@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>centos7 Crane环境配置 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "centos7 Crane\u73af\u5883\u914d\u7f6e";
+        var mkdocs_page_input_path = "config/Centos7Configuration.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../command/crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">centos7 Crane环境配置</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#1">1.环境准备</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#2">2.安装工具链</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#3c">3.安装C++库</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#4mariadb">4.安装mariadb</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#5mongodb">5.安装MongoDB</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#6mongodb-c">6.安装MongoDB C++驱动</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#7">7.编译程序</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#8pam">8.Pam模块</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#9go">9.配置前端go语言环境</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#10">10.部署文件同步</a>
+    </li>
+    </ul>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Config</li>
+      <li class="breadcrumb-item active">centos7 Crane环境配置</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="centos7-crane">centos7 Crane环境配置</h1>
+<h2 id="1">1.环境准备</h2>
+<p>安装ntp ntpdate同步时钟</p>
+<pre><code class="language-shell">yum install ntp ntpdate
+systemctl start ntpd
+systemctl enable ntpd
+
+timedatectl set-timezone Asia/Shanghai
+</code></pre>
+<p>关闭防火墙，不允许关闭防火墙则考虑开放10011、10010、873端口</p>
+<pre><code class="language-shell">systemctl stop firewalld
+systemctl disable firewalld
+
+# 或者开放端口
+firewall-cmd --add-port=10011/tcp --permanent --zone=public
+firewall-cmd --add-port=10010/tcp --permanent --zone=public
+firewall-cmd --add-port=873/tcp --permanent --zone=public
+# 重启防火墙(修改配置后要重启防火墙)
+firewall-cmd --reload
+</code></pre>
+<p>Change yum source to tsinghua repo source:</p>
+<pre><code class="language-shell">rm -rf /etc/yum.repos.d/*
+vi /etc/yum.repos.d/CentOS-Base.repo
+</code></pre>
+<p>Paste the following contents:</p>
+<pre><code># CentOS-Base.repo
+#
+# The mirror system uses the connecting IP address of the client and the
+# update status of each mirror to pick mirrors that are updated to and
+# geographically close to the client.  You should use this for CentOS updates
+# unless you are manually picking other mirrors.
+#
+# If the mirrorlist= does not work for you, as a fall back you can try the
+# remarked out baseurl= line instead.
+#
+#
+
+[base]
+name=CentOS-$releasever - Base
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos/$releasever/os/$basearch/
+#mirrorlist=http://mirrorlist.centos.org/?release=$releasever&amp;arch=$basearch&amp;repo=os
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+
+#released updates
+[updates]
+name=CentOS-$releasever - Updates
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos/$releasever/updates/$basearch/
+#mirrorlist=http://mirrorlist.centos.org/?release=$releasever&amp;arch=$basearch&amp;repo=updates
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+
+#additional packages that may be useful
+[extras]
+name=CentOS-$releasever - Extras
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos/$releasever/extras/$basearch/
+#mirrorlist=http://mirrorlist.centos.org/?release=$releasever&amp;arch=$basearch&amp;repo=extras
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+
+#additional packages that extend functionality of existing packages
+[centosplus]
+name=CentOS-$releasever - Plus
+baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos/$releasever/centosplus/$basearch/
+#mirrorlist=http://mirrorlist.centos.org/?release=$releasever&amp;arch=$basearch&amp;repo=centosplus
+gpgcheck=1
+enabled=0
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+</code></pre>
+<pre><code class="language-shell">yum clean all
+yum makecache
+
+yum install epel-release
+yum install centos-release-scl-rh
+</code></pre>
+<h2 id="2">2.安装工具链</h2>
+<pre><code class="language-shell">yum install devtoolset-11
+yum install rh-git218
+</code></pre>
+<p>为了避免每次手动生效， Then, paste the following contents into <code>~/.bash_profile</code></p>
+<pre><code class="language-shell">vim ~/.bash_profile
+</code></pre>
+<pre><code>source scl_source enable rh-git218
+source scl_source enable devtoolset-11
+</code></pre>
+<p>Restart bash.</p>
+<p>这时用gcc --version查询，可以看到版本已经是11.2系列了</p>
+<pre><code class="language-shell">$ gcc --version
+gcc (GCC) 11.2.1 20210728 (Red Hat 11.2.1-1)
+Copyright (C) 2021 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+</code></pre>
+<p>给系统安装个下载命令器</p>
+<pre><code class="language-shell">yum install wget -y
+</code></pre>
+<p>安装cmake和ninja</p>
+<p>由于需要源码安装，首先选择合适的源码存放位置，可以放在自己账号的目录下。</p>
+<pre><code class="language-shell">su - liulinxing # 用户名
+mkdir download
+cd download
+</code></pre>
+<p>从github下载源码</p>
+<pre><code class="language-shell">wget https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-linux.zip
+wget https://github.com/Kitware/CMake/releases/download/v3.21.3/cmake-3.21.3.tar.gz
+</code></pre>
+<p>解压编译安装</p>
+<pre><code class="language-shell">unzip ninja-linux.zip
+cp ninja /usr/bin/
+
+yum install openssl-devel
+
+tar -zxvf cmake-3.21.3.tar.gz
+cd cmake-3.12.4
+./bootstrap
+gmake
+gmake install
+</code></pre>
+<p>检查安装是否成功</p>
+<pre><code class="language-shell">cmake --version
+#cmake version 3.21.3
+#
+#CMake suite maintained and supported by Kitware (kitware.com/cmake).
+</code></pre>
+<h2 id="3c">3.安装C++库</h2>
+<p>下载相关源码压缩包到一个目录，解压所有源码压缩包</p>
+<pre><code class="language-shell">wget https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz
+tar xzf boost_1_78_0.tar.gz
+
+wget https://github.com/fmtlib/fmt/archive/refs/tags/8.0.1.tar.gz
+tar xzf fmt-8.0.1.tar.gz
+
+wget https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz
+tar xzf libevent-2.1.12-stable.tar.gz
+
+wget https://github.com/jarro2783/cxxopts/archive/refs/tags/v2.2.1.tar.gz
+tar xzf cxxopts-2.2.1.tar.gz
+
+wget https://github.com/google/googletest/archive/refs/tags/release-1.11.0.tar.gz
+tar xzf googletest-release-1.11.0.tar.gz
+
+wget https://dist.libuv.org/dist/v1.42.0/libuv-v1.42.0.tar.gz
+tar xzf libuv-1.42.0.tar.gz
+
+wget https://github.com/gabime/spdlog/archive/refs/tags/v1.8.5.tar.gz
+tar xzf spdlog-1.8.5.tar.gz
+</code></pre>
+<p>安装第三方库</p>
+<pre><code class="language-shell">yum install libcgroup-devel
+yum install libcurl-devel
+yum install pam-devel
+
+ cd boost_1_78_0
+./bootstrap.sh
+./b2 install --with=all
+
+cd ..
+cd libuv-1.42.0
+mkdir build
+cd build/
+cmake -DCMAKE_INSTALL_PREFIX=/nfs/home/testCrane/Crane/dependencies/online/libuv -DCMAKE_CXX_STANDARD=17 -G Ninja ..
+ninja install
+
+# 运行安装脚本
+bash ./download_deps.sh
+</code></pre>
+<h2 id="4mariadb">4.安装mariadb</h2>
+<p>通过yum安装就行了，安装mariadb-server，默认依赖安装mariadb，一个是服务端、一个是客户端。</p>
+<pre><code class="language-shell">wget https://downloads.mariadb.com/MariaDB/mariadb_repo_setup
+chmod +x mariadb_repo_setup
+./mariadb_repo_setup
+yum install MariaDB-server
+yum install mysql-devel #安装链接库
+
+systemctl start mariadb  # 开启服务
+systemctl enable mariadb  # 设置为开机自启动服务
+
+mariadb-secure-installation  # 首次安装需要进行数据库的配置
+</code></pre>
+<p>配置时出现的各个选项</p>
+<pre><code class="language-shell">Enter current password for root (enter for none):  # 输入数据库超级管理员root的密码(注意不是系统root的密码)，第一次进入还没有设置密码则直接回车
+
+Set root password? [Y/n]  # 设置密码，y
+
+New password:  # 新密码  123456
+Re-enter new password:  # 再次输入密码:123456
+
+Remove anonymous users? [Y/n]  # 移除匿名用户， y
+
+Disallow root login remotely? [Y/n]  # 拒绝root远程登录，n，不管y/n，都会拒绝root远程登录
+
+Remove test database and access to it? [Y/n]  # 删除test数据库，y：删除。n：不删除，数据库中会有一个test数据库，一般不需要
+
+Reload privilege tables now? [Y/n]  # 重新加载权限表，y。或者重启服务也许
+</code></pre>
+<p>安装过程中遇到Table doesn’t exist报错：
+ERROR 1146 (42S02) at line 1: Table ‘mysql.global_priv’ doesn’t exist … Failed!
+执行下面的命令后，重启mysql</p>
+<pre><code class="language-shell">mysql_upgrade -uroot -p --force
+</code></pre>
+<p>重启数据库</p>
+<pre><code class="language-shell">systemctl restart mariadb
+</code></pre>
+<p>登陆数据库</p>
+<pre><code class="language-shell">mysql -uroot -p
+Enter password:
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MariaDB connection id is 9
+Server version: 10.4.8-MariaDB MariaDB Server
+</code></pre>
+<p>进入mysql数据库</p>
+<pre><code class="language-shell">use mysql
+</code></pre>
+<p>查询user表，可看到多条数据</p>
+<pre><code class="language-shell">select host,user,password from user;
+</code></pre>
+<p>删除localhost以外数据</p>
+<pre><code class="language-shell">delete from user where host !='localhost';
+</code></pre>
+<p>配置完毕，退出</p>
+<pre><code class="language-shell">exit;
+systemctl restart mariadb
+</code></pre>
+<h2 id="5mongodb">5.安装MongoDB</h2>
+<pre><code class="language-shell"># 下载并解压安装包
+wget https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-rhel70-5.0.9.tgz
+tar -zxvf mongodb-linux-x86_64-rhel70-5.0.9.tgz
+# 重命名
+mv mongodb-linux-x86_64-rhel70-5.0.9  /opt/mongodb
+# 添加环境变量  
+vim /etc/profile
+</code></pre>
+<p>在配置文件中添加如下内容（路径应对应MongoDB安装路径）</p>
+<pre><code class="language-shell">export MONGODB_HOME=/opt/mongodb
+export PATH=$PATH:${MONGODB_HOME}/bin
+</code></pre>
+<pre><code class="language-shell"># 使环境变量生效
+source /etc/profile 
+# 创建db目录和log目录
+cd /opt/mongodb-linux-x86_64-rhel70-5.0.3
+mkdir -p ./data/db
+mkdir -p ./logs
+touch ./logs/mongodb.log
+</code></pre>
+<p>创建mongodb.conf配置文件，内容如下（路径应对应之前创建的db/log目录）：</p>
+<pre><code class="language-shell">#端口号
+port=27017
+#db目录
+dbpath=/opt/mongodb/data/db
+#日志目录
+logpath=/opt/mongodb/logs/mongodb.log
+#后台
+fork=true
+#日志输出
+logappend=true
+#允许远程IP连接
+bind_ip=0.0.0.0
+#开启权限验证
+auth=true
+</code></pre>
+<p>启动测试</p>
+<pre><code class="language-shell">mongod --config /opt/mongodb/mongodb.conf
+mongo
+</code></pre>
+<p>创建用户</p>
+<pre><code class="language-shell">use admin
+db.createUser({
+  user:'admin',//用户名
+  pwd:'123456',//密码
+  roles:[{ role:'root',db:'admin'}]//root 代表超級管理员权限 admin代表给admin数据库加的超级管理员
+})
+
+use Crane_db
+
+db.createUser({
+  user:&quot;crane&quot;,
+  pwd:&quot;123456&quot;,
+  roles:[{role:&quot;dbOwner&quot;,db:&quot;Crane_db&quot;}]
+})
+
+db.shutdownServer() //重启前先关闭服务器
+</code></pre>
+<p>重新启动MongoDB数据库</p>
+<pre><code class="language-shell">mongod --config /opt/mongodb/mongodb.conf
+</code></pre>
+<p>编辑开机启动</p>
+<pre><code class="language-shell">vi /etc/rc.local
+# 加入如下语句，以便启动时执行：
+mongod --config /opt/mongodb/mongodb.conf
+</code></pre>
+<h2 id="6mongodb-c">6.安装MongoDB C++驱动</h2>
+<p>参考 http://mongocxx.org/mongocxx-v3/installation/linux/</p>
+<p>安装mongo-c-driver</p>
+<pre><code class="language-shell">wget https://github.com/mongodb/mongo-c-driver/releases/download/1.21.1/mongo-c-driver-1.21.1.tar.gz
+tar xzf mongo-c-driver-1.21.1.tar.gz
+cd mongo-c-driver-1.21.1
+mkdir cmake-build
+cd cmake-build
+cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-c-driver ..
+sudo make &amp;&amp; make install
+</code></pre>
+<p>安装mongo-cxx-driver</p>
+<pre><code class="language-shell">curl -OL https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
+cd mongo-cxx-driver-r3.6.5/build/
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-driver ..
+sudo make EP_mnmlstc_core
+make
+sudo make install
+</code></pre>
+<h2 id="7">7.编译程序</h2>
+<p>首先进入到项目目录下</p>
+<pre><code class="language-shell">mkdir build
+cd build/
+
+cmake -DCMAKE_CXX_STANDARD=17 -G Ninja ..
+cmake --build .
+</code></pre>
+<h2 id="8pam">8.Pam模块</h2>
+<p>首次编译完成后需要将pam模块动态链接库放入系统指定位置</p>
+<pre><code class="language-shell">cp Crane/build/src/Misc/Pam/pam_Crane.so /usr/lib64/security/
+</code></pre>
+<p>同时计算节点“/etc/security/access.conf”文件禁止非root用户登录</p>
+<p>Required pam_access.so</p>
+<h2 id="9go">9.配置前端go语言环境</h2>
+<p>安装go语言</p>
+<pre><code class="language-shell">cd download/
+wget https://golang.google.cn/dl/go1.17.3.linux-amd64.tar.gz
+tar -C /usr/local -xzf go1.17.3.linux-amd64.tar.gz
+
+# 在 /etc/profile中设置环境变量
+export PATH=$PATH:/usr/local/go/bin
+
+source /etc/profile
+
+go version
+
+#设置代理
+go env -w GOPROXY=https://goproxy.cn,direct 
+
+# 安装插件
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+cp /root/go/bin/protoc-gen-go-grpc /usr/local/bin/
+cp /root/go/bin/protoc-gen-go /usr/local/bin/
+
+</code></pre>
+<p>安装protuc</p>
+<pre><code class="language-shell">https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/protobuf-all-3.19.4.tar.gz
+tar -xzf protobuf-all-3.19.4.tar.gz
+cd protobuf-3.19.4
+./configure -prefix=/usr/local/
+make &amp;&amp; make install
+protoc --version
+# libprotoc 3.11.2
+</code></pre>
+<p>拉取项目</p>
+<pre><code class="language-shell">git clone https://github.com/RileyWen/Crane-FrontEnd.git # 克隆项目代码
+
+mkdir Crane-FrontEnd/out
+mkdir Crane-FrontEnd/generated/protos
+</code></pre>
+<p>编译项目</p>
+<pre><code class="language-shell"># 在Crane-FrontEnd/protos目录下
+protoc --go_out=../generated --go-grpc_out=../generated ./*
+
+# 在Crane-FrontEnd/out目录下
+go build Crane-FrontEnd/cmd/sbatchx/sbatchx.go
+</code></pre>
+<p>部署前端命令</p>
+<pre><code class="language-shell">ln -s /nfs/home/testCrane/Crane-FrontEnd/out/sbatchx /usr/local/bin/sbatchx
+ln -s /nfs/home/testCrane/Crane-FrontEnd/out/scontrol /usr/local/bin/scontrol
+ln -s /nfs/home/testCrane/Crane-FrontEnd/out/sacctmgr /usr/local/bin/sacctmgr
+</code></pre>
+<h2 id="10">10.部署文件同步</h2>
+<p>在所有节点安装rsync</p>
+<pre><code class="language-shell">yum -y install rsync
+
+# 安装完成后，使用rsync –-help命令可查看 rsync 相关信息
+</code></pre>
+<p>在CraneCtld安装inotify</p>
+<pre><code class="language-shell">yum install -y epel-release
+yum --enablerepo=epel install inotify-tools
+</code></pre>
+<p>编写监听脚本，并在后台自动运行</p>
+<pre><code class="language-shell"> vim /etc/Crane/inotifyrsync.sh
+
+#####
+inotifywait -mrq --timefmt '%d/%m/%y %H:%M' --format '%T %w%f' -e modify,delete,create,attrib /etc/Crane/ | while read file
+do
+        for i in {cn01,cn02,cn03,cn04,cn05,cn06,cn07,cn08,cn09,cn10}
+        do
+                rsync -avPz --progress --delete /etc/Crane/ $i:/etc/Crane/
+        done
+echo &quot;${file} was synchronized&quot;
+done
+########
+
+chmod 755 /etc/Crane/inotifyrsync.sh
+
+/etc/Crane/inotifyrsync.sh &amp;
+echo &quot;/etc/Crane/inotifyrsync.sh &amp;&quot; &gt;&gt; /etc/rc.local
+</code></pre>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../../command/crun/" class="btn btn-neutral float-left" title="crun 提交交互式任务"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../../command/crun/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
