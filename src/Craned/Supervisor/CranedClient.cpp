@@ -21,6 +21,7 @@
 #include "SupervisorServer.h"
 #include "TaskManager.h"
 #include "crane/GrpcHelper.h"
+#include "crane/String.h"
 
 namespace Supervisor {
 
@@ -45,8 +46,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
 void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                                          uint32_t exit_code,
                                          std::optional<std::string> reason) {
-  StepStatusChangeQueueElem elem{.task_id = g_config.JobId,
-                                 .new_status = new_status,
+  StepStatusChangeQueueElem elem{.new_status = new_status,
                                  .exit_code = exit_code,
                                  .reason = std::move(reason)};
   m_task_status_change_queue_.enqueue(std::move(elem));
@@ -74,9 +74,8 @@ void CranedClient::AsyncSendThread_() {
       crane::grpc::StepStatusChangeReply reply;
       grpc::Status status;
 
-      CRANE_TRACE("Sending StepStatusChange for step #{}", elem.task_id);
-
-      request.set_task_id(elem.task_id);
+      CRANE_TRACE("Sending StepStatusChange for step status: {}",
+                  util::StepStatusToString(elem.new_status));
       request.set_new_status(elem.new_status);
       request.set_exit_code(elem.exit_code);
       if (elem.reason.has_value()) request.set_reason(elem.reason.value());
@@ -84,9 +83,9 @@ void CranedClient::AsyncSendThread_() {
       status = m_stub_->StepStatusChange(&context, request, &reply);
       if (!status.ok()) {
         CRANE_ERROR(
-            "Failed to send TaskStatusChange: "
-            "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-            elem.task_id, int(elem.new_status), status.error_message(),
+            "Failed to send StepStatusChange: "
+            "NewStatus: {}, reason: {} | {}, code: {}",
+            util::StepStatusToString(elem.new_status), status.error_message(),
             context.debug_error_string(), int(status.error_code()));
 
         // If some messages are not sent due to channel failure,
@@ -96,9 +95,7 @@ void CranedClient::AsyncSendThread_() {
         break;
 
       } else {
-        // The step on this node finish
-        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                    elem.task_id, reply.ok());
+        CRANE_TRACE("StepStatusChange sent. reply.ok={}", reply.ok());
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));

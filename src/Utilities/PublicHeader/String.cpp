@@ -472,4 +472,22 @@ std::expected<CertPair, std::string> ParseCertificate(
   return CertPair{cn, formatted_serial_number};
 }
 
+std::string_view StepIdsToString(const job_id_t job_id,
+                                 const step_id_t step_id) {
+  return fmt::format("{}.{}", job_id, step_id);
+}
+
+std::string_view StepIdTupleToString(
+    const std::tuple<job_id_t, step_id_t> &step) {
+  return StepIdsToString(std::get<0>(step), std::get<1>(step));
+}
+
+std::string_view StepIdPairToString(
+    const std::pair<job_id_t, step_id_t> &step) {
+  return StepIdsToString(step.first, step.second);
+}
+
+std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
+  return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
+}
 }  // namespace util

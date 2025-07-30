@@ -232,6 +232,8 @@ void StartServer() {
 
   CRANE_INFO("Supervisor started.");
 
+  g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Running, 0,
+                                         std::nullopt);
   g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();

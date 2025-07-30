@@ -55,7 +55,7 @@ message InitSupervisorRequest {
   }
   PluginConfig plugin_config = 8;
 
-  TaskToD step_spec = 9;
+  StepToD step_spec = 9;
   map<string, string> env = 10;
 
   string log_dir = 11;
@@ -95,9 +95,10 @@ message QueryStepEnvReply {
 message CheckStatusRequest {}
 
 message CheckStatusReply {
-  int32 job_id = 1;
-  int32 supervisor_pid = 2;
-  bool ok = 3;
+  uint32 job_id = 1;
+  uint32 step_id = 2 ;
+  int32 supervisor_pid = 3;
+  bool ok = 4;
 }
 
 message ChangeTaskTimeLimitRequest {
