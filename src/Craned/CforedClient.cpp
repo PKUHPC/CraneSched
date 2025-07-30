@@ -405,7 +405,7 @@ void CforedManager::RegisterIOForward(const RegisterElem& elem,
   std::promise<RegisterResult> done;
   std::future<RegisterResult> done_fut = done.get_future();
 
-  m_register_queue_.enqueue(std::make_pair(std::move(elem), std::move(done)));
+  m_register_queue_.enqueue(std::make_pair(elem, std::move(done)));
   m_register_handle_->send();
   *result = done_fut.get();
 }
@@ -443,9 +443,44 @@ void CforedManager::RegisterCb_() {
 
     CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.task_out_fd,
                 elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.task_out_fd);
-    poll_handle->on<uvw::poll_event>([this, elem = elem](const uvw::poll_event&,
-                                                         uvw::poll_handle& h) {
+    std::shared_ptr<uvw::poll_handle> poll_handle =
+        m_loop_->uninitialized_resource<uvw::poll_handle>(elem.task_out_fd);
+
+    int err = 0, retry_cnt = 0;
+    while (true) {
+      err = poll_handle->init();
+      if (err == 0) break;
+      if (err != UV_EINTR && err != UV_EAGAIN) {
+        CRANE_ERROR("Failed to init poll_handle for task #{} output fd {}: {}",
+                    elem.task_id, elem.task_out_fd, uv_strerror(err));
+        result.ok = false;
+        break;
+      }
+
+      if (retry_cnt++ > 3) {
+        CRANE_ERROR(
+            "Failed to init poll_handle for task #{} output fd {}: {} after "
+            "3 times.",
+            elem.task_id, elem.task_out_fd, uv_strerror(err));
+        result.ok = false;
+        break;
+      }
+
+      CRANE_DEBUG(
+          "Recoverable error {} when initializing poll_handle "
+          "for task #{} output fd {}, retrying...",
+          uv_strerror(err), elem.task_id, elem.task_out_fd);
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    if (err != 0) {
+      poll_handle->close();
+      result.ok = false;
+    }
+
+    auto poll_cb = [this, elem = elem](const uvw::poll_event&,
+                                       uvw::poll_handle& h) {
       CRANE_TRACE("Detect task #{} output.", elem.task_id);
 
       constexpr int MAX_BUF_SIZE = 4096;
@@ -506,12 +541,17 @@ void CforedManager::RegisterCb_() {
       CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
       m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
                                                            output);
-    });
+    };
 
-    int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-    if (ret < 0) {
-      CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-      result.ok = false;
+    if (err == 0) {
+      poll_handle->on<uvw::poll_event>(std::move(poll_cb));
+
+      int ret =
+          poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
+      if (ret < 0) {
+        CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
+        result.ok = false;
+      }
     }
 
     if (elem.x11_enable_forwarding) {
