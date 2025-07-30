@@ -97,6 +97,8 @@ class CranedStub {
   crane::grpc::ExecInContainerStepReply ExecInContainerStep(
       const crane::grpc::ExecInContainerStepRequest &request);
 
+  CraneErrCode ReceivePmixPort(uint32_t task_id, uint32_t port, const std::string& craned_id);
+
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
   }

@@ -18,89 +18,98 @@
 
 #pragma once
 
-#include "CranedPublicDefs.h"
-
+#include "absl/container/node_hash_map.h"
 #include "crane/Lock.h"
 #include "crane/Network.h"
+#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
+#include "protos/Pmix.grpc.pb.h"
+#include "protos/Pmix.pb.h"
+#include <parallel_hashmap/phmap.h>
 
-namespace Craned {
+namespace pmix {
+
 
 using AsyncGrpcCallback = std::function<void(grpc::Status)>;
 
-class CranedClient;
+class PmixClient;
 
-class CranedStub {
+class PmixStub {
  public:
-  explicit CranedStub(CranedClient *craned_client);
+  explicit PmixStub(PmixClient *pmix_client);
 
-  ~CranedStub() = default;
+  ~PmixStub() = default;
 
   void SendPmixRingMsg(grpc::ClientContext *context,
-                       const crane::grpc::SendPmixRingMsgReq &request,
-                       crane::grpc::SendPmixRingMsgReply *reply,
+                       const crane::grpc::pmix::SendPmixRingMsgReq &request,
+                       crane::grpc::pmix::SendPmixRingMsgReply *reply,
                        AsyncGrpcCallback callback);
 
   void PmixTreeUpwardForward(
       grpc::ClientContext *context,
-      const crane::grpc::PmixTreeUpwardForwardReq &request,
-      crane::grpc::PmixTreeUpwardForwardReply *reply,
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request,
+      crane::grpc::pmix::PmixTreeUpwardForwardReply *reply,
       AsyncGrpcCallback callback);
 
   void PmixTreeDownwardForward(
       grpc::ClientContext *context,
-      const crane::grpc::PmixTreeDownwardForwardReq &request,
-      crane::grpc::PmixTreeDownwardForwardReply *reply,
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request,
+      crane::grpc::pmix::PmixTreeDownwardForwardReply *reply,
       AsyncGrpcCallback callback);
 
   void PmixDModexRequest(grpc::ClientContext *context,
-                         const crane::grpc::PmixDModexRequestReq &request,
-                         crane::grpc::PmixDModexRequestReply *reply,
+                         const crane::grpc::pmix::PmixDModexRequestReq &request,
+                         crane::grpc::pmix::PmixDModexRequestReply *reply,
                          AsyncGrpcCallback callback);
 
   void PmixDModexResponse(grpc::ClientContext *context,
-                          const crane::grpc::PmixDModexResponseReq &request,
-                          crane::grpc::PmixDModexResponseReply *reply,
+                          const crane::grpc::pmix::PmixDModexResponseReq &request,
+                          crane::grpc::pmix::PmixDModexResponseReply *reply,
                           AsyncGrpcCallback callback);
 
   int GetNodeId() const { return m_node_id_; }
 
  private:
 
-  CranedClient *m_craned_client_;
+  PmixClient *m_pmix_client_;
 
   std::shared_ptr<grpc::Channel> m_channel_;
 
-  std::unique_ptr<crane::grpc::Craned::Stub> m_stub_;
+  std::unique_ptr<crane::grpc::pmix::Pmix::Stub> m_stub_;
 
   CranedId m_craned_id_;
 
   int m_node_id_;
 
-  friend class CranedClient;
+  friend class PmixClient;
 };
 
-class CranedClient {
+class PmixClient {
  public:
-  CranedClient() = default;
+  PmixClient() = default;
 
-  ~CranedClient() = default;
+  ~PmixClient() = default;
 
-  void Init(const std::set<CranedId>& craned_id_list);
+  void EmplacePmixStub(const CranedId &craned_id, uint32_t port);
 
-  std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
+  std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id);
 
  private:
   template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
   using NodeHashMap = absl::node_hash_map<K, V, Hash>;
 
-  NodeHashMap<CranedId, std::shared_ptr<CranedStub>> m_craned_id_stub_map_;
+  using CranedIdToStubMap = phmap::parallel_flat_hash_map<
+      CranedId,
+      std::shared_ptr<PmixStub>, phmap::priv::hash_default_hash<CranedId>,
+      phmap::priv::hash_default_eq<CranedId>,
+      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixStub>>>, 4,
+      std::shared_mutex>;
+
+  CranedIdToStubMap m_craned_id_stub_map_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };
 
-} // namespace Craned
-
-inline std::unique_ptr<Craned::CranedClient> g_craned_client;
+} // namespace pmix

@@ -353,6 +353,33 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
   return reply;
 }
 
+CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, uint32_t port, const std::string& craned_id) {
+  using crane::grpc::ReceivePmixPortRequest;
+  using crane::grpc::ReceivePmixPortReply;
+
+  ClientContext context;
+  Status status;
+  ReceivePmixPortRequest request;
+  ReceivePmixPortReply reply;
+
+  request.set_task_id(task_id);
+  request.set_port(port);
+  request.set_craned_id(craned_id);
+  status = m_stub_->ReceivePmixPort(&context, request, &reply);
+
+  if (!status.ok()) {
+    CRANE_ERROR("ReceivePmixPort to Craned {} failed: {} ",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  if (!reply.ok())
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+
+  return CraneErrCode::SUCCESS;
+}
+
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
     CRANE_INFO(
