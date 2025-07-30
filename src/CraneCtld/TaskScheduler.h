@@ -495,18 +495,20 @@ class TaskScheduler {
   CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
-  void StepStatusChangeWithReasonAsync(uint32_t task_id,
+  void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string>&& reason) {
     // TODO: Add reason implementation here!
-    TaskStatusChangeAsync(task_id, craned_index, new_status, exit_code);
+    StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
+                          reason.value_or(""));
   }
 
-  void TaskStatusChangeAsync(uint32_t task_id, const CranedId& craned_index,
+  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                             const CranedId& craned_index,
                              crane::grpc::TaskStatus new_status,
-                             uint32_t exit_code);
+                             uint32_t exit_code, std::string reason);
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
@@ -518,8 +520,9 @@ class TaskScheduler {
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
 
-  void TerminateOrphanedJobs(const std::set<task_id_t>& jobs,
-                             const CranedId& excluded_node);
+  void TerminateOrphanedSteps(
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
+      const CranedId& excluded_node);
 
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
@@ -570,6 +573,11 @@ class TaskScheduler {
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
+  static CraneExpected<void> AcquireStepAttributes(const TaskInCtld& task,
+                                                   StepInCtld* step);
+  static CraneExpected<void> CheckStepValidity(const TaskInCtld& task,
+                                               StepInCtld* step);
+
   // TODO: Move to Reservation Mini-Scheduler.
   crane::grpc::CreateReservationReply CreateResv(
       const crane::grpc::CreateReservationRequest& request);
@@ -599,13 +607,17 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void ProcessFinalTasks_(std::vector<TaskInCtld*> const& tasks);
+  static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
+  static void PersistAndTransferStepsToMongodb_(
+      std::unordered_set<StepInCtld*> const& steps);
+
+  static void ProcessFinalTasks_(const std::unordered_set<TaskInCtld*>& tasks);
 
   static void CallPluginHookForFinalTasks_(
-      std::vector<TaskInCtld*> const& tasks);
+      std::unordered_set<TaskInCtld*> const& tasks);
 
   static void PersistAndTransferTasksToMongodb_(
-      std::vector<TaskInCtld*> const& tasks);
+      std::unordered_set<TaskInCtld*> const& tasks);
 
   CraneErrCode TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -650,6 +662,9 @@ class TaskScheduler {
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::thread m_step_exec_thread_;
+  void StepExecThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
@@ -676,7 +691,8 @@ class TaskScheduler {
   };
 
   struct CancelRunningTaskQueueElem {
-    task_id_t task_id;
+    job_id_t job_id;
+    step_id_t step_id;
     CranedId craned_id;
   };
 
@@ -708,16 +724,94 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
 
   struct TaskStatusChangeArg {
-    uint32_t task_id;
+    uint32_t job_id;
+    step_id_t step_id;
     uint32_t exit_code;
     crane::grpc::TaskStatus new_status;
     CranedId craned_index;
+    std::string reason;
   };
 
   ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
   void TaskStatusChangeAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
+
+  struct StepStatusChangeContext {
+    /* ------------------------------ steps ------------------------------ */
+
+    // Step to alloc
+    std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
+        craned_step_alloc_map;
+
+    // Steps will execute on craned
+    std::unordered_map<CranedId,
+                       std::unordered_map<job_id_t, std::set<step_id_t>>>
+        craned_step_free_map;
+    // Steps will execute on craned
+    std::unordered_map<CranedId,
+                       std::unordered_map<job_id_t, std::set<step_id_t>>>
+        craned_step_exec_map;
+    // Error steps to terminate with orphaned status
+    std::unordered_map<CranedId,
+                       std::unordered_map<job_id_t, std::set<step_id_t>>>
+        craned_orphaned_steps{};
+    // Common step to cancel, caused by a finished primary step
+    std::unordered_map<CranedId,
+                       std::unordered_map<job_id_t, std::set<step_id_t>>>
+        craned_cancel_steps{};
+    // Steps will update in embeddedDb
+    std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
+    std::unordered_set<StepInCtld*> step_raw_ptrs;
+    // Carry the ownership of StepInCtld for completed step automatic
+    // destruction.
+    std::unordered_set<std::unique_ptr<StepInCtld>> step_ptrs;
+
+    /* ------------------------------ jobs ------------------------------ */
+
+    std::unordered_map<CranedId, std::vector<job_id_t>> craned_jobs_to_free;
+    // Jobs will update in embedded db
+    std::unordered_set<TaskInCtld*> rn_job_raw_ptrs{};
+    // Carry the ownership of TaskInCtld for automatic destruction.
+    std::unordered_set<std::unique_ptr<TaskInCtld>> job_ptrs;
+    // Ended jobs will transfer from embedded db to mongodb
+    std::unordered_set<TaskInCtld*> job_raw_ptrs;
+  };
+
+  enum StepStatus : uint8_t {
+    NONE = 0,
+    CONFIGURE_FAILED,
+    CONFIGURED,
+
+    COMPLETED,
+  };
+
+  /**
+   *
+   * @param new_status step status
+   * @param job the TaskInCtld
+   * @param craned_id status change source craned
+   * @param context
+   * @return nullopt if job not finish or job finish status
+   * */
+  std::optional<crane::grpc::TaskStatus> DaemonStepStatusChangeHandler_(
+      crane::grpc::TaskStatus new_status, TaskInCtld* job,
+      const CranedId& craned_id, StepStatusChangeContext* context);
+
+  /**
+   *
+   * @param new_status step status
+   * @param exit_code
+   * @param job the TaskInCtld
+   * @param step_id
+   * @param craned_id status change source craned
+   * @param context
+   * */
+  void CommonStepStatusChangeHandler_(crane::grpc::TaskStatus new_status,
+                                      uint32_t exit_code, TaskInCtld* job,
+                                      step_id_t step_id,
+                                      const CranedId& craned_id,
+                                      StepStatusChangeContext* context);
   void CleanTaskStatusChangeQueueCb_();
 
   // TODO: Move to Reservation Mini-Scheduler.

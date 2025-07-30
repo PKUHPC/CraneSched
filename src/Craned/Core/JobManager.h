@@ -31,19 +31,31 @@
 namespace Craned {
 
 constexpr int kMaxSupervisorCheckRetryCount = 10;
-// TODO: Replace this with tak execution info.
-using StepToD = crane::grpc::TaskToD;
 
+using StepToD = crane::grpc::StepToD;
+using StepStatus = crane::grpc::TaskStatus;
 struct StepInstance {
-  StepToD step_to_d;
+  job_id_t job_id;
+  step_id_t step_id;
   pid_t supv_pid;
+  crane::grpc::StepToD step_to_d;
+  StepStatus status{StepStatus::Invalid};
+  explicit StepInstance(const crane::grpc::StepToD& step_to_d);
+  // For step recovery
+  StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
+               StepStatus status);
+  [[nodiscard]] bool IsDaemon() const;
+  [[nodiscard]] bool CanOperate() const;
+  [[nodiscard]] std::string StepIdString() const;
 };
 
 // Job allocation info, where allocation = job spec + execution info
 struct JobInD {
   JobInD() = default;
-  explicit JobInD(crane::grpc::JobToD const& job_to_d)
-      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {}
+  JobInD(crane::grpc::JobToD const& job_to_d)
+      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {
+    step_map_mtx = std::make_unique<absl::Mutex>();
+  }
 
   ~JobInD() = default;
 
@@ -59,9 +71,9 @@ struct JobInD {
   crane::grpc::JobToD job_to_d;
 
   std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
-  bool orphaned{false};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
+  std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
   EnvMap GetJobEnvMap();
@@ -79,36 +91,55 @@ class JobManager {
 
   CraneErrCode Recover(
       std::unordered_map<task_id_t, JobInD>&& job_map,
-      std::unordered_map<task_id_t, std::unique_ptr<StepInstance>>&& step_map);
+      absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                          std::unique_ptr<StepInstance>>&& step_map);
 
   ~JobManager();
 
   bool AllocJobs(std::vector<JobInD>&& jobs);
 
-  Common::CgroupInterface* GetCgForJob(task_id_t job_id);
-
+  /**
+   * Terminate all job steps on the node and clean up.
+   * @param job_ids jobs to free
+   * @return true if all job exists
+   */
   bool FreeJobs(std::set<task_id_t>&& job_ids);
 
-  CraneErrCode ExecuteStepAsync(StepToD const& step);
+  void AllocSteps(std::vector<StepToD>&& steps);
+
+  void FreeSteps(
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+
+  CraneErrCode ExecuteStepAsync(
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
-  CraneExpected<JobInD*> QueryJob(job_id_t job_id);
+  auto QueryJob(job_id_t job_id) {
+    return m_job_map_.GetValueExclusivePtr(job_id);
+  }
 
-  std::set<task_id_t> GetAllocatedJobs();
+  std::map<job_id_t, std::set<step_id_t>> GetAllocatedJobSteps();
 
-  void TerminateStepAsync(task_id_t task_id);
+  void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
-  void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
+  void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
-  bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
+  /**
+   *
+   * @param jobs completing jobs to clean up
+   * @param steps completing step to clean up, for daemon steps will send
+   * ShutdownSupervisor
+   */
+  void CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
+                               std::vector<StepInstance*>&& steps);
 
-  void StepStopAndDoStatusChangeAsync(task_id_t job_id,
-                                      crane::grpc::TaskStatus new_status,
-                                      uint32_t exit_code,
-                                      std::optional<std::string> reason);
+  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                             crane::grpc::TaskStatus new_status,
+                             uint32_t exit_code,
+                             std::optional<std::string> reason);
 
   // Wait internal libuv base loop to exit...
   void Wait();
@@ -124,14 +155,23 @@ class JobManager {
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+  using JobMap = util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD>;
+  using UidMap = util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
+                                     absl::flat_hash_set<job_id_t>>;
 
   struct EvQueueAllocateJobElem {
     std::promise<bool> ok_prom;
     std::vector<JobInD> job_specs;
   };
 
-  struct EvQueueExecuteStepElem {
+  struct EvQueueAllocateStepElem {
     std::unique_ptr<StepInstance> step_inst;
+    std::promise<CraneErrCode> ok_prom;
+  };
+
+  struct EvQueueExecuteStepElem {
+    job_id_t job_id;
+    step_id_t step_id;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -140,26 +180,23 @@ class JobManager {
     pid_t pid;
   };
 
-  struct ChangeTaskTimeLimitQueueElem {
-    task_id_t job_id;
-    absl::Duration time_limit;
-    std::promise<bool> ok_prom;
-  };
-
   struct StepTerminateQueueElem {
-    uint32_t step_id{0};
+    job_id_t job_id;
+    step_id_t step_id;
     bool terminated_by_user{false};  // If the task is canceled by user,
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
     std::promise<void> terminate_prom;
   };
 
-  struct CheckTaskStatusQueueElem {
-    task_id_t task_id;
-    std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
-  };
+  std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
+  std::optional<JobInD> FreeJobInfoNoLock_(
+      job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
+      UidMap::MapExclusivePtr& uid_map_ptr);
 
-  bool FreeJobAllocation_(const std::vector<task_id_t>& job_ids);
+  bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
+
+  void FreeStepAllocation_(std::vector<StepInstance*>&& steps);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
@@ -175,7 +212,7 @@ class JobManager {
    * 3. A task cannot be created because of various reasons.
    *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
    */
-  void ActivateTaskStatusChangeAsync_(task_id_t task_id,
+  void ActivateTaskStatusChangeAsync_(job_id_t job_id, step_id_t step_id,
                                       crane::grpc::TaskStatus new_status,
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
@@ -193,13 +230,10 @@ class JobManager {
   static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
-  util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD> m_job_map_;
+  JobMap m_job_map_;
 
-  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<job_id_t>>
-      m_uid_to_job_ids_map_;
+  UidMap m_uid_to_job_ids_map_;
 
-  void EvCleanCheckSupervisorQueueCb_();
   bool EvCheckSupervisorRunning_();
 
   void EvSigchldCb_();
@@ -207,13 +241,12 @@ class JobManager {
   // Callback function to handle SIGINT sent by Ctrl+C
   void EvSigintCb_();
 
+  void EvCleanGrpcAllocStepsQueueCb_();
   void EvCleanGrpcExecuteStepQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
-
-  void EvCleanChangeTaskTimeLimitQueueCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -224,27 +257,26 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
-  absl::Mutex m_release_cg_mtx_;
-  std::unordered_map<task_id_t, int /*retry count*/> m_release_job_retry_map_
-      ABSL_GUARDED_BY(m_release_cg_mtx_);
-  ConcurrentQueue<std::vector<task_id_t>> m_check_supervisor_queue_;
-  std::shared_ptr<uvw::async_handle> m_check_supervisor_async_handle_;
+  absl::Mutex m_free_job_step_mtx_;
+  std::unordered_map<StepInstance*, int /*retry count*/>
+      m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
+  std::unordered_map<job_id_t, JobInD> m_completing_job_
+      ABSL_GUARDED_BY(m_free_job_step_mtx_);
+
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
 
-  std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
-  ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;
+  std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
+  ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
   // A custom event that handles the ExecuteTask RPC.
   ConcurrentQueue<EvQueueExecuteStepElem> m_grpc_execute_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
-  ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+  ConcurrentQueue<StepStatusChangeQueueElem> m_task_status_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
 
   // The function which will be called when SIGINT is triggered.

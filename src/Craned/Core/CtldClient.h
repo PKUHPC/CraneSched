@@ -62,7 +62,7 @@ class CtldClientStateMachine {
   struct RegisterArg {
     RegToken token;
     std::set<job_id_t> lost_jobs;
-    std::set<step_id_t> lost_steps;
+    std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps;
   };
 
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
@@ -71,8 +71,10 @@ class CtldClientStateMachine {
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
-  void EvConfigurationDone(std::optional<std::set<job_id_t>> lost_jobs,
-                           std::optional<std::set<step_id_t>> lost_steps);
+  void EvConfigurationDone(
+      std::optional<std::set<job_id_t>> lost_jobs,
+      std::optional<std::unordered_map<job_id_t, std::set<step_id_t>>>
+          lost_steps);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply,
                           const RegToken& token);
   void EvPingFailed();
@@ -112,8 +114,9 @@ class CtldClientStateMachine {
   // State Actions:
   void ActionRequestConfig_();
   void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
-  void ActionRegister_(std::set<task_id_t>&& lost_jobs,
-                       std::set<task_id_t>&& lost_tasks);
+  void ActionRegister_(
+      std::set<job_id_t>&& lost_jobs,
+      std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps);
   void ActionReady_();
   void ActionDisconnected_();
 
@@ -191,18 +194,19 @@ class CtldClient {
     m_last_active_time_ = std::chrono::steady_clock::now();
   }
 
-  void StepStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
+  void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
-  [[nodiscard]] std::set<step_id_t> GetAllStepStatusChangeId();
+  [[nodiscard]] std::map<job_id_t, std::set<step_id_t>>
+  GetAllFinishStepStatusChangeId();
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
  private:
   bool RequestConfigFromCtld_(RegToken const& token);
 
-  bool CranedRegister_(RegToken const& token,
-                       std::set<job_id_t> const& lost_jobs,
-                       std::set<step_id_t> const& lost_steps);
+  bool CranedRegister_(
+      RegToken const& token, std::set<job_id_t> const& lost_jobs,
+      std::unordered_map<job_id_t, std::set<step_id_t>> const& lost_steps);
 
   void AsyncSendThread_();
   bool Ping_();
@@ -211,7 +215,7 @@ class CtldClient {
 
   absl::Mutex m_step_status_change_mtx_;
 
-  std::list<TaskStatusChangeQueueElem> m_step_status_change_list_
+  std::list<StepStatusChangeQueueElem> m_step_status_change_list_
       ABSL_GUARDED_BY(m_step_status_change_mtx_);
 
   std::thread m_async_send_thread_;

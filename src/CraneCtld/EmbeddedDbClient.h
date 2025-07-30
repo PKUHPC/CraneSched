@@ -165,6 +165,7 @@ class EmbeddedDbClient {
  private:
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+  using StepInEmbeddedDb = crane::grpc::StepInEmbeddedDb;
 
  public:
   struct DbSnapshot {
@@ -173,12 +174,18 @@ class EmbeddedDbClient {
     std::unordered_map<db_id_t, TaskInEmbeddedDb> final_queue;
   };
 
+  struct StepDbSnapshot {
+    std::unordered_map<job_id_t, std::vector<StepInEmbeddedDb>> steps;
+  };
+
   EmbeddedDbClient() = default;
   ~EmbeddedDbClient();
 
   bool Init(std::string const& db_path);
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
+
+  bool RetrieveLastStepInfo(StepDbSnapshot* snapshot);
 
   bool RetrieveReservationInfo(
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
@@ -200,6 +207,22 @@ class EmbeddedDbClient {
     return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
+  bool BeginStepVarDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_step_var_db_.get(), txn_id);
+  }
+
+  bool CommitStepVarDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_step_var_db_.get(), txn_id);
+  }
+
+  bool BeginStepFixedDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_step_fixed_db_.get(), txn_id);
+  }
+
+  bool CommitStepFixedDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_step_fixed_db_.get(), txn_id);
+  }
+
   bool BeginReservationDbTransaction(txn_id_t* txn_id) {
     return BeginDbTransaction_(m_resv_db_.get(), txn_id);
   }
@@ -214,7 +237,8 @@ class EmbeddedDbClient {
   bool AppendTasksToPendingAndAdvanceTaskIds(
       const std::vector<TaskInCtld*>& tasks);
 
-  bool PurgeEndedTasks(const std::vector<db_id_t>& db_ids);
+  bool PurgeEndedTasks(
+      const std::unordered_map<job_id_t, task_db_id_t>& job_ids);
 
   bool UpdateRuntimeAttrOfTask(
       txn_id_t txn_id, db_id_t db_id,
@@ -252,6 +276,47 @@ class EmbeddedDbClient {
     return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
   }
 
+  bool AppendSteps(const std::vector<StepInCtld*>& steps);
+
+  bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids);
+
+  bool UpdateRuntimeAttrOfStep(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
+    return StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            GetStepVariableDbEntryName_(db_id), &runtime_attr)
+        .has_value();
+  }
+
+  bool UpdateStepToCtld(txn_id_t txn_id, db_id_t db_id,
+                        crane::grpc::StepToCtld const& step_to_ctld) {
+    return StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
+                            GetStepFixedDbEntryName_(db_id), &step_to_ctld)
+        .has_value();
+  }
+
+  bool UpdateRuntimeAttrOfStepIfExists(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
+    return StoreTypeIntoDbIfExists_(m_step_var_db_.get(), txn_id,
+                                    GetStepVariableDbEntryName_(db_id),
+                                    &runtime_attr)
+        .has_value();
+  }
+
+  bool UpdateStepToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
+                                crane::grpc::StepToCtld const& step_to_ctld) {
+    return StoreTypeIntoDbIfExists_(m_step_fixed_db_.get(), txn_id,
+                                    GetStepFixedDbEntryName_(db_id),
+                                    &step_to_ctld)
+        .has_value();
+  }
+
+  bool FetchStepDataInDb(txn_id_t txn_id, db_id_t db_id,
+                         StepInEmbeddedDb* step_in_db) {  // Only used in test
+    return FetchStepDataInDbAtomic_(txn_id, db_id, step_in_db).has_value();
+  }
+
   bool UpdateReservationInfo(
       txn_id_t txn_id, const ResvId& name,
       const crane::grpc::CreateReservationRequest& reservation_req) {
@@ -278,6 +343,22 @@ class EmbeddedDbClient {
 
   inline static task_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
     return std::stol(key.substr(0, key.size() - 1));
+  }
+
+  inline static std::string GetStepFixedDbEntryName_(db_id_t db_id) {
+    return fmt::format("{}ST", db_id);
+  }
+
+  inline static std::string GetStepVariableDbEntryName_(db_id_t db_id) {
+    return fmt::format("{}SS", db_id);
+  }
+
+  inline static bool IsVariableDbStepDataEntry_(std::string const& key) {
+    return key.ends_with("SS");
+  }
+
+  inline static step_db_id_t ExtractStepDbIdFromEntry_(std::string const& key) {
+    return std::stol(key.substr(0, key.size() - 2));
   }
 
   bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
@@ -316,21 +397,59 @@ class EmbeddedDbClient {
                             task_in_db->mutable_runtime_attr());
   }
 
-  template <std::integral T>
-  bool FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
-                                                      std::string const& key,
-                                                      T* buf, T value) {
+  inline std::expected<size_t, DbErrorCode> FetchStepDataInDbAtomic_(
+      txn_id_t txn_id, db_id_t db_id, StepInEmbeddedDb* step_in_db) {
+    auto result = FetchTypeFromDb_(m_step_fixed_db_.get(), txn_id,
+                                   GetStepFixedDbEntryName_(db_id),
+                                   step_in_db->mutable_step_to_ctld());
+    if (!result) return result;
+
+    return FetchTypeFromDb_(m_step_var_db_.get(), txn_id,
+                            GetStepVariableDbEntryName_(db_id),
+                            step_in_db->mutable_runtime_attr());
+  }
+
+  template <typename T>
+  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
+                                                   IEmbeddedDb* db,
+                                                   std::string const& key,
+                                                   T* buf, T value) {
     std::expected<size_t, DbErrorCode> fetch_result =
-        FetchTypeFromDb_(m_variable_db_.get(), txn_id, key, buf);
+        FetchTypeFromDb_(db, txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
     if (fetch_result.error() == DbErrorCode::kNotFound) {
       CRANE_TRACE(
-          "Key {} not found in embedded db. Initialize it with value {}", key,
-          value);
+          "Key {} not found in embedded db. Initialize it with given value.",
+          key);
 
-      std::expected store_result =
-          StoreTypeIntoDb_(m_variable_db_.get(), txn_id, key, &value);
+      std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
+      if (!store_result) {
+        CRANE_ERROR("Failed to init key '{}' in db.", key);
+        return false;
+      }
+
+      *buf = value;
+      return true;
+    } else {
+      CRANE_ERROR("Failed to fetch key '{}' from db.", key);
+      return false;
+    }
+  }
+
+  template <std::integral T>
+  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
+                                                   IEmbeddedDb* db,
+                                                   std::string const& key,
+                                                   T* buf, T value) {
+    std::expected<size_t, DbErrorCode> fetch_result =
+        FetchTypeFromDb_(db, txn_id, key, buf);
+    if (fetch_result.has_value()) return true;
+
+    if (fetch_result.error() == DbErrorCode::kNotFound) {
+      CRANE_TRACE("Key {} not found in embedded db. Initializing it.", key);
+
+      std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
       if (!store_result) {
         CRANE_ERROR("Failed to init key '{}' in db.", key);
         return false;
@@ -508,7 +627,33 @@ class EmbeddedDbClient {
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;
   std::unique_ptr<IEmbeddedDb> m_resv_db_;
+
+  inline static std::string const s_next_step_db_id_str_{"NSDI"};
+  inline static std::string const s_next_step_id_str_{"NSI"};
+
+  inline static db_id_t s_next_step_db_id_;
+  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_;
+  inline static absl::Mutex s_step_db_id_mtx_;
+  std::unique_ptr<IEmbeddedDb> m_step_var_db_;
+  std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
 };
+
+template <>
+inline std::expected<void, DbErrorCode> EmbeddedDbClient::StoreTypeIntoDb_(
+    IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
+    const crane::grpc::StepNextIdInEmbeddedDb* value) {
+  using google::protobuf::io::CodedOutputStream;
+  using google::protobuf::io::StringOutputStream;
+
+  std::string buf;
+  StringOutputStream stringOutputStream(&buf);
+  CodedOutputStream codedOutputStream(&stringOutputStream);
+
+  size_t n_bytes{value->ByteSizeLong()};
+  value->SerializeToCodedStream(&codedOutputStream);
+
+  return db->Store(txn_id, key, buf.data(), n_bytes);
+}
 
 }  // namespace Ctld
 

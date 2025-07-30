@@ -853,6 +853,7 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 

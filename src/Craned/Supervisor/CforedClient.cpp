@@ -536,7 +536,7 @@ void CforedClient::AsyncSendRecvThread_() {
       request.set_type(StreamTaskIORequest::SUPERVISOR_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
-      request.mutable_payload_register_req()->set_task_id(g_config.JobId);
+      request.mutable_payload_register_req()->set_job_id(g_config.JobId);
       request.mutable_payload_register_req()->set_step_id(g_config.StepId);
 
       write_pending.store(true, std::memory_order::release);

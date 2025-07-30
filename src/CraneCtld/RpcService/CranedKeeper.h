@@ -73,23 +73,23 @@ class CranedStub {
     m_token_.reset();
   }
 
-  static crane::grpc::ExecuteStepsRequest NewExecuteTasksRequests(
-      const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
+  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
 
-  CraneExpected<std::vector<task_id_t>> ExecuteSteps(
-      const crane::grpc::ExecuteStepsRequest &request);
+  CraneErrCode FreeJobs(const std::vector<task_id_t> &task);
 
-  CraneErrCode CreateCgroupForJobs(
-      std::vector<crane::grpc::JobToD> const &jobs);
+  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
 
-  CraneErrCode FreeSteps(const std::vector<task_id_t> &jobs);
+  CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode ReleaseCgroupForJobs(
-      const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
+  CraneErrCode FreeSteps(
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode TerminateSteps(const std::vector<task_id_t> &task_ids);
+  CraneErrCode TerminateSteps(
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode TerminateOrphanedSteps(const std::vector<task_id_t> &task_ids);
+  CraneErrCode TerminateOrphanedSteps(
+      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
