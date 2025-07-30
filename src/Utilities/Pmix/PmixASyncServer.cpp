@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,18 +16,19 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CranedASyncServer.h"
+#include "PmixASyncServer.h"
 
-#include "Pmix/Pmix.h"
-#include "Pmix/PmixColl.h"
-#include "Pmix/PmixDModex.h"
-#include "TaskManager.h"
+#include "PmixASyncServer.h"
+#include "Pmix.h"
+#include "PmixColl.h"
+#include "PmixDModex.h"
+#include "crane/GrpcHelper.h"
 
-namespace Craned {
+namespace pmix {
 
-grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
-    grpc::CallbackServerContext* context, const ::crane::grpc::SendPmixRingMsgReq* request,
-    crane::grpc::SendPmixRingMsgReply *response) {
+grpc::ServerUnaryReactor* PmixASyncServiceImpl::SendPmixRingMsg(
+    grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
+    crane::grpc::pmix::SendPmixRingMsgReply *response) {
 
 
   auto* reactor = context->DefaultReactor();
@@ -60,9 +61,9 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::SendPmixRingMsg(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
-  grpc::CallbackServerContext* context, const crane::grpc::PmixTreeUpwardForwardReq *request,
-  crane::grpc::PmixTreeUpwardForwardReply *response) {
+grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeUpwardForward(
+  grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeUpwardForwardReq *request,
+  crane::grpc::pmix::PmixTreeUpwardForwardReply *response) {
 
   auto* reactor = context->DefaultReactor();
 
@@ -92,9 +93,9 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeUpwardForward(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
-  grpc::CallbackServerContext* context, const crane::grpc::PmixTreeDownwardForwardReq* request,
-  crane::grpc::PmixTreeDownwardForwardReply* response) {
+grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeDownwardForward(
+  grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeDownwardForwardReq* request,
+  crane::grpc::pmix::PmixTreeDownwardForwardReply* response) {
 
   auto* reactor = context->DefaultReactor();
 
@@ -125,9 +126,9 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixTreeDownwardForward(
 }
 
 
-grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixDModexRequest(
-    grpc::CallbackServerContext* context, const crane::grpc::PmixDModexRequestReq* request,
-    crane::grpc::PmixDModexRequestReply* response) {
+grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexRequest(
+    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexRequestReq* request,
+    crane::grpc::pmix::PmixDModexRequestReply* response) {
 
   auto* reactor = context->DefaultReactor();
 
@@ -145,9 +146,9 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixDModexRequest(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixDModexResponse(
-    grpc::CallbackServerContext* context, const crane::grpc::PmixDModexResponseReq* request,
-    crane::grpc::PmixDModexResponseReply* response) {
+grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexResponse(
+    grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
+    crane::grpc::pmix::PmixDModexResponseReply* response) {
   auto* reactor = context->DefaultReactor();
 
   g_dmodex_req_manager->PmixProcessResponse(request->seq_num(), request->craned_id(), request->data(), request->status());
@@ -156,28 +157,37 @@ grpc::ServerUnaryReactor* CranedASyncServiceImpl::PmixDModexResponse(
   return reactor;
 }
 
-CranedASyncServer::CranedASyncServer(const Config::CranedListenConf &listen_conf) {
-  m_service_impl_ = std::make_unique<CranedASyncServiceImpl>();
+
+bool PmixASyncServer::Init(const Config& config) {
+  m_service_impl_ = std::make_unique<PmixASyncServiceImpl>();
 
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);
 
-  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
+  if (config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  std::string craned_listen_addr = listen_conf.CranedListenAddr;
-  if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, craned_listen_addr,
-                                        kCranedAsyncDefaultPort,
-                                        listen_conf.TlsCerts);
-  } else {
-    ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
-                                             kCranedAsyncDefaultPort);
-  }
+  std::string listen_addr = "0.0.0.0";
+  int selected_port = 0;
+  if (config.UseTls)
+    // TODO:
+    ServerBuilderAddTcpInsecureListeningRandomPort(&builder, listen_addr, &selected_port);
+  else
+    ServerBuilderAddTcpInsecureListeningRandomPort(&builder, listen_addr, &selected_port);
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("CranedASync is listening on [{}:{}]", craned_listen_addr, kCranedAsyncDefaultPort);
+  if (!m_server_ || selected_port == 0) {
+    CRANE_ERROR("Failed to bind port for PMIx direct connection");
+    g_pmix_server->GetCranedClient()->TerminateTasks();
+    return false;
+  }
+
+  CRANE_INFO("PMIx direct connection is listening on [{}:{}]", listen_addr, selected_port);
+
+  g_pmix_server->GetCranedClient()->BroadcastPmixPort(selected_port);
+
+  return true;
 }
 
-} // namespace Craned
+} // namespace pmix

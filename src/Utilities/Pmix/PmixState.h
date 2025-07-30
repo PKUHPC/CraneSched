@@ -16,34 +16,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "PmixState.h"
+#pragma once
+
+#include <list>
+
+#include "PmixColl.h"
+#include "crane/Lock.h"
 
 namespace pmix {
 
-std::shared_ptr<Coll> PmixState::PmixStateCollGet(
-    CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
+class PmixState {
+public:
+  PmixState() = default;
 
-  util::write_lock_guard lock_guard(m_mutex_);
+  std::shared_ptr<Coll> PmixStateCollGet(CollType type, const std::vector<pmix_proc_t>& procs,
+                         size_t nprocs);
+private:
 
-  for (const auto& coll : m_coll_list_) {
-    if (coll->GetProcNum() != nprocs) continue;
-    if (coll->GetType() != type) continue;
-    if (!coll->GetProcNum()) return coll;
-
-    for (size_t i = 0; i < nprocs; i++) {
-      const auto& proc = coll->GetProcs(i);
-      if (std::strcmp(proc.nspace, procs[i].nspace) == 0 &&
-          proc.rank == procs[i].rank)
-        return coll;
-    }
-  }
-
-  std::shared_ptr<Coll> coll = std::make_shared<Coll>();
-  if (!coll->PmixCollInit(type, procs, nprocs)) return nullptr;
-
-  m_coll_list_.emplace_back(coll);
-
-  return coll;
-}
+  util::rw_mutex m_mutex_;
+  std::list<std::shared_ptr<Coll>> m_coll_list_;
+};
 
 } // namespace pmix
+
+inline std::unique_ptr<pmix::PmixState> g_pmix_state;
