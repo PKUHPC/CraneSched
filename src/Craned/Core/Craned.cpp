@@ -30,9 +30,6 @@
 #include <cxxopts.hpp>
 
 #include "CranedForPamServer.h"
-#include "CforedClient.h"
-#include "CranedASyncServer.h"
-#include "CranedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"

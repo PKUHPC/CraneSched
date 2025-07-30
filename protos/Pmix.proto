@@ -1,0 +1,95 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.pmix;
+option go_package = "CraneFrontEnd/generated/protos/pmix";
+
+import "PublicDefs.proto";
+
+message SendPmixRingMsgReq {
+  message PmixRingMsgHdr {
+    uint32 contrib_id = 1;
+    uint32 seq = 2;
+    uint32 hop_seq = 3;
+    string craned_id = 4;
+    uint32 msgsize = 5;
+  };
+
+  PmixRingMsgHdr pmix_ring_msg_hdr = 1;
+  repeated PmixProc pmix_procs = 2;
+  bytes msg = 3;
+}
+
+message SendPmixRingMsgReply {
+  bool ok = 1;
+}
+
+message PmixTreeUpwardForwardReq {
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  bytes msg = 4;
+}
+
+message PmixTreeUpwardForwardReply {
+  bool ok = 1;
+}
+
+message PmixTreeDownwardForwardReq {
+  uint32 seq = 1;
+  repeated PmixProc pmix_procs = 2;
+  string peer_host = 3;
+  bytes msg = 4;
+}
+
+message PmixTreeDownwardForwardReply {
+  bool ok = 1;
+}
+
+message PmixDModexRequestReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  PmixProc pmix_proc = 3;
+  string local_namespace = 4;
+  int32 status = 5;
+}
+
+message PmixDModexRequestReply {
+  bool ok = 1;
+}
+
+message PmixDModexResponseReq {
+  uint32 seq_num = 1;
+  string craned_id = 2;
+  bytes data = 3;
+  int32 status = 4;
+}
+
+message PmixDModexResponseReply {
+  bool ok = 1;
+}
+
+service Pmix {
+  rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
+  rpc PmixTreeUpwardForward(PmixTreeUpwardForwardReq) returns (PmixTreeUpwardForwardReply);
+  rpc PmixTreeDownwardForward(PmixTreeDownwardForwardReq) returns (PmixTreeDownwardForwardReply);
+  rpc PmixDModexRequest(PmixDModexRequestReq) returns (PmixDModexRequestReply);
+  rpc PmixDModexResponse(PmixDModexResponseReq) returns (PmixDModexResponseReply);
+}

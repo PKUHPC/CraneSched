@@ -23,6 +23,7 @@
 #include <string>
 
 #include "crane/Lock.h"
+#include "crane/PublicHeader.h"
 
 namespace pmix {
 
