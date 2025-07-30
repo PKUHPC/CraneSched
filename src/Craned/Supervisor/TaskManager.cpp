@@ -1507,13 +1507,13 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                            std::move(reason));
 }
 
-std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
+std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
   CRANE_INFO("[Job #{}] Executing task.", m_step_.GetStep().task_id());
 
-  std::promise<CraneExpected<pid_t>> pid_promise;
-  std::future<CraneExpected<pid_t>> pid_future = pid_promise.get_future();
+  std::promise<CraneErrCode> ok_promise;
+  std::future ok_future = ok_promise.get_future();
 
-  auto elem = ExecuteTaskElem{.pid_prom = std::move(pid_promise)};
+  auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
   if (m_step_.GetStep().container().length() != 0) {
     // Container
@@ -1525,27 +1525,10 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
-  return pid_future;
+  return ok_future;
 }
 
 void TaskManager::LaunchExecution_() {
-  m_task_->pwd.Init(m_task_->GetParentStep().uid());
-  if (!m_task_->pwd.Valid()) {
-    CRANE_DEBUG("[Job #{}] Failed to look up password entry for uid {} of task",
-                m_task_->GetParentStep().task_id(),
-                m_task_->GetParentStep().uid());
-    ActivateTaskStatusChange_(
-        crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
-        fmt::format(
-            "[Job #{}] Failed to look up password entry for uid {} of task",
-            m_task_->GetParentStep().task_id(),
-            m_task_->GetParentStep().uid()));
-    return;
-  }
-
-  // Calloc tasks have no scripts to run. Just return.
-  if (m_step_.IsCalloc()) return;
-
   // Prepare for execution
   CraneErrCode err = m_task_->Prepare();
   if (err != CraneErrCode::SUCCESS) {
@@ -1804,14 +1787,34 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     AddTerminationTimer_(m_task_.get(), sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
 
+    m_task_->pwd.Init(m_task_->GetParentStep().uid());
+    if (!m_task_->pwd.Valid()) {
+      CRANE_DEBUG(
+          "[Job #{}] Failed to look up password entry for uid {} of task",
+          m_task_->GetParentStep().task_id(), m_task_->GetParentStep().uid());
+      ActivateTaskStatusChange_(
+          crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
+          fmt::format(
+              "[Job #{}] Failed to look up password entry for uid {} of task",
+              m_task_->GetParentStep().task_id(),
+              m_task_->GetParentStep().uid()));
+      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      return;
+    }
+
+    // Calloc tasks have no scripts to run. Just return.
+    if (m_step_.IsCalloc()) {
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
+      return;
+    }
+
     LaunchExecution_();
     if (!m_task_->GetPid()) {
       CRANE_WARN("[task #{}] Failed to launch process.",
                  m_step_.GetStep().task_id());
-      elem.pid_prom.set_value(
-          std::unexpected(CraneErrCode::ERR_GENERIC_FAILURE));
+      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
-      elem.pid_prom.set_value(m_task_->GetPid());
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }
 }

@@ -29,7 +29,7 @@ namespace Craned {
 
 class SupervisorStub {
  public:
-  CraneExpected<pid_t> ExecuteTask();
+  CraneErrCode ExecuteTask();
   CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::pair<task_id_t, pid_t>> CheckStatus();
 

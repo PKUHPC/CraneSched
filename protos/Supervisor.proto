@@ -68,8 +68,7 @@ message SupervisorReady {
 message TaskExecutionRequest {}
 
 message TaskExecutionReply {
-  bool ok = 1;
-  int32 pid = 2;
+  ErrCode code = 1;
 }
 
 message QueryStepEnvRequest {}

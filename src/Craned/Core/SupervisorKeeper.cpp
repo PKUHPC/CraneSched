@@ -22,17 +22,17 @@
 namespace Craned {
 using grpc::ClientContext;
 
-CraneExpected<pid_t> SupervisorStub::ExecuteTask() {
+CraneErrCode SupervisorStub::ExecuteTask() {
   ClientContext context;
   crane::grpc::supervisor::TaskExecutionRequest request;
   crane::grpc::supervisor::TaskExecutionReply reply;
 
   auto ok = m_stub_->ExecuteTask(&context, request, &reply);
-  if (ok.ok() && reply.ok()) {
-    return reply.pid();
+  if (!ok.ok()) {
+    return CraneErrCode::ERR_RPC_FAILURE;
   }
 
-  return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
+  return reply.code();
 }
 
 CraneExpected<EnvMap> SupervisorStub::QueryStepEnv() {

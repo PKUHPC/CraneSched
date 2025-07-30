@@ -26,16 +26,12 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
-  std::future<CraneExpected<pid_t>> pid_future = g_task_mgr->ExecuteTaskAsync();
-  pid_future.wait();
+  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
+  code_future.wait();
 
-  CraneExpected<pid_t> pid = pid_future.get();
-  if (pid.has_value()) {
-    response->set_ok(true);
-    response->set_pid(pid.value());
-  } else {
-    response->set_ok(false);
-  }
+  CraneErrCode ok = code_future.get();
+  response->set_code(ok);
+
   return Status::OK;
 }
 

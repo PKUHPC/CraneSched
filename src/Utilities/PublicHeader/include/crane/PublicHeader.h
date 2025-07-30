@@ -214,9 +214,15 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "LibEvent error",
         "No available node",
 
-        // 65 - 67
+        // 65 - 69
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
-        "User has insufficient privilege"
+        "User has insufficient privilege",
+        "The account does not have permission to run jobs in this partition. Please contact the administrator to add it to the allowed list",
+        "The account has been denied access to this partition. Please contact the security administrator if access is required",
+        "EBPF syscall error",
+
+        // 70 - 74
+        "Supervisor error",
     };
 // clang-format on
 }  // namespace Internal
