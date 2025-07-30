@@ -286,7 +286,7 @@ class TaskManager {
 
   void TaskStopAndDoStatusChange();
 
-  std::future<CraneExpected<pid_t>> ExecuteTaskAsync();
+  std::future<CraneErrCode> ExecuteTaskAsync();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
@@ -304,7 +304,7 @@ class TaskManager {
 
   struct ExecuteTaskElem {
     std::unique_ptr<ITaskInstance> instance;
-    std::promise<CraneExpected<pid_t>> pid_prom;
+    std::promise<CraneErrCode> ok_prom;
   };
 
   struct TaskTerminateQueueElem {

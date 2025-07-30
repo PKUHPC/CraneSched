@@ -1507,13 +1507,13 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                            std::move(reason));
 }
 
-std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
+std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
   CRANE_INFO("[Job #{}] Executing task.", m_step_.GetStep().task_id());
 
-  std::promise<CraneExpected<pid_t>> pid_promise;
-  std::future<CraneExpected<pid_t>> pid_future = pid_promise.get_future();
+  std::promise<CraneErrCode> ok_promise;
+  std::future ok_future = ok_promise.get_future();
 
-  auto elem = ExecuteTaskElem{.pid_prom = std::move(pid_promise)};
+  auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
   if (m_step_.GetStep().container().length() != 0) {
     // Container
@@ -1525,7 +1525,7 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync() {
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
-  return pid_future;
+  return ok_future;
 }
 
 void TaskManager::LaunchExecution_() {
@@ -1803,7 +1803,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
-      elem.pid_prom.set_value(0);
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       return;
     }
 
@@ -1811,10 +1811,9 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (!m_task_->GetPid()) {
       CRANE_WARN("[task #{}] Failed to launch process.",
                  m_step_.GetStep().task_id());
-      elem.pid_prom.set_value(
-          std::unexpected(CraneErrCode::ERR_GENERIC_FAILURE));
+      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
-      elem.pid_prom.set_value(m_task_->GetPid());
+      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }
 }
