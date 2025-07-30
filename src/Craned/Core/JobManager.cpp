@@ -870,11 +870,11 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
-        elem.step_id);
+        elem.job_id);
 
-    auto job_instance = m_job_map_.GetValueExclusivePtr(elem.step_id);
+    auto job_instance = m_job_map_.GetValueExclusivePtr(elem.job_id);
     if (!job_instance || job_instance->step_map.empty()) {
-      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.step_id);
+      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.job_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
       // it might indicate other nodes allocated to the task might have
@@ -903,27 +903,32 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     auto* instance = job_instance.get();
     instance->orphaned = elem.mark_as_orphaned;
 
-    auto stub = g_supervisor_keeper->GetStub(elem.step_id);
+    auto stub = g_supervisor_keeper->GetStub(elem.job_id);
     if (!stub) {
-      CRANE_ERROR("Supervisor for task #{} not found", elem.step_id);
+      CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
       continue;
     }
     auto err =
         stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
     if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to terminate task #{}", elem.step_id);
+      CRANE_ERROR("Failed to terminate task #{}", elem.job_id);
     }
   }
 }
 
-void JobManager::TerminateStepAsync(step_id_t step_id) {
-  StepTerminateQueueElem elem{.step_id = step_id, .terminated_by_user = true};
+void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
+  StepTerminateQueueElem elem{.job_id = job_id,
+                              .step_id = step_id,
+                              .terminated_by_user = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
 
-void JobManager::MarkStepAsOrphanedAndTerminateAsync(step_id_t step_id) {
-  StepTerminateQueueElem elem{.step_id = step_id, .mark_as_orphaned = true};
+void JobManager::MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id,
+                                                     step_id_t step_id) {
+  StepTerminateQueueElem elem{.job_id = job_id,
+                              .step_id = step_id,
+                              .mark_as_orphaned = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }

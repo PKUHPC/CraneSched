@@ -113,6 +113,7 @@ enum TaskStatus {
   Failed = 3;
   ExceedTimeLimit = 4;
   Cancelled = 5;
+  Configuring = 6;
 
   Invalid = 15;
 }
@@ -196,44 +197,97 @@ message RuntimeAttrOfTask {
   double cached_priority = 20;
 }
 
+message StepToCtld{
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+
+  ResourceView req_resources = 3;
+
+  uint32 node_num = 9;
+  uint32 ntasks_per_node = 10;
+  double cpus_per_task = 11;
+
+  bool requeue_if_failed = 12;
+  bool get_user_env = 13;
+
+  repeated uint32 gid = 14;  // egid
+
+  InteractiveTaskAdditionalMeta interactive_meta = 22;
+
+  string extra_attr = 23;
+
+  string cmd_line = 31;
+  string cwd = 32;  // Current working directory
+  map<string, string> env = 33;
+
+  string excludes = 34;
+  string nodelist = 35;
+  string container = 26;
+}
+
+message StepInEmbeddedDb {
+  RuntimeAttrOfStep runtime_attr = 1;
+  StepToCtld step_to_ctld = 2;
+}
+
+message RuntimeAttrOfStep {
+  // Fields that won't change after this task is accepted.
+  uint32 step_id = 1;
+  int64 step_db_id = 3;
+
+  // Fields that will change after this task is accepted.
+  int32 requeue_count = 11;
+  repeated string craned_ids = 12;
+  TaskStatus status = 13;
+  uint32 exit_code = 14;
+
+  google.protobuf.Timestamp submit_time = 15;
+  google.protobuf.Timestamp start_time = 16;
+  google.protobuf.Timestamp end_time = 17;
+
+  ResourceV2 allocated_res = 19;
+}
+
 message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
-  ResourceInNode res = 3;
+  ResourceInNode res = 4;
+
+  string partition = 5;
+  string account = 6;
+  string qos = 7;
 }
 
-message TaskToD {
-  uint32 task_id = 1;
-  TaskType type = 2;
-  uint32 partition_id = 3;
+enum StepType {
+  DAEMON = 0;
+  PRIMARY = 1;
+  COMMON = 2;
+}
 
-  ResourceInNode resources = 4;
+message StepToD {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  ResourceInNode res = 3;
+  TaskType type = 4;
+  StepType step_type = 5;
+
+  repeated uint32 gid = 7;
+
+  //For execution step
+  optional BatchTaskAdditionalMeta batch_meta = 9;
+  optional InteractiveTaskAdditionalMeta interactive_meta = 10;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
-  google.protobuf.Duration time_limit = 6;
+  google.protobuf.Timestamp start_time = 14;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
+  google.protobuf.Duration time_limit = 16;
 
-  string partition = 8;
-  uint32 uid = 9;
-  uint32 gid = 10;
+  map<string, string> env = 17;
+  string cwd = 18;
+  string name = 19;
 
-  oneof payload {
-    BatchTaskAdditionalMeta batch_meta = 11;
-    InteractiveTaskAdditionalMeta interactive_meta = 12;
-  }
-
-  map<string, string> env = 13;
-  string cwd = 14;
-
-  repeated string allocated_nodes = 15;
-
-  string name = 16;
-  string account = 17;
-  string qos = 18;
-
-  repeated string excludes = 19;
   repeated string nodelist = 20;
 
   uint32 node_num = 21;

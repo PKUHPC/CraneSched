@@ -31,7 +31,7 @@
 namespace Craned {
 
 // TODO: Replace this with tak execution info.
-using StepToD = crane::grpc::TaskToD;
+using StepToD = crane::grpc::StepToD;
 
 struct StepInstance {
   StepToD step_to_d;
@@ -98,9 +98,9 @@ class JobManager {
 
   std::set<task_id_t> GetAllocatedJobs();
 
-  void TerminateStepAsync(task_id_t task_id);
+  void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
-  void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
+  void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
   bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
@@ -146,7 +146,8 @@ class JobManager {
   };
 
   struct StepTerminateQueueElem {
-    uint32_t step_id{0};
+    job_id_t job_id;
+    step_id_t step_id;
     bool terminated_by_user{false};  // If the task is canceled by user,
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
