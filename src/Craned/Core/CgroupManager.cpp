@@ -37,10 +37,6 @@
 
 namespace Craned {
 
-// #ifdef CRANE_ENABLE_BPF
-// BpfRuntimeInfo CgroupManager::bpf_runtime_info = BpfRuntimeInfo{};
-// #endif
-
 CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
