@@ -17,7 +17,6 @@
  */
 
 #include "CranedClient.h"
-#include "CranedPublicDefs.h"
 #include "Pmix.h"
 #include "PmixColl.h"
 #include "PmixCommon.h"
@@ -123,7 +122,7 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
   /* check for ring is complete */
   if (contrib_id != (m_peerid_+1) % m_peers_cnt_) {
     // forward data to the next node
-    crane::grpc::SendPmixRingMsgReq request{};
+    crane::grpc::pmix::SendPmixRingMsgReq request{};
 
     auto* pmix_ring_msg_hdr = request.mutable_pmix_ring_msg_hdr();
     pmix_ring_msg_hdr->set_msgsize(data.size());
@@ -144,8 +143,8 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
     CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}", static_cast<void*>(&coll_ring_ctx), m_ring_.next_craned_id, coll_ring_ctx.seq, hop_seq, data.size(), contrib_id);
 
     auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::SendPmixRingMsgReply>();
-    auto stub = g_craned_client->GetCranedStub(m_ring_.next_craned_id);
+    auto reply = std::make_shared<crane::grpc::pmix::SendPmixRingMsgReply>();
+    auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_ring_.next_craned_id);
     if (!stub) {
       CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
       coll_ring_ctx.ring_buf.clear();
@@ -258,7 +257,7 @@ void Coll::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
 }
 
 bool Coll::ProcessRingRequest(
-    const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg) {
+    const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg) {
 
   CRANE_DEBUG("collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}", hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(), hdr.msgsize());
 
@@ -275,7 +274,7 @@ bool Coll::ProcessRingRequest(
      * This will 100% lead to application hang.
      */
     CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());
-    // TODO: kill job
+    g_pmix_server->GetCranedClient()->TerminateTasks();
     return false;
   }
 
@@ -285,7 +284,7 @@ bool Coll::ProcessRingRequest(
 }
 
 bool Coll::PmixCollRingNeighbor_(
-    const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
+    const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr,
     const std::string& msg) {
 
   CollRingCtx *coll_ring_ctx = nullptr;
@@ -343,4 +342,3 @@ bool Coll::PmixCollRingNeighbor_(
 }
 
 } // namespace pmix
-
