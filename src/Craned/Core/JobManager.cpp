@@ -527,8 +527,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     g_supervisor_keeper->AddSupervisor(task_id);
 
     auto stub = g_supervisor_keeper->GetStub(task_id);
-    auto pid = stub->ExecuteTask();
-    if (!pid) {
+    ok = stub->ExecuteTask().has_value();
+    if (!ok) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.", task_id);
       KillPid_(child_pid, SIGKILL);
       close(craned_supervisor_fd);

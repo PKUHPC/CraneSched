@@ -198,6 +198,11 @@ message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
   ResourceInNode res = 3;
+
+}
+
+message StepToD{
+
 }
 
 message TaskToD {

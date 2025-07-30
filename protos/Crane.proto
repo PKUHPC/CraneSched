@@ -45,7 +45,7 @@ message CranedTriggerReverseConnRequest {
 message ConfigureCranedRequest {
   bool ok = 1;
   map<uint32, JobToD> job_map = 2;
-  map<uint32, TaskToD> job_tasks_map = 3;
+  map<uint32, StepToD> job_tasks_map = 3;
   google.protobuf.Timestamp token = 4;
 }
 
@@ -91,7 +91,7 @@ message SubmitBatchTasksReply {
 }
 
 message ExecuteStepsRequest {
-  repeated TaskToD tasks = 1;
+  repeated StepToD tasks = 1;
 }
 
 message ExecuteStepsReply {
