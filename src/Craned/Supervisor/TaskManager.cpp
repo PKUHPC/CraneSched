@@ -1798,6 +1798,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
               "[Job #{}] Failed to look up password entry for uid {} of task",
               m_task_->GetParentStep().task_id(),
               m_task_->GetParentStep().uid()));
+      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
     }
 
