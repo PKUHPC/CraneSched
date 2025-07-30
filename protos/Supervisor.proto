@@ -34,11 +34,12 @@ message ChildProcessReady {
 
 message InitSupervisorRequest {
   uint32 job_id = 1;
-  string debug_level = 2;
-  string craned_id = 3;
-  string craned_unix_socket_path = 4;
-  string crane_base_dir = 5;
-  string crane_script_dir = 6;
+  uint32 step_id = 2;
+  string debug_level = 3;
+  string craned_id = 4;
+  string craned_unix_socket_path = 5;
+  string crane_base_dir = 6;
+  string crane_script_dir = 7;
 
   message ContainerConfig {
     string temp_dir = 1;
@@ -48,18 +49,18 @@ message InitSupervisorRequest {
     string kill_cmd = 5;
     string delete_cmd = 6;
   }
-  ContainerConfig container_config = 7;
+  ContainerConfig container_config = 15;
 
   message PluginConfig {
     string socket_path = 1;
   }
-  PluginConfig plugin_config = 8;
+  PluginConfig plugin_config = 20;
 
-  TaskToD step_spec = 9;
-  map<string, string> env = 10;
+  StepToD step_spec = 21;
+  map<string, string> env = 22;
 
-  string log_dir = 11;
-  string cgroup_path = 12;  // resolved cgroup path for OOM monitoring
+  string log_dir = 23;
+  string cgroup_path = 24;  // resolved cgroup path for OOM monitoring
 
   message CforedListenConf {
     message TlsCertificates {
@@ -73,7 +74,7 @@ message InitSupervisorRequest {
     string domain_suffix = 3;
   }
 
-  CforedListenConf cfored_listen_conf = 13;
+  CforedListenConf cfored_listen_conf = 25;
 }
 
 message SupervisorReady {
@@ -96,9 +97,10 @@ message QueryStepEnvReply {
 message CheckStatusRequest {}
 
 message CheckStatusReply {
-  int32 job_id = 1;
-  int32 supervisor_pid = 2;
-  bool ok = 3;
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  int32 supervisor_pid = 3;
+  bool ok = 4;
 }
 
 message ChangeTaskTimeLimitRequest {
