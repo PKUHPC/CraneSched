@@ -166,6 +166,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+  optional uint64 mem_per_cpu = 38;
 }
 
 message TaskInEmbeddedDb {
