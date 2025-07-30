@@ -46,6 +46,8 @@ std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
 
+std::optional<uint64_t> ParseMemStringAsByte(const std::string& mem);
+
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list);
 
@@ -88,5 +90,9 @@ std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
+
+bool ConvertStringToDeviceMap(const std::string& s, DeviceMap* device_map);
+
+bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 
 }  // namespace util

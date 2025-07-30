@@ -64,9 +64,30 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.max_time_limit_per_task = absl::Seconds(kTaskMaxTimeLimitSec);
     qos.max_cpus_per_user =
         std::numeric_limits<decltype(qos.max_cpus_per_user)>::max();
-    qos.max_cpus_per_account =
-        std::numeric_limits<decltype(qos.max_cpus_per_account)>::max();
     qos.reference_count = 1;
+    qos.max_jobs_per_account =
+      std::numeric_limits<decltype(qos.max_jobs_per_account)>::max();
+    qos.max_submit_jobs =
+      std::numeric_limits<decltype(qos.max_submit_jobs)>::max();
+    qos.max_submit_jobs_per_user =
+      std::numeric_limits<decltype(qos.max_submit_jobs_per_user)>::max();
+    qos.max_submit_jobs_per_account =
+      std::numeric_limits<decltype(qos.max_submit_jobs_per_account)>::max();
+    qos.max_jobs =
+      std::numeric_limits<decltype(qos.max_jobs)>::max();
+    qos.max_wall = absl::ZeroDuration();
+    qos.max_tres.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres.GetAllocatableRes().memory_bytes)>::max();
+    qos.max_tres_per_user.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres_per_user.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres_per_user.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres_per_user.GetAllocatableRes().memory_bytes)>::max();
+    qos.max_tres_per_account.GetAllocatableRes().cpu_count =
+      std::numeric_limits<decltype(qos.max_tres_per_account.GetAllocatableRes().cpu_count)>::max();
+    qos.max_tres_per_account.GetAllocatableRes().memory_bytes =
+      std::numeric_limits<decltype(qos.max_tres_per_account.GetAllocatableRes().memory_bytes)>::max();
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -627,6 +648,40 @@ void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
   }));
 }
 
+template <>
+void MongodbClient::DocumentAppendItem_<ResourceView>(
+  document& doc, const std::string& key,
+  const ResourceView& value) {
+  doc.append(kvp(key, [&](sub_document valueDocument) {
+    valueDocument.append(kvp("allocatable_res", [&](sub_document allocDoc) {
+        allocDoc.append(kvp("cpu_count", value.CpuCount()));
+        allocDoc.append(kvp("mem", std::to_string(value.MemoryBytes())));
+        allocDoc.append(kvp("mem_sw", std::to_string(value.MemoryBytes())));
+    }));
+    SubDocumentAppendItem_(valueDocument, "device_map", value.GetDeviceMap());
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<DeviceMap>(
+  sub_document& doc, const std::string& key,
+  const DeviceMap& value) {
+  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
+    for (const auto& [dev_name, pair_val] : value) {
+      uint64_t untyped_req_count = pair_val.first;
+      const auto& type_map = pair_val.second;
+      mapValueDocument.append(kvp(dev_name, [&](sub_document devDoc) {
+        devDoc.append(kvp("untyped_req_count", std::to_string(untyped_req_count)));
+        devDoc.append(kvp("type_total", [&](sub_document typeDoc) {
+          for (const auto& [type, total] : type_map) {
+            typeDoc.append(kvp(type, std::to_string(total)));
+          }
+        }));
+      }));
+    }
+  }));
+}
+
 template <typename... Ts, std::size_t... Is>
 bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
@@ -795,10 +850,25 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->priority = qos_view[Qos::FieldStringOfPriority()].get_int64().value;
     qos->max_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxJobsPerUser()].get_int64().value;
+    qos->max_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxJobsPerAccount()].get_int64().value;
     qos->max_cpus_per_user =
         qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_user =
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
+    qos->max_submit_jobs_per_account =
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
+    qos->max_jobs = qos_view[Qos::FieldStringOfMaxJobs()].get_int64().value;
+    qos->max_submit_jobs = qos_view[Qos::FieldStringOfMaxSubmitJobs()].get_int64().value;
+    qos->max_wall = absl::Seconds(
+        qos_view[Qos::FieldStringOfMaxWall()].get_int64().value);
+    qos->flags = qos_view[Qos::FieldStringOfFlags()].get_int64().value;
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTres(), &qos->max_tres);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerUser(), &qos->max_tres_per_user);
+    QosResourceViewFromDb_(qos_view, Qos::FieldStringOfMaxTresPerAccount(), &qos->max_tres_per_account);
+
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -806,7 +876,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{
+  std::array<std::string, 18> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -815,9 +885,18 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
       Qos::FieldStringOfMaxTimeLimitPerTask(),
-  };
+      Qos::FieldStringOfMaxJobsPerAccount(),
+      Qos::FieldStringOfMaxSubmitJobsPerUser(),
+      Qos::FieldStringOfMaxSubmitJobsPerAccount(),
+      Qos::FieldStringOfMaxJobs(),
+      Qos::FieldStringOfMaxSubmitJobs(),
+      Qos::FieldStringOfMaxWall(),
+      Qos::FieldStringOfMaxTres(),
+      Qos::FieldStringOfMaxTresPerUser(),
+      Qos::FieldStringOfMaxTresPerAccount(),
+      Qos::FieldStringOfFlags()};
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t>
+             int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, ResourceView, ResourceView, ResourceView, int64_t>
       values{false,
              qos.name,
              qos.description,
@@ -825,7 +904,17 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             qos.max_jobs_per_account,
+             qos.max_submit_jobs_per_user,
+             qos.max_submit_jobs_per_account,
+             qos.max_jobs,
+             qos.max_submit_jobs,
+             absl::ToInt64Seconds(qos.max_wall),
+             qos.max_tres,
+             qos.max_tres_per_user,
+             qos.max_tres_per_account,
+             qos.flags};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1007,6 +1096,28 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              device_map_str, task_to_ctld.container()};
 
   return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::QosResourceViewFromDb_(
+    const bsoncxx::document::view& qos_view, const std::string& field,
+    ResourceView* resource) {
+  auto max_tres = qos_view[field].get_document().value;
+  auto allocatable_res = max_tres["allocatable_res"].get_document().value;
+  resource->GetAllocatableRes().cpu_count = static_cast<cpu_t>(allocatable_res["cpu_count"].get_double().value);
+  resource->GetAllocatableRes().memory_bytes = std::stoull(std::string(allocatable_res["mem"].get_string().value));
+  resource->GetAllocatableRes().memory_sw_bytes = std::stoull(std::string(allocatable_res["mem_sw"].get_string().value));
+  for (auto &&device_item : max_tres["device_map"].get_document().value) {
+    auto device_doc = device_item.get_document().value;
+    uint64_t untyped_req_count = std::stoull(std::string(device_doc["untyped_req_count"].get_string().value));
+    std::unordered_map<std::string, uint64_t> type_total;
+    auto type_total_ele = device_doc["type_total"];
+    for (auto&& sub_item : type_total_ele.get_document().value) {
+      uint64_t total = std::stoull(std::string(sub_item.get_string().value));
+      type_total[std::string(sub_item.key())] = total;
+    }
+    resource->GetDeviceMap().emplace(std::string(device_item.key()),
+            std::make_pair(untyped_req_count, std::move(type_total)));
+  }
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {

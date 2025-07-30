@@ -384,6 +384,8 @@ struct TaskInCtld {
 
   std::string reservation;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -525,6 +527,11 @@ struct TaskInCtld {
   crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 };
 
+
+struct QosFlags {
+  static constexpr uint32_t DenyOnLimit = 1 << 0;
+};
+
 struct Qos {
   bool deleted = false;
   std::string name;
@@ -532,10 +539,19 @@ struct Qos {
   uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
+  uint32_t max_jobs_per_account;
   uint32_t max_running_tasks_per_user;
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
-  uint32_t max_cpus_per_account;
+  uint32_t max_submit_jobs_per_user;
+  uint32_t max_submit_jobs_per_account;
+  uint32_t max_jobs;
+  uint32_t max_submit_jobs;
+  absl::Duration max_wall;
+  ResourceView max_tres;
+  ResourceView max_tres_per_user;
+  ResourceView max_tres_per_account;
+  uint32_t flags;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -549,14 +565,41 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxJobsPerUser() {
     return "max_jobs_per_user";
   }
+  static constexpr const char* FieldStringOfMaxJobsPerAccount() {
+    return "max_jobs_per_account";
+  }
   static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
     return "max_time_limit_per_task";
   }
   static constexpr const char* FieldStringOfMaxCpusPerUser() {
     return "max_cpus_per_user";
   }
-  static constexpr const char* FieldStringOfMaxCpusPerAccount() {
-    return "max_cpus_per_account";
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
+    return "max_submit_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
+    return "max_submit_jobs_per_account";
+  }
+  static constexpr const char* FieldStringOfMaxJobs() {
+    return "max_jobs";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobs() {
+    return "max_submit_jobs";
+  }
+  static constexpr const char* FieldStringOfMaxWall() {
+    return "max_wall";
+  }
+  static constexpr const char* FieldStringOfMaxTres() {
+    return "max_tres";
+  }
+  static constexpr const char* FieldStringOfMaxTresPerUser() {
+    return "max_tres_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxTresPerAccount() {
+    return "max_tres_per_account";
+  }
+  static constexpr const char* FieldStringOfFlags() {
+    return "flags";
   }
 };
 
@@ -621,8 +664,44 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
 
 struct QosResource {
   ResourceView resource;
-  uint32_t jobs_per_user;
+  uint32_t jobs_count;
+  uint32_t submit_jobs_count;
+  absl::Duration wall_time;
 };
+
+// clang-format off
+constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE>
+    CraneModifyFieldStrArr = {
+        "partition",
+        "qos",
+        "default_qos",
+        "description",  // account and qos
+        // user
+        "admin_level",
+        "default_account",
+        // qos
+        "priority",
+        "max_jobs_per_user",
+        "max_cpus_per_user",
+        "max_time_limit_per_task",
+        "max_jobs_per_account",
+        "max_submit_jobs_per_user",
+        "max_submit_jobs_per_account",
+        "max_jobs",
+        "max_submit_jobs",
+        "max_wall",
+        "max_tres",
+        "max_tres_per_user",
+        "max_tres_per_account",
+        "flags"
+    };
+// clang-format on
+inline std::string_view CraneModifyFieldStr(
+    crane::grpc::ModifyField modify_field) {
+  const auto idx = static_cast<uint16_t>(modify_field);
+  CRANE_ASSERT(idx < CraneModifyFieldStrArr.size());
+  return CraneModifyFieldStrArr[idx];
+}
 
 }  // namespace Ctld
 

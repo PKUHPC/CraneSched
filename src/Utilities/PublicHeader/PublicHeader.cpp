@@ -358,6 +358,41 @@ DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map) {
   return device_map;
 }
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs) {
+  for (const auto& [dev_name, rhs_val] : rhs) {
+    const auto& [rhs_untyped, rhs_types] = rhs_val;
+    auto& lhs_pair = lhs[dev_name];
+    lhs_pair.first += rhs_untyped;
+    for (const auto& [type_name, type_count] : rhs_types) {
+      lhs_pair.second[type_name] += type_count;
+    }
+  }
+}
+
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs) {
+  for (const auto& [dev_name, rhs_val] : rhs) {
+    const auto& [rhs_untyped, rhs_types] = rhs_val;
+    auto lhs_it = lhs.find(dev_name);
+    ABSL_ASSERT(lhs_it != lhs.end());
+    auto& lhs_pair = lhs_it->second;
+    ABSL_ASSERT(lhs_pair.first >= rhs_untyped);
+    lhs_pair.first -= rhs_untyped;
+    for (const auto& [type_name, type_count] : rhs_types) {
+      auto type_it = lhs_pair.second.find(type_name);
+      ABSL_ASSERT(type_it != lhs_pair.second.end());
+      ABSL_ASSERT(type_it->second >= type_count);
+      type_it->second -= type_count;
+
+      // Drop empty type buckets
+      if (type_it->second == 0)
+        lhs_pair.second.erase(type_it);
+    }
+    // Drop the whole device entry when both untyped and typed counts vanish
+    if (lhs_pair.first == 0 && lhs_pair.second.empty())
+      lhs.erase(lhs_it);
+  }
+}
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map)
     for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map.type_slots_map)
@@ -690,6 +725,18 @@ ResourceView& ResourceView::operator+=(const DedicatedResourceInNode& rhs) {
 
 ResourceView& ResourceView::operator-=(const DedicatedResourceInNode& rhs) {
   this->device_map -= rhs;
+  return *this;
+}
+
+ResourceView& ResourceView::operator+=(const ResourceView& rhs) {
+  this->allocatable_res += rhs.allocatable_res;
+  this->device_map += rhs.device_map;
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const ResourceView& rhs) {
+  this->allocatable_res -= rhs.allocatable_res;
+  this->device_map -= rhs.device_map;
   return *this;
 }
 

@@ -214,9 +214,23 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "LibEvent error",
         "No available node",
 
-        // 65 - 67
+        // 65 - 69
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
-        "User has insufficient privilege"
+        "User has insufficient privilege",
+        "The current account is not in the allowed account list for the partition",
+        "The current account has been explicitly added to the deny list for the partition",
+        "ERR_EBPF",
+
+        // 70 - 74
+        "ERR_SUPERVISOR",
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)",
+        "ERR_USER_HAS_TASK",
+        "The current submitted job exceeds the QoS limit (MaxJobsPerQos)",
+        "ERR_CONVERT_TO_RESOURCE_VIEW",
+
+        // 75-76
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_USER_BEYOND)",
+        "The current submitted job exceeds the QoS limit (MAX_TRES_PER_ACCOUNT_BEYOND)",
     };
 // clang-format on
 }  // namespace Internal
@@ -363,6 +377,9 @@ using DeviceMap =
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map);
 DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
+void operator-=(DeviceMap& lhs, const DeviceMap& rhs);
+
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
@@ -462,6 +479,10 @@ class ResourceView {
   ResourceView& operator+=(const DedicatedResourceInNode& rhs);
   ResourceView& operator-=(const DedicatedResourceInNode& rhs);
 
+  // Account level resource operations
+  ResourceView& operator+=(const ResourceView& rhs);
+  ResourceView& operator-=(const ResourceView& rhs);
+
   bool IsZero() const;
   void SetToZero();
 
@@ -476,6 +497,7 @@ class ResourceView {
     return allocatable_res;
   }
 
+  DeviceMap& GetDeviceMap() { return device_map; }
   const DeviceMap& GetDeviceMap() const { return device_map; }
 
  private:
