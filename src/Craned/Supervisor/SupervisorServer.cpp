@@ -19,6 +19,7 @@
 #include "SupervisorServer.h"
 
 #include "CranedClient.h"
+#include "Pmix.h"
 #include "TaskManager.h"
 
 namespace Craned::Supervisor {
@@ -107,6 +108,17 @@ grpc::Status SupervisorServiceImpl::TerminateStep(
     break;
   }
   g_task_mgr->TerminateStepAsync(request->mark_orphaned(), cause);
+  response->set_ok(true);
+  return Status::OK;
+}
+
+grpc::Status SupervisorServiceImpl::ReceivePmixPort(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::ReceivePmixPortRequest* request,
+    crane::grpc::supervisor::ReceivePmixPortReply* response) {
+
+  g_pmix_server->GetPmixClient()->EmplacePmixStub(request->craned_id(), request->port());
+
   response->set_ok(true);
   return Status::OK;
 }

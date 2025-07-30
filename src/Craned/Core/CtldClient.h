@@ -198,6 +198,9 @@ class CtldClient {
 
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& step_status_change);
 
+  void BroadcastPmixPort(const crane::grpc::BroadcastPmixPortRequest& request,
+    crane::grpc::BroadcastPmixPortReply* response);
+
   // Convenience method for reporting status changes
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::JobStatus new_status,

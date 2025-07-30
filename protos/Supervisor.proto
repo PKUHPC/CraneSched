@@ -180,6 +180,16 @@ message ShutdownSupervisorRequest {}
 
 message ShutdownSupervisorReply {}
 
+message ReceivePmixPortRequest {
+  uint32 task_id = 1;
+  uint32 port = 2;
+  string craned_id = 3;
+}
+
+message ReceivePmixPortReply {
+  bool ok = 1;
+}
+
 service Supervisor {
   rpc ExecuteStep(StepExecutionRequest) returns (StepExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
@@ -188,4 +198,5 @@ service Supervisor {
   rpc TerminateStep(TerminateStepRequest) returns (TerminateStepReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
 }
