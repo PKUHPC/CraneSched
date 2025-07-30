@@ -123,15 +123,15 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
 
           bool ok_to_free = this->TaskOutputFinish(meta.pid);
           if (ok_to_free) {
-            CRANE_TRACE("It's ok to unregister task #{} on {}", g_config.JobId,
-                        m_cfored_name_);
+            CRANE_TRACE("It's ok to begin unregister task #{} on {}",
+                        g_config.JobId, m_cfored_name_);
             TaskEnd(meta.pid);
           }
           return;
         }
 
         std::string output(buf, ret);
-        CRANE_TRACE("Fwd to task #{}: {}", g_config.JobId, output);
+        CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
         this->TaskOutPutForward(output);
       });
 
@@ -255,7 +255,8 @@ void CforedClient::StartUvLoopThread() {
   });
 }
 
-bool CforedClient::WriteStringToFd_(const std::string& msg, int fd) {
+bool CforedClient::WriteStringToFd_(const std::string& msg, int fd,
+                                    bool close_fd) {
   ssize_t sz_sent = 0, sz_written;
   while (sz_sent != msg.size()) {
     sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -266,6 +267,7 @@ bool CforedClient::WriteStringToFd_(const std::string& msg, int fd) {
 
     sz_sent += sz_written;
   }
+  if (close_fd) close(fd);
   return true;
 }
 
@@ -490,10 +492,10 @@ void CforedClient::AsyncSendRecvThread_() {
 
       if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
         msg = &reply.payload_task_x11_input_req().msg();
-        CRANE_TRACE("TASK_X11_INPUT.");
+        CRANE_TRACE("TASK_X11_INPUT len:{}.", msg->length());
       } else if (reply.type() == StreamTaskIOReply::TASK_INPUT) {
         msg = &reply.payload_task_input_req().msg();
-        CRANE_TRACE("TASK_INPUT.");
+        CRANE_TRACE("TASK_INPUT len:{}.", msg->length());
       } else [[unlikely]] {
         CRANE_ERROR("Expect TASK_INPUT or TASK_X11_INPUT, but got {}",
                     (int)reply.type());
@@ -507,14 +509,15 @@ void CforedClient::AsyncSendRecvThread_() {
           CRANE_ASSERT(fwd_meta.x11_fd_info);
           if (!fwd_meta.x11_input_stopped)
             fwd_meta.x11_input_stopped =
-                !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd);
+                !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd, false);
         }
       } else {
+        bool eof = reply.payload_task_input_req().eof();
         // CRANED_TASK_INPUT
         for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
           if (!fwd_meta.input_stopped)
             fwd_meta.input_stopped =
-                !WriteStringToFd_(*msg, fwd_meta.stdin_write);
+                !WriteStringToFd_(*msg, fwd_meta.stdin_write, eof);
         }
       }
 

@@ -687,6 +687,7 @@ message StreamCrunRequest {
   message TaskIOForwardReq {
     uint32 task_id = 1;
     bytes msg = 2;
+    bool eof = 3;
   }
 
   message TaskX11ForwardReq {
@@ -815,6 +816,7 @@ message StreamTaskIOReply {
     uint32 task_id = 1;
     uint32 step_id = 2;
     bytes msg = 3;
+    bool eof = 4;
   }
 
   message SupervisorUnregisterReply {
