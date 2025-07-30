@@ -21,6 +21,7 @@
 #include "SupervisorServer.h"
 #include "TaskManager.h"
 #include "crane/GrpcHelper.h"
+#include "crane/String.h"
 
 namespace Craned::Supervisor {
 
@@ -45,18 +46,20 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
 void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                                          uint32_t exit_code,
                                          std::optional<std::string> reason) {
-  StepStatusChangeQueueElem elem{.task_id = g_config.JobId,
-                                 .new_status = new_status,
+  StepStatusChangeQueueElem elem{.new_status = new_status,
                                  .exit_code = exit_code,
                                  .reason = std::move(reason)};
-  m_task_status_change_queue_.enqueue(std::move(elem));
+  m_task_status_change_queue_.push_back(std::move(elem));
 }
 
 void CranedClient::AsyncSendThread_() {
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   while (true) {
-    if (m_thread_stop_) break;
+    {
+      absl::MutexLock lock(&m_mutex_);
+      if (m_task_status_change_queue_.empty() && m_thread_stop_) break;
+    }
 
     bool connected = m_channel_->WaitForConnected(
         std::chrono::system_clock::now() + std::chrono::seconds(3));
@@ -67,38 +70,36 @@ void CranedClient::AsyncSendThread_() {
       continue;
     }
 
-    StepStatusChangeQueueElem elem;
-    while (m_task_status_change_queue_.try_dequeue(elem)) {
-      grpc::ClientContext context;
-      crane::grpc::StepStatusChangeRequest request;
-      crane::grpc::StepStatusChangeReply reply;
-      grpc::Status status;
+    {
+      absl::MutexLock lock(&m_mutex_);
+      while (!m_task_status_change_queue_.empty()) {
+        auto& elem = m_task_status_change_queue_.front();
+        grpc::ClientContext context;
+        crane::grpc::StepStatusChangeRequest request;
+        crane::grpc::StepStatusChangeReply reply;
+        grpc::Status status;
 
-      CRANE_TRACE("Sending StepStatusChange for step #{}", elem.task_id);
+        CRANE_TRACE("Sending StepStatusChange for step status: {}",
+                    util::StepStatusToString(elem.new_status));
 
-      request.set_task_id(elem.task_id);
-      request.set_new_status(elem.new_status);
-      request.set_exit_code(elem.exit_code);
-      if (elem.reason.has_value()) request.set_reason(elem.reason.value());
+        request.set_job_id(g_config.JobId);
+        request.set_step_id(g_config.StepId);
+        request.set_new_status(elem.new_status);
+        request.set_exit_code(elem.exit_code);
+        if (elem.reason.has_value()) request.set_reason(elem.reason.value());
 
-      status = m_stub_->StepStatusChange(&context, request, &reply);
-      if (!status.ok()) {
-        CRANE_ERROR(
-            "Failed to send TaskStatusChange: "
-            "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-            elem.task_id, int(elem.new_status), status.error_message(),
-            context.debug_error_string(), int(status.error_code()));
-
-        // If some messages are not sent due to channel failure,
-        // put them back into m_task_status_change_list_
-        m_task_status_change_queue_.enqueue(elem);
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        break;
-
-      } else {
-        // The step on this node finish
-        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                    elem.task_id, reply.ok());
+        status = m_stub_->StepStatusChange(&context, request, &reply);
+        if (!status.ok()) {
+          CRANE_ERROR(
+              "Failed to send StepStatusChange: "
+              "NewStatus: {}, reason: {} | {}, code: {}",
+              util::StepStatusToString(elem.new_status), status.error_message(),
+              context.debug_error_string(), int(status.error_code()));
+          break;
+        }
+        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
+                    util::StepStatusToString(elem.new_status), reply.ok());
+        m_task_status_change_queue_.pop_front();
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
