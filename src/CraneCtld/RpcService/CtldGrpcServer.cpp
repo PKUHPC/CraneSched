@@ -38,13 +38,10 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
   // TODO: Set reason here.
-  g_task_scheduler->TaskStatusChangeAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code());
+  g_task_scheduler->StepStatusChangeAsync(
+      request->task_id(), request->step_id(), request->craned_id(),
+      request->new_status(), request->exit_code(), request->reason());
   response->set_ok(true);
   return grpc::Status::OK;
 }

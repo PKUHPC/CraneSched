@@ -37,6 +37,100 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
+void StepInCtld::SetSubmitTime(absl::Time submit_time) {
+  m_submit_time_ = submit_time;
+  this->runtime_attr.mutable_submit_time()->set_seconds(
+      ToUnixSeconds(submit_time));
+}
+void StepInCtld::SetStartTime(absl::Time start_time) {
+  m_start_time_ = start_time;
+  this->runtime_attr.mutable_start_time()->set_seconds(
+      ToUnixSeconds(start_time));
+}
+void StepInCtld::SetEndTime(absl::Time end_time) {
+  m_end_time_ = end_time;
+  this->runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+}
+
+void StepInCtld::SetAllocatedRes(const ResourceV2& res) {
+  this->m_allocated_res_ = res;
+  *this->runtime_attr.mutable_allocated_res() =
+      static_cast<crane::grpc::ResourceV2>(res);
+}
+
+void StepInCtld::SetCranedIds(const std::list<CranedId>& craned_list) {
+  this->craned_ids = craned_list;
+  this->runtime_attr.mutable_craned_ids()->Assign(craned_list.begin(),
+                                                  craned_list.end());
+}
+
+void StepInCtld::SetStatus(crane::grpc::TaskStatus new_status) {
+  this->m_status_ = new_status;
+  this->runtime_attr.set_status(new_status);
+}
+
+void StepInCtld::SetExitCode(uint32_t exit_code) {
+  this->m_exit_code_ = exit_code;
+  this->runtime_attr.set_exit_code(exit_code);
+}
+
+crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
+    const CranedId& craned_id) const {
+  crane::grpc::JobToD spec;
+  spec.set_job_id(job_id);
+  spec.set_uid(uid);
+  *spec.mutable_res() =
+      crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
+  return spec;
+}
+
+crane::grpc::StepToD CommonStepInCtld::GetStepToD(
+    const CranedId& craned_id) const {
+  crane::grpc::StepToD step_to_d;
+  // Set time_limit
+  step_to_d.mutable_time_limit()->CopyFrom(
+      google::protobuf::util::TimeUtil::MillisecondsToDuration(
+          ToInt64Milliseconds(this->time_limit)));
+  auto* mutable_res_in_node = step_to_d.mutable_res();
+  *mutable_res_in_node =
+      static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
+
+  // Set type
+  step_to_d.set_type(this->type);
+
+  step_to_d.set_job_id(this->job_id);
+  step_to_d.set_step_id(1);
+  step_to_d.set_name(this->name);
+
+  step_to_d.set_node_num(this->node_num);
+  step_to_d.set_ntasks_per_node(this->ntasks_per_node);
+  step_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
+
+  step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+  step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
+  step_to_d.set_cwd(this->cwd);
+  step_to_d.set_container(this->container);
+  step_to_d.set_get_user_env(this->get_user_env);
+
+  for (const auto& hostname : this->craned_ids)
+    step_to_d.mutable_nodelist()->Add()->assign(hostname);
+
+  step_to_d.mutable_start_time()->set_seconds(
+      ToUnixSeconds(this->m_start_time_));
+  step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+
+  if (this->type == crane::grpc::Batch) {
+    auto* mutable_meta = step_to_d.mutable_batch_meta();
+    mutable_meta->CopyFrom(this->task_to_ctld.batch_meta());
+  } else {
+    const auto& proto_ia_meta = this->task_to_ctld.interactive_meta();
+    auto* mutable_meta = step_to_d.mutable_interactive_meta();
+    mutable_meta->CopyFrom(proto_ia_meta);
+  }
+  return step_to_d;
+}
+
 bool TaskInCtld::IsX11() const {
   if (!IsInteractive()) return false;
   auto const& ia_meta = this->task_to_ctld.interactive_meta();
@@ -299,72 +393,67 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
 }
 
-crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
-  crane::grpc::TaskToD task_to_d;
-  // Set time_limit
-  task_to_d.mutable_time_limit()->CopyFrom(
-      google::protobuf::util::TimeUtil::MillisecondsToDuration(
-          ToInt64Milliseconds(this->time_limit)));
+void TaskInCtld::InitDaemonStepInCtld() {
+  m_daemon_step_ = std::make_unique<DaemonStepInCtld>();
+  /*Fields in StepInCtld*/
+  m_daemon_step_->job_id = task_id;
+  m_daemon_step_->step_id = kDaemonStepId;
+  m_daemon_step_->uid = uid;
+  m_daemon_step_->gids = {task_to_ctld.gid()};
 
-  // TODO: remove this field
-  //  Set resources
-  auto* mutable_res_in_node = task_to_d.mutable_resources();
-  *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-      this->AllocatedRes().at(craned_id));
+  m_daemon_step_->name = name;
+  m_daemon_step_->time_limit = time_limit;
+  m_daemon_step_->requested_node_res_view = requested_node_res_view;
+  m_daemon_step_->configuring_nodes =
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_daemon_step_->running_nodes =
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_daemon_step_->SetSubmitTime(submit_time);
+  m_daemon_step_->SetCranedIds(craned_ids);
+  m_daemon_step_->SetStatus(crane::grpc::TaskStatus::Configuring);
 
-  // Set type
-  task_to_d.set_type(this->type);
-
-  task_to_d.set_task_id(this->TaskId());
-  task_to_d.set_name(this->name);
-  task_to_d.set_account(this->account);
-  task_to_d.set_qos(this->qos);
-  task_to_d.set_partition(this->partition_id);
-
-  for (auto&& node : this->included_nodes) {
-    task_to_d.mutable_nodelist()->Add()->assign(node);
-  }
-
-  for (auto&& node : this->excluded_nodes) {
-    task_to_d.mutable_excludes()->Add()->assign(node);
-  }
-
-  task_to_d.set_node_num(this->node_num);
-  task_to_d.set_ntasks_per_node(this->ntasks_per_node);
-  task_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
-
-  task_to_d.set_uid(this->uid);
-  task_to_d.set_gid(this->gid);
-  task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
-
-  task_to_d.set_cwd(this->cwd);
-  task_to_d.set_container(this->container);
-  task_to_d.set_get_user_env(this->get_user_env);
-
-  for (const auto& hostname : this->CranedIds())
-    task_to_d.mutable_allocated_nodes()->Add()->assign(hostname);
-
-  task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
-  task_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-
-  if (this->type == crane::grpc::Batch) {
-    auto* mutable_meta = task_to_d.mutable_batch_meta();
-    mutable_meta->CopyFrom(this->task_to_ctld.batch_meta());
-  } else {
-    const auto& proto_ia_meta = this->task_to_ctld.interactive_meta();
-    auto* mutable_meta = task_to_d.mutable_interactive_meta();
-    mutable_meta->CopyFrom(proto_ia_meta);
-  }
-  return task_to_d;
+  /*Fields in DaemonStepInCtld*/
+  m_daemon_step_->partition = partition_id;
+  m_daemon_step_->account = account;
+  m_daemon_step_->qos = qos;
 }
 
-crane::grpc::JobToD TaskInCtld::GetJobToD(const CranedId& craned_id) const {
-  crane::grpc::JobToD spec;
-  spec.set_job_id(task_id);
-  spec.set_uid(uid);
-  *spec.mutable_res() =
-      crane::grpc::ResourceInNode(allocated_res.at(craned_id));
-  return spec;
+void TaskInCtld::InitPrimaryStepInCtld() {
+  m_primary_step_ = std::make_unique<CommonStepInCtld>();
+  /*Fields in StepInCtld*/
+  m_primary_step_->job_id = task_id;
+  m_primary_step_->step_id = kDaemonStepId + 1;
+  m_primary_step_->uid = uid;
+  m_primary_step_->gids = {task_to_ctld.gid()};
+
+  m_primary_step_->name = name;
+  m_primary_step_->time_limit = time_limit;
+  m_primary_step_->requested_node_res_view = requested_node_res_view;
+
+  m_primary_step_->SetSubmitTime(submit_time);
+  m_primary_step_->SetCranedIds(craned_ids);
+  m_primary_step_->SetStatus(crane::grpc::TaskStatus::Configuring);
+  m_primary_step_->configuring_nodes =
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_primary_step_->running_nodes =
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+
+  /*Fields in PrimaryStepInCtld*/
+  m_primary_step_->type = type;
+  m_primary_step_->node_num = node_num;
+  m_primary_step_->ntasks_per_node = ntasks_per_node;
+  m_primary_step_->cpus_per_task = cpus_per_task;
+  m_primary_step_->requeue_if_failed = requeue_if_failed;
+  m_primary_step_->get_user_env = get_user_env;
+  m_primary_step_->cmd_line = cmd_line;
+  m_primary_step_->env = env;
+  m_primary_step_->cwd = cwd;
+  m_primary_step_->container = container;
+  m_primary_step_->extra_attr = extra_attr;
+
+  m_primary_step_->executing_craned_ids = executing_craned_ids;
+  m_primary_step_->allocated_craneds_regex = allocated_craneds_regex;
+  m_primary_step_->pending_reason = pending_reason;
 }
 
 }  // namespace Ctld

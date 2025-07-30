@@ -44,6 +44,10 @@ struct CallbackWrapper {
   bool consume;
 };
 
+inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
+  return fmt::format("{}:{}", step.job_id(), step.step_id());
+}
+
 struct TaskStatusChangeQueueElem {
   task_id_t step_id{};
   crane::grpc::TaskStatus new_status{};

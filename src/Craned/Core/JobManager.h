@@ -31,11 +31,31 @@
 namespace Craned {
 
 // TODO: Replace this with tak execution info.
-using StepToD = crane::grpc::TaskToD;
-
+using StepToD = crane::grpc::StepToD;
+struct DaemonStepInstance;
+struct CommonStepInstance;
 struct StepInstance {
-  StepToD step_to_d;
+  job_id_t job_id;
+  step_id_t step_id;
   pid_t supv_pid;
+
+  crane::grpc::ResourceInNode res;
+  crane::grpc::StepType step_type;
+  virtual ~StepInstance() = default;
+  DaemonStepInstance* GetDaemonStepInstance();
+  const DaemonStepInstance* GetDaemonStepInstance() const;
+  CommonStepInstance* GetCommonStepInstance();
+  const CommonStepInstance* GetCommonStepInstance() const;
+};
+
+struct DaemonStepInstance : StepInstance {
+  ~DaemonStepInstance() override = default;
+  crane::grpc::JobToD job_to_d;
+};
+
+struct CommonStepInstance : StepInstance {
+  ~CommonStepInstance() override = default;
+  StepToD step_to_d;
 };
 
 // Job allocation info, where allocation = job spec + execution info
@@ -88,6 +108,8 @@ class JobManager {
 
   bool FreeJobs(std::set<task_id_t>&& job_ids);
 
+  void AllocSteps(std::vector<StepToD>&& steps);
+
   CraneErrCode ExecuteStepAsync(StepToD const& step);
 
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
@@ -98,9 +120,9 @@ class JobManager {
 
   std::set<task_id_t> GetAllocatedJobs();
 
-  void TerminateStepAsync(task_id_t task_id);
+  void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
-  void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
+  void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
   bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
@@ -129,6 +151,11 @@ class JobManager {
     std::vector<JobInD> job_specs;
   };
 
+  struct EvQueueAllocateStepElem {
+    crane::grpc::StepToD step_to_d;
+    std::promise<CraneErrCode> ok_prom;
+  };
+
   struct EvQueueExecuteStepElem {
     std::unique_ptr<StepInstance> step_inst;
     std::promise<CraneErrCode> ok_prom;
@@ -146,7 +173,8 @@ class JobManager {
   };
 
   struct StepTerminateQueueElem {
-    uint32_t step_id{0};
+    job_id_t job_id;
+    step_id_t step_id;
     bool terminated_by_user{false};  // If the task is canceled by user,
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
@@ -206,6 +234,7 @@ class JobManager {
   // Callback function to handle SIGINT sent by Ctrl+C
   void EvSigintCb_();
 
+  void EvCleanGrpcAllocStepsQueueCb_();
   void EvCleanGrpcExecuteStepQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
@@ -232,6 +261,9 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
   ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
+  ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_step_async_handle_;
   // A custom event that handles the ExecuteTask RPC.
