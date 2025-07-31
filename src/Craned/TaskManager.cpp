@@ -284,13 +284,14 @@ void TaskManager::EvSigchldCb_() {
 
         CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
                     pid, WTERMSIG(status));
+      } else {
+        // Ignore other status as the process is not exited,
+        // e.g., SIGSTOP, SIGCONT, etc.
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                    pid, status);
+        break;
       }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
+
       m_sigchld_queue_.enqueue(std::move(sigchld_info));
       m_process_sigchld_async_handle_->send();
     } else if (pid == 0) {
