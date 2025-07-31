@@ -1198,7 +1198,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
   const User* op_user = user_result.value();
 
   // Verify whether the serial number already exists in the user database.
-  if (!op_user->serial_number.empty())
+  if (!op_user->cert_number.empty())
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
 
   std::string common_name = std::format("{}.{}", uid, g_config.ListenConf.TlsConfig.DomainSuffix);
@@ -1220,7 +1220,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_user_map_[op_user->name]->serial_number = sign_response->serial_number;
+  m_user_map_[op_user->name]->cert_number = sign_response->serial_number;
 
   CRANE_INFO("The user {} successfully signed the certificate.",
               op_user->name);
@@ -1268,8 +1268,8 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
   if (!result) return result;
 
-  if (!p_target_user->serial_number.empty() &&
-      !g_vault_client->RevokeCert(p_target_user->serial_number))
+  if (!p_target_user->cert_number.empty() &&
+      !g_vault_client->RevokeCert(p_target_user->cert_number))
     return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
   // Save the serial number in the database.
@@ -1283,10 +1283,10 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
 
-  m_user_map_[p_target_user->name]->serial_number = "";
+  m_user_map_[p_target_user->name]->cert_number = "";
 
   CRANE_DEBUG("Reset User {} Certificate {}", p_target_user->name,
-              p_target_user->serial_number);
+              p_target_user->cert_number);
 
   return result;
 }
@@ -2003,8 +2003,8 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
   }
 
   if (g_config.VaultConf.Enabled) {
-    if (res_user.deleted && !res_user.serial_number.empty() &&
-    !g_vault_client->RevokeCert(res_user.serial_number))
+    if (res_user.deleted && !res_user.cert_number.empty() &&
+    !g_vault_client->RevokeCert(res_user.cert_number))
       return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
   }
 
