@@ -703,7 +703,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       user->coordinator_accounts.emplace_back(acc.get_string().value);
     }
 
-    user->serial_number = user_view["serial_number"].get_string().value;
+    user->cert_number = user_view["cert_number"].get_string().value;
 
     for (auto&& account_to_attrs_map_item :
          user_view["account_to_attrs_map"].get_document().view()) {
@@ -742,7 +742,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
-                                     "serial_number"};
+                                     "cert_number"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>, std::string>
       values{user.deleted,
@@ -752,7 +752,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts,
-             user.serial_number};
+             user.cert_number};
   return DocumentConstructor_(fields, values);
 }
 

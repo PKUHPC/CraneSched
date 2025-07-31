@@ -870,8 +870,7 @@ message SignUserCertificateRequest {
 message SignUserCertificateResponse {
   bool ok = 1;
   string certificate = 2;
-  string external_certificate = 3;
-  ErrCode reason = 4;
+  ErrCode reason = 3;
 }
 
 message ResetUserCredentialRequest {

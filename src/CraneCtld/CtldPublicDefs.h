@@ -616,7 +616,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  std::string serial_number;
+  std::string cert_number;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
