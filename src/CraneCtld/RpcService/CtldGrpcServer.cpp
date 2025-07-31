@@ -1485,8 +1485,6 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   } else {
     response->set_ok(true);
     response->set_certificate(result.value());
-    response->set_external_certificate(
-        g_config.ListenConf.TlsConfig.ExternalCerts.CertContent);
   }
 
   return grpc::Status::OK;
