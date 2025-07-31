@@ -1211,7 +1211,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                     op_user->name, "serial_number",
+                                     op_user->name, "cert_number",
                                      sign_response->serial_number);
   };
 
@@ -1276,7 +1276,7 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                     p_target_user->name, "serial_number", "");
+                                     p_target_user->name, "cert_number", "");
   };
 
   // Update to database

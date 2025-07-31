@@ -1812,8 +1812,6 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   auto result = util::ParseCertificate(certificate);
   if (!result) return "Certificate is invalid";
 
-  CRANE_DEBUG("parse user {} certificate cn: {}, serial_number: {}", uid, result->first, result->second);
-
   if (!g_vault_client->IsCertAllowed(result.value().second))
     return "Certificate has expired";
 
