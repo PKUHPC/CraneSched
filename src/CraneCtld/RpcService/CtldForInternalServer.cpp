@@ -341,7 +341,7 @@ CtldForInternalServer::CtldForInternalServer(
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPortForInternal(
         &builder, cranectld_listen_addr,
-        listen_conf.CraneCtldForInternalListenPort, listen_conf.tls_config.InternalCerts);
+        listen_conf.CraneCtldForInternalListenPort, listen_conf.TlsConfig.InternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(
         &builder, cranectld_listen_addr,
