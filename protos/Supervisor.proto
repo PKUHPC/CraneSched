@@ -61,8 +61,7 @@ message InitSupervisorRequest {
   string log_dir = 11;
   string crane_cluster_name = 12;
 
-  message CforedListenConf{
-
+  message CforedListenConf {
     message TlsCertificates {
       string cert_content = 1;
       string key_content = 2;

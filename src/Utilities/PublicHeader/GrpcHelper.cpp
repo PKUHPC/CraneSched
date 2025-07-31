@@ -92,12 +92,11 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 }
 
 // Internal enforced mutual TLS (mTLS) authentication
-void ServerBuilderAddTcpTlsListeningPortForInternal(grpc::ServerBuilder* builder,
-                                         const std::string& address,
-                                         const std::string& port,
-                                         const TlsCertificates& certs) {
+void ServerBuilderAddTcpTlsListeningPortForInternal(
+    grpc::ServerBuilder* builder, const std::string& address,
+    const std::string& port, const TlsCertificates& certs) {
   std::string listen_addr_port =
-    fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
+      fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
   grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
   pem_key_cert_pair.cert_chain = certs.CertContent;
@@ -109,7 +108,8 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(grpc::ServerBuilder* builder
   ssl_opts.client_certificate_request =
       GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
 
-  builder->AddListeningPort(listen_addr_port, grpc::SslServerCredentials(ssl_opts));
+  builder->AddListeningPort(listen_addr_port,
+                            grpc::SslServerCredentials(ssl_opts));
 }
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
@@ -129,7 +129,8 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
   ssl_opts.client_certificate_request =
       GRPC_SSL_REQUEST_CLIENT_CERTIFICATE_AND_VERIFY;
 
-  builder->AddListeningPort(listen_addr_port, grpc::SslServerCredentials(ssl_opts));
+  builder->AddListeningPort(listen_addr_port,
+                            grpc::SslServerCredentials(ssl_opts));
 }
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
@@ -152,8 +153,7 @@ void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
                             const std::string& domain_suffix) {
-  args->SetSslTargetNameOverride(
-      fmt::format("{}.{}", hostname, domain_suffix));
+  args->SetSslTargetNameOverride(fmt::format("{}.{}", hostname, domain_suffix));
 }
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
@@ -203,19 +203,18 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
-  std::string target =
-      fmt::format("{}.{}:{}", hostname, domain_suffix, port);
+  std::string target = fmt::format("{}.{}:{}", hostname, domain_suffix, port);
   return grpc::CreateChannel(target, grpc::SslCredentials(ssl_opts));
 }
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const std::string& domain_suffix, const grpc::ChannelArguments& args) {
+    const TlsCertificates& certs, const std::string& domain_suffix,
+    const grpc::ChannelArguments& args) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
-  std::string target =
-      fmt::format("{}.{}:{}", hostname, domain_suffix, port);
+  std::string target = fmt::format("{}.{}:{}", hostname, domain_suffix, port);
   return grpc::CreateCustomChannel(target, grpc::SslCredentials(ssl_opts),
                                    args);
 }
