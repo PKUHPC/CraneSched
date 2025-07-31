@@ -71,11 +71,6 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   // Make sure before exit all output has been drained.
   while (!m_stopped_ || ok || x11_ok) {
     if (!ok && !x11_ok) {
-      if (m_stopped_) {
-        m_output_drained_.store(true, std::memory_order::release);
-        CRANE_TRACE("Output queue drained. Output thread exiting.");
-        break;
-      }
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_output_queue_.try_dequeue(output);
       x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
@@ -121,6 +116,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
   }
 
+  m_output_drained_.store(true, std::memory_order::release);
   CRANE_TRACE("CleanOutputQueueThread exited.");
 }
 
@@ -163,7 +159,7 @@ void CforedClient::AsyncSendRecvThread_() {
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
-        if (!m_output_drained_) {
+        if (!m_output_drained_.load(std::memory_order::acquire)) {
           CRANE_TRACE("Waiting for output drained.");
           state = State::Draining;
           continue;
@@ -249,6 +245,7 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_TRACE("Forwarding State");
       // Do nothing for acknowledgements of successful writes in Forward State.
       if (tag == Tag::Write) {
+        CRANE_TRACE("One elem of output was sent.");
         write_pending.store(false, std::memory_order::release);
         break;
       }
@@ -296,6 +293,7 @@ void CforedClient::AsyncSendRecvThread_() {
     case State::Draining:
       // Write all pending outputs, stop reading
       if (tag == Tag::Write) {
+        CRANE_TRACE("One of drained output was sent.");
         write_pending.store(false, std::memory_order::release);
       }
       break;
