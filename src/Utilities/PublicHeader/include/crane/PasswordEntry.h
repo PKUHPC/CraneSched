@@ -22,6 +22,8 @@
 
 #include <string>
 
+#include "crane/Logger.h"
+
 class PasswordEntry {
  public:
   static void InitializeEntrySize() {
@@ -33,14 +35,14 @@ class PasswordEntry {
   PasswordEntry() = default;
   void Init(uid_t uid) {
     m_uid_ = uid;
-    struct passwd pwd;
+    struct passwd pwd{};
     struct passwd* result;
     char* buf;
     buf = new char[s_passwd_size_];
 
     if (getpwuid_r(uid, &pwd, buf, s_passwd_size_, &result) != 0) {
       CRANE_ERROR("Error when getpwuid_r");
-    } else if (result == NULL) {
+    } else if (result == nullptr) {
       CRANE_ERROR("User uid #{} not found.", uid);
     } else {
       m_valid_ = true;
@@ -77,5 +79,5 @@ class PasswordEntry {
   std::string m_pw_dir_;    /* home directory */
   std::string m_pw_shell_;  /* shell program */
 
-  static inline size_t s_passwd_size_;
+  static inline size_t s_passwd_size_{16384};  // Default size
 };

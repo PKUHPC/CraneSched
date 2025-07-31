@@ -135,7 +135,8 @@ class ITaskInstance {
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
 
-  virtual const TaskExitInfo& HandleSigchld(pid_t pid, int status) = 0;
+  virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
+                                                          int status) = 0;
 
   PasswordEntry pwd;
 
@@ -208,7 +209,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  const TaskExitInfo& HandleSigchld(pid_t pid, int status) override;
+  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
+                                                  int status) override;
 
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
@@ -229,7 +231,8 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
-  const TaskExitInfo& HandleSigchld(pid_t pid, int status) override;
+  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
+                                                  int status) override;
 };
 
 class TaskManager {
