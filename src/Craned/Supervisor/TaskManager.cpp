@@ -1007,7 +1007,8 @@ CraneErrCode ContainerInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-const TaskExitInfo& ContainerInstance::HandleSigchld(pid_t pid, int status) {
+std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
+                                                                   int status) {
   m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
@@ -1030,9 +1031,13 @@ const TaskExitInfo& ContainerInstance::HandleSigchld(pid_t pid, int status) {
     m_exit_info_.value = WTERMSIG(status);
     CRANE_WARN("OCI runtime for task #{} is killed by signal {}.",
                m_parent_step_inst_->GetStep().task_id(), m_exit_info_.value);
+  } else {
+    CRANE_TRACE("Received SIGCHLD with status {} for task #{} but ignored.",
+                status, m_parent_step_inst_->GetStep().task_id());
+    return std::nullopt;
   }
 
-  return m_exit_info_;
+  return std::optional<TaskExitInfo>{m_exit_info_};
 }
 
 CraneErrCode ProcInstance::Prepare() {
@@ -1347,7 +1352,8 @@ CraneErrCode ProcInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-const TaskExitInfo& ProcInstance::HandleSigchld(pid_t pid, int status) {
+std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
+                                                              int status) {
   m_exit_info_.pid = pid;
 
   if (WIFEXITED(status)) {
@@ -1358,15 +1364,13 @@ const TaskExitInfo& ProcInstance::HandleSigchld(pid_t pid, int status) {
     // Killed by signal WTERMSIG(status)
     m_exit_info_.is_terminated_by_signal = true;
     m_exit_info_.value = WTERMSIG(status);
+  } else {
+    CRANE_TRACE("Received SIGCHLD with status {} for task #{} but ignored.",
+                status, m_parent_step_inst_->GetStep().task_id());
+    return std::nullopt;
   }
-  /* Todo(More status tracing):
-   else if (WIFSTOPPED(status)) {
-    printf("stopped by signal %d\n", WSTOPSIG(status));
-  } else if (WIFCONTINUED(status)) {
-    printf("continued\n");
-  } */
 
-  return m_exit_info_;
+  return std::optional<TaskExitInfo>{m_exit_info_};
 }
 
 TaskManager::TaskManager()
@@ -1605,9 +1609,12 @@ void TaskManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      const auto& exit_info = m_task_->HandleSigchld(pid, status);
-      CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Status: {}", pid,
-                  exit_info.is_terminated_by_signal, exit_info.value);
+      const auto exit_info = m_task_->HandleSigchld(pid, status);
+      if (!exit_info.has_value()) continue;
+
+      CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}", pid,
+                  exit_info->is_terminated_by_signal, exit_info->value);
+
       if (m_step_.IsCrun()) {
         // TaskStatusChange of a crun task is triggered in
         // CforedManager.
