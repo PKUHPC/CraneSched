@@ -260,21 +260,14 @@ class MongodbClient {
       std::visit([&](auto&& arg) { filter.append(kvp(fname, arg)); }, fvalue);
     }
 
-    if (opt == "$set") {
-      updateItem.append(kvp("$set", [&](sub_document subDocument) {
-        SubDocumentAppendItem_(subDocument, key, value);
-        subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-      }));
-    } else {
-      updateItem.append(
-          kvp(opt,
-              [&](sub_document subDocument) {
-                SubDocumentAppendItem_(subDocument, key, value);
-              }),
-          kvp("$set", [](sub_document subDocument) {
-            subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-          }));
-    }
+    updateItem.append(
+        kvp(opt,
+            [&](sub_document subDocument) {
+              SubDocumentAppendItem_(subDocument, key, value);
+            }),
+        kvp("$set", [](sub_document subDocument) {
+          subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+        }));
 
     switch (type) {
     case EntityType::ACCOUNT:
