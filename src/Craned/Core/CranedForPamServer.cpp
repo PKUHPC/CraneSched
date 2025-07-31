@@ -102,7 +102,8 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
                   request->ssh_remote_address(), remote_hostname);
 
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_port, g_config.ListenConf.TlsCerts, g_config.ListenConf.DomainSuffix);
+          remote_hostname, crane_port, g_config.ListenConf.TlsCerts,
+          g_config.ListenConf.DomainSuffix);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());

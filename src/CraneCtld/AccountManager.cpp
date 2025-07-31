@@ -1201,7 +1201,8 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
   if (!op_user->cert_number.empty())
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
 
-  std::string common_name = std::format("{}.{}", uid, g_config.ListenConf.TlsConfig.DomainSuffix);
+  std::string common_name =
+      std::format("{}.{}", uid, g_config.ListenConf.TlsConfig.DomainSuffix);
   auto sign_response =
       g_vault_client->Sign(csr_content, common_name, alt_names);
   if (!sign_response)
@@ -1213,7 +1214,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      op_user->name, "cert_number",
                                      sign_response->serial_number);
-  };
+      };
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback)) {
@@ -1222,8 +1223,7 @@ CraneExpected<std::string> AccountManager::SignUserCertificate(
 
   m_user_map_[op_user->name]->cert_number = sign_response->serial_number;
 
-  CRANE_INFO("The user {} successfully signed the certificate.",
-              op_user->name);
+  CRANE_INFO("The user {} successfully signed the certificate.", op_user->name);
 
   return sign_response->certificate;
 }
@@ -1277,7 +1277,7 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      p_target_user->name, "cert_number", "");
-  };
+      };
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
@@ -2004,7 +2004,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
 
   if (g_config.VaultConf.Enabled) {
     if (res_user.deleted && !res_user.cert_number.empty() &&
-    !g_vault_client->RevokeCert(res_user.cert_number))
+        !g_vault_client->RevokeCert(res_user.cert_number))
       return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
   }
 
