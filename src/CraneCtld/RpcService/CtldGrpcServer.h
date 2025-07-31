@@ -344,12 +344,13 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::EnableAutoPowerControlReply *response) override;
 
   grpc::Status SignUserCertificate(
-   grpc::ServerContext *context,
-   const crane::grpc::SignUserCertificateRequest *request,
-   crane::grpc::SignUserCertificateResponse *response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::SignUserCertificateRequest *request,
+      crane::grpc::SignUserCertificateResponse *response) override;
 
  private:
-  static std::optional<std::string> CheckCertAndUIDAllowed_(const grpc::ServerContext *context, uint32_t uid);
+  static std::optional<std::string> CheckCertAndUIDAllowed_(
+      const grpc::ServerContext *context, uint32_t uid);
 
   CtldServer *m_ctld_server_;
 };

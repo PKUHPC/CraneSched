@@ -1537,7 +1537,6 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-
   std::unordered_set<std::string> user_list{request->user_list().begin(),
                                             request->user_list().end()};
 
@@ -1549,7 +1548,8 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
   }
 
   for (const auto &username : user_list) {
-    auto result = g_account_manager->ResetUserCertificate(request->uid(), username);
+    auto result =
+        g_account_manager->ResetUserCertificate(request->uid(), username);
     if (!result) {
       auto *new_err_record = response->mutable_rich_error_list()->Add();
       new_err_record->set_description(username);
@@ -1780,7 +1780,9 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
     }
 
     if (!g_config.ListenConf.TlsConfig.AllowedNodes.contains(hostname)) {
-      CRANE_DEBUG("User {} tried to access from host {}, the host is not allowed.", request->uid(), hostname);
+      CRANE_DEBUG(
+          "User {} tried to access from host {}, the host is not allowed.",
+          request->uid(), hostname);
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
       return grpc::Status::OK;
@@ -1816,17 +1818,16 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
     return "Certificate has expired";
 
   std::vector<std::string> cn_parts = absl::StrSplit(result.value().first, '.');
-  if (cn_parts.empty() || cn_parts[0].empty())
-    return "Certificate is invalid";
+  if (cn_parts.empty() || cn_parts[0].empty()) return "Certificate is invalid";
 
   try {
     uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
     if (parsed_uid != uid) return "Uid mismatch";
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     return "Certificate contains an invalid UID";
-  } catch (const std::out_of_range&) {
+  } catch (const std::out_of_range &) {
     return "Certificate UID is out of range";
-  } catch (const std::exception&) {
+  } catch (const std::exception &) {
     return "Parse uid unknown error";
   }
 

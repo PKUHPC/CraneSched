@@ -742,7 +742,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
-                                     "cert_number"};
+                                    "cert_number"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>, std::string>
       values{user.deleted,

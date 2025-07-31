@@ -160,7 +160,6 @@ void ParseConfig(int argc, char** argv) {
                                    &g_tls_config.InternalCerts.CertContent))
           std::exit(1);
 
-
         if (!util::ParseCertConfig("InternalKeyFilePath", tls_config,
                                    &g_tls_config.InternalCerts.KeyFilePath,
                                    &g_tls_config.InternalCerts.KeyContent))
@@ -173,10 +172,9 @@ void ParseConfig(int argc, char** argv) {
 
         // external
         if (!util::ParseCertConfig("ExternalCertFilePath", tls_config,
-                           &g_tls_config.ExternalCerts.CertFilePath,
-                           &g_tls_config.ExternalCerts.CertContent))
+                                   &g_tls_config.ExternalCerts.CertFilePath,
+                                   &g_tls_config.ExternalCerts.CertContent))
           std::exit(1);
-
 
         if (!util::ParseCertConfig("ExternalKeyFilePath", tls_config,
                                    &g_tls_config.ExternalCerts.KeyFilePath,

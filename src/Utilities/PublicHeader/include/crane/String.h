@@ -106,13 +106,11 @@ template <typename YamlNode>
 bool ParseCertConfig(const std::string &cert_name, const YamlNode &tls_config,
                      std::string *file_path, std::string *file_content) {
   if (tls_config[cert_name]) {
-    *file_path =
-        tls_config[cert_name].template as<std::string>();
+    *file_path = tls_config[cert_name].template as<std::string>();
 
     try {
-      *file_content =
-          util::ReadFileIntoString(*file_path);
-    } catch (const std::exception& e) {
+      *file_content = util::ReadFileIntoString(*file_path);
+    } catch (const std::exception &e) {
       CRANE_ERROR("Read {} error: {}", cert_name, e.what());
       return false;
     }
@@ -120,7 +118,8 @@ bool ParseCertConfig(const std::string &cert_name, const YamlNode &tls_config,
       CRANE_ERROR(
           "UseTls is true, but the file specified by "
           "{} "
-          "is empty", cert_name);
+          "is empty",
+          cert_name);
       return false;
     }
   } else {

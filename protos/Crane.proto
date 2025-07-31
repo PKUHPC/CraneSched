@@ -864,7 +864,7 @@ message EnableAutoPowerControlReply {
 message SignUserCertificateRequest {
   uint32 uid = 1;
   string csr_content = 2;
-  string alt_names = 3;   // "localhost, *.domainSuffix"
+  string alt_names = 3;  // "localhost, *.domainSuffix"
 }
 
 message SignUserCertificateResponse {

@@ -204,22 +204,21 @@ void ParseConfig(int argc, char** argv) {
 
         const auto& tls_config = config["TLS"];
 
-        g_config.ListenConf.DomainSuffix = YamlValueOr(tls_config["DomainSuffix"], "");
-
+        g_config.ListenConf.DomainSuffix =
+            YamlValueOr(tls_config["DomainSuffix"], "");
 
         if (!util::ParseCertConfig("InternalCertFilePath", tls_config,
-                           &tls_certs.CertFilePath,
-                           &tls_certs.CertContent))
+                                   &tls_certs.CertFilePath,
+                                   &tls_certs.CertContent))
           std::exit(1);
 
         if (!util::ParseCertConfig("InternalKeyFilePath", tls_config,
-                           &tls_certs.KeyFilePath,
-                           &tls_certs.KeyContent))
+                                   &tls_certs.KeyFilePath,
+                                   &tls_certs.KeyContent))
           std::exit(1);
 
         if (!util::ParseCertConfig("InternalCaFilePath", tls_config,
-                           &tls_certs.CaFilePath,
-                           &tls_certs.CaContent))
+                                   &tls_certs.CaFilePath, &tls_certs.CaContent))
           std::exit(1);
 
       } else {

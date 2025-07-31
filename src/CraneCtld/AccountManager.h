@@ -21,9 +21,9 @@
 // Precompiled header comes first!
 
 #include "DbClient.h"
+#include "Security/VaultClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
-#include "Security/VaultClient.h"
 
 namespace Ctld {
 

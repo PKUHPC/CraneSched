@@ -424,14 +424,17 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
 
 std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
   // Load the certificate content into a BIO (memory buffer).
-  std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),  &BIO_free);
+  std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+      BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),
+      &BIO_free);
   if (!bio) {
     CRANE_ERROR("Failed to create BIO");
     return std::nullopt;
   }
 
   // Read a PEM-formatted certificate.
-  std::unique_ptr<X509, decltype(&X509_free)> cert(PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
+  std::unique_ptr<X509, decltype(&X509_free)> cert(
+      PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
   if (!cert) {
     CRANE_ERROR("Failed to parse PEM certificate");
     return std::nullopt;
@@ -462,7 +465,8 @@ std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
     return std::nullopt;
   }
 
-  std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
+  std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(
+      ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
   if (!bn) {
     CRANE_ERROR("Failed to convert serial to BIGNUM");
     return std::nullopt;
@@ -483,8 +487,7 @@ std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
     }
   }
 
-  std::ranges::transform(serial_number,
-                 serial_number.begin(), ::tolower);
+  std::ranges::transform(serial_number, serial_number.begin(), ::tolower);
 
   // free the memory
   OPENSSL_free(hex);
