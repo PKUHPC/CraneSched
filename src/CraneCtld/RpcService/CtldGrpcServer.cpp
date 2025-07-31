@@ -1740,34 +1740,51 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  if (!g_config.ListenConf.tls_config.AllowedNodes.empty()) {
+  if (!g_config.ListenConf.TlsConfig.AllowedNodes.empty()) {
     std::string client_address = context->peer();
     std::vector<std::string> str_list = absl::StrSplit(client_address, ":");
+    if (str_list.size() < 2) {
+      CRANE_ERROR("Invalid client address format: {}", client_address);
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+
     std::string hostname;
     bool resolve_result = false;
     if (str_list[0] == "ipv4") {
       ipv4_t addr;
       if (!crane::StrToIpv4(str_list[1], &addr)) {
         CRANE_ERROR("Failed to parse ipv4 address: {}", str_list[1]);
-      } else {
-        resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
+        response->set_ok(false);
+        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+        return grpc::Status::OK;
       }
+      resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
     } else {
       ipv6_t addr;
       if (!crane::StrToIpv6(str_list[1], &addr)) {
         CRANE_ERROR("Failed to parse ipv6 address: {}", str_list[1]);
-      } else {
-        resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
+        response->set_ok(false);
+        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+        return grpc::Status::OK;
       }
+      resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
     }
 
-    if (!resolve_result ||
-        !g_config.ListenConf.tls_config.AllowedNodes.contains(hostname)) {
-      CRANE_DEBUG("user {}'hostname {} not allowed.", request->uid(), hostname);
+    if (!resolve_result) {
+      CRANE_ERROR("Failed to resolve hostname for address: {}", client_address);
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+
+    if (!g_config.ListenConf.TlsConfig.AllowedNodes.contains(hostname)) {
+      CRANE_DEBUG("User {} tried to access from host {}, the host is not allowed.", request->uid(), hostname);
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
       return grpc::Status::OK;
-        }
+    }
   }
 
   auto result = g_account_manager->SignUserCertificate(
@@ -1779,7 +1796,7 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
     response->set_ok(true);
     response->set_certificate(result.value());
     response->set_external_certificate(
-        g_config.ListenConf.tls_config.ExternalCerts.CertContent);
+        g_config.ListenConf.TlsConfig.ExternalCerts.CertContent);
   }
 
   return grpc::Status::OK;
@@ -1797,6 +1814,8 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   auto result = util::ParseCertificate(certificate);
   if (!result) return "Certificate is invalid";
 
+  CRANE_DEBUG("parse user {} certificate cn: {}, serial_number: {}", uid, result->first, result->second);
+
   if (!g_vault_client->IsCertAllowed(result.value().second))
     return "Certificate has expired";
 
@@ -1804,8 +1823,16 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   if (cn_parts.empty() || cn_parts[0].empty())
     return "Certificate is invalid";
 
-  if (static_cast<uint32_t>(std::stoul(cn_parts[0])) != uid)
-    return "Uid mismatch";
+  try {
+    uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
+    if (parsed_uid != uid) return "Uid mismatch";
+  } catch (const std::invalid_argument&) {
+    return "Certificate contains an invalid UID";
+  } catch (const std::out_of_range&) {
+    return "Certificate UID is out of range";
+  } catch (const std::exception&) {
+    return "Parse uid unknown error";
+  }
 
   return std::nullopt;
 }
@@ -1847,7 +1874,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.tls_config.ExternalCerts);
+                                        listen_conf.TlsConfig.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);

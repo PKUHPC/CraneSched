@@ -98,7 +98,7 @@ struct Config {
       std::unordered_set<std::string> AllowedNodes;
       std::string DomainSuffix;
     };
-    TlsCertsConfig tls_config;
+    TlsCertsConfig TlsConfig;
   };
   CraneCtldListenConf ListenConf;
 
@@ -175,6 +175,37 @@ struct Config {
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
 };
+
+inline bool ParseCertConfig(
+    const std::string& cert_name,
+    const YAML::Node& tls_config,
+    std::string* file_path,
+    std::string* file_content) {
+
+  if (tls_config[cert_name]) {
+    *file_path =
+        tls_config[cert_name].as<std::string>();
+
+    try {
+      *file_content =
+          util::ReadFileIntoString(*file_path);
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Read {} error: {}", cert_name, e.what());
+      return false;
+    }
+    if (file_content->empty()) {
+      CRANE_ERROR(
+          "UseTls is true, but the file specified by "
+          "{} "
+          "is empty", cert_name);
+      return false;
+    }
+  } else {
+    CRANE_ERROR("UseTls is true, but {} is empty", cert_name);
+    return false;
+  }
+  return true;
+}
 
 struct RunTimeStatus {
   std::atomic_bool srv_ready{false};

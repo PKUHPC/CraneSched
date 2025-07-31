@@ -129,17 +129,17 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        auto& tls_config = g_config.ListenConf.tls_config;
+        auto& g_tls_config = g_config.ListenConf.TlsConfig;
         g_config.ListenConf.UseTls = true;
 
-        const auto& ssl_config = config["SSL"];
+        const auto& tls_config = config["SSL"];
 
-        if (ssl_config["DomainSuffix"])
-          tls_config.DomainSuffix =
-              ssl_config["DomainSuffix"].as<std::string>();
+        if (tls_config["DomainSuffix"])
+          g_tls_config.DomainSuffix =
+              tls_config["DomainSuffix"].as<std::string>();
 
-        if (ssl_config["Nodes"]) {
-          std::string nodes = ssl_config["Nodes"].as<std::string>();
+        if (tls_config["Nodes"]) {
+          std::string nodes = tls_config["Nodes"].as<std::string>();
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
                                    &name_list)) {
@@ -147,140 +147,46 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
           for (const auto& name : name_list) {
-            tls_config.AllowedNodes.insert(name);
-            tls_config.AllowedNodes.insert(fmt::format("{}.{}", name, tls_config.DomainSuffix));
+            g_tls_config.AllowedNodes.insert(name);
+            g_tls_config.AllowedNodes.insert(
+                fmt::format("{}.{}", name, g_tls_config.DomainSuffix));
           }
           // todo: localhost?
-          tls_config.AllowedNodes.insert("localhost");
+          g_tls_config.AllowedNodes.insert("localhost");
         }
-
-        if (ssl_config["InternalCertFilePath"]) {
-          tls_config.InternalCerts.CertFilePath =
-              ssl_config["InternalCertFilePath"].as<std::string>();
-
-          try {
-            tls_config.InternalCerts.CertContent =
-                util::ReadFileIntoString(tls_config.InternalCerts.CertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read internal cert file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.InternalCerts.CertContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by "
-                "InternalCertFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but InternalCertFilePath is empty");
+        // internal
+        if (!Ctld::ParseCertConfig("InternalCertFilePath", tls_config,
+                                   &g_tls_config.InternalCerts.CertFilePath,
+                                   &g_tls_config.InternalCerts.CertContent))
           std::exit(1);
-        }
 
-        if (ssl_config["InternalKeyFilePath"]) {
-          tls_config.InternalCerts.KeyFilePath =
-              ssl_config["InternalKeyFilePath"].as<std::string>();
 
-          try {
-            tls_config.InternalCerts.KeyContent =
-                util::ReadFileIntoString(tls_config.InternalCerts.KeyFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read internal key file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.InternalCerts.KeyContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by InternalKeyFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but InternalKeyFilePath is empty");
+        if (!Ctld::ParseCertConfig("InternalKeyFilePath", tls_config,
+                                   &g_tls_config.InternalCerts.KeyFilePath,
+                                   &g_tls_config.InternalCerts.KeyContent))
           std::exit(1);
-        }
 
-        if (ssl_config["InternalCaFilePath"]) {
-          tls_config.InternalCerts.CaFilePath =
-              ssl_config["InternalCaFilePath"].as<std::string>();
-
-          try {
-            tls_config.InternalCerts.CaContent =
-                util::ReadFileIntoString(tls_config.InternalCerts.CaFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read internal ca file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.InternalCerts.CaContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by InternalCaFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but InternalCaFilePath is empty");
+        if (!Ctld::ParseCertConfig("InternalCaFilePath", tls_config,
+                                   &g_tls_config.InternalCerts.CaFilePath,
+                                   &g_tls_config.InternalCerts.CaContent))
           std::exit(1);
-        }
 
-        if (ssl_config["ExternalCertFilePath"]) {
-          tls_config.ExternalCerts.CertFilePath =
-              ssl_config["ExternalCertFilePath"].as<std::string>();
-
-          try {
-            tls_config.ExternalCerts.CertContent =
-                util::ReadFileIntoString(tls_config.ExternalCerts.CertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read external cert file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.ExternalCerts.CertContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by "
-                "ExternalCertFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but ExternalCertFilePath is empty");
+        // external
+        if (!Ctld::ParseCertConfig("ExternalCertFilePath", tls_config,
+                           &g_tls_config.ExternalCerts.CertFilePath,
+                           &g_tls_config.ExternalCerts.CertContent))
           std::exit(1);
-        }
 
-        if (ssl_config["ExternalKeyFilePath"]) {
-          tls_config.ExternalCerts.KeyFilePath =
-              ssl_config["ExternalKeyFilePath"].as<std::string>();
 
-          try {
-            tls_config.ExternalCerts.KeyContent =
-                util::ReadFileIntoString(tls_config.ExternalCerts.KeyFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read external key file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.ExternalCerts.KeyContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ExternalKeyFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but ExternalKeyFilePath is empty");
+        if (!Ctld::ParseCertConfig("ExternalKeyFilePath", tls_config,
+                                   &g_tls_config.ExternalCerts.KeyFilePath,
+                                   &g_tls_config.ExternalCerts.KeyContent))
           std::exit(1);
-        }
 
-        if (ssl_config["ExternalCaFilePath"]) {
-          tls_config.ExternalCerts.CaFilePath =
-              ssl_config["ExternalCaFilePath"].as<std::string>();
-
-          try {
-            tls_config.ExternalCerts.CaContent =
-                util::ReadFileIntoString(tls_config.ExternalCerts.CaFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read external ca file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_config.ExternalCerts.CaContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ExternalCaFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but InternalCaFilePath is empty");
+        if (!Ctld::ParseCertConfig("ExternalCaFilePath", tls_config,
+                                   &g_tls_config.ExternalCerts.CaFilePath,
+                                   &g_tls_config.ExternalCerts.CaContent))
           std::exit(1);
-        }
       } else {
         g_config.ListenConf.UseTls = false;
       }

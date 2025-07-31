@@ -444,8 +444,13 @@ std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
     return std::nullopt;
   }
 
-  char cn[256];
-  int len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn, sizeof(cn));
+  int len = X509_NAME_get_text_by_NID(subject, NID_commonName, nullptr, 0);
+  if (len <= 0) {
+    CRANE_ERROR("Failed to get common name");
+    return std::nullopt;
+  }
+  std::string cn(len, '\0');
+  len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn.data(), len + 1);
   if (len <= 0) {
     CRANE_ERROR("Failed to get common name");
     return std::nullopt;
@@ -470,10 +475,13 @@ std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
   }
 
   std::string serial_number = std::string(hex);
-  std::regex re("(.{2})");
-  serial_number = std::regex_replace(serial_number, re, "$1:");
-  if (!serial_number.empty())
-    serial_number.pop_back();  // remove the last colon
+  std::string formatted_serial_number;
+  for (size_t i = 0; i < serial_number.size(); ++i) {
+    formatted_serial_number += serial_number[i];
+    if (i % 2 == 1 && i != serial_number.size() - 1) {
+      formatted_serial_number += ':';
+    }
+  }
 
   std::ranges::transform(serial_number,
                  serial_number.begin(), ::tolower);
@@ -481,7 +489,7 @@ std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
   // free the memory
   OPENSSL_free(hex);
 
-  return CertPair{cn, serial_number};
+  return CertPair{cn, formatted_serial_number};
 }
 
 }  // namespace util
