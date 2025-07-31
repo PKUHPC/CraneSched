@@ -80,6 +80,7 @@ class CforedClient {
 
   std::thread m_fwd_thread_;
   std::atomic<bool> m_stopped_{false};
+  std::atomic<bool> m_output_drained_{false};
 
   std::string m_cfored_name_;
   std::shared_ptr<grpc::Channel> m_cfored_channel_;

@@ -71,6 +71,11 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   // Make sure before exit all output has been drained.
   while (!m_stopped_ || ok || x11_ok) {
     if (!ok && !x11_ok) {
+      if (m_stopped_) {
+        m_output_drained_.store(true, std::memory_order::release);
+        CRANE_TRACE("Output queue drained. Output thread exiting.");
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_output_queue_.try_dequeue(output);
       x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
@@ -124,8 +129,9 @@ void CforedClient::AsyncSendRecvThread_() {
     Registering = 0,
     WaitRegisterAck = 1,
     Forwarding = 2,
-    Unregistering = 3,
-    End = 4,
+    Draining,
+    Unregistering,
+    End,
   };
 
   std::thread output_clean_thread;
@@ -157,7 +163,10 @@ void CforedClient::AsyncSendRecvThread_() {
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
-
+        if (!m_output_drained_) {
+          CRANE_TRACE("Waiting for output drained.");
+          continue;
+        }
         // No need to switch to Unregistering state if already switched.
         if (state == State::Unregistering) continue;
         // Wait for forwarding thread to drain output queue and stop.
@@ -282,6 +291,13 @@ void CforedClient::AsyncSendRecvThread_() {
       reply.Clear();
       stream->Read(&reply, (void*)Tag::Read);
     } break;
+
+    case State::Draining:
+      // Write all pending outputs, stop reading
+      if (tag == Tag::Write) {
+        write_pending.store(false, std::memory_order::release);
+      }
+      break;
 
     case State::Unregistering:
       if (tag == Tag::Write) {
