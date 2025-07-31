@@ -422,61 +422,46 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
   return crc;
 }
 
-std::optional<CertPair> ParseCertificate(const std::string &cert_pem) {
+std::expected<CertPair, std::string> ParseCertificate(const std::string &cert_pem) {
   // Load the certificate content into a BIO (memory buffer).
   std::unique_ptr<BIO, decltype(&BIO_free)> bio(
       BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),
       &BIO_free);
-  if (!bio) {
-    CRANE_ERROR("Failed to create BIO");
-    return std::nullopt;
-  }
+  if (!bio)
+    return std::unexpected("Failed to create BIO");
 
   // Read a PEM-formatted certificate.
   std::unique_ptr<X509, decltype(&X509_free)> cert(
       PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
-  if (!cert) {
-    CRANE_ERROR("Failed to parse PEM certificate");
-    return std::nullopt;
-  }
+  if (!cert)
+    return std::unexpected("Failed to parse PEM certificate");
 
   // Retrieve Subject information.
   X509_NAME *subject = X509_get_subject_name(cert.get());
-  if (!subject) {
-    CRANE_ERROR("Failed to get subject name");
-    return std::nullopt;
-  }
+  if (!subject)
+    return std::unexpected("Failed to get subject name");
 
   int len = X509_NAME_get_text_by_NID(subject, NID_commonName, nullptr, 0);
-  if (len <= 0) {
-    CRANE_ERROR("Failed to get common name");
-    return std::nullopt;
-  }
+  if (len <= 0)
+    return std::unexpected("Failed to get common name");
+
   std::string cn(len, '\0');
   len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn.data(), len + 1);
-  if (len <= 0) {
-    CRANE_ERROR("Failed to get common name");
-    return std::nullopt;
-  }
+  if (len <= 0)
+    return std::unexpected("Failed to get common name");
 
   ASN1_INTEGER *serial = X509_get_serialNumber(cert.get());
-  if (!serial) {
-    CRANE_ERROR("Failed to get serial number");
-    return std::nullopt;
-  }
+  if (!serial)
+    return std::unexpected("Failed to get serial number");
 
   std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(
       ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
-  if (!bn) {
-    CRANE_ERROR("Failed to convert serial to BIGNUM");
-    return std::nullopt;
-  }
+  if (!bn)
+    return std::unexpected("Failed to convert serial to BIGNUM");
 
   char *hex = BN_bn2hex(bn.get());
-  if (!hex) {
-    CRANE_ERROR("Failed to convert serial to hex");
-    return std::nullopt;
-  }
+  if (!hex)
+    return std::unexpected("Failed to convert serial to hex");
 
   std::string serial_number = std::string(hex);
   std::string formatted_serial_number;

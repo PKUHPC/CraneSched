@@ -1812,7 +1812,7 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   std::string certificate = std::string(cert[0].data(), cert[0].size());
 
   auto result = util::ParseCertificate(certificate);
-  if (!result) return "Certificate is invalid";
+  if (!result) return result.error();
 
   if (!g_vault_client->IsCertAllowed(result.value().second))
     return "Certificate has expired";
