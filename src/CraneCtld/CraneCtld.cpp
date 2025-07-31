@@ -132,7 +132,7 @@ void ParseConfig(int argc, char** argv) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
         g_config.ListenConf.UseTls = true;
 
-        const auto& tls_config = config["SSL"];
+        const auto& tls_config = config["TLS"];
 
         if (tls_config["DomainSuffix"])
           g_tls_config.DomainSuffix =
@@ -155,35 +155,35 @@ void ParseConfig(int argc, char** argv) {
           g_tls_config.AllowedNodes.insert("localhost");
         }
         // internal
-        if (!Ctld::ParseCertConfig("InternalCertFilePath", tls_config,
+        if (!util::ParseCertConfig("InternalCertFilePath", tls_config,
                                    &g_tls_config.InternalCerts.CertFilePath,
                                    &g_tls_config.InternalCerts.CertContent))
           std::exit(1);
 
 
-        if (!Ctld::ParseCertConfig("InternalKeyFilePath", tls_config,
+        if (!util::ParseCertConfig("InternalKeyFilePath", tls_config,
                                    &g_tls_config.InternalCerts.KeyFilePath,
                                    &g_tls_config.InternalCerts.KeyContent))
           std::exit(1);
 
-        if (!Ctld::ParseCertConfig("InternalCaFilePath", tls_config,
+        if (!util::ParseCertConfig("InternalCaFilePath", tls_config,
                                    &g_tls_config.InternalCerts.CaFilePath,
                                    &g_tls_config.InternalCerts.CaContent))
           std::exit(1);
 
         // external
-        if (!Ctld::ParseCertConfig("ExternalCertFilePath", tls_config,
+        if (!util::ParseCertConfig("ExternalCertFilePath", tls_config,
                            &g_tls_config.ExternalCerts.CertFilePath,
                            &g_tls_config.ExternalCerts.CertContent))
           std::exit(1);
 
 
-        if (!Ctld::ParseCertConfig("ExternalKeyFilePath", tls_config,
+        if (!util::ParseCertConfig("ExternalKeyFilePath", tls_config,
                                    &g_tls_config.ExternalCerts.KeyFilePath,
                                    &g_tls_config.ExternalCerts.KeyContent))
           std::exit(1);
 
-        if (!Ctld::ParseCertConfig("ExternalCaFilePath", tls_config,
+        if (!util::ParseCertConfig("ExternalCaFilePath", tls_config,
                                    &g_tls_config.ExternalCerts.CaFilePath,
                                    &g_tls_config.ExternalCerts.CaContent))
           std::exit(1);
