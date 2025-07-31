@@ -92,7 +92,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       while (write_pending->load(std::memory_order::acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
 
-      CRANE_TRACE("Writing output...");
+      CRANE_TRACE("[Job #{}] Writing output...", output.first);
       write_pending->store(true, std::memory_order::release);
       stream->Write(request, (void*)Tag::Write);
 
@@ -112,8 +112,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       while (write_pending->load(std::memory_order::acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
 
-      CRANE_TRACE("Forwarding x11 output from task to cfored {}",
-                  this->m_cfored_name_);
+      CRANE_TRACE("[Job #{}] Forwarding x11 output from task to cfored {}",
+                  task_id, this->m_cfored_name_);
       write_pending->store(true, std::memory_order::release);
       stream->Write(request, (void*)Tag::Write);
 
