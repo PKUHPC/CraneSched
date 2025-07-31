@@ -165,6 +165,7 @@ void CforedClient::AsyncSendRecvThread_() {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
         if (!m_output_drained_) {
           CRANE_TRACE("Waiting for output drained.");
+          if (state == State::Forwarding) state = State::Draining;
           continue;
         }
         // No need to switch to Unregistering state if already switched.
