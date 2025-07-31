@@ -289,7 +289,7 @@ void TaskManager::EvSigchldCb_() {
         // e.g., SIGSTOP, SIGCONT, etc.
         CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
                     pid, status);
-        break;
+        continue;
       }
 
       m_sigchld_queue_.enqueue(std::move(sigchld_info));
