@@ -1451,7 +1451,7 @@ void TaskManager::Wait() {
 void TaskManager::TaskStopAndDoStatusChange() {
   CRANE_INFO("task #{} stopped and is doing TaskStatusChange...",
              m_task_->GetParentStep().task_id());
-
+  m_task_->GetParentStepInstance()->StopCforedClient();
   switch (m_task_->err_before_exec) {
   case CraneErrCode::ERR_PROTOBUF:
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
