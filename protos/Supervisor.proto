@@ -104,10 +104,21 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message ReceivePmixPortRequest {
+  uint32 task_id = 1;
+  uint32 port = 2;
+  string craned_id = 3;
+}
+
+message ReceivePmixPortReply {
+  bool ok = 1;
+}
+
 service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
 }

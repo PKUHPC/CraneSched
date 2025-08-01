@@ -1,4 +1,5 @@
 add_subdirectory(AnonymousPipe)
 add_subdirectory(FileLogger)
 add_subdirectory(PluginClient)
+add_subdirectory(Pmix)
 add_subdirectory(PublicHeader)
