@@ -199,48 +199,30 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = true;
         TlsCertificates& tls_certs = g_config.ListenConf.TlsCerts;
 
-        tls_certs.DomainSuffix = YamlValueOr(config["DomainSuffix"], "");
+        const auto& tls_config = config["TLS"];
 
-        if (config["ServerCertFilePath"]) {
-          tls_certs.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        g_config.ListenConf.DomainSuffix =
+            YamlValueOr(tls_config["DomainSuffix"], "");
 
-          try {
-            tls_certs.ServerCertContent =
-                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
-            std::exit(1);
-          }
-
-          if (tls_certs.ServerCertContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+        if (auto result = util::ParseCertConfig(
+                "InternalCertFilePath", tls_config, &tls_certs.CertFilePath,
+                &tls_certs.CertContent);
+            result) {
+          CRANE_ERROR(result.value());
           std::exit(1);
         }
-
-        if (config["ServerKeyFilePath"]) {
-          tls_certs.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
-
-          try {
-            tls_certs.ServerKeyContent =
-                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
-            std::exit(1);
-          }
-          if (tls_certs.ServerKeyContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+        if (auto result = util::ParseCertConfig(
+                "InternalKeyFilePath", tls_config, &tls_certs.KeyFilePath,
+                &tls_certs.KeyContent);
+            result) {
+          CRANE_ERROR(result.value());
+          std::exit(1);
+        }
+        if (auto result = util::ParseCertConfig(
+                "InternalCaFilePath", tls_config, &tls_certs.CaFilePath,
+                &tls_certs.CaContent);
+            result) {
+          CRANE_ERROR(result.value());
           std::exit(1);
         }
       } else {

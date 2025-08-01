@@ -339,9 +339,10 @@ CtldForInternalServer::CtldForInternalServer(
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(
+    ServerBuilderAddTcpTlsListeningPortForInternal(
         &builder, cranectld_listen_addr,
-        listen_conf.CraneCtldForInternalListenPort, listen_conf.Certs);
+        listen_conf.CraneCtldForInternalListenPort,
+        listen_conf.TlsConfig.InternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(
         &builder, cranectld_listen_addr,

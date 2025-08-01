@@ -70,6 +70,7 @@ struct Config {
 
     bool UseTls{false};
     TlsCertificates TlsCerts;
+    std::string DomainSuffix;
 
     std::string UnixSocketListenAddr;
     std::string UnixSocketForPamListenAddr;
