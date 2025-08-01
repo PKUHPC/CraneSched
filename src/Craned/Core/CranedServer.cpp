@@ -174,7 +174,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
 
   // 3. pid2jobid
   do {
-    auto task_id_expt = g_cg_mgr->GetJobIdFromPid(pid_i);
+    auto task_id_expt = CgroupManager::GetJobIdFromPid(pid_i);
     if (task_id_expt.has_value()) {
       CRANE_TRACE("Task id for pid {} is #{}", pid_i, task_id_expt.value());
       response->set_ok(true);

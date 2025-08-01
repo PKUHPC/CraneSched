@@ -86,7 +86,7 @@ class JobManager {
 
   CgroupInterface* GetCgForJob(task_id_t job_id);
 
-  bool FreeJobs(const std::set<task_id_t>& job_ids);
+  bool FreeJobs(std::set<task_id_t>&& job_ids);
 
   CraneErrCode ExecuteStepAsync(StepToD const& step);
 

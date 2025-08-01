@@ -293,7 +293,7 @@ void CtldClient::Init() {
         if (!invalid_jobs.empty()) {
           CRANE_DEBUG("Freeing invalid jobs: [{}].",
                       absl::StrJoin(invalid_jobs, ","));
-          g_job_mgr->FreeJobs(invalid_jobs);
+          g_job_mgr->FreeJobs(std::move(invalid_jobs));
         }
       },
       CallbackInvokeMode::ASYNC, false);
