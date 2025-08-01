@@ -732,13 +732,16 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     for (int i = 0; i < control_state_num; i++) {
       for (int j = 0; j < resource_state_num; j++) {
         for (int k = 0; k < power_state_num; k++) {
-          auto* craned_list = craned_lists->Add();
-          craned_list->set_control_state(crane::grpc::CranedControlState(i));
-          craned_list->set_resource_state(crane::grpc::CranedResourceState(j));
-          craned_list->set_power_state(crane::grpc::CranedPowerState(k));
-          craned_list->set_count(craned_name_lists[i][j][k].size());
-          craned_list->set_craned_list_regex(
-              util::HostNameListToStr(craned_name_lists[i][j][k]));
+          if (craned_name_lists[i][j][k].size() > 0) {
+            auto* craned_list = craned_lists->Add();
+            craned_list->set_control_state(crane::grpc::CranedControlState(i));
+            craned_list->set_resource_state(
+                crane::grpc::CranedResourceState(j));
+            craned_list->set_power_state(crane::grpc::CranedPowerState(k));
+            craned_list->set_count(craned_name_lists[i][j][k].size());
+            craned_list->set_craned_list_regex(
+                util::HostNameListToStr(craned_name_lists[i][j][k]));
+          }
         }
       }
     }
