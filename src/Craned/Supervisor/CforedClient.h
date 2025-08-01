@@ -89,6 +89,7 @@ class CforedClient {
       std::atomic<bool>* write_pending);
 
   std::atomic<bool> m_stopped_{false};
+  std::atomic<bool> m_output_drained_{false};
 
   ConcurrentQueue<std::string> m_output_queue_;
   ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
