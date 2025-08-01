@@ -60,11 +60,15 @@ class VaultClient {
   std::unique_ptr<Vault::Pki> m_pki_root_;
   std::unique_ptr<Vault::Pki> m_pki_external_;
 
-  template <typename T>
-  using ParallelHashSet = phmap::parallel_flat_hash_set<T>;
+  using ParallelHashMap = phmap::parallel_flat_hash_map<
+      std::string,
+      int64_t, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, int64_t>>, 4,
+      std::shared_mutex>;
 
   // Use parallel containers to improve performance.
-  ParallelHashSet<std::string> m_allowed_certs_;
+  ParallelHashMap m_allowed_certs_;
 
   std::string m_address_;
   std::string m_port_;

@@ -35,7 +35,6 @@
 #include <ranges>
 #include <string>
 
-#include "Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace util {
