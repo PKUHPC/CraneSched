@@ -44,7 +44,7 @@ message CranedTriggerReverseConnRequest {
 
 message ConfigureCranedRequest {
   bool ok = 1;
-  map<uint32, JobToD> job_map = 2;
+  map<uint32, StepToD> job_map = 2;
   map<uint32, StepToD> job_tasks_map = 3;
   google.protobuf.Timestamp token = 4;
 }
@@ -91,25 +91,13 @@ message SubmitBatchTasksReply {
 }
 
 message ExecuteStepsRequest {
-  repeated StepToD tasks = 1;
+  repeated StepToD steps = 1;
 }
 
 message ExecuteStepsReply {
-  repeated uint32 failed_task_id_list = 1;
+  repeated uint32 failed_job_list = 1;
+  repeated uint32 failed_step_list = 2;
 }
-
-message CreateCgroupForJobsRequest {
-  repeated JobToD job_list = 1;
-}
-
-message CreateCgroupForJobsReply {}
-
-message ReleaseCgroupForJobsRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-}
-
-message ReleaseCgroupForJobsReply {}
 
 message TerminateStepsRequest {
   repeated uint32 task_id_list = 1;
@@ -925,9 +913,6 @@ service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
-
-  rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
-  rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
