@@ -138,8 +138,8 @@ void ParseConfig(int argc, char** argv) {
           g_tls_config.DomainSuffix =
               tls_config["DomainSuffix"].as<std::string>();
 
-        if (tls_config["Nodes"]) {
-          std::string nodes = tls_config["Nodes"].as<std::string>();
+        if (tls_config["AllowedNodes"]) {
+          std::string nodes = tls_config["AllowedNodes"].as<std::string>();
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
                                    &name_list)) {

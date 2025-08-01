@@ -92,7 +92,7 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
       return std::nullopt;
     }
 
-    m_allowed_certs_.emplace(std::string(*it_ser),  absl::ToUnixSeconds(absl::Now()));
+    m_allowed_certs_.insert_or_assign(std::string(*it_ser),  absl::ToUnixSeconds(absl::Now()));
 
     return SignResponse{*it_ser, *it_cert};
 
@@ -123,7 +123,7 @@ bool VaultClient::RevokeCert(const std::string& serial_number) {
 
 bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   auto iter = m_allowed_certs_.find(serial_number);
-  if (iter != m_allowed_certs_.end() && absl::Now() - absl::FromUnixSeconds(iter->second) > absl::Minutes(30))
+  if (iter != m_allowed_certs_.end() && absl::Now() - absl::FromUnixSeconds(iter->second) < absl::Minutes(30))
     return true;
 
   try {
