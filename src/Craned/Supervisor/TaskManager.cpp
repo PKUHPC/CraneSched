@@ -80,6 +80,30 @@ ITaskInstance::~ITaskInstance() {
 EnvMap ITaskInstance::GetChildProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
+  auto node_id_to_str = [this]() -> std::string {
+    uint32_t node_idx = 0;
+
+    std::array<char, HOST_NAME_MAX> host_name{};
+    if (gethostname(host_name.data(), host_name.size()) != 0) {
+      return std::to_string(-1);  // invalid
+    }
+    std::string_view host_name_view(host_name.data());
+    const auto& nodelist =
+        this->m_parent_step_inst_->GetStep().allocated_nodes();
+    for (const auto& node_name : nodelist) {
+      if (node_name == host_name_view) {
+        break;
+      }
+      node_idx++;
+    }
+
+    if (node_idx >= nodelist.size()) {
+      return std::to_string(-1);  // invalid
+    }
+
+    return std::to_string(node_idx);
+  };
+
   // Job env from CraneD
   for (auto& [name, value] : g_config.JobEnv) {
     env_map.emplace(name, value);
@@ -112,6 +136,26 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
     env_map.emplace("SHELL", this->pwd.Shell());
   }
 
+  // TODO CRANE_NTASKS_PER_CORE is not set
+  uint64_t gpus_per_node = 0;
+  auto alloc_node_num =
+      this->m_parent_step_inst_->GetStep().allocated_nodes().size();
+  if (alloc_node_num != 0) {
+    gpus_per_node =
+        this->m_parent_step_inst_->GetStep().total_gpus() / alloc_node_num;
+  }
+  auto mem_in_node = this->m_parent_step_inst_->GetStep()
+                         .resources()
+                         .allocatable_res_in_node()
+                         .memory_limit_bytes() /
+                     (static_cast<uint64_t>(1024 * 1024));
+
+  auto cpus_on_node = this->m_parent_step_inst_->GetStep()
+                          .resources()
+                          .allocatable_res_in_node()
+                          .cpu_core_limit();
+  auto mem_per_cpu = static_cast<double>(mem_in_node) / cpus_on_node;
+
   env_map.emplace(
       "CRANE_JOB_NODELIST",
       absl::StrJoin(this->m_parent_step_inst_->GetStep().allocated_nodes(),
@@ -123,9 +167,35 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
                   this->m_parent_step_inst_->GetStep().name());
   env_map.emplace("CRANE_ACCOUNT",
                   this->m_parent_step_inst_->GetStep().account());
-  env_map.emplace("CRANE_PARTITION",
+  env_map.emplace("CRANE_JOB_PARTITION",
                   this->m_parent_step_inst_->GetStep().partition());
   env_map.emplace("CRANE_QOS", this->m_parent_step_inst_->GetStep().qos());
+
+  env_map.emplace("CRANE_SUBMIT_DIR",
+                  this->m_parent_step_inst_->GetStep().cwd());
+  env_map.emplace(
+      "CRANE_CPUS_PER_TASK",
+      std::format("{:.2f}",
+                  this->m_parent_step_inst_->GetStep().cpus_per_task()));
+  env_map.emplace("CRANE_MEM_PER_NODE", std::to_string(mem_in_node));
+  env_map.emplace("CRANE_JOB_NUM_NODES", std::to_string(alloc_node_num));
+  env_map.emplace(
+      "CRANE_NTASKS_PER_NODE",
+      std::to_string(this->m_parent_step_inst_->GetStep().ntasks_per_node()));
+  env_map.emplace(
+      "CRANE_GPUS",
+      std::to_string(this->m_parent_step_inst_->GetStep().total_gpus()));
+  env_map.emplace("CRANE_GPUS_PER_NODE", std::to_string(gpus_per_node));
+  env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
+  env_map.emplace(
+      "CRANE_NTASKS",
+      std::to_string(alloc_node_num *
+                     this->m_parent_step_inst_->GetStep().ntasks_per_node()));
+  env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
+  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  env_map.emplace("CRANE_NODEID", node_id_to_str());
+  env_map.emplace("CRANE_SUBMIT_HOST",
+                  this->m_parent_step_inst_->GetStep().submit_hostname());
 
   if (this->m_parent_step_inst_->IsCrun()) {
     auto const& ia_meta =

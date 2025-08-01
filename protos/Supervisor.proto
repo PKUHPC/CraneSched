@@ -59,6 +59,7 @@ message InitSupervisorRequest {
   map<string, string> env = 10;
 
   string log_dir = 11;
+  string crane_cluster_name = 12;
 }
 
 message SupervisorReady {

@@ -125,6 +125,16 @@ void ParseConfig(int argc, char** argv) {
     try {
       using util::YamlValueOr;
       YAML::Node config = YAML::LoadFile(config_path);
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          fmt::print(stderr, "Cluster name is empty.");
+          std::exit(1);
+        }
+      } else {
+        fmt::print(stderr, "Cluster name is empty.");
+        std::exit(1);
+      }
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
