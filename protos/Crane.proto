@@ -930,8 +930,8 @@ service Craned {
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
-  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
+  rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
+  rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
   rpc ConfigHashCalc(google.protobuf.Empty) returns (ConfigHashCalcReply);
 
   /*
