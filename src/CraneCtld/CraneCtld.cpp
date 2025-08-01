@@ -19,6 +19,7 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
+#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -82,6 +83,21 @@ void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
+
+      // Calculate hash val
+      YAML::Emitter config_out;
+      config_out << config;
+      std::string normalized = config_out.c_str();
+      std::array<unsigned char, SHA256_DIGEST_LENGTH> hash;
+      SHA256(reinterpret_cast<const unsigned char*>(normalized.data()),
+             normalized.size(), hash.data());
+
+      std::string hexstr;
+      hexstr.reserve(SHA256_DIGEST_LENGTH * 2);
+      for (unsigned char c : hash) {
+        fmt::format_to(std::back_inserter(hexstr), "{:02x}", c);
+      }
+      g_config.ConfigHashVal = std::move(hexstr);
 
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
@@ -423,24 +439,42 @@ void ParseConfig(int argc, char** argv) {
 
           part.nodelist_str = nodes;
           std::list<std::string> name_list;
-          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
-                                   &name_list)) {
-            CRANE_ERROR("Illegal node name string format.");
-            std::exit(1);
-          }
+          auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
+          if (act_nodes_str == "ALL") {
+            std::list<std::string> host_list =
+                g_config.Nodes | ranges::views::keys |
+                ranges::to<std::list<std::string>>();
+            part.nodelist_str = util::HostNameListToStr(host_list);
+            for (auto&& node : host_list) {
+              part.nodes.emplace(node);
+              nodes_without_part.erase(node);
+              CRANE_TRACE("Set the partition of node {} to {}", node, name);
+            }
+          } else {
+            if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
+              CRANE_ERROR("Illegal node name string format.");
+              std::exit(1);
+            }
 
-          for (auto&& node : name_list) {
-            auto node_it = g_config.Nodes.find(node);
-            if (node_it != g_config.Nodes.end()) {
-              part.nodes.emplace(node_it->first);
-              nodes_without_part.erase(node_it->first);
-              CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
-                          name);
+            if (name_list.size() == 1 && name_list.front() == "") {
+              CRANE_WARN("No nodes in partition '{}'.", name);
             } else {
-              CRANE_ERROR(
-                  "Unknown node '{}' found in partition '{}'. It is ignored "
-                  "and should be contained in the configuration file.",
-                  node, name);
+              for (auto&& node : name_list) {
+                auto node_it = g_config.Nodes.find(node);
+                if (node_it != g_config.Nodes.end()) {
+                  part.nodes.emplace(node_it->first);
+                  nodes_without_part.erase(node_it->first);
+                  CRANE_TRACE("Set the partition of node {} to {}",
+                              node_it->first, name);
+                } else {
+                  CRANE_ERROR(
+                      "Unknown node '{}' found in partition '{}'. It is "
+                      "ignored "
+                      "and should be contained in the configuration file.",
+                      node, name);
+                  std::exit(1);
+                }
+              }
             }
           }
 
@@ -487,7 +521,7 @@ void ParseConfig(int argc, char** argv) {
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }
-            part.default_mem_per_cpu = part_mem / part_cpu;
+            if (part_cpu != 0) part.default_mem_per_cpu = part_mem / part_cpu;
           }
 
           if (partition["MaxMemPerCpu"] &&
@@ -546,6 +580,28 @@ void ParseConfig(int argc, char** argv) {
           CRANE_ERROR("Unknown default partition {}",
                       g_config.DefaultPartition);
           std::exit(1);
+        }
+      }
+
+      if (config["DebugFlags"] && !config["DebugFlags"].IsNull()) {
+        auto str = config["DebugFlags"].as<std::string>();
+        std::ranges::transform(str, str.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+
+        std::string_view debug_flags_view(str);
+
+        for (auto&& part : debug_flags_view | std::views::split(',')) {
+          std::string_view token(&*part.begin(), std::ranges::distance(part));
+          token = absl::StripAsciiWhitespace(token);
+          if (!token.empty()) {
+            auto it = g_debug_flag_set_map.find(token);
+            if (it != g_debug_flag_set_map.end())
+              g_config.DebugFlags |= it->second;
+            else {
+              CRANE_ERROR("Unknown DebugFlag: {}", token);
+              std::exit(1);
+            }
+          }
         }
       }
 
@@ -772,6 +828,7 @@ void InitializeCtldGlobalVariables() {
           return;
         }
         stub->ConfigureCraned(craned_id, token);
+        stub->CheckCranedConfig(craned_id);
       });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
