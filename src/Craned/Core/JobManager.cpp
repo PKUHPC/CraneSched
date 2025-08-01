@@ -592,7 +592,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     std::vector<const char*> argv;
 
     // Argv[0] is the program name which can be anything.
-    argv.emplace_back("csupervisor");
+    auto supervisor_name = fmt::format("csupervisor: [{}]", task_id);
+    argv.emplace_back(supervisor_name.c_str());
 
     argv.push_back(nullptr);
 
