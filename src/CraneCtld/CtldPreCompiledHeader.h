@@ -61,6 +61,7 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 #include <absl/container/node_hash_map.h>
+#include <absl/hash/hash.h>
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>

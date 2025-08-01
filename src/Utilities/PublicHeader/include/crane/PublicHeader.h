@@ -223,6 +223,14 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 70 - 74
         "Supervisor error",
+        "The entered wckey does not exist or no input wckey",
+        "The wckey already exists in the crane",
+        "The entered cluster does not exist",
+        "The wckey is default wckey, please modify default wckey then delete wckey",
+        
+         // 75
+        "No default wckey, please submit job by wckey or set default wckey"
+
     };
 // clang-format on
 }  // namespace Internal

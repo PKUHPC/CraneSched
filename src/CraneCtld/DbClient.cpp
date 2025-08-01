@@ -301,7 +301,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container      wckey
 
   try {
     for (auto view : cursor) {
@@ -371,6 +371,12 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
+
+      if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
+        task->set_wckey(view["wckey"].get_string().value.data());
+      } else {
+        task->set_wckey("");
+      }
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -398,6 +404,20 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt)
+    return true;
+  else
+    return false;
+}
+
+bool MongodbClient::InsertWckey(const Ctld::Wckey& new_wckey) {
+  document doc = WckeyToDocument_(new_wckey);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].insert_one(
           *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
@@ -448,6 +468,9 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   case EntityType::QOS:
     coll = m_qos_collection_name_;
     break;
+  case EntityType::WCKEY:
+    coll = m_wckey_collection_name_;
+    break;
   }
   document filter;
   filter.append(kvp("name", name));
@@ -486,6 +509,16 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
   }
 }
 
+void MongodbClient::SelectAllWckey(std::list<Ctld::Wckey>* wckey_list) {
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].find({});
+  for (auto view : cursor) {
+    Ctld::Wckey wckey;
+    ViewToWckey_(view, &wckey);
+    wckey_list->emplace_back(wckey);
+  }
+}
+
 void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_account_collection_name_].find({});
@@ -516,6 +549,26 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
       (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
           *GetSession_(), filter.view(), setDocument.view());
+
+  if (!update_result || !update_result->modified_count()) {
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::UpdateWckey(const Wckey& wckey) {
+  document doc = WckeyToDocument_(wckey), set_document, filter;
+
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+  set_document.append(kvp("$set", doc));
+
+  filter.append(kvp("name", wckey.name));
+  filter.append(kvp("cluster", wckey.cluster));
+  filter.append(kvp("user_name", wckey.user_name));
+
+  auto update_result =
+      (*GetClient_())[m_db_name_][m_wckey_collection_name_].update_one(
+          *GetSession_(), filter.view(), set_document.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -603,6 +656,18 @@ void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
             SubDocumentAppendItem_(itemDoc, "allowed_partition_qos_map",
                                    mapItem.second.allowed_partition_qos_map);
           }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<
+    std::unordered_map<std::string, std::string>>(
+    document& doc, const std::string& key,
+    const std::unordered_map<std::string, std::string>& value) {
+  doc.append(kvp(key, [&value](sub_document subdoc) {
+    for (const auto& [k, v] : value) {
+      subdoc.append(kvp(k, v));
     }
   }));
 }
@@ -701,7 +766,17 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
-
+    user->default_wckey_map.clear();
+    if (auto elem = user_view["default_wckey_map"];
+        elem && elem.type() == bsoncxx::type::k_document) {
+      auto doc_view = elem.get_document().view();
+      for (auto&& kv : doc_view) {
+        std::string k = std::string(kv.key());
+        if (kv.type() == bsoncxx::type::k_utf8) {
+          user->default_wckey_map[k] = std::string(kv.get_string().value);
+        }
+      }
+    }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -709,23 +784,52 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
+                                    "coordinator_accounts",
+                                    "default_wckey_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>,
+             std::unordered_map<std::string, std::string>>
       values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.default_wckey_map};
   return DocumentConstructor_(fields, values);
+}
+
+bsoncxx::builder::basic::document MongodbClient::WckeyToDocument_(
+    const Ctld::Wckey& wckey) {
+  std::array<std::string, 6> fields{
+      "deleted", "name", "cluster", "uid", "user_name", "is_def",
+  };
+  std::tuple<bool, std::string, std::string, int64_t, std::string, bool> values{
+      wckey.deleted,   wckey.name,
+      wckey.cluster,   static_cast<int64_t>(wckey.uid),
+      wckey.user_name, wckey.is_def};
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToWckey_(const bsoncxx::document::view& wckey_view,
+                                 Ctld::Wckey* wckey) {
+  try {
+    wckey->deleted = wckey_view["deleted"].get_bool().value;
+    wckey->name = wckey_view["name"].get_string().value;
+    wckey->cluster = wckey_view["cluster"].get_string().value;
+    wckey->uid = wckey_view["uid"].get_int64().value;
+    wckey->user_name = wckey_view["user_name"].get_string().value;
+    wckey->is_def = wckey_view["is_def"].get_bool().value;
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
+  }
 }
 
 void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
@@ -940,10 +1044,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container     wckey
 
   // clang-format off
-  std::array<std::string, 38> fields{
+  std::array<std::string, 39> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -959,7 +1063,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
-    "mem_alloc", "device_map", "container",
+    "mem_alloc", "device_map", "container", "wckey"
   };
   // clang-format on
 
@@ -970,7 +1074,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, std::string>                    /*35-39*/
+             int64_t, std::string, std::string, std::string>       /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1004,7 +1108,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             device_map_str, task_to_ctld.container()};
+             device_map_str, task_to_ctld.container(), task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1030,10 +1134,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container       wckey
 
   // clang-format off
-  std::array<std::string, 38> fields{
+  std::array<std::string, 39> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1049,7 +1153,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "container",
+      "mem_alloc", "device_map", "container", "wckey"
   };
   // clang-format on
 
@@ -1060,7 +1164,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, std::string>                    /*35-39*/
+             int64_t, std::string, std::string, std::string>       /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1086,7 +1190,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str, task->container};
+             device_map_str, task->container, task->wckey};
   return DocumentConstructor_(fields, values);
 }
 

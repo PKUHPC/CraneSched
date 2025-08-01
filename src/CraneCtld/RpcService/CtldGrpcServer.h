@@ -103,6 +103,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                       const crane::grpc::AddQosRequest *request,
                       crane::grpc::AddQosReply *response) override;
 
+  grpc::Status AddWckey(grpc::ServerContext *context,
+                        const crane::grpc::AddWckeyRequest *request,
+                        crane::grpc::AddWckeyReply *response) override;
+
   grpc::Status ModifyAccount(
       grpc::ServerContext *context,
       const crane::grpc::ModifyAccountRequest *request,
@@ -116,6 +120,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                          const crane::grpc::ModifyQosRequest *request,
                          crane::grpc::ModifyQosReply *response) override;
 
+  grpc::Status ModifyDefaultWckey(
+      grpc::ServerContext *context,
+      const crane::grpc::ModifyDefaultWckeyRequest *request,
+      crane::grpc::ModifyDefaultWckeyReply *response) override;
+
   grpc::Status QueryAccountInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryAccountInfoRequest *request,
@@ -125,6 +134,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::QueryUserInfoRequest *request,
       crane::grpc::QueryUserInfoReply *response) override;
+
+  grpc::Status QueryWckeyInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryWckeyInfoRequest *request,
+      crane::grpc::QueryWckeyInfoReply *response) override;
 
   grpc::Status QueryQosInfo(grpc::ServerContext *context,
                             const crane::grpc::QueryQosInfoRequest *request,
@@ -142,6 +156,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
   grpc::Status DeleteQos(grpc::ServerContext *context,
                          const crane::grpc::DeleteQosRequest *request,
                          crane::grpc::DeleteQosReply *response) override;
+
+  grpc::Status DeleteWckey(grpc::ServerContext *context,
+                           const crane::grpc::DeleteWckeyRequest *request,
+                           crane::grpc::DeleteWckeyReply *response) override;
 
   grpc::Status BlockAccountOrUser(
       grpc::ServerContext *context,
