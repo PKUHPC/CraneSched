@@ -19,7 +19,7 @@ TLS:
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key
   ExternalCaFilePath: /etc/crane/tls/external_ca.pem
-  Nodes: "cn[15-18]"
+  AllowedNodes: "cn[15-18]"
   DomainSuffix: crane.com
 
 # Ctld settings
