@@ -356,7 +356,7 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
     mutable_meta->CopyFrom(proto_ia_meta);
   }
   task_to_d.set_submit_hostname(this->task_to_ctld.submit_hostname());
-  task_to_d.set_total_gpus(this->allocated_res_view.GetGpuCount());
+  task_to_d.set_total_gpus(this->allocated_res_view.GpuCount());
   return task_to_d;
 }
 

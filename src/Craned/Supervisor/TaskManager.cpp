@@ -141,7 +141,7 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
   auto alloc_node_num =
       this->m_parent_step_inst_->GetStep().allocated_nodes().size();
   if (alloc_node_num != 0) {
-    uint64_t gpus_per_node =
+    gpus_per_node =
         this->m_parent_step_inst_->GetStep().total_gpus() / alloc_node_num;
   }
   auto mem_in_node = this->m_parent_step_inst_->GetStep()
