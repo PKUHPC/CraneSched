@@ -67,7 +67,8 @@ class CtldClientStateMachine {
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
   void EvConfigurationDone(std::optional<std::set<job_id_t>> lost_jobs,
                            std::optional<std::set<step_id_t>> lost_steps);
-  bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply);
+  bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply,
+                          const RegToken& token);
 
   // Grpc Channel events
   void EvGrpcConnected();

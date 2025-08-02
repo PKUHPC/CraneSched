@@ -102,13 +102,18 @@ void CtldClientStateMachine::EvConfigurationDone(
 }
 
 bool CtldClientStateMachine::EvGetRegisterReply(
-    const crane::grpc::CranedRegisterReply& reply) {
+    const crane::grpc::CranedRegisterReply& reply, const RegToken& token) {
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REGISTERING) {
     CRANE_WARN("EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
                static_cast<int>(m_state_));
+    return false;
+  }
+
+  if (m_reg_token_ != token) {
+    CRANE_TRACE("Register token mismatch when recv register reply.");
     return false;
   }
 
@@ -220,15 +225,19 @@ void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
 void CtldClientStateMachine::ActionReady_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-
-  g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
+  g_server->SetGrpcSrvReady(true);
+  g_thread_pool->detach_task([this] {
+    if (m_action_ready_cb_) m_action_ready_cb_();
+  });
 }
 
 void CtldClientStateMachine::ActionDisconnected_() {
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
-
-  g_thread_pool->detach_task([this] { m_action_disconnected_cb_(); });
+  g_server->SetGrpcSrvReady(false);
+  g_thread_pool->detach_task([this] {
+    if (m_action_disconnected_cb_) m_action_disconnected_cb_();
+  });
 }
 
 void CtldClient::Shutdown() {
@@ -244,11 +253,6 @@ CtldClient::~CtldClient() {
 }
 
 void CtldClient::Init() {
-  g_ctld_client_sm->SetActionDisconnectedCb([] {
-    // The implementation now is auto-reconnecting.
-    // Just do nothing here.
-  });
-
   g_ctld_client_sm->SetActionRequestConfigCb(
       [this](RegToken const& token) { RequestConfigFromCtld_(token); });
 
@@ -432,7 +436,7 @@ bool CtldClient::CranedRegister_(RegToken const& token,
     return false;
   }
 
-  return g_ctld_client_sm->EvGetRegisterReply(ready_reply);
+  return g_ctld_client_sm->EvGetRegisterReply(ready_reply, token);
 }
 
 void CtldClient::AsyncSendThread_() {
