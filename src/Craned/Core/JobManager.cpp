@@ -921,9 +921,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 }
 
 void JobManager::TerminateStepAsync(step_id_t step_id) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return;
-  }
   StepTerminateQueueElem elem{.step_id = step_id, .terminated_by_user = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
