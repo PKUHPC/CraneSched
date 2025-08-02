@@ -832,9 +832,6 @@ void JobManager::ActivateTaskStatusChangeAsync_(
  * @return True if job and cgroup exists
  */
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return false;
-  }
   CgroupInterface* cg = GetCgForJob(job_id);
   if (!cg) return false;
 
@@ -842,10 +839,6 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
 }
 
 CraneExpected<JobInD*> JobManager::QueryJob(job_id_t job_id) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return std::unexpected(CraneErrCode::ERR_SHUTTING_DOWN);
-  }
-
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
   return job_ptr.get();
@@ -858,10 +851,6 @@ std::set<task_id_t> JobManager::GetAllocatedJobs() {
 }
 
 std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return std::nullopt;
-  }
-
   CRANE_DEBUG("Query task info for uid {}", uid);
 
   TaskInfoOfUid info;
@@ -941,9 +930,6 @@ void JobManager::TerminateStepAsync(step_id_t step_id) {
 }
 
 void JobManager::MarkStepAsOrphanedAndTerminateAsync(step_id_t step_id) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return;
-  }
   StepTerminateQueueElem elem{.step_id = step_id, .mark_as_orphaned = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
