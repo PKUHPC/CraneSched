@@ -633,10 +633,6 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
   step_inst->step_to_d = step;
   EvQueueExecuteStepElem elem{.step_inst = std::move(step_inst)};
 
-  if (!m_job_map_.Contains(step.task_id())) {
-    CRANE_ERROR("Failed to find job #{} allocation", step.task_id());
-    return CraneErrCode::ERR_CGROUP;
-  }
   m_grpc_execute_step_queue_.enqueue(std::move(elem));
   m_grpc_execute_step_async_handle_->send();
 
