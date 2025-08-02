@@ -165,7 +165,6 @@ JobManager::~JobManager() {
 }
 
 bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   CRANE_DEBUG("Allocating {} job", jobs.size());
 
   auto begin = std::chrono::steady_clock::now();
@@ -213,7 +212,6 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
 // Wait for supervisor exit and release cgroup
 bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   // We do noting here,just check if supervisor exist and remove its cgroup
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
@@ -617,7 +615,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
 }
 
 CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return CraneErrCode::ERR_SHUTTING_DOWN;
+  }
 
   CRANE_INFO("Executing step #{} of job #{}", step.task_id(), step.task_id());
   if (!m_job_map_.Contains(step.task_id())) {
@@ -633,11 +633,14 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
   step_inst->step_to_d = step;
   EvQueueExecuteStepElem elem{.step_inst = std::move(step_inst)};
 
-  auto future = elem.ok_prom.get_future();
+  if (!m_job_map_.Contains(step.task_id())) {
+    CRANE_ERROR("Failed to find job #{} allocation", step.task_id());
+    return CraneErrCode::ERR_CGROUP;
+  }
   m_grpc_execute_step_queue_.enqueue(std::move(elem));
   m_grpc_execute_step_async_handle_->send();
 
-  return future.get();
+  return CraneErrCode::SUCCESS;
 }
 
 void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
@@ -829,7 +832,9 @@ void JobManager::ActivateTaskStatusChangeAsync_(
  * @return True if job and cgroup exists
  */
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return false;
+  }
   CgroupInterface* cg = GetCgForJob(job_id);
   if (!cg) return false;
 
@@ -837,7 +842,9 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
 }
 
 CraneExpected<JobInD*> JobManager::QueryJob(job_id_t job_id) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return std::unexpected(CraneErrCode::ERR_SHUTTING_DOWN);
+  }
 
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
@@ -851,7 +858,9 @@ std::set<task_id_t> JobManager::GetAllocatedJobs() {
 }
 
 std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return std::nullopt;
+  }
 
   CRANE_DEBUG("Query task info for uid {}", uid);
 
@@ -923,14 +932,18 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 }
 
 void JobManager::TerminateStepAsync(step_id_t step_id) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return;
+  }
   StepTerminateQueueElem elem{.step_id = step_id, .terminated_by_user = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
 }
 
 void JobManager::MarkStepAsOrphanedAndTerminateAsync(step_id_t step_id) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return;
+  }
   StepTerminateQueueElem elem{.step_id = step_id, .mark_as_orphaned = true};
   m_step_terminate_queue_.enqueue(std::move(elem));
   m_terminate_step_async_handle_->send();
@@ -938,7 +951,9 @@ void JobManager::MarkStepAsOrphanedAndTerminateAsync(step_id_t step_id) {
 
 bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
                                          absl::Duration time_limit) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
+  if (m_is_ending_now_.load(std::memory_order_acquire)) {
+    return false;
+  }
   ChangeTaskTimeLimitQueueElem elem{.job_id = job_id, .time_limit = time_limit};
 
   std::future<bool> ok_fut = elem.ok_prom.get_future();
@@ -950,7 +965,6 @@ bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
 void JobManager::StepStopAndDoStatusChangeAsync(
     task_id_t job_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
-  CRANE_ASSERT(!m_is_ending_now_.load(std::memory_order_acquire));
   if (!m_job_map_.Contains(job_id)) {
     CRANE_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
                 job_id);

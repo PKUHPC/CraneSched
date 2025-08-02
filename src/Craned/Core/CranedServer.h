@@ -108,7 +108,8 @@ class CranedServer {
 
   void Shutdown() {
     m_status_ = CranedStatus::STOPPING;
-    m_server_->Shutdown();
+    m_server_->Shutdown(std::chrono::system_clock::now() +
+                        std::chrono::seconds(1));
   }
 
   void Wait() { m_server_->Wait(); }
@@ -117,24 +118,35 @@ class CranedServer {
     if (m_status_ == CranedStatus::STOPPING) {
       CRANE_DEBUG("Craned is stopping, SetGrpcSrvReady to {} not applied.",
                   ready);
+      return;
     }
     if (ready) {
       CRANE_ASSERT(m_status_ == CranedStatus::INITIALIZING ||
                    m_status_ == CranedStatus::RECONFIGURING);
       m_status_ = CranedStatus::RUNNING;
     } else {
-      CRANE_ASSERT(m_status_ == CranedStatus::RUNNING);
-      m_status_ = CranedStatus::RECONFIGURING;
+      if (m_status_ == CranedStatus::RUNNING) {
+        CRANE_TRACE(
+            "CraneCtld disconnected, craned server status set to "
+            "RECONFIGURING, prev status {}.",
+            static_cast<std::uint8_t>(m_status_.load()));
+        m_status_ = CranedStatus::RECONFIGURING;
+      } else {
+        CRANE_ASSERT(m_status_ == CranedStatus::INITIALIZING ||
+                     m_status_ == CranedStatus::RECONFIGURING);
+        // INITIALIZING or RECONFIGURING;
+        CRANE_TRACE("CraneCtld disconnected, current status {}.",
+                    static_cast<std::uint8_t>(m_status_.load()));
+      }
     }
-
-    m_status_ = ready ? CranedStatus::RUNNING : CranedStatus::RECONFIGURING;
   }
 
   [[nodiscard]] bool ReadyFor(RequestSource request_source) const {
     CRANE_ASSERT(request_source != RequestSource::INVALID);
-    if (m_status_ == CranedStatus::INITIALIZING) return false;
-    if (m_status_ == CranedStatus::RECONFIGURING ||
+    if (m_status_ == CranedStatus::INITIALIZING ||
         m_status_ == CranedStatus::STOPPING)
+      return false;
+    if (m_status_ == CranedStatus::RECONFIGURING)
       // Only PAM can send requests during recovery or stopping.
       return request_source == RequestSource::PAM;
 
