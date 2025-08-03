@@ -384,6 +384,9 @@ struct TaskInCtld {
 
   std::string reservation;
 
+  // Task will be PENDING until next schedule time exceeds the begin time
+  absl::Time begin_time{absl::InfinitePast()};
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -504,6 +507,10 @@ struct TaskInCtld {
 
   void SetHeld(bool val);
   bool const& Held() const { return held; }
+
+  // void SetBeginTime(absl::Time const& val);
+  // absl::Time const& BeginTime() const { return begin_time; }
+  // int64_t BeginTimeInUnixSecond() const { return ToUnixSeconds(begin_time); }
 
   void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }

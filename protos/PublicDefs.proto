@@ -166,9 +166,10 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
-
+  
   bool hold = 38;
   string submit_hostname = 39;
+  google.protobuf.Timestamp begin_time = 40;  // Time when job becomes eligible for scheduling
 }
 
 message TaskInEmbeddedDb {
