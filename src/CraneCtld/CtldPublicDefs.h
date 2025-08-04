@@ -114,6 +114,7 @@ struct Config {
     std::string Username;
     std::string Password;
     bool Tls;
+    uint64_t ExpirationMinutes;
   };
   VaultConfig VaultConf;
 
