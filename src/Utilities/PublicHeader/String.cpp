@@ -411,26 +411,4 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
-std::unordered_set<std::string> SplitStr(const std::string &s, char delim) {
-  std::unordered_set<std::string> elems;
-  std::stringstream ss(s);
-  std::string item;
-  while (std::getline(ss, item, delim)) {
-    size_t start = item.find_first_not_of(" \t");
-    size_t end = item.find_last_not_of(" \t");
-    if (start != std::string::npos && end != std::string::npos)
-      elems.insert(item.substr(start, end - start + 1));
-    else if (start != std::string::npos)
-      elems.insert(item.substr(start));
-  }
-  return elems;
-}
-
-std::string ToLower(const std::string &s) {
-  std::string result = s;
-  std::ranges::transform(result, result.begin(),
-                         [](unsigned char c) { return std::tolower(c); });
-  return result;
-}
-
 }  // namespace util

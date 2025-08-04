@@ -608,7 +608,7 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
-  std::unordered_map<std::string, std::string> default_wckey_map;
+  std::unordered_map<std::string/*cluster*/, std::string/*wckey_name*/> default_wckey_map;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
