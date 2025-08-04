@@ -83,9 +83,6 @@ void ParseConfig(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
 
-      if (config["ClusterName"])
-        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
-
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
@@ -108,6 +105,17 @@ void ParseConfig(int argc, char** argv) {
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();
+      }
+
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("ClusterName is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("ClusterName is empty.");
+        std::exit(1);
       }
 
       g_config.CraneCtldMutexFilePath =
