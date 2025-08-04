@@ -39,13 +39,13 @@ class JobInD;
 
 namespace CgConstant {
 
-enum class CgroupVersion : uint64_t {
+enum class CgroupVersion : uint8_t {
   CGROUP_V1 = 0,
   CGROUP_V2,
   UNDEFINED,
 };
 
-enum class Controller : uint64_t {
+enum class Controller : uint8_t {
   MEMORY_CONTROLLER = 0,
   CPUACCT_CONTROLLER,
   FREEZE_CONTROLLER,
@@ -53,16 +53,16 @@ enum class Controller : uint64_t {
   CPU_CONTROLLER,
   DEVICES_CONTROLLER,
 
-  MEMORY_CONTORLLER_V2,
+  MEMORY_CONTROLLER_V2,
   CPU_CONTROLLER_V2,
   IO_CONTROLLER_V2,
   CPUSET_CONTROLLER_V2,
   PIDS_CONTROLLER_V2,
 
-  ControllerCount,
+  CONTROLLER_COUNT,
 };
 
-enum class ControllerFile : uint64_t {
+enum class ControllerFile : uint8_t {
   CPU_SHARES = 0,
   CPU_CFS_PERIOD_US,
   CPU_CFS_QUOTA_US,
@@ -75,8 +75,8 @@ enum class ControllerFile : uint64_t {
 
   DEVICES_DENY,
   DEVICES_ALLOW,
-  // V2
 
+  // V2
   CPU_WEIGHT_V2,
   CPU_MAX_V2,
 
@@ -87,15 +87,18 @@ enum class ControllerFile : uint64_t {
   IO_WEIGHT_V2,
   // root cgroup controller can't be change or created
 
-  ControllerFileCount,
+  CONTROLLER_FILE_COUNT,
 };
 
 inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
+inline constexpr std::string kCraneCgPathPrefix = "crane";
+
 inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
 inline const std::filesystem::path kRootCgroupFullPath = "/sys/fs/cgroup";
+
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -106,8 +109,8 @@ inline const char *kBpfProgramName = "craned_device_access";
 namespace Internal {
 
 constexpr std::array<std::string_view,
-                     static_cast<size_t>(Controller::ControllerCount)>
-    ControllerStringView{
+                     static_cast<size_t>(Controller::CONTROLLER_COUNT)>
+    kControllerStringView{
         "memory",
         "cpuacct",
         "freezer",
@@ -123,8 +126,8 @@ constexpr std::array<std::string_view,
     };
 
 constexpr std::array<std::string_view,
-                     static_cast<size_t>(ControllerFile::ControllerFileCount)>
-    ControllerFileStringView{
+                     static_cast<size_t>(ControllerFile::CONTROLLER_FILE_COUNT)>
+    kControllerFileStringView{
         "cpu.shares",
         "cpu.cfs_period_us",
         "cpu.cfs_quota_us",
@@ -137,8 +140,8 @@ constexpr std::array<std::string_view,
 
         "devices.deny",
         "devices.allow",
-        // V2
 
+        // V2
         "cpu.weight",
         "cpu.max",
 
@@ -147,18 +150,17 @@ constexpr std::array<std::string_view,
         "memory.high",
 
         "io.weight",
-
     };
 
 }  // namespace Internal
 
 constexpr std::string_view GetControllerStringView(Controller controller) {
-  return Internal::ControllerStringView[static_cast<uint64_t>(controller)];
+  return Internal::kControllerStringView[static_cast<uint64_t>(controller)];
 }
 
 constexpr std::string_view GetControllerFileStringView(
     ControllerFile controller_file) {
-  return Internal::ControllerFileStringView[static_cast<uint64_t>(
+  return Internal::kControllerFileStringView[static_cast<uint64_t>(
       controller_file)];
 }
 
@@ -180,18 +182,18 @@ struct BpfDeviceMeta {
   uint32_t major;
   uint32_t minor;
   int permission;
-  short access;
-  short type;
+  int16_t access;
+  int16_t type;
 };
 #  pragma pack(pop)
 #endif
 
 class ControllerFlags {
  public:
-  constexpr ControllerFlags() noexcept : m_flags_(0u) {}
+  constexpr ControllerFlags() noexcept : m_flags_(0U) {}
 
   constexpr explicit ControllerFlags(CgConstant::Controller controller) noexcept
-      : m_flags_(1u << static_cast<uint64_t>(controller)) {}
+      : m_flags_(1U << static_cast<uint64_t>(controller)) {}
 
   ControllerFlags(const ControllerFlags &val) noexcept = default;
 
@@ -205,13 +207,14 @@ class ControllerFlags {
     return *this;
   }
 
-  operator bool() const noexcept { return static_cast<bool>(m_flags_); }
-
   constexpr ControllerFlags operator~() const noexcept {
     ControllerFlags cf;
     cf.m_flags_ = ~m_flags_;
     return cf;
   }
+
+  // NOLINTNEXTLINE(google-explicit-constructor, hicpp-explicit-conversions)
+  operator bool() const noexcept { return static_cast<bool>(m_flags_); }
 
  private:
   friend constexpr ControllerFlags operator|(
@@ -245,14 +248,14 @@ constexpr ControllerFlags operator&(const ControllerFlags &lhs,
 constexpr ControllerFlags operator|(
     const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
-  flags.m_flags_ = lhs.m_flags_ | (1u << static_cast<uint64_t>(rhs));
+  flags.m_flags_ = lhs.m_flags_ | (1U << static_cast<uint64_t>(rhs));
   return flags;
 }
 
 constexpr ControllerFlags operator&(
     const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
-  flags.m_flags_ = lhs.m_flags_ & (1u << static_cast<uint64_t>(rhs));
+  flags.m_flags_ = lhs.m_flags_ & (1U << static_cast<uint64_t>(rhs));
   return flags;
 }
 
@@ -261,7 +264,7 @@ constexpr ControllerFlags operator|(
     const CgConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ =
-      (1u << static_cast<uint64_t>(lhs)) | (1u << static_cast<uint64_t>(rhs));
+      (1U << static_cast<uint64_t>(lhs)) | (1U << static_cast<uint64_t>(rhs));
   return flags;
 }
 
@@ -280,7 +283,7 @@ constexpr ControllerFlags CG_V1_REQUIRED_CONTROLLERS =
 
 constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
-    CgConstant::Controller::MEMORY_CONTORLLER_V2 |
+    CgConstant::Controller::MEMORY_CONTROLLER_V2 |
     CgConstant::Controller::IO_CONTROLLER_V2;
 
 #ifdef CRANE_ENABLE_BPF
@@ -288,6 +291,7 @@ class BpfRuntimeInfo {
  public:
   BpfRuntimeInfo();
   ~BpfRuntimeInfo();
+
   bool InitializeBpfObj();
   void CloseBpfObj();
   void Destroy();
@@ -417,7 +421,7 @@ class CgroupV2 : public CgroupInterface {
            std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
 #endif
 
-  ~CgroupV2() override {}
+  ~CgroupV2() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;

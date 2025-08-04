@@ -25,6 +25,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <array>
 #include <ctime>
 #include <cxxopts.hpp>
 
@@ -584,13 +585,13 @@ void ParseConfig(int argc, char** argv) {
     std::exit(1);
   }
 
-  char hostname[HOST_NAME_MAX + 1];
-  int r = gethostname(hostname, HOST_NAME_MAX + 1);
-  if (r != 0) {
+  std::array<char, HOST_NAME_MAX + 1> hostname{};
+  int rc = gethostname(hostname.data(), hostname.size());
+  if (rc != 0) {
     CRANE_ERROR("Error: get hostname.");
     std::exit(1);
   }
-  g_config.Hostname.assign(hostname);
+  g_config.Hostname.assign(hostname.data());
 
   if (!g_config.CranedRes.contains(g_config.Hostname)) {
     CRANE_ERROR("This machine {} is not contained in Nodes!",
@@ -753,7 +754,7 @@ void GlobalVariableInit() {
   if (CgroupManager::GetCgroupVersion() ==
           Craned::CgConstant::CgroupVersion::CGROUP_V2 &&
       (!CgroupManager::Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !CgroupManager::Mounted(Controller::MEMORY_CONTORLLER_V2) ||
+       !CgroupManager::Mounted(Controller::MEMORY_CONTROLLER_V2) ||
        !CgroupManager::Mounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
