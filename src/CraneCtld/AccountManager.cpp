@@ -1283,10 +1283,10 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
 
-  m_user_map_[p_target_user->name]->cert_number = "";
-
   CRANE_DEBUG("Reset User {} Certificate {}", p_target_user->name,
               p_target_user->cert_number);
+
+  m_user_map_[p_target_user->name]->cert_number = "";
 
   return result;
 }
