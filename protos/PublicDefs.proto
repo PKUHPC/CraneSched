@@ -171,6 +171,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
 
@@ -786,7 +787,7 @@ message WckeyInfo {
   string name = 1;
   string cluster = 2;
   string user_name = 3;
-  bool is_def = 4;
+  bool is_def = 4;  //default
 }
 
 message TimeInterval {
