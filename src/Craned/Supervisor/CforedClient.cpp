@@ -577,7 +577,7 @@ bool CforedClient::TaskProcessStop(pid_t pid) {
 }
 
 void CforedClient::TaskEnd(pid_t pid) {
-  g_task_mgr->TaskStopAndDoStatusChange();
+  g_task_mgr->TaskStopAndDoStatusChange(g_config.JobId);
 };
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {

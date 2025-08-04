@@ -1456,6 +1456,12 @@ TaskManager::TaskManager()
     CRANE_ERROR("Failed to start the SIGCHLD handle");
   }
 
+  m_task_stop_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_stop_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTaskStopQueueCb_();
+      });
+
   m_terminate_task_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
@@ -1518,62 +1524,9 @@ void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::TaskStopAndDoStatusChange() {
-  CRANE_INFO("task #{} stopped and is doing TaskStatusChange...",
-             m_task_->GetParentStep().task_id());
-
-  switch (m_task_->err_before_exec) {
-  case CraneErrCode::ERR_PROTOBUF:
-    ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeSpawnProcessFail,
-                              std::nullopt);
-    return;
-
-  case CraneErrCode::ERR_CGROUP:
-    ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeCgroupError, std::nullopt);
-    return;
-
-  default:
-    break;
-  }
-
-  const auto& exit_info = m_task_->GetExitInfo();
-  if (m_step_.IsBatch() || m_step_.IsCrun()) {
-    // For a Batch task, the end of the process means it is done.
-    if (exit_info.is_terminated_by_signal) {
-      switch (m_task_->terminated_by) {
-      case TerminatedBy::CANCELLED_BY_USER: {
-        ActivateTaskStatusChange_(
-            crane::grpc::TaskStatus::Cancelled,
-            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-        break;
-      }
-      case TerminatedBy::TERMINATION_BY_TIMEOUT: {
-        ActivateTaskStatusChange_(
-            crane::grpc::TaskStatus::ExceedTimeLimit,
-            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-        break;
-      }
-      default:
-        ActivateTaskStatusChange_(
-            crane::grpc::TaskStatus::Failed,
-            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-      }
-    } else
-      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                exit_info.value, std::nullopt);
-  } else /* Calloc */ {
-    // For a COMPLETING Calloc task with a process running,
-    // the end of this process means that this task is done.
-    if (exit_info.is_terminated_by_signal)
-      ActivateTaskStatusChange_(
-          crane::grpc::TaskStatus::Completed,
-          exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-    else
-      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
-                                exit_info.value, std::nullopt);
-  }
+void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
+  m_task_stop_queue_.enqueue(task_id);
+  m_task_stop_async_handle_->send();
 }
 
 void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
@@ -1703,7 +1656,7 @@ void TaskManager::EvSigchldCb_() {
         // If the TaskInstance has no process left,
         // send TaskStatusChange for this task.
         // See the comment of EvActivateTaskStatusChange_.
-        TaskStopAndDoStatusChange();
+        TaskStopAndDoStatusChange(g_config.JobId);
       }
     } else if (pid == 0) {
       break;
@@ -1739,6 +1692,67 @@ void TaskManager::EvTaskTimerCb_() {
   } else {
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::ExceedTimeLimit,
                               ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+  }
+}
+
+void TaskManager::EvCleanTaskStopQueueCb_() {
+  task_id_t task_id;
+  while (m_task_stop_queue_.try_dequeue(task_id)) {
+    CRANE_INFO("[Job #{}.{}] Stopped and is doing TaskStatusChange...",
+               m_task_->GetParentStep().task_id(), 0);
+
+    switch (m_task_->err_before_exec) {
+    case CraneErrCode::ERR_PROTOBUF:
+      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
+                                ExitCode::kExitCodeSpawnProcessFail,
+                                std::nullopt);
+      return;
+
+    case CraneErrCode::ERR_CGROUP:
+      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
+                                ExitCode::kExitCodeCgroupError, std::nullopt);
+      return;
+
+    default:
+      break;
+    }
+
+    const auto& exit_info = m_task_->GetExitInfo();
+    if (m_step_.IsBatch() || m_step_.IsCrun()) {
+      // For a Batch task, the end of the process means it is done.
+      if (exit_info.is_terminated_by_signal) {
+        switch (m_task_->terminated_by) {
+        case TerminatedBy::CANCELLED_BY_USER: {
+          ActivateTaskStatusChange_(
+              crane::grpc::TaskStatus::Cancelled,
+              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          break;
+        }
+        case TerminatedBy::TERMINATION_BY_TIMEOUT: {
+          ActivateTaskStatusChange_(
+              crane::grpc::TaskStatus::ExceedTimeLimit,
+              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          break;
+        }
+        default:
+          ActivateTaskStatusChange_(
+              crane::grpc::TaskStatus::Failed,
+              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+        }
+      } else
+        ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
+                                  exit_info.value, std::nullopt);
+    } else /* Calloc */ {
+      // For a COMPLETING Calloc task with a process running,
+      // the end of this process means that this task is done.
+      if (exit_info.is_terminated_by_signal)
+        ActivateTaskStatusChange_(
+            crane::grpc::TaskStatus::Completed,
+            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+      else
+        ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
+                                  exit_info.value, std::nullopt);
+    }
   }
 }
 

@@ -296,7 +296,7 @@ class TaskManager {
   void LaunchExecution_();
   // NOLINTEND(readability-identifier-naming)
 
-  void TaskStopAndDoStatusChange();
+  void TaskStopAndDoStatusChange(task_id_t task_id);
 
   std::future<CraneErrCode> ExecuteTaskAsync();
 
@@ -334,6 +334,7 @@ class TaskManager {
 
   void EvSigchldCb_();
   void EvTaskTimerCb_();
+  void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
@@ -344,6 +345,9 @@ class TaskManager {
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
+
+  std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_stop_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
