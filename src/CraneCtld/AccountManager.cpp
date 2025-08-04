@@ -305,7 +305,7 @@ CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
   if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   auto it = p_target_user->default_wckey_map.find(cluster);
   if (it != p_target_user->default_wckey_map.end() && it->second == name) {
-    return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_WCKEY);
+    return std::unexpected(CraneErrCode::ERR_DEL_DEFAULT_WCKEY);
   }
 
   const Wckey* wckey = GetExistedWckeyInfoNoLock_(name, cluster, user_name);

@@ -644,13 +644,17 @@ void ParseConfig(int argc, char** argv) {
         }
       }
       if (config["AccountingStorageEnforce"]) {
-        auto val = config["AccountingStorageEnforce"].as<std::string>();
-        std::unordered_set<std::string> items = util::SplitStr(val, ',');
+        auto item_list = config["AccountingStorageEnforce"].as<std::string>();
+        std::unordered_set<std::string> items;
+        for (absl::string_view item : absl::StrSplit(item_list, ',')) {
+          item = absl::StripAsciiWhitespace(item);
+          if (!item.empty()) items.emplace(item);
+        }
         if (items.contains("wckeys")) g_config.MustNeedWckey = true;
       }
       if (config["TrackWCKey"]) {
         auto val = config["TrackWCKey"].as<std::string>();
-        val = util::ToLower(val);
+        val = absl::AsciiStrToLower(val);
         if (val == "yes") {
           g_config.WckeyValid = true;
         } else if (val == "no") {
