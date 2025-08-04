@@ -860,6 +860,7 @@ message EnableAutoPowerControlReply {
 }
 
 message ConfigHashCalcReply {
+  // Hex-encoded (lowercase) SHA256 digest of the normalized YAML config.
   string hash_val = 1;
 }
 
