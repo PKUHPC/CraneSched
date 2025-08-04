@@ -86,6 +86,8 @@ inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
+inline const char* const kResourceTypeGpu = "gpu";
+
 constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
