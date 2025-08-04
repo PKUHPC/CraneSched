@@ -464,6 +464,7 @@ std::expected<CertPair, std::string> ParseCertificate(const std::string &cert_pe
     return std::unexpected("Failed to convert serial to hex");
 
   std::string serial_number = std::string(hex);
+  std::ranges::transform(serial_number, serial_number.begin(), ::tolower);
   std::string formatted_serial_number;
   for (size_t i = 0; i < serial_number.size(); ++i) {
     formatted_serial_number += serial_number[i];
@@ -472,7 +473,6 @@ std::expected<CertPair, std::string> ParseCertificate(const std::string &cert_pe
     }
   }
 
-  std::ranges::transform(serial_number, serial_number.begin(), ::tolower);
 
   // free the memory
   OPENSSL_free(hex);
