@@ -707,10 +707,10 @@ double ResourceView::CpuCount() const {
 }
 
 uint64_t ResourceView::GpuCount() const {
-  auto it = device_map.find("gpu");
-  if (it == device_map.end()) return 0;
+  auto gpu_info_itr = device_map.find("gpu");
+  if (gpu_info_itr == device_map.end()) return 0;
 
-  const auto& [untyped_count, type_map] = it->second;
+  const auto& [untyped_count, type_map] = gpu_info_itr->second;
 
   uint64_t type_sum = std::accumulate(std::views::values(type_map).begin(),
                                       std::views::values(type_map).end(),

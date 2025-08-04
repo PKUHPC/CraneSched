@@ -83,17 +83,6 @@ void ParseConfig(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
 
-      if (config["ClusterName"]) {
-        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
-        if (g_config.CraneClusterName.empty()) {
-          fmt::print(stderr, "Cluster name is empty.");
-          std::exit(1);
-        }
-      } else {
-        fmt::print(stderr, "Cluster name is empty.");
-        std::exit(1);
-      }
-
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
@@ -555,6 +544,16 @@ void ParseConfig(int argc, char** argv) {
                       g_config.DefaultPartition);
           std::exit(1);
         }
+      }
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("Cluster name is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("Cluster name is empty.");
+        std::exit(1);
       }
 
       if (config["Plugin"]) {
