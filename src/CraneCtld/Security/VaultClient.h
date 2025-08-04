@@ -61,8 +61,7 @@ class VaultClient {
   std::unique_ptr<Vault::Pki> m_pki_external_;
 
   using ParallelHashMap = phmap::parallel_flat_hash_map<
-      std::string,
-      int64_t, phmap::priv::hash_default_hash<std::string>,
+      std::string, int64_t, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, int64_t>>, 4,
       std::shared_mutex>;

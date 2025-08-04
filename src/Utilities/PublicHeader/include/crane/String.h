@@ -99,11 +99,14 @@ std::string GenerateCommaSeparatedString(const int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
 
-std::expected<CertPair, std::string> ParseCertificate(const std::string &cert_pem);
+std::expected<CertPair, std::string> ParseCertificate(
+    const std::string &cert_pem);
 
 template <typename YamlNode>
-std::optional<std::string> ParseCertConfig(const std::string &cert_name, const YamlNode &tls_config,
-                     std::string *file_path, std::string *file_content) {
+std::optional<std::string> ParseCertConfig(const std::string &cert_name,
+                                           const YamlNode &tls_config,
+                                           std::string *file_path,
+                                           std::string *file_content) {
   if (tls_config[cert_name]) {
     *file_path = tls_config[cert_name].template as<std::string>();
     try {
@@ -112,7 +115,8 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name, const Y
       return fmt::format("Read {} error: {}", cert_name, e.what());
     }
     if (file_content->empty())
-      return fmt::format("UseTls is true, but the file specified by {} is empty", cert_name);
+      return fmt::format(
+          "UseTls is true, but the file specified by {} is empty", cert_name);
   } else {
     return fmt::format("UseTls is true, but {} is empty", cert_name);
   }

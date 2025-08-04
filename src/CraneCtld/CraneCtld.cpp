@@ -155,45 +155,55 @@ void ParseConfig(int argc, char** argv) {
           g_tls_config.AllowedNodes.insert("localhost");
         }
         // internal
-        if (auto result = util::ParseCertConfig("InternalCertFilePath", tls_config,
-                                   &g_tls_config.InternalCerts.CertFilePath,
-                                   &g_tls_config.InternalCerts.CertContent); result) {
+        if (auto result =
+                util::ParseCertConfig("InternalCertFilePath", tls_config,
+                                      &g_tls_config.InternalCerts.CertFilePath,
+                                      &g_tls_config.InternalCerts.CertContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
 
-
-        if (auto result = util::ParseCertConfig("InternalKeyFilePath", tls_config,
-                                   &g_tls_config.InternalCerts.KeyFilePath,
-                                   &g_tls_config.InternalCerts.KeyContent); result) {
+        if (auto result =
+                util::ParseCertConfig("InternalKeyFilePath", tls_config,
+                                      &g_tls_config.InternalCerts.KeyFilePath,
+                                      &g_tls_config.InternalCerts.KeyContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
 
-
-        if (auto result = util::ParseCertConfig("InternalCaFilePath", tls_config,
-                                   &g_tls_config.InternalCerts.CaFilePath,
-                                   &g_tls_config.InternalCerts.CaContent); result) {
+        if (auto result =
+                util::ParseCertConfig("InternalCaFilePath", tls_config,
+                                      &g_tls_config.InternalCerts.CaFilePath,
+                                      &g_tls_config.InternalCerts.CaContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
 
         // external
-        if (auto result = util::ParseCertConfig("ExternalCertFilePath", tls_config,
-                                   &g_tls_config.ExternalCerts.CertFilePath,
-                                   &g_tls_config.ExternalCerts.CertContent); result) {
+        if (auto result =
+                util::ParseCertConfig("ExternalCertFilePath", tls_config,
+                                      &g_tls_config.ExternalCerts.CertFilePath,
+                                      &g_tls_config.ExternalCerts.CertContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
-        if (auto result = util::ParseCertConfig("ExternalKeyFilePath", tls_config,
-                                   &g_tls_config.ExternalCerts.KeyFilePath,
-                                   &g_tls_config.ExternalCerts.KeyContent); result) {
+        if (auto result =
+                util::ParseCertConfig("ExternalKeyFilePath", tls_config,
+                                      &g_tls_config.ExternalCerts.KeyFilePath,
+                                      &g_tls_config.ExternalCerts.KeyContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
-        if (auto result = util::ParseCertConfig("ExternalCaFilePath", tls_config,
-                                   &g_tls_config.ExternalCerts.CaFilePath,
-                                   &g_tls_config.ExternalCerts.CaContent); result) {
+        if (auto result =
+                util::ParseCertConfig("ExternalCaFilePath", tls_config,
+                                      &g_tls_config.ExternalCerts.CaFilePath,
+                                      &g_tls_config.ExternalCerts.CaContent);
+            result) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
@@ -673,7 +683,8 @@ void ParseConfig(int argc, char** argv) {
         else
           g_config.VaultConf.Addr = "127.0.0.1";
 
-        g_config.VaultConf.Addr = YamlValueOr(vault_config["Addr"], "127.0.0.1");
+        g_config.VaultConf.Addr =
+            YamlValueOr(vault_config["Addr"], "127.0.0.1");
 
         g_config.VaultConf.Port = YamlValueOr(vault_config["Port"], "8200");
 
