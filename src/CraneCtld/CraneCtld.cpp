@@ -570,13 +570,9 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["DebugFlags"] && !config["DebugFlags"].IsNull()) {
         auto str = config["DebugFlags"].as<std::string>();
-        std::ranges::transform(str, str.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
+        absl::AsciiStrToLower(&str);
 
-        std::string_view debug_flags_view(str);
-
-        for (auto&& part : debug_flags_view | std::views::split(',')) {
-          std::string_view token(&*part.begin(), std::ranges::distance(part));
+        for (absl::string_view token : absl::StrSplit(str, ',')) {
           token = absl::StripAsciiWhitespace(token);
           if (!token.empty()) {
             auto it = g_debug_flag_set_map.find(token);

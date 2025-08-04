@@ -481,9 +481,7 @@ void ParseConfig(int argc, char** argv) {
               CRANE_WARN("No nodes in partition '{}'.", name);
             } else {
               for (auto&& node : name_list) {
-                std::string node_s{node};
-
-                auto node_it = g_config.CranedRes.find(node_s);
+                auto node_it = g_config.CranedRes.find(node);
                 if (node_it != g_config.CranedRes.end()) {
                   part.nodes.emplace(node_it->first);
                   CRANE_INFO("Find node {} in partition {}", node_it->first,
