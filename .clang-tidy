@@ -81,3 +81,4 @@ CheckOptions:
   - { key: readability-identifier-naming.PrivateMethodCase,          value: CamelCase }
   - { key: readability-identifier-naming.PrivateMethodPrefix,        value: "" }
   - { key: readability-identifier-naming.PrivateMethodSuffix,        value: "_" }
+  - { key: readability-function-cognitive-complexity.Threshold,      value: 30 }

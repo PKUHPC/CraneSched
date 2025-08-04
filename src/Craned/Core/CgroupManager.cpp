@@ -67,55 +67,55 @@ CraneErrCode CgroupManager::Init() {
   using CgConstant::Controller;
   using CgConstant::GetControllerStringView;
 
-  ControllerFlags NO_CONTROLLERS;
-
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
     void *handle = nullptr;
     controller_data info{};
+
     int ret = cgroup_get_all_controller_begin(&handle, &info);
     while (ret == 0) {
       if (info.name == GetControllerStringView(Controller::MEMORY_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0)
                 ? ControllerFlags{Controller::MEMORY_CONTROLLER}
-                : NO_CONTROLLERS;
+                : NO_CONTROLLER_FLAG;
 
       } else if (info.name ==
                  GetControllerStringView(Controller::CPUACCT_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0)
                 ? ControllerFlags{Controller::CPUACCT_CONTROLLER}
-                : NO_CONTROLLERS;
+                : NO_CONTROLLER_FLAG;
 
       } else if (info.name ==
                  GetControllerStringView(Controller::FREEZE_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0)
                 ? ControllerFlags{Controller::FREEZE_CONTROLLER}
-                : NO_CONTROLLERS;
+                : NO_CONTROLLER_FLAG;
 
       } else if (info.name ==
                  GetControllerStringView(Controller::BLOCK_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0)
                 ? ControllerFlags{Controller::BLOCK_CONTROLLER}
-                : NO_CONTROLLERS;
+                : NO_CONTROLLER_FLAG;
 
       } else if (info.name ==
                  GetControllerStringView(Controller::CPU_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0) ? ControllerFlags{Controller::CPU_CONTROLLER}
-                                  : NO_CONTROLLERS;
+                                  : NO_CONTROLLER_FLAG;
       } else if (info.name ==
                  GetControllerStringView(Controller::DEVICES_CONTROLLER)) {
         m_mounted_controllers_ |=
             (info.hierarchy != 0)
                 ? ControllerFlags{Controller::DEVICES_CONTROLLER}
-                : NO_CONTROLLERS;
+                : NO_CONTROLLER_FLAG;
       }
       ret = cgroup_get_all_controller_next(&handle, &info);
     }
-    if (handle) {
+
+    if (handle != nullptr) {
       cgroup_get_all_controller_end(&handle);
     }
 
@@ -125,9 +125,8 @@ CraneErrCode CgroupManager::Init() {
                  cgroup_strerror(ret));
       return CraneErrCode::ERR_CGROUP;
     }
-  }
-  // cgroup don't use /proc/cgroups to manage controller
-  else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
+  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
+    // cgroup v2 don't use /proc/cgroups to manage controller
     cgroup *root = cgroup_new_cgroup("/");
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
@@ -136,10 +135,11 @@ CraneErrCode CgroupManager::Init() {
 
     int ret = cgroup_get_cgroup(root);
     if (ret != 0) {
-      CRANE_WARN("Error : root cgroup not exist.");
+      CRANE_WARN("Error: root cgroup not exist.");
       return CraneErrCode::ERR_CGROUP;
     }
 
+    // NOLINTBEGIN(bugprone-suspicious-stringview-data-usage)
     if ((cgroup_get_controller(
             root,
             GetControllerStringView(Controller::CPU_CONTROLLER_V2).data())) !=
@@ -147,10 +147,10 @@ CraneErrCode CgroupManager::Init() {
       m_mounted_controllers_ |= ControllerFlags{Controller::CPU_CONTROLLER_V2};
     }
     if ((cgroup_get_controller(
-            root, GetControllerStringView(Controller::MEMORY_CONTORLLER_V2)
+            root, GetControllerStringView(Controller::MEMORY_CONTROLLER_V2)
                       .data())) != nullptr) {
       m_mounted_controllers_ |=
-          ControllerFlags{Controller::MEMORY_CONTORLLER_V2};
+          ControllerFlags{Controller::MEMORY_CONTROLLER_V2};
     }
     if ((cgroup_get_controller(
             root, GetControllerStringView(Controller::CPUSET_CONTROLLER_V2)
@@ -170,9 +170,10 @@ CraneErrCode CgroupManager::Init() {
         nullptr) {
       m_mounted_controllers_ |= ControllerFlags{Controller::PIDS_CONTROLLER_V2};
     }
+    // NOLINTEND(bugprone-suspicious-stringview-data-usage)
 
     ControllersMounted();
-    // root cgroup controller can't be change or created
+
 #ifdef CRANE_ENABLE_BPF
     bpf_runtime_info.SetLogEnabled(
         StrToLogLevel(g_config.CranedDebugLevel).value() < spdlog::level::info);
@@ -182,6 +183,7 @@ CraneErrCode CgroupManager::Init() {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErrCode::ERR_CGROUP;
   }
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -288,7 +290,7 @@ void CgroupManager::ControllersMounted() {
     if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
       CRANE_WARN("Cgroup controller for CPU is not available.");
     }
-    if (!Mounted(Controller::MEMORY_CONTORLLER_V2)) {
+    if (!Mounted(Controller::MEMORY_CONTROLLER_V2)) {
       CRANE_WARN("Cgroup controller for memory is not available.");
     }
     if (!Mounted(Controller::CPUSET_CONTROLLER_V2)) {
@@ -465,10 +467,10 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
             changed_cgroup)) {
       return nullptr;
     }
-    if ((preferred_controllers & Controller::MEMORY_CONTORLLER_V2) &&
+    if ((preferred_controllers & Controller::MEMORY_CONTROLLER_V2) &&
         InitializeController_(
-            *native_cgroup, Controller::MEMORY_CONTORLLER_V2,
-            required_controllers & Controller::MEMORY_CONTORLLER_V2, has_cgroup,
+            *native_cgroup, Controller::MEMORY_CONTROLLER_V2,
+            required_controllers & Controller::MEMORY_CONTROLLER_V2, has_cgroup,
             changed_cgroup)) {
       return nullptr;
     }
@@ -1162,9 +1164,9 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 
     struct BpfKey key = {static_cast<uint64_t>(0), static_cast<uint32_t>(0),
                          static_cast<uint32_t>(0)};
-    struct BpfDeviceMeta meta = {static_cast<uint32_t>(bpf_enable_logging_),
-                                 static_cast<uint32_t>(0), static_cast<int>(0),
-                                 static_cast<short>(0), static_cast<short>(0)};
+    struct BpfDeviceMeta meta = {
+        static_cast<uint32_t>(bpf_enable_logging_), static_cast<uint32_t>(0),
+        static_cast<int>(0), static_cast<int16_t>(0), static_cast<int16_t>(0)};
     if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
                              sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
       CRANE_ERROR("Failed to set debug log level in BPF");
@@ -1270,19 +1272,19 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
 
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
   return m_cgroup_info_.SetControllerValue(
-      CgConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_MAX_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
   return m_cgroup_info_.SetControllerValue(
-      CgConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_HIGH_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySwLimitBytes(uint64_t memory_bytes) {
   return m_cgroup_info_.SetControllerValue(
-      CgConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgConstant::Controller::MEMORY_CONTROLLER_V2,
       CgConstant::ControllerFile::MEMORY_SWAP_MAX_V2, memory_bytes);
 }
 
