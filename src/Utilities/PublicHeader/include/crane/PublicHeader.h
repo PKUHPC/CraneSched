@@ -225,6 +225,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 70 - 74
         "Supervisor error",
+        "Service shutting down",
     };
 // clang-format on
 }  // namespace Internal

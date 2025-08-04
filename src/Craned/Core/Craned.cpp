@@ -776,12 +776,9 @@ void GlobalVariableInit() {
         Recover(arg.req);
       },
       Craned::CallbackInvokeMode::SYNC, true);
-  g_ctld_client_sm->SetActionReadyCb([] { g_server->SetGrpcSrvReady(true); });
 
   g_ctld_client->Init();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-  g_ctld_client->AddGrpcCtldDisconnectedCb(
-      [] { g_server->SetGrpcSrvReady(false); });
 
   g_ctld_client->InitGrpcChannel(g_config.ControlMachine);
 
