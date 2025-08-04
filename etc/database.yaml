@@ -19,3 +19,4 @@ Vault:
   Username: admin
   Password: "123456"
   Tls: false
+  ExpirationMinutes: 30

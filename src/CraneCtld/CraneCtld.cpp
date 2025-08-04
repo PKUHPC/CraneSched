@@ -673,10 +673,12 @@ void ParseConfig(int argc, char** argv) {
         else
           g_config.VaultConf.Addr = "127.0.0.1";
 
-        if (vault_config["Port"])
-          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
-        else
-          g_config.VaultConf.Port = "8200";
+        g_config.VaultConf.Addr = YamlValueOr(vault_config["Addr"], "127.0.0.1");
+
+        g_config.VaultConf.Port = YamlValueOr(vault_config["Port"], "8200");
+
+        g_config.VaultConf.ExpirationMinutes = YamlValueOr<uint64_t>(
+            vault_config["ExpirationMinutes"], kDefaultCertExpirationMinutes);
 
         if (vault_config["Username"] && !vault_config["Username"].IsNull())
           g_config.VaultConf.Username =
