@@ -141,6 +141,11 @@ void TaskInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
+// void TaskInCtld::SetBeginTime(absl::Time const& val) {
+//   begin_time = val;
+//   runtime_attr.mutable_begin_time()->set_seconds(ToUnixSeconds(begin_time));
+// }
+
 void TaskInCtld::SetCachedPriority(const double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
@@ -203,6 +208,10 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   reservation = val.reservation();
 
   SetHeld(val.hold());
+
+  if (val.has_begin_time()) {
+    begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
+  }
 }
 
 void TaskInCtld::SetFieldsByRuntimeAttr(
