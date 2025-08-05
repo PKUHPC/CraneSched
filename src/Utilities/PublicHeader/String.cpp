@@ -119,6 +119,10 @@ bool ParseNodeList(const std::string &node_str,
 
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list) {
+  if (host_str.empty()) {
+    if (host_list != nullptr) host_list->clear();
+    return true;
+  }
   std::string name_str;
   name_str.reserve(host_str.size());
 
@@ -409,6 +413,24 @@ std::string GenerateCommaSeparatedString(const int val) {
     val_vec.push_back(i);
   }
   return absl::StrJoin(val_vec, ",");
+}
+
+uint64_t Fnv1a64(const std::string &s) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (unsigned char c : s) {
+    hash ^= c;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+std::string CalcConfigFnv1a64Hex(const YAML::Node &config) {
+  YAML::Emitter config_out;
+  config_out << config;
+  std::string normalized = config_out.c_str();
+
+  uint64_t hash_val = Fnv1a64(normalized);
+  return fmt::format("{:016x}", hash_val);
 }
 
 }  // namespace util

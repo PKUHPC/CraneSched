@@ -19,7 +19,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -129,19 +128,7 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(config_path);
 
       // Calculate hash val
-      YAML::Emitter config_out;
-      config_out << config;
-      std::string normalized = config_out.c_str();
-      std::array<unsigned char, SHA256_DIGEST_LENGTH> hash;
-      SHA256(reinterpret_cast<const unsigned char*>(normalized.data()),
-             normalized.size(), hash.data());
-
-      std::string hexstr;
-      hexstr.reserve(SHA256_DIGEST_LENGTH * 2);
-      for (unsigned char c : hash) {
-        fmt::format_to(std::back_inserter(hexstr), "{:02x}", c);
-      }
-      g_config.ConfigHashVal = std::move(hexstr);
+      g_config.ConfigHashVal = util::CalcConfigFnv1a64Hex(config);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
@@ -477,7 +464,7 @@ void ParseConfig(int argc, char** argv) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
-            if (name_list.size() == 1 && name_list.front() == "") {
+            if (name_list.empty()) {
               CRANE_WARN("No nodes in partition '{}'.", name);
             } else {
               for (auto&& node : name_list) {

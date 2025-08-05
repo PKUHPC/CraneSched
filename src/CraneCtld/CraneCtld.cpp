@@ -19,7 +19,6 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
-#include <openssl/sha.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -86,6 +85,9 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+
+      // Calculate hash val
+      g_config.ConfigHashVal = util::CalcConfigFnv1a64Hex(config);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
@@ -422,7 +424,6 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          part.nodelist_str = nodes;
           std::list<std::string> name_list;
           auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
           if (act_nodes_str == "ALL") {
@@ -436,12 +437,13 @@ void ParseConfig(int argc, char** argv) {
               CRANE_TRACE("Set the partition of node {} to {}", node, name);
             }
           } else {
+            part.nodelist_str = nodes;
             if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
 
-            if (name_list.size() == 1 && name_list.front() == "") {
+            if (name_list.empty()) {
               CRANE_WARN("No nodes in partition '{}'.", name);
             } else {
               for (auto&& node : name_list) {
@@ -809,7 +811,6 @@ void InitializeCtldGlobalVariables() {
           return;
         }
         stub->ConfigureCraned(craned_id, token);
-        stub->CheckCranedConfig(craned_id);
       });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {

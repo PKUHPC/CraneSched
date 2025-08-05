@@ -600,4 +600,5 @@ message CranedRemoteMeta {
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
+  string config_hash = 9;
 }

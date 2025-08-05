@@ -16,6 +16,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
         crane_proto_lib
         fpm
+        yaml-cpp
 )
 
 # This trimmed version is used for PAM module

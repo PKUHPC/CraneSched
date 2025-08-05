@@ -22,6 +22,7 @@
 #include <absl/strings/str_join.h>
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
+#include <yaml-cpp/yaml.h>
 
 #include <charconv>
 #include <filesystem>
@@ -88,5 +89,7 @@ std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
+
+std::string CalcConfigFnv1a64Hex(const YAML::Node &config);
 
 }  // namespace util

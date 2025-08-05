@@ -539,30 +539,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   return nullptr;
 }
 
-void CranedStub::CheckCranedConfig(const CranedId &craned_id) {
-  using crane::grpc::ConfigHashCalcReply;
-
-  ClientContext context;
-  google::protobuf::Empty request;
-  crane::grpc::ConfigHashCalcReply reply;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
-
-  auto status = m_stub_->ConfigHashCalc(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_ERROR(
-        "ConfigHashCalc RPC for Node {} returned with status not ok: {}",
-        craned_id, status.error_message());
-  }
-  if (!(g_config.DebugFlags & DEBUG_FLAG_NO_CONF_HASH) &&
-      (reply.hash_val() != g_config.ConfigHashVal)) {
-    CRANE_ERROR(
-        "CranedNode #{} appears to have a diffrent config.yaml than the "
-        "CraneCtld.",
-        craned_id);
-  }
-}
-
 CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
   // CRANE_TRACE("Enter EstablishedCranedStateMachine_");

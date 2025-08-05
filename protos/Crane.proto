@@ -859,11 +859,6 @@ message EnableAutoPowerControlReply {
   repeated string not_modified_reasons = 3;
 }
 
-message ConfigHashCalcReply {
-  // Hex-encoded (lowercase) SHA256 digest of the normalized YAML config.
-  string hash_val = 1;
-}
-
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -933,7 +928,6 @@ service Craned {
 
   rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
   rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
-  rpc ConfigHashCalc(google.protobuf.Empty) returns (ConfigHashCalcReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

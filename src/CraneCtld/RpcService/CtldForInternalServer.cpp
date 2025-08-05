@@ -88,6 +88,14 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
+  if (!(g_config.DebugFlags & DEBUG_FLAG_NO_CONF_HASH) &&
+      (request->remote_meta().config_hash() != g_config.ConfigHashVal)) {
+    CRANE_ERROR(
+        "CranedNode #{} appears to have a diffrent config.yaml than the "
+        "CraneCtld.",
+        request->craned_id());
+  }
+
   auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
   if (stub == nullptr) {
     CRANE_WARN("Craned {} to be ready is not connected.", request->craned_id());
