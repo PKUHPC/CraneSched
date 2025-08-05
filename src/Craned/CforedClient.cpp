@@ -490,7 +490,7 @@ void CforedManager::RegisterCb_() {
     }
 
     if (err != 0) {
-      poll_handle->close();
+      if (poll_handle) poll_handle->close();
       result.ok = false;
     }
 
@@ -508,7 +508,7 @@ void CforedManager::RegisterCb_() {
         if (!elem.pty) {
           read_finished = true;
         } else {
-          // For pty,do nothing, process exit on return -1 and error set to EIO
+          // For pty, do nothing, process exit on return -1 and error set to EIO
           CRANE_TRACE("Read EOF from pty task #{} on cfored {}", elem.task_id,
                       elem.cfored);
         }
@@ -559,13 +559,34 @@ void CforedManager::RegisterCb_() {
     };
 
     if (err == 0) {
-      poll_handle->on<uvw::poll_event>(std::move(poll_cb));
+      poll_handle->on<uvw::poll_event>(poll_cb);
 
       int ret =
           poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
       if (ret < 0) {
         CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
         result.ok = false;
+      } else {
+        char dummy;
+        ssize_t check_ret = read(elem.task_out_fd, &dummy, 0);
+
+        if (check_ret == 0 || (check_ret < 0 && elem.pty && errno == EIO)) {
+          // fd was already EOF or pty was already closed.
+          CRANE_DEBUG("Task #{} fd {} already closed, handling immediately.",
+                      elem.task_id, elem.task_out_fd);
+
+          // Process in next event loop to avoid directly operating in this cb.
+          auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
+          immediate->init();
+          immediate->on<uvw::check_event>([poll_cb = poll_cb, poll_handle](
+                                              const uvw::check_event&,
+                                              uvw::check_handle& h) {
+            uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
+            poll_cb(fake_event, *poll_handle);
+            h.close();
+          });
+          immediate->start();
+        }
       }
     }
 
