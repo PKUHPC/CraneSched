@@ -496,48 +496,64 @@ void CforedManager::RegisterCb_() {
 
     auto poll_cb = [this, elem = elem](const uvw::poll_event&,
                                        uvw::poll_handle& h) {
-      CRANE_TRACE("Detect task #{} output.", elem.task_id);
+      CRANE_TRACE("Task #{} output event is triggered.", elem.task_id);
 
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.task_out_fd, buf, MAX_BUF_SIZE);
+      auto bytes_read = read(elem.task_out_fd, buf, MAX_BUF_SIZE);
+      if (bytes_read > 0) {
+        std::string output(buf, bytes_read);
+        CRANE_TRACE("Task #{} forwarding content: {}", elem.task_id, output);
+        m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
+                                                             output);
+        return;
+      }
+
       bool read_finished{false};
-
-      if (ret == 0) {
-        if (!elem.pty) {
+      do {
+        if (bytes_read == 0 && !elem.pty) {
           read_finished = true;
-        } else {
+          break;
+        }
+
+        if (bytes_read == 0 && elem.pty) {
           // For pty, do nothing, process exit on return -1 and error set to EIO
-          CRANE_TRACE("Read EOF from pty task #{} on cfored {}", elem.task_id,
+          CRANE_TRACE("Task #{} on cfored {} read EOF from pty ", elem.task_id,
                       elem.cfored);
-        }
-      }
-
-      if (ret == -1) {
-        if (!elem.pty) {
-          CRANE_ERROR("Error when reading task #{} output, error {}",
-                      elem.task_id, std::strerror(errno));
-          return;
+          break;
         }
 
-        if (errno == EIO) {
-          // For pty output, the read() will return -1 with errno set to EIO
-          // when process exit.
-          // ref: https://unix.stackexchange.com/questions/538198
+        if (bytes_read == -1) {
+          if (!elem.pty) {
+            CRANE_WARN("Task #{} Error when reading non-pty output. Error: {}",
+                       elem.task_id, std::strerror(errno));
+            read_finished = true;
+            break;
+          }
+
+          if (errno == EIO) {
+            // For pty output, the read() will return -1 with errno set to EIO
+            // when process exit.
+            // ref: https://unix.stackexchange.com/questions/538198
+            read_finished = true;
+            break;
+          }
+
+          if (errno == EAGAIN) {
+            // Read before the process begin.
+            break;
+          }
+
+          CRANE_WARN("task #{} error when reading pty output. Error: {}",
+                     elem.task_id, std::strerror(errno));
           read_finished = true;
-        } else if (errno == EAGAIN) {
-          // Read before the process begin.
-          return;
-        } else {
-          CRANE_ERROR("Error when reading task #{} output, error {}",
-                      elem.task_id, std::strerror(errno));
-          return;
+          break;
         }
-      }
+      } while (false);
 
       if (read_finished) {
-        CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
+        CRANE_DEBUG("Task #{} to cfored {} finished its output.", elem.task_id,
                     elem.cfored);
         h.close();
         close(elem.task_out_fd);
@@ -545,17 +561,11 @@ void CforedManager::RegisterCb_() {
         bool ok_to_free =
             m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
         if (ok_to_free) {
-          CRANE_TRACE("It's ok to unregister task #{} on {}", elem.task_id,
+          CRANE_DEBUG("Task #{} It's ok to unregister on {}", elem.task_id,
                       elem.cfored);
           UnregisterIOForward_(elem.cfored, elem.task_id);
         }
-        return;
       }
-
-      std::string output(buf, ret);
-      CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
-      m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
-                                                           output);
     };
 
     if (err == 0) {
@@ -565,6 +575,7 @@ void CforedManager::RegisterCb_() {
           poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
       if (ret < 0) {
         CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
+        if (poll_handle) poll_handle->close();
         result.ok = false;
       } else {
         char dummy;
