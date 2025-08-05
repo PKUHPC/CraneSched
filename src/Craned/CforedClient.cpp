@@ -456,6 +456,11 @@ void CforedManager::RegisterCb_() {
           return true;
         });
 
+    if (elem.x11_enable_forwarding) {
+      CRANE_TRACE("Registering X11 forwarding for task #{}", elem.task_id);
+      result.x11_port = SetupX11forwarding_(elem.cfored, elem.task_id);
+    }
+
     CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.task_out_fd,
                 elem.task_id);
     std::shared_ptr<uvw::poll_handle> poll_handle =
@@ -490,10 +495,21 @@ void CforedManager::RegisterCb_() {
     }
 
     if (err != 0) {
+      CRANE_ERROR(
+          "Task #{} failed to init poll_handle for output fd {}. "
+          "Close poll handle and fd.",
+          elem.task_id, elem.task_out_fd);
+
       if (poll_handle) poll_handle->close();
+      close(elem.task_out_fd);
+
       result.ok = false;
+      p.second.set_value(result);
+
+      continue;
     }
 
+    // Init poll_handle successfully. Register Cb for output events.
     auto poll_cb = [this, elem = elem](const uvw::poll_event&,
                                        uvw::poll_handle& h) {
       CRANE_TRACE("Task #{} output event is triggered.", elem.task_id);
@@ -525,6 +541,11 @@ void CforedManager::RegisterCb_() {
         }
 
         if (bytes_read == -1) {
+          if (errno == EAGAIN) {
+            // Read before the process begin.
+            break;
+          }
+
           if (!elem.pty) {
             CRANE_WARN("Task #{} Error when reading non-pty output. Error: {}",
                        elem.task_id, std::strerror(errno));
@@ -532,16 +553,13 @@ void CforedManager::RegisterCb_() {
             break;
           }
 
+          // For pty:
+
           if (errno == EIO) {
             // For pty output, the read() will return -1 with errno set to EIO
             // when process exit.
             // ref: https://unix.stackexchange.com/questions/538198
             read_finished = true;
-            break;
-          }
-
-          if (errno == EAGAIN) {
-            // Read before the process begin.
             break;
           }
 
@@ -568,42 +586,25 @@ void CforedManager::RegisterCb_() {
       }
     };
 
-    if (err == 0) {
-      poll_handle->on<uvw::poll_event>(poll_cb);
+    poll_handle->on<uvw::poll_event>(poll_cb);
 
-      int ret =
-          poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-      if (ret < 0) {
-        CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-        if (poll_handle) poll_handle->close();
-        result.ok = false;
-      } else {
-        char dummy;
-        ssize_t check_ret = read(elem.task_out_fd, &dummy, 0);
-
-        if (check_ret == 0 || (check_ret < 0 && elem.pty && errno == EIO)) {
-          // fd was already EOF or pty was already closed.
-          CRANE_DEBUG("Task #{} fd {} already closed, handling immediately.",
-                      elem.task_id, elem.task_out_fd);
-
-          // Process in next event loop to avoid directly operating in this cb.
-          auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
-          immediate->init();
-          immediate->on<uvw::check_event>([poll_cb = poll_cb, poll_handle](
-                                              const uvw::check_event&,
-                                              uvw::check_handle& h) {
+    int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
+    if (ret < 0) {
+      CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
+      if (poll_handle) poll_handle->close();
+      result.ok = false;
+    } else {
+      // Doing one-time triggering in case of missing EOF of fast-ending task.
+      auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
+      immediate->init();
+      immediate->on<uvw::check_event>(
+          [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
+                                           uvw::check_handle& h) {
             uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
             poll_cb(fake_event, *poll_handle);
             h.close();
           });
-          immediate->start();
-        }
-      }
-    }
-
-    if (elem.x11_enable_forwarding) {
-      CRANE_TRACE("Registering X11 forwarding for task #{}", elem.task_id);
-      result.x11_port = SetupX11forwarding_(elem.cfored, elem.task_id);
+      immediate->start();
     }
 
     p.second.set_value(result);
