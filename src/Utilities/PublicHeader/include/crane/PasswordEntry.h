@@ -31,9 +31,8 @@ class PasswordEntry {
     if (s_passwd_size_ == -1) s_passwd_size_ = 16384;
   }
 
-  explicit PasswordEntry(uid_t uid) { Init(uid); }
   PasswordEntry() = default;
-  void Init(uid_t uid) {
+  [[nodiscard]] CraneErrCode Init(uid_t uid) {
     m_uid_ = uid;
     struct passwd pwd{};
     struct passwd* result;
@@ -41,9 +40,9 @@ class PasswordEntry {
     buf = new char[s_passwd_size_];
 
     if (getpwuid_r(uid, &pwd, buf, s_passwd_size_, &result) != 0) {
-      CRANE_ERROR("Error when getpwuid_r");
+      return crane::grpc::ErrCode::ERR_SYSTEM_ERR;
     } else if (result == nullptr) {
-      CRANE_ERROR("User uid #{} not found.", uid);
+      return crane::grpc::ErrCode::ERR_INVALID_UID;
     } else {
       m_valid_ = true;
       m_pw_name_.assign(pwd.pw_name);
@@ -56,6 +55,7 @@ class PasswordEntry {
     }
 
     delete[] buf;
+    return CraneErrCode::SUCCESS;
   }
 
   bool Valid() const { return m_valid_; };

@@ -1647,7 +1647,11 @@ void AccountManager::InitDataMap_() {
 
 CraneExpected<const User*> AccountManager::GetUserInfoByUidNoLock_(
     uint32_t uid) {
-  PasswordEntry entry(uid);
+  PasswordEntry entry{};
+  if (auto err = entry.Init(uid); err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Uid {} not existed", uid);
+    return std::unexpected(err);
+  };
 
   if (!entry.Valid()) {
     CRANE_ERROR("Uid {} not existed", uid);

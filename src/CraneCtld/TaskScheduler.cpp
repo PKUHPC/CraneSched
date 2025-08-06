@@ -437,7 +437,7 @@ void TaskScheduler::ReleaseTaskThread_(
           h.parent().walk([](auto&& h) { h.close(); });
           h.parent().stop();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
       });
 
   if (idle_handle->start() != 0) {
@@ -459,7 +459,7 @@ void TaskScheduler::CancelTaskThread_(
           h.parent().walk([](auto&& h) { h.close(); });
           h.parent().stop();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
       });
 
   if (idle_handle->start() != 0) {
@@ -481,7 +481,7 @@ void TaskScheduler::SubmitTaskThread_(
           h.parent().walk([](auto&& h) { h.close(); });
           h.parent().stop();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
       });
 
   if (idle_handle->start() != 0) {
@@ -503,7 +503,7 @@ void TaskScheduler::TaskStatusChangeThread_(
           h.parent().walk([](auto&& h) { h.close(); });
           h.parent().stop();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
       });
 
   if (idle_handle->start() != 0) {
@@ -1212,7 +1212,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
       !g_account_manager->CheckUidIsAdmin(operator_uid)) {
-    PasswordEntry entry(operator_uid);
+    PasswordEntry entry{};
+    if (auto err = entry.Init(operator_uid); err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Error when initializing password entry for uid {}",
+                  operator_uid);
+    };
+
     filter_uname = entry.Username();
   }
 

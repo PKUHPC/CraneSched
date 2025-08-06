@@ -180,7 +180,10 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   cpus_per_task = cpu_t(val.cpus_per_task());
 
   uid = val.uid();
-  password_entry = std::make_unique<PasswordEntry>(uid);
+  password_entry = std::make_unique<PasswordEntry>();
+  if (auto err = password_entry->Init(uid); err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Error when initializing password entry for uid {}", uid);
+  };
 
   // Note: gid is egid, which may be different from the
   // primary group of the user in `password_entry`.

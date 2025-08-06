@@ -1885,7 +1885,13 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     AddTerminationTimer_(m_task_.get(), sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
 
-    m_task_->pwd.Init(m_task_->GetParentStep().uid());
+    if (auto err = m_task_->pwd.Init(m_task_->GetParentStep().uid());
+        err != CraneErrCode::SUCCESS) {
+      CRANE_DEBUG("[Job #{}] Failed to look up password entry for uid {}",
+                  m_task_->GetParentStep().task_id(),
+                  m_task_->GetParentStep().uid());
+    }
+
     if (!m_task_->pwd.Valid()) {
       CRANE_DEBUG(
           "[Job #{}] Failed to look up password entry for uid {} of task",
