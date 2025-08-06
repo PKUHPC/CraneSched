@@ -128,7 +128,7 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(config_path);
 
       // Calculate hash val
-      g_config.ConfigHashVal = util::CalcConfigFnv1a64Hex(config);
+      g_config.ConfigHashVal = util::CalcConfigStdHashHex(config);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
@@ -451,11 +451,7 @@ void ParseConfig(int argc, char** argv) {
           std::list<std::string> name_list;
           auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
           if (act_nodes_str == "ALL") {
-            std::list<std::string> host_list =
-                g_config.CranedRes | std::ranges::views::keys |
-                std::ranges::to<std::list<std::string>>();
-
-            for (auto&& node : host_list) {
+            for (const auto& [node, _] : g_config.CranedRes) {
               part.nodes.emplace(node);
               CRANE_INFO("Find node {} in partition {}", node, name);
             }

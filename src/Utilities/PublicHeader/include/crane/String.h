@@ -90,6 +90,6 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
-std::string CalcConfigFnv1a64Hex(const YAML::Node &config);
+std::string CalcConfigStdHashHex(const YAML::Node &config);
 
 }  // namespace util

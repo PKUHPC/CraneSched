@@ -150,7 +150,7 @@
     } while (false)
 #endif
 
-enum DebugFlag : uint8_t {
+enum DebugFlag : uint64_t {
   /* no warning about config.yaml files checksum mismatch */
   DEBUG_FLAG_NO_CONF_HASH = 1 << 0,
 };
