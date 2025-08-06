@@ -94,10 +94,14 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-inline constexpr std::string kCraneCgPathPrefix = "crane";
+// For libcgroup use kRootCgPathPrefix as libcgroup operates in the system path
+// For manual cgroup operation, use kSystemCgPathPrefix / kRootCgPathPrefix
+inline const std::filesystem::path kSystemCgPathPrefix = "/sys/fs/cgroup";
+inline const std::filesystem::path kRootCgPathPrefix = "crane";
 
-inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
-inline const std::filesystem::path kRootCgroupFullPath = "/sys/fs/cgroup";
+inline constexpr std::string kJobCgPathPrefix = "job_";
+inline constexpr std::string kStepCgPathPrefix = "step_";
+inline constexpr std::string kTaskCgPathPrefix = "task_";
 
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
@@ -268,6 +272,7 @@ constexpr ControllerFlags operator|(
   return flags;
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
 // In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
@@ -285,6 +290,7 @@ constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
     CgConstant::Controller::MEMORY_CONTROLLER_V2 |
     CgConstant::Controller::IO_CONTROLLER_V2;
+// NOLINTEND(readability-identifier-naming)
 
 #ifdef CRANE_ENABLE_BPF
 class BpfRuntimeInfo {
@@ -510,7 +516,7 @@ class CgroupManager {
   static CraneErrCode TryToRecoverCgForJobs(
       std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
-  [[nodiscard]] static bool Mounted(CgConstant::Controller controller) {
+  [[nodiscard]] static bool IsMounted(CgConstant::Controller controller) {
     return static_cast<bool>(m_mounted_controllers_ &
                              ControllerFlags{controller});
   }
@@ -521,10 +527,11 @@ class CgroupManager {
    * \brief Allocate and return cgroup handle for job, should only be called
    * once per job.
    * \param job cgroup spec for job.
+   * \param recover recover cgroup instead creating new one.
    * \return CgroupInterface ptr,null if error.
    */
   static std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
-      const JobInD &job, bool recovery_mode);
+      const JobInD &job, bool recover);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
@@ -542,11 +549,19 @@ class CgroupManager {
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
-  static std::string CgroupStrByTaskId_(task_id_t task_id);
-  static std::optional<task_id_t> GetJobIdFromCg_(const std::string &path);
+  static std::string CgroupStrByJobId_(job_id_t job_id);
+  static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
+  static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
+                                        task_id_t task_id);
+
+  [[deprecated]] static std::optional<task_id_t> GetJobIdFromCg_(
+      const std::string &path);
+
+  static std::tuple<job_id_t, step_id_t, task_id_t> ParseIdsFromCgroupStr_(
+      const std::string &cgroup_str);
 
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
-      task_id_t job_id, ControllerFlags preferred_controllers,
+      const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
   static int InitializeController_(struct cgroup &cgroup,
@@ -554,13 +569,13 @@ class CgroupManager {
                                    bool required, bool has_cgroup,
                                    bool &changed_cgroup);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV1_(
+  static std::set<job_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV2_(
+  static std::set<job_id_t> GetJobIdsFromCgroupV2_(
       const std::string &root_cgroup_path);
 
-  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2_(
+  static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
       const std::string &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
