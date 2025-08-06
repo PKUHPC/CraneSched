@@ -86,8 +86,8 @@ void ParseConfig(int argc, char** argv) {
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
 
-      // Calculate hash val
-      g_config.ConfigHashVal = util::CalcConfigStdHashHex(config);
+      // Calculate crc val
+      g_config.ConfigCrcVal = util::CalcConfigCRC32Hex(config);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);

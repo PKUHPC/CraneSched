@@ -23,6 +23,7 @@
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
+#include <zlib.h>
 
 #include <charconv>
 #include <filesystem>
@@ -90,6 +91,6 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
-std::string CalcConfigStdHashHex(const YAML::Node &config);
+std::string CalcConfigCRC32Hex(const YAML::Node &config);
 
 }  // namespace util

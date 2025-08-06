@@ -88,8 +88,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  if (!(g_config.DebugFlags & DEBUG_FLAG_NO_CONF_HASH) &&
-      (request->remote_meta().config_hash() != g_config.ConfigHashVal)) {
+  if (!(g_config.DebugFlags & DEBUG_FLAG_NO_CONF_CRC) &&
+      (request->remote_meta().config_crc() != g_config.ConfigCrcVal)) {
     CRANE_ERROR(
         "CranedNode #{} appears to have a diffrent config.yaml than the "
         "CraneCtld.",

@@ -129,7 +129,7 @@ JobFileAppend: false
 # Set the subsystem to record more detailed events
 # Multiple subsystems can be specified using comma separators.
 # It is not case sensitive.
-DebugFlags: No_Config_Hash
+DebugFlags: No_Config_Crc
 
 Supervisor:
   Path: /usr/libexec/csupervisor

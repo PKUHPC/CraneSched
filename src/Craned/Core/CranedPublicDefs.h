@@ -105,7 +105,7 @@ struct Config {
   std::string CraneCtldForInternalListenPort;
   std::string CranedDebugLevel;
   std::string CraneClusterName;
-  std::string ConfigHashVal;
+  std::string ConfigCrcVal;
 
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CranedLogFile;

@@ -152,11 +152,11 @@
 
 enum DebugFlag : uint64_t {
   /* no warning about config.yaml files checksum mismatch */
-  DEBUG_FLAG_NO_CONF_HASH = 1 << 0,
+  DEBUG_FLAG_NO_CONF_CRC = 1 << 0,
 };
 
 const std::unordered_map<std::string_view, uint64_t> g_debug_flag_set_map = {
-    {"no_config_hash", DEBUG_FLAG_NO_CONF_HASH},
+    {"no_config_crc", DEBUG_FLAG_NO_CONF_CRC},
 };
 
 std::optional<spdlog::level::level_enum> StrToLogLevel(

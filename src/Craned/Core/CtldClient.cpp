@@ -407,7 +407,7 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));
   grpc_meta->set_craned_version(CRANE_VERSION_STRING);
-  grpc_meta->set_config_hash(g_config.ConfigHashVal);
+  grpc_meta->set_config_crc(g_config.ConfigCrcVal);
 
   const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
   auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
