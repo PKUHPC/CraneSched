@@ -132,6 +132,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
   std::thread output_clean_thread;
   std::atomic<bool> write_pending;
+  bool read_pending{false};
 
   bool ok;
   Tag tag;
@@ -160,16 +161,25 @@ void CforedClient::AsyncSendRecvThread_() {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
         if (!m_output_drained_.load(std::memory_order::acquire)) {
-          CRANE_TRACE("Waiting for output drained.");
+          CRANE_TRACE("Cfored [{}] Waiting for output drained.",
+                      m_cfored_name_);
           state = State::Draining;
           continue;
         }
         // No need to switch to Unregistering state if already switched.
-        if (state == State::Unregistering) continue;
+        if (state == State::Unregistering) {
+          CRANE_TRACE("Cfored [{}] Stopping: waiting for unregister reply.",
+                      m_cfored_name_);
+          continue;
+        }
         // Wait for forwarding thread to drain output queue and stop.
         if (output_clean_thread.joinable()) output_clean_thread.join();
         // If some writes are pending, let state machine clean them up.
-        if (write_pending.load(std::memory_order::acquire)) continue;
+        if (write_pending.load(std::memory_order::acquire)) {
+          CRANE_TRACE("Cfored [{}] Stopping: waiting for write operation done.",
+                      m_cfored_name_);
+          continue;
+        }
 
         // Cfored received stopping signal. Unregistering...
         CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
@@ -226,6 +236,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
+        read_pending = true;
       } else if (tag == Tag::Read) {
         CRANE_TRACE("Cfored RegisterAck Read. Start Forwarding..");
         state = State::Forwarding;
@@ -233,6 +244,7 @@ void CforedClient::AsyncSendRecvThread_() {
         // Issue initial read request
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
+        read_pending = true;
 
         // Start output forwarding thread
         output_clean_thread =
@@ -291,11 +303,17 @@ void CforedClient::AsyncSendRecvThread_() {
     } break;
 
     case State::Draining:
-      // Write all pending outputs, stop reading
+      // Write all pending outputs
       if (tag == Tag::Write) {
         CRANE_TRACE("One of drained output was sent.");
         write_pending.store(false, std::memory_order::release);
+        break;
       }
+
+      // Drop all read reply here, issue read request for unregister reply.
+      CRANE_TRACE("Cfored [{}] reading and msg dropped.", m_cfored_name_);
+      reply.Clear();
+      stream->Read(&reply, (void*)Tag::Read);
       break;
 
     case State::Unregistering:
