@@ -66,6 +66,8 @@ inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 
+inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
+
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
     "cranectld/cranectld.lock";

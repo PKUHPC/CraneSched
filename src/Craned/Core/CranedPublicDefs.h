@@ -68,8 +68,13 @@ struct Config {
     std::string CranedListenAddr;
     std::string CranedListenPort;
 
-    bool UseTls{false};
-    TlsCertificates TlsCerts;
+    struct TlsCertsConfig {
+      bool Enabled{false};
+      TlsCertificates TlsCerts;
+      std::string DomainSuffix;
+    };
+
+    TlsCertsConfig TlsConfig;
 
     std::string UnixSocketListenAddr;
     std::string UnixSocketForPamListenAddr;
