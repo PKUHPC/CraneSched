@@ -11,8 +11,8 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 
 # Tls settings
-UseTls: false
 TLS:
+  Enabled: false
   InternalCertFilePath: /etc/crane/tls/internal.pem
   InternalKeyFilePath: /etc/crane/tls/internal.key
   InternalCaFilePath: /etc/crane/tls/internal_ca.pem

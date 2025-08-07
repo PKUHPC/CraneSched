@@ -1494,7 +1494,7 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
 
 std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
     const grpc::ServerContext *context, uint32_t uid) {
-  if (!g_config.ListenConf.UseTls) return std::nullopt;
+  if (!g_config.ListenConf.TlsConfig.Enabled) return std::nullopt;
 
   auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
   if (cert.empty()) return "Certificate is empty";
@@ -1533,7 +1533,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
-  if (listen_conf.UseTls) {
+  if (listen_conf.TlsConfig.Enabled) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
                                         listen_conf.TlsConfig.ExternalCerts);
@@ -1552,7 +1552,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   CRANE_INFO("CraneCtld is listening on {}:{} and Tls is {}",
              cranectld_listen_addr, listen_conf.CraneCtldListenPort,
-             listen_conf.UseTls);
+             listen_conf.TlsConfig.Enabled);
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread signal_waiting_thread([p_server = m_server_.get()] {

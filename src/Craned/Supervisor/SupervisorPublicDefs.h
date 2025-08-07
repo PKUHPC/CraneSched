@@ -38,9 +38,12 @@ struct TaskStatusChangeQueueElem {
 
 struct Config {
   struct CforedListenConf {
-    bool UseTls{false};
-    TlsCertificates TlsCerts;
-    std::string DomainSuffix;
+    struct TlsCertConfig {
+      bool Enabled{false};
+      TlsCertificates TlsCerts;
+      std::string DomainSuffix;
+    };
+    TlsCertConfig TlsConfig;
   };
   CforedListenConf CforedListenConf;
   struct ContainerConfig {

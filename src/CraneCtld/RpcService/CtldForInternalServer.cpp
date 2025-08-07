@@ -338,7 +338,7 @@ CtldForInternalServer::CtldForInternalServer(
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
-  if (listen_conf.UseTls) {
+  if (listen_conf.TlsConfig.Enabled) {
     ServerBuilderAddTcpTlsListeningPortForInternal(
         &builder, cranectld_listen_addr,
         listen_conf.CraneCtldForInternalListenPort,
@@ -359,7 +359,7 @@ CtldForInternalServer::CtldForInternalServer(
 
   CRANE_INFO("CraneCtldForInternal is listening on {}:{} and Tls is {}",
              cranectld_listen_addr, listen_conf.CraneCtldForInternalListenPort,
-             listen_conf.UseTls);
+             listen_conf.TlsConfig.Enabled);
 }
 
 }  // namespace Ctld
