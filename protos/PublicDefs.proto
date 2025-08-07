@@ -168,7 +168,6 @@ message TaskToCtld {
   bool exclusive = 37;
 
   bool hold = 38;
-  string submit_hostname = 39;
 }
 
 message TaskInEmbeddedDb {
@@ -243,8 +242,7 @@ message TaskToD {
 
   bool get_user_env = 24;
   string container = 25;
-  string submit_hostname = 26;
-  uint32 total_gpus = 27;
+
   // Not used now.
   string extra_attr = 29;
 }
