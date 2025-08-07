@@ -29,7 +29,7 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     crane::grpc::StepStatusChangeReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready "};
+                        "CraneCtld Server is not ready"};
 
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
