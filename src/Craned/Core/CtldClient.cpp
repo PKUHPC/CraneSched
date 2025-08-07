@@ -324,8 +324,8 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.ListenConf.TlsConfig.Enabled)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
         server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsConfig.TlsCerts, g_config.ListenConf.TlsConfig.DomainSuffix,
-        channel_args);
+        g_config.ListenConf.TlsConfig.TlsCerts,
+        g_config.ListenConf.TlsConfig.DomainSuffix, channel_args);
   else
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
         server_address, g_config.CraneCtldForInternalListenPort, channel_args);

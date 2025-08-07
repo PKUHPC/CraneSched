@@ -321,9 +321,9 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
 
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
   if (listen_conf.TlsConfig.Enabled) {
-    ServerBuilderAddTcpTlsListeningPortForInternal(&builder, craned_listen_addr,
-                                                   listen_conf.CranedListenPort,
-                                                   listen_conf.TlsConfig.TlsCerts);
+    ServerBuilderAddTcpTlsListeningPortForInternal(
+        &builder, craned_listen_addr, listen_conf.CranedListenPort,
+        listen_conf.TlsConfig.TlsCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
                                              listen_conf.CranedListenPort);

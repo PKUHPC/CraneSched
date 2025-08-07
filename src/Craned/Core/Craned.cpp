@@ -208,8 +208,7 @@ void ParseConfig(int argc, char** argv) {
         if (tls_config["Enabled"])
           g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
-        g_tls_config.DomainSuffix =
-            YamlValueOr(tls_config["DomainSuffix"], "");
+        g_tls_config.DomainSuffix = YamlValueOr(tls_config["DomainSuffix"], "");
 
         if (auto result = util::ParseCertConfig(
                 "InternalCertFilePath", tls_config, &tls_certs.CertFilePath,

@@ -133,7 +133,6 @@ void ParseConfig(int argc, char** argv) {
 
         const auto& tls_config = config["TLS"];
 
-
         if (tls_config["Enabled"])
           g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
