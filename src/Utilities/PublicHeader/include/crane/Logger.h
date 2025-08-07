@@ -150,8 +150,6 @@
     } while (false)
 #endif
 
-
-
 std::optional<spdlog::level::level_enum> StrToLogLevel(
     const std::string &level);
 
