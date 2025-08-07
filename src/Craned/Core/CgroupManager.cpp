@@ -128,7 +128,7 @@ CraneErrCode CgroupManager::Init() {
     }
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // cgroup v2 don't use /proc/cgroups to manage controller
-    cgroup *root = cgroup_new_cgroup("/");
+    cgroup *root = cgroup_new_cgroup(CgConstant::kRootCgPathPrefix.c_str());
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
       return CraneErrCode::ERR_CGROUP;
@@ -202,12 +202,12 @@ CraneErrCode CgroupManager::TryToRecoverCgForJobs(
         GetJobIdsFromCgroupV1_(CgConstant::Controller::DEVICES_CONTROLLER));
 
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    rn_job_ids_with_cg =
-        GetJobIdsFromCgroupV2_(CgConstant::kSystemCgPathPrefix);
+    rn_job_ids_with_cg = GetJobIdsFromCgroupV2_(
+        CgConstant::kSystemCgPathPrefix / CgConstant::kRootCgPathPrefix);
 
 #ifdef CRANE_ENABLE_BPF
-    auto job_id_bpf_key_vec_map =
-        GetJobBpfMapCgroupsV2_(CgConstant::kSystemCgPathPrefix);
+    auto job_id_bpf_key_vec_map = GetJobBpfMapCgroupsV2_(
+        CgConstant::kSystemCgPathPrefix / CgConstant::kRootCgPathPrefix);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
       return CraneErrCode::ERR_EBPF;
@@ -423,8 +423,6 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   using CgConstant::Controller;
   using CgConstant::GetControllerStringView;
 
-  // std::string cgroup_string = CgroupStrByTaskId_(job_id);
-
   bool changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_str.c_str());
   if (native_cgroup == nullptr) {
@@ -546,8 +544,9 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
-    std::filesystem::path cgroup_full_path =
-        CgConstant::kSystemCgPathPrefix / cgroup_str;
+    std::filesystem::path cgroup_full_path = CgConstant::kSystemCgPathPrefix /
+                                             CgConstant::kRootCgPathPrefix /
+                                             cgroup_str;
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_str,
                   std::strerror(errno));
@@ -624,8 +623,9 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
 
   int base_level;
   int depth = 1;
-  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
-                                   &base_level);
+  int ret = cgroup_walk_tree_begin(controller_str,
+                                   CgConstant::kRootCgPathPrefix.c_str(), depth,
+                                   &handle, &info, &base_level);
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
       auto parsed_ids = ParseIdsFromCgroupStr_(info.path);
@@ -1338,8 +1338,9 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
   int cgroup_fd;
 
-  std::filesystem::path cgroup_path =
-      CgConstant::kSystemCgPathPrefix / m_cgroup_info_.GetCgroupPath();
+  std::filesystem::path cgroup_path = CgConstant::kSystemCgPathPrefix /
+                                      CgConstant::kRootCgPathPrefix /
+                                      m_cgroup_info_.GetCgroupPath();
 
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
@@ -1417,8 +1418,9 @@ bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
 
   int cgroup_fd;
 
-  std::filesystem::path cgroup_path =
-      CgConstant::kSystemCgPathPrefix / m_cgroup_info_.GetCgroupPath();
+  std::filesystem::path cgroup_path = CgConstant::kSystemCgPathPrefix /
+                                      CgConstant::kRootCgPathPrefix /
+                                      m_cgroup_info_.GetCgroupPath();
 
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {

@@ -94,7 +94,7 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-// For libcgroup use kRootCgPathPrefix as libcgroup operates in the system path
+// For libcgroup, use kRootCgPathPrefix as libcgroup operates in the system path
 // For manual cgroup operation, use kSystemCgPathPrefix / kRootCgPathPrefix
 inline const std::filesystem::path kSystemCgPathPrefix = "/sys/fs/cgroup";
 inline const std::filesystem::path kRootCgPathPrefix = "crane";
@@ -549,6 +549,7 @@ class CgroupManager {
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
+  // NOTE: The caller should add prefix to the generated cgroup string.
   static std::string CgroupStrByJobId_(job_id_t job_id);
   static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
   static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
