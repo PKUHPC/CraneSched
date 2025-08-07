@@ -706,9 +706,9 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
 
   env_map.emplace(
       "CRANE_MEM_PER_NODE",
-      std::format("{}M",
-                  res_in_node.allocatable_res_in_node().memory_limit_bytes() /
-                      (1024ULL * 1024ULL)));
+      std::to_string(
+          res_in_node.allocatable_res_in_node().memory_limit_bytes() /
+          (1024 * 1024)));
 
   return env_map;
 }

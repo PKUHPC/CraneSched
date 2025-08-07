@@ -462,7 +462,6 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
     init_req.set_log_dir(g_config.Supervisor.LogDir);
-    init_req.set_crane_cluster_name(g_config.CraneClusterName);
 
     // Pass job env to supervisor
     EnvMap res_env_map = job->GetJobEnvMap();
