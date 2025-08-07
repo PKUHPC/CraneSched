@@ -170,6 +170,7 @@ bool ParseHostList(const std::string &host_str,
   static const LazyRE2 regex = {R"(.*\[(.*)\](\..*)*$)"};
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
+    if (str_s == "") continue;
     if (!RE2::FullMatch(str_s, *regex)) {
       host_list->emplace_back(str_s);
     } else {
@@ -411,4 +412,11 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
+uint32_t CalcConfigCRC32(const YAML::Node &config) {
+  std::string normalized = YAML::Dump(config);
+  uint32_t crc =
+      crc32(0, reinterpret_cast<const unsigned char *>(normalized.data()),
+            normalized.size());
+  return crc;
+}
 }  // namespace util

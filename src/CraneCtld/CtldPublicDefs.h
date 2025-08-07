@@ -133,6 +133,7 @@ struct Config {
   bool CompressedRpc{};
 
   std::string CraneClusterName;
+  uint32_t ConfigCrcVal;
   std::string CraneCtldDebugLevel;
   std::filesystem::path CraneCtldLogFile;
 
@@ -166,6 +167,7 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
+  bool ConfigCrcWarnIgnoreFlag{false};
 };
 
 struct RunTimeStatus {
