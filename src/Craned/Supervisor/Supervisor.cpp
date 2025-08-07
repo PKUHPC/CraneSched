@@ -79,7 +79,8 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CraneBaseDir = msg.crane_base_dir();
   g_config.CraneScriptDir = msg.crane_script_dir();
   g_config.CraneClusterName = msg.crane_cluster_name();
-  g_config.CforedListenConf.TlsConfig.Enabled = msg.cfored_listen_conf().use_tls();
+  g_config.CforedListenConf.TlsConfig.Enabled =
+      msg.cfored_listen_conf().use_tls();
   g_config.CforedListenConf.TlsConfig.TlsCerts.CertContent =
       msg.cfored_listen_conf().tls_certs().cert_content();
   g_config.CforedListenConf.TlsConfig.TlsCerts.CaContent =
