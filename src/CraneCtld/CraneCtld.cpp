@@ -570,23 +570,10 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
-      if (config["DebugFlags"] && !config["DebugFlags"].IsNull()) {
-        auto str = config["DebugFlags"].as<std::string>();
-        absl::AsciiStrToLower(&str);
-
-        for (absl::string_view token : absl::StrSplit(str, ',')) {
-          token = absl::StripAsciiWhitespace(token);
-          if (!token.empty()) {
-            auto it = g_debug_flag_set_map.find(token);
-            if (it != g_debug_flag_set_map.end())
-              g_config.DebugFlags |= it->second;
-            else {
-              CRANE_ERROR("Unknown DebugFlag: {}", token);
-              std::exit(1);
-            }
-          }
-        }
-      }
+      if (config["ConfigCrcWarnIgnoreFlag"] &&
+          !config["ConfigCrcWarnIgnoreFlag"].IsNull())
+        g_config.ConfigCrcWarnIgnoreFlag =
+            config["ConfigCrcWarnIgnoreFlag"].as<bool>();
 
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];
