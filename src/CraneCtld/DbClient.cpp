@@ -333,8 +333,6 @@ bool MongodbClient::FetchJobRecords(
           view["mem_alloc"].get_int64().value);
       mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
           view["mem_alloc"].get_int64().value);
-      std::string device_map_str =
-          std::string(view["device_map"].get_string().value);
       auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
       *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
       task->set_name(std::string(view["task_name"].get_string().value));
@@ -908,6 +906,15 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
   } catch (const std::exception& e) {
     PrintError_(e.what());
   }
+
+  using json = nlohmann::json;
+  json j;
+  for (const auto& [device_name, pair_val] : device_map) {
+    // pair_val.first 是 total，pair_val.second 是 type_count_map
+    j[device_name]["total"] = pair_val.first;
+    j[device_name]["type_count_map"] = pair_val.second;  // 直接赋值 map
+  }
+  CRANE_TRACE("dbtag device_map{}", j.dump());
 
   return device_map;
 }
