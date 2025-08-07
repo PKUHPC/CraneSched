@@ -86,7 +86,6 @@ void ParseConfig(int argc, char** argv) {
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
 
-      // Calculate crc val
       g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
 
       g_config.CraneBaseDir =
