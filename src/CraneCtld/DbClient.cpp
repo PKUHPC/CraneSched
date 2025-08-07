@@ -633,18 +633,19 @@ void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
     for (const auto& mapItem : value) {
       const auto& device_name = mapItem.first;
       const auto& pair_val = mapItem.second;
-      uint64_t untyped_req_count = pair_val.first;
-      const auto& type_total_map = pair_val.second;
+      uint64_t total = pair_val.first;
+      const auto& type_count_map = pair_val.second;
 
-      mapValueDocument.append(kvp(
-          device_name, [&untyped_req_count, &type_total_map](sub_array arr) {
-            arr.append(static_cast<int64_t>(untyped_req_count));
-            arr.append([&type_total_map](sub_document typeDoc) {
-              for (const auto& typeItem : type_total_map) {
-                typeDoc.append(
-                    kvp(typeItem.first, static_cast<int64_t>(typeItem.second)));
-              }
-            });
+      mapValueDocument.append(
+          kvp(device_name, [&total, &type_count_map](sub_document deviceDoc) {
+            deviceDoc.append(kvp("total", static_cast<int64_t>(total)));
+            deviceDoc.append(
+                kvp("type_count_map", [&type_count_map](sub_document typeDoc) {
+                  for (const auto& typeItem : type_count_map) {
+                    typeDoc.append(kvp(typeItem.first,
+                                       static_cast<int64_t>(typeItem.second)));
+                  }
+                }));
           }));
     }
   }));
@@ -906,15 +907,6 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
   } catch (const std::exception& e) {
     PrintError_(e.what());
   }
-
-  using json = nlohmann::json;
-  json j;
-  for (const auto& [device_name, pair_val] : device_map) {
-    // pair_val.first 是 total，pair_val.second 是 type_count_map
-    j[device_name]["total"] = pair_val.first;
-    j[device_name]["type_count_map"] = pair_val.second;  // 直接赋值 map
-  }
-  CRANE_TRACE("dbtag device_map{}", j.dump());
 
   return device_map;
 }
