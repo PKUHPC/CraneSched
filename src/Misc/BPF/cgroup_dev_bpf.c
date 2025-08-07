@@ -1,6 +1,10 @@
+// DO NOT
 #include <linux/bpf.h>
+// REORDER
 #include <bpf/bpf_helpers.h>
+// THESE
 #include <bpf/bpf_core_read.h>
+// HEADERS
 #include <stdint.h>
 
 enum BPF_PERMISSION { ALLOW = 0, DENY };
@@ -18,8 +22,8 @@ struct BpfDeviceMeta {
   uint32_t major;
   uint32_t minor;
   int permission;
-  short access;
-  short type;
+  int16_t access;
+  int16_t type;
 };
 #pragma pack(pop)
 
@@ -104,8 +108,7 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   }
 
   if (enable_logging)
-    bpf_printk("Access allowed for device major=%d, minor=%d\n", major,
-               minor);
+    bpf_printk("Access allowed for device major=%d, minor=%d\n", major, minor);
   return 1;
 }
 
