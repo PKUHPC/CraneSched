@@ -91,6 +91,6 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
-std::string CalcConfigCRC32Hex(const YAML::Node &config);
+uint32_t CalcConfigCRC32(const YAML::Node &config);
 
 }  // namespace util

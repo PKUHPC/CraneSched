@@ -412,16 +412,11 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
-std::string CalcConfigCRC32Hex(const YAML::Node &config) {
-  YAML::Emitter config_out;
-  config_out << config;
-  std::string normalized = config_out.c_str();
-
+uint32_t CalcConfigCRC32(const YAML::Node &config) {
+  std::string normalized = YAML::Dump(config);
   uint32_t crc =
       crc32(0, reinterpret_cast<const unsigned char *>(normalized.data()),
             normalized.size());
-
-  return fmt::format("{:08x}", crc);
+  return crc;
 }
-
 }  // namespace util

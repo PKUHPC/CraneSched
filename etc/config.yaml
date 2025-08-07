@@ -129,7 +129,7 @@ JobFileAppend: false
 # Set the subsystem to record more detailed events
 # Multiple subsystems can be specified using comma separators.
 # It is not case sensitive.
-ConfigCrcWarnIgnoreFlag: true
+ConfigCrcWarnIgnoreFlag: false
 
 Supervisor:
   Path: /usr/libexec/csupervisor
