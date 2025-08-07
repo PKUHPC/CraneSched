@@ -80,12 +80,14 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CraneScriptDir = msg.crane_script_dir();
   g_config.CforedListenConf.UseTls = msg.cfored_listen_conf().use_tls();
   g_config.CforedListenConf.TlsCerts.CertContent =
+  g_config.CforedListenConf.TlsConfig.Enabled = msg.cfored_listen_conf().use_tls();
+  g_config.CforedListenConf.TlsConfig.TlsCerts.CertContent =
       msg.cfored_listen_conf().tls_certs().cert_content();
-  g_config.CforedListenConf.TlsCerts.CaContent =
+  g_config.CforedListenConf.TlsConfig.TlsCerts.CaContent =
       msg.cfored_listen_conf().tls_certs().ca_content();
-  g_config.CforedListenConf.TlsCerts.KeyContent =
+  g_config.CforedListenConf.TlsConfig.TlsCerts.KeyContent =
       msg.cfored_listen_conf().tls_certs().key_content();
-  g_config.CforedListenConf.DomainSuffix =
+  g_config.CforedListenConf.TlsConfig.DomainSuffix =
       msg.cfored_listen_conf().domain_suffix();
 
   // Environment from JobManager

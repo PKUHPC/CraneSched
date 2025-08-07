@@ -198,13 +198,17 @@ void ParseConfig(int argc, char** argv) {
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
 
-      if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        g_config.ListenConf.UseTls = true;
-        TlsCertificates& tls_certs = g_config.ListenConf.TlsCerts;
+      if (config["TLS"]) {
+        auto& g_tls_config = g_config.ListenConf.TlsConfig;
+
+        TlsCertificates& tls_certs = g_tls_config.TlsCerts;
 
         const auto& tls_config = config["TLS"];
 
-        g_config.ListenConf.DomainSuffix =
+        if (tls_config["Enabled"])
+          g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
+
+        g_tls_config.DomainSuffix =
             YamlValueOr(tls_config["DomainSuffix"], "");
 
         if (auto result = util::ParseCertConfig(
@@ -228,8 +232,6 @@ void ParseConfig(int argc, char** argv) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
-      } else {
-        g_config.ListenConf.UseTls = false;
       }
 
       if (config["ControlMachine"]) {

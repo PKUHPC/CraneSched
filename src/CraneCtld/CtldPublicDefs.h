@@ -91,8 +91,8 @@ struct Config {
     std::string CraneCtldListenPort;
     std::string CraneCtldForInternalListenPort;
 
-    bool UseTls{false};
     struct TlsCertsConfig {
+      bool Enabled{false};
       TlsCertificates InternalCerts;
       TlsCertificates ExternalCerts;
       std::unordered_set<std::string> AllowedNodes;

@@ -128,11 +128,14 @@ void ParseConfig(int argc, char** argv) {
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-      if (config["UseTls"] && config["UseTls"].as<bool>()) {
+      if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
-        g_config.ListenConf.UseTls = true;
 
         const auto& tls_config = config["TLS"];
+
+
+        if (tls_config["Enabled"])
+          g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
         if (tls_config["DomainSuffix"])
           g_tls_config.DomainSuffix =
@@ -207,8 +210,6 @@ void ParseConfig(int argc, char** argv) {
           CRANE_ERROR(result.value());
           std::exit(1);
         }
-      } else {
-        g_config.ListenConf.UseTls = false;
       }
 
       if (config["CraneCtldForeground"]) {
@@ -791,7 +792,7 @@ void InitializeCtldGlobalVariables() {
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();
     if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
-  } else if (g_config.ListenConf.UseTls) {
+  } else if (g_config.ListenConf.TlsConfig.Enabled) {
     CRANE_ERROR("[Security] TLS is enabled but Vault is not enabled.");
     std::exit(1);
   }
