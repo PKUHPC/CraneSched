@@ -126,9 +126,7 @@ RejectJobsBeyondCapacity: false
 # Default value is false.
 JobFileAppend: false
 
-# Set the subsystem to record more detailed events
-# Multiple subsystems can be specified using comma separators.
-# It is not case sensitive.
+# Set the flag to ignore warnings about config files mismatches.
 ConfigCrcWarnIgnoreFlag: false
 
 Supervisor:

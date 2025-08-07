@@ -127,7 +127,6 @@ void ParseConfig(int argc, char** argv) {
       using util::YamlValueOr;
       YAML::Node config = YAML::LoadFile(config_path);
 
-      // Calculate crc val
       g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
 
       g_config.CraneBaseDir =
