@@ -336,7 +336,7 @@ bool MongodbClient::FetchJobRecords(
       std::string device_map_str =
           std::string(view["device_map"].get_string().value);
       auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
-      *device_map_ptr = ToGrpcDeviceMap(JsonStringToDeviceMap(device_map_str));
+      *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
       task->set_uid(view["id_user"].get_int32().value);
@@ -627,6 +627,31 @@ void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
   }));
 }
 
+template <>
+void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
+                                                   const std::string& key,
+                                                   const DeviceMap& value) {
+  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
+    for (const auto& mapItem : value) {
+      const auto& device_name = mapItem.first;
+      const auto& pair_val = mapItem.second;
+      uint64_t untyped_req_count = pair_val.first;
+      const auto& type_total_map = pair_val.second;
+
+      mapValueDocument.append(kvp(
+          device_name, [&untyped_req_count, &type_total_map](sub_array arr) {
+            arr.append(static_cast<int64_t>(untyped_req_count));
+            arr.append([&type_total_map](sub_document typeDoc) {
+              for (const auto& typeItem : type_total_map) {
+                typeDoc.append(
+                    kvp(typeItem.first, static_cast<int64_t>(typeItem.second)));
+              }
+            });
+          }));
+    }
+  }));
+}
+
 template <typename... Ts, std::size_t... Is>
 bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
@@ -830,88 +855,61 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
-std::unordered_map<std::string, uint64_t> MongodbClient::ParseTypeMap(
-    const bsoncxx::document::view& type_map_view) {
-  std::unordered_map<std::string, uint64_t> type_map;
-
-  for (const auto& element : type_map_view) {
-    const std::string type_name = std::string(element.key());
-    uint64_t type_total = 0;
-    if (element.type() == bsoncxx::type::k_int64) {
-      type_total = element.get_int64().value;
-    } else if (element.type() == bsoncxx::type::k_int32) {
-      type_total = element.get_int32().value;
-    } else {
-      PrintError_("type_map value: BSON type is not a number.");
-    }
-    type_map[type_name] = type_total;
-  }
-
-  return type_map;
-}
-
-DeviceMap MongodbClient::JsonStringToDeviceMap(
-    const std::string& device_map_str) {
+DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
   DeviceMap device_map;
-  if (device_map_str.empty()) {
-    return device_map;
-  }
+
   try {
-    bsoncxx::document::value bson_doc = bsoncxx::from_json(device_map_str);
-    bsoncxx::document::view bson_view = bson_doc.view();
+    auto device_map_elem = doc["device_map"];
+    if (!device_map_elem || device_map_elem.type() != bsoncxx::type::k_document)
+      return device_map;
 
-    for (const auto& device_entry : bson_view) {
-      const std::string device_name = std::string(device_entry.key());
-      bsoncxx::document::view device_doc = device_entry.get_document().view();
+    auto device_map_doc = device_map_elem.get_document().view();
 
-      auto untyped_elem = device_doc["untyped_req_count"];
-      uint64_t untyped_req_count = 0;
-      if (untyped_elem.type() == bsoncxx::type::k_int64) {
-        untyped_req_count = untyped_elem.get_int64().value;
-      } else if (untyped_elem.type() == bsoncxx::type::k_int32) {
-        untyped_req_count = untyped_elem.get_int32().value;
-      } else {
-        PrintError_("untyped_req_count: BSON type is not a number.");
+    for (const auto& device_elem : device_map_doc) {
+      std::string device_name = std::string(device_elem.key());
+      if (device_elem.type() != bsoncxx::type::k_document) {
+        PrintError_("device_map value: BSON type is not a document.");
+        continue;
       }
 
-      bsoncxx::document::view type_map_view =
-          device_doc["type_map"].get_document().view();
-      std::unordered_map<std::string, uint64_t> type_map =
-          ParseTypeMap(type_map_view);
+      auto type_count_doc = device_elem.get_document().view();
 
-      device_map[device_name] = {untyped_req_count, type_map};
+      uint64_t total = 0;
+      if (auto total_elem = type_count_doc["total"]) {
+        if (total_elem.type() == bsoncxx::type::k_int64)
+          total = static_cast<uint64_t>(total_elem.get_int64());
+        else if (total_elem.type() == bsoncxx::type::k_int32)
+          total = static_cast<uint64_t>(total_elem.get_int32());
+        else
+          PrintError_("total: BSON type is not a number.");
+      }
+
+      std::unordered_map<std::string, uint64_t> type_count_map;
+      if (auto type_map_elem = type_count_doc["type_count_map"];
+          type_map_elem && type_map_elem.type() == bsoncxx::type::k_document) {
+        auto type_map_doc = type_map_elem.get_document().view();
+        for (const auto& type_elem : type_map_doc) {
+          uint64_t val = 0;
+          if (type_elem.type() == bsoncxx::type::k_int64)
+            val = static_cast<uint64_t>(type_elem.get_int64());
+          else if (type_elem.type() == bsoncxx::type::k_int32)
+            val = static_cast<uint64_t>(type_elem.get_int32());
+          else
+            PrintError_("type_count_map value: BSON type is not a number.");
+
+          type_count_map[std::string(type_elem.key())] = val;
+        }
+      } else {
+        PrintError_("type_count_map: BSON type is not a document.");
+      }
+
+      device_map[device_name] = {total, type_count_map};
     }
   } catch (const std::exception& e) {
     PrintError_(e.what());
   }
 
   return device_map;
-}
-
-std::string MongodbClient::DeviceMapToJsonString(const DeviceMap& device_map) {
-  bsoncxx::builder::stream::document device_map_doc;
-
-  for (const auto& device_entry : device_map) {
-    const std::string& device_name = device_entry.first;
-    const auto& [untyped_req_count, type_map] = device_entry.second;
-
-    bsoncxx::builder::stream::document device_doc;
-    device_doc << "untyped_req_count"
-               << static_cast<int64_t>(untyped_req_count);
-
-    bsoncxx::builder::stream::document type_map_doc;
-    for (const auto& type_entry : type_map) {
-      const std::string& type_name = type_entry.first;
-      uint64_t type_total = type_entry.second;
-      type_map_doc << type_name << static_cast<int64_t>(type_total);
-    }
-
-    device_doc << "type_map" << type_map_doc.view();
-
-    device_map_doc << device_name << device_doc.view();
-  }
-
-  return bsoncxx::to_json(device_map_doc.view());
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
@@ -930,8 +928,6 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   }
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
-  std::string device_map_str =
-      DeviceMapToJsonString(allocated_res_view.GetDeviceMap());
 
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
@@ -970,7 +966,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, std::string>                    /*35-39*/
+             int64_t, DeviceMap, std::string>                      /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1004,7 +1000,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             device_map_str, task_to_ctld.container()};
+             allocated_res_view.GetDeviceMap(), task_to_ctld.container()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1020,8 +1016,6 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   }
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
-  std::string device_map_str =
-      DeviceMapToJsonString(task->allocated_res_view.GetDeviceMap());
 
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
@@ -1060,7 +1054,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, std::string, std::string>                    /*35-39*/
+             int64_t, DeviceMap, std::string>                      /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1086,7 +1080,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str, task->container};
+             task->allocated_res_view.GetDeviceMap(), task->container};
   return DocumentConstructor_(fields, values);
 }
 
