@@ -536,14 +536,15 @@ class CgroupManager {
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
-  static CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid);
-
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
     m_cg_version_ = v;
   }
   [[nodiscard]] static CgConstant::CgroupVersion GetCgroupVersion() {
     return m_cg_version_;
   }
+
+  static CraneExpected<std::tuple<job_id_t, step_id_t, task_id_t>> GetIdsByPid(
+      pid_t pid);
 
 #ifdef CRANE_ENABLE_BPF
   inline static BpfRuntimeInfo bpf_runtime_info;
@@ -554,9 +555,6 @@ class CgroupManager {
   static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
   static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
                                         task_id_t task_id);
-
-  [[deprecated]] static std::optional<task_id_t> GetJobIdFromCg_(
-      const std::string &path);
 
   static std::tuple<job_id_t, step_id_t, task_id_t> ParseIdsFromCgroupStr_(
       const std::string &cgroup_str);

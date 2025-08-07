@@ -397,18 +397,6 @@ CgroupManager::ParseIdsFromCgroupStr_(const std::string &cgroup_str) {
   return {0, 0, 0};
 }
 
-std::optional<task_id_t> CgroupManager::GetJobIdFromCg_(
-    const std::string &path) {
-  static const auto cg_pattern_str = CgConstant::kTaskCgPathPrefix + R"((\d+))";
-  static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-  std::string job_id;
-  if (RE2::FullMatch(path, *cg_pattern, &job_id)) {
-    return std::stoul(job_id);
-  }
-
-  return std::nullopt;
-}
-
 /**
  * @brief Create or open cgroup for task, not guarantee cg spec exists.
  * @param cgroup_str cgroup path string to create or open.
@@ -742,11 +730,13 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) {
-  static const auto cg_pattern_str =
-      ".*/" + CgConstant::kTaskCgPathPrefix + R"((\d+).*)";
+CraneExpected<std::tuple<job_id_t, step_id_t, task_id_t>>
+CgroupManager::GetIdsByPid(pid_t pid) {
+  static const auto cg_pattern_str = std::format(
+      R"(.*/{}(\d+)(?:\/{}(\d+))?(?:\/{}(\d+))?)", CgConstant::kJobCgPathPrefix,
+      CgConstant::kStepCgPathPrefix, CgConstant::kTaskCgPathPrefix);
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-  std::string job_id_str;
+
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
   std::ifstream infile(cgroup_file);
 
@@ -755,14 +745,21 @@ CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) {
     return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
 
+  job_id_t job_id{};
+  step_id_t step_id{};
+  task_id_t task_id{};
+
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
+    // TODO: Fix examples in comments below.
     // cgroup file format: 0::/Crane_Task_148567
     std::string line;
 
     while (std::getline(infile, line)) {
-      if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
-        CRANE_TRACE("Get task Id {}", job_id_str);
-        return std::stoi(job_id_str);
+      if (RE2::FullMatch(line, *cg_pattern, &job_id, &step_id, &task_id)) {
+        CRANE_TRACE("Get ids of pid {}, job: {}, step: {}, task: {}", pid,
+                    job_id, step_id, task_id);
+        return std::tuple<job_id_t, step_id_t, task_id_t>{job_id, step_id,
+                                                          task_id};
       }
     }
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
@@ -787,20 +784,19 @@ CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) {
       return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
     }
 
-    if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
-      return std::stoi(job_id_str);
+    if (RE2::FullMatch(line, *cg_pattern, &job_id, &step_id, &task_id)) {
+      CRANE_TRACE("Get ids of pid {}, job: {}, step: {}, task: {}", pid, job_id,
+                  step_id, task_id);
+      return std::tuple<job_id_t, step_id_t, task_id_t>{job_id, step_id,
+                                                        task_id};
     }
 
   } else {
     std::unreachable();
   }
+
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
-
-/*
- * Cleanup cgroup.
- * If the cgroup was created by us in the OS, remove it..
- */
 
 bool Cgroup::SetControllerValue(CgConstant::Controller controller,
                                 CgConstant::ControllerFile controller_file,

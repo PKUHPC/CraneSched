@@ -20,6 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "CgroupManager.h"
 #include "CranedForPamServer.h"
 #include "CtldClient.h"
 #include "JobManager.h"
@@ -108,7 +109,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive QueryTaskIdFromPort RPC from {}: port: {}",
+  CRANE_TRACE("Receive QueryStepFromPort RPC from {}: port: {}",
               context->peer(), request->port());
 
   ino_t inode;
@@ -174,28 +175,32 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
 
   // 3. pid2jobid
   do {
-    auto task_id_expt = CgroupManager::GetJobIdFromPid(pid_i);
-    if (task_id_expt.has_value()) {
-      CRANE_TRACE("Task id for pid {} is #{}", pid_i, task_id_expt.value());
+    auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
+    if (pid_to_ids_expt.has_value()) {
+      auto [job_id, step_id, task_id] = pid_to_ids_expt.value();
+      CRANE_TRACE("Find {} for pid {}", pid_to_ids_expt.value(), pid_i);
+
+      // FIXME: Use step id instead of job id / step id.
       response->set_ok(true);
-      response->set_task_id(task_id_expt.value());
+      response->set_task_id(job_id);
       return Status::OK;
-    } else {
-      std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
-      YAML::Node proc_details = YAML::LoadFile(proc_dir);
-      if (proc_details["PPid"]) {
-        pid_t ppid = std::stoi(proc_details["PPid"].as<std::string>());
-        CRANE_TRACE("Pid {} not found in TaskManager. Checking ppid {}", pid_i,
-                    ppid);
-        pid_i = ppid;
-      } else {
-        CRANE_TRACE(
-            "Pid {} not found in TaskManager. "
-            "However ppid is 1. Break the loop.",
-            pid_i);
-        pid_i = 1;
-      }
     }
+
+    std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
+    YAML::Node proc_details = YAML::LoadFile(proc_dir);
+    if (proc_details["PPid"]) {
+      pid_t ppid = std::stoi(proc_details["PPid"].as<std::string>());
+      CRANE_TRACE("Pid {} not found in TaskManager. Checking ppid {}", pid_i,
+                  ppid);
+      pid_i = ppid;
+    } else {
+      CRANE_TRACE(
+          "Pid {} not found in TaskManager. "
+          "However ppid is 1. Break the loop.",
+          pid_i);
+      pid_i = 1;
+    }
+
   } while (pid_i > 1);
 
   response->set_ok(false);
