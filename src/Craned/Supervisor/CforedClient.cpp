@@ -71,73 +71,127 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
                       .stdin_write = stdin_write,
                       .stdout_read = stdout_read};
 
-  auto poll_handle = m_loop_->resource<uvw::poll_handle>(stdout_read);
-  poll_handle->on<uvw::poll_event>(
-      [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
-        CRANE_TRACE("Detect task #{} output.", g_config.JobId);
+  auto poll_handle =
+      m_loop_->uninitialized_resource<uvw::poll_handle>(stdout_read);
 
-        constexpr int MAX_BUF_SIZE = 4096;
-        char buf[MAX_BUF_SIZE];
+  int err = 0, retry_cnt = 0;
+  while (true) {
+    err = poll_handle->init();
+    if (err == 0) break;
+    if (err != UV_EINTR && err != UV_EAGAIN) {
+      CRANE_ERROR("[Proc #{}] Failed to init poll_handle for output fd {}: {}",
+                  pid, stdout_read, uv_strerror(err));
+      // TODO: handle failed status
+      break;
+    }
 
-        auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
-        bool read_finished{false};
+    if (retry_cnt++ > 3) {
+      CRANE_ERROR(
+          "[Proc #{}] Failed to init poll_handle for output fd {}: {} after "
+          "3 times.",
+          pid, stdout_read, uv_strerror(err));
+      // TODO: handle failed status
+      break;
+    }
 
-        if (ret == 0) {
-          if (!meta.pty) {
-            read_finished = true;
-          } else {
-            // For pty,do nothing, process exit on return -1 and error set to
-            // EIO
-            CRANE_TRACE("Read EOF from pty task #{} on cfored {}",
-                        g_config.JobId, m_cfored_name_);
-          }
-        }
+    CRANE_DEBUG(
+        "[Proc #{}] Recoverable error {} when initializing poll_handle "
+        "for output fd {}, retrying...",
+        pid, uv_strerror(err), stdout_read);
 
-        if (ret == -1) {
-          if (!meta.pty) {
-            CRANE_ERROR("Error when reading task #{} output, error {}",
-                        g_config.JobId, std::strerror(errno));
-            return;
-          }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
 
-          if (errno == EIO) {
-            // For pty output, the read() will return -1 with errno set to EIO
-            // when process exit.
-            // ref: https://unix.stackexchange.com/questions/538198
-            read_finished = true;
-          } else if (errno == EAGAIN) {
-            // Read before the process begin.
-            return;
-          } else {
-            CRANE_ERROR("Error when reading task #{} output, error {}",
-                        g_config.JobId, std::strerror(errno));
-            return;
-          }
-        }
+  if (err != 0) {
+    CRANE_ERROR(
+        "[Proc #{}] failed to init poll_handle for output fd {}. "
+        "Close poll handle and fd.",
+        pid, stdout_read);
 
-        if (read_finished) {
-          CRANE_TRACE("Task #{} to cfored {} finished its output.",
-                      g_config.JobId, m_cfored_name_);
-          h.close();
-          close(meta.stdout_read);
+    if (poll_handle) poll_handle->close();
+    close(stdout_read);
 
-          bool ok_to_free = this->TaskOutputFinish(meta.pid);
-          if (ok_to_free) {
-            CRANE_TRACE("It's ok to begin unregister task #{} on {}",
-                        g_config.JobId, m_cfored_name_);
-            TaskEnd(meta.pid);
-          }
-          return;
-        }
+    // TODO: handle failed status
+  }
+  auto poll_cb = [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
+    CRANE_TRACE("Detect task #{} output.", g_config.JobId);
 
-        std::string output(buf, ret);
-        CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
-        this->TaskOutPutForward(output);
-      });
+    constexpr int MAX_BUF_SIZE = 4096;
+    char buf[MAX_BUF_SIZE];
 
+    auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
+    bool read_finished{false};
+
+    if (ret == 0) {
+      if (!meta.pty) {
+        read_finished = true;
+      } else {
+        // For pty,do nothing, process exit on return -1 and error set to
+        // EIO
+        CRANE_TRACE("Read EOF from pty task #{} on cfored {}", g_config.JobId,
+                    m_cfored_name_);
+      }
+    }
+
+    if (ret == -1) {
+      if (!meta.pty) {
+        CRANE_ERROR("Error when reading task #{} output, error {}",
+                    g_config.JobId, std::strerror(errno));
+        return;
+      }
+
+      if (errno == EIO) {
+        // For pty output, the read() will return -1 with errno set to EIO
+        // when process exit.
+        // ref: https://unix.stackexchange.com/questions/538198
+        read_finished = true;
+      } else if (errno == EAGAIN) {
+        // Read before the process begin.
+        return;
+      } else {
+        CRANE_ERROR("Error when reading task #{} output, error {}",
+                    g_config.JobId, std::strerror(errno));
+        return;
+      }
+    }
+
+    if (read_finished) {
+      CRANE_TRACE("Task #{} to cfored {} finished its output.", g_config.JobId,
+                  m_cfored_name_);
+      h.close();
+      close(meta.stdout_read);
+
+      bool ok_to_free = this->TaskOutputFinish(meta.pid);
+      if (ok_to_free) {
+        CRANE_TRACE("It's ok to begin unregister task #{} on {}",
+                    g_config.JobId, m_cfored_name_);
+        TaskEnd(meta.pid);
+      }
+      return;
+    }
+
+    std::string output(buf, ret);
+    CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
+    this->TaskOutPutForward(output);
+  };
+  poll_handle->on<uvw::poll_event>(poll_cb);
   int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
   if (ret < 0) {
     CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
+    if (poll_handle) poll_handle->close();
+    // TODO: handle failed status
+  } else {
+    // Doing one-time triggering in case of missing EOF of fast-ending task.
+    auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
+    immediate->init();
+    immediate->on<uvw::check_event>(
+        [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
+                                         uvw::check_handle& h) {
+          uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
+          poll_cb(fake_event, *poll_handle);
+          h.close();
+        });
+    immediate->start();
   }
 
   absl::MutexLock lock(&m_mtx_);
@@ -495,7 +549,8 @@ void CforedClient::AsyncSendRecvThread_() {
         CRANE_TRACE("TASK_X11_INPUT len:{}.", msg->length());
       } else if (reply.type() == StreamTaskIOReply::TASK_INPUT) {
         msg = &reply.payload_task_input_req().msg();
-        CRANE_TRACE("TASK_INPUT len:{}.", msg->length());
+        CRANE_TRACE("TASK_INPUT len:{} EOF:{}.", msg->length(),
+                    reply.payload_task_input_req().eof());
       } else [[unlikely]] {
         CRANE_ERROR("Expect TASK_INPUT or TASK_X11_INPUT, but got {}",
                     (int)reply.type());
@@ -512,7 +567,7 @@ void CforedClient::AsyncSendRecvThread_() {
                 !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd, false);
         }
       } else {
-        bool eof = reply.payload_task_input_req().eof();
+        const bool eof = reply.payload_task_input_req().eof();
         // CRANED_TASK_INPUT
         for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
           if (!fwd_meta.input_stopped)
@@ -528,11 +583,21 @@ void CforedClient::AsyncSendRecvThread_() {
     } break;
 
     case State::Draining:
-      // Write all pending outputs, stop reading
+      // Write all pending outputs
       if (tag == Tag::Write) {
-        CRANE_TRACE("One of drained output was sent.");
+        CRANE_TRACE("Cfored {} drain 1 write event.", m_cfored_name_);
         write_pending.store(false, std::memory_order::release);
+        break;
       }
+
+      // Drop all read reply (task input from crun) here and
+      // make sure there will always be a read request for unregister reply.
+      //
+      // Here, the last issued read request is for unregister reply.
+      CRANE_TRACE("Cfored {} read type {} in Draining state. Dropped it.",
+                  m_cfored_name_, static_cast<int>(reply.type()));
+      reply.Clear();
+      stream->Read(&reply, (void*)Tag::Read);
       break;
 
     case State::Unregistering:

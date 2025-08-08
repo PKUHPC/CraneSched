@@ -896,7 +896,14 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       // we just remove the cgroup for such task, Ctld will fail in the
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
-      // FreeJobInstanceAllocation_(job_instance->release());
+
+      if (job_instance)
+        FreeJobAllocation_({job_instance->job_id});
+      else {
+        StepStopAndDoStatusChangeAsync(
+            elem.step_id, crane::grpc::TaskStatus::Cancelled,
+            ExitCode::kExitCodeTerminated, "Job not found.");
+      }
       continue;
     }
 
