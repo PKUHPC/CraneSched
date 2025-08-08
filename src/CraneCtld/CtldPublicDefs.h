@@ -424,6 +424,7 @@ struct StepInCtld {
   crane::grpc::RuntimeAttrOfStep runtime_attr;
 
  public:
+  virtual ~StepInCtld() = default;
   void SetSubmitTime(absl::Time submit_time);
   absl::Time SubmitTime() const { return m_submit_time_; }
   void SetStartTime(absl::Time start_time);
@@ -687,7 +688,15 @@ struct TaskInCtld {
     }
     return nullptr;
   }
-
+  std::unique_ptr<CommonStepInCtld> EraseStep(step_id_t step_id) {
+    if (m_steps_.contains(step_id)) {
+      auto step =
+          std::unique_ptr<CommonStepInCtld>(m_steps_.at(step_id).release());
+      m_steps_.erase(step_id);
+      return step;
+    }
+    return nullptr;
+  }
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> const&
   Steps() {
     return m_steps_;

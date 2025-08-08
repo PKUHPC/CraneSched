@@ -33,6 +33,19 @@
 
 namespace Craned {
 
+DaemonStepInstance* StepInstance::GetDaemonStepInstance() {
+  return dynamic_cast<DaemonStepInstance*>(this);
+}
+const DaemonStepInstance* StepInstance::GetDaemonStepInstance() const {
+  return dynamic_cast<const DaemonStepInstance*>(this);
+}
+CommonStepInstance* StepInstance::GetCommonStepInstance() {
+  return dynamic_cast<CommonStepInstance*>(this);
+}
+const CommonStepInstance* StepInstance::GetCommonStepInstance() const {
+  return dynamic_cast<const CommonStepInstance*>(this);
+}
+
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
@@ -202,8 +215,8 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   }
   if (job->cgroup) return job->cgroup.get();
 
-  std::unique_ptr<CgroupInterface> cg =
-      CgroupManager::AllocateAndGetJobCgroup(*job.get(), false);
+  std::unique_ptr<CgroupInterface> cg = CgroupManager::AllocateAndGetJobCgroup(
+      job_id, false, job->job_to_d.res());
   job->cgroup = std::move(cg);
 
   return job->cgroup.get();
@@ -336,7 +349,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
   using crane::grpc::supervisor::CanStartMessage;
   using crane::grpc::supervisor::ChildProcessReady;
 
-  task_id_t task_id = step->step_to_d.task_id();
+  job_id_t task_id = step->job_id;
 
   std::array<int, 2> supervisor_craned_pipe{};
   std::array<int, 2> craned_supervisor_pipe{};
@@ -391,9 +404,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     // Before exec, we need to make sure that the cgroup is ready.
     if (!job->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
-          "[Task #{}] Terminate the subprocess due to failure of cgroup "
+          "[Job #{}.{}] Terminate the subprocess due to failure of cgroup "
           "migration.",
-          step->step_to_d.task_id());
+          step->job_id, step->step_id);
 
       job->err_before_supervisor_ready = CraneErrCode::ERR_CGROUP;
 
@@ -401,8 +414,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       msg.set_ok(false);
       ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
       if (!ok) {
-        CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
-                    child_pid, task_id);
+        CRANE_ERROR("[Job #{}.{}] Failed to ask subprocess {} to suicide.",
+                    task_id, step->step_id, child_pid);
 
         job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
         KillPid_(child_pid, SIGKILL);
@@ -619,10 +632,9 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
 
-  CRANE_INFO("Executing step #{} of job #{}", step.task_id(), step.task_id());
-  if (!m_job_map_.Contains(step.task_id())) {
-    CRANE_DEBUG("Task #{} without job allocation. Ignoring it.",
-                step.task_id());
+  CRANE_INFO("[Job #{}.{}]Executing step.", step.job_id(), step.step_id());
+  if (!m_job_map_.Contains(step.job_id())) {
+    CRANE_DEBUG("Task #{} without job allocation. Ignoring it.", step.job_id());
     return CraneErrCode::ERR_CGROUP;
   }
 
@@ -644,17 +656,18 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteTask RPC is processed, the Execution goes into m_job_map_.
-    std::unique_ptr execution = std::move(elem.step_inst);
+    std::unique_ptr step_inst = std::move(elem.step_inst);
 
-    if (!m_job_map_.Contains(execution->step_to_d.task_id())) {
-      CRANE_ERROR("Failed to find job #{} allocation",
-                  execution->step_to_d.task_id());
+    if (!m_job_map_.Contains(step_inst->step_to_d.job_id())) {
+      CRANE_ERROR("[Job #{}.{}]Failed to find allocation",
+                  step_inst->step_to_d.job_id(),
+                  step_inst->step_to_d.step_id());
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
-    g_thread_pool->detach_task([this, execution = execution.release()] {
+    g_thread_pool->detach_task([this, execution = step_inst.release()] {
       LaunchStepMt_(std::unique_ptr<StepInstance>(execution));
     });
   }
@@ -727,10 +740,11 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // safety. JobInstance will not be free during this function. Take care of
   // data race for job instance.
 
-  task_id_t job_id = step->step_to_d.task_id();
+  job_id_t job_id = step->job_id;
+  step_id_t step_id = step->step_id;
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
-    CRANE_ERROR("Failed to get the allocation of job#{}", job_id);
+    CRANE_ERROR("[Job #{}.{}]Failed to find job allocation", job_id, step_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
         fmt::format("Failed to get the allocation for job#{} ", job_id));
@@ -739,18 +753,21 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_ptr.get();
 
   // Check if the step is acceptable.
-  if (!step->step_to_d.container().empty() && !g_config.Container.Enabled) {
-    CRANE_ERROR("Container support is disabled but job #{} requires it.",
-                job_id);
-    ActivateTaskStatusChangeAsync_(step->step_to_d.task_id(),
-                                   crane::grpc::TaskStatus::Failed,
-                                   ExitCode::kExitCodeSpawnProcessFail,
-                                   "Container is not enabled in this craned.");
-    return;
+  if (step->step_type != crane::grpc::StepType::DAEMON) {
+    if (!step->step_to_d.container().empty() && !g_config.Container.Enabled) {
+      CRANE_ERROR("Container support is disabled but job #{} requires it.",
+                  job_id);
+      ActivateTaskStatusChangeAsync_(
+          step->step_to_d.job_id(), crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodeSpawnProcessFail,
+          "Container is not enabled in this craned.");
+      return;
+    }
   }
 
   if (!job->cgroup) {
-    job->cgroup = CgroupManager::AllocateAndGetJobCgroup(*job, false);
+    job->cgroup =
+        CgroupManager::AllocateAndGetJobCgroup(job_id, false, step->res);
   }
   if (!job->cgroup) {
     CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
@@ -778,9 +795,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     // by timer and eventually be handled once the SIGCHLD processing callback
     // sees the pid in index maps. Now we do not support launch multiple tasks
     // in a job.
-    CRANE_TRACE("[job #{}] Spawned successfully.", job->job_id);
-    // TODO: replace this with step_id
-    job->step_map.emplace(0, std::move(step));
+    CRANE_TRACE("[job #{}.{}] Spawned successfully.", step->job_id,
+                step->step_id);
+    job->step_map.emplace(step->step_id, std::move(step));
   }
 }
 

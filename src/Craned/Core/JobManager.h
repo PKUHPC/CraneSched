@@ -32,10 +32,30 @@ namespace Craned {
 
 // TODO: Replace this with tak execution info.
 using StepToD = crane::grpc::StepToD;
-
+struct DaemonStepInstance;
+struct CommonStepInstance;
 struct StepInstance {
-  StepToD step_to_d;
+  job_id_t job_id;
+  step_id_t step_id;
   pid_t supv_pid;
+
+  crane::grpc::ResourceInNode res;
+  crane::grpc::StepType step_type;
+  virtual ~StepInstance() = default;
+  DaemonStepInstance* GetDaemonStepInstance();
+  const DaemonStepInstance* GetDaemonStepInstance() const;
+  CommonStepInstance* GetCommonStepInstance();
+  const CommonStepInstance* GetCommonStepInstance() const;
+};
+
+struct DaemonStepInstance : StepInstance {
+  ~DaemonStepInstance() override = default;
+  crane::grpc::JobToD job_to_d;
+};
+
+struct CommonStepInstance : StepInstance {
+  ~CommonStepInstance() override = default;
+  StepToD step_to_d;
 };
 
 // Job allocation info, where allocation = job spec + execution info

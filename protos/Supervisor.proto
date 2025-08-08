@@ -55,10 +55,14 @@ message InitSupervisorRequest {
   }
   PluginConfig plugin_config = 8;
 
-  StepToD step_spec = 9;
-  map<string, string> env = 10;
+  oneof spec {
+    JobToD job_spec = 9;
+    StepToD step_spec = 10;
+  }
 
-  string log_dir = 11;
+  map<string, string> env = 12;
+
+  string log_dir = 13;
 }
 
 message SupervisorReady {
@@ -104,10 +108,14 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message StopDaemonStepRequest {}
+message StopDaemonStepReply {}
+
 service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc StopDaemonStep(StopDaemonStepRequest)returns (StopDaemonStepReply);
 }

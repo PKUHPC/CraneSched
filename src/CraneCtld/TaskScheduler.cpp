@@ -2005,6 +2005,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   // Steps will update in embedded db
   std::vector<StepInCtld*> rn_step_raw_ptr_vec{};
 
+  // Carry the ownership of TaskInCtld for automatic destruction.
+  std::vector<std::unique_ptr<StepInCtld>> step_ptr_vec;
   // Ended steps will update in embedded db and transfer to mongodb
   std::vector<StepInCtld*> step_raw_ptr_vec{};
 
@@ -2073,7 +2075,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         }
       }
 
-      if (terminate_step || step_ended) step_raw_ptr_vec.push_back(step);
+      if (terminate_step || step_ended) {
+        step_ptr_vec.emplace_back(task->EraseStep(step_id));
+        step_raw_ptr_vec.push_back(step);
+      }
     }
 
     if (job_finished) {
