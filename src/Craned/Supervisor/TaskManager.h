@@ -37,10 +37,16 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
+struct ITaskInstance;
+
 class StepInstance {
  public:
+  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  PasswordEntry pwd;
+
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step) : m_step_to_supv_(step) {};
+  ~StepInstance();
 
   bool IsBatch() const;
   bool IsCrun() const;
@@ -68,9 +74,17 @@ class StepInstance {
     return m_cfored_client_.get();
   }
 
+  EnvMap GetStepProcessEnv() const;
+
+  void AddTaskInstance(task_id_t task_id,
+                       std::unique_ptr<ITaskInstance>&& task);
+  ITaskInstance* GetTaskInstance(task_id_t task_id);
+  const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
+
  private:
   crane::grpc::TaskToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
+  std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
 struct TaskInstanceMeta {
@@ -148,9 +162,8 @@ class ITaskInstance {
   virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                           int status) = 0;
 
-  PasswordEntry pwd;
+  task_id_t task_id;
 
-  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
   bool orphaned{false};
@@ -259,7 +272,7 @@ class TaskManager {
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
-  void AddTerminationTimer_(ITaskInstance* instance, Duration duration) {
+  void AddTerminationTimer_(Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -268,10 +281,10 @@ class TaskManager {
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
         std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(ITaskInstance* instance, int64_t secs) {
+  void AddTerminationTimer_(int64_t secs) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -279,21 +292,22 @@ class TaskManager {
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handel;
   }
 
-  static void DelTerminationTimer_(ITaskInstance* instance) {
+  void DelTerminationTimer_() {
     // Close handle before free
-    if (instance->termination_timer) {
-      instance->termination_timer->close();
-      instance->termination_timer.reset();
+    if (m_step_.termination_timer) {
+      m_step_.termination_timer->close();
+      m_step_.termination_timer.reset();
     }
   }
 
-  void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
+  void ActivateTaskStatusChange_(task_id_t task_id,
+                                 crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
-  void LaunchExecution_();
+  void LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
@@ -301,8 +315,6 @@ class TaskManager {
   std::future<CraneErrCode> ExecuteTaskAsync();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
-
-  std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
 
   std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
