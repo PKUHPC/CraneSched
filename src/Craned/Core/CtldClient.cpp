@@ -185,12 +185,10 @@ void CtldClientStateMachine::ActionConfigure_(
   CRANE_DEBUG("Ctld client state machine has entered state {}",
               StateToString(m_state_));
 
-  if (config_req.job_map_size() != 0)
-    CRANE_TRACE(
-        "Recv ctld job: [{}],task: [{}]",
-        absl::StrJoin(config_req.job_map() | std::ranges::views::keys, ","),
-        absl::StrJoin(config_req.job_tasks_map() | std::ranges::views::keys,
-                      ","));
+  CRANE_TRACE(
+      "Recv ctld job: [{}]",
+      absl::StrJoin(config_req.steps() | std::views::transform(GetStepIdStr),
+                    ","));
 
   absl::MutexLock lk(&m_cb_mutex_);
   auto it = m_action_configure_cb_list_.begin();
@@ -259,9 +257,9 @@ void CtldClient::Init() {
   g_ctld_client_sm->AddActionConfigureCb(
       [](CtldClientStateMachine::ConfigureArg const& arg) {
         auto token = arg.req.token();
-        auto job_ids = arg.req.job_map() | std::ranges::views::keys |
+        auto job_ids = arg.req.jobs() | std::views::transform([]()) |
                        std::ranges::to<std::set<task_id_t>>();
-        auto step_ids = arg.req.job_tasks_map() | std::ranges::views::keys |
+        auto step_ids = arg.req.steps() | std::ranges::views::keys |
                         std::ranges::to<std::set<task_id_t>>();
         CRANE_DEBUG("Configuring action for token {}.",
                     ProtoTimestampToString(token));
@@ -291,7 +289,7 @@ void CtldClient::Init() {
           CRANE_DEBUG("Terminating orphaned tasks: [{}].",
                       absl::StrJoin(invalid_tasks, ","));
           for (auto task_id : invalid_tasks) {
-            g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(task_id);
+            g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(TODO, task_id);
           }
         }
         if (!invalid_jobs.empty()) {

@@ -72,7 +72,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
                       .stdout_read = stdout_read};
 
   auto poll_handle = m_loop_->resource<uvw::poll_handle>(stdout_read);
-  poll_handle->on<uvw::poll_event>(
+  poll_handle->poll_handle->on<uvw::poll_event>(
       [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
         CRANE_TRACE("Detect task #{} output.", g_config.JobId);
 

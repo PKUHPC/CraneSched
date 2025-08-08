@@ -69,7 +69,7 @@ class StepInstance {
   }
 
  private:
-  crane::grpc::TaskToD m_step_to_supv_;
+  crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
 };
 

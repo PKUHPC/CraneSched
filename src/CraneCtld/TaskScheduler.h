@@ -491,18 +491,20 @@ class TaskScheduler {
   CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
-  void StepStatusChangeWithReasonAsync(uint32_t task_id,
+  void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
                                        std::optional<std::string>&& reason) {
     // TODO: Add reason implementation here!
-    TaskStatusChangeAsync(task_id, craned_index, new_status, exit_code);
+    StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
+                          reason.value_or(""));
   }
 
-  void TaskStatusChangeAsync(uint32_t task_id, const CranedId& craned_index,
+  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                             const CranedId& craned_index,
                              crane::grpc::TaskStatus new_status,
-                             uint32_t exit_code);
+                             uint32_t exit_code, std::string reason);
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
@@ -626,6 +628,10 @@ class TaskScheduler {
       ABSL_GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_ ABSL_ACQUIRED_AFTER(m_running_task_map_mtx_);
 
+  HashMap<CranedId, HashMap<job_id_t, std::vector<crane::grpc::StepToD>>>
+      m_node_step_exec_queue_ ABSL_GUARDED_BY(m_node_step_exec_queue_mx_);
+  Mutex m_node_step_exec_queue_mx_ ABSL_ACQUIRED_AFTER(m_task_indexes_mtx_);
+
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
 
   // If this variable is set to true, all threads must stop in a certain time.
@@ -645,6 +651,9 @@ class TaskScheduler {
 
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::thread m_step_exec_thread_;
+  void StepExecThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
@@ -704,16 +713,45 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
 
   struct TaskStatusChangeArg {
-    uint32_t task_id;
+    uint32_t job_id;
+    step_id_t step_id;
     uint32_t exit_code;
     crane::grpc::TaskStatus new_status;
     CranedId craned_index;
+    std::string reason;
   };
 
   ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
   void TaskStatusChangeAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
+  /**
+   *
+   * @param new_status step status
+   * @param job the TaskInCtld
+   * @param craned_id status change source craned
+   * @param craned_step_exec_map craned to steps will execute
+   * @param rn_step_raw_ptr_vec steps will update in embeddedDb
+   * @return Job finished
+   * */
+  bool DaemonStepStatusChangeHandler_(
+      crane::grpc::TaskStatus new_status, TaskInCtld* job,
+      const CranedId& craned_id,
+      std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>*
+          craned_step_exec_map,
+      std::vector<StepInCtld*>* rn_step_raw_ptr_vec);
+
+  /**
+   *
+   * @param new_status step status
+   * @param job the TaskInCtld
+   * @param rn_step_raw_ptr_vec steps will update in embeddedDb
+   * @param craned_id status change source craned
+   * @return Job finished:Job Running
+   * */
+  std::pair<bool, bool> PrimaryStepStatusChangeHandler_(
+      crane::grpc::TaskStatus new_status, TaskInCtld* job,
+      std::vector<StepInCtld*>* rn_step_raw_ptr_vec, const CranedId& craned_id);
   void CleanTaskStatusChangeQueueCb_();
 
   // TODO: Move to Reservation Mini-Scheduler.
