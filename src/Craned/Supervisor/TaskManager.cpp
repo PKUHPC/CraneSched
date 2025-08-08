@@ -1630,7 +1630,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
   while (m_task_stop_queue_.try_dequeue(task_id)) {
     CRANE_INFO("[Job #{}.{}] Stopped and is doing TaskStatusChange...",
                m_task_->GetParentStep().task_id(), 0);
-    //FIXME: support multiple crun task.
+    // FIXME: support multiple crun task.
     m_task_->GetParentStepInstance()->StopCforedClient();
     switch (m_task_->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
