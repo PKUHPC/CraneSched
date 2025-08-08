@@ -75,7 +75,7 @@ class CforedClient {
  private:
   uint16_t SetupX11forwarding_();
 
-  static bool WriteStringToFd_(const std::string& msg, int fd);
+  static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
 
   void AsyncSendRecvThread_();
 
