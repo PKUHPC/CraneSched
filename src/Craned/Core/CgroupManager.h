@@ -496,6 +496,10 @@ class DedicatedResourceAllocator {
       CgroupInterface *cg);
 };
 
+using CgroupStrParsedIds =
+    std::tuple<std::optional<job_id_t>, std::optional<step_id_t>,
+               std::optional<task_id_t>>;
+
 class CgroupManager {
  public:
   CgroupManager() = default;
@@ -543,8 +547,7 @@ class CgroupManager {
     return m_cg_version_;
   }
 
-  static CraneExpected<std::tuple<job_id_t, step_id_t, task_id_t>> GetIdsByPid(
-      pid_t pid);
+  static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
 
 #ifdef CRANE_ENABLE_BPF
   inline static BpfRuntimeInfo bpf_runtime_info;
@@ -556,7 +559,7 @@ class CgroupManager {
   static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
                                         task_id_t task_id);
 
-  static std::tuple<job_id_t, step_id_t, task_id_t> ParseIdsFromCgroupStr_(
+  static CgroupStrParsedIds ParseIdsFromCgroupStr_(
       const std::string &cgroup_str);
 
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(

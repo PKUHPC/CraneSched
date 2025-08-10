@@ -378,23 +378,20 @@ std::string CgroupManager::CgroupStrByTaskId_(job_id_t job_id,
                      CgConstant::kTaskCgPathPrefix, task_id);
 }
 
-std::tuple<job_id_t, step_id_t, task_id_t>
-CgroupManager::ParseIdsFromCgroupStr_(const std::string &cgroup_str) {
+CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
+    const std::string &cgroup_str) {
   static const auto cg_pattern_str = std::format(
-      R"({}(\d+)(?:\/{}(\d+))?(?:\/{}(\d+))?)", CgConstant::kJobCgPathPrefix,
+      R"(.*{}(\d+)(?:\/{}(\d+))?(?:\/{}(\d+))?)", CgConstant::kJobCgPathPrefix,
       CgConstant::kStepCgPathPrefix, CgConstant::kTaskCgPathPrefix);
-
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-  job_id_t job_id{};
-  step_id_t step_id{};
-  task_id_t task_id{};
 
-  if (RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id, &task_id)) {
-    return {job_id, step_id, task_id};
+  CgroupStrParsedIds parsed_ids{};
+  if (RE2::FullMatch(cgroup_str, *cg_pattern, &std::get<0>(parsed_ids),
+                     &std::get<1>(parsed_ids), &std::get<2>(parsed_ids))) {
+    return parsed_ids;
   }
 
-  CRANE_ERROR("Failed to parse cgroup string: {}", cgroup_str);
-  return {0, 0, 0};
+  return {};
 }
 
 /**
@@ -617,8 +614,8 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
       auto parsed_ids = ParseIdsFromCgroupStr_(info.path);
-      auto job_id = std::get<0>(parsed_ids);
-      if (job_id != 0) job_ids.emplace(job_id);
+      auto job_id_opt = std::get<0>(parsed_ids);
+      if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
     }
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
   }
@@ -635,8 +632,8 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id = std::get<0>(parsed_ids);
-        if (job_id != 0) job_ids.emplace(job_id);
+        auto job_id_opt = std::get<0>(parsed_ids);
+        if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
@@ -653,8 +650,8 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id = std::get<0>(parsed_ids);
-        if (job_id == 0) continue;
+        auto job_id_opt = std::get<0>(parsed_ids);
+        if (!job_id_opt.has_value()) continue;
 
         struct stat cg_stat{};
         if (stat(it.path().c_str(), &cg_stat) != 0) {
@@ -663,7 +660,7 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
           continue;
         }
 
-        cg_job_id_map.emplace(cg_stat.st_ino, job_id);
+        cg_job_id_map.emplace(cg_stat.st_ino, job_id_opt.value());
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
@@ -730,13 +727,7 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-CraneExpected<std::tuple<job_id_t, step_id_t, task_id_t>>
-CgroupManager::GetIdsByPid(pid_t pid) {
-  static const auto cg_pattern_str = std::format(
-      R"(.*/{}(\d+)(?:\/{}(\d+))?(?:\/{}(\d+))?)", CgConstant::kJobCgPathPrefix,
-      CgConstant::kStepCgPathPrefix, CgConstant::kTaskCgPathPrefix);
-  static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-
+CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
   std::ifstream infile(cgroup_file);
 
@@ -745,51 +736,29 @@ CgroupManager::GetIdsByPid(pid_t pid) {
     return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
 
-  job_id_t job_id{};
-  step_id_t step_id{};
-  task_id_t task_id{};
-
   if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V1) {
-    // TODO: Fix examples in comments below.
-    // cgroup file format: 0::/Crane_Task_148567
+    // TODO: Add examples in comments below.
     std::string line;
-
     while (std::getline(infile, line)) {
-      if (RE2::FullMatch(line, *cg_pattern, &job_id, &step_id, &task_id)) {
-        CRANE_TRACE("Get ids of pid {}, job: {}, step: {}, task: {}", pid,
-                    job_id, step_id, task_id);
-        return std::tuple<job_id_t, step_id_t, task_id_t>{job_id, step_id,
-                                                          task_id};
-      }
+      auto parsed_ids = ParseIdsFromCgroupStr_(line);
+      auto job_id_opt = std::get<0>(parsed_ids);
+
+      // if job_id found, entry is valid.
+      if (job_id_opt.has_value()) return parsed_ids;
     }
+
   } else if (m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2) {
-    /* cgroup file format:
-     *  13:devices:/Crane_Task_148568
-     *  12:hugetlb:/
-     *  11:cpuset:/
-     *  10:perf_event:/
-     *  9:pids:/user.slice/user-0.slice/session-131.scope
-     *  8:net_cls,net_prio:/
-     *  7:blkio:/Crane_Task_148568
-     *  6:freezer:/
-     *  5:misc:/
-     *  4:rdma:/
-     *  3:memory:/Crane_Task_148568
-     *  2:cpu,cpuacct:/Crane_Task_148568
-     *  1:name=systemd:/user.slice/user-0.slice/session-131.scope
-     */
     std::string line;
     if (!std::getline(infile, line)) {
       CRANE_ERROR("Failed to read cgroup file");
       return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
     }
 
-    if (RE2::FullMatch(line, *cg_pattern, &job_id, &step_id, &task_id)) {
-      CRANE_TRACE("Get ids of pid {}, job: {}, step: {}, task: {}", pid, job_id,
-                  step_id, task_id);
-      return std::tuple<job_id_t, step_id_t, task_id_t>{job_id, step_id,
-                                                        task_id};
-    }
+    auto parsed_ids = ParseIdsFromCgroupStr_(line);
+    auto job_id_opt = std::get<0>(parsed_ids);
+
+    // If job_id found, entry is valid.
+    if (job_id_opt.has_value()) return parsed_ids;
 
   } else {
     std::unreachable();

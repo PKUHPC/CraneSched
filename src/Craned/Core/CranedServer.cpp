@@ -177,12 +177,14 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   do {
     auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
     if (pid_to_ids_expt.has_value()) {
-      auto [job_id, step_id, task_id] = pid_to_ids_expt.value();
-      CRANE_TRACE("Find {} for pid {}", pid_to_ids_expt.value(), pid_i);
+      auto [job_id_opt, step_id_opt, task_id_opt] = pid_to_ids_expt.value();
 
-      // FIXME: Use step id instead of job id / step id.
+      // FIXME: Use step_id_opt after multi-step is supported.
+      CRANE_ASSERT_MSG(job_id_opt.has_value(),
+                       "Job ID always has value when RE2 matches.");
+
       response->set_ok(true);
-      response->set_task_id(job_id);
+      response->set_task_id(job_id_opt.value());
       return Status::OK;
     }
 
