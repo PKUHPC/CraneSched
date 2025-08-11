@@ -126,6 +126,9 @@ RejectJobsBeyondCapacity: false
 # Default value is false.
 JobFileAppend: false
 
+# Set the flag to ignore warnings about config files mismatches.
+ConfigCrcWarnIgnoreFlag: false
+
 Supervisor:
   Path: /usr/libexec/csupervisor
   # Supervisor log level

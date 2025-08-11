@@ -86,6 +86,8 @@ void ParseConfig(int argc, char** argv) {
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
 
+      g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
+
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
@@ -421,26 +423,44 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          part.nodelist_str = nodes;
           std::list<std::string> name_list;
-          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
-                                   &name_list)) {
-            CRANE_ERROR("Illegal node name string format.");
-            std::exit(1);
-          }
+          auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
+          if (act_nodes_str == "ALL") {
+            std::list<std::string> host_list =
+                g_config.Nodes | ranges::views::keys |
+                ranges::to<std::list<std::string>>();
+            part.nodelist_str = util::HostNameListToStr(host_list);
+            for (auto&& node : host_list) {
+              part.nodes.emplace(node);
+              nodes_without_part.erase(node);
+              CRANE_TRACE("Set the partition of node {} to {}", node, name);
+            }
+          } else {
+            part.nodelist_str = nodes;
+            if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
+              CRANE_ERROR("Illegal node name string format.");
+              std::exit(1);
+            }
 
-          for (auto&& node : name_list) {
-            auto node_it = g_config.Nodes.find(node);
-            if (node_it != g_config.Nodes.end()) {
-              part.nodes.emplace(node_it->first);
-              nodes_without_part.erase(node_it->first);
-              CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
-                          name);
+            if (name_list.empty()) {
+              CRANE_WARN("No nodes in partition '{}'.", name);
             } else {
-              CRANE_ERROR(
-                  "Unknown node '{}' found in partition '{}'. It is ignored "
-                  "and should be contained in the configuration file.",
-                  node, name);
+              for (auto&& node : name_list) {
+                auto node_it = g_config.Nodes.find(node);
+                if (node_it != g_config.Nodes.end()) {
+                  part.nodes.emplace(node_it->first);
+                  nodes_without_part.erase(node_it->first);
+                  CRANE_TRACE("Set the partition of node {} to {}",
+                              node_it->first, name);
+                } else {
+                  CRANE_ERROR(
+                      "Unknown node '{}' found in partition '{}'. It is "
+                      "ignored "
+                      "and should be contained in the configuration file.",
+                      node, name);
+                  std::exit(1);
+                }
+              }
             }
           }
 
@@ -487,7 +507,7 @@ void ParseConfig(int argc, char** argv) {
               part_cpu += g_config.Nodes[node]->cpu;
               part_mem += g_config.Nodes[node]->memory_bytes;
             }
-            part.default_mem_per_cpu = part_mem / part_cpu;
+            if (part_cpu != 0) part.default_mem_per_cpu = part_mem / part_cpu;
           }
 
           if (partition["MaxMemPerCpu"] &&
@@ -548,6 +568,11 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
+
+      if (config["ConfigCrcWarnIgnoreFlag"] &&
+          !config["ConfigCrcWarnIgnoreFlag"].IsNull())
+        g_config.ConfigCrcWarnIgnoreFlag =
+            config["ConfigCrcWarnIgnoreFlag"].as<bool>();
 
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];

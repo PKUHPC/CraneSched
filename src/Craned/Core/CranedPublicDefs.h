@@ -104,6 +104,8 @@ struct Config {
   std::string ControlMachine;
   std::string CraneCtldForInternalListenPort;
   std::string CranedDebugLevel;
+  std::string CraneClusterName;
+  uint32_t ConfigCrcVal;
 
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CranedLogFile;
