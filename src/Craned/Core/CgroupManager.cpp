@@ -127,8 +127,9 @@ CraneErrCode CgroupManager::Init() {
       return CraneErrCode::ERR_CGROUP;
     }
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    // cgroup v2 don't use /proc/cgroups to manage controller
-    cgroup *root = cgroup_new_cgroup(CgConstant::kRootCgPathPrefix.c_str());
+    // cgroup v2 don't use /proc/cgroups to manage controller.
+    // Instead, we use root cgroup ("/") to check mounted controllers.
+    cgroup *root = cgroup_new_cgroup("/");
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
       return CraneErrCode::ERR_CGROUP;
@@ -526,13 +527,15 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
     return std::make_unique<CgroupV1>(cgroup_str, native_cgroup);
-  } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    // For cgroup V2,we put task cgroup under RootCgroupFullPath.
-    struct stat cgroup_stat;
+  }
+
+  if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
+    // For cgroup v2, we need save the inode. Full path is generated for stat().
+    struct stat cgroup_stat{};
     std::filesystem::path cgroup_full_path = CgConstant::kSystemCgPathPrefix /
                                              CgConstant::kRootCgPathPrefix /
                                              cgroup_str;
-    if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
+    if (stat(cgroup_full_path.c_str(), &cgroup_stat) != 0) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_str,
                   std::strerror(errno));
       return nullptr;
@@ -540,11 +543,11 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 
     return std::make_unique<CgroupV2>(cgroup_str, native_cgroup,
                                       cgroup_stat.st_ino);
-  } else {
-    CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
-               cgroup_str);
-    return nullptr;
   }
+
+  CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
+             cgroup_str);
+  return nullptr;
 }
 
 std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
@@ -627,6 +630,10 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
 std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
     const std::string &root_cgroup_path) {
   std::set<job_id_t> job_ids;
+
+  // If the directory not existed, return an empty set.
+  if (!std::filesystem::exists(root_cgroup_path)) return job_ids;
+
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
@@ -645,6 +652,10 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
 std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
     const std::string &root_cgroup_path) {
   std::unordered_map<ino_t, job_id_t> cg_job_id_map;
+
+  // If the directory not existed, return an empty map.
+  if (!std::filesystem::exists(root_cgroup_path)) return cg_job_id_map;
+
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
