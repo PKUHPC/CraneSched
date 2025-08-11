@@ -33,7 +33,6 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "RpcService/CranedKeeper.h"
-#include "RpcService/CtldForInternalServer.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
@@ -810,8 +809,6 @@ void InitializeCtldGlobalVariables() {
   g_task_scheduler = std::make_unique<TaskScheduler>();
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
-  g_internal_server =
-      std::make_unique<Ctld::CtldForInternalServer>(g_config.ListenConf);
 
   ok = g_task_scheduler->Init();
   if (!ok) {
@@ -853,7 +850,6 @@ int StartServer() {
   InitializeCtldGlobalVariables();
 
   g_ctld_server->Wait();
-  g_internal_server->Wait();
 
   DestroyCtldGlobalVariables();
 
