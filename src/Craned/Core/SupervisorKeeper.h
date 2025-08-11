@@ -47,7 +47,7 @@ class SupervisorStub {
 class SupervisorKeeper {
  public:
   SupervisorKeeper() = default;
-  ~SupervisorKeeper() { CRANE_DEBUG("Destroy SupervisorKeeper."); }
+  ~SupervisorKeeper() = default;
 
   SupervisorKeeper(const SupervisorKeeper&) = delete;
   SupervisorKeeper& operator=(const SupervisorKeeper&) = delete;

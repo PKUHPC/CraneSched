@@ -94,10 +94,15 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-inline constexpr std::string kCraneCgPathPrefix = "crane";
+// NOTE: cgroup_name != cgroup_path.
+// For manual cgroup operation, use kSystemCgPathPrefix / cgroup_name
+inline const std::filesystem::path kSystemCgPathPrefix = "/sys/fs/cgroup";
 
-inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
-inline const std::filesystem::path kRootCgroupFullPath = "/sys/fs/cgroup";
+// For libcgroup, use kRootCgNamePrefix / cgroup_name_str
+inline constexpr std::string kRootCgNamePrefix = "crane";
+inline constexpr std::string kJobCgNamePrefix = "job_";
+inline constexpr std::string kStepCgNamePrefix = "step_";
+inline constexpr std::string kTaskCgNamePrefix = "task_";
 
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
@@ -268,6 +273,7 @@ constexpr ControllerFlags operator|(
   return flags;
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
 // In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
@@ -285,6 +291,7 @@ constexpr ControllerFlags CG_V2_REQUIRED_CONTROLLERS =
     NO_CONTROLLER_FLAG | CgConstant::Controller::CPU_CONTROLLER_V2 |
     CgConstant::Controller::MEMORY_CONTROLLER_V2 |
     CgConstant::Controller::IO_CONTROLLER_V2;
+// NOLINTEND(readability-identifier-naming)
 
 #ifdef CRANE_ENABLE_BPF
 class BpfRuntimeInfo {
@@ -321,8 +328,8 @@ class BpfRuntimeInfo {
 
 class Cgroup {
  public:
-  Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
-      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id_(id) {}
+  Cgroup(const std::string &name, struct cgroup *handle, uint64_t id = 0)
+      : m_cgroup_name_(name), m_cgroup_(handle), m_cgroup_id_(id) {}
   ~Cgroup() = default;
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
@@ -345,23 +352,23 @@ class Cgroup {
   // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
 
-  const std::filesystem::path &GetCgroupPath() const { return m_cgroup_path_; }
+  const std::string &GetCgroupName() const { return m_cgroup_name_; }
 
   uint64_t GetCgroupId() const { return m_cgroup_id_; }
 
   struct cgroup *RawCgHandle() const { return m_cgroup_; }
 
  private:
-  std::filesystem::path m_cgroup_path_;
+  std::string m_cgroup_name_;
   mutable struct cgroup *m_cgroup_;
   uint64_t m_cgroup_id_;
 };
 
 class CgroupInterface {
  public:
-  CgroupInterface(const std::string &path, struct cgroup *handle,
+  CgroupInterface(const std::string &name, struct cgroup *handle,
                   uint64_t id = 0)
-      : m_cgroup_info_(path, handle, id) {};
+      : m_cgroup_info_(name, handle, id) {};
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
@@ -381,8 +388,9 @@ class CgroupInterface {
 
   bool MigrateProcIn(pid_t pid);
 
-  std::string CgroupPathStr() const {
-    return m_cgroup_info_.GetCgroupPath().string();
+  std::string CgroupName() const { return m_cgroup_info_.GetCgroupName(); }
+  std::filesystem::path CgroupPath() const {
+    return CgConstant::kSystemCgPathPrefix / CgroupName();
   }
 
  protected:
@@ -391,8 +399,8 @@ class CgroupInterface {
 
 class CgroupV1 : public CgroupInterface {
  public:
-  CgroupV1(const std::string &path, struct cgroup *handle)
-      : CgroupInterface(path, handle) {}
+  CgroupV1(const std::string &name, struct cgroup *handle)
+      : CgroupInterface(name, handle) {}
   ~CgroupV1() override = default;
 
   bool SetCpuCoreLimit(double core_num) override;
@@ -414,10 +422,10 @@ class CgroupV1 : public CgroupInterface {
 
 class CgroupV2 : public CgroupInterface {
  public:
-  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);
+  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id);
 
 #ifdef CRANE_ENABLE_BPF
-  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
+  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id,
            std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
 #endif
 
@@ -490,6 +498,10 @@ class DedicatedResourceAllocator {
       CgroupInterface *cg);
 };
 
+using CgroupStrParsedIds =
+    std::tuple<std::optional<job_id_t>, std::optional<step_id_t>,
+               std::optional<task_id_t>>;
+
 class CgroupManager {
  public:
   CgroupManager() = default;
@@ -510,7 +522,7 @@ class CgroupManager {
   static CraneErrCode TryToRecoverCgForJobs(
       std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
-  [[nodiscard]] static bool Mounted(CgConstant::Controller controller) {
+  [[nodiscard]] static bool IsMounted(CgConstant::Controller controller) {
     return static_cast<bool>(m_mounted_controllers_ &
                              ControllerFlags{controller});
   }
@@ -521,15 +533,14 @@ class CgroupManager {
    * \brief Allocate and return cgroup handle for job, should only be called
    * once per job.
    * \param job cgroup spec for job.
-   * \return CgroupInterface ptr,null if error.
+   * \param recover recover cgroup instead creating new one.
+   * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
    */
-  static std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
-      const JobInD &job, bool recovery_mode);
+  static CraneExpected<std::unique_ptr<CgroupInterface>>
+  AllocateAndGetJobCgroup(const JobInD &job, bool recover);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
-
-  static CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid);
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
     m_cg_version_ = v;
@@ -538,15 +549,24 @@ class CgroupManager {
     return m_cg_version_;
   }
 
+  static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
+
 #ifdef CRANE_ENABLE_BPF
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
-  static std::string CgroupStrByTaskId_(task_id_t task_id);
-  static std::optional<task_id_t> GetJobIdFromCg_(const std::string &path);
+  // NOTE: These methods produce cgroup str w/o proper prefix.
+  // Use CreateOrOpen_() to generate cgroup name with prefix.
+  static std::string CgroupStrByJobId_(job_id_t job_id);
+  static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
+  static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
+                                        task_id_t task_id);
+
+  static CgroupStrParsedIds ParseIdsFromCgroupStr_(
+      const std::string &cgroup_str);
 
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
-      task_id_t job_id, ControllerFlags preferred_controllers,
+      const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
   static int InitializeController_(struct cgroup &cgroup,
@@ -554,19 +574,19 @@ class CgroupManager {
                                    bool required, bool has_cgroup,
                                    bool &changed_cgroup);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV1_(
+  static std::set<job_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<task_id_t> GetJobIdsFromCgroupV2_(
-      const std::string &root_cgroup_path);
+  static std::set<job_id_t> GetJobIdsFromCgroupV2_(
+      const std::filesystem::path &root_cgroup_path);
 
-  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2_(
-      const std::string &root_cgroup_path);
+  static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
+      const std::filesystem::path &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
   inline static CraneExpected<
       std::unordered_map<task_id_t, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path);
+  GetJobBpfMapCgroupsV2_(const std::filesystem::path &root_cgroup_path);
 #endif
 
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;

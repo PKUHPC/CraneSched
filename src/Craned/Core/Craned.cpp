@@ -746,19 +746,19 @@ void GlobalVariableInit() {
   CgroupManager::Init();
   if (CgroupManager::GetCgroupVersion() ==
           Craned::CgConstant::CgroupVersion::CGROUP_V1 &&
-      (!CgroupManager::Mounted(Controller::CPU_CONTROLLER) ||
-       !CgroupManager::Mounted(Controller::MEMORY_CONTROLLER) ||
-       !CgroupManager::Mounted(Controller::DEVICES_CONTROLLER) ||
-       !CgroupManager::Mounted(Controller::BLOCK_CONTROLLER))) {
+      (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER) ||
+       !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER) ||
+       !CgroupManager::IsMounted(Controller::DEVICES_CONTROLLER) ||
+       !CgroupManager::IsMounted(Controller::BLOCK_CONTROLLER))) {
     CRANE_ERROR(
         "Failed to initialize cpu,memory,devices,block cgroups controller.");
     std::exit(1);
   }
   if (CgroupManager::GetCgroupVersion() ==
           Craned::CgConstant::CgroupVersion::CGROUP_V2 &&
-      (!CgroupManager::Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !CgroupManager::Mounted(Controller::MEMORY_CONTROLLER_V2) ||
-       !CgroupManager::Mounted(Controller::IO_CONTROLLER_V2))) {
+      (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER_V2) ||
+       !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER_V2) ||
+       !CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
