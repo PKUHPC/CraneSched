@@ -318,7 +318,7 @@ void CforedClient::AsyncSendRecvThread_() {
       //
       // Here, the last issued read request is for unregister reply.
       CRANE_TRACE("Cfored {} read type {} in Draining state. Dropped it.",
-                  m_cfored_name_, reply.type());
+                  m_cfored_name_, (int)reply.type());
       reply.Clear();
       stream->Read(&reply, (void*)Tag::Read);
       break;
