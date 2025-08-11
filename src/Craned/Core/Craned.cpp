@@ -208,28 +208,30 @@ void ParseConfig(int argc, char** argv) {
         if (tls_config["Enabled"])
           g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
-        g_tls_config.DomainSuffix = YamlValueOr(tls_config["DomainSuffix"], "");
+        if (g_tls_config.Enabled) {
+          g_tls_config.DomainSuffix = YamlValueOr(tls_config["DomainSuffix"], "");
 
-        if (auto result = util::ParseCertConfig(
-                "InternalCertFilePath", tls_config, &tls_certs.CertFilePath,
-                &tls_certs.CertContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
-        if (auto result = util::ParseCertConfig(
-                "InternalKeyFilePath", tls_config, &tls_certs.KeyFilePath,
-                &tls_certs.KeyContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
-        if (auto result = util::ParseCertConfig(
-                "InternalCaFilePath", tls_config, &tls_certs.CaFilePath,
-                &tls_certs.CaContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
+          if (auto result = util::ParseCertConfig(
+                  "InternalCertFilePath", tls_config, &tls_certs.CertFilePath,
+                  &tls_certs.CertContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+              }
+          if (auto result = util::ParseCertConfig(
+                  "InternalKeyFilePath", tls_config, &tls_certs.KeyFilePath,
+                  &tls_certs.KeyContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+              }
+          if (auto result = util::ParseCertConfig(
+                  "InternalCaFilePath", tls_config, &tls_certs.CaFilePath,
+                  &tls_certs.CaContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+              }
         }
       }
 

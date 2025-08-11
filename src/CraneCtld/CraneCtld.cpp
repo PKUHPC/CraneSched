@@ -136,78 +136,80 @@ void ParseConfig(int argc, char** argv) {
         if (tls_config["Enabled"])
           g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
-        if (tls_config["DomainSuffix"])
-          g_tls_config.DomainSuffix =
-              tls_config["DomainSuffix"].as<std::string>();
+        if (g_tls_config.Enabled) {
+          if (tls_config["DomainSuffix"])
+            g_tls_config.DomainSuffix =
+                tls_config["DomainSuffix"].as<std::string>();
 
-        if (tls_config["AllowedNodes"]) {
-          std::string nodes = tls_config["AllowedNodes"].as<std::string>();
-          std::list<std::string> name_list;
-          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
-                                   &name_list)) {
-            CRANE_ERROR("Illegal login node name string format.");
+          if (tls_config["AllowedNodes"]) {
+            std::string nodes = tls_config["AllowedNodes"].as<std::string>();
+            std::list<std::string> name_list;
+            if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                     &name_list)) {
+              CRANE_ERROR("Illegal login node name string format.");
+              std::exit(1);
+            }
+            for (const auto& name : name_list) {
+              g_tls_config.AllowedNodes.insert(name);
+              g_tls_config.AllowedNodes.insert(
+                  fmt::format("{}.{}", name, g_tls_config.DomainSuffix));
+            }
+            // todo: localhost?
+            g_tls_config.AllowedNodes.insert("localhost");
+          }
+          // internal
+          if (auto result = util::ParseCertConfig(
+                  "InternalCertFilePath", tls_config,
+                  &g_tls_config.InternalCerts.CertFilePath,
+                  &g_tls_config.InternalCerts.CertContent);
+              result) {
+            CRANE_ERROR(result.value());
             std::exit(1);
           }
-          for (const auto& name : name_list) {
-            g_tls_config.AllowedNodes.insert(name);
-            g_tls_config.AllowedNodes.insert(
-                fmt::format("{}.{}", name, g_tls_config.DomainSuffix));
+
+          if (auto result =
+                  util::ParseCertConfig("InternalKeyFilePath", tls_config,
+                                        &g_tls_config.InternalCerts.KeyFilePath,
+                                        &g_tls_config.InternalCerts.KeyContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
           }
-          // todo: localhost?
-          g_tls_config.AllowedNodes.insert("localhost");
-        }
-        // internal
-        if (auto result =
-                util::ParseCertConfig("InternalCertFilePath", tls_config,
-                                      &g_tls_config.InternalCerts.CertFilePath,
-                                      &g_tls_config.InternalCerts.CertContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
 
-        if (auto result =
-                util::ParseCertConfig("InternalKeyFilePath", tls_config,
-                                      &g_tls_config.InternalCerts.KeyFilePath,
-                                      &g_tls_config.InternalCerts.KeyContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
+          if (auto result =
+                  util::ParseCertConfig("InternalCaFilePath", tls_config,
+                                        &g_tls_config.InternalCerts.CaFilePath,
+                                        &g_tls_config.InternalCerts.CaContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
 
-        if (auto result =
-                util::ParseCertConfig("InternalCaFilePath", tls_config,
-                                      &g_tls_config.InternalCerts.CaFilePath,
-                                      &g_tls_config.InternalCerts.CaContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
-
-        // external
-        if (auto result =
-                util::ParseCertConfig("ExternalCertFilePath", tls_config,
-                                      &g_tls_config.ExternalCerts.CertFilePath,
-                                      &g_tls_config.ExternalCerts.CertContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
-        if (auto result =
-                util::ParseCertConfig("ExternalKeyFilePath", tls_config,
-                                      &g_tls_config.ExternalCerts.KeyFilePath,
-                                      &g_tls_config.ExternalCerts.KeyContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
-        }
-        if (auto result =
-                util::ParseCertConfig("ExternalCaFilePath", tls_config,
-                                      &g_tls_config.ExternalCerts.CaFilePath,
-                                      &g_tls_config.ExternalCerts.CaContent);
-            result) {
-          CRANE_ERROR(result.value());
-          std::exit(1);
+          // external
+          if (auto result = util::ParseCertConfig(
+                  "ExternalCertFilePath", tls_config,
+                  &g_tls_config.ExternalCerts.CertFilePath,
+                  &g_tls_config.ExternalCerts.CertContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
+          if (auto result =
+                  util::ParseCertConfig("ExternalKeyFilePath", tls_config,
+                                        &g_tls_config.ExternalCerts.KeyFilePath,
+                                        &g_tls_config.ExternalCerts.KeyContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
+          if (auto result =
+                  util::ParseCertConfig("ExternalCaFilePath", tls_config,
+                                        &g_tls_config.ExternalCerts.CaFilePath,
+                                        &g_tls_config.ExternalCerts.CaContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
         }
       }
 
