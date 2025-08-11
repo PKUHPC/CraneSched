@@ -132,6 +132,7 @@ CraneErrCode JobManager::Recover(
     std::unordered_map<task_id_t, std::unique_ptr<StepInstance>>&& step_map) {
   CRANE_INFO("Job allocation [{}] recovered.",
              absl::StrJoin(job_map | std::views::keys, ","));
+
   for (auto&& job : job_map | std::views::values) {
     job_id_t job_id = job.job_id;
     uid_t uid = job.Uid();
@@ -202,16 +203,19 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   }
   if (job->cgroup) return job->cgroup.get();
 
-  std::unique_ptr<CgroupInterface> cg =
-      CgroupManager::AllocateAndGetJobCgroup(*job.get(), false);
-  job->cgroup = std::move(cg);
+  auto cg_expt = CgroupManager::AllocateAndGetJobCgroup(*job.get(), false);
+  if (cg_expt.has_value()) {
+    job->cgroup = std::move(cg_expt.value());
+    return job->cgroup.get();
+  }
 
-  return job->cgroup.get();
+  CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
+  return nullptr;
 }
 
 // Wait for supervisor exit and release cgroup
 bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
-  // We do noting here,just check if supervisor exist and remove its cgroup
+  // We do noting here, just check if supervisor exist and remove its cgroup
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
@@ -694,7 +698,7 @@ bool JobManager::FreeJobAllocation_(const std::vector<task_id_t>& job_ids) {
     if (cgroup == nullptr) continue;
 
     if (g_config.Plugin.Enabled && g_plugin_client) {
-      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupPathStr());
+      g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->CgroupName());
     }
 
     g_thread_pool->detach_task([cgroup]() {
@@ -707,7 +711,7 @@ bool JobManager::FreeJobAllocation_(const std::vector<task_id_t>& job_ids) {
           CRANE_ERROR(
               "Couldn't kill the processes in cgroup {} after {} times. "
               "Skipping it.",
-              cgroup->CgroupPathStr(), cnt);
+              cgroup->CgroupName(), cnt);
           break;
         }
 
@@ -751,14 +755,17 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 
   if (!job->cgroup) {
-    job->cgroup = CgroupManager::AllocateAndGetJobCgroup(*job, false);
-  }
-  if (!job->cgroup) {
-    CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
-    ActivateTaskStatusChangeAsync_(
-        job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get cgroup for job#{} ", job_id));
-    return;
+    auto cg_expt = CgroupManager::AllocateAndGetJobCgroup(*job, false);
+    if (cg_expt.has_value()) {
+      job->cgroup = std::move(cg_expt.value());
+    } else {
+      CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
+      ActivateTaskStatusChangeAsync_(
+          job_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodeCgroupError,
+          fmt::format("Failed to get cgroup for job#{} ", job_id));
+      return;
+    }
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -830,7 +837,7 @@ void JobManager::ActivateTaskStatusChangeAsync_(
  */
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   CgroupInterface* cg = GetCgForJob(job_id);
-  if (!cg) return false;
+  if (cg == nullptr) return false;
 
   return cg->MigrateProcIn(pid);
 }

@@ -94,14 +94,15 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
-// For libcgroup, use kRootCgPathPrefix as libcgroup operates in the system path
-// For manual cgroup operation, use kSystemCgPathPrefix / kRootCgPathPrefix
+// NOTE: cgroup_name != cgroup_path.
+// For manual cgroup operation, use kSystemCgPathPrefix / cgroup_name
 inline const std::filesystem::path kSystemCgPathPrefix = "/sys/fs/cgroup";
-inline const std::filesystem::path kRootCgPathPrefix = "crane";
 
-inline constexpr std::string kJobCgPathPrefix = "job_";
-inline constexpr std::string kStepCgPathPrefix = "step_";
-inline constexpr std::string kTaskCgPathPrefix = "task_";
+// For libcgroup, use kRootCgNamePrefix / cgroup_name_str
+inline constexpr std::string kRootCgNamePrefix = "crane";
+inline constexpr std::string kJobCgNamePrefix = "job_";
+inline constexpr std::string kStepCgNamePrefix = "step_";
+inline constexpr std::string kTaskCgNamePrefix = "task_";
 
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
@@ -327,8 +328,8 @@ class BpfRuntimeInfo {
 
 class Cgroup {
  public:
-  Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
-      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id_(id) {}
+  Cgroup(const std::string &name, struct cgroup *handle, uint64_t id = 0)
+      : m_cgroup_name_(name), m_cgroup_(handle), m_cgroup_id_(id) {}
   ~Cgroup() = default;
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
@@ -351,23 +352,23 @@ class Cgroup {
   // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
 
-  const std::filesystem::path &GetCgroupPath() const { return m_cgroup_path_; }
+  const std::string &GetCgroupName() const { return m_cgroup_name_; }
 
   uint64_t GetCgroupId() const { return m_cgroup_id_; }
 
   struct cgroup *RawCgHandle() const { return m_cgroup_; }
 
  private:
-  std::filesystem::path m_cgroup_path_;
+  std::string m_cgroup_name_;
   mutable struct cgroup *m_cgroup_;
   uint64_t m_cgroup_id_;
 };
 
 class CgroupInterface {
  public:
-  CgroupInterface(const std::string &path, struct cgroup *handle,
+  CgroupInterface(const std::string &name, struct cgroup *handle,
                   uint64_t id = 0)
-      : m_cgroup_info_(path, handle, id) {};
+      : m_cgroup_info_(name, handle, id) {};
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
@@ -387,8 +388,9 @@ class CgroupInterface {
 
   bool MigrateProcIn(pid_t pid);
 
-  std::string CgroupPathStr() const {
-    return m_cgroup_info_.GetCgroupPath().string();
+  std::string CgroupName() const { return m_cgroup_info_.GetCgroupName(); }
+  std::filesystem::path CgroupPath() const {
+    return CgConstant::kSystemCgPathPrefix / CgroupName();
   }
 
  protected:
@@ -397,8 +399,8 @@ class CgroupInterface {
 
 class CgroupV1 : public CgroupInterface {
  public:
-  CgroupV1(const std::string &path, struct cgroup *handle)
-      : CgroupInterface(path, handle) {}
+  CgroupV1(const std::string &name, struct cgroup *handle)
+      : CgroupInterface(name, handle) {}
   ~CgroupV1() override = default;
 
   bool SetCpuCoreLimit(double core_num) override;
@@ -420,10 +422,10 @@ class CgroupV1 : public CgroupInterface {
 
 class CgroupV2 : public CgroupInterface {
  public:
-  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);
+  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id);
 
 #ifdef CRANE_ENABLE_BPF
-  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
+  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id,
            std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
 #endif
 
@@ -532,10 +534,10 @@ class CgroupManager {
    * once per job.
    * \param job cgroup spec for job.
    * \param recover recover cgroup instead creating new one.
-   * \return CgroupInterface ptr,null if error.
+   * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
    */
-  static std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
-      const JobInD &job, bool recover);
+  static CraneExpected<std::unique_ptr<CgroupInterface>>
+  AllocateAndGetJobCgroup(const JobInD &job, bool recover);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
@@ -553,7 +555,8 @@ class CgroupManager {
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
-  // NOTE: The caller should add prefix to the generated cgroup string.
+  // NOTE: These methods produce cgroup str w/o proper prefix.
+  // Use CreateOrOpen_() to generate cgroup name with prefix.
   static std::string CgroupStrByJobId_(job_id_t job_id);
   static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
   static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
@@ -575,15 +578,15 @@ class CgroupManager {
       CgConstant::Controller controller);
 
   static std::set<job_id_t> GetJobIdsFromCgroupV2_(
-      const std::string &root_cgroup_path);
+      const std::filesystem::path &root_cgroup_path);
 
   static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
-      const std::string &root_cgroup_path);
+      const std::filesystem::path &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
   inline static CraneExpected<
       std::unordered_map<task_id_t, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2_(const std::string &root_cgroup_path);
+  GetJobBpfMapCgroupsV2_(const std::filesystem::path &root_cgroup_path);
 #endif
 
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
