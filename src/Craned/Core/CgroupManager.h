@@ -467,7 +467,7 @@ class CgroupV2 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const JobInD &job);
+  bool RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -514,6 +514,13 @@ class CgroupManager {
 
   static CraneErrCode Init();
 
+  // NOTE: These methods produce cgroup str w/o proper prefix.
+  // Use CreateOrOpen_() to generate cgroup name with prefix.
+  static std::string CgroupStrByJobId(job_id_t job_id);
+  static std::string CgroupStrByStepId(job_id_t job_id, step_id_t step_id);
+  static std::string CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
+                                       task_id_t task_id);
+
   /**
    * @brief Destroy cgroups which CraneCtld doesn't have records of
    * corresponding running jobs and set `recovered` field for jobs with their
@@ -530,14 +537,16 @@ class CgroupManager {
   static void ControllersMounted();
 
   /**
-   * \brief Allocate and return cgroup handle for job, should only be called
-   * once per job.
-   * \param job cgroup spec for job.
+   * \brief Allocate and return cgroup handle for job/step/task, should only be
+   * called once per job/step/task.
+   * \param cgroup_str cgroup_str for job/step/task.
+   * \param resource resource constrains
    * \param recover recover cgroup instead creating new one.
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
    */
-  static CraneExpected<std::unique_ptr<CgroupInterface>>
-  AllocateAndGetJobCgroup(const JobInD &job, bool recover);
+  static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
+      const std::string &cgroup_str,
+      const crane::grpc::ResourceInNode &resource, bool recover);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
@@ -555,13 +564,6 @@ class CgroupManager {
   inline static BpfRuntimeInfo bpf_runtime_info;
 #endif
  private:
-  // NOTE: These methods produce cgroup str w/o proper prefix.
-  // Use CreateOrOpen_() to generate cgroup name with prefix.
-  static std::string CgroupStrByJobId_(job_id_t job_id);
-  static std::string CgroupStrByStepId_(job_id_t job_id, step_id_t step_id);
-  static std::string CgroupStrByTaskId_(job_id_t job_id, step_id_t step_id,
-                                        task_id_t task_id);
-
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
       const std::string &cgroup_str);
 

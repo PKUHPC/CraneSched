@@ -203,7 +203,8 @@ CgroupInterface* JobManager::GetCgForJob(task_id_t job_id) {
   }
   if (job->cgroup) return job->cgroup.get();
 
-  auto cg_expt = CgroupManager::AllocateAndGetJobCgroup(*job.get(), false);
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(), false);
   if (cg_expt.has_value()) {
     job->cgroup = std::move(cg_expt.value());
     return job->cgroup.get();
@@ -754,7 +755,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 
   if (!job->cgroup) {
-    auto cg_expt = CgroupManager::AllocateAndGetJobCgroup(*job, false);
+    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+        CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(),
+        false);
     if (cg_expt.has_value()) {
       job->cgroup = std::move(cg_expt.value());
     } else {
