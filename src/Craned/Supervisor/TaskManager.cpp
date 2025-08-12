@@ -268,7 +268,7 @@ CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
   return pid;
 }
 
-void ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
+bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   auto* meta = dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
 
   if (!meta->pty) {
@@ -283,8 +283,9 @@ void ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   const auto& parent_step = m_parent_step_inst_->GetStep();
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
-  parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
+  auto ok = parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
       m_pid_, meta->stdin_write, meta->stdout_read, meta->pty);
+  if (!ok) return false;
 
   if (m_parent_step_inst_->RequiresX11()) {
     if (m_parent_step_inst_->RequiresX11Fwd())
@@ -301,6 +302,7 @@ void ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   // TODO: It's ok here to start the uv loop thread, since currently 1 task only
   //  corresponds to 1 step.
   parent_cfored_client->StartUvLoopThread();
+  return true;
 }
 
 void ITaskInstance::ResetChildProcSigHandler_() {
@@ -764,13 +766,14 @@ CraneErrCode ContainerInstance::Spawn() {
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
+    bool crun_init_success{false};
     if (m_parent_step_inst_->IsCrun()) {
       if (m_parent_step_inst_->RequiresX11()) {
         uint16_t x11_port;
-        SetupCrunFwdAtParent_(&x11_port);
+        crun_init_success = SetupCrunFwdAtParent_(&x11_port);
         msg.set_x11_port(x11_port);
       } else
-        SetupCrunFwdAtParent_(nullptr);
+        crun_init_success = SetupCrunFwdAtParent_(nullptr);
 
       CRANE_DEBUG("Task #{} has initialized crun forwarding.",
                   m_parent_step_inst_->GetStep().task_id());
@@ -781,7 +784,7 @@ CraneErrCode ContainerInstance::Spawn() {
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
-    msg.set_ok(true);
+    msg.set_ok(crun_init_success);
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
       CRANE_ERROR("Failed to serialize msg to ostream: {}",
@@ -1170,13 +1173,14 @@ CraneErrCode ProcInstance::Spawn() {
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
+    bool crun_init_success{false};
     if (m_parent_step_inst_->IsCrun()) {
       if (m_parent_step_inst_->RequiresX11()) {
         uint16_t x11_port;
-        SetupCrunFwdAtParent_(&x11_port);
+        crun_init_success = SetupCrunFwdAtParent_(&x11_port);
         msg.set_x11_port(x11_port);
       } else
-        SetupCrunFwdAtParent_(nullptr);
+        crun_init_success = SetupCrunFwdAtParent_(nullptr);
 
       CRANE_DEBUG("Task #{} has initialized crun forwarding.",
                   m_parent_step_inst_->GetStep().task_id());
@@ -1187,7 +1191,7 @@ CraneErrCode ProcInstance::Spawn() {
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
-    msg.set_ok(true);
+    msg.set_ok(crun_init_success);
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
       CRANE_ERROR("Failed to serialize msg to ostream: {}",

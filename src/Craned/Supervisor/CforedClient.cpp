@@ -59,7 +59,7 @@ CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
                                                     int stdout_read, bool pty) {
   CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
               pid, stdin_write, stdout_read, pty);
@@ -81,8 +81,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
     if (err != UV_EINTR && err != UV_EAGAIN) {
       CRANE_ERROR("[Proc #{}] Failed to init poll_handle for output fd {}: {}",
                   pid, stdout_read, uv_strerror(err));
-      // TODO: handle failed status
-      break;
+      return false;
     }
 
     if (retry_cnt++ > 3) {
@@ -90,8 +89,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
           "[Proc #{}] Failed to init poll_handle for output fd {}: {} after "
           "3 times.",
           pid, stdout_read, uv_strerror(err));
-      // TODO: handle failed status
-      break;
+      return false;
     }
 
     CRANE_DEBUG(
@@ -110,7 +108,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
 
     if (poll_handle) poll_handle->close();
     close(stdout_read);
-
+    return false;
     // TODO: handle failed status
   }
   auto poll_cb = [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
@@ -179,7 +177,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
   if (ret < 0) {
     CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
     if (poll_handle) poll_handle->close();
-    // TODO: handle failed status
+    return false;
   } else {
     // Doing one-time triggering in case of missing EOF of fast-ending task.
     auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
@@ -196,6 +194,7 @@ void CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
 
   absl::MutexLock lock(&m_mtx_);
   m_fwd_meta_map[pid] = std::move(meta);
+  return true;
 }
 
 uint16_t CforedClient::InitUvX11FwdHandler(pid_t pid) {
