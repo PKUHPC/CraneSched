@@ -233,6 +233,28 @@ grpc::Status CranedServiceImpl::CreateCgroupForJobs(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::FreeSteps(
+    grpc::ServerContext *context, const crane::grpc::FreeStepsRequest *request,
+    crane::grpc::FreeStepsReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  std::latch latch(request->job_id_list().size());
+  for (job_id_t job_id : request->job_id_list()) {
+    g_thread_pool->detach_task([&latch, job_id] {
+      auto stub = g_supervisor_keeper->GetStub(job_id);
+      if (!stub) {
+        CRANE_ERROR("[Job #{}.{}]Failed to get stub.", job_id, 0);
+      }
+      stub->ShutdownSupervisor();
+    });
+  }
+  latch.wait();
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::ReleaseCgroupForJobs(
     grpc::ServerContext *context,
     const crane::grpc::ReleaseCgroupForJobsRequest *request,

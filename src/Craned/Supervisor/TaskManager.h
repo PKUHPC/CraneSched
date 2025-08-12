@@ -37,8 +37,6 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
-void ShutdownSupervisor();
-
 struct ITaskInstance;
 
 class StepInstance {
@@ -275,6 +273,8 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void Wait();
+
+  void ShutdownSupervisor();
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>

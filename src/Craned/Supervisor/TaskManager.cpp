@@ -37,13 +37,6 @@
 
 namespace Supervisor {
 
-void ShutdownSupervisor() {
-  CRANE_TRACE("All tasks finished, exiting...");
-  g_craned_client->Shutdown();
-  g_server->Shutdown();
-  g_task_mgr->Shutdown();
-}
-
 StepInstance::~StepInstance() {
   if (termination_timer) {
     termination_timer->close();
@@ -1515,6 +1508,13 @@ TaskManager::~TaskManager() {
 
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+}
+
+void TaskManager::ShutdownSupervisor() {
+  CRANE_TRACE("All tasks finished, exiting...");
+  g_craned_client->Shutdown();
+  g_server->Shutdown();
+  g_task_mgr->Shutdown();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {

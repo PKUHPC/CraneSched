@@ -85,6 +85,14 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
   return Status::OK;
 }
 
+grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
+    crane::grpc::supervisor::ShutdownSupervisorReply* response) {
+  g_task_mgr->ShutdownSupervisor();
+  return Status::OK;
+}
+
 SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
