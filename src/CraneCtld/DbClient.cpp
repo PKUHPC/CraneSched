@@ -671,6 +671,14 @@ bsoncxx::builder::basic::document MongodbClient::DocumentConstructor_(
                               std::make_index_sequence<sizeof...(Ts)>{});
 }
 
+template <typename ViewValue, typename T>
+T MongodbClient::ViewValueOr_(ViewValue view_value, T default_value) {
+  if (view_value && view_value.type() == BsonFieldTrait<T>::bson_type)
+    return BsonFieldTrait<T>::get(view_value);
+
+  return default_value;
+}
+
 mongocxx::client* MongodbClient::GetClient_() {
   if (m_connect_pool_) {
     thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
@@ -692,25 +700,25 @@ mongocxx::client_session* MongodbClient::GetSession_() {
 void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
                                 Ctld::User* user) {
   try {
-    user->deleted = user_view["deleted"].get_bool();
-    user->uid = user_view["uid"].get_int64().value;
-    user->name = user_view["name"].get_string().value;
-    user->default_account = user_view["default_account"].get_string().value;
-    user->admin_level =
-        (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
-    for (auto&& acc : user_view["coordinator_accounts"].get_array().value) {
+    user->deleted = ViewValueOr_(user_view["deleted"], false);
+    user->uid = ViewValueOr_(user_view["uid"], 0);
+    user->name = ViewValueOr_(user_view["name"], std::string{""});
+    user->default_account =
+        ViewValueOr_(user_view["default_account"], std::string{""});
+    user->admin_level = static_cast<User::AdminLevel>(
+        ViewValueOr_(user_view["admin_level"], 0));
+
+    for (auto&& acc : ViewValueOr_(user_view["coordinator_accounts"],
+                                   bsoncxx::array::view{})) {
       user->coordinator_accounts.emplace_back(acc.get_string().value);
     }
 
-    user->cert_number = user_view["cert_number"].get_string().value;
-
-    for (auto&& account_to_attrs_map_item :
-         user_view["account_to_attrs_map"].get_document().view()) {
+    for (auto& account_to_attrs_map_item : ViewValueOr_(
+             user_view["account_to_attrs_map"], bsoncxx::document::view{})) {
       User::PartToAllowedQosMap temp;
       for (auto&& partition :
-           account_to_attrs_map_item["allowed_partition_qos_map"]
-               .get_document()
-               .view()) {
+           ViewValueOr_(account_to_attrs_map_item["allowed_partition_qos_map"],
+                        bsoncxx::document::view{})) {
         std::string default_qos;
         std::list<std::string> allowed_qos_list;
         auto partition_array = partition.get_array().value;
@@ -726,6 +734,8 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
+
+    user->cert_number = user_view["cert_number"].get_string().value;
 
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
