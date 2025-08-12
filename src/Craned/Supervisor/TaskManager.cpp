@@ -19,11 +19,15 @@
 #include "TaskManager.h"
 
 #include <absl/strings/str_split.h>
+#include <fcntl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
 #include <spdlog/fmt/bundled/core.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <nlohmann/json.hpp>
 
@@ -322,6 +326,15 @@ void ITaskInstance::ResetChildProcSigHandler_() {
 }
 
 CraneErrCode ITaskInstance::SetChildProcessProperty_() {
+  // Reset OOM score adjustment for child process
+  std::filesystem::path oom_score_adj_file =
+      fmt::format("/proc/{}/oom_score_adj", getpid());
+  std::ofstream oom_score_adj_stream(oom_score_adj_file);
+  if (oom_score_adj_stream.is_open()) {
+    oom_score_adj_stream << "0";  // Normal OOM score, can be killed
+    oom_score_adj_stream.close();
+  }
+
   int ngroups = 0;
   // We should not check rc here. It must be -1.
   getgrouplist(pwd.Username().c_str(), m_parent_step_inst_->GetStep().gid(),
@@ -1430,6 +1443,12 @@ TaskManager::TaskManager()
         EvGrpcQueryStepEnvCb_();
       });
 
+  m_oom_monitoring_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_oom_monitoring_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvOomMonitoringCb_();
+      });
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -1466,6 +1485,18 @@ void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
 void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
+  // Stop OOM monitoring when task finishes
+  if (m_oom_monitoring_enabled_) {
+    bool is_cgroup_v2 =
+        std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
+    if (is_cgroup_v2) {
+      StopCgroupV2OomMonitoring_();
+    } else {
+      StopCgroupV1OomMonitoring_();
+    }
+    m_oom_monitoring_enabled_ = false;
+  }
+
   m_task_->Cleanup();
   bool orphaned = m_task_->orphaned;
   // No need to free the TaskInstance structure,will destruct with TaskMgr.
@@ -1492,6 +1523,9 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
+
+  m_oom_monitoring_queue_.enqueue(m_step_.GetStep().task_id());
+  m_oom_monitoring_async_handle_->send();
   return ok_future;
 }
 
@@ -1666,6 +1700,12 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         case TerminatedBy::TERMINATION_BY_TIMEOUT: {
           ActivateTaskStatusChange_(
               crane::grpc::TaskStatus::ExceedTimeLimit,
+              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          break;
+        }
+        case TerminatedBy::TERMINATION_BY_OOM: {
+          ActivateTaskStatusChange_(
+              crane::grpc::TaskStatus::Failed,
               exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
           break;
         }
@@ -1863,6 +1903,135 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
     }
     elem.set_value(m_task_->GetChildProcessEnv());
   }
+}
+
+void TaskManager::EvOomMonitoringCb_() {
+  task_id_t task_id;
+  while (m_oom_monitoring_queue_.try_dequeue(task_id)) {
+    InitOomMonitoring_();
+  }
+}
+
+void TaskManager::InitOomMonitoring_() {
+  // Generate cgroup name for this task
+  std::string cgroup_name = fmt::format("Crane_Task_{}", g_config.JobId);
+
+  // Detect cgroup version by checking filesystem
+  bool is_cgroup_v2 =
+      std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
+
+  if (is_cgroup_v2) {
+    m_cgroup_path_ = fmt::format("/sys/fs/cgroup/{}", cgroup_name);
+  } else {
+    m_cgroup_path_ = fmt::format("/sys/fs/cgroup/memory/{}", cgroup_name);
+  }
+
+  CRANE_DEBUG("Initializing OOM monitoring for cgroup path: {}",
+              m_cgroup_path_);
+
+  // Check if cgroup path exists
+  if (!std::filesystem::exists(m_cgroup_path_)) {
+    CRANE_WARN("Cgroup path {} does not exist, OOM monitoring disabled",
+               m_cgroup_path_);
+    return;
+  }
+
+  m_oom_monitoring_enabled_ = true;
+
+  if (is_cgroup_v2) {
+    StartCgroupV2OomMonitoring_();
+  } else {
+    StartCgroupV1OomMonitoring_();
+  }
+}
+
+void TaskManager::StartCgroupV2OomMonitoring_() {
+  std::string memory_events_path = m_cgroup_path_ + "/" + MemoryEvents;
+
+  CRANE_DEBUG("Setting up CgroupV2 OOM monitoring for path: {}",
+              memory_events_path);
+
+  // Check if memory.events file exists
+  if (!std::filesystem::exists(memory_events_path)) {
+    CRANE_WARN("Memory events file {} does not exist, OOM monitoring disabled",
+               memory_events_path);
+    return;
+  }
+
+  // Create file system event handle for monitoring memory.events file changes
+  auto fs_event_handle = m_uvw_loop_->resource<uvw::fs_event_handle>();
+
+  fs_event_handle->on<uvw::fs_event_event>([this, memory_events_path](
+                                               uvw::fs_event_event& event,
+                                               uvw::fs_event_handle& handle) {
+    // When memory.events file changes, check for oom_kill events
+    std::ifstream events_file(memory_events_path);
+    if (events_file.is_open()) {
+      std::string line;
+      while (std::getline(events_file, line)) {
+        if (line.find("oom_kill ") != std::string::npos) {
+          std::istringstream iss(line);
+          std::string field;
+          int value = 0;
+
+          iss >> field >> value;
+          if (value > 0) {
+            CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
+                        m_step_.GetStep().task_id());
+
+            // Handle OOM based on task type, matching PR #402 implementation
+            if (m_step_.IsBatch()) {
+              // For Batch tasks, use task termination queue
+              TaskTerminateQueueElem terminate_elem{
+                  .terminated_by_user = false,
+                  .terminated_by_timeout = false,
+                  .mark_as_orphaned = false};
+              m_task_terminate_queue_.enqueue(terminate_elem);
+              m_terminate_task_async_handle_->send();
+
+              // Mark task as terminated by OOM
+              if (m_task_ && m_task_->terminated_by == TerminatedBy::NONE) {
+                m_task_->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
+              }
+            } else {
+              // For non-Batch tasks (Interactive, etc.), use direct status
+              // change with kExitCodeOOMError
+              ActivateTaskStatusChange_(
+                  crane::grpc::TaskStatus::Failed,
+                  static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
+                  "Task terminated due to out-of-memory (OOM)");
+            }
+            break;
+          }
+        }
+      }
+      events_file.close();
+    }
+  });
+
+  // Start monitoring the memory.events file for changes
+  fs_event_handle->start(memory_events_path,
+                         uvw::fs_event_handle::event_flags::RECURSIVE);
+
+  // Store the handle for cleanup later
+  m_oom_fs_event_handle_ = fs_event_handle;
+}
+
+void TaskManager::StopCgroupV2OomMonitoring_() {
+  if (m_oom_fs_event_handle_) {
+    CRANE_DEBUG("Stopping CgroupV2 OOM monitoring");
+    m_oom_fs_event_handle_->stop();
+    m_oom_fs_event_handle_->close();
+    m_oom_fs_event_handle_.reset();
+  }
+}
+
+void TaskManager::StartCgroupV1OomMonitoring_() {}
+
+void TaskManager::StopCgroupV1OomMonitoring_() {
+  // CgroupV1 OOM monitoring cleanup - currently empty as
+  // StartCgroupV1OomMonitoring_ is also empty
+  CRANE_DEBUG("Stopping CgroupV1 OOM monitoring");
 }
 
 }  // namespace Supervisor
