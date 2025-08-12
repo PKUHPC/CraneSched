@@ -43,6 +43,7 @@ class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   PasswordEntry pwd;
+  bool orphaned{false};
 
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step) : m_step_to_supv_(step) {};
@@ -82,6 +83,8 @@ class StepInstance {
                        std::unique_ptr<ITaskInstance>&& task);
   ITaskInstance* GetTaskInstance(task_id_t task_id);
   const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
+  std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
+  bool AllTaskFinished() const;
 
  private:
   crane::grpc::TaskToD m_step_to_supv_;
@@ -168,7 +171,6 @@ class ITaskInstance {
 
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
-  bool orphaned{false};
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
@@ -347,6 +349,8 @@ class TaskManager {
   };
 
   void EvSigchldCb_();
+  void EvSigchldTimerCb_();
+  void EvCleanSigchldQueueCb_();
   void EvTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
@@ -359,6 +363,9 @@ class TaskManager {
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
+  std::shared_ptr<uvw::timer_handle> m_sigchld_timer_handle_;
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
+  ConcurrentQueue<std::pair<pid_t, int>> m_sigchld_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
   ConcurrentQueue<task_id_t> m_task_stop_queue_;
@@ -384,8 +391,7 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
-  // TODO: Support multiple tasks
-  std::unique_ptr<ITaskInstance> m_task_;
+  std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
 };
 
 }  // namespace Supervisor

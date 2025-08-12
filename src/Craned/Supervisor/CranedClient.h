@@ -28,7 +28,7 @@ class CranedClient {
  public:
   ~CranedClient();
   void InitChannelAndStub(const std::string& endpoint);
-  void TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
+  void StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason);
 

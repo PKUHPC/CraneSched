@@ -39,7 +39,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CranedClient::TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
+void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                                          uint32_t exit_code,
                                          std::optional<std::string> reason) {
   StepStatusChangeQueueElem elem{.task_id = g_config.JobId,
