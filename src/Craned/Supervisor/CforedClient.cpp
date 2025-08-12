@@ -566,12 +566,12 @@ void CforedClient::AsyncSendRecvThread_() {
                 !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd, false);
         }
       } else {
-        const bool eof = reply.payload_task_input_req().eof();
+        bool eof = reply.payload_task_input_req().eof();
         // CRANED_TASK_INPUT
         for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
           if (!fwd_meta.input_stopped)
-            fwd_meta.input_stopped =
-                !WriteStringToFd_(*msg, fwd_meta.stdin_write, eof);
+            fwd_meta.input_stopped = !WriteStringToFd_(
+                *msg, fwd_meta.stdin_write, !fwd_meta.pty && eof);
         }
       }
 
