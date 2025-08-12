@@ -766,7 +766,7 @@ CraneErrCode ContainerInstance::Spawn() {
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
-    bool crun_init_success{false};
+    bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
       if (m_parent_step_inst_->RequiresX11()) {
         uint16_t x11_port;
@@ -1173,7 +1173,7 @@ CraneErrCode ProcInstance::Spawn() {
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
-    bool crun_init_success{false};
+    bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
       if (m_parent_step_inst_->RequiresX11()) {
         uint16_t x11_port;
