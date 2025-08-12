@@ -1841,6 +1841,9 @@ CraneExpected<void> AccountManager::AddUser_(const User& user,
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
+
+        // TODO: add txn log
+
         // Update the user's account
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$addToSet", object_account, "users",

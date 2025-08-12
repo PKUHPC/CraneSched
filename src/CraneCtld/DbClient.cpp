@@ -554,6 +554,32 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   return true;
 }
 
+bool MongodbClient::InsertTxn(const Txn& txn) {
+  document doc = TxnToDocument_(txn);
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(
+          doc.view());
+
+  return ret != bsoncxx::stdx::nullopt;
+}
+
+template <typename T>
+bool MongodbClient::SelectTxn(const std::string& key, const T& value,
+                              Txn* txn) {
+  document doc;
+  doc.append(kvp(key, value));
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].find_one(doc.view());
+
+  if (!result) return false;
+
+  bsoncxx::document::view txn_view = result->view();
+  ViewToTxn_(txn_view, txn);
+
+  return true;
+}
+
 bool MongodbClient::CommitTransaction(
     const mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
@@ -862,6 +888,25 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
              absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToTxn_(const bsoncxx::document::view& txn_view,
+                               Txn* txn) {
+  try {
+    // TODO: mongo default
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
+  std::array<std::string, 5> fields{
+      "creation_time", "actor", "target", "action", "info",
+  };
+  std::tuple<int64_t, std::string, std::string, int32_t, std::string> values{
+      txn.creation_time, txn.actor, txn.target, txn.action, txn.info};
 
   return DocumentConstructor_(fields, values);
 }

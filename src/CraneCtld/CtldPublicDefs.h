@@ -641,6 +641,15 @@ struct QosResource {
   uint32_t jobs_per_user;
 };
 
+// Transaction
+struct Txn {
+  uint64_t creation_time;
+  std::string actor;
+  std::string target;
+  crane::grpc::TxnAction action;
+  std::string info;
+};
+
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
