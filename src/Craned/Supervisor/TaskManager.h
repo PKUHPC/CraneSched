@@ -68,6 +68,8 @@ class StepInstance {
     return m_cfored_client_.get();
   }
 
+  void StopCforedClient() { m_cfored_client_.reset(); }
+
  private:
   crane::grpc::TaskToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
@@ -93,7 +95,7 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 
   int stdin_write;
   int stdout_write;
-
+  // FIXME: this fd not closed
   int stdin_read;
   int stdout_read;
 
@@ -168,7 +170,7 @@ class ITaskInstance {
   // Return error before fork.
   virtual CraneExpected<pid_t> ForkCrunAndInitMeta_();
 
-  virtual void SetupCrunFwdAtParent_(uint16_t* x11_port);
+  virtual bool SetupCrunFwdAtParent_(uint16_t* x11_port);
 
   virtual void ResetChildProcSigHandler_();
 

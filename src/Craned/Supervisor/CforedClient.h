@@ -59,7 +59,7 @@ class CforedClient {
 
   void InitChannelAndStub(const std::string& cfored_name);
 
-  void InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+  bool InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
                                         int stdout_read, bool pty);
 
   uint16_t InitUvX11FwdHandler(pid_t pid);
@@ -75,7 +75,7 @@ class CforedClient {
  private:
   uint16_t SetupX11forwarding_();
 
-  static bool WriteStringToFd_(const std::string& msg, int fd);
+  static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
 
   void AsyncSendRecvThread_();
 
