@@ -239,7 +239,8 @@ CraneErrCode CgroupManager::TryToRecoverCgForJobs(
       JobInD &job = rn_jobs_from_ctld.at(job_id);
 
       CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
-      auto cg_expt = AllocateAndGetJobCgroup(job, true);
+      auto cg_expt = AllocateAndGetCgroup(CgroupStrByJobId(job_id),
+                                          job.job_to_d.res(), true);
       if (cg_expt.has_value()) {
         // Job cgroup is recovered.
         job.cgroup = std::move(cg_expt.value());
@@ -256,7 +257,7 @@ CraneErrCode CgroupManager::TryToRecoverCgForJobs(
     std::unique_ptr<CgroupInterface> cg_ptr;
 
     // Open cgroup and destroy it.
-    auto cg_str = CgroupStrByJobId_(job_id);
+    auto cg_str = CgroupStrByJobId(job_id);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
     if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1)
@@ -358,14 +359,14 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
       CRANE_WARN("Unable to initialize cgroup {} controller.\n",
                  controller_str);
       return required ? 1 : 0;
-    } else {
-      // Try to turn on hierarchical memory accounting in V1.
-      if (controller == CgConstant::Controller::MEMORY_CONTROLLER) {
-        if ((err = cgroup_add_value_bool(p_raw_controller,
-                                         "memory.use_hierarchy", true))) {
-          CRANE_WARN("Unable to set hierarchical memory settings: {} {}\n", err,
-                     cgroup_strerror(err));
-        }
+    }
+
+    // Try to turn on hierarchical memory accounting in V1.
+    if (controller == CgConstant::Controller::MEMORY_CONTROLLER) {
+      if ((err = cgroup_add_value_bool(p_raw_controller, "memory.use_hierarchy",
+                                       true))) {
+        CRANE_WARN("Unable to set hierarchical memory settings: {} {}\n", err,
+                   cgroup_strerror(err));
       }
     }
   }
@@ -373,20 +374,19 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
   return 0;
 }
 
-std::string CgroupManager::CgroupStrByJobId_(job_id_t job_id) {
+std::string CgroupManager::CgroupStrByJobId(job_id_t job_id) {
   return std::format("{}{}", CgConstant::kJobCgNamePrefix, job_id);
 }
 
-std::string CgroupManager::CgroupStrByStepId_(job_id_t job_id,
-                                              step_id_t step_id) {
-  return std::format("{}/{}{}", CgroupStrByJobId_(job_id),
+std::string CgroupManager::CgroupStrByStepId(job_id_t job_id,
+                                             step_id_t step_id) {
+  return std::format("{}/{}{}", CgroupStrByJobId(job_id),
                      CgConstant::kStepCgNamePrefix, step_id);
 }
 
-std::string CgroupManager::CgroupStrByTaskId_(job_id_t job_id,
-                                              step_id_t step_id,
-                                              task_id_t task_id) {
-  return std::format("{}/{}{}", CgroupStrByStepId_(job_id, step_id),
+std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
+                                             task_id_t task_id) {
+  return std::format("{}/{}{}", CgroupStrByStepId(job_id, step_id),
                      CgConstant::kTaskCgNamePrefix, task_id);
 }
 
@@ -564,18 +564,16 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 }
 
 CraneExpected<std::unique_ptr<CgroupInterface>>
-CgroupManager::AllocateAndGetJobCgroup(const JobInD &job, bool recover) {
-  const crane::grpc::ResourceInNode &res = job.job_to_d.res();
-  auto job_id = job.job_id;
-  std::string cg_str = CgroupStrByJobId_(job_id);
-
+CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
+                                    const crane::grpc::ResourceInNode &resource,
+                                    bool recover) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    cg_unique_ptr = CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
+    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V1_REQUIRED_CONTROLLERS,
                                   NO_CONTROLLER_FLAG, recover);
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
-    cg_unique_ptr = CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
+    cg_unique_ptr = CreateOrOpen_(cgroup_str, CG_V2_REQUIRED_CONTROLLERS,
                                   NO_CONTROLLER_FLAG, recover);
   } else {
     CRANE_WARN("cgroup version is not supported.");
@@ -593,27 +591,29 @@ CgroupManager::AllocateAndGetJobCgroup(const JobInD &job, bool recover) {
       return cg_unique_ptr;
     }
     auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromCgSpec(job);
+    cg_v2_ptr->RecoverFromCgSpec(resource);
 #endif
 
     return cg_unique_ptr;
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(job.job_id,
-                                           cg_unique_ptr->CgroupName(), res);
+    // FIXME: Refactor related plugin interface and replace here.
+    auto ids = ParseIdsFromCgroupStr_(cgroup_str);
+    g_plugin_client->CreateCgroupHookAsync(
+        std::get<0>(ids).value_or(0), cg_unique_ptr->CgroupName(), resource);
   }
 
-  CRANE_TRACE(
-      "Setting cgroup for job #{}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
-      job_id, res.allocatable_res_in_node().cpu_core_limit(),
-      res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
-      util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));
+  CRANE_TRACE("Setting cgroup {}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
+              cgroup_str, resource.allocatable_res_in_node().cpu_core_limit(),
+              resource.allocatable_res_in_node().memory_limit_bytes() /
+                  (1024.0 * 1024.0),
+              util::ReadableGrpcDresInNode(resource.dedicated_res_in_node()));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      res.allocatable_res_in_node(), cg_unique_ptr.get());
+      resource.allocatable_res_in_node(), cg_unique_ptr.get());
   if (ok)
-    ok &= DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(),
+    ok &= DedicatedResourceAllocator::Allocate(resource.dedicated_res_in_node(),
                                                cg_unique_ptr.get());
 
   if (ok) return std::move(cg_unique_ptr);
@@ -1117,11 +1117,11 @@ bool CgroupV1::Empty() {
   if (rc == 0) {
     free(pids);
     return size == 0;
-  } else {
-    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
-                cgroup_strerror(rc));
-    return false;
   }
+
+  CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+              cgroup_strerror(rc));
+  return false;
 }
 
 void CgroupV1::Destroy() { CgroupInterface::Destroy(); }
@@ -1368,14 +1368,15 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
   {
     absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
-    for (int i = 0; i < bpf_devices.size(); i++) {
-      struct BpfKey key = {m_cgroup_info_.GetCgroupId(), bpf_devices[i].major,
-                           bpf_devices[i].minor};
+    for (auto &bpf_device : bpf_devices) {
+      struct BpfKey key = {.cgroup_id = m_cgroup_info_.GetCgroupId(),
+                           .major = bpf_device.major,
+                           .minor = bpf_device.minor};
       if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
-                               &key, sizeof(BpfKey), &bpf_devices[i],
+                               &key, sizeof(BpfKey), &bpf_device,
                                sizeof(BpfDeviceMeta), BPF_ANY) < 0) {
         CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
-                    bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+                    bpf_device.major, bpf_device.minor, key.cgroup_id);
         close(cgroup_fd);
         return false;
       }
@@ -1405,7 +1406,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
+bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
   if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
@@ -1422,14 +1423,14 @@ bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
     return false;
   }
 
-  short access = 0;
+  int16_t access = 0;
   if (CgConstant::kCgLimitDeviceRead) access |= BPF_DEVCG_ACC_READ;
   if (CgConstant::kCgLimitDeviceWrite) access |= BPF_DEVCG_ACC_WRITE;
   if (CgConstant::kCgLimitDeviceMknod) access |= BPF_DEVCG_ACC_MKNOD;
 
   std::unordered_set<std::string> all_request_slots;
   for (const auto &[_, type_slots_map] :
-       job.job_to_d.res().dedicated_res_in_node().name_type_map()) {
+       resource.dedicated_res_in_node().name_type_map()) {
     for (const auto &[__, slots] : type_slots_map.type_slots_map())
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
@@ -1438,13 +1439,13 @@ bool CgroupV2::RecoverFromCgSpec(const JobInD &job) {
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
     if (!all_request_slots.contains(this_device->slot_id)) {
       for (const auto &dev_meta : this_device->device_file_metas) {
-        short op_type = 0;
+        int16_t op_type = 0;
         if (dev_meta.op_type == 'c') {
           op_type |= BPF_DEVCG_DEV_CHAR;
         } else if (dev_meta.op_type == 'b') {
           op_type |= BPF_DEVCG_DEV_BLOCK;
         } else {
-          op_type |= 0xffff;
+          op_type |= static_cast<int16_t>(0xffff);
         }
         bpf_devices.push_back({dev_meta.major, dev_meta.minor,
                                BPF_PERMISSION::DENY, access, op_type});
