@@ -37,6 +37,13 @@
 
 namespace Supervisor {
 
+void ShutdownSupervisor() {
+  CRANE_TRACE("All tasks finished, exiting...");
+  g_craned_client->Shutdown();
+  g_server->Shutdown();
+  g_task_mgr->Shutdown();
+}
+
 StepInstance::~StepInstance() {
   if (termination_timer) {
     termination_timer->close();
@@ -1523,11 +1530,14 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
   // No need to free the TaskInstance structure,will destruct with TaskMgr.
-  if (!orphaned && m_step_.AllTaskFinished())
-    g_craned_client->StepStatusChangeAsync(new_status, exit_code,
-                                           std::move(reason));
   if (m_step_.AllTaskFinished()) {
-    m_step_.StopCforedClient();
+    if (!orphaned)
+      g_craned_client->StepStatusChangeAsync(new_status, exit_code,
+                                             std::move(reason));
+    else {
+      m_step_.StopCforedClient();
+      ShutdownSupervisor();
+    }
   }
 }
 

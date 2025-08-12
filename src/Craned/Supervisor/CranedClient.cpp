@@ -32,6 +32,9 @@ CranedClient::~CranedClient() {
     m_async_send_thread_.join();
   }
 }
+
+void CranedClient::Shutdown() { m_thread_stop_ = true; }
+
 void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.
@@ -94,15 +97,10 @@ void CranedClient::AsyncSendThread_() {
           break;
         }
       } else {
-        m_finished_tasks_++;
+        // The step on this node finish
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     elem.task_id, reply.ok());
-        if (m_finished_tasks_ == g_config.TaskCount) {
-          CRANE_TRACE("All tasks finished, exiting...");
-          m_thread_stop_ = true;
-          g_server->Shutdown();
-          g_task_mgr->Shutdown();
-        }
+        ShutdownSupervisor();
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));

@@ -37,6 +37,8 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
+void ShutdownSupervisor();
+
 struct ITaskInstance;
 
 class StepInstance {

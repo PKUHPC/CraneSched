@@ -27,6 +27,7 @@ namespace Supervisor {
 class CranedClient {
  public:
   ~CranedClient();
+  void Shutdown();
   void InitChannelAndStub(const std::string& endpoint);
   void StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                              uint32_t exit_code,
