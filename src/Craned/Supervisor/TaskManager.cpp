@@ -1653,9 +1653,11 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     auto it = m_pid_task_id_map_.find(pid);
     if (it == m_pid_task_id_map_.end()) {
       not_found_tasks.emplace_back(elem);
+      CRANE_TRACE("Cannot find task for pid {}, will check next time.", pid);
       continue;
     }
     auto task_id = it->second;
+    CRANE_TRACE("[Job #{}.{}] Receiving SIGCHLD for pid {}", task_id, 0, pid);
     auto task = m_step_.GetTaskInstance(task_id);
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;

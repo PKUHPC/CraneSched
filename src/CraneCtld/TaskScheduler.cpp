@@ -2078,7 +2078,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         CraneErrCode err =
             stub->FreeSteps(cgroups | std::views::keys |
-                            std::ranges::to < std::vector<task_id_t>());
+                            std::ranges::to<std::vector<task_id_t>>());
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
                       cgroups.size(), craned_id);

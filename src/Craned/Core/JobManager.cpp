@@ -806,14 +806,6 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    // If the supervisor is spawned, we need to remove it.
-    if (job_ptr->err_before_supervisor_ready == crane::grpc::SUCCESS) {
-      g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
-    } else {
-      CRANE_TRACE("Supervisor for job #{} is never ready, skipping removing.",
-                  job_ptr->job_id);
-    }
-
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));

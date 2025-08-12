@@ -89,7 +89,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  g_task_mgr->ShutdownSupervisor();
+  g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
   return Status::OK;
 }
 

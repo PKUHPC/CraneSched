@@ -131,7 +131,8 @@ struct TaskExitInfo {
 class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
-      : m_parent_step_inst_(step_inst) {}
+      : m_parent_step_inst_(step_inst),
+        task_id(step_inst->GetStep().task_id()) {}
   virtual ~ITaskInstance();
 
   ITaskInstance(const ITaskInstance&) = delete;

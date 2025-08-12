@@ -100,7 +100,6 @@ void CranedClient::AsyncSendThread_() {
         // The step on this node finish
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     elem.task_id, reply.ok());
-        ShutdownSupervisor();
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
