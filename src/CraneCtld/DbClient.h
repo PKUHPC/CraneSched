@@ -220,12 +220,7 @@ class MongodbClient {
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
 
-  std::string DeviceMapToJsonString(const DeviceMap& device_map);
-
-  std::unordered_map<std::string, uint64_t> ParseTypeMap(
-      const bsoncxx::document::view& type_map_view);
-
-  DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
+  DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
@@ -254,6 +249,11 @@ template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
+                                                   const std::string& key,
+                                                   const DeviceMap& value);
 
 }  // namespace Ctld
 
