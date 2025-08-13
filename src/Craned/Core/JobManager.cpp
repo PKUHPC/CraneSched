@@ -240,7 +240,7 @@ void JobManager::EvCleanCheckSupervisorQueueCb_() {
       m_release_job_retry_map_.emplace(job_id, 0);
     }
     if (!m_check_supervisor_timer_handle_->active())
-      m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{1000},
+      m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{0},
                                               uvw::timer_handle::time{1000});
   }
 }

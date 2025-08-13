@@ -2069,30 +2069,27 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
-  std::latch counter(craned_cgroups_map.size());
-  for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-    g_thread_pool->detach_task([&counter, &craned_id, &cgroups]() {
+  for (auto& [craned_id, cgroups] : craned_cgroups_map) {
+    g_thread_pool->detach_task([craned_id, jobs = std::move(cgroups)] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         CraneErrCode err =
-            stub->FreeSteps(cgroups | std::views::keys |
+            stub->FreeSteps(jobs | std::views::keys |
                             std::ranges::to<std::vector<task_id_t>>());
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
-                      cgroups.size(), craned_id);
+                      jobs.size(), craned_id);
         }
-        err = stub->ReleaseCgroupForJobs(cgroups);
+        err = stub->ReleaseCgroupForJobs(jobs);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
-                      cgroups.size(), craned_id);
+                      jobs.size(), craned_id);
         }
       }
-      counter.count_down();
     });
   }
-  counter.wait();
 
   ProcessFinalTasks_(task_raw_ptr_vec);
 }

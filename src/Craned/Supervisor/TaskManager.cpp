@@ -43,18 +43,16 @@ StepInstance::~StepInstance() {
   }
 }
 
-bool StepInstance::IsBatch() const {
-  return GetStep().type() == crane::grpc::Batch;
-}
+bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
 
 bool StepInstance::IsCrun() const {
-  return GetStep().type() == crane::grpc::Interactive &&
-         GetStep().interactive_meta().interactive_type() == crane::grpc::Crun;
+  return interactive_type.has_value() &&
+         interactive_type.value() == crane::grpc::Crun;
 }
 
 bool StepInstance::IsCalloc() const {
-  return GetStep().type() == crane::grpc::Interactive &&
-         GetStep().interactive_meta().interactive_type() == crane::grpc::Calloc;
+  return interactive_type.has_value() &&
+         interactive_type.value() == crane::grpc::Calloc;
 }
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
@@ -323,8 +321,8 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
       m_pid_, meta->stdin_write, meta->stdout_read, meta->pty);
   if (!ok) return false;
 
-  if (m_parent_step_inst_->RequiresX11()) {
-    if (m_parent_step_inst_->RequiresX11Fwd())
+  if (m_parent_step_inst_->x11) {
+    if (m_parent_step_inst_->x11_fwd)
       meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(m_pid_);
     else
       meta->x11_port = parent_step.interactive_meta().x11_meta().port();
@@ -332,7 +330,7 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
     if (x11_port != nullptr) *x11_port = meta->x11_port;
 
     CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
-                m_parent_step_inst_->RequiresX11Fwd(), meta->x11_port);
+                m_parent_step_inst_->x11_fwd, meta->x11_port);
   }
 
   // TODO: It's ok here to start the uv loop thread, since currently 1 task only
@@ -806,7 +804,7 @@ CraneErrCode ContainerInstance::Spawn() {
 
     bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
-      if (m_parent_step_inst_->RequiresX11()) {
+      if (m_parent_step_inst_->x11) {
         uint16_t x11_port;
         crun_init_success = SetupCrunFwdAtParent_(&x11_port);
         msg.set_x11_port(x11_port);
@@ -1213,7 +1211,7 @@ CraneErrCode ProcInstance::Spawn() {
 
     bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
-      if (m_parent_step_inst_->RequiresX11()) {
+      if (m_parent_step_inst_->x11) {
         uint16_t x11_port;
         crun_init_success = SetupCrunFwdAtParent_(&x11_port);
         msg.set_x11_port(x11_port);
@@ -1542,14 +1540,14 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
 }
 
 std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
-  CRANE_INFO("[Job #{}] Executing task.", m_step_.GetStep().task_id());
+  CRANE_INFO("[Job #{}] Executing task.", m_step_.job_id);
 
   std::promise<CraneErrCode> ok_promise;
   std::future ok_future = ok_promise.get_future();
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.GetStep().container().length() != 0) {
+  if (m_step_.container.length() != 0) {
     // Container
     elem.instance = std::make_unique<ContainerInstance>(&m_step_);
   } else {
@@ -1630,6 +1628,7 @@ void TaskManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
+      CRANE_TRACE("Receiving SIGCHLD for pid {}", m_step_.job_id);
       m_sigchld_queue_.enqueue({pid, status});
       m_process_sigchld_async_handle_->send();
     } else if (pid == 0) {
@@ -1696,8 +1695,7 @@ void TaskManager::EvTaskTimerCb_() {
         TaskTerminateQueueElem{.terminated_by_timeout = true});
     m_terminate_task_async_handle_->send();
   } else {
-    // TODO: send status change for all task in step
-    ActivateTaskStatusChange_(m_step_.GetStep().task_id(),
+    ActivateTaskStatusChange_(m_step_.job_id,
                               crane::grpc::TaskStatus::ExceedTimeLimit,
                               ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
@@ -1817,7 +1815,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         // For an Interactive task with a process running or a Batch task, we
         // just send a kill signal here.
         task->Kill(sig);
-      } else if (m_step_.GetStep().type() == crane::grpc::Interactive) {
+      } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
         ActivateTaskStatusChange_(task_id, crane::grpc::Completed,
                                   ExitCode::kExitCodeTerminated, std::nullopt);
@@ -1876,7 +1874,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
     auto task = std::move(elem.instance);
-
+    task_id_t task_id = task->task_id;
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
@@ -1884,37 +1882,39 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     AddTerminationTimer_(sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
 
-    m_step_.pwd.Init(m_step_.GetStep().uid());
+    m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_DEBUG(
           "[Job #{}] Failed to look up password entry for uid {} of task",
-          m_step_.GetStep().task_id(), m_step_.GetStep().uid());
+          m_step_.job_id, m_step_.uid);
       ActivateTaskStatusChange_(
           task->task_id, crane::grpc::TaskStatus::Failed,
           ExitCode::kExitCodePermissionDenied,
           fmt::format(
               "[Job #{}] Failed to look up password entry for uid {} of task",
-              m_step_.GetStep().task_id(), m_step_.GetStep().uid()));
+              m_step_.job_id, m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
     }
 
+    // TODO: Replace following job_id with task_id.
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.GetStep().task_id(), std::move(task));
+      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
       return;
     }
 
     LaunchExecution_(task.get());
     if (!task->GetPid()) {
-      CRANE_WARN("[task #{}] Failed to launch process.",
-                 m_step_.GetStep().task_id());
+      CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
+      CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
+                 task->GetPid());
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.GetStep().task_id(), std::move(task));
+      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }

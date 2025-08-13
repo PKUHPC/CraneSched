@@ -44,20 +44,42 @@ class StepInstance {
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   PasswordEntry pwd;
   bool orphaned{false};
+  job_id_t job_id;
+  step_id_t step_id;
+  std::vector<task_id_t> task_ids;
+
+  uid_t uid;
+  gid_t gid;
+
+  std::string container;
+  std::optional<crane::grpc::InteractiveTaskType> interactive_type;
+  bool pty;
+  bool x11;
+  bool x11_fwd;
 
   StepInstance() = default;
-  explicit StepInstance(const StepToSupv& step) : m_step_to_supv_(step) {};
+  explicit StepInstance(const StepToSupv& step)
+      : m_step_to_supv_(step),
+        job_id(step.task_id()),
+        step_id(0),
+        task_ids({}),
+        uid(step.uid()),
+        gid(step.gid()),
+        container(step.container()) {
+    interactive_type =
+        step.type() == crane::grpc::TaskType::Interactive
+            ? std::optional(step.interactive_meta().interactive_type())
+            : std::nullopt;
+    pty = interactive_type.has_value() && step.interactive_meta().pty();
+    x11 = interactive_type.has_value() && step.interactive_meta().x11();
+    x11_fwd = interactive_type.has_value() &&
+              step.interactive_meta().x11_meta().enable_forwarding();
+  };
   ~StepInstance();
 
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
-
-  bool RequiresPty() const { return m_step_to_supv_.interactive_meta().pty(); }
-  bool RequiresX11() const { return m_step_to_supv_.interactive_meta().x11(); }
-  bool RequiresX11Fwd() const {
-    return m_step_to_supv_.interactive_meta().x11_meta().enable_forwarding();
-  }
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
