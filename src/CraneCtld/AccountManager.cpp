@@ -2069,9 +2069,11 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
         g_db_client->UpdateUser(res_user);
         AddTxnLogToDB_(
             actor_name, name, TxnAction::DeleteUser,
-            fmt::format("remove_accounts: {}, remove_coordinator_accounts: {}, deleted: {}",
+            fmt::format("remove_accounts: {}, remove_coordinator_accounts: {}, "
+                        "deleted: {}",
                         fmt::join(remove_accounts, ", "),
-                        fmt::join(remove_coordinator_accounts, ", "), res_user.deleted));
+                        fmt::join(remove_coordinator_accounts, ", "),
+                        res_user.deleted));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2340,7 +2342,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
         g_db_client->UpdateUser(res_user);
         AddTxnLogToDB_(
             actor_name, name, TxnAction::ModifyUser,
-            fmt::format("set: account: {}, partition_list:[{}]", account_name,
+            fmt::format("Set: account: {}, partition_list:[{}]", account_name,
                         fmt::join(partition_list, ",")));
       };
 
@@ -2389,7 +2391,10 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, fmt::format("set: account: {}, partition: {}, qos_list: {}", account_name, partition, fmt::join(qos_list, ",")));
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("Set: account: {}, partition: {}, qos_list: {}",
+                        account_name, partition, fmt::join(qos_list, ",")));
       };
 
   // Update to database
@@ -2418,7 +2423,9 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
             "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
                 partition,
             std::string(""));
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, fmt::format("del: account: {}, partition: {}", account, partition));
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("Del: account: {}, partition: {}", account, partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2468,7 +2475,9 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, fmt::format("del: account: {}, partition: {}, qos: {}", account, partition, qos));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Del: account: {}, partition: {}, qos: {}",
+                                   account, partition, qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2490,7 +2499,8 @@ CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$addToSet", name, "allowed_partition",
                                      partition);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("add: partition: {}", partition));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Add: partition: {}", partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2516,7 +2526,8 @@ CraneExpected<void> AccountManager::AddAccountAllowedQos_(
                                      "$addToSet", name, "allowed_qos_list",
                                      qos);
         IncQosReferenceCountInDb_(qos, 1);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("add: qos: {}", qos));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Add: qos: {}", qos));
       };
 
   // Update to database
@@ -2540,7 +2551,8 @@ CraneExpected<void> AccountManager::SetAccountDescription_(
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "description", description);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("description: {}", description));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("description: {}", description));
       };
 
   // Update to database
@@ -2562,7 +2574,8 @@ CraneExpected<void> AccountManager::SetAccountDefaultQos_(
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "default_qos", qos);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("default_qos: {}", qos));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("default_qos: {}", qos));
       };
 
   // Update to database
@@ -2601,7 +2614,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
                                        "$set", name, "allowed_partition",
                                        partition_list);
         }
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("set: partition_list: {}", fmt::join(partition_list, ",")));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Set: partition_list: {}",
+                                   fmt::join(partition_list, ",")));
       };
 
   if (!g_db_client->CommitTransaction(callback))
@@ -2660,7 +2675,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
             IncQosReferenceCountInDb_(qos, 1);
           }
         }
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("set: qos_list: {}", fmt::join(qos_list, ",")));
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyAccount,
+            fmt::format("Set: qos_list: {}", fmt::join(qos_list, ",")));
       };
 
   if (!g_db_client->CommitTransaction(callback))
@@ -2694,7 +2711,8 @@ CraneExpected<void> AccountManager::DeleteAccountAllowedPartition_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
-        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount, fmt::format("del: partition: {}", partition));
+        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
+                       fmt::format("Del: partition: {}", partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2714,7 +2732,8 @@ CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
       [&](mongocxx::client_session* session) {
         change_num = DeleteAccountAllowedQosFromDBNoLock_(account.name, qos);
         IncQosReferenceCountInDb_(qos, -change_num);
-        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount, fmt::format("del: qos: {}", qos));
+        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
+                       fmt::format("Del: qos: {}", qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2735,7 +2754,9 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(
         g_db_client->UpdateEntityOne(
             MongodbClient::EntityType::USER, "$set", name,
             "account_to_attrs_map." + account + ".blocked", block);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, fmt::format("set: account_to_attrs_map.{}.blocked: {}", account, block));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Set: account_to_attrs_map.{}.blocked: {}",
+                                   account, block));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2753,7 +2774,8 @@ CraneExpected<void> AccountManager::BlockAccountNoLock_(
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "blocked", block);
-        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount, fmt::format("blocked: {}", block));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("blocked: {}", block));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {

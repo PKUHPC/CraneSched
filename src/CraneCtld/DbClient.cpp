@@ -895,7 +895,12 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 void MongodbClient::ViewToTxn_(const bsoncxx::document::view& txn_view,
                                Txn* txn) {
   try {
-    // TODO: mongo default
+    txn->actor = txn_view["actor"].get_string().value;
+    txn->target = txn_view["target"].get_string().value;
+    txn->action = static_cast<crane::grpc::TxnAction>(
+        txn_view["action"].get_int32().value);
+    txn->creation_time = txn_view["creation_time"].get_int64().value;
+    txn->info = txn_view["info"].get_string().value;
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
