@@ -360,6 +360,10 @@ class TaskManager {
   void StartCgroupV2OomMonitoring_();
   void StopCgroupV2OomMonitoring_();
 
+  // Resolve actual cgroup fs path for a pid by reading /proc/<pid>/cgroup
+  std::optional<std::string> ResolveCgroupPathForPid_(pid_t pid,
+                                                      bool is_cgroup_v2);
+
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -396,6 +400,7 @@ class TaskManager {
 
   std::string m_cgroup_path_;
   bool m_oom_monitoring_enabled_{false};
+  uint64_t m_last_oom_kill_count_{0};
 
   std::atomic_bool m_oom_monitoring_thread_exit_{false};
   std::thread m_oom_monitoring_thread_;

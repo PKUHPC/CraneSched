@@ -1913,23 +1913,33 @@ void TaskManager::EvOomMonitoringCb_() {
 }
 
 void TaskManager::InitOomMonitoring_() {
-  // Generate cgroup name for this task
-  std::string cgroup_name = fmt::format("Crane_Task_{}", g_config.JobId);
-
   // Detect cgroup version by checking filesystem
   bool is_cgroup_v2 =
       std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
 
-  if (is_cgroup_v2) {
-    m_cgroup_path_ = fmt::format("/sys/fs/cgroup/{}", cgroup_name);
-  } else {
-    m_cgroup_path_ = fmt::format("/sys/fs/cgroup/memory/{}", cgroup_name);
+  pid_t pid = m_task_ ? m_task_->GetPid() : 0;
+  if (pid <= 0) {
+    CRANE_WARN("No valid pid for OOM monitoring.");
+    return;
   }
+
+  // Resolve actual cgroup path for this pid
+  auto resolved = ResolveCgroupPathForPid_(pid, is_cgroup_v2);
+  if (!resolved.has_value()) {
+    CRANE_WARN(
+        "Failed to resolve cgroup path for pid {}. OOM monitoring disabled",
+        pid);
+    return;
+  }
+  m_cgroup_path_ = *resolved;
+
+  // Wait briefly for cgroup path to appear (race tolerance)
+  for (int i = 0; i < 20 && !std::filesystem::exists(m_cgroup_path_); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
   CRANE_DEBUG("Initializing OOM monitoring for cgroup path: {}",
               m_cgroup_path_);
 
-  // Check if cgroup path exists
   if (!std::filesystem::exists(m_cgroup_path_)) {
     CRANE_WARN("Cgroup path {} does not exist, OOM monitoring disabled",
                m_cgroup_path_);
@@ -1945,8 +1955,40 @@ void TaskManager::InitOomMonitoring_() {
   }
 }
 
+std::optional<std::string> TaskManager::ResolveCgroupPathForPid_(
+    pid_t pid, bool is_cgroup_v2) {
+  std::ifstream fin(fmt::format("/proc/{}/cgroup", pid));
+  if (!fin.is_open()) return std::nullopt;
+
+  std::string line;
+  if (is_cgroup_v2) {
+    // v2 format: 0::/crane[/...]
+    while (std::getline(fin, line)) {
+      auto pos = line.find("::");
+      if (pos == std::string::npos) continue;
+      std::string rel = line.substr(pos + 2);  // includes leading '/'
+      if (rel.empty()) continue;
+      return std::string("/sys/fs/cgroup") + rel;
+    }
+  } else {
+    // v1 format: <id>:controllers:/path
+    while (std::getline(fin, line)) {
+      auto first = line.find(":");
+      if (first == std::string::npos) continue;
+      auto second = line.find(":", first + 1);
+      if (second == std::string::npos) continue;
+      std::string ctrls = line.substr(first + 1, second - first - 1);
+      if (ctrls.find("memory") == std::string::npos) continue;
+      std::string rel = line.substr(second + 1);
+      return std::string("/sys/fs/cgroup/memory") + rel;
+    }
+  }
+  return std::nullopt;
+}
+
 void TaskManager::StartCgroupV2OomMonitoring_() {
-  std::string memory_events_path = m_cgroup_path_ + "/" + MemoryEvents;
+  std::string memory_events_path =
+      (std::filesystem::path(m_cgroup_path_) / MemoryEvents).string();
 
   CRANE_DEBUG("Setting up CgroupV2 OOM monitoring for path: {}",
               memory_events_path);
@@ -1956,6 +1998,24 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
     CRANE_WARN("Memory events file {} does not exist, OOM monitoring disabled",
                memory_events_path);
     return;
+  }
+
+  // Initialize baseline oom_kill counter to avoid false immediate trigger
+  {
+    std::ifstream events_file(memory_events_path);
+    if (events_file.is_open()) {
+      std::string line;
+      while (std::getline(events_file, line)) {
+        if (line.rfind("oom_kill ", 0) == 0) {
+          std::istringstream iss(line);
+          std::string field;
+          uint64_t value = 0;
+          iss >> field >> value;
+          m_last_oom_kill_count_ = value;
+          break;
+        }
+      }
+    }
   }
 
   // Create file system event handle for monitoring memory.events file changes
@@ -1969,17 +2029,16 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
     if (events_file.is_open()) {
       std::string line;
       while (std::getline(events_file, line)) {
-        if (line.find("oom_kill ") != std::string::npos) {
+        if (line.rfind("oom_kill ", 0) == 0) {
           std::istringstream iss(line);
           std::string field;
-          int value = 0;
+          uint64_t value = 0;
 
           iss >> field >> value;
-          if (value > 0) {
+          if (value > m_last_oom_kill_count_) {
             CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
                         m_step_.GetStep().task_id());
 
-            // Handle OOM based on task type, matching PR #402 implementation
             if (m_step_.IsBatch()) {
               // For Batch tasks, use task termination queue
               TaskTerminateQueueElem terminate_elem{
@@ -2001,6 +2060,7 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
                   static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
                   "Task terminated due to out-of-memory (OOM)");
             }
+            m_last_oom_kill_count_ = value;  // de-dup
             break;
           }
         }
