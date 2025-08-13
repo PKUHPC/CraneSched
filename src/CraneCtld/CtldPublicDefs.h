@@ -574,6 +574,18 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
   }
+
+  std::string QosToString() const {
+    return fmt::format(
+      "name: {}, description: {}, reference_count: {}, priority: {}, "
+      "max_jobs_per_user: {}, max_running_tasks_per_user: {}, "
+      "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
+      "max_cpus_per_account: {}",
+      name, description, reference_count, priority, max_jobs_per_user,
+      max_running_tasks_per_user,
+      absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
+      max_cpus_per_account);
+  }
 };
 
 struct Account {
@@ -588,6 +600,17 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
+
+  std::string AccountToString() const {
+    return fmt::format(
+        "name: {}, description: {}, blocked: {}, parent_account: {}, "
+        "default_qos: {}, users: [{}], child_accounts: [{}], "
+        "allowed_partition: [{}], allowed_qos_list: [{}], coordinators: [{}]",
+        name, description, blocked, parent_account, default_qos,
+        fmt::join(users, ", "), fmt::join(child_accounts, ", "),
+        fmt::join(allowed_partition, ", "), fmt::join(allowed_qos_list, ", "),
+        fmt::join(coordinators, ", "));
+  }
 };
 
 struct User {
@@ -625,6 +648,54 @@ struct User {
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
   std::string cert_number;
+
+  std::string UserToString() const {
+    std::string accounts_info = "{";
+    for (auto it = account_to_attrs_map.begin();
+         it != account_to_attrs_map.end(); ++it) {
+      if (it != account_to_attrs_map.begin()) {
+        accounts_info += ", ";
+      }
+
+      std::string partition_qos_info = "{";
+      for (auto pit = it->second.allowed_partition_qos_map.begin();
+           pit != it->second.allowed_partition_qos_map.end(); ++pit) {
+        if (pit != it->second.allowed_partition_qos_map.begin()) {
+          partition_qos_info += ", ";
+        }
+        partition_qos_info +=
+            fmt::format("{}: default={}, allowed=[{}]", pit->first,
+                        pit->second.first, fmt::join(pit->second.second, ", "));
+      }
+      partition_qos_info += "}";
+
+      accounts_info +=
+          fmt::format("{}: {{blocked: {}, partition_qos: {}}}", it->first,
+                      it->second.blocked, partition_qos_info);
+    }
+    accounts_info += "}";
+
+    return fmt::format(
+        "uid: {}, name: {}, default_account: {}, admin_level: {}, "
+        "coordinator_accounts: [{}], account_attributes: {}",
+        uid, name, default_account, static_cast<int>(admin_level),
+        fmt::join(coordinator_accounts, ", "), accounts_info);
+  }
+
+  static const char* AdminLevelToString(AdminLevel level) {
+    switch (level) {
+    case None:
+      return "None";
+    case Operator:
+      return "Operator";
+    case Admin:
+      return "Admin";
+    case Root:
+      return "Root";
+    default:
+      return "Unknown";
+    }
+  }
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
