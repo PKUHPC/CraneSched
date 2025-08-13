@@ -41,6 +41,14 @@
 
 namespace util {
 
+enum class PartitionNodesResult : std::uint8_t {
+  SUCCESS = 0,
+  ILLEGAL_FORMAT,
+  UNKNOWN_NODE,
+  NO_NODE_IN_PARTITION,
+  NODE_NOT_ASSIGNED
+};
+
 using CertPair = std::pair<std::string,   // CN
                            std::string>;  // serial number
 
@@ -258,4 +266,8 @@ bool ConvertStringToGresMap(const std::string& s, GresMap* gres_map);
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 
+PartitionNodesResult PartitionNodesProcess(
+    const std::string &node_str, const std::list<std::string> &host_list,
+    const std::string &part_name,
+    std::unordered_set<std::string> &part_node_list);
 }  // namespace util
