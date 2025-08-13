@@ -475,17 +475,17 @@ std::expected<CertPair, std::string> ParseCertificate(
 PartitionNodesResult PartitionNodesProcess(
     const std::string &node_str, const std::list<std::string> &host_list,
     const std::string &part_name,
-    std::unordered_set<std::string> &part_node_list) {
+    std::unordered_set<std::string> &part_node_list,
+    std::unordered_set<std::string> *nodes_without_part) {
   std::list<std::string> name_list;
-  auto node_name_set_list =
-      std::ranges::to<std::unordered_set<std::string>>(host_list);
-  std::unordered_set<std::string> nodes_without_part = node_name_set_list;
+  std::unordered_set<std::string> node_name_set_list(host_list.begin(),
+                                                     host_list.end());
 
   auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
   if (act_nodes_str == "ALL") {
-    for (auto &&node : host_list) {
+    for (const auto &node : host_list) {
       part_node_list.emplace(node);
-      nodes_without_part.erase(node);
+      if (nodes_without_part != nullptr) nodes_without_part->erase(node);
       CRANE_TRACE("Find node {} in partition {}", node, part_name);
     }
   } else {
@@ -497,12 +497,14 @@ PartitionNodesResult PartitionNodesProcess(
     if (name_list.empty()) {
       CRANE_WARN("No nodes in partition '{}'.", part_name);
     } else {
-      for (auto &&node : name_list) {
+      for (const auto &node : name_list) {
         auto node_it = node_name_set_list.find(node);
         if (node_it != node_name_set_list.end()) {
           part_node_list.emplace(*node_it);
-          nodes_without_part.erase(*node_it);
-          CRANE_INFO("Find node {} in partition {}", *node_it, part_name);
+          if (nodes_without_part != nullptr)
+            nodes_without_part->erase(*node_it);
+          CRANE_TRACE("Set the partition of node {} to {}", *node_it,
+                      part_name);
         } else {
           CRANE_ERROR(
               "Unknown node '{}' found in partition '{}'. It is "
@@ -514,11 +516,7 @@ PartitionNodesResult PartitionNodesProcess(
       }
     }
   }
-  if (!nodes_without_part.empty()) {
-    CRANE_ERROR("Nodes {} not belong to any partition",
-                absl::StrJoin(nodes_without_part, ","));
-    return PartitionNodesResult::NO_NODE_IN_PARTITION;
-  }
+
   return PartitionNodesResult::SUCCESS;
 }
 

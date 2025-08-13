@@ -423,6 +423,9 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      std::unordered_set nodes_without_part = g_config.Nodes |
+                                              ranges::views::keys |
+                                              ranges::to<std::unordered_set>();
       if (config["Partitions"]) {
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
@@ -455,7 +458,8 @@ void ParseConfig(int argc, char** argv) {
               g_config.Nodes | ranges::views::keys |
               ranges::to<std::list<std::string>>();
           part.nodelist_str = util::HostNameListToStr(host_list);
-          if (util::PartitionNodesProcess(nodes, host_list, name, part.nodes) !=
+          if (util::PartitionNodesProcess(nodes, host_list, name, part.nodes,
+                                          &nodes_without_part) !=
               util::PartitionNodesResult::SUCCESS) {
             std::exit(1);
           }
@@ -536,6 +540,12 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      if (!nodes_without_part.empty()) {
+        CRANE_ERROR("Nodes {} not belong to any partition",
+                    ranges::views::join(nodes_without_part, ",") |
+                        ranges::to<std::string>);
+        std::exit(1);
+      }
 
       if (config["DefaultPartition"] && !config["DefaultPartition"].IsNull()) {
         auto default_partition = config["DefaultPartition"].as<std::string>();
