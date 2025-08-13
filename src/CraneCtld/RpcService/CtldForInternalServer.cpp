@@ -336,6 +336,32 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   }
 }
 
+grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
+    grpc::ServerContext *context,
+    const crane::grpc::BroadcastPmixPortRequest *request,
+    crane::grpc::BroadcastPmixPortReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  for (const auto& craned_id : request->craned_ids()) {
+    auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (!craned_stub) {
+      response->set_ok(false);
+      break;
+    }
+
+    auto result = craned_stub->ReceivePmixPort(request->task_id(), request->port(), craned_id);
+    if (!result) {
+      response->set_ok(false);
+      break;
+    }
+  }
+
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
 CtldForInternalServer::CtldForInternalServer(
     const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForInternalServiceImpl>(this);
