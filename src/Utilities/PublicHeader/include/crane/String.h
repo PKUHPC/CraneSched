@@ -39,6 +39,14 @@
 
 namespace util {
 
+enum class PartitionNodesResult : std::uint8_t {
+  SUCCESS = 0,
+  ILLEGAL_FORMAT,
+  UNKNOWN_NODE,
+  NO_NODE_IN_PARTITION,
+  NODE_NOT_ASSIGNED
+};
+
 template <typename T = std::string, typename YamlNode, typename DefaultType>
   requires requires(const YamlNode &node) {
     { node.template as<T>() };
@@ -123,4 +131,8 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name,
   return std::nullopt;
 }
 
+PartitionNodesResult PartitionNodesProcess(
+    const std::string &node_str, const std::list<std::string> &host_list,
+    const std::string &part_name,
+    std::unordered_set<std::string> &part_node_list);
 }  // namespace util

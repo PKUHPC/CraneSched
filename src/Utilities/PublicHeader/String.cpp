@@ -472,4 +472,54 @@ std::expected<CertPair, std::string> ParseCertificate(
   return CertPair{cn, formatted_serial_number};
 }
 
+PartitionNodesResult PartitionNodesProcess(
+    const std::string &node_str, const std::list<std::string> &host_list,
+    const std::string &part_name,
+    std::unordered_set<std::string> &part_node_list) {
+  std::list<std::string> name_list;
+  auto node_name_set_list =
+      std::ranges::to<std::unordered_set<std::string>>(host_list);
+  std::unordered_set<std::string> nodes_without_part = node_name_set_list;
+
+  auto act_nodes_str = absl::StripAsciiWhitespace(node_str);
+  if (act_nodes_str == "ALL") {
+    for (auto &&node : host_list) {
+      part_node_list.emplace(node);
+      nodes_without_part.erase(node);
+      CRANE_TRACE("Find node {} in partition {}", node, part_name);
+    }
+  } else {
+    if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
+      CRANE_ERROR("Illegal node name string format.");
+      return PartitionNodesResult::ILLEGAL_FORMAT;
+    }
+
+    if (name_list.empty()) {
+      CRANE_WARN("No nodes in partition '{}'.", part_name);
+    } else {
+      for (auto &&node : name_list) {
+        auto node_it = node_name_set_list.find(node);
+        if (node_it != node_name_set_list.end()) {
+          part_node_list.emplace(*node_it);
+          nodes_without_part.erase(*node_it);
+          CRANE_INFO("Find node {} in partition {}", *node_it, part_name);
+        } else {
+          CRANE_ERROR(
+              "Unknown node '{}' found in partition '{}'. It is "
+              "ignored "
+              "and should be contained in the configuration file.",
+              node, part_name);
+          return PartitionNodesResult::UNKNOWN_NODE;
+        }
+      }
+    }
+  }
+  if (!nodes_without_part.empty()) {
+    CRANE_ERROR("Nodes {} not belong to any partition",
+                absl::StrJoin(nodes_without_part, ","));
+    return PartitionNodesResult::NO_NODE_IN_PARTITION;
+  }
+  return PartitionNodesResult::SUCCESS;
+}
+
 }  // namespace util

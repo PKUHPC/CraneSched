@@ -93,6 +93,7 @@ Nodes:
         EnvInjector: nvidia
 
 # partition information list
+# "nodes" parameter supports the "ALL" option, indicating all nodes
 Partitions:
   - name: CPU
     nodes: "cn[15-16]"
