@@ -104,13 +104,11 @@ message CreateCgroupForJobsRequest {
 
 message CreateCgroupForJobsReply {}
 
-message FreeStepsRequest{
+message FreeStepsRequest {
   repeated uint32 job_id_list = 1;
 }
 
-message FreeStepsReply{
-
-}
+message FreeStepsReply {}
 
 message ReleaseCgroupForJobsRequest {
   repeated uint32 task_id_list = 1;
@@ -937,7 +935,7 @@ service Craned {
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
   rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
-  rpc FreeSteps(FreeStepsRequest)returns(FreeStepsReply);
+  rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
 
   /*

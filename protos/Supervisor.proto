@@ -104,12 +104,9 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
-message ShutdownSupervisorRequest{
-}
+message ShutdownSupervisorRequest {}
 
-message ShutdownSupervisorReply {
-
-}
+message ShutdownSupervisorReply {}
 
 service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
