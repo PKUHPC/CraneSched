@@ -501,45 +501,18 @@ void ParseConfig(int argc, char** argv) {
                 g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
                                                     kDefaultContainerTempDir);
 
-            if (container_config["RuntimeBin"]) {
-              g_config.Container.RuntimeBin =
-                  container_config["RuntimeBin"].as<std::string>();
+            if (container_config["RuntimeEndpoint"]) {
+              g_config.Container.RuntimeEndpoint =
+                  container_config["RuntimeEndpoint"].as<std::string>();
             } else {
-              CRANE_ERROR("RuntimeBin is not configured.");
+              CRANE_ERROR("RuntimeEndpoint is not configured.");
               std::exit(1);
             }
 
-            if (container_config["RuntimeState"]) {
-              g_config.Container.RuntimeState =
-                  container_config["RuntimeState"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeState is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeKill"]) {
-              g_config.Container.RuntimeKill =
-                  container_config["RuntimeKill"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeKill is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeDelete"]) {
-              g_config.Container.RuntimeDelete =
-                  container_config["RuntimeDelete"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeDelete is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeRun"]) {
-              g_config.Container.RuntimeRun =
-                  container_config["RuntimeRun"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeRun is not configured.");
-              std::exit(1);
-            }
+            // In most cases, ImageEndpoint is the same as RuntimeEndpoint.
+            g_config.Container.ImageEndpoint =
+                YamlValueOr(container_config["ImageEndpoint"],
+                            g_config.Container.RuntimeEndpoint.string());
           }
         }
 

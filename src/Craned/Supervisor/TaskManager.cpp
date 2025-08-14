@@ -559,21 +559,6 @@ std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
   return argv;
 }
 
-std::string ContainerInstance::ParseOCICmdPattern_(
-    const std::string& cmd) const {
-  auto& pwd = m_parent_step_inst_->pwd;
-  std::string parsed_cmd(cmd);
-  // NOTE: Using m_temp_path_ as the bundle is modified and stored here
-  absl::StrReplaceAll(
-      {{"%b", m_temp_path_.string()},
-       {"%j", std::to_string(m_parent_step_inst_->GetStep().task_id())},
-       {"%x", m_parent_step_inst_->GetStep().name()},
-       {"%u", pwd.Username()},
-       {"%U", std::to_string(pwd.Uid())}},
-      &parsed_cmd);
-  return parsed_cmd;
-}
-
 CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
     const std::string& src, const std::string& dst) const {
   using json = nlohmann::json;
@@ -667,15 +652,15 @@ CraneErrCode ContainerInstance::Prepare() {
   // Generate path and params.
   m_temp_path_ = g_config.Container.TempDir /
                  fmt::format("{}", m_parent_step_inst_->GetStep().task_id());
-  m_bundle_path_ = m_parent_step_inst_->GetStep().container();
-  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
+  m_image_tag_ = m_parent_step_inst_->GetStep().container();
+
   // FIXME: Some env like x11 port are assigned later in spawn.
   m_env_ = GetChildProcessEnv();
   // m_arguments_ is not applicable for container tasks.
 
   // Check relative path
-  if (m_bundle_path_.is_relative())
-    m_bundle_path_ = m_parent_step_inst_->GetStep().cwd() / m_bundle_path_;
+  if (m_image_tag_.is_relative())
+    m_image_tag_ = m_parent_step_inst_->GetStep().cwd() / m_image_tag_;
 
   // Write script into the temp folder
   auto sh_path =
@@ -739,7 +724,7 @@ CraneErrCode ContainerInstance::Prepare() {
   m_meta_->parsed_sh_script_path = sh_path;
 
   // Modify bundle
-  auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
+  auto err = ModifyOCIBundleConfig_(m_image_tag_, m_temp_path_);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
                 m_parent_step_inst_->GetStep().task_id());
@@ -958,7 +943,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     json jret;
 
     // Check the state of the container
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+    // cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
 
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
                                                   pclose);
@@ -999,24 +984,24 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     // Try to stop gracefully.
     // NOTE: It's admin's responsibility to ensure the command is safe.
     // Note: Signal is configured in config.yaml instead of in the param.
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeKill);
-    rc = system(cmd.c_str());
-    if (rc != 0) {
-      CRANE_TRACE(
-          "[Subprocess] Failed to kill container for task #{}: error in {}",
-          m_parent_step_inst_->GetStep().task_id(), cmd);
-    }
+    // cmd = ParseOCICmdPattern_(g_config.Container.RuntimeKill);
+    // rc = system(cmd.c_str());
+    // if (rc != 0) {
+    //   CRANE_TRACE(
+    //       "[Subprocess] Failed to kill container for task #{}: error in {}",
+    //       m_parent_step_inst_->GetStep().task_id(), cmd);
+    // }
 
   ContainerDelete:
     // Delete the container
     // NOTE: Admin could choose if --force is configured or not.
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeDelete);
-    rc = system(cmd.c_str());
-    if (rc != 0) {
-      CRANE_TRACE(
-          "[Subprocess] Failed to delete container for task #{}: error in {}",
-          m_parent_step_inst_->GetStep().task_id(), cmd);
-    }
+    // cmd = ParseOCICmdPattern_(g_config.Container.RuntimeDelete);
+    // rc = system(cmd.c_str());
+    // if (rc != 0) {
+    //   CRANE_TRACE(
+    //       "[Subprocess] Failed to delete container for task #{}: error in
+    //       {}", m_parent_step_inst_->GetStep().task_id(), cmd);
+    // }
 
   ProcessKill:
     // Kill runc process as the last resort.
