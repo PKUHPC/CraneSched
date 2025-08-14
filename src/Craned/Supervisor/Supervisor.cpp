@@ -23,6 +23,7 @@
 #include <cxxopts.hpp>
 
 #include "CranedClient.h"
+#include "CriClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
