@@ -569,10 +569,10 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
-      if (config["ConfigCrcWarnIgnoreFlag"] &&
-          !config["ConfigCrcWarnIgnoreFlag"].IsNull())
-        g_config.ConfigCrcWarnIgnoreFlag =
-            config["ConfigCrcWarnIgnoreFlag"].as<bool>();
+      if (config["IgnoreConfigInconsistency"] &&
+          !config["IgnoreConfigInconsistency"].IsNull())
+        g_config.IgnoreConfigInconsistency =
+            config["IgnoreConfigInconsistency"].as<bool>();
 
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];

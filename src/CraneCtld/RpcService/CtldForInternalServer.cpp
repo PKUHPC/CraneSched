@@ -88,7 +88,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  if (!g_config.ConfigCrcWarnIgnoreFlag &&
+  if (!g_config.IgnoreConfigInconsistency &&
       (request->remote_meta().config_crc() != g_config.ConfigCrcVal)) {
     CRANE_ERROR(
         "CranedNode #{} appears to have a diffrent config.yaml than the "
