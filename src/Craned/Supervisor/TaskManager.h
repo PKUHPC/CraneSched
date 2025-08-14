@@ -332,6 +332,8 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is terminated by timeout,
     // task->status=Timeout (From internal queue)
     bool mark_as_orphaned{false};
+    bool terminated_by_oom{false};  // If the task is terminated by OOM,
+    // status=Failed (From internal queue)
   };
 
   struct ChangeTaskTimeLimitQueueElem {
@@ -409,6 +411,8 @@ class TaskManager {
 
   std::shared_ptr<uvw::timer_handle> m_oom_timer_handle_;
   std::shared_ptr<uvw::fs_event_handle> m_oom_fs_event_handle_;
+  std::shared_ptr<uvw::poll_handle> m_oom_v1_poll_handle_;
+  bool m_v1_oom_fired_{false};
 };
 
 }  // namespace Supervisor

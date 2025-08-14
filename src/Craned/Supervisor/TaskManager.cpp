@@ -331,7 +331,7 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
       fmt::format("/proc/{}/oom_score_adj", getpid());
   std::ofstream oom_score_adj_stream(oom_score_adj_file);
   if (oom_score_adj_stream.is_open()) {
-    oom_score_adj_stream << "0";  // Normal OOM score, can be killed
+    oom_score_adj_stream << "0";
     oom_score_adj_stream.close();
   }
 
@@ -1765,12 +1765,18 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    int sig = SIGTERM;  // For BatchTask
+    int sig = SIGTERM;  // default for BatchTask
     if (m_step_.IsCrun()) sig = SIGHUP;
 
     if (elem.mark_as_orphaned) m_task_->orphaned = true;
     if (elem.terminated_by_timeout)
       m_task_->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
+    if (elem.terminated_by_oom) {
+      // On OOM: force kill the whole process group to avoid parent exiting
+      // normally and unify the result as signaled termination.
+      sig = SIGKILL;
+      m_task_->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
+    }
     if (elem.terminated_by_user) {
       // If termination request is sent by user, send SIGKILL to ensure that
       // even freezing processes will be terminated immediately.
@@ -1913,7 +1919,6 @@ void TaskManager::EvOomMonitoringCb_() {
 }
 
 void TaskManager::InitOomMonitoring_() {
-  // Detect cgroup version by checking filesystem
   bool is_cgroup_v2 =
       std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
 
@@ -1962,7 +1967,6 @@ std::optional<std::string> TaskManager::ResolveCgroupPathForPid_(
 
   std::string line;
   if (is_cgroup_v2) {
-    // v2 format: 0::/crane[/...]
     while (std::getline(fin, line)) {
       auto pos = line.find("::");
       if (pos == std::string::npos) continue;
@@ -1971,7 +1975,6 @@ std::optional<std::string> TaskManager::ResolveCgroupPathForPid_(
       return std::string("/sys/fs/cgroup") + rel;
     }
   } else {
-    // v1 format: <id>:controllers:/path
     while (std::getline(fin, line)) {
       auto first = line.find(":");
       if (first == std::string::npos) continue;
@@ -2022,7 +2025,7 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
   auto fs_event_handle = m_uvw_loop_->resource<uvw::fs_event_handle>();
 
   fs_event_handle->on<uvw::fs_event_event>([this, memory_events_path](
-                                               uvw::fs_event_event& event,
+                                               const uvw::fs_event_event& event,
                                                uvw::fs_event_handle& handle) {
     // When memory.events file changes, check for oom_kill events
     std::ifstream events_file(memory_events_path);
@@ -2040,27 +2043,18 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
                         m_step_.GetStep().task_id());
 
             if (m_step_.IsBatch()) {
-              // For Batch tasks, use task termination queue
-              TaskTerminateQueueElem terminate_elem{
-                  .terminated_by_user = false,
-                  .terminated_by_timeout = false,
-                  .mark_as_orphaned = false};
+              TaskTerminateQueueElem terminate_elem{};
+              terminate_elem.terminated_by_oom = true;
               m_task_terminate_queue_.enqueue(terminate_elem);
               m_terminate_task_async_handle_->send();
 
-              // Mark task as terminated by OOM
-              if (m_task_ && m_task_->terminated_by == TerminatedBy::NONE) {
-                m_task_->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
-              }
             } else {
-              // For non-Batch tasks (Interactive, etc.), use direct status
-              // change with kExitCodeOOMError
               ActivateTaskStatusChange_(
                   crane::grpc::TaskStatus::Failed,
                   static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
                   "Task terminated due to out-of-memory (OOM)");
             }
-            m_last_oom_kill_count_ = value;  // de-dup
+            m_last_oom_kill_count_ = value;
             break;
           }
         }
@@ -2086,12 +2080,129 @@ void TaskManager::StopCgroupV2OomMonitoring_() {
   }
 }
 
-void TaskManager::StartCgroupV1OomMonitoring_() {}
+void TaskManager::StartCgroupV1OomMonitoring_() {
+  // cgroup v1 OOM monitoring via cgroup.event_control + eventfd
+  auto mem_oom_ctrl_path =
+      (std::filesystem::path(m_cgroup_path_) / MemoryOomControl).string();
+  auto cgrp_event_ctrl_path =
+      (std::filesystem::path(m_cgroup_path_) / "cgroup.event_control").string();
+
+  if (!std::filesystem::exists(mem_oom_ctrl_path) ||
+      !std::filesystem::exists(cgrp_event_ctrl_path)) {
+    CRANE_WARN(
+        "CgroupV1 OOM control files not found ({} or {}). Monitoring disabled",
+        mem_oom_ctrl_path, cgrp_event_ctrl_path);
+    return;
+  }
+
+  // Open memory.oom_control and create eventfd
+  m_memory_oom_control_fd_ =
+      open(mem_oom_ctrl_path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (m_memory_oom_control_fd_ < 0) {
+    CRANE_WARN("Failed to open {}: {}", mem_oom_ctrl_path, strerror(errno));
+    return;
+  }
+
+  m_oom_eventfd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (m_oom_eventfd_ < 0) {
+    CRANE_WARN("eventfd() failed for v1 OOM monitoring: {}", strerror(errno));
+    close(m_memory_oom_control_fd_);
+    m_memory_oom_control_fd_ = -1;
+    return;
+  }
+
+  // Register eventfd + memory.oom_control into cgroup.event_control
+  int ctrl_fd = open(cgrp_event_ctrl_path.c_str(), O_WRONLY | O_CLOEXEC);
+  if (ctrl_fd < 0) {
+    CRANE_WARN("Failed to open {}: {}", cgrp_event_ctrl_path, strerror(errno));
+    close(m_oom_eventfd_);
+    m_oom_eventfd_ = -1;
+    close(m_memory_oom_control_fd_);
+    m_memory_oom_control_fd_ = -1;
+    return;
+  }
+
+  char buf[64];
+  int len = snprintf(buf, sizeof(buf), "%d %d", m_oom_eventfd_,
+                     m_memory_oom_control_fd_);
+  if (len <= 0 || write(ctrl_fd, buf, len) != len) {
+    CRANE_WARN("Failed to register OOM event to {}: {}", cgrp_event_ctrl_path,
+               strerror(errno));
+    close(ctrl_fd);
+    close(m_oom_eventfd_);
+    m_oom_eventfd_ = -1;
+    close(m_memory_oom_control_fd_);
+    m_memory_oom_control_fd_ = -1;
+    return;
+  }
+  close(ctrl_fd);
+
+  // Set up uv poll on eventfd
+  m_v1_oom_fired_ = false;
+  auto poll = m_uvw_loop_->resource<uvw::poll_handle>(m_oom_eventfd_);
+  poll->on<uvw::poll_event>([this](const uvw::poll_event& ev,
+                                   uvw::poll_handle& h) {
+    // Drain eventfd
+    uint64_t counter = 0;
+    ssize_t r = read(m_oom_eventfd_, &counter, sizeof(counter));
+    if (r < 0 && errno != EAGAIN) {
+      h.stop();
+      h.close();
+      return;
+    }
+
+    if (!m_v1_oom_fired_) {
+      CRANE_TRACE("Task #{} exceeded its memory limit (v1). Terminating it...",
+                  m_step_.GetStep().task_id());
+
+      if (m_step_.IsBatch()) {
+        TaskTerminateQueueElem terminate_elem{};
+        terminate_elem.terminated_by_oom = true;
+        m_task_terminate_queue_.enqueue(terminate_elem);
+        m_terminate_task_async_handle_->send();
+      } else {
+        ActivateTaskStatusChange_(
+            crane::grpc::TaskStatus::Failed,
+            static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
+            "Task terminated due to out-of-memory (OOM)");
+      }
+
+      m_v1_oom_fired_ = true;
+    }
+  });
+
+  try {
+    poll->start(uvw::details::uvw_poll_event::READABLE);
+  } catch (const std::exception& e) {
+    CRANE_WARN("Failed to start poll on eventfd {}: {}", m_oom_eventfd_,
+               e.what());
+    poll->close();
+    close(m_oom_eventfd_);
+    m_oom_eventfd_ = -1;
+    close(m_memory_oom_control_fd_);
+    m_memory_oom_control_fd_ = -1;
+    return;
+  }
+
+  m_oom_v1_poll_handle_ = poll;
+}
 
 void TaskManager::StopCgroupV1OomMonitoring_() {
-  // CgroupV1 OOM monitoring cleanup - currently empty as
-  // StartCgroupV1OomMonitoring_ is also empty
   CRANE_DEBUG("Stopping CgroupV1 OOM monitoring");
+  m_v1_oom_fired_ = false;
+  if (m_oom_v1_poll_handle_) {
+    m_oom_v1_poll_handle_->stop();
+    m_oom_v1_poll_handle_->close();
+    m_oom_v1_poll_handle_.reset();
+  }
+  if (m_oom_eventfd_ >= 0) {
+    close(m_oom_eventfd_);
+    m_oom_eventfd_ = -1;
+  }
+  if (m_memory_oom_control_fd_ >= 0) {
+    close(m_memory_oom_control_fd_);
+    m_memory_oom_control_fd_ = -1;
+  }
 }
 
 }  // namespace Supervisor
