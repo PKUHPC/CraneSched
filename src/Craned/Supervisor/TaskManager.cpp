@@ -1661,6 +1661,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
 
+    m_pid_task_id_map_.erase(pid);
     CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}", pid,
                 exit_info->is_terminated_by_signal, exit_info->value);
 
