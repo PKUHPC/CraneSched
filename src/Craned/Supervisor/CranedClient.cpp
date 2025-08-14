@@ -32,6 +32,7 @@ CranedClient::~CranedClient() {
     m_async_send_thread_.join();
   }
 }
+
 void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.
