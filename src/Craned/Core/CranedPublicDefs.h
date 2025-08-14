@@ -94,11 +94,8 @@ struct Config {
   struct ContainerConfig {
     bool Enabled{false};
     std::filesystem::path TempDir;
-    std::string RuntimeBin;
-    std::string RuntimeState;
-    std::string RuntimeRun;
-    std::string RuntimeKill;
-    std::string RuntimeDelete;
+    std::filesystem::path RuntimeEndpoint;
+    std::filesystem::path ImageEndpoint;
   };
   ContainerConfig Container;
 

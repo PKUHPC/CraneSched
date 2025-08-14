@@ -103,11 +103,9 @@ void InitFromStdin(int argc, char** argv) {
   g_config.Container.Enabled = msg.has_container_config();
   if (g_config.Container.Enabled) {
     g_config.Container.TempDir = msg.container_config().temp_dir();
-    g_config.Container.RuntimeBin = msg.container_config().runtime_bin();
-    g_config.Container.RuntimeState = msg.container_config().state_cmd();
-    g_config.Container.RuntimeRun = msg.container_config().run_cmd();
-    g_config.Container.RuntimeKill = msg.container_config().kill_cmd();
-    g_config.Container.RuntimeDelete = msg.container_config().delete_cmd();
+    g_config.Container.RuntimeEndpoint =
+        msg.container_config().runtime_endpoint();
+    g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
   }
 
   // Plugin config
@@ -214,7 +212,15 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
+  if (g_config.Container.Enabled) {
+    CRANE_INFO("[Container] Container module is enabled.");
+    g_cri_client = std::make_unique<Supervisor::CriClient>();
+    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                     g_config.Container.ImageEndpoint);
+  }
+
+  g_server =
+      std::make_unique<Craned::Supervisor::Supervisor::SupervisorServer>();
 
   // Make sure grpc server is ready to receive requests.
   std::this_thread::sleep_for(std::chrono::seconds(1));
