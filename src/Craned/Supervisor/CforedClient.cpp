@@ -447,7 +447,7 @@ void CforedClient::AsyncSendRecvThread_() {
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
-        if (state <= State::Registering) {
+        if (state < State::Forwarding) {
           CRANE_TRACE("Waiting for register.");
           continue;
         }
