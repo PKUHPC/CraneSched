@@ -1,6 +1,8 @@
 add_executable(csupervisor
         CranedClient.cpp
         CranedClient.h
+        CriClient.h
+        CriClient.cpp
         CforedClient.cpp
         CforedClient.h
         SupervisorServer.h

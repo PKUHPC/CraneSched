@@ -23,6 +23,7 @@
 #include <cxxopts.hpp>
 
 #include "CranedClient.h"
+#include "CriClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
@@ -206,6 +207,16 @@ void GlobalVariableInit() {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
+  // XXX: DEBUG ONLY
+  if (true) {
+    // if (g_config.Container.Enabled) {
+    CRANE_INFO("[Container] Container module is enabled.");
+    g_cri_client = std::make_unique<Supervisor::CriClient>();
+    g_cri_client->InitChannelAndStub("unix:///run/containerd/containerd.sock");
+    g_cri_client->Version();
+    g_cri_client->RuntimeConfig();
   }
 
   g_server = std::make_unique<Supervisor::SupervisorServer>();
