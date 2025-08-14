@@ -472,10 +472,10 @@ std::expected<CertPair, std::string> ParseCertificate(
   return CertPair{cn, formatted_serial_number};
 }
 
-PartitionNodesResult PartitionNodesProcess(
+bool PartitionNodesProcess(
     const std::string &node_str, const std::list<std::string> &host_list,
     const std::string &part_name,
-    std::unordered_set<std::string> &part_node_list,
+    std::unordered_set<std::string> &part_node_list, const bool is_cranectld,
     std::unordered_set<std::string> *nodes_without_part) {
   std::list<std::string> name_list;
   std::unordered_set<std::string> node_name_set_list(host_list.begin(),
@@ -491,7 +491,7 @@ PartitionNodesResult PartitionNodesProcess(
   } else {
     if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
       CRANE_ERROR("Illegal node name string format.");
-      return PartitionNodesResult::ILLEGAL_FORMAT;
+      return false;
     }
 
     if (name_list.empty()) {
@@ -511,13 +511,13 @@ PartitionNodesResult PartitionNodesProcess(
               "ignored "
               "and should be contained in the configuration file.",
               node, part_name);
-          return PartitionNodesResult::UNKNOWN_NODE;
+          if (is_cranectld) return false;
         }
       }
     }
   }
 
-  return PartitionNodesResult::SUCCESS;
+  return true;
 }
 
 }  // namespace util

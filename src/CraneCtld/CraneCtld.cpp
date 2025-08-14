@@ -458,9 +458,8 @@ void ParseConfig(int argc, char** argv) {
               g_config.Nodes | ranges::views::keys |
               ranges::to<std::list<std::string>>();
           part.nodelist_str = util::HostNameListToStr(host_list);
-          if (util::PartitionNodesProcess(nodes, host_list, name, part.nodes,
-                                          &nodes_without_part) !=
-              util::PartitionNodesResult::SUCCESS) {
+          if (!util::PartitionNodesProcess(nodes, host_list, name, true,
+                                           part.nodes, &nodes_without_part)) {
             std::exit(1);
           }
 
