@@ -95,12 +95,12 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   }
 
   if (!g_config.IgnoreConfigInconsistency &&
-    (request->remote_meta().config_crc() != g_config.ConfigCrcVal)) {
+      (request->remote_meta().config_crc() != g_config.ConfigCrcVal)) {
     CRANE_ERROR(
         "CranedNode #{} appears to have a diffrent config.yaml than the "
         "CraneCtld.",
         request->craned_id());
-    }
+  }
 
   auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
   if (stub == nullptr) {
@@ -1664,9 +1664,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
         &internal_builder, cranectld_listen_addr,
         listen_conf.CraneCtldForInternalListenPort, listen_conf.Certs);
   else
-    ServerBuilderAddTcpInsecureListeningPort(&internal_builder,
-                                             cranectld_listen_addr,
-                                             listen_conf.CraneCtldForInternalListenPort);
+    ServerBuilderAddTcpInsecureListeningPort(
+        &internal_builder, cranectld_listen_addr,
+        listen_conf.CraneCtldForInternalListenPort);
 
   internal_builder.RegisterService(m_internal_service_impl_.get());
 
@@ -1706,26 +1706,28 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
-  std::thread signal_waiting_thread([p_server = m_server_.get(), p_internal_server = m_internal_server_.get()] {
-    util::SetCurrentThreadName("SIG_Waiter");
+  std::thread signal_waiting_thread(
+      [p_server = m_server_.get(),
+       p_internal_server = m_internal_server_.get()] {
+        util::SetCurrentThreadName("SIG_Waiter");
 
-    std::unique_lock<std::mutex> lk(s_signal_cv_mtx_);
-    s_signal_cv_.wait(lk);
+        std::unique_lock<std::mutex> lk(s_signal_cv_mtx_);
+        s_signal_cv_.wait(lk);
 
-    CRANE_TRACE(
-        "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
+        CRANE_TRACE(
+            "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
 
-    // craned_keeper MUST be shutdown before GrpcServer.
-    // Otherwise, once GrpcServer is shut down, the main thread stops and
-    // g_craned_keeper.reset() is called. The Shutdown here and reset() in the
-    // main thread will access g_craned_keeper simultaneously and a race
-    // condition will occur.
-    g_craned_keeper->Shutdown();
+        // craned_keeper MUST be shutdown before GrpcServer.
+        // Otherwise, once GrpcServer is shut down, the main thread stops and
+        // g_craned_keeper.reset() is called. The Shutdown here and reset() in
+        // the main thread will access g_craned_keeper simultaneously and a race
+        // condition will occur.
+        g_craned_keeper->Shutdown();
 
-    auto ddl = std::chrono::seconds(1);
-    p_internal_server->Shutdown(std::chrono::system_clock::now() + ddl);
-    p_server->Shutdown(std::chrono::system_clock::now() + ddl);
-  });
+        auto ddl = std::chrono::seconds(1);
+        p_internal_server->Shutdown(std::chrono::system_clock::now() + ddl);
+        p_server->Shutdown(std::chrono::system_clock::now() + ddl);
+      });
   signal_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);

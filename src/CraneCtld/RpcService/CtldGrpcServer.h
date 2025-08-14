@@ -169,7 +169,7 @@ class CtldServer;
 
 class CtldForInternalServiceImpl final
     : public crane::grpc::CraneCtldForInternal::Service {
-public:
+ public:
   explicit CtldForInternalServiceImpl(CtldServer *server)
       : m_ctld_server_(server) {}
 
@@ -194,7 +194,7 @@ public:
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
-private:
+ private:
   CtldServer *m_ctld_server_;
 };
 
@@ -356,7 +356,6 @@ class CtldServer {
   void Wait() { m_server_->Wait(); }
 
  private:
-
   template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
   using HashMap = absl::flat_hash_map<K, V, Hash>;
