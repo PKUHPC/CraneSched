@@ -1938,7 +1938,6 @@ void TaskManager::InitOomMonitoring_() {
   }
   m_cgroup_path_ = *resolved;
 
-  // Wait briefly for cgroup path to appear (race tolerance)
   for (int i = 0; i < 20 && !std::filesystem::exists(m_cgroup_path_); ++i)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
