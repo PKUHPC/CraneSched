@@ -564,20 +564,45 @@ bool MongodbClient::InsertTxn(const Txn& txn) {
   return ret != bsoncxx::stdx::nullopt;
 }
 
-template <typename T>
-bool MongodbClient::SelectTxn(const std::string& key, const T& value,
-                              Txn* txn) {
-  document doc;
-  doc.append(kvp(key, value));
-  bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_txn_collection_name_].find_one(doc.view());
+void MongodbClient::SelectTxns(
+    const std::unordered_map<std::string, std::string>& conditions,
+    std::list<Txn>* res_txn) {
+  bsoncxx::builder::basic::document doc_builder;
+  int64_t start_time = 0;
+  int64_t end_time = 0;
 
-  if (!result) return false;
+  for (const auto& [key, value] : conditions) {
+    if (key == "start_time") {
+      start_time = std::stoll(value);
+    } else if (key == "end_time") {
+      end_time = std::stoll(value);
+    } else {
+      doc_builder.append(bsoncxx::builder::basic::kvp(key, value));
+    }
+  }
 
-  bsoncxx::document::view txn_view = result->view();
-  ViewToTxn_(txn_view, txn);
+  if (start_time != 0 || end_time != 0) {
+    bsoncxx::builder::basic::document range_doc;
+    if (start_time != 0)
+      range_doc.append(bsoncxx::builder::basic::kvp("$gte", start_time));
+    if (end_time != 0)
+      range_doc.append(bsoncxx::builder::basic::kvp("$lt", end_time));
+    doc_builder.append(
+        bsoncxx::builder::basic::kvp("creation_time", range_doc.view()));
+  }
 
-  return true;
+  // TODO: page query ?
+  mongocxx::options::find find_options;
+  find_options.limit(1000);
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].find(
+          doc_builder.view(), find_options);
+
+  for (auto view : cursor) {
+    Txn txn;
+    ViewToTxn_(view, &txn);
+    res_txn->emplace_back(txn);
+  }
 }
 
 bool MongodbClient::CommitTransaction(

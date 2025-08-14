@@ -232,8 +232,7 @@ class MongodbClient {
   bool UpdateQos(const Qos& qos);
 
   bool InsertTxn(const Txn& txn);
-  template <typename T>
-  bool SelectTxn(const std::string& key, const T& value, Txn* txn);
+  void SelectTxns(const std::unordered_map<std::string, std::string>& conditions, std::list<Txn>* res_txn);
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
@@ -273,7 +272,6 @@ class MongodbClient {
 
   document QosToDocument_(const Qos& qos);
 
-  // TODO:
   void ViewToTxn_(const bsoncxx::document::view& txn_view, Txn* txn);
   document TxnToDocument_(const Txn& txn);
 

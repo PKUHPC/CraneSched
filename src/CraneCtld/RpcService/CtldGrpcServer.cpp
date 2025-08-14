@@ -1588,6 +1588,37 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryTxnLog(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTxnLogRequest *request,
+    crane::grpc::QueryTxnLogReply *response) {
+
+  std::unordered_map<std::string, std::string> conditions;
+  if (request->has_actor())
+    conditions.emplace("actor", request->actor());
+  if (request->has_target())
+    conditions.emplace("target", request->target());
+  if (request->has_action())
+    conditions.emplace("action", request->target());
+  if (request->has_start_time())
+    conditions.emplace("start_time", request->start_time());
+  if (request->has_end_time())
+    conditions.emplace("end_time", request->end_time());
+  if (request->has_info())
+    conditions.emplace("info", request->info());
+
+  auto result = g_account_manager->QueryTxnList(request->uid(), conditions);
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,

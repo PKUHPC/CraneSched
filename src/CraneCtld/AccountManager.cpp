@@ -1106,6 +1106,19 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
   return BlockUserNoLock_(actor_name, name, actual_account, block);
 }
 
+CraneExpected<std::list<Txn>> AccountManager::QueryTxnList(
+    uint32_t uid,
+    const std::unordered_map<std::string, std::string>& conditions) {
+
+  auto result = CheckUidIsAdmin(uid);
+  if (!result) return std::unexpected(result.error());
+
+  std::list<Txn> txn_list;
+  g_db_client->SelectTxns(conditions, &txn_list);
+
+  return std::move(txn_list);
+}
+
 bool AccountManager::CheckUserPermissionToPartition(
     const std::string& name, const std::string& account,
     const std::string& partition) {
