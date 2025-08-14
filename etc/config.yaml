@@ -148,9 +148,10 @@ Nodes:
         #   - nvidia.com/gpu=GPU3
 
 # partition information list
-# "nodes" parameter supports the "ALL" option, indicating all nodes
 Partitions:
   - name: CPU
+    # "nodes" parameter supports the "ALL" option, indicating all nodes,
+    # eg: nodes: ALL
     nodes: "cn[15-16]"
     priority: 5
   - name: GPU

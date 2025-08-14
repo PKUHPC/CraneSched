@@ -264,9 +264,10 @@ bool ConvertStringToGresMap(const std::string& s, GresMap* gres_map);
 
 bool ConvertStringToResourceView(const std::string& s, ResourceView* res);
 
-PartitionNodesResult PartitionNodesProcess(
-    const std::string &node_str, const std::list<std::string> &host_list,
-    const std::string &part_name,
-    std::unordered_set<std::string> &part_node_list,
-    std::unordered_set<std::string> *nodes_without_part = nullptr);
+bool PartitionNodesProcess(const std::string &node_str,
+                           const std::list<std::string> &host_list,
+                           const std::string &part_name,
+                           std::unordered_set<std::string> &part_node_list,
+                           const bool is_cranectld,
+                           std::unordered_set<std::string> *nodes_without_part);
 }  // namespace util
