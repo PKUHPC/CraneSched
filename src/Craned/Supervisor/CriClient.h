@@ -18,17 +18,24 @@
 
 #pragma once
 
+#include "SupervisorPreCompiledHeader.h"
+// Precompiled header comes first
+
+#include <grpcpp/channel.h>
+
 #include "cri/api.grpc.pb.h"
 
-// Precompiled header comes first.
 namespace Supervisor {
+
+namespace cri = runtime::v1;
 
 class CriClient {
  public:
   CriClient() = default;
   ~CriClient();
 
-  void InitChannelAndStub(const std::string& endpoint);
+  void InitChannelAndStub(const std::filesystem::path& runtime_service,
+                          const std::filesystem::path& image_service);
 
   // FIXME: DEBUG ONLY
   void Version();
@@ -38,8 +45,10 @@ class CriClient {
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_;
   int m_finished_tasks_{0};
-  std::shared_ptr<grpc::Channel> m_channel_;
-  std::shared_ptr<runtime::v1::RuntimeService::Stub> m_stub_;
+  std::shared_ptr<grpc::Channel> m_rs_channel_;
+  std::shared_ptr<grpc::Channel> m_is_channel_;
+  std::shared_ptr<cri::RuntimeService::Stub> m_rs_stub_;
+  std::shared_ptr<cri::ImageService::Stub> m_is_stub_;
 };
 
 }  // namespace Supervisor

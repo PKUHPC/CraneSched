@@ -253,6 +253,12 @@ class ContainerInstance : public ITaskInstance {
       : ITaskInstance(step_spec) {}
   ~ContainerInstance() override = default;
 
+  ContainerInstance(const ContainerInstance&) = delete;
+  ContainerInstance(ContainerInstance&&) = delete;
+
+  ContainerInstance& operator=(ContainerInstance&&) = delete;
+  ContainerInstance& operator=(const ContainerInstance&) = delete;
+
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
@@ -264,9 +270,8 @@ class ContainerInstance : public ITaskInstance {
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
-  std::string ParseOCICmdPattern_(const std::string& cmd) const;
 
-  std::filesystem::path m_bundle_path_;
+  std::filesystem::path m_image_tag_;
   std::filesystem::path m_temp_path_;
 };
 
@@ -274,6 +279,12 @@ class ProcInstance : public ITaskInstance {
  public:
   explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
   ~ProcInstance() override = default;
+
+  ProcInstance(const ProcInstance&) = delete;
+  ProcInstance(ProcInstance&&) = delete;
+
+  ProcInstance& operator=(ProcInstance&&) = delete;
+  ProcInstance& operator=(const ProcInstance&) = delete;
 
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;

@@ -31,16 +31,24 @@ CriClient::~CriClient() {
   }
 }
 
-void CriClient::InitChannelAndStub(const std::string& endpoint) {
-  m_channel_ = CreateUnixInsecureChannel(endpoint);
-  // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = runtime::v1::RuntimeService::NewStub(m_channel_);
+void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
+                                   const std::filesystem::path& image_service) {
+  if (runtime_service == image_service) {
+    m_rs_channel_ = CreateUnixInsecureChannel(runtime_service);
+    m_is_channel_ = m_rs_channel_;
+  } else {
+    m_rs_channel_ = CreateUnixInsecureChannel(runtime_service);
+    m_is_channel_ = CreateUnixInsecureChannel(image_service);
+  }
+
+  m_rs_stub_ = cri::RuntimeService::NewStub(m_rs_channel_);
+  m_is_stub_ = cri::ImageService::NewStub(m_is_channel_);
   m_async_send_thread_ = std::thread([this] {});
 }
 
 void CriClient::Version() {
-  using runtime::v1::VersionRequest;
-  using runtime::v1::VersionResponse;
+  using cri::VersionRequest;
+  using cri::VersionResponse;
 
   VersionRequest request{};
   VersionResponse response{};
@@ -49,7 +57,7 @@ void CriClient::Version() {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(5));
 
-  auto status = m_stub_->Version(&context, request, &response);
+  auto status = m_rs_stub_->Version(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to get CRI version: {}", status.error_message());
     return;
@@ -59,8 +67,8 @@ void CriClient::Version() {
 }
 
 void CriClient::RuntimeConfig() {
-  using runtime::v1::RuntimeConfigRequest;
-  using runtime::v1::RuntimeConfigResponse;
+  using cri::RuntimeConfigRequest;
+  using cri::RuntimeConfigResponse;
 
   RuntimeConfigRequest request{};
   RuntimeConfigResponse response{};
@@ -69,7 +77,7 @@ void CriClient::RuntimeConfig() {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(5));
 
-  auto status = m_stub_->RuntimeConfig(&context, request, &response);
+  auto status = m_rs_stub_->RuntimeConfig(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to get CRI runtime config: {}", status.error_message());
     return;
@@ -85,7 +93,7 @@ void CriClient::RuntimeConfig() {
 #endif
 
   CRANE_TRACE("CRI replied RuntimeConfig: cgroup_driver={}",
-              runtime::v1::CgroupDriver_Name(cg));
+              cri::CgroupDriver_Name(cg));
 }
 
 }  // namespace Supervisor
