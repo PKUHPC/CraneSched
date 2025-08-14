@@ -167,7 +167,7 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
-  bool ConfigCrcWarnIgnoreFlag{false};
+  bool IgnoreConfigInconsistency{false};
 };
 
 struct RunTimeStatus {
