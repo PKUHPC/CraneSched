@@ -22,6 +22,8 @@
 #include <absl/strings/strip.h>
 #include <pthread.h>
 
+#include <regex>
+
 #include "crane/Logger.h"
 
 namespace util {
@@ -419,4 +421,55 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
             normalized.size());
   return crc;
 }
+
+std::expected<CertPair, std::string> ParseCertificate(
+    const std::string &cert_pem) {
+  // Load the certificate content into a BIO (memory buffer).
+  std::unique_ptr<BIO, decltype(&BIO_free)> bio(
+      BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size())),
+      &BIO_free);
+  if (!bio) return std::unexpected("Failed to create BIO");
+
+  // Read a PEM-formatted certificate.
+  std::unique_ptr<X509, decltype(&X509_free)> cert(
+      PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), &X509_free);
+  if (!cert) return std::unexpected("Failed to parse PEM certificate");
+
+  // Retrieve Subject information.
+  X509_NAME *subject = X509_get_subject_name(cert.get());
+  if (!subject) return std::unexpected("Failed to get subject name");
+
+  int len = X509_NAME_get_text_by_NID(subject, NID_commonName, nullptr, 0);
+  if (len <= 0) return std::unexpected("Failed to get common name");
+
+  std::string cn(len, '\0');
+  len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn.data(), len + 1);
+  if (len <= 0) return std::unexpected("Failed to get common name");
+
+  ASN1_INTEGER *serial = X509_get_serialNumber(cert.get());
+  if (!serial) return std::unexpected("Failed to get serial number");
+
+  std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(
+      ASN1_INTEGER_to_BN(serial, nullptr), &BN_free);
+  if (!bn) return std::unexpected("Failed to convert serial to BIGNUM");
+
+  char *hex = BN_bn2hex(bn.get());
+  if (!hex) return std::unexpected("Failed to convert serial to hex");
+
+  std::string serial_number = std::string(hex);
+  std::ranges::transform(serial_number, serial_number.begin(), ::tolower);
+  std::string formatted_serial_number;
+  for (size_t i = 0; i < serial_number.size(); ++i) {
+    formatted_serial_number += serial_number[i];
+    if (i % 2 == 1 && i != serial_number.size() - 1) {
+      formatted_serial_number += ':';
+    }
+  }
+
+  // free the memory
+  OPENSSL_free(hex);
+
+  return CertPair{cn, formatted_serial_number};
+}
+
 }  // namespace util

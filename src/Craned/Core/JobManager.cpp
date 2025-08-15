@@ -467,6 +467,16 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
     init_req.set_log_dir(g_config.Supervisor.LogDir);
+    auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
+    cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
+    cfored_listen_conf->set_domain_suffix(
+        g_config.ListenConf.TlsConfig.DomainSuffix);
+    auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
+    tls_certs->set_cert_content(
+        g_config.ListenConf.TlsConfig.TlsCerts.CertContent);
+    tls_certs->set_ca_content(g_config.ListenConf.TlsConfig.TlsCerts.CaContent);
+    tls_certs->set_key_content(
+        g_config.ListenConf.TlsConfig.TlsCerts.KeyContent);
 
     // Pass job env to supervisor
     EnvMap res_env_map = job->GetJobEnvMap();

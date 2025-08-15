@@ -59,6 +59,20 @@ message InitSupervisorRequest {
   map<string, string> env = 10;
 
   string log_dir = 11;
+
+  message CforedListenConf {
+    message TlsCertificates {
+      string cert_content = 1;
+      string key_content = 2;
+      string ca_content = 3;
+    };
+
+    bool use_tls = 1;
+    TlsCertificates tls_certs = 2;
+    string domain_suffix = 3;
+  }
+
+  CforedListenConf cfored_listen_conf = 13;
 }
 
 message SupervisorReady {

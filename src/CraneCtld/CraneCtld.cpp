@@ -128,57 +128,89 @@ void ParseConfig(int argc, char** argv) {
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-      if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        TlsCertificates& tls_certs = g_config.ListenConf.Certs;
+      if (config["TLS"]) {
+        auto& g_tls_config = g_config.ListenConf.TlsConfig;
 
-        g_config.ListenConf.UseTls = true;
+        const auto& tls_config = config["TLS"];
 
-        if (config["DomainSuffix"])
-          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
+        if (tls_config["Enabled"])
+          g_tls_config.Enabled = tls_config["Enabled"].as<bool>();
 
-        if (config["ServerCertFilePath"]) {
-          tls_certs.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        if (g_tls_config.Enabled) {
+          if (tls_config["DomainSuffix"])
+            g_tls_config.DomainSuffix =
+                tls_config["DomainSuffix"].as<std::string>();
 
-          try {
-            tls_certs.ServerCertContent =
-                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+          if (tls_config["AllowedNodes"]) {
+            std::string nodes = tls_config["AllowedNodes"].as<std::string>();
+            std::list<std::string> name_list;
+            if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                     &name_list)) {
+              CRANE_ERROR("Illegal login node name string format.");
+              std::exit(1);
+            }
+            for (const auto& name : name_list) {
+              g_tls_config.AllowedNodes.insert(name);
+              g_tls_config.AllowedNodes.insert(
+                  fmt::format("{}.{}", name, g_tls_config.DomainSuffix));
+            }
+            // todo: localhost?
+            g_tls_config.AllowedNodes.insert("localhost");
+          }
+          // internal
+          if (auto result = util::ParseCertConfig(
+                  "InternalCertFilePath", tls_config,
+                  &g_tls_config.InternalCerts.CertFilePath,
+                  &g_tls_config.InternalCerts.CertContent);
+              result) {
+            CRANE_ERROR(result.value());
             std::exit(1);
           }
-          if (tls_certs.ServerCertContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
-          std::exit(1);
-        }
 
-        if (config["ServerKeyFilePath"]) {
-          tls_certs.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
-
-          try {
-            tls_certs.ServerKeyContent =
-                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+          if (auto result =
+                  util::ParseCertConfig("InternalKeyFilePath", tls_config,
+                                        &g_tls_config.InternalCerts.KeyFilePath,
+                                        &g_tls_config.InternalCerts.KeyContent);
+              result) {
+            CRANE_ERROR(result.value());
             std::exit(1);
           }
-          if (tls_certs.ServerKeyContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
-                "is empty");
+
+          if (auto result =
+                  util::ParseCertConfig("InternalCaFilePath", tls_config,
+                                        &g_tls_config.InternalCerts.CaFilePath,
+                                        &g_tls_config.InternalCerts.CaContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
           }
-        } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
-          std::exit(1);
+
+          // external
+          if (auto result = util::ParseCertConfig(
+                  "ExternalCertFilePath", tls_config,
+                  &g_tls_config.ExternalCerts.CertFilePath,
+                  &g_tls_config.ExternalCerts.CertContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
+          if (auto result =
+                  util::ParseCertConfig("ExternalKeyFilePath", tls_config,
+                                        &g_tls_config.ExternalCerts.KeyFilePath,
+                                        &g_tls_config.ExternalCerts.KeyContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
+          if (auto result =
+                  util::ParseCertConfig("ExternalCaFilePath", tls_config,
+                                        &g_tls_config.ExternalCerts.CaFilePath,
+                                        &g_tls_config.ExternalCerts.CaContent);
+              result) {
+            CRANE_ERROR(result.value());
+            std::exit(1);
+          }
         }
-      } else {
-        g_config.ListenConf.UseTls = false;
       }
 
       if (config["CraneCtldForeground"]) {
@@ -648,15 +680,13 @@ void ParseConfig(int argc, char** argv) {
         if (vault_config["Enabled"])
           g_config.VaultConf.Enabled = vault_config["Enabled"].as<bool>();
 
-        if (vault_config["Addr"])
-          g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
-        else
-          g_config.VaultConf.Addr = "127.0.0.1";
+        g_config.VaultConf.Addr =
+            YamlValueOr(vault_config["Addr"], "127.0.0.1");
 
-        if (vault_config["Port"])
-          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
-        else
-          g_config.VaultConf.Port = "8200";
+        g_config.VaultConf.Port = YamlValueOr(vault_config["Port"], "8200");
+
+        g_config.VaultConf.ExpirationMinutes = YamlValueOr<uint64_t>(
+            vault_config["ExpirationMinutes"], kDefaultCertExpirationMinutes);
 
         if (vault_config["Username"] && !vault_config["Username"].IsNull())
           g_config.VaultConf.Username =
@@ -763,6 +793,9 @@ void InitializeCtldGlobalVariables() {
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<Security::VaultClient>();
     if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
+  } else if (g_config.ListenConf.TlsConfig.Enabled) {
+    CRANE_ERROR("[Security] TLS is enabled but Vault is not enabled.");
+    std::exit(1);
   }
 
   // Account manager must be initialized before Task Scheduler

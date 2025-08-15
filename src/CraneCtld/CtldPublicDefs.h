@@ -77,10 +77,10 @@ struct Config {
 
   struct Partition {
     std::string nodelist_str;
-    uint32_t priority;
-    uint64_t default_mem_per_cpu;
+    uint32_t priority{0};
+    uint64_t default_mem_per_cpu{0};
     // optional, 0 indicates no limit
-    uint64_t max_mem_per_cpu;
+    uint64_t max_mem_per_cpu{0};
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> allowed_accounts;
     std::unordered_set<std::string> denied_accounts;
@@ -91,8 +91,14 @@ struct Config {
     std::string CraneCtldListenPort;
     std::string CraneCtldForInternalListenPort;
 
-    bool UseTls{false};
-    TlsCertificates Certs;
+    struct TlsCertsConfig {
+      bool Enabled{false};
+      TlsCertificates InternalCerts;
+      TlsCertificates ExternalCerts;
+      std::unordered_set<std::string> AllowedNodes;
+      std::string DomainSuffix;
+    };
+    TlsCertsConfig TlsConfig;
   };
   CraneCtldListenConf ListenConf;
 
@@ -108,6 +114,7 @@ struct Config {
     std::string Username;
     std::string Password;
     bool Tls;
+    uint64_t ExpirationMinutes;
   };
   VaultConfig VaultConf;
 
@@ -610,6 +617,7 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+  std::string cert_number;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

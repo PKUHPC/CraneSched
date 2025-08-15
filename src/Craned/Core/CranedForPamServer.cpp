@@ -88,7 +88,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
   }
 
   std::shared_ptr<Channel> channel_of_remote_service;
-  if (g_config.ListenConf.UseTls) {
+  if (g_config.ListenConf.TlsConfig.Enabled) {
     std::string remote_hostname;
     if (ip_ver == 4) {
       ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
@@ -102,7 +102,8 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
                   request->ssh_remote_address(), remote_hostname);
 
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_port, g_config.ListenConf.TlsCerts);
+          remote_hostname, crane_port, g_config.ListenConf.TlsConfig.TlsCerts,
+          g_config.ListenConf.TlsConfig.DomainSuffix);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());

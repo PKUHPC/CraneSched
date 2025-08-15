@@ -23,6 +23,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -347,6 +348,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
@@ -376,6 +379,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   std::vector<CraneExpected<std::future<task_id_t>>> results;
 
@@ -453,6 +458,8 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
@@ -477,6 +484,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
 
@@ -569,6 +578,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTasksExtraAttrs(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
@@ -608,6 +619,8 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     crane::grpc::ModifyCranedStateReply *response) {
   CRANE_TRACE("Received update state request: {}",
               crane::grpc::CranedControlState_Name(request->new_state()));
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
@@ -701,6 +714,8 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   CraneExpected<void> result;
 
@@ -739,7 +754,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
   // Query tasks in RAM
   g_task_scheduler->QueryTasksInRam(request, response);
 
@@ -788,6 +802,8 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   Account account;
   const crane::grpc::AccountInfo *account_info = &request->account();
@@ -820,6 +836,8 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   User user;
   const crane::grpc::UserInfo *user_info = &request->user();
@@ -864,6 +882,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   Qos qos;
   const crane::grpc::QosInfo *qos_info = &request->qos();
 
@@ -900,6 +920,8 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
@@ -963,6 +985,8 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   CraneExpected<void> modify_res;
 
@@ -1103,6 +1127,8 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   auto modify_res =
       g_account_manager->ModifyQos(request->uid(), request->name(),
                                    request->modify_field(), request->value());
@@ -1124,7 +1150,8 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   std::vector<Account> res_account_list;
   if (request->account_list().empty()) {
     auto res = g_account_manager->QueryAllAccountInfo(request->uid());
@@ -1201,6 +1228,8 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   std::unordered_set<std::string> user_list{request->user_list().begin(),
                                             request->user_list().end()};
@@ -1281,6 +1310,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   std::vector<Qos> res_qos_list;
 
@@ -1335,6 +1366,8 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   for (const auto &account_name : request->account_list()) {
     auto res = g_account_manager->DeleteAccount(request->uid(), account_name);
@@ -1359,6 +1392,8 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   for (const auto &user_name : request->user_list()) {
     auto res = g_account_manager->DeleteUser(request->uid(), user_name,
                                              request->account());
@@ -1384,6 +1419,8 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   for (const auto &qos_name : request->qos_list()) {
     auto res = g_account_manager->DeleteQos(request->uid(), qos_name);
@@ -1410,6 +1447,8 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status(grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready");
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   CraneExpected<void> res;
   std::unordered_set<std::string> entity_list{request->entity_list().begin(),
                                               request->entity_list().end()};
@@ -1488,6 +1527,45 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ResetUserCredential(
+    grpc::ServerContext *context,
+    const crane::grpc::ResetUserCredentialRequest *request,
+    crane::grpc::ResetUserCredentialReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  std::unordered_set<std::string> user_list{request->user_list().begin(),
+                                            request->user_list().end()};
+
+  if (request->user_list().empty()) {
+    const auto user_map_ptr = g_account_manager->GetAllUserInfo();
+    for (const auto &username : *user_map_ptr | std::views::keys) {
+      user_list.insert(username);
+    }
+  }
+
+  for (const auto &username : user_list) {
+    auto result =
+        g_account_manager->ResetUserCertificate(request->uid(), username);
+    if (!result) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(username);
+      new_err_record->set_code(result.error());
+    }
+  }
+
+  if (!response->rich_error_list().empty()) {
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
@@ -1507,6 +1585,8 @@ grpc::Status CraneCtldServiceImpl::CreateReservation(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
@@ -1526,6 +1606,8 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
@@ -1592,6 +1674,8 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   CRANE_INFO(
       "Received enable auto power control request for {} nodes, enable: {}",
@@ -1649,6 +1733,107 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::SignUserCertificate(
+    grpc::ServerContext *context,
+    const crane::grpc::SignUserCertificateRequest *request,
+    crane::grpc::SignUserCertificateResponse *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (!g_config.ListenConf.TlsConfig.AllowedNodes.empty()) {
+    std::string client_address = context->peer();
+    std::vector<std::string> str_list = absl::StrSplit(client_address, ":");
+    if (str_list.size() < 2) {
+      CRANE_ERROR("Invalid client address format: {}", client_address);
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+
+    std::string hostname;
+    bool resolve_result = false;
+    if (str_list[0] == "ipv4") {
+      ipv4_t addr;
+      if (!crane::StrToIpv4(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv4 address: {}", str_list[1]);
+        response->set_ok(false);
+        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+        return grpc::Status::OK;
+      }
+      resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
+    } else {
+      ipv6_t addr;
+      if (!crane::StrToIpv6(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv6 address: {}", str_list[1]);
+        response->set_ok(false);
+        response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+        return grpc::Status::OK;
+      }
+      resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
+    }
+
+    if (!resolve_result) {
+      CRANE_ERROR("Failed to resolve hostname for address: {}", client_address);
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_INVALID_PARAM);
+      return grpc::Status::OK;
+    }
+
+    if (!g_config.ListenConf.TlsConfig.AllowedNodes.contains(hostname)) {
+      CRANE_DEBUG(
+          "User {} tried to access from host {}, the host is not allowed.",
+          request->uid(), hostname);
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
+      return grpc::Status::OK;
+    }
+  }
+
+  auto result = g_account_manager->SignUserCertificate(
+      request->uid(), request->csr_content(), request->alt_names());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+  } else {
+    response->set_ok(true);
+    response->set_certificate(result.value());
+  }
+
+  return grpc::Status::OK;
+}
+
+std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
+    const grpc::ServerContext *context, uint32_t uid) {
+  if (!g_config.ListenConf.TlsConfig.Enabled) return std::nullopt;
+
+  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
+  if (cert.empty()) return "Certificate is empty";
+
+  std::string certificate = std::string(cert[0].data(), cert[0].size());
+
+  auto result = util::ParseCertificate(certificate);
+  if (!result) return result.error();
+
+  if (!g_vault_client->IsCertAllowed(result.value().second))
+    return "Certificate has expired";
+
+  std::vector<std::string> cn_parts = absl::StrSplit(result.value().first, '.');
+  if (cn_parts.empty() || cn_parts[0].empty()) return "Certificate is invalid";
+
+  try {
+    uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
+    if (parsed_uid != uid) return "Uid mismatch";
+  } catch (const std::invalid_argument &) {
+    return "Certificate contains an invalid UID";
+  } catch (const std::out_of_range &) {
+    return "Certificate UID is out of range";
+  } catch (const std::exception &) {
+    return "Parse uid unknown error";
+  }
+
+  return std::nullopt;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
 
@@ -1659,10 +1844,11 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&internal_builder);
 
-  if (listen_conf.UseTls)
+  if (listen_conf.TlsConfig.Enabled)
     ServerBuilderAddTcpTlsListeningPort(
         &internal_builder, cranectld_listen_addr,
-        listen_conf.CraneCtldForInternalListenPort, listen_conf.Certs);
+        listen_conf.CraneCtldForInternalListenPort,
+        listen_conf.TlsConfig.InternalCerts);
   else
     ServerBuilderAddTcpInsecureListeningPort(
         &internal_builder, cranectld_listen_addr,
@@ -1683,10 +1869,10 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  if (listen_conf.UseTls) {
+  if (listen_conf.TlsConfig.Enabled) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.Certs);
+                                        listen_conf.TlsConfig.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
@@ -1703,7 +1889,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   CRANE_INFO("CraneCtld is listening on {}:{} and {}:{} and Tls is {}",
              cranectld_listen_addr, listen_conf.CraneCtldListenPort,
              cranectld_listen_addr, listen_conf.CraneCtldForInternalListenPort,
-             listen_conf.UseTls);
+             listen_conf.TlsConfig.Enabled);
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread signal_waiting_thread(

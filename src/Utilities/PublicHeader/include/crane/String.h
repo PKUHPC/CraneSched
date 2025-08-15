@@ -20,12 +20,15 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
 #include <zlib.h>
 
 #include <charconv>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <list>
@@ -43,6 +46,9 @@ template <typename T = std::string, typename YamlNode, typename DefaultType>
 T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
   return node ? node.template as<T>() : default_value;
 }
+
+using CertPair = std::pair<std::string,   // CN
+                           std::string>;  // serial number
 
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
@@ -92,5 +98,29 @@ std::string ReadableGrpcDresInNode(
 std::string GenerateCommaSeparatedString(const int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
+
+std::expected<CertPair, std::string> ParseCertificate(
+    const std::string &cert_pem);
+
+template <typename YamlNode>
+std::optional<std::string> ParseCertConfig(const std::string &cert_name,
+                                           const YamlNode &tls_config,
+                                           std::string *file_path,
+                                           std::string *file_content) {
+  if (tls_config[cert_name]) {
+    *file_path = tls_config[cert_name].template as<std::string>();
+    try {
+      *file_content = util::ReadFileIntoString(*file_path);
+    } catch (const std::exception &e) {
+      return fmt::format("Read {} error: {}", cert_name, e.what());
+    }
+    if (file_content->empty())
+      return fmt::format(
+          "UseTls is true, but the file specified by {} is empty", cert_name);
+  } else {
+    return fmt::format("UseTls is true, but {} is empty", cert_name);
+  }
+  return std::nullopt;
+}
 
 }  // namespace util
