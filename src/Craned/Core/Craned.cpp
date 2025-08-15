@@ -513,6 +513,12 @@ void ParseConfig(int argc, char** argv) {
             g_config.Container.ImageEndpoint =
                 YamlValueOr(container_config["ImageEndpoint"],
                             g_config.Container.RuntimeEndpoint.string());
+
+            // Prepend unix protocol
+            g_config.Container.RuntimeEndpoint =
+                fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
+            g_config.Container.ImageEndpoint =
+                fmt::format("unix://{}", g_config.Container.ImageEndpoint);
           }
         }
 
@@ -520,10 +526,10 @@ void ParseConfig(int argc, char** argv) {
           const auto& plugin_config = config["Plugin"];
           g_config.Plugin.Enabled =
               YamlValueOr<bool>(plugin_config["Enabled"], false);
-          g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          YamlValueOr(plugin_config["PlugindSockPath"],
-                                      kDefaultPlugindUnixSockPath));
+          g_config.Plugin.PlugindSockPath = fmt::format(
+              "unix://{}", g_config.CraneBaseDir /
+                               YamlValueOr(plugin_config["PlugindSockPath"],
+                                           kDefaultPlugindUnixSockPath));
         }
       }
     } catch (YAML::BadFile& e) {

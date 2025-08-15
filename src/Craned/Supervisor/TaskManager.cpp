@@ -29,6 +29,7 @@
 
 #include "CforedClient.h"
 #include "CranedClient.h"
+#include "CriClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/OS.h"
@@ -649,31 +650,40 @@ CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  // TODO: Replace with job_id when refactoring.
+  uid_t uid = m_parent_step_inst_->GetStep().uid();
+  gid_t gid = m_parent_step_inst_->GetStep().gid();
+  job_id_t job_id = m_parent_step_inst_->GetStep().task_id();
+  const std::string& job_name = m_parent_step_inst_->GetStep().name();
+
   // Generate path and params.
-  m_temp_path_ = g_config.Container.TempDir /
-                 fmt::format("{}", m_parent_step_inst_->GetStep().task_id());
-  m_image_tag_ = m_parent_step_inst_->GetStep().container();
+  m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
+  m_image_ref_ = m_parent_step_inst_->GetStep().container();
+
+  auto image_id_opt = g_cri_client->GetImageId(m_image_ref_);
+  if (!image_id_opt.has_value()) {
+    // Image is not pulled. Pull the image first.
+    image_id_opt = g_cri_client->PullImage(m_image_ref_);
+    if (!image_id_opt.has_value()) {
+      CRANE_ERROR("Failed to pull image {} for task #{}",
+                  m_parent_step_inst_->GetStep().container(), job_id);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+  }
 
   // FIXME: Some env like x11 port are assigned later in spawn.
   m_env_ = GetChildProcessEnv();
   // m_arguments_ is not applicable for container tasks.
 
-  // Check relative path
-  if (m_image_tag_.is_relative())
-    m_image_tag_ = m_parent_step_inst_->GetStep().cwd() / m_image_tag_;
-
   // Write script into the temp folder
-  auto sh_path =
-      m_temp_path_ /
-      fmt::format("Crane-{}.sh", m_parent_step_inst_->GetStep().task_id());
+  auto sh_path = m_temp_path_ / fmt::format("Crane-{}.sh", job_id);
   if (!util::os::CreateFoldersForFile(sh_path)) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}",
-                m_parent_step_inst_->GetStep().task_id());
+    CRANE_ERROR("Failed write the script for task #{}", job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -687,10 +697,9 @@ CraneErrCode ContainerInstance::Prepare() {
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  if (chown(sh_path.c_str(), m_parent_step_inst_->GetStep().uid(),
-            m_parent_step_inst_->GetStep().gid()) != 0) {
+  if (chown(sh_path.c_str(), uid, gid) != 0) {
     CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
-                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+                job_id, strerror(errno));
   }
 
   // Write meta
@@ -723,12 +732,30 @@ CraneErrCode ContainerInstance::Prepare() {
   }
   m_meta_->parsed_sh_script_path = sh_path;
 
-  // Modify bundle
-  auto err = ModifyOCIBundleConfig_(m_image_tag_, m_temp_path_);
-  if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
-                m_parent_step_inst_->GetStep().task_id());
-    return err;
+  // Prepare the pod
+  auto pod_config = std::make_unique<cri::PodSandboxConfig>();
+  pod_config->set_log_directory(m_temp_path_.string());
+
+  auto linux_config = CriClient::BuildLinuxPodConfig();
+  if (linux_config.cgroup_parent().empty()) {
+    // Failed to get cgroup parent
+    CRANE_ERROR("Failed to get cgroup parent for pod from task #{}", job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  pod_config->mutable_linux()->Swap(&linux_config);
+
+  auto pod_meta = CriClient::BuildPodSandboxMetaData(uid, job_id, job_name);
+  pod_config->set_hostname(pod_meta.name());  // Set pod name for hostname.
+  pod_config->mutable_metadata()->Swap(&pod_meta);
+
+  auto labels = CriClient::BuildPodLabels(uid, job_id, job_name);
+  pod_config->mutable_labels()->insert(labels.begin(), labels.end());
+
+  // Launch the pod after all configurations are set
+  auto pod_id_opt = g_cri_client->RunPodSandbox(std::move(pod_config));
+  if (!pod_id_opt.has_value()) {
+    CRANE_ERROR("Failed to run pod sandbox for task #{}", job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   return CraneErrCode::SUCCESS;
