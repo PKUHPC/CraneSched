@@ -41,6 +41,21 @@
 using Craned::g_config;
 using Craned::Partition;
 
+void ParseCranedConfig(const YAML::Node& config) {
+  Craned::Config::CranedConfig conf{};
+  using util::YamlValueOr;
+  conf.PingIntervalSec = kCranedPingIntervalSec;
+  conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
+  if (config["Craned"]) {
+    auto craned_config = config["Craned"];
+    if (craned_config["PingInterval"])
+      conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
+    if (craned_config["CraneCtldTimeout"])
+      conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
+  }
+  g_config.CranedConf = std::move(conf);
+}
+
 void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   using util::YamlValueOr;
   g_config.Supervisor.Path =
@@ -197,6 +212,8 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
+
+      ParseCranedConfig(config);
 
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;

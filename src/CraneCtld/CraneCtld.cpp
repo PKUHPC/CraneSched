@@ -39,6 +39,18 @@
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
+void ParseCtldConfig(const YAML::Node& config) {
+  using util::YamlValueOr;
+  Ctld::Config::CraneCtldConf ctld_config{};
+  ctld_config.CranedTimeout = kCranedTimeoutSec;
+  if (config["CraneCtld"]) {
+    auto ctld_cfg = config["CraneCtld"];
+    if (ctld_cfg["CranedTimeout"])
+      ctld_config.CranedTimeout = ctld_cfg["CranedTimeout"].as<uint32_t>();
+  }
+  g_config.CtldConf = std::move(ctld_config);
+}
+
 void ParseConfig(int argc, char** argv) {
   using util::YamlValueOr;
   cxxopts::Options options("cranectld");
@@ -124,6 +136,8 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
+
+      ParseCtldConfig(config);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();

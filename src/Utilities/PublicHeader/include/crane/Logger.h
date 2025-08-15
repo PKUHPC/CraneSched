@@ -64,52 +64,49 @@
 #define CRANE_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
 #define CRANE_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
-#define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
-  spdlog::default_logger_raw()->log(                                    \
-      spdlog::source_loc{loc.file_name(), static_cast<int>(loc.line()), \
-                         loc.function_name()},                          \
-      level, __VA_ARGS__)
+#define CRANE_LOGGER_CALL(logger, level, ...)    \
+  SPDLOG_LOGGER_CALL(logger, level, __VA_ARGS__)
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_TRACE
-#  define CRANE_TRACE_LOC(loc, ...)                            \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::trace, __VA_ARGS__)
+#  define CRANE_LOGGER_TRACE(logger, ...)                        \
+    CRANE_LOGGER_CALL(logger, spdlog::level::trace, __VA_ARGS__)
 #else
-#  define CRANE_TRACE_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_TRACE(logger, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_DEBUG
-#  define CRANE_DEBUG_LOC(loc, ...)                            \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::debug, __VA_ARGS__)
+#  define CRANE_LOGGER_DEBUG(logger, ...)                        \
+    CRANE_LOGGER_CALL(logger, spdlog::level::debug, __VA_ARGS__)
 #else
-#  define CRANE_DEBUG_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_DEBUG(logger, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_INFO
-#  define CRANE_INFO_LOC(loc, ...)                            \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::info, __VA_ARGS__)
+#  define CRANE_LOGGER_INFO(logger, ...)                        \
+    CRANE_LOGGER_CALL(logger, spdlog::level::info, __VA_ARGS__)
 #else
-#  define CRANE_INFO_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_INFO(logger, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_WARN
-#  define CRANE_WARN_LOC(loc, ...)                            \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::warn, __VA_ARGS__)
+#  define CRANE_LOGGER_WARN(logger, ...)                        \
+    CRANE_LOGGER_CALL(logger, spdlog::level::warn, __VA_ARGS__)
 #else
-#  define CRANE_WARN_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_WARN(logger, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_ERROR
-#  define CRANE_ERROR_LOC(loc, ...)                          \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::err, __VA_ARGS__)
+#  define CRANE_LOGGER_ERROR(logger, ...)                      \
+    CRANE_LOGGER_CALL(logger, spdlog::level::err, __VA_ARGS__)
 #else
-#  define CRANE_ERROR_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_ERROR(logger, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_CRITICAL
-#  define CRANE_CRITICAL_LOC(loc, ...)                            \
-    CRANE_LOG_LOC_CALL(loc, spdlog::level::critical, __VA_ARGS__)
+#  define CRANE_LOGGER_CRITICAL(logger, ...)                        \
+    CRANE_LOGGER_CALL(logger, spdlog::level::critical, __VA_ARGS__)
 #else
-#  define CRANE_CRITICAL_LOC(loc, ...) (void)0
+#  define CRANE_LOGGER_CRITICAL(logger, ...) (void)0
 #endif
 
 #ifndef NDEBUG
@@ -150,11 +147,24 @@
     } while (false)
 #endif
 
+struct LoggerSinks {
+  std::shared_ptr<spdlog::sinks::sink> file_sink;
+  std::shared_ptr<spdlog::sinks::sink> console_sink;
+};
+
 std::optional<spdlog::level::level_enum> StrToLogLevel(
-    const std::string &level);
+    const std::string& level);
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path, bool enable_console);
+                const std::string& log_file_path, bool enable_console);
+
+std::shared_ptr<spdlog::async_logger> AddLogger(
+    const std::string& name, spdlog::level::level_enum level,
+    const std::filesystem::path& log_file_path, bool enable_console);
+
+std::shared_ptr<spdlog::async_logger> AddLogger(const std::string& name,
+                                                spdlog::level::level_enum level,
+                                                bool enable_console);
 
 // Custom type formatting
 namespace fmt {
@@ -162,12 +172,12 @@ namespace fmt {
 template <>
 struct formatter<cpu_t> {
   template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
+  constexpr auto parse(ParseContext& ctx) {
     return ctx.begin();
   };
 
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) const {
+  auto format(const cpu_t& v, FormatContext& ctx) const {
     return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
@@ -175,12 +185,12 @@ struct formatter<cpu_t> {
 template <>
 struct formatter<std::filesystem::path> {
   template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
+  constexpr auto parse(ParseContext& ctx) {
     return ctx.begin();
   };
 
   template <typename FormatContext>
-  auto format(const std::filesystem::path &v, FormatContext &ctx) const {
+  auto format(const std::filesystem::path& v, FormatContext& ctx) const {
     return fmt::format_to(ctx.out(), "{}", v.string());
   }
 };

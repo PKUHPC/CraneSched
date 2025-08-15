@@ -59,6 +59,14 @@ message CranedRegisterReply {
   bool ok = 1;
 }
 
+message CranedPingRequest {
+  string craned_id = 1;
+}
+
+message CranedPingReply {
+  bool ok = 1;
+}
+
 message QueryCranedListFromTaskIdRequest {
   uint32 task_id = 1;
 }
@@ -945,6 +953,7 @@ service CraneCtldForInternal {
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+  rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);

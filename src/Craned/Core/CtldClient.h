@@ -34,6 +34,12 @@ using grpc::Status;
 
 class CtldClientStateMachine {
  public:
+  CtldClientStateMachine();
+  ~CtldClientStateMachine();
+  CtldClientStateMachine(CtldClientStateMachine const&) = delete;
+  CtldClientStateMachine& operator=(CtldClientStateMachine const&) = delete;
+  CtldClientStateMachine(CtldClientStateMachine&&) = delete;
+  CtldClientStateMachine& operator=(CtldClientStateMachine&&) = delete;
   void SetActionRequestConfigCb(std::function<void(RegToken const&)>&& cb);
 
   struct ConfigureArg {
@@ -62,6 +68,7 @@ class CtldClientStateMachine {
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
   void SetActionDisconnectedCb(std::function<void()>&& cb);
+  void SetActionTimeoutCb(std::function<void()>&& cb);
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
@@ -69,11 +76,12 @@ class CtldClientStateMachine {
                            std::optional<std::set<step_id_t>> lost_steps);
   bool EvGetRegisterReply(const crane::grpc::CranedRegisterReply& reply,
                           const RegToken& token);
+  void EvPingFailed();
+  void EvPingSuccess();
 
   // Grpc Channel events
   void EvGrpcConnected();
   void EvGrpcConnectionFailed();
-  void EvGrpcTimeout();
 
   bool IsReadyNow();
 
@@ -108,7 +116,11 @@ class CtldClientStateMachine {
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
                        std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
+  void ActionTimeout_();
   void ActionDisconnected_();
+
+  // Internal application-level events
+  void EvTimeout_();
 
   std::function<void(RegToken const&)> m_action_request_config_cb_;
 
@@ -118,6 +130,7 @@ class CtldClientStateMachine {
 
   std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
+  std::function<void()> m_action_timeout_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
   absl::Mutex m_cb_mutex_;
@@ -129,11 +142,18 @@ class CtldClientStateMachine {
       m_last_op_time_ ABSL_GUARDED_BY(m_mtx_){std::nullopt};
 
   absl::Mutex m_mtx_;
+  std::atomic_bool m_stopping_{false};
+
+  std::thread m_uvw_thread_;
+
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_timeout_handle_;
+  std::atomic_bool m_check_reg_timeout_{false};
 };
 
 class CtldClient {
  public:
-  CtldClient() = default;
+  CtldClient();
   void Shutdown();
   ~CtldClient();
 
@@ -161,7 +181,16 @@ class CtldClient {
 
   void AddGrpcCtldDisconnectedCb(std::function<void()> cb);
 
+  void SetPingSuccessCb(std::function<void()>&& cb);
+  void SetPingFailedCb(std::function<void()>&& cb);
+
   void StartGrpcCtldConnection() { m_connection_start_notification_.Notify(); }
+
+  void StartPingCtld() { m_ping_ctld_ = true; }
+  void StopPingCtld() { m_ping_ctld_ = false; }
+  void UpdateLastActiveTime() {
+    m_last_active_time_ = std::chrono::steady_clock::now();
+  }
 
   void StepStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -177,6 +206,7 @@ class CtldClient {
                        std::set<step_id_t> const& lost_steps);
 
   void AsyncSendThread_();
+  bool Ping_();
 
   void SendStatusChanges_();
 
@@ -197,8 +227,17 @@ class CtldClient {
   std::atomic<bool> m_grpc_has_initialized_;
   std::vector<std::function<void()>> m_on_ctld_connected_cb_chain_;
   std::vector<std::function<void()>> m_on_ctld_disconnected_cb_chain_;
+  std::function<void()> m_ping_success_cb_;
+  std::function<void()> m_ping_failed_cb_;
 
   absl::Notification m_connection_start_notification_;
+
+  std::thread m_uvw_thread_;
+
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_ping_handle_;
+  std::atomic_bool m_ping_ctld_{false};
+  std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
 };
 
 }  // namespace Craned
