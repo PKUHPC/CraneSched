@@ -95,8 +95,7 @@ Nodes:
 # partition information list
 Partitions:
   - name: CPU
-    # "nodes" parameter supports the "ALL" option, indicating all nodes,
-    # eg: nodes: ALL
+    # Nodes in this partition. Use "ALL" for all nodes.
     nodes: "cn[15-16]"
     priority: 5
   - name: GPU
