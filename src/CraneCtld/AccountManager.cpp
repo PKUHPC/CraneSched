@@ -1108,13 +1108,13 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
 
 CraneExpected<std::list<Txn>> AccountManager::QueryTxnList(
     uint32_t uid,
-    const std::unordered_map<std::string, std::string>& conditions) {
-
+    const std::unordered_map<std::string, std::string>& conditions,
+    int64_t start_time, int64_t end_time) {
   auto result = CheckUidIsAdmin(uid);
   if (!result) return std::unexpected(result.error());
 
   std::list<Txn> txn_list;
-  g_db_client->SelectTxns(conditions, &txn_list);
+  g_db_client->SelectTxns(conditions, start_time, end_time, &txn_list);
 
   return std::move(txn_list);
 }
@@ -3076,6 +3076,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
 void AccountManager::AddTxnLogToDB_(const std::string& actor_name,
                                     const std::string& target, TxnAction action,
                                     const std::string& info) {
+  // TODO: 将action 转为 string
   Txn txn;
   txn.creation_time = ToUnixSeconds(absl::Now());
   txn.actor = actor_name;

@@ -1592,29 +1592,30 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
     grpc::ServerContext *context,
     const crane::grpc::QueryTxnLogRequest *request,
     crane::grpc::QueryTxnLogReply *response) {
-
   std::unordered_map<std::string, std::string> conditions;
-  if (request->has_actor())
-    conditions.emplace("actor", request->actor());
-  if (request->has_target())
+  if (!request->actor().empty()) conditions.emplace("actor", request->actor());
+  if (!request->target().empty())
     conditions.emplace("target", request->target());
-  if (request->has_action())
-    conditions.emplace("action", request->target());
-  if (request->has_start_time())
-    conditions.emplace("start_time", request->start_time());
-  if (request->has_end_time())
-    conditions.emplace("end_time", request->end_time());
-  if (request->has_info())
-    conditions.emplace("info", request->info());
+  if (!request->action().empty())
+    conditions.emplace("action", request->action());
+  if (!request->info().empty()) conditions.emplace("info", request->info());
 
-  auto result = g_account_manager->QueryTxnList(request->uid(), conditions);
+  auto result = g_account_manager->QueryTxnList(
+      request->uid(), conditions, request->start_time(), request->end_time());
   if (!result) {
     response->set_ok(false);
     response->set_code(result.error());
   } else {
     response->set_ok(true);
+    for (auto &txn : result.value()) {
+      auto *new_txn = response->add_txn_log_list();
+      new_txn->set_actor(txn.actor);
+      new_txn->set_target(txn.target);
+      new_txn->set_action(txn.action);
+      new_txn->set_creation_time(txn.creation_time);
+      new_txn->set_info(txn.info);
+    }
   }
-
 
   return grpc::Status::OK;
 }

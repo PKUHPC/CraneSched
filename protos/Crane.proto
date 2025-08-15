@@ -899,12 +899,12 @@ message ResetUserCredentialReply {
 
 message QueryTxnLogRequest{
   uint32 uid = 1;
-  optional string actor = 2;
-  optional string target = 3;
-  optional string action = 4;
-  optional string info = 5;
-  optional string start_time = 6;
-  optional string end_time = 7;
+  string actor = 2;
+  string target = 3;
+  string action = 4;
+  string info = 5;
+  int64 start_time = 6;
+  int64 end_time = 7;
 }
 
 message QueryTxnLogReply{
@@ -913,10 +913,11 @@ message QueryTxnLogReply{
   message Txn {
     string actor = 1;
     string target = 2;
-    string action = 3;
+    TxnAction action = 3;
     string info = 4;
+    int64 creation_time = 5;
   }
-  repeated Txn txn_log = 3;
+  repeated Txn txn_log_list = 3;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun

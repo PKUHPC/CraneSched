@@ -149,7 +149,10 @@ class AccountManager {
   CraneExpected<void> BlockUser(uint32_t uid, const std::string& name,
                                 const std::string& account, bool block);
 
-  CraneExpected<std::list<Txn>> QueryTxnList(uint32_t uid, const std::unordered_map<std::string, std::string>& conditions);
+  CraneExpected<std::list<Txn>> QueryTxnList(
+      uint32_t uid,
+      const std::unordered_map<std::string, std::string>& conditions,
+      int64_t start_time, int64_t end_time);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& account,

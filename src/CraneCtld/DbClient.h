@@ -232,7 +232,9 @@ class MongodbClient {
   bool UpdateQos(const Qos& qos);
 
   bool InsertTxn(const Txn& txn);
-  void SelectTxns(const std::unordered_map<std::string, std::string>& conditions, std::list<Txn>* res_txn);
+  void SelectTxns(
+      const std::unordered_map<std::string, std::string>& conditions,
+      int64_t start_time, int64_t end_time, std::list<Txn>* res_txn);
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
