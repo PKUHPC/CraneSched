@@ -93,6 +93,17 @@ CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
+CraneErrCode SupervisorStub::ShutdownSupervisor() {
+  ClientContext context;
+  crane::grpc::supervisor::ShutdownSupervisorRequest request;
+  crane::grpc::supervisor::ShutdownSupervisorReply reply;
+
+  auto ok = m_stub_->ShutdownSupervisor(&context, request, &reply);
+  if (ok.ok()) return CraneErrCode::SUCCESS;
+
+  return CraneErrCode::ERR_RPC_FAILURE;
+}
+
 void SupervisorStub::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.

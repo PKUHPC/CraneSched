@@ -30,6 +30,7 @@
 
 namespace Craned {
 
+constexpr int kMaxSupervisorCheckRetryCount = 10;
 // TODO: Replace this with tak execution info.
 using StepToD = crane::grpc::TaskToD;
 
@@ -224,7 +225,7 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_release_cg_mtx_;
-  std::unordered_set<task_id_t> m_release_job_req_set_
+  std::unordered_map<task_id_t, int /*retry count*/> m_release_job_retry_map_
       ABSL_GUARDED_BY(m_release_cg_mtx_);
   ConcurrentQueue<std::vector<task_id_t>> m_check_supervisor_queue_;
   std::shared_ptr<uvw::async_handle> m_check_supervisor_async_handle_;

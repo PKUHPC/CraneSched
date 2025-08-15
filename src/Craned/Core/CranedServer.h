@@ -86,6 +86,10 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::CreateCgroupForJobsRequest *request,
       crane::grpc::CreateCgroupForJobsReply *response) override;
 
+  grpc::Status FreeSteps(grpc::ServerContext *context,
+                         const crane::grpc::FreeStepsRequest *request,
+                         crane::grpc::FreeStepsReply *response) override;
+
   grpc::Status ReleaseCgroupForJobs(
       grpc::ServerContext *context,
       const crane::grpc::ReleaseCgroupForJobsRequest *request,
