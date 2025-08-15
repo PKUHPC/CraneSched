@@ -572,18 +572,28 @@ void MongodbClient::SelectTxns(
   if (start_time != 0 || end_time != 0) {
     bsoncxx::builder::basic::document range_doc;
     if (start_time != 0)
-      range_doc.append(bsoncxx::builder::basic::kvp("$gte", start_time));
+      range_doc.append(kvp("$gte", start_time));
     if (end_time != 0)
-      range_doc.append(bsoncxx::builder::basic::kvp("$lt", end_time));
+      range_doc.append(kvp("$lt", end_time));
     doc_builder.append(
-        bsoncxx::builder::basic::kvp("creation_time", range_doc.view()));
+        kvp("creation_time", range_doc.view()));
   }
 
   for (const auto& [key, value] : conditions) {
     if (key == "action")
-      doc_builder.append(bsoncxx::builder::basic::kvp(key, static_cast<int64_t>(std::stoll(value))));
+      doc_builder.append(kvp(key, static_cast<int64_t>(std::stoll(value))));
+    else if (key == "info") {
+      doc_builder.append(
+          kvp(
+              key,
+              bsoncxx::builder::basic::make_document(
+                  kvp("$regex", value)
+              )
+          )
+      );
+    }
     else
-      doc_builder.append(bsoncxx::builder::basic::kvp(key, value));
+      doc_builder.append(kvp(key, value));
   }
 
   mongocxx::options::find find_options;
