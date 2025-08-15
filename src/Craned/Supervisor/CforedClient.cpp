@@ -421,7 +421,6 @@ void CforedClient::AsyncSendRecvThread_() {
   std::atomic<bool> write_pending;
 
   bool ok;
-  bool registered{false};
   Tag tag;
   grpc::ClientContext context;
   StreamTaskIORequest request;
