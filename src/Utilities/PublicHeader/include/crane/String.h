@@ -125,8 +125,6 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name,
 
 bool PartitionNodesProcess(const std::string &node_str,
                            const std::list<std::string> &host_list,
-                           const std::string &part_name,
-                           std::unordered_set<std::string> &part_node_list,
-                           const bool is_cranectld,
-                           std::unordered_set<std::string> *nodes_without_part);
+                           const std::string &part_name, bool disallow_unknown_node,
+                           std::unordered_set<std::string> &part_node_list);
 }  // namespace util

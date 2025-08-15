@@ -459,8 +459,12 @@ void ParseConfig(int argc, char** argv) {
               ranges::to<std::list<std::string>>();
           part.nodelist_str = util::HostNameListToStr(host_list);
           if (!util::PartitionNodesProcess(nodes, host_list, name, true,
-                                           part.nodes, &nodes_without_part)) {
+                                           part.nodes)) {
             std::exit(1);
+          }
+
+          for (const auto& node_name : part.nodes) {
+            nodes_without_part.erase(node_name);
           }
 
           if (partition["AllowedAccounts"] &&
