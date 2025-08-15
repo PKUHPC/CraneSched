@@ -903,8 +903,7 @@ message QueryTxnLogRequest{
   string target = 3;
   string action = 4;
   string info = 5;
-  int64 start_time = 6;
-  int64 end_time = 7;
+  TimeInterval time_interval = 6;
 }
 
 message QueryTxnLogReply{

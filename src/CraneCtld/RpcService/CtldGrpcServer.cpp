@@ -1601,7 +1601,7 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
   if (!request->info().empty()) conditions.emplace("info", request->info());
 
   auto result = g_account_manager->QueryTxnList(
-      request->uid(), conditions, request->start_time(), request->end_time());
+      request->uid(), conditions, request->time_interval().lower_bound().seconds(), request->time_interval().upper_bound().seconds());
   if (!result) {
     response->set_ok(false);
     response->set_code(result.error());
