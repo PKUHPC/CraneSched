@@ -276,7 +276,7 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
 
-  std::filesystem::path m_image_tag_;
+  std::string m_image_ref_;
   std::filesystem::path m_temp_path_;
 };
 
