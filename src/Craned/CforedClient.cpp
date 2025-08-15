@@ -160,6 +160,11 @@ void CforedClient::AsyncSendRecvThread_() {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
 
+        if (state < State::Forwarding) {
+          CRANE_TRACE("Waiting for register.");
+          continue;
+        }
+
         if (!m_output_drained_.load(std::memory_order::acquire)) {
           CRANE_TRACE("Cfored [{}] Waiting for output drained.",
                       m_cfored_name_);
