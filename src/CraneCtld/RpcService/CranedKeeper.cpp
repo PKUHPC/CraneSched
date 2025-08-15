@@ -109,7 +109,7 @@ CraneErrCode CranedStub::TerminateSteps(
   TerminateStepsRequest request;
   TerminateStepsReply reply;
   context.set_deadline(std::chrono::system_clock::now() +
-                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (const auto &id : task_ids) request.add_task_id_list(id);
 
@@ -136,7 +136,7 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
   TerminateOrphanedStepRequest request;
   TerminateOrphanedStepReply reply;
   context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(kCtldRpcTimeoutSeconds));
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
 

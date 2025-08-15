@@ -189,8 +189,8 @@ class CtldForInternalServiceImpl final
       crane::grpc::CranedRegisterReply *response) override;
 
   grpc::Status CranedPing(grpc::ServerContext *context,
-                         const crane::grpc::CranedPingRequest *request,
-                         crane::grpc::CranedPingReply *response) override;
+                          const crane::grpc::CranedPingRequest *request,
+                          crane::grpc::CranedPingReply *response) override;
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,
