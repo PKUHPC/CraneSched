@@ -421,6 +421,7 @@ void CforedClient::AsyncSendRecvThread_() {
   std::atomic<bool> write_pending;
 
   bool ok;
+  bool registered{false};
   Tag tag;
   grpc::ClientContext context;
   StreamTaskIORequest request;
@@ -446,6 +447,10 @@ void CforedClient::AsyncSendRecvThread_() {
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
         CRANE_TRACE("TIMEOUT with m_stopped_=true.");
+        if (state < State::Forwarding) {
+          CRANE_TRACE("Waiting for register.");
+          continue;
+        }
         if (!m_output_drained_.load(std::memory_order::acquire)) {
           CRANE_TRACE("Waiting for output drained.");
           state = State::Draining;
