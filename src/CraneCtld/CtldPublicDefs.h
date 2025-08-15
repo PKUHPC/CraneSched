@@ -719,28 +719,6 @@ struct Txn {
   std::string target;
   crane::grpc::TxnAction action;
   std::string info;
-
-  // TODO:
-  const std::unordered_map<std::string, crane::grpc::TxnAction> TxnActionLowerMap = {
-    {"addaccount", crane::grpc::TxnAction::AddAccount},
-    {"modifyaccount", crane::grpc::TxnAction::ModifyAccount},
-    {"deleteaccount", crane::grpc::TxnAction::DeleteAccount},
-    {"adduser", crane::grpc::TxnAction::AddUser},
-    {"modifyuser", crane::grpc::TxnAction::ModifyUser},
-    {"deleteuser", crane::grpc::TxnAction::DeleteUser},
-    {"addqos", crane::grpc::TxnAction::AddQos},
-    {"modifyqos", crane::grpc::TxnAction::ModifyQos},
-    {"deleteqos", crane::grpc::TxnAction::DeleteQos},
-  };
-
-  crane::grpc::TxnAction StringToTxnActionCaseInsensitive(const std::string& str) {
-    auto it = TxnActionLowerMap.find(str);
-    if (it != TxnActionLowerMap.end()) {
-      return it->second;
-    }
-
-    return static_cast<crane::grpc::TxnAction>(-1);
-  }
 };
 
 }  // namespace Ctld

@@ -565,21 +565,9 @@ bool MongodbClient::InsertTxn(const Txn& txn) {
 }
 
 void MongodbClient::SelectTxns(
-    const std::unordered_map<std::string, std::string>& conditions,
+    const std::unordered_map<std::string, std::string>& conditions, int64_t start_time, int64_t end_time,
     std::list<Txn>* res_txn) {
   bsoncxx::builder::basic::document doc_builder;
-  int64_t start_time = 0;
-  int64_t end_time = 0;
-
-  for (const auto& [key, value] : conditions) {
-    if (key == "start_time") {
-      start_time = std::stoll(value);
-    } else if (key == "end_time") {
-      end_time = std::stoll(value);
-    } else {
-      doc_builder.append(bsoncxx::builder::basic::kvp(key, value));
-    }
-  }
 
   if (start_time != 0 || end_time != 0) {
     bsoncxx::builder::basic::document range_doc;
@@ -591,7 +579,13 @@ void MongodbClient::SelectTxns(
         bsoncxx::builder::basic::kvp("creation_time", range_doc.view()));
   }
 
-  // TODO: page query ?
+  for (const auto& [key, value] : conditions) {
+    if (key == "action")
+      doc_builder.append(bsoncxx::builder::basic::kvp(key, static_cast<int64_t>(std::stoll(value))));
+    else
+      doc_builder.append(bsoncxx::builder::basic::kvp(key, value));
+  }
+
   mongocxx::options::find find_options;
   find_options.limit(1000);
   mongocxx::cursor cursor =
