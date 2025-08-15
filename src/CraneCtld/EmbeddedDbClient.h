@@ -252,6 +252,13 @@ class EmbeddedDbClient {
     return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
   }
 
+  [[nodiscard]] bool UpdateRuntimeAttrOfStep(
+      txn_id_t txn_id, db_id_t db_id,
+      crane::grpc::RuntimeAttrOfStep const& runtime_attr) {
+    // FIXME: finish this function.
+    return true;
+  }
+
   bool UpdateReservationInfo(
       txn_id_t txn_id, const ResvId& name,
       const crane::grpc::CreateReservationRequest& reservation_req) {

@@ -66,16 +66,18 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   }
 }
 
-std::vector<task_id_t> CranedStub::ExecuteSteps(
-    const crane::grpc::ExecuteStepsRequest &request) {
+std::vector<std::pair<job_id_t, step_id_t>> CranedStub::ExecuteSteps(
+    const std::vector<crane::grpc::StepToD> &steps) {
   using crane::grpc::ExecuteStepsReply;
   using crane::grpc::ExecuteStepsRequest;
 
-  std::vector<task_id_t> failed_task_ids;
+  std::vector<std::pair<job_id_t, step_id_t>> failed_steps;
 
+  ExecuteStepsRequest request;
   ExecuteStepsReply reply;
   ClientContext context;
   Status status;
+  for (const auto &step : steps) *request.add_steps() = step;
 
   status = m_stub_->ExecuteSteps(&context, request, &reply);
   if (!status.ok()) {
@@ -83,20 +85,24 @@ std::vector<task_id_t> CranedStub::ExecuteSteps(
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    failed_task_ids.reserve(request.tasks_size());
-    for (auto &task : request.tasks())
-      failed_task_ids.emplace_back(task.task_id());
+    failed_steps.reserve(steps.size());
+    for (auto &step : steps)
+      failed_steps.emplace_back(step.job_id(), step.step_id());
 
-    return failed_task_ids;
+    return failed_steps;
   }
 
-  failed_task_ids.assign(reply.failed_task_id_list().begin(),
-                         reply.failed_task_id_list().end());
-  return failed_task_ids;
+  failed_steps.reserve(reply.failed_job_list_size());
+  for (const auto &[job_id, step_id] :
+       std::views::zip(reply.failed_job_list(), reply.failed_step_list())) {
+    failed_steps.emplace_back(job_id, step_id);
+  }
+
+  return failed_steps;
 }
 
 CraneErrCode CranedStub::TerminateSteps(
-    const std::vector<task_id_t> &task_ids) {
+    const std::vector<std::pair<job_id_t, step_id_t>> &steps) {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 
@@ -105,8 +111,10 @@ CraneErrCode CranedStub::TerminateSteps(
   TerminateStepsRequest request;
   TerminateStepsReply reply;
 
-  for (const auto &id : task_ids) request.add_task_id_list(id);
-
+  auto job_ids = std::views::keys(steps);
+  auto step_ids = std::views::values(steps);
+  request.mutable_job_id_list()->Assign(job_ids.begin(), job_ids.end());
+  request.mutable_step_id_list()->Assign(step_ids.begin(), step_ids.end());
   status = m_stub_->TerminateSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
@@ -120,7 +128,7 @@ CraneErrCode CranedStub::TerminateSteps(
 }
 
 CraneErrCode CranedStub::TerminateOrphanedSteps(
-    const std::vector<task_id_t> &task_ids) {
+    const std::vector<std::pair<job_id_t, step_id_t>> &steps) {
   using crane::grpc::TerminateOrphanedStepReply;
   using crane::grpc::TerminateOrphanedStepRequest;
 
@@ -129,8 +137,12 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
   TerminateOrphanedStepRequest request;
   TerminateOrphanedStepReply reply;
 
-  request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
-
+  request.mutable_job_id_list()->Reserve(steps.size());
+  request.mutable_step_id_list()->Reserve(steps.size());
+  for (const auto [job_id, step_id] : steps) {
+    request.add_job_id_list(job_id);
+    request.add_step_id_list(step_id);
+  }
   status = m_stub_->TerminateOrphanedStep(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
@@ -146,28 +158,27 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::CreateCgroupForJobs(
-    std::vector<crane::grpc::JobToD> const &jobs) {
-  using crane::grpc::CreateCgroupForJobsReply;
-  using crane::grpc::CreateCgroupForJobsRequest;
+CraneErrCode CranedStub::AllocJobs(
+    const std::vector<crane::grpc::JobToD> &jobs) {
+  using crane::grpc::AllocJobsReply;
+  using crane::grpc::AllocJobsRequest;
 
   Status status;
-  CreateCgroupForJobsRequest request;
-  CreateCgroupForJobsReply reply;
+  AllocJobsRequest request;
+  AllocJobsReply reply;
 
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const auto &job : jobs) {
-    *request.add_job_list() = job;
+  for (auto &&job : jobs) {
+    *request.add_jobs() = job;
   }
 
-  status = m_stub_->CreateCgroupForJobs(&context, request, &reply);
+  status = m_stub_->AllocJobs(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_ERROR(
-        "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
-        m_craned_id_, status.error_message());
+    CRANE_ERROR("AllocJobs RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
@@ -175,25 +186,21 @@ CraneErrCode CranedStub::CreateCgroupForJobs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ReleaseCgroupForJobs(
-    const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs) {
-  using crane::grpc::ReleaseCgroupForJobsReply;
-  using crane::grpc::ReleaseCgroupForJobsRequest;
+CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
+  using crane::grpc::FreeJobsReply;
+  using crane::grpc::FreeJobsRequest;
 
   Status status;
-  ReleaseCgroupForJobsRequest request;
-  ReleaseCgroupForJobsReply reply;
+  FreeJobsRequest request;
+  FreeJobsReply reply;
 
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const auto &[task_id, uid] : task_uid_pairs) {
-    request.add_task_id_list(task_id);
-    request.add_uid_list(uid);
-  }
+  request.mutable_job_id_list()->Assign(task.begin(), task.end());
 
-  status = m_stub_->ReleaseCgroupForJobs(&context, request, &reply);
+  status = m_stub_->FreeJobs(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
@@ -202,6 +209,73 @@ CraneErrCode CranedStub::ReleaseCgroupForJobs(
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
+  return CraneErrCode::SUCCESS;
+}
+CraneErrCode CranedStub::AllocSteps(
+    const std::vector<crane::grpc::StepToD> &steps) {
+  using crane::grpc::AllocStepsReply;
+  using crane::grpc::AllocStepsRequest;
+  AllocStepsRequest request;
+  AllocStepsReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto &step : steps) *request.add_steps() = step;
+  Status status = m_stub_->AllocSteps(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("AllocSteps RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  return CraneErrCode::SUCCESS;
+}
+CraneErrCode CranedStub::ExecuteSteps(
+    const std::vector<std::pair<job_id_t, step_id_t>> &steps) {
+  using crane::grpc::ExecuteStepsReply;
+  using crane::grpc::ExecuteStepsRequest;
+  ExecuteStepsRequest request;
+  ExecuteStepsReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  request.mutable_job_id_list()->Reserve(steps.size());
+  request.mutable_step_id_list()->Reserve(steps.size());
+  for (const auto &[job_id, step_id] : steps) {
+    request.add_job_id_list(job_id);
+    request.add_step_id_list(step_id);
+  }
+  auto status = m_stub_->ExecuteSteps(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("ExecuteSteps RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode CranedStub::FreeSteps(
+    const std::vector<std::pair<job_id_t, step_id_t>> &steps) {
+  using crane::grpc::FreeStepsReply;
+  using crane::grpc::FreeStepsRequest;
+  FreeStepsRequest request;
+  FreeStepsReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+  for (auto &[job_id, step_id] : steps) {
+    request.add_job_id_list(job_id);
+    request.add_step_id_list(step_id);
+  }
+
+  Status status = m_stub_->FreeSteps(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("AllocSteps RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
   return CraneErrCode::SUCCESS;
 }
 
@@ -237,70 +311,6 @@ void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
                m_craned_id_);
     g_meta_container->CranedDown(m_craned_id_);
   }
-}
-
-crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
-    const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
-  crane::grpc::ExecuteStepsRequest request;
-
-  for (TaskInCtld *task : tasks) {
-    auto *mutable_task = request.add_tasks();
-
-    // Set time_limit
-    mutable_task->mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(task->time_limit)));
-
-    // Set resources
-    auto *mutable_res_in_node = mutable_task->mutable_resources();
-    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        task->AllocatedRes().at(craned_id));
-
-    // Set type
-    mutable_task->set_type(task->type);
-    mutable_task->set_task_id(task->TaskId());
-    mutable_task->set_name(task->name);
-    mutable_task->set_account(task->account);
-    mutable_task->set_qos(task->qos);
-    mutable_task->set_partition(task->partition_id);
-
-    for (auto &&node : task->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto &&node : task->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    mutable_task->set_node_num(task->node_num);
-    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
-
-    mutable_task->set_uid(task->uid);
-    mutable_task->set_gid(task->gid);
-    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
-
-    mutable_task->set_cwd(task->cwd);
-    mutable_task->set_get_user_env(task->get_user_env);
-
-    for (const auto &hostname : task->CranedIds())
-      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
-
-    mutable_task->mutable_start_time()->set_seconds(
-        task->StartTimeInUnixSecond());
-    mutable_task->mutable_time_limit()->set_seconds(
-        ToInt64Seconds(task->time_limit));
-
-    if (task->type == crane::grpc::Batch) {
-      auto *mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
-    } else {
-      auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
-    }
-  }
-
-  return request;
 }
 
 CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {

@@ -27,10 +27,11 @@ import "PublicDefs.proto";
 
 message StepStatusChangeRequest {
   uint32 task_id = 1;
-  string craned_id = 2;
-  TaskStatus new_status = 3;
-  uint32 exit_code = 4;
-  string reason = 5;
+  uint32 step_id = 2;
+  string craned_id = 3;
+  TaskStatus new_status = 4;
+  uint32 exit_code = 5;
+  string reason = 6;
 }
 
 message StepStatusChangeReply {
@@ -44,8 +45,8 @@ message CranedTriggerReverseConnRequest {
 
 message ConfigureCranedRequest {
   bool ok = 1;
-  map<uint32, JobToD> job_map = 2;
-  map<uint32, TaskToD> job_tasks_map = 3;
+  repeated JobToD jobs = 2;
+  repeated StepToD steps = 3;
   google.protobuf.Timestamp token = 4;
 }
 
@@ -90,29 +91,42 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
+message AllocJobsRequest {
+  repeated JobToD jobs = 1;
+}
+
+message AllocJobsReply {}
+
+message AllocStepsRequest {
+  repeated StepToD steps = 1;
+}
+
+message AllocStepsReply {}
+
+message FreeStepsRequest {
+  repeated uint32 job_id_list = 1;
+  repeated uint32 step_id_list = 2;
+}
+
+message FreeStepsReply {}
+
+message FreeJobsRequest {
+  repeated uint32 job_id_list = 1;
+}
+
+message FreeJobsReply{}
+
 message ExecuteStepsRequest {
-  repeated TaskToD tasks = 1;
+  repeated uint32 job_id_list = 1;
+  repeated uint32 step_id_list = 2;
 }
 
 message ExecuteStepsReply {
-  repeated uint32 failed_task_id_list = 1;
 }
-
-message CreateCgroupForJobsRequest {
-  repeated JobToD job_list = 1;
-}
-
-message CreateCgroupForJobsReply {}
-
-message ReleaseCgroupForJobsRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-}
-
-message ReleaseCgroupForJobsReply {}
 
 message TerminateStepsRequest {
-  repeated uint32 task_id_list = 1;
+  repeated uint32 job_id_list = 1;
+  repeated uint32 step_id_list = 2;
 }
 
 message TerminateStepsReply {
@@ -121,7 +135,8 @@ message TerminateStepsReply {
 }
 
 message TerminateOrphanedStepRequest {
-  repeated uint32 task_id_list = 1;
+  repeated uint32 job_id_list = 1;
+  repeated uint32 step_id_list = 2;
 }
 
 message TerminateOrphanedStepReply {
@@ -955,9 +970,10 @@ service Craned {
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
-  rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
-  rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
-
+  rpc AllocJobs(AllocJobsRequest) returns (AllocJobsReply);
+  rpc AllocSteps(AllocStepsRequest) returns (AllocStepsReply);
+  rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
+  rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.
