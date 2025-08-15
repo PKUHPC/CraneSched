@@ -831,6 +831,11 @@ PartitionNodesResult PartitionNodesProcess(
     const std::string &part_name,
     std::unordered_set<std::string> &part_node_list, const bool is_cranectld,
     std::unordered_set<std::string> *nodes_without_part) {
+bool PartitionNodesProcess(const std::string &node_str,
+                           const std::list<std::string> &host_list,
+                           const std::string &part_name,
+                           bool disallow_unknown_node,
+                           std::unordered_set<std::string> &part_node_list) {
   std::list<std::string> name_list;
   std::unordered_set<std::string> node_name_set_list(host_list.begin(),
                                                      host_list.end());
@@ -839,7 +844,6 @@ PartitionNodesResult PartitionNodesProcess(
   if (act_nodes_str == "ALL") {
     for (const auto &node : host_list) {
       part_node_list.emplace(node);
-      if (nodes_without_part != nullptr) nodes_without_part->erase(node);
       CRANE_TRACE("Find node {} in partition {}", node, part_name);
     }
   } else {
@@ -855,17 +859,14 @@ PartitionNodesResult PartitionNodesProcess(
         auto node_it = node_name_set_list.find(node);
         if (node_it != node_name_set_list.end()) {
           part_node_list.emplace(*node_it);
-          if (nodes_without_part != nullptr)
-            nodes_without_part->erase(*node_it);
-          CRANE_TRACE("Set the partition of node {} to {}", *node_it,
-                      part_name);
+          CRANE_TRACE("Find node {} in partition {}", *node_it, part_name);
         } else {
           CRANE_ERROR(
               "Unknown node '{}' found in partition '{}'. It is "
               "ignored "
               "and should be contained in the configuration file.",
               node, part_name);
-          if (is_cranectld) return false;
+          if (disallow_unknown_node) return false;
         }
       }
     }
