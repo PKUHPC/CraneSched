@@ -74,8 +74,10 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
           stub->ConfigureCraned(craned_id, token);
         });
     } else {
-      CRANE_TRACE("Already online craned {} notify craned connected.",
-                  craned_id);
+      CRANE_TRACE(
+          "Already online craned {} notify craned connected, consider it down.",
+          craned_id);
+      g_meta_container->CranedDown(craned_id);
     }
   }
 
@@ -141,6 +143,28 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
   response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::CranedPing(
+    grpc::ServerContext *context, const crane::grpc::CranedPingRequest *request,
+    crane::grpc::CranedPingReply *response) {
+  if (!g_meta_container->CheckCranedOnline(request->craned_id())) {
+    CRANE_WARN("Reject ping from offline node {}", request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(request->craned_id());
+  if (stub == nullptr) {
+    CRANE_WARN("Ping from Craned {}, which is not connected.",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  stub->UpdateLastActiveTime();
+  response->set_ok(true);
+
   return grpc::Status::OK;
 }
 

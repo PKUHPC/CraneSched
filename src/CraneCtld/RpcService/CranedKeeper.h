@@ -52,7 +52,9 @@ class CranedStub {
     absl::MutexLock l(&m_lock_);
     bool ret = m_token_.has_value() && m_token_.value() == token;
     if (!ret) {
-      CRANE_DEBUG("Token for {} mismatch, resetting token.", m_craned_id_);
+      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                         "Token for {} mismatch, resetting token.",
+                         m_craned_id_);
       m_token_.reset();
     }
     return ret;
@@ -61,8 +63,10 @@ class CranedStub {
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
   void SetReady() {
-    CRANE_TRACE("Craned {} stub ready.", m_craned_id_);
+    CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                       "Craned {} stub ready.", m_craned_id_);
     m_registered_.store(true, std::memory_order_release);
+    UpdateLastActiveTime();
 
     absl::MutexLock l(&m_lock_);
     m_token_.reset();
@@ -89,9 +93,15 @@ class CranedStub {
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
   }
+
+  void UpdateLastActiveTime() {
+    m_last_active_time_.store(std::chrono::steady_clock::now(),
+                              std::memory_order_release);
+  }
+
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
-           !m_registered_.load(std::memory_order_acquire);
+           !m_registered_.load(std::memory_order_acquire) || m_shutting_down_;
   }
 
  private:
@@ -107,6 +117,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   std::atomic_bool m_disconnected_;
   std::atomic_bool m_registered_{false};
+  std::atomic_bool m_shutting_down_{false};
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
@@ -115,6 +126,8 @@ class CranedStub {
 
   absl::Mutex m_lock_;
   std::optional<RegToken> m_token_ ABSL_GUARDED_BY(m_lock_){std::nullopt};
+  std::atomic<std::chrono::time_point<std::chrono::steady_clock>>
+      m_last_active_time_;
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.
@@ -176,7 +189,7 @@ class CranedKeeper {
 
   static void CranedChannelConnectFail_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id, const RegToken &token);
+  void ConnectCranedNode_(CranedId const &craned_id);
 
   CqTag *InitCranedStateMachine_(CranedStub *craned,
                                  grpc_connectivity_state new_state);
@@ -186,6 +199,8 @@ class CranedKeeper {
   void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
+
+  void EvCheckTimeoutCb_();
 
   std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
 
@@ -218,6 +233,10 @@ class CranedKeeper {
   std::vector<std::thread> m_cq_thread_vec_;
 
   std::thread m_period_connect_thread_;
+  std::thread m_uvw_thread_;
+
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_check_timeout_handle_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };

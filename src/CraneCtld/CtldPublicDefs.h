@@ -69,6 +69,11 @@ constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 constexpr bool kDefaultJobFileOpenModeAppend = false;
 
 struct Config {
+  struct CraneCtldConf {
+    uint32_t CranedTimeout;
+  };
+
+  CraneCtldConf CtldConf;
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
@@ -179,6 +184,8 @@ struct Config {
 
 struct RunTimeStatus {
   std::atomic_bool srv_ready{false};
+  std::shared_ptr<spdlog::async_logger> connection_logger;
+  std::shared_ptr<spdlog::async_logger> db_logger;
 };
 
 }  // namespace Ctld
