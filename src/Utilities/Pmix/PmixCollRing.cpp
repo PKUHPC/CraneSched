@@ -70,7 +70,8 @@ bool Coll::PmixCollRingLocal_(const std::string& data,
   CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(coll_ctx), coll_ctx->seq, ToString(coll_ctx->state), data.size());
 
   // contrib peer node
-  CollRingContrib_(*coll_ctx, m_peerid_, 0, data);
+  if (!CollRingContrib_(*coll_ctx, m_peerid_, 0, data))
+    return false;
 
   coll_ctx->contrib_local = true;
   this->ProgressCollectRing_(*coll_ctx);
@@ -146,7 +147,7 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
     auto reply = std::make_shared<crane::grpc::pmix::SendPmixRingMsgReply>();
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_ring_.next_craned_id);
     if (!stub) {
-      CRANE_ERROR("{:p}, Cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
+      CRANE_ERROR("{:p}, PmixStub is not get, cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
       coll_ring_ctx.ring_buf.clear();
       return false;
     }
@@ -332,7 +333,8 @@ bool Coll::PmixCollRingNeighbor_(
 
   coll_ring_ctx->contrib_map[hdr.contrib_id()] = true;
 
-  CollRingContrib_(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq()+1, msg);
+  if (!CollRingContrib_(*coll_ring_ctx, hdr.contrib_id(), hdr.hop_seq()+1, msg))
+      return false;
 
   coll_ring_ctx->contrib_prev++;
 

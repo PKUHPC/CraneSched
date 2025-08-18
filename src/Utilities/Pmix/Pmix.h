@@ -61,7 +61,7 @@ class PmixServer {
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(
       uint32_t rank);
 
-  const std::string& GetHostname() const { return m_hostname_;};
+  const std::string& GetHostname() const { return m_hostname_;}
   task_id_t GetTaskId() const { return static_cast<task_id_t>(std::stoul(m_task_id_)); }
   const std::vector<std::string>& GetNodeList() { return m_node_list_; }
   const std::vector<std::string>& GetPeerNodeList() { return m_peer_node_list_; }

@@ -28,6 +28,8 @@
 #include <limits>
 #include <variant>
 
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
@@ -2359,6 +2361,21 @@ CraneErrCode ProcInstance::Spawn() {
     // Apply environment variables
     InitEnvMap();
 
+    std::unordered_map<std::string, std::string> pmix_env;
+    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
+      auto result = g_pmix_server->SetupFork(0);
+      if (!result) {
+        fmt::print(stderr,
+                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
+        std::abort();
+      }
+      pmix_env = result.value();
+    }
+
+    for (const auto& [k, v] : pmix_env) {
+      m_env_.emplace(k, v);
+    }
+
     if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
       RunPrologEpilogArgs run_prolog_args{
           .scripts = g_config.JobLifecycleHook.TaskPrologs,
@@ -2671,6 +2688,7 @@ TaskManager::~TaskManager() {
       CRANE_DEBUG("Epilog success");
     }
   }
+  g_pmix_server.reset();
 }
 
 void TaskManager::SupervisorFinishInit(StepStatus status) {
