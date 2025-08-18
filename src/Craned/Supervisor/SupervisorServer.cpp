@@ -91,6 +91,10 @@ grpc::Status SupervisorServiceImpl::ReceivePmixPort(
     const crane::grpc::supervisor::ReceivePmixPortRequest* request,
     crane::grpc::supervisor::ReceivePmixPortReply* response) {
 
+  if (!g_pmix_server || !g_pmix_server->GetPmixClient()) {
+    response->set_ok(false);
+    return Status::OK;
+  }
   g_pmix_server->GetPmixClient()->EmplacePmixStub(request->craned_id(), request->port());
 
   response->set_ok(true);

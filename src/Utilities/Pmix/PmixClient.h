@@ -27,6 +27,7 @@
 #include "protos/Pmix.grpc.pb.h"
 #include "protos/Pmix.pb.h"
 #include <parallel_hashmap/phmap.h>
+#include <condition_variable>
 
 namespace pmix {
 
@@ -87,13 +88,20 @@ class PmixStub {
 
 class PmixClient {
  public:
-  PmixClient() = default;
+  PmixClient(int node_num) : m_peer_node_num_(node_num) {}
 
   ~PmixClient() = default;
 
   void EmplacePmixStub(const CranedId &craned_id, uint32_t port);
 
   std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id);
+
+  uint64_t GetChannelCount() const { return m_channel_count_.load(); }
+
+  void WaitAllStubReady() {
+    std::unique_lock<std::mutex> lock(m_mutex_);
+    m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_peer_node_num_; });
+  }
 
  private:
   template <typename K, typename V,
@@ -108,6 +116,11 @@ class PmixClient {
       std::shared_mutex>;
 
   CranedIdToStubMap m_craned_id_stub_map_;
+
+  std::mutex m_mutex_;
+  std::condition_variable m_cv_;
+
+  int m_peer_node_num_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };
