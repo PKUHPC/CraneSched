@@ -672,21 +672,19 @@ void CtldClient::SendStatusChanges_() {
           status.error_message(), context.debug_error_string(),
           static_cast<int>(status.error_code()));
 
-      if (status.error_code() == grpc::UNAVAILABLE) {
-        if (m_stopping_) return;
-        // If some messages are not sent due to channel failure,
-        // put them back into m_task_status_change_list_
-        if (!changes.empty()) {
-          m_step_status_change_mtx_.Lock();
-          m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
-                                            std::move(changes));
-          m_step_status_change_mtx_.Unlock();
-        }
-        // Sleep for a while to avoid too many retries.
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        break;
-      } else
-        changes.pop_front();
+      if (m_stopping_) return;
+      // If some messages are not sent due to channel failure,
+      // put them back into m_task_status_change_list_
+      if (!changes.empty()) {
+        m_step_status_change_mtx_.Lock();
+        m_step_status_change_list_.splice(m_step_status_change_list_.begin(),
+                                          std::move(changes));
+        m_step_status_change_mtx_.Unlock();
+      }
+      // Sleep for a while to avoid too many retries.
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      break;
+
     } else {
       CRANE_TRACE("StepStatusChange for step #{} sent. reply.ok={}",
                   status_change.step_id, reply.ok());

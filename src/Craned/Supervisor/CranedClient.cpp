@@ -86,13 +86,12 @@ void CranedClient::AsyncSendThread_() {
             elem.task_id, int(elem.new_status), status.error_message(),
             context.debug_error_string(), int(status.error_code()));
 
-        if (status.error_code() == grpc::UNAVAILABLE) {
-          // If some messages are not sent due to channel failure,
-          // put them back into m_task_status_change_list_
-          m_task_status_change_queue_.enqueue(elem);
-          std::this_thread::sleep_for(std::chrono::seconds(1));
-          break;
-        }
+        // If some messages are not sent due to channel failure,
+        // put them back into m_task_status_change_list_
+        m_task_status_change_queue_.enqueue(elem);
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        break;
+
       } else {
         m_finished_tasks_++;
         CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
