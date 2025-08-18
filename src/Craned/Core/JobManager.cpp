@@ -928,7 +928,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to terminate task #{}", elem.step_id);
-    } else {
+      // Supervisor dead for some reason.
       StepStopAndDoStatusChangeAsync(
           elem.step_id, crane::grpc::TaskStatus::Cancelled,
           ExitCode::kExitCodeTerminated, "Terminated failed.");

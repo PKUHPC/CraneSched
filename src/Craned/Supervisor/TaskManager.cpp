@@ -1459,13 +1459,6 @@ TaskManager::TaskManager()
         EvCleanChangeTaskTimeLimitQueueCb_();
       });
 
-  m_check_task_status_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_check_task_status_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanCheckTaskStatusQueueCb_();
-      });
-
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
@@ -1772,28 +1765,9 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         g_config.JobId);
 
     if (m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Terminating a non-existent task #{}.", g_config.JobId);
+      CRANE_DEBUG("Terminating a completing task #{}, ignored.",
+                  g_config.JobId);
 
-      // Note if Ctld wants to terminate some tasks that are not running,
-      // it might indicate other nodes allocated to the task might have
-      // crashed. We should mark the task as kind of not runnable by removing
-      // its cgroup.
-      //
-      // Considering such a situation:
-      // In Task Scheduler of Ctld,
-      // the task index from node id to task id have just been added and
-      // Ctld are sending CreateCgroupForTasks.
-      // Right at the moment, one Craned allocated to this task and
-      // designated as the executing node crashes,
-      // but it has been sent a CreateCgroupForTasks and replied.
-      // Then the CranedKeeper search the task index and
-      // send TerminateTasksOnCraned to all Craned allocated to this task
-      // including this node.
-      // In order to give Ctld kind of feedback without adding complicated
-      // synchronizing mechanism in ScheduleThread_(),
-      // we just remove the cgroup for such task, Ctld will fail in the
-      // following ExecuteTasks and the task will go to the right place as
-      // well as the completed queue.
       continue;
     }
 
@@ -1849,25 +1823,6 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-  }
-}
-
-void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
-  std::promise<CraneExpected<pid_t>> elem;
-  while (m_check_task_status_queue_.try_dequeue(elem)) {
-    // if (m_task_) {
-    //   if (!m_task_->GetPid()) {
-    //     CRANE_DEBUG("CheckTaskStatus: task launch failed.");
-    //     // Launch failed
-    //     elem.set_value(std::unexpected(CraneErrCode::ERR_NON_EXISTENT));
-    //   } else {
-    //     elem.set_value(m_task_->GetPid());
-    //   }
-    // } else {
-    //   CRANE_DEBUG("CheckTaskStatus: task #{} does not exist.",
-    //   g_config.JobId);
-    //   elem.set_value(std::unexpected(CraneErrCode::ERR_NON_EXISTENT));
-    // }
   }
 }
 

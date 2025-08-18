@@ -381,7 +381,7 @@ class TaskManager {
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
-  void EvCleanCheckTaskStatusQueueCb_();
+
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
 
@@ -400,10 +400,6 @@ class TaskManager {
 
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
-  ConcurrentQueue<std::promise<CraneExpected<pid_t>>>
-      m_check_task_status_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
