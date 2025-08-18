@@ -37,20 +37,49 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
+struct ITaskInstance;
+
 class StepInstance {
  public:
+  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  PasswordEntry pwd;
+  bool orphaned{false};
+  job_id_t job_id;
+  step_id_t step_id;
+  std::vector<task_id_t> task_ids;
+
+  uid_t uid;
+  gid_t gid;
+
+  std::string container;
+  std::optional<crane::grpc::InteractiveTaskType> interactive_type;
+  bool pty;
+  bool x11;
+  bool x11_fwd;
+
   StepInstance() = default;
-  explicit StepInstance(const StepToSupv& step) : m_step_to_supv_(step) {};
+  explicit StepInstance(const StepToSupv& step)
+      : m_step_to_supv_(step),
+        job_id(step.task_id()),
+        step_id(0),
+        task_ids({}),
+        uid(step.uid()),
+        gid(step.gid()),
+        container(step.container()) {
+    interactive_type =
+        step.type() == crane::grpc::TaskType::Interactive
+            ? std::optional(step.interactive_meta().interactive_type())
+            : std::nullopt;
+    pty = interactive_type.has_value() && step.interactive_meta().pty();
+    x11 = interactive_type.has_value() && step.interactive_meta().x11();
+    x11_fwd = interactive_type.has_value() &&
+              step.interactive_meta().x11_meta().enable_forwarding();
+  };
+  ~StepInstance();
 
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
-
-  bool RequiresPty() const { return m_step_to_supv_.interactive_meta().pty(); }
-  bool RequiresX11() const { return m_step_to_supv_.interactive_meta().x11(); }
-  bool RequiresX11Fwd() const {
-    return m_step_to_supv_.interactive_meta().x11_meta().enable_forwarding();
-  }
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -70,9 +99,19 @@ class StepInstance {
 
   void StopCforedClient() { m_cfored_client_.reset(); }
 
+  EnvMap GetStepProcessEnv() const;
+
+  void AddTaskInstance(task_id_t task_id,
+                       std::unique_ptr<ITaskInstance>&& task);
+  ITaskInstance* GetTaskInstance(task_id_t task_id);
+  const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
+  std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
+  bool AllTaskFinished() const;
+
  private:
   crane::grpc::TaskToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
+  std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
 struct TaskInstanceMeta {
@@ -114,7 +153,8 @@ struct TaskExitInfo {
 class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
-      : m_parent_step_inst_(step_inst) {}
+      : m_parent_step_inst_(step_inst),
+        task_id(step_inst->GetStep().task_id()) {}
   virtual ~ITaskInstance();
 
   ITaskInstance(const ITaskInstance&) = delete;
@@ -150,12 +190,10 @@ class ITaskInstance {
   virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                           int status) = 0;
 
-  PasswordEntry pwd;
+  task_id_t task_id;
 
-  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
-  bool orphaned{false};
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
@@ -259,9 +297,11 @@ class TaskManager {
 
   void Wait();
 
+  void ShutdownSupervisor();
+
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
-  void AddTerminationTimer_(ITaskInstance* instance, Duration duration) {
+  void AddTerminationTimer_(Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -270,10 +310,10 @@ class TaskManager {
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
         std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(ITaskInstance* instance, int64_t secs) {
+  void AddTerminationTimer_(int64_t secs) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -281,21 +321,22 @@ class TaskManager {
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handel;
   }
 
-  static void DelTerminationTimer_(ITaskInstance* instance) {
+  void DelTerminationTimer_() {
     // Close handle before free
-    if (instance->termination_timer) {
-      instance->termination_timer->close();
-      instance->termination_timer.reset();
+    if (m_step_.termination_timer) {
+      m_step_.termination_timer->close();
+      m_step_.termination_timer.reset();
     }
   }
 
-  void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
+  void ActivateTaskStatusChange_(task_id_t task_id,
+                                 crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
-  void LaunchExecution_();
+  void LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
@@ -303,8 +344,6 @@ class TaskManager {
   std::future<CraneErrCode> ExecuteTaskAsync();
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
-
-  std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
 
   std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
@@ -335,18 +374,23 @@ class TaskManager {
   };
 
   void EvSigchldCb_();
+  void EvSigchldTimerCb_();
+  void EvCleanSigchldQueueCb_();
   void EvTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
-  void EvCleanCheckTaskStatusQueueCb_();
+
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
+  std::shared_ptr<uvw::timer_handle> m_sigchld_timer_handle_;
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
+  ConcurrentQueue<std::pair<pid_t, int>> m_sigchld_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
   ConcurrentQueue<task_id_t> m_task_stop_queue_;
@@ -356,10 +400,6 @@ class TaskManager {
 
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
-  ConcurrentQueue<std::promise<CraneExpected<pid_t>>>
-      m_check_task_status_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
@@ -372,8 +412,7 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
-  // TODO: Support multiple tasks
-  std::unique_ptr<ITaskInstance> m_task_;
+  std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
 };
 
 }  // namespace Supervisor

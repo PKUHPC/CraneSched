@@ -186,6 +186,31 @@ CraneErrCode CranedStub::CreateCgroupForJobs(
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode CranedStub::FreeSteps(const std::vector<task_id_t> &jobs) {
+  using crane::grpc::FreeStepsReply;
+  using crane::grpc::FreeStepsRequest;
+
+  Status status;
+  FreeStepsRequest request;
+  FreeStepsReply reply;
+
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  request.mutable_job_id_list()->Assign(jobs.begin(), jobs.end());
+
+  status = m_stub_->FreeSteps(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("FreeSteps gRPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 CraneErrCode CranedStub::ReleaseCgroupForJobs(
     const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs) {
   using crane::grpc::ReleaseCgroupForJobsReply;

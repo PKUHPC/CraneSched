@@ -236,9 +236,11 @@ void JobManager::EvCleanCheckSupervisorQueueCb_() {
   std::vector<task_id_t> job_ids;
   absl::MutexLock lk(&m_release_cg_mtx_);
   while (m_check_supervisor_queue_.try_dequeue(job_ids)) {
-    m_release_job_req_set_.insert(job_ids.begin(), job_ids.end());
+    for (task_id_t job_id : job_ids) {
+      m_release_job_retry_map_.emplace(job_id, 0);
+    }
     if (!m_check_supervisor_timer_handle_->active())
-      m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{1000},
+      m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{0},
                                               uvw::timer_handle::time{1000});
   }
 }
@@ -248,7 +250,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
   {
     std::error_code ec;
     absl::MutexLock lk(&m_release_cg_mtx_);
-    for (task_id_t job_id : m_release_job_req_set_) {
+    for (auto& [job_id, retry_count] : m_release_job_retry_map_) {
       // TODO: replace following with step_id
       auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
       for (const auto& step : job_ptr->step_map | std::views::values) {
@@ -261,11 +263,16 @@ bool JobManager::EvCheckSupervisorRunning_() {
         }
         if (!exists) {
           job_ids.emplace_back(job_id);
+        } else {
+          retry_count++;
+        }
+        if (retry_count > kMaxSupervisorCheckRetryCount) {
+          job_ids.emplace_back(job_id);
         }
       }
     }
     for (task_id_t job_id : job_ids) {
-      m_release_job_req_set_.erase(job_id);
+      m_release_job_retry_map_.erase(job_id);
     }
   }
 
@@ -277,7 +284,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
         [this, jobs = std::move(job_ids)] { FreeJobAllocation_(jobs); });
   }
 
-  return m_release_job_req_set_.empty();
+  return m_release_job_retry_map_.empty();
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -816,14 +823,6 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    // If the supervisor is spawned, we need to remove it.
-    if (job_ptr->err_before_supervisor_ready == crane::grpc::SUCCESS) {
-      g_supervisor_keeper->RemoveSupervisor(job_ptr->job_id);
-    } else {
-      CRANE_TRACE("Supervisor for job #{} is never ready, skipping removing.",
-                  job_ptr->job_id);
-    }
-
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
@@ -939,6 +938,10 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to terminate task #{}", elem.step_id);
+      // Supervisor dead for some reason.
+      StepStopAndDoStatusChangeAsync(
+          elem.step_id, crane::grpc::TaskStatus::Cancelled,
+          ExitCode::kExitCodeTerminated, "Terminated failed.");
     }
   }
 }

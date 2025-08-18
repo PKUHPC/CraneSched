@@ -59,6 +59,11 @@ class SupervisorServiceImpl : public Supervisor::Service {
       grpc::ServerContext* context,
       const crane::grpc::supervisor::TerminateTaskRequest* request,
       crane::grpc::supervisor::TerminateTaskReply* response) override;
+
+  grpc::Status ShutdownSupervisor(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
+      crane::grpc::supervisor::ShutdownSupervisorReply* response) override;
 };
 
 class SupervisorServer {

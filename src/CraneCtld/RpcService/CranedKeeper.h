@@ -81,6 +81,8 @@ class CranedStub {
   CraneErrCode CreateCgroupForJobs(
       std::vector<crane::grpc::JobToD> const &jobs);
 
+  CraneErrCode FreeSteps(const std::vector<task_id_t> &jobs);
+
   CraneErrCode ReleaseCgroupForJobs(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
