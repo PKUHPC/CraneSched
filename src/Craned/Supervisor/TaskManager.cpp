@@ -27,6 +27,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "CforedClient.h"
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
@@ -1330,8 +1332,21 @@ CraneErrCode ProcInstance::Spawn() {
       this->GetCrunMeta()->x11_port = msg.x11_port();
       SetupChildProcessCrunX11_();
     }
+    std::unordered_map<std::string, std::string> pmix_env;
+    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
+      auto result = g_pmix_server->SetupFork(0);
+      if (!result) {
+        fmt::print(stderr,
+                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
+        std::abort();
+      }
+      pmix_env = result.value();
+    }
 
     m_env_ = GetChildProcessEnv();
+    for (const auto& [k, v] : pmix_env) {
+      m_env_.emplace(k, v);
+    }
 
     // Apply environment variables
     err = SetChildProcessEnv_();
@@ -1494,6 +1509,7 @@ TaskManager::TaskManager()
 TaskManager::~TaskManager() {
   CRANE_TRACE("Shutting down task manager.");
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  g_pmix_server.reset();
 }
 
 void TaskManager::Wait() {
@@ -1562,6 +1578,26 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
                               fmt::format("Failed to prepare task"));
     return;
   }
+
+  if (m_step_.IsCrun() &&
+    m_step_.GetStep().interactive_meta().mpi() == "pmix") {
+    g_pmix_server = std::make_unique<pmix::PmixServer>();
+    pmix::Config pmix_config{
+      .UseTls = g_config.CforedListenConf.UseTls,
+      .TlsCerts = g_config.CforedListenConf.TlsCerts,
+      .CompressedRpc = g_config.CompressedRpc,
+      .CraneBaseDir = g_config.CraneBaseDir,
+      .CraneScriptDir = g_config.CraneScriptDir,
+      .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+    if (!g_pmix_server->Init(std::move(pmix_config), m_step_.GetStep(),
+                             m_task_->GetChildProcessEnv())) {
+      CRANE_ERROR("Failed to initialize PMIx server.");
+      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
+                                ExitCode::kExitCodeInitMpiServer,
+                                "Failed to initialize PMIx server.");
+      return;
+                             }
+    }
 
   CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);
   // err will NOT be kOk ONLY if fork() is not called due to some failure

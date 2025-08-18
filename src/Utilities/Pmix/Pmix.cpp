@@ -103,7 +103,7 @@ class PMIxServerModule {
      }
 
      // TODO: 从env中获取type，默认MAX  SLURM_PMIX_FENCE (mixed, tree, ring)
-     CollType type = CollType::FENCE_MAX;
+     CollType type = CollType::FENCE_RING;
 
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
@@ -212,6 +212,7 @@ void OpCb(pmix_status_t status, void* cbdata) {
   CRANE_DEBUG("op callback is called with status={}: {}", status,
               PMIx_Error_string(status));
 }
+
 }  // namespace
 
 PmixServer::~PmixServer() {
@@ -235,13 +236,18 @@ PmixServer::~PmixServer() {
 bool PmixServer::Init(
     const Config& config, const crane::grpc::TaskToD& task,
     const std::unordered_map<std::string, std::string>& env_map) {
+
   util::os::DeleteFolders(m_server_tmpdir_);
+  // TODO: task_id.step_id
   m_server_tmpdir_ = fmt::format("{}pmix.crane", config.CraneBaseDir);
   if (!util::os::CreateFolders(m_server_tmpdir_)) {
     return false;
   }
 
   InfoSet_(task, env_map);
+
+  m_craned_client_ = std::make_unique<CranedClient>();
+  m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
   pmix_status_t rc;
 
@@ -264,19 +270,19 @@ bool PmixServer::Init(
 
   g_dmodex_req_manager = std::make_unique<PmixDModexReqManager>();
   g_pmix_state = std::make_unique<PmixState>();
-  m_craned_client_ = std::make_unique<CranedClient>();
-  m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
+
+
+  if (!JobSet_()) return false;
 
   if (task.node_num() > 1) {
-    m_pmix_client_ = std::make_unique<PmixClient>();
+    m_pmix_client_ = std::make_unique<PmixClient>(m_peer_node_list_.size());
     m_pmix_async_server_ = std::make_unique<PmixASyncServer>();
     if (!m_pmix_async_server_->Init(config))
       return false;
+
+    // TODO: 必须确保我和对面都已经收到且ready
+    m_pmix_client_->WaitAllStubReady();
   }
-
-  JobSet_();
-
-  // TODO: wait for all PMIx clients to be ready ?
 
   CRANE_INFO("Crun Task #{} Launch the PMIx server, dir: {}, version {}.{}.{}",
               task.task_id(), m_server_tmpdir_, PMIX_VERSION_MAJOR, PMIX_VERSION_MINOR,
@@ -499,6 +505,7 @@ void PmixServer::InfoSet_(
   m_uid_ = task.uid();
   m_gid_ = task.gid();
   m_task_id_ = std::to_string(task.task_id());
+  // TODO: job_id.step_id
   m_nspace_ = fmt::sprintf("crane.pmix.%d", task.task_id());
 
   m_ntasks_per_node_ = task.ntasks_per_node();
@@ -526,11 +533,10 @@ void PmixServer::InfoSet_(
   m_peer_node_list_ = std::vector(m_node_list_);
   std::erase(m_peer_node_list_, m_hostname_);
 
-  size_t total_tasks = m_node_num_ * m_ntasks_per_node_;
-  std::vector<uint32_t> task_map(total_tasks);
+  m_task_map_ = std::vector<uint32_t>(m_task_num_);
 
   for (size_t node = 0; node < m_node_num_; ++node) {
-    std::fill_n(task_map.begin() + node * m_ntasks_per_node_, m_ntasks_per_node_, node);
+    std::fill_n(m_task_map_.begin() + node * m_ntasks_per_node_, m_ntasks_per_node_, node);
   }
 
 }

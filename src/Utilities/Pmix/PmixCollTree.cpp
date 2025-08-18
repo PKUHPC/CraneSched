@@ -186,6 +186,7 @@ void Coll::ProgressCollectTree_() {
       break;
     default:
       CRANE_ERROR("{:p}: unknown state {}", static_cast<void*>(this), ToString(m_tree_.state));
+      g_pmix_server->GetCranedClient()->TerminateTasks();
       break;
     }
   } while (result);

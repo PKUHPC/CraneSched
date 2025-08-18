@@ -911,9 +911,11 @@ message SendPmixRingMsgReq {
   bytes msg = 3;
 }
 message BroadcastPmixPortRequest {
-  repeated string craned_ids = 1;
-  uint32 task_id = 2;
-  uint32 port = 3;
+  string craned_id = 1; //  sender
+  repeated string craned_ids = 2; // peer
+  uint32 task_id = 3;
+  uint32 port = 4;
+}
 
 message BroadcastPmixPortReply {
   bool ok = 1;
