@@ -267,7 +267,7 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, uint32_t port, const std::string& craned_id) {
+CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, const std::vector<std::pair<uint32_t, CranedId>>& pmix_ports) {
   using crane::grpc::ReceivePmixPortRequest;
   using crane::grpc::ReceivePmixPortReply;
 
@@ -277,8 +277,13 @@ CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, uint32_t port, const 
   ReceivePmixPortReply reply;
 
   request.set_task_id(task_id);
-  request.set_port(port);
-  request.set_craned_id(craned_id);
+  auto pmix_port_list = request.mutable_pmix_ports();
+  for (const auto& pmix_port : pmix_ports) {
+    auto pmix_port_req = pmix_port_list->Add();
+    pmix_port_req->set_craned_id(pmix_port.second);
+    pmix_port_req->set_port(pmix_port.first);
+  }
+
   status = m_stub_->ReceivePmixPort(&context, request, &reply);
 
   if (!status.ok()) {

@@ -363,7 +363,12 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     return Status::OK;
   }
 
-  auto result = stub->ReceivePmixPort(request->task_id(), request->port(), request->craned_id());
+  std::vector<std::pair<uint32_t, CranedId>> pmix_ports;
+  for (const auto& pmix_port : request->pmix_ports()) {
+    pmix_ports.emplace_back(pmix_port.port(), pmix_port.craned_id());
+  }
+
+  auto result = stub->ReceivePmixPort(request->task_id(), pmix_ports);
   if (result != CraneErrCode::SUCCESS) {
     response->set_ok(false);
   } else {
