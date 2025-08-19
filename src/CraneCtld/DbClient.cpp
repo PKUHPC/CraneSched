@@ -702,8 +702,6 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       user->coordinator_accounts.emplace_back(acc.get_string().value);
     }
 
-    user->cert_number = user_view["cert_number"].get_string().value;
-
     for (auto&& account_to_attrs_map_item :
          user_view["account_to_attrs_map"].get_document().view()) {
       User::PartToAllowedQosMap temp;
@@ -726,6 +724,8 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
           User::AttrsInAccount{std::move(temp),
                                account_to_attrs_map_item["blocked"].get_bool()};
     }
+
+    user->cert_number = user_view["cert_number"].get_string().value;
 
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
