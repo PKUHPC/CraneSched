@@ -67,7 +67,8 @@ bool Coll::PmixCollRingLocal_(const std::string& data,
     return false;
   }
 
-  CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}", static_cast<void*>(coll_ctx), coll_ctx->seq, ToString(coll_ctx->state), data.size());
+  CRANE_DEBUG("{:p}: contrib/loc: seq_num={}, state={}, size={}",
+    static_cast<void*>(coll_ctx), coll_ctx->seq, ToString(coll_ctx->state), data.size());
 
   // contrib peer node
   if (!CollRingContrib_(*coll_ctx, m_peerid_, 0, data))

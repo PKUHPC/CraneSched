@@ -62,8 +62,8 @@ bool CranedClient::BroadcastPmixPort(uint32_t pmix_port) {
   request.set_task_id(g_pmix_server->GetTaskId());
   request.set_port(pmix_port);
   request.set_craned_id(g_pmix_server->GetHostname());
-  request.mutable_craned_ids()->Add(g_pmix_server->GetPeerNodeList().begin(),
-                                    g_pmix_server->GetPeerNodeList().end());
+  request.mutable_craned_ids()->Add(g_pmix_server->GetNodeList().begin(),
+                                    g_pmix_server->GetNodeList().end());
 
   if (m_stub_ == nullptr) return false;
 
