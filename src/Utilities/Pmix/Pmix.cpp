@@ -103,7 +103,7 @@ class PMIxServerModule {
      }
 
      // TODO: 从env中获取type，默认MAX  SLURM_PMIX_FENCE (mixed, tree, ring)
-     CollType type = CollType::FENCE_RING;
+     CollType type = CollType::FENCE_MAX;
 
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
@@ -114,9 +114,7 @@ class PMIxServerModule {
 
      auto coll = g_pmix_state->PmixStateCollGet(type, procs, nprocs);
 
-     if (coll == nullptr) return PMIX_ERROR;
-
-     if (!coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
+     if (coll == nullptr || !coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
      }
@@ -128,6 +126,7 @@ class PMIxServerModule {
                                   const pmix_info_t info[], size_t ninfo,
                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
 
+     CRANE_DEBUG("dmodex func called");
      auto rc = g_dmodex_req_manager->PmixDModexGet(proc->nspace, proc->rank, cbfunc, cbdata);
 
      if (!rc) return PMIX_ERROR;
@@ -275,12 +274,12 @@ bool PmixServer::Init(
   if (!JobSet_()) return false;
 
   if (task.node_num() > 1) {
-    m_pmix_client_ = std::make_unique<PmixClient>(m_peer_node_list_.size());
+    m_pmix_client_ = std::make_unique<PmixClient>(m_node_num_);
     m_pmix_async_server_ = std::make_unique<PmixASyncServer>();
     if (!m_pmix_async_server_->Init(config))
       return false;
 
-    // TODO: 必须确保我和对面都已经收到且ready
+    // TODO: must ensure that both sides have received [the message] and are ready.
     m_pmix_client_->WaitAllStubReady();
   }
 
@@ -299,7 +298,6 @@ PmixServer::SetupFork(uint32_t rank) {
   PMIX_LOAD_NSPACE(proc.nspace, m_nspace_.c_str());
   proc.rank = m_ntasks_per_node_ * m_node_id_ + rank;
   pmix_status_t rc;
-
   if (PMIX_SUCCESS != PMIx_server_setup_fork(&proc, &client_env)) {
     CRANE_ERROR("Server fork setup failed with error {}", rc);
     return std::nullopt;
@@ -493,7 +491,6 @@ bool PmixServer::JobSet_() {
       bc.Wait();
     }
   }
-  m_is_init_ = true;
 
   return true;
 }
@@ -506,7 +503,7 @@ void PmixServer::InfoSet_(
   m_gid_ = task.gid();
   m_task_id_ = std::to_string(task.task_id());
   // TODO: job_id.step_id
-  m_nspace_ = fmt::sprintf("crane.pmix.%d", task.task_id());
+  m_nspace_ = fmt::format("crane.pmix.{}", task.task_id());
 
   m_ntasks_per_node_ = task.ntasks_per_node();
   m_node_num_ = task.node_num();

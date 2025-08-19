@@ -124,8 +124,11 @@ message ShutdownSupervisorReply {}
 
 message ReceivePmixPortRequest {
   uint32 task_id = 1;
-  uint32 port = 2;
-  string craned_id = 3;
+  message PmixPorts{
+    uint32 port = 1;
+    string craned_id = 2;
+  }
+  repeated PmixPorts pmix_ports = 2;
 }
 
 message ReceivePmixPortReply {

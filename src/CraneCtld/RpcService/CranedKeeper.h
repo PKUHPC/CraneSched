@@ -92,7 +92,9 @@ class CranedStub {
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErrCode ReceivePmixPort(uint32_t task_id, uint32_t port, const std::string& craned_id);
+  CraneErrCode ReceivePmixPort(
+      uint32_t task_id,
+      const std::vector<std::pair<uint32_t, CranedId>> &pmix_ports);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
