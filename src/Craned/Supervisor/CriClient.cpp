@@ -21,6 +21,7 @@
 #include <grpcpp/client_context.h>
 
 #include "crane/Logger.h"
+#include "crane/PublicHeader.h"
 #include "cri/api.pb.h"
 
 namespace Supervisor {
@@ -151,8 +152,8 @@ std::optional<std::string> CriClient::PullImage(
   return response.image_ref();
 }
 
-std::optional<std::string> CriClient::RunPodSandbox(
-    std::unique_ptr<cri::PodSandboxConfig> config) const {
+CraneExpected<std::string> CriClient::RunPodSandbox(
+    const cri::PodSandboxConfig& config) const {
   using cri::RunPodSandboxRequest;
   using cri::RunPodSandboxResponse;
 
@@ -163,14 +164,58 @@ std::optional<std::string> CriClient::RunPodSandbox(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(5));
 
-  request.set_allocated_config(config.release());
+  request.mutable_config()->CopyFrom(config);
   auto status = m_rs_stub_->RunPodSandbox(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to run pod sandbox: {}", status.error_message());
-    return std::nullopt;
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
 
   return response.pod_sandbox_id();
+}
+
+CraneExpected<std::string> CriClient::CreateContainer(
+    const cri::ContainerConfig& config) const {
+  using cri::CreateContainerRequest;
+  using cri::CreateContainerResponse;
+
+  CreateContainerRequest request{};
+  CreateContainerResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(5));
+
+  request.mutable_config()->CopyFrom(config);
+  auto status = m_rs_stub_->CreateContainer(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to create container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return response.container_id();
+}
+
+CraneExpected<void> CriClient::StartContainer(std::string container_id) const {
+  using cri::StartContainerRequest;
+  using cri::StartContainerResponse;
+
+  CraneExpected<void> ret;
+  StartContainerRequest request{};
+  StartContainerResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(5));
+
+  request.set_container_id(std::move(container_id));
+  auto status = m_rs_stub_->StartContainer(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to start container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return ret;
 }
 
 cri::PodSandboxMetadata CriClient::BuildPodSandboxMetaData(
@@ -202,34 +247,20 @@ std::unordered_map<std::string, std::string> CriClient::BuildPodLabels(
   return labels;
 }
 
-cri::LinuxPodSandboxConfig CriClient::BuildLinuxPodConfig() {
-  cri::LinuxPodSandboxConfig config{};
+cri::ContainerMetadata CriClient::BuildContainerMetaData(
+    uid_t uid, job_id_t job_id, const std::string& name) {
+  cri::ContainerMetadata metadata{};
+  if (!name.empty()) metadata.set_name(name);
+  return metadata;
+}
 
-  // FIXME: This is just a workaround before we have CgroupManager refactored
-  // into a public library.
-  std::ifstream cgroup_file("/proc/self/cgroup");
-  std::string line;
-  std::filesystem::path cgroup_path;
-
-  while (std::getline(cgroup_file, line)) {
-    // cgroup v1: 10:memory:/user.slice
-    // cgroup v2: 0::/user.slice
-    auto pos = line.rfind(':');
-    if (pos != std::string::npos && pos + 1 < line.size()) {
-      cgroup_path = line.substr(pos + 1);
-      if (!cgroup_path.empty()) {
-        break;
-      }
-    }
-  }
-
-  if (cgroup_path.empty()) {
-    CRANE_ERROR("Failed to determine cgroup path from /proc/self/cgroup");
-    return config;
-  }
-
-  config.set_cgroup_parent(cgroup_path.parent_path());
-  return config;
+std::unordered_map<std::string, std::string> CriClient::BuildContainerLabels(
+    uid_t uid, job_id_t job_id, const std::string& name) {
+  std::unordered_map<std::string, std::string> labels;
+  labels["uid"] = std::to_string(uid);
+  labels["job_id"] = std::to_string(job_id);
+  labels["name"] = name;
+  return labels;
 }
 
 }  // namespace Supervisor
