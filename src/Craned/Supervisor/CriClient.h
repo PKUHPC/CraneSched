@@ -52,8 +52,11 @@ class CriClient {
   void RuntimeConfig() const;
 
   // Runtime Service
-  std::optional<std::string> RunPodSandbox(
-      std::unique_ptr<cri::PodSandboxConfig> config) const;
+  CraneExpected<std::string> RunPodSandbox(
+      const cri::PodSandboxConfig& config) const;
+  CraneExpected<std::string> CreateContainer(
+      const cri::ContainerConfig& config) const;
+  CraneExpected<void> StartContainer(std::string container_id) const;
 
   // Image Service
   std::optional<std::string> GetImageId(const std::string& image_ref) const;
@@ -61,7 +64,7 @@ class CriClient {
 
   // Helper Methods
 
-  // Generate a default PodMetadata.
+  // Generate a default PodMetadata
   static cri::PodSandboxMetadata BuildPodSandboxMetaData(
       uid_t uid, job_id_t job_id, const std::string& name);
 
@@ -69,8 +72,15 @@ class CriClient {
   static std::unordered_map<std::string, std::string> BuildPodLabels(
       uid_t uid, job_id_t job_id, const std::string& name);
 
-  // Generate Linux Pod config
-  static cri::LinuxPodSandboxConfig BuildLinuxPodConfig();
+  // Generate a default ContainerMetadata
+  // TODO: Refactor these methods after we seperate job and step.
+  static cri::ContainerMetadata BuildContainerMetaData(uid_t uid,
+                                                       job_id_t job_id,
+                                                       const std::string& name);
+
+  // Generate default Container labels
+  static std::unordered_map<std::string, std::string> BuildContainerLabels(
+      uid_t uid, job_id_t job_id, const std::string& name);
 
  private:
   std::thread m_async_send_thread_;

@@ -23,6 +23,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "CriClient.h"
 #include "crane/PasswordEntry.h"
 
 namespace Craned::Supervisor {
@@ -277,6 +278,15 @@ class ContainerInstance : public ITaskInstance {
                                       const std::string& dst) const;
 
   std::string m_image_ref_;
+  std::string m_pod_id_;
+  std::string m_container_id_;
+
+  cri::PodSandboxConfig m_pod_config_;
+  cri::ContainerConfig m_container_config_;
+
+  std::array<cri::IDMapping, 2> m_uid_mapping_{};
+  std::array<cri::IDMapping, 2> m_gid_mapping_{};
+
   std::filesystem::path m_temp_path_;
 };
 
