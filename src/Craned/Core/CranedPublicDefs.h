@@ -146,6 +146,12 @@ struct Config {
 };
 
 inline Config g_config{};
+
+struct RunTimeStatus {
+  std::shared_ptr<spdlog::async_logger> conn_logger;
+};
+
+inline RunTimeStatus g_runtime_status{};
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

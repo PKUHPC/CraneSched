@@ -119,28 +119,35 @@ class CranedServer {
   void Wait() { m_server_->Wait(); }
 
   void SetGrpcSrvReady(bool ready) {
+    CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                       "SetGrpcSrvReady to {}, current {}", ready,
+                       static_cast<std::uint8_t>(m_status_.load()));
     if (m_status_ == CranedStatus::STOPPING) {
-      CRANE_DEBUG("Craned is stopping, SetGrpcSrvReady to {} not applied.",
-                  ready);
+      CRANE_LOGGER_DEBUG(
+          g_runtime_status.conn_logger,
+          "Craned is stopping, SetGrpcSrvReady to {} not applied.", ready);
       return;
     }
     if (ready) {
-      CRANE_ASSERT(m_status_ == CranedStatus::INITIALIZING ||
-                   m_status_ == CranedStatus::RECONFIGURING);
+      CRANE_ASSERT_MSG(m_status_ == CranedStatus::INITIALIZING ||
+                           m_status_ == CranedStatus::RECONFIGURING,
+                       fmt::format("m_status_={}", static_cast<std::uint8_t>(
+                                                       m_status_.load())));
       m_status_ = CranedStatus::RUNNING;
     } else {
       if (m_status_ == CranedStatus::RUNNING) {
-        CRANE_TRACE(
+        CRANE_LOGGER_TRACE(
+            g_runtime_status.conn_logger,
             "CraneCtld disconnected, craned server status set to "
-            "RECONFIGURING, prev status {}.",
-            static_cast<std::uint8_t>(m_status_.load()));
+            "RECONFIGURING, prev status RUNNING.");
         m_status_ = CranedStatus::RECONFIGURING;
       } else {
+        CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                           "CraneCtld disconnected, current status {}.",
+                           static_cast<std::uint8_t>(m_status_.load()));
         CRANE_ASSERT(m_status_ == CranedStatus::INITIALIZING ||
                      m_status_ == CranedStatus::RECONFIGURING);
         // INITIALIZING or RECONFIGURING;
-        CRANE_TRACE("CraneCtld disconnected, current status {}.",
-                    static_cast<std::uint8_t>(m_status_.load()));
       }
     }
   }
