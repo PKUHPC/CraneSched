@@ -249,9 +249,8 @@ class MongodbClient {
   document DocumentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
-
   template <typename ViewValue, typename T>
-  T ViewValueOr_(ViewValue view_value, T default_value);
+  T ViewValueOr_(const ViewValue& view_value, const T& default_value);
 
   mongocxx::client* GetClient_();
   mongocxx::client_session* GetSession_();
