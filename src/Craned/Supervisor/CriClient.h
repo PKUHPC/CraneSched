@@ -126,10 +126,6 @@ class CriClient {
   void ContainerEventStreamLoop_();
   void HandleContainerEvent_(const cri::ContainerEventResponse& event);
 
-  // Reserved for async calling rpc
-  std::thread m_async_send_thread_;
-  std::atomic_bool m_thread_stop_;
-
   // Container event streaming
   std::thread m_event_stream_thread_;
   std::atomic_bool m_event_stream_stop_;
@@ -143,5 +139,3 @@ class CriClient {
 };
 
 }  // namespace Supervisor
-
-inline std::unique_ptr<Supervisor::CriClient> g_cri_client;

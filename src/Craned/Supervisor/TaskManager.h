@@ -19,6 +19,7 @@
 #pragma once
 #include <sched.h>
 
+#include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
@@ -42,22 +43,6 @@ struct ITaskInstance;
 
 class StepInstance {
  public:
-  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  PasswordEntry pwd;
-  bool orphaned{false};
-  job_id_t job_id;
-  step_id_t step_id;
-  std::vector<task_id_t> task_ids;
-
-  uid_t uid;
-  gid_t gid;
-
-  std::string container;
-  std::optional<crane::grpc::InteractiveTaskType> interactive_type;
-  bool pty;
-  bool x11;
-  bool x11_fwd;
-
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
@@ -78,29 +63,38 @@ class StepInstance {
   };
   ~StepInstance();
 
-  bool IsBatch() const;
-  bool IsCrun() const;
-  bool IsCalloc() const;
+  inline bool IsContainer() const;
+  inline bool IsBatch() const;
+  inline bool IsCrun() const;
+  inline bool IsCalloc() const;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
+  // Cfored client in step
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(
         m_step_to_supv_.interactive_meta().cfored_name());
   }
-
   [[nodiscard]] const CforedClient* GetCforedClient() const {
     return m_cfored_client_.get();
   }
-
   [[nodiscard]] CforedClient* GetCforedClient() {
     return m_cfored_client_.get();
   }
-
   void StopCforedClient() { m_cfored_client_.reset(); }
 
-  EnvMap GetStepProcessEnv() const;
+  // CRI client in step
+  void InitCriClient() {
+    CRANE_ASSERT(g_config.Container.Enabled);
+    m_cri_client_ = std::make_unique<CriClient>();
+    m_cri_client_->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                      g_config.Container.ImageEndpoint);
+  }
+  [[nodiscard]] const CriClient* GetCriClient() const {
+    return m_cri_client_.get();
+  }
+  [[nodiscard]] CriClient* GetCriClient() { return m_cri_client_.get(); }
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
@@ -112,8 +106,29 @@ class StepInstance {
 
   bool AllTaskFinished() const;
 
+  EnvMap GetStepProcessEnv() const;
+
+  job_id_t job_id;
+  step_id_t step_id;
+  std::vector<task_id_t> task_ids;
+
+  uid_t uid;
+  gid_t gid;
+  PasswordEntry pwd;
+
+  std::string container;
+
+  std::optional<crane::grpc::InteractiveTaskType> interactive_type;
+  bool pty;
+  bool x11;
+  bool x11_fwd;
+
+  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  bool orphaned{false};
+
  private:
   crane::grpc::TaskToD m_step_to_supv_;
+  std::unique_ptr<CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
