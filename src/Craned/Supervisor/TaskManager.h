@@ -104,9 +104,12 @@ class StepInstance {
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
+
   ITaskInstance* GetTaskInstance(task_id_t task_id);
   const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
+
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
+
   bool AllTaskFinished() const;
 
  private:
@@ -269,9 +272,6 @@ class ContainerInstance : public ITaskInstance {
                                                   int status) override;
 
  private:
-  CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
-                                      const std::string& dst) const;
-
   std::string m_image_ref_;
   std::string m_pod_id_;
   std::string m_container_id_;
