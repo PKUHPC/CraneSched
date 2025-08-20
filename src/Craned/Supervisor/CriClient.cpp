@@ -28,12 +28,8 @@
 namespace Supervisor {
 
 CriClient::~CriClient() {
-  // Stop event stream first
+  // Stop event stream
   StopContainerEventStream();
-
-  if (m_async_send_thread_.joinable()) {
-    m_async_send_thread_.join();
-  }
 }
 
 void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
@@ -48,7 +44,6 @@ void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
 
   m_rs_stub_ = cri::RuntimeService::NewStub(m_rs_channel_);
   m_is_stub_ = cri::ImageService::NewStub(m_is_channel_);
-  m_async_send_thread_ = std::thread([this] {});
 }
 
 void CriClient::Version() const {
