@@ -80,7 +80,7 @@ struct Config {
 
   std::filesystem::path SupervisorUnixSockPath;
 
-  task_id_t JobId;
+  job_id_t JobId;
   EnvMap JobEnv;
   step_id_t StepId;
   StepToSupv StepSpec;
