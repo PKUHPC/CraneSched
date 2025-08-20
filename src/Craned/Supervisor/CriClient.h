@@ -23,8 +23,9 @@
 
 #include <grpcpp/channel.h>
 
-#include "crane/PublicHeader.h"
+#include "SupervisorPublicDefs.h"
 #include "crane/Lock.h"
+#include "crane/PublicHeader.h"
 #include "cri/api.grpc.pb.h"
 #include "cri/api.pb.h"
 
@@ -35,11 +36,10 @@ namespace cri = runtime::v1;
 inline constexpr std::string kDefaultPodNamespace = "cranesched";
 inline constexpr std::chrono::seconds kDefaultCriReqTimeout =
     std::chrono::seconds(5);
+using ContainerEventCallback =
+    std::function<void(const cri::ContainerEventResponse&)>;
 
 class CriClient {
-  using ContainerEventCallback =
-      std::function<void(const cri::ContainerEventResponse&)>;
-
  public:
   CriClient() = default;
   ~CriClient();
@@ -82,10 +82,8 @@ class CriClient {
 
   // Start event streaming thread
   void StartContainerEventStream(ContainerEventCallback callback);
-
   // Stop event streaming thread
   void StopContainerEventStream();
-
   // Check if event streaming is started
   bool IsEventStreamActive() const;
 
@@ -128,10 +126,11 @@ class CriClient {
   void ContainerEventStreamLoop_();
   void HandleContainerEvent_(const cri::ContainerEventResponse& event);
 
+  // Reserved for async calling rpc
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_;
 
-  // Container event monitoring
+  // Container event streaming
   std::thread m_event_stream_thread_;
   std::atomic_bool m_event_stream_stop_;
   ContainerEventCallback m_event_callback_;
