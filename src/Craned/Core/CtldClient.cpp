@@ -222,11 +222,10 @@ void CtldClientStateMachine::EvTimeout_() {
 void CtldClientStateMachine::EvPingFailed() {
   absl::MutexLock lk(&m_mtx_);
   CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ping failed, current state {}, starting handshake.",
+                     "Ping failed, current state {}, starting new handshake.",
                      StateToString(m_state_));
   m_last_op_time_ = std::chrono::steady_clock::now();
 
-  m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(false);
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
@@ -245,7 +244,8 @@ bool CtldClientStateMachine::IsReadyNow() {
 
 void CtldClientStateMachine::ActionRequestConfig_() {
   CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
+                     "Ctld client state machine has entered state {}, start "
+                     "check register operation timeout.",
                      StateToString(m_state_));
   m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
@@ -302,8 +302,10 @@ void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
 
 void CtldClientStateMachine::ActionReady_() {
   CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
+                     "Ctld client state machine has entered state {}, stop "
+                     "check register operation timeout",
                      StateToString(m_state_));
+  m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(true);
   g_ctld_client->StartPingCtld();
   if (m_action_ready_cb_)
@@ -312,7 +314,8 @@ void CtldClientStateMachine::ActionReady_() {
 
 void CtldClientStateMachine::ActionDisconnected_() {
   CRANE_LOGGER_DEBUG(m_logger_,
-                     "Ctld client state machine has entered state {}",
+                     "Ctld client state machine has entered state {}, stop "
+                     "check register operation timeout",
                      StateToString(m_state_));
   m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(false);
