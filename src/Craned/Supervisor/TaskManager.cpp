@@ -55,6 +55,7 @@ bool StepInstance::IsCalloc() const {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Calloc;
 }
+
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
@@ -113,9 +114,11 @@ void StepInstance::AddTaskInstance(task_id_t task_id,
                                    std::unique_ptr<ITaskInstance>&& task) {
   m_task_map_.emplace(task_id, std::move(task));
 }
+
 ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) {
   return m_task_map_.at(task_id).get();
 }
+
 const ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) const {
   return m_task_map_.at(task_id).get();
 }
@@ -892,6 +895,8 @@ CraneErrCode ContainerInstance::Spawn() {
     return ret.error();
   }
 
+  // TODO: Register callback for event streaming
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -949,6 +954,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 CraneErrCode ContainerInstance::Cleanup() {
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     if (!m_temp_path_.empty())
+      // FIXME: Remove Pod here
       g_thread_pool->detach_task(
           [p = m_temp_path_]() { util::os::DeleteFolders(p); });
   }
@@ -1548,6 +1554,7 @@ void TaskManager::EvSigchldCb_() {
     }
   }
 }
+
 void TaskManager::EvSigchldTimerCb_() {
   m_process_sigchld_async_handle_->send();
 }
@@ -1565,7 +1572,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     }
     auto task_id = it->second;
     CRANE_TRACE("[Job #{}.{}] Receiving SIGCHLD for pid {}", task_id, 0, pid);
-    auto task = m_step_.GetTaskInstance(task_id);
+    auto* task = m_step_.GetTaskInstance(task_id);
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
 
@@ -1614,7 +1621,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stop_queue_.try_dequeue(task_id)) {
     CRANE_INFO("[Task #{}] Stopped and is doing TaskStatusChange...", task_id);
-    auto task = m_step_.GetTaskInstance(task_id);
+    auto* task = m_step_.GetTaskInstance(task_id);
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
@@ -1714,7 +1721,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
-      auto task = m_step_.GetTaskInstance(task_id);
+      auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
