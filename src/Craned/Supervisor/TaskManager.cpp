@@ -489,7 +489,6 @@ void ITaskInstance::SetupChildProcessCrunX11_() {
       "MIT-MAGIC-COOKIE-1",
       proto_x11_meta.cookie().c_str(),
   };
-  std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
 
   xauth_argv.push_back(nullptr);
 
@@ -1503,6 +1502,7 @@ void TaskManager::Wait() {
 
 void TaskManager::ShutdownSupervisor() {
   CRANE_TRACE("All tasks finished, exiting...");
+  m_step_.StopCforedClient();
   g_craned_client->Shutdown();
   g_server->Shutdown();
   g_task_mgr->Shutdown();
@@ -1526,7 +1526,6 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     else {
-      m_step_.StopCforedClient();
       ShutdownSupervisor();
     }
   }
