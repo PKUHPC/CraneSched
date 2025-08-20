@@ -24,6 +24,7 @@
 #include <grpcpp/channel.h>
 
 #include "crane/PublicHeader.h"
+#include "crane/Lock.h"
 #include "cri/api.grpc.pb.h"
 #include "cri/api.pb.h"
 
@@ -32,8 +33,13 @@ namespace Supervisor {
 namespace cri = runtime::v1;
 
 inline constexpr std::string kDefaultPodNamespace = "cranesched";
+inline constexpr std::chrono::seconds kDefaultCriReqTimeout =
+    std::chrono::seconds(5);
 
 class CriClient {
+  using ContainerEventCallback =
+      std::function<void(const cri::ContainerEventResponse&)>;
+
  public:
   CriClient() = default;
   ~CriClient();
@@ -47,22 +53,57 @@ class CriClient {
   void InitChannelAndStub(const std::filesystem::path& runtime_service,
                           const std::filesystem::path& image_service);
 
-  // FIXME: DEBUG ONLY
+  // TODO: Remove these debugging methods
   void Version() const;
   void RuntimeConfig() const;
 
-  // Runtime Service
+  // ==== Runtime Service ====
+
+  // Pod
   CraneExpected<std::string> RunPodSandbox(
       const cri::PodSandboxConfig& config) const;
+
+  CraneExpected<void> StopPodSandbox(const std::string& pod_sandbox_id) const;
+
+  CraneExpected<void> RemovePodSandbox(const std::string& pod_sandbox_id) const;
+
+  // Containers
   CraneExpected<std::string> CreateContainer(
       const cri::ContainerConfig& config) const;
-  CraneExpected<void> StartContainer(std::string container_id) const;
 
-  // Image Service
+  CraneExpected<void> StartContainer(const std::string& container_id) const;
+
+  CraneExpected<void> StopContainer(const std::string& container_id,
+                                    int64_t timeout = 0) const;
+
+  CraneExpected<void> RemoveContainer(const std::string& container_id) const;
+
+  // Container Event Streaming
+
+  // Start event streaming thread
+  void StartContainerEventStream(ContainerEventCallback callback);
+
+  // Stop event streaming thread
+  void StopContainerEventStream();
+
+  // Check if event streaming is started
+  bool IsEventStreamActive() const;
+
+  // Active Container Status Checking
+  CraneExpected<std::vector<cri::Container>> ListContainers() const;
+
+  CraneExpected<std::vector<cri::Container>> ListContainers(
+      const std::map<std::string, std::string>& label_selector) const;
+
+  CraneExpected<cri::ContainerStatus> GetContainerStatus(
+      const std::string& container_id, bool verbose = false) const;
+
+  // ==== Image Service ====
+
   std::optional<std::string> GetImageId(const std::string& image_ref) const;
   std::optional<std::string> PullImage(const std::string& image_ref) const;
 
-  // Helper Methods
+  // ==== Helper Methods ====
 
   // Generate a default PodMetadata
   static cri::PodSandboxMetadata BuildPodSandboxMetaData(
@@ -83,8 +124,18 @@ class CriClient {
       uid_t uid, job_id_t job_id, const std::string& name);
 
  private:
+  // Container Event Stream Management
+  void ContainerEventStreamLoop_();
+  void HandleContainerEvent_(const cri::ContainerEventResponse& event);
+
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_;
+
+  // Container event monitoring
+  std::thread m_event_stream_thread_;
+  std::atomic_bool m_event_stream_stop_;
+  ContainerEventCallback m_event_callback_;
+  util::mutex m_event_callback_mutex_;
 
   std::shared_ptr<grpc::Channel> m_rs_channel_;
   std::shared_ptr<grpc::Channel> m_is_channel_;
