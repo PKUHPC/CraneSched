@@ -20,6 +20,7 @@
 
 #include <grpcpp/client_context.h>
 
+#include "crane/Lock.h"
 #include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 #include "cri/api.pb.h"
@@ -27,6 +28,9 @@
 namespace Supervisor {
 
 CriClient::~CriClient() {
+  // Stop event stream first
+  StopContainerEventStream();
+
   if (m_async_send_thread_.joinable()) {
     m_async_send_thread_.join();
   }
@@ -56,7 +60,7 @@ void CriClient::Version() const {
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   auto status = m_rs_stub_->Version(&context, request, &response);
   if (!status.ok()) {
@@ -76,7 +80,7 @@ void CriClient::RuntimeConfig() const {
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   auto status = m_rs_stub_->RuntimeConfig(&context, request, &response);
   if (!status.ok()) {
@@ -107,7 +111,7 @@ std::optional<std::string> CriClient::GetImageId(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_ref);
@@ -133,7 +137,7 @@ std::optional<std::string> CriClient::PullImage(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_ref);
@@ -162,7 +166,7 @@ CraneExpected<std::string> CriClient::RunPodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   request.mutable_config()->CopyFrom(config);
   auto status = m_rs_stub_->RunPodSandbox(&context, request, &response);
@@ -172,6 +176,52 @@ CraneExpected<std::string> CriClient::RunPodSandbox(
   }
 
   return response.pod_sandbox_id();
+}
+
+CraneExpected<void> CriClient::StopPodSandbox(
+    const std::string& pod_sandbox_id) const {
+  using cri::StopPodSandboxRequest;
+  using cri::StopPodSandboxResponse;
+
+  CraneExpected<void> ret;
+  StopPodSandboxRequest request{};
+  StopPodSandboxResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  request.set_pod_sandbox_id(pod_sandbox_id);
+  auto status = m_rs_stub_->StopPodSandbox(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to stop pod sandbox: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return ret;
+}
+
+CraneExpected<void> CriClient::RemovePodSandbox(
+    const std::string& pod_sandbox_id) const {
+  using cri::RemovePodSandboxRequest;
+  using cri::RemovePodSandboxResponse;
+
+  CraneExpected<void> ret;
+  RemovePodSandboxRequest request{};
+  RemovePodSandboxResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  request.set_pod_sandbox_id(pod_sandbox_id);
+  auto status = m_rs_stub_->RemovePodSandbox(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to remove pod sandbox: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return ret;
 }
 
 CraneExpected<std::string> CriClient::CreateContainer(
@@ -184,7 +234,7 @@ CraneExpected<std::string> CriClient::CreateContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
   request.mutable_config()->CopyFrom(config);
   auto status = m_rs_stub_->CreateContainer(&context, request, &response);
@@ -196,7 +246,8 @@ CraneExpected<std::string> CriClient::CreateContainer(
   return response.container_id();
 }
 
-CraneExpected<void> CriClient::StartContainer(std::string container_id) const {
+CraneExpected<void> CriClient::StartContainer(
+    const std::string& container_id) const {
   using cri::StartContainerRequest;
   using cri::StartContainerResponse;
 
@@ -206,12 +257,59 @@ CraneExpected<void> CriClient::StartContainer(std::string container_id) const {
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(5));
+                       kDefaultCriReqTimeout);
 
-  request.set_container_id(std::move(container_id));
+  request.set_container_id(container_id);
   auto status = m_rs_stub_->StartContainer(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to start container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return ret;
+}
+
+CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
+                                             int64_t timeout) const {
+  using cri::StopContainerRequest;
+  using cri::StopContainerResponse;
+
+  CraneExpected<void> ret;
+  StopContainerRequest request{};
+  StopContainerResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  request.set_container_id(container_id);
+  request.set_timeout(timeout);
+  auto status = m_rs_stub_->StopContainer(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to stop container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return ret;
+}
+
+CraneExpected<void> CriClient::RemoveContainer(
+    const std::string& container_id) const {
+  using cri::RemoveContainerRequest;
+  using cri::RemoveContainerResponse;
+
+  CraneExpected<void> ret;
+  RemoveContainerRequest request{};
+  RemoveContainerResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  request.set_container_id(container_id);
+  auto status = m_rs_stub_->RemoveContainer(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to remove container: {}", status.error_message());
     return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
 
@@ -261,6 +359,171 @@ std::unordered_map<std::string, std::string> CriClient::BuildContainerLabels(
   labels["job_id"] = std::to_string(job_id);
   labels["name"] = name;
   return labels;
+}
+
+// ===== Container Event Monitoring Implementation =====
+
+void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
+  // Stop existing stream if running
+  StopContainerEventStream();
+
+  {
+    util::lock_guard lock(m_event_callback_mutex_);
+    m_event_callback_ = std::move(callback);
+  }
+
+  m_event_stream_stop_ = false;
+  m_event_stream_thread_ = std::thread([this] { ContainerEventStreamLoop_(); });
+
+  CRANE_DEBUG("Container event stream started");
+}
+
+void CriClient::StopContainerEventStream() {
+  if (m_event_stream_thread_.joinable()) {
+    m_event_stream_stop_ = true;
+    m_event_stream_thread_.join();
+    CRANE_DEBUG("Container event stream stopped");
+  }
+
+  {
+    util::lock_guard lock(m_event_callback_mutex_);
+    m_event_callback_ = nullptr;
+  }
+}
+
+bool CriClient::IsEventStreamActive() const {
+  return m_event_stream_thread_.joinable() && !m_event_stream_stop_;
+}
+
+void CriClient::ContainerEventStreamLoop_() {
+  using cri::ContainerEventResponse;
+  using cri::GetEventsRequest;
+
+  while (!m_event_stream_stop_) {
+    try {
+      GetEventsRequest request{};
+      grpc::ClientContext context;
+
+      // Set a reasonable timeout for the stream
+      context.set_deadline(std::chrono::system_clock::now() +
+                           std::chrono::minutes(5));
+
+      CRANE_DEBUG("Starting container event stream...");
+      auto stream = m_rs_stub_->GetContainerEvents(&context, request);
+
+      ContainerEventResponse response;
+      while (stream->Read(&response) && !m_event_stream_stop_) {
+        HandleContainerEvent_(response);
+      }
+
+      auto status = stream->Finish();
+      if (!status.ok() && !m_event_stream_stop_) {
+        CRANE_ERROR("Container event stream failed: {} (code: {})",
+                    status.error_message(),
+                    static_cast<int>(status.error_code()));
+      }
+
+    } catch (const std::exception& e) {
+      if (!m_event_stream_stop_) {
+        CRANE_ERROR("Exception in container event stream: {}", e.what());
+      }
+    }
+
+    // Reconnection delay if not stopping
+    if (!m_event_stream_stop_) {
+      CRANE_INFO(
+          "Container event stream disconnected, reconnecting in 5 seconds...");
+      std::this_thread::sleep_for(kDefaultCriReqTimeout);
+    }
+  }
+
+  CRANE_DEBUG("Container event stream loop ended");
+}
+
+void CriClient::HandleContainerEvent_(
+    const cri::ContainerEventResponse& event) {
+  // Log the event
+  auto event_type_str =
+      cri::ContainerEventType_Name(event.container_event_type());
+
+  CRANE_TRACE("Container event: {} {} at {}", event.container_id(),
+              event_type_str, event.created_at());
+
+  // Invoke the callback if set
+  util::lock_guard lock(m_event_callback_mutex_);
+  if (m_event_callback_) {
+    try {
+      m_event_callback_(event);
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Exception in container event callback: {}", e.what());
+    }
+  }
+}
+
+// ===== Active Container Status Query Implementation =====
+
+CraneExpected<std::vector<cri::Container>> CriClient::ListContainers() const {
+  using cri::ListContainersRequest;
+  using cri::ListContainersResponse;
+
+  ListContainersRequest request{};
+  ListContainersResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  auto status = m_rs_stub_->ListContainers(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to list containers: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  std::vector<cri::Container> containers;
+  containers.reserve(response.containers_size());
+  for (const auto& container : response.containers()) {
+    containers.push_back(container);
+  }
+
+  CRANE_DEBUG("Listed {} containers", containers.size());
+  return containers;
+}
+
+CraneExpected<std::vector<cri::Container>> CriClient::ListContainers(
+    const std::map<std::string, std::string>& label_selector) const {
+  using cri::ContainerFilter;
+  using cri::ListContainersRequest;
+  using cri::ListContainersResponse;
+
+  ListContainersRequest request{};
+  ListContainersResponse response{};
+
+  // Set up filter with label selector
+  auto* filter = request.mutable_filter();
+  auto* labels = filter->mutable_label_selector();
+  for (const auto& [key, value] : label_selector) {
+    (*labels)[key] = value;
+  }
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kDefaultCriReqTimeout);
+
+  auto status = m_rs_stub_->ListContainers(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to list containers by labels: {}",
+                status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  std::vector<cri::Container> containers;
+  containers.reserve(response.containers_size());
+  for (const auto& container : response.containers()) {
+    containers.push_back(container);
+  }
+
+  CRANE_DEBUG("Listed {} containers matching labels", containers.size());
+  return containers;
 }
 
 }  // namespace Supervisor

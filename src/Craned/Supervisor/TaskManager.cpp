@@ -833,7 +833,52 @@ CraneErrCode ContainerInstance::Spawn() {
 }
 
 CraneErrCode ContainerInstance::Kill(int signum) {
+  // For containers, we ignore the signum parameter and use CRI to stop/cleanup
   // Stop Container -> Remove Container -> Stop Pod -> Remove Pod
+
+  // Step 1: Stop Container
+  if (!m_container_id_.empty()) {
+    auto stop_ret = g_cri_client->StopContainer(m_container_id_, 10);
+    if (!stop_ret.has_value()) {
+      CRANE_ERROR("Failed to stop container {}: {}", m_container_id_,
+                  static_cast<int>(stop_ret.error()));
+      // Continue with cleanup even if stop fails
+    } else {
+      CRANE_DEBUG("Container {} stopped successfully", m_container_id_);
+    }
+
+    // Step 2: Remove Container
+    auto remove_ret = g_cri_client->RemoveContainer(m_container_id_);
+    if (!remove_ret.has_value()) {
+      CRANE_ERROR("Failed to remove container {}: {}", m_container_id_,
+                  static_cast<int>(remove_ret.error()));
+      // Continue with pod cleanup even if container removal fails
+    } else {
+      CRANE_DEBUG("Container {} removed successfully", m_container_id_);
+    }
+  }
+
+  // Step 3: Stop Pod
+  if (!m_pod_id_.empty()) {
+    auto stop_pod_ret = g_cri_client->StopPodSandbox(m_pod_id_);
+    if (!stop_pod_ret.has_value()) {
+      CRANE_ERROR("Failed to stop pod {}: {}", m_pod_id_,
+                  static_cast<int>(stop_pod_ret.error()));
+      // Continue with pod removal even if stop fails
+    } else {
+      CRANE_DEBUG("Pod {} stopped successfully", m_pod_id_);
+    }
+
+    // Step 4: Remove Pod
+    auto remove_pod_ret = g_cri_client->RemovePodSandbox(m_pod_id_);
+    if (!remove_pod_ret.has_value()) {
+      CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
+                  static_cast<int>(remove_pod_ret.error()));
+      return CraneErrCode::ERR_GENERIC_FAILURE;
+    } else {
+      CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
+    }
+  }
 
   return CraneErrCode::SUCCESS;
 }
