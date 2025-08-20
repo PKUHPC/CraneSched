@@ -32,15 +32,16 @@
 
 namespace Ctld {
 
-template<typename T>
+template <typename T>
 struct BsonFieldTrait {
   static T get(const bsoncxx::document::element&) {
-    static_assert(sizeof(T) == 0, "BsonFieldTrait not implemented for this type");
+    static_assert(sizeof(T) == 0,
+                  "BsonFieldTrait not implemented for this type");
   }
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_null;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<bool> {
   static bool get(const bsoncxx::document::element& ele) {
     return ele.get_bool().value;
@@ -48,31 +49,31 @@ struct BsonFieldTrait<bool> {
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_bool;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<int64_t> {
   static int64_t get(const bsoncxx::document::element& ele) {
-      return ele.get_int64().value;
+    return ele.get_int64().value;
   }
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int64;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<int32_t> {
   static int32_t get(const bsoncxx::document::element& ele) {
-      return ele.get_int32().value;
+    return ele.get_int32().value;
   }
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int32;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<std::string> {
   static std::string get(const bsoncxx::document::element& ele) {
-      return std::string(ele.get_string().value);
+    return std::string(ele.get_string().value);
   }
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_string;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<bsoncxx::array::view> {
   static bsoncxx::array::view get(const bsoncxx::document::element& ele) {
     return ele.get_array().value;
@@ -80,7 +81,7 @@ struct BsonFieldTrait<bsoncxx::array::view> {
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_array;
 };
 
-template<>
+template <>
 struct BsonFieldTrait<bsoncxx::document::view> {
   static bsoncxx::document::view get(const bsoncxx::document::element& ele) {
     return ele.get_document().view();
