@@ -47,6 +47,8 @@ StepInstance::~StepInstance() {
   }
 }
 
+bool StepInstance::IsContainer() const { return !container.empty(); }
+
 bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
 
 bool StepInstance::IsCrun() const {
@@ -535,11 +537,11 @@ void ITaskInstance::SetupChildProcessCrunX11_() {
 }
 
 CraneErrCode ITaskInstance::SetChildProcessEnv_() const {
-  if (clearenv())
+  if (clearenv() != 0)
     fmt::print(stderr, "[Subprocess] Warning: clearenv() failed.\n");
 
   for (const auto& [name, value] : m_env_)
-    if (setenv(name.c_str(), value.c_str(), 1))
+    if (setenv(name.c_str(), value.c_str(), 1) != 0)
       fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
                  name, value);
 
@@ -572,6 +574,8 @@ CraneErrCode ContainerInstance::Prepare() {
     return CraneErrCode::ERR_INVALID_PARAM;
   }
 
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
   // TODO: Replace with job_id when refactoring.
   uid_t uid = m_parent_step_inst_->GetStep().uid();
   gid_t gid = m_parent_step_inst_->GetStep().gid();
@@ -586,10 +590,10 @@ CraneErrCode ContainerInstance::Prepare() {
   m_env_ = GetChildProcessEnv();
   // m_arguments_ is not applicable for container tasks.
 
-  auto image_id_opt = g_cri_client->GetImageId(m_image_ref_);
+  auto image_id_opt = cri_client->GetImageId(m_image_ref_);
   if (!image_id_opt.has_value()) {
     // Image is not pulled. Pull the image first.
-    image_id_opt = g_cri_client->PullImage(m_image_ref_);
+    image_id_opt = cri_client->PullImage(m_image_ref_);
     if (!image_id_opt.has_value()) {
       CRANE_ERROR("Failed to pull image {} for task #{}",
                   m_parent_step_inst_->GetStep().container(), job_id);
@@ -727,7 +731,7 @@ CraneErrCode ContainerInstance::Prepare() {
   pod_config.mutable_labels()->insert(labels.begin(), labels.end());
 
   // Launch the pod after all configurations are set
-  auto pod_id_expt = g_cri_client->RunPodSandbox(pod_config);
+  auto pod_id_expt = cri_client->RunPodSandbox(pod_config);
   if (!pod_id_expt.has_value()) {
     CRANE_ERROR("Failed to run pod sandbox for task #{}", job_id);
     return pod_id_expt.error();
@@ -746,6 +750,7 @@ CraneErrCode ContainerInstance::Spawn() {
   }
 
   cri::ContainerConfig config;
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   // metadata
   auto meta = CriClient::BuildContainerMetaData(
@@ -812,7 +817,7 @@ CraneErrCode ContainerInstance::Spawn() {
         m_parent_step_inst_->GetStep().gid());
   }
 
-  auto container_id_expt = g_cri_client->CreateContainer(config);
+  auto container_id_expt = cri_client->CreateContainer(config);
   if (!container_id_expt.has_value()) {
     CRANE_ERROR("Failed to create container for task #{}",
                 m_parent_step_inst_->GetStep().task_id());
@@ -825,7 +830,7 @@ CraneErrCode ContainerInstance::Spawn() {
   CRANE_DEBUG("Container {} created for task #{}", m_container_id_,
               m_parent_step_inst_->GetStep().task_id());
 
-  auto ret = g_cri_client->StartContainer(m_container_id_);
+  auto ret = cri_client->StartContainer(m_container_id_);
   if (!ret.has_value()) {
     CRANE_ERROR("Failed to start container for task #{}",
                 m_parent_step_inst_->GetStep().task_id());
@@ -841,9 +846,11 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   // For containers, we ignore the signum parameter and use CRI to stop/cleanup
   // Stop Container -> Remove Container -> Stop Pod -> Remove Pod
 
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
   // Step 1: Stop Container
   if (!m_container_id_.empty()) {
-    auto stop_ret = g_cri_client->StopContainer(m_container_id_, 10);
+    auto stop_ret = cri_client->StopContainer(m_container_id_, 10);
     if (!stop_ret.has_value()) {
       CRANE_ERROR("Failed to stop container {}: {}", m_container_id_,
                   static_cast<int>(stop_ret.error()));
@@ -853,7 +860,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     }
 
     // Step 2: Remove Container
-    auto remove_ret = g_cri_client->RemoveContainer(m_container_id_);
+    auto remove_ret = cri_client->RemoveContainer(m_container_id_);
     if (!remove_ret.has_value()) {
       CRANE_ERROR("Failed to remove container {}: {}", m_container_id_,
                   static_cast<int>(remove_ret.error()));
@@ -865,7 +872,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 
   // Step 3: Stop Pod
   if (!m_pod_id_.empty()) {
-    auto stop_pod_ret = g_cri_client->StopPodSandbox(m_pod_id_);
+    auto stop_pod_ret = cri_client->StopPodSandbox(m_pod_id_);
     if (!stop_pod_ret.has_value()) {
       CRANE_ERROR("Failed to stop pod {}: {}", m_pod_id_,
                   static_cast<int>(stop_pod_ret.error()));
@@ -875,7 +882,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     }
 
     // Step 4: Remove Pod
-    auto remove_pod_ret = g_cri_client->RemovePodSandbox(m_pod_id_);
+    auto remove_pod_ret = cri_client->RemovePodSandbox(m_pod_id_);
     if (!remove_pod_ret.has_value()) {
       CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
                   static_cast<int>(remove_pod_ret.error()));
@@ -1408,6 +1415,9 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 }
 
 void TaskManager::LaunchExecution_(ITaskInstance* task) {
+  // Init CriClient before preparation
+  if (m_step_.IsContainer()) m_step_.InitCriClient();
+
   // Prepare for execution
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
@@ -1418,14 +1428,10 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
     return;
   }
 
-  CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
-
+  // Init cfored before start the task.
   if (m_step_.IsCrun()) m_step_.InitCforedClient();
 
+  CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
     ActivateTaskStatusChange_(
