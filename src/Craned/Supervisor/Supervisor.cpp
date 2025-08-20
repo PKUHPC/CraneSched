@@ -212,15 +212,7 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  if (g_config.Container.Enabled) {
-    CRANE_INFO("[Container] Container module is enabled.");
-    g_cri_client = std::make_unique<Supervisor::CriClient>();
-    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
-                                     g_config.Container.ImageEndpoint);
-  }
-
-  g_server =
-      std::make_unique<Craned::Supervisor::Supervisor::SupervisorServer>();
+  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   // Make sure grpc server is ready to receive requests.
   std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -250,7 +242,6 @@ void StartServer() {
   g_task_mgr.reset();
 
   g_craned_client.reset();
-  g_cri_client.reset();
   g_plugin_client.reset();
 
   g_thread_pool->wait();
