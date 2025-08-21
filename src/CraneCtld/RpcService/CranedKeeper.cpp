@@ -67,7 +67,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   }
 }
 
-std::vector<task_id_t> CranedStub::ExecuteSteps(
+CraneExpected<std::vector<task_id_t>> CranedStub::ExecuteSteps(
     const crane::grpc::ExecuteStepsRequest &request) {
   using crane::grpc::ExecuteStepsReply;
   using crane::grpc::ExecuteStepsRequest;
@@ -86,11 +86,7 @@ std::vector<task_id_t> CranedStub::ExecuteSteps(
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    failed_task_ids.reserve(request.tasks_size());
-    for (auto &task : request.tasks())
-      failed_task_ids.emplace_back(task.task_id());
-
-    return failed_task_ids;
+    return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
   UpdateLastActiveTime();
 
