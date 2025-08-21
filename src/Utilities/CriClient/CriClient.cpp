@@ -16,16 +16,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CriClient.h"
+#include "crane/CriClient.h"
 
 #include <grpcpp/client_context.h>
 
+#include "crane/GrpcHelper.h"
 #include "crane/Lock.h"
 #include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 #include "cri/api.pb.h"
+#include "protos/PublicDefs.pb.h"
 
-namespace Supervisor {
+namespace cri {
 
 CriClient::~CriClient() {
   // Stop event stream
@@ -42,20 +44,20 @@ void CriClient::InitChannelAndStub(const std::filesystem::path& runtime_service,
     m_is_channel_ = CreateUnixInsecureChannel(image_service);
   }
 
-  m_rs_stub_ = cri::RuntimeService::NewStub(m_rs_channel_);
-  m_is_stub_ = cri::ImageService::NewStub(m_is_channel_);
+  m_rs_stub_ = api::RuntimeService::NewStub(m_rs_channel_);
+  m_is_stub_ = api::ImageService::NewStub(m_is_channel_);
 }
 
 void CriClient::Version() const {
-  using cri::VersionRequest;
-  using cri::VersionResponse;
+  using api::VersionRequest;
+  using api::VersionResponse;
 
   VersionRequest request{};
   VersionResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto status = m_rs_stub_->Version(&context, request, &response);
   if (!status.ok()) {
@@ -67,15 +69,15 @@ void CriClient::Version() const {
 }
 
 void CriClient::RuntimeConfig() const {
-  using cri::RuntimeConfigRequest;
-  using cri::RuntimeConfigResponse;
+  using api::RuntimeConfigRequest;
+  using api::RuntimeConfigResponse;
 
   RuntimeConfigRequest request{};
   RuntimeConfigResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto status = m_rs_stub_->RuntimeConfig(&context, request, &response);
   if (!status.ok()) {
@@ -93,20 +95,20 @@ void CriClient::RuntimeConfig() const {
 #endif
 
   CRANE_TRACE("CRI replied RuntimeConfig: cgroup_driver={}",
-              cri::CgroupDriver_Name(cg));
+              api::CgroupDriver_Name(cg));
 }
 
 std::optional<std::string> CriClient::GetImageId(
     const std::string& image_ref) const {
-  using cri::ImageStatusRequest;
-  using cri::ImageStatusResponse;
+  using api::ImageStatusRequest;
+  using api::ImageStatusResponse;
 
   ImageStatusRequest request{};
   ImageStatusResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_ref);
@@ -124,15 +126,15 @@ std::optional<std::string> CriClient::GetImageId(
 
 std::optional<std::string> CriClient::PullImage(
     const std::string& image_ref) const {
-  using cri::PullImageRequest;
-  using cri::PullImageResponse;
+  using api::PullImageRequest;
+  using api::PullImageResponse;
 
   PullImageRequest request{};
   PullImageResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_ref);
@@ -152,18 +154,21 @@ std::optional<std::string> CriClient::PullImage(
 }
 
 CraneExpected<std::string> CriClient::RunPodSandbox(
-    const cri::PodSandboxConfig& config) const {
-  using cri::RunPodSandboxRequest;
-  using cri::RunPodSandboxResponse;
+    api::PodSandboxConfig* config) const {
+  using api::RunPodSandboxRequest;
+  using api::RunPodSandboxResponse;
+
+  // Inject the config
+  InjectConfig_(config);
 
   RunPodSandboxRequest request{};
   RunPodSandboxResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
-  request.mutable_config()->CopyFrom(config);
+  request.mutable_config()->CopyFrom(*config);
   auto status = m_rs_stub_->RunPodSandbox(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to run pod sandbox: {}", status.error_message());
@@ -175,8 +180,8 @@ CraneExpected<std::string> CriClient::RunPodSandbox(
 
 CraneExpected<void> CriClient::StopPodSandbox(
     const std::string& pod_sandbox_id) const {
-  using cri::StopPodSandboxRequest;
-  using cri::StopPodSandboxResponse;
+  using api::StopPodSandboxRequest;
+  using api::StopPodSandboxResponse;
 
   CraneExpected<void> ret;
   StopPodSandboxRequest request{};
@@ -184,7 +189,7 @@ CraneExpected<void> CriClient::StopPodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->StopPodSandbox(&context, request, &response);
@@ -198,8 +203,8 @@ CraneExpected<void> CriClient::StopPodSandbox(
 
 CraneExpected<void> CriClient::RemovePodSandbox(
     const std::string& pod_sandbox_id) const {
-  using cri::RemovePodSandboxRequest;
-  using cri::RemovePodSandboxResponse;
+  using api::RemovePodSandboxRequest;
+  using api::RemovePodSandboxResponse;
 
   CraneExpected<void> ret;
   RemovePodSandboxRequest request{};
@@ -207,7 +212,7 @@ CraneExpected<void> CriClient::RemovePodSandbox(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->RemovePodSandbox(&context, request, &response);
@@ -220,18 +225,24 @@ CraneExpected<void> CriClient::RemovePodSandbox(
 }
 
 CraneExpected<std::string> CriClient::CreateContainer(
-    const cri::ContainerConfig& config) const {
-  using cri::CreateContainerRequest;
-  using cri::CreateContainerResponse;
+    const std::string& pod_id, const api::PodSandboxConfig& pod_config,
+    api::ContainerConfig* config) const {
+  using api::CreateContainerRequest;
+  using api::CreateContainerResponse;
+
+  // Inject the config
+  InjectConfig_(config);
 
   CreateContainerRequest request{};
   CreateContainerResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
-  request.mutable_config()->CopyFrom(config);
+  request.set_pod_sandbox_id(pod_id);
+  request.mutable_sandbox_config()->CopyFrom(pod_config);
+  request.mutable_config()->CopyFrom(*config);
   auto status = m_rs_stub_->CreateContainer(&context, request, &response);
   if (!status.ok()) {
     CRANE_ERROR("Failed to create container: {}", status.error_message());
@@ -243,8 +254,8 @@ CraneExpected<std::string> CriClient::CreateContainer(
 
 CraneExpected<void> CriClient::StartContainer(
     const std::string& container_id) const {
-  using cri::StartContainerRequest;
-  using cri::StartContainerResponse;
+  using api::StartContainerRequest;
+  using api::StartContainerResponse;
 
   CraneExpected<void> ret;
   StartContainerRequest request{};
@@ -252,7 +263,7 @@ CraneExpected<void> CriClient::StartContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   request.set_container_id(container_id);
   auto status = m_rs_stub_->StartContainer(&context, request, &response);
@@ -266,8 +277,8 @@ CraneExpected<void> CriClient::StartContainer(
 
 CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
                                              int64_t timeout) const {
-  using cri::StopContainerRequest;
-  using cri::StopContainerResponse;
+  using api::StopContainerRequest;
+  using api::StopContainerResponse;
 
   CraneExpected<void> ret;
   StopContainerRequest request{};
@@ -275,7 +286,7 @@ CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   request.set_container_id(container_id);
   request.set_timeout(timeout);
@@ -290,8 +301,8 @@ CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
 
 CraneExpected<void> CriClient::RemoveContainer(
     const std::string& container_id) const {
-  using cri::RemoveContainerRequest;
-  using cri::RemoveContainerResponse;
+  using api::RemoveContainerRequest;
+  using api::RemoveContainerResponse;
 
   CraneExpected<void> ret;
   RemoveContainerRequest request{};
@@ -299,7 +310,7 @@ CraneExpected<void> CriClient::RemoveContainer(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   request.set_container_id(container_id);
   auto status = m_rs_stub_->RemoveContainer(&context, request, &response);
@@ -309,51 +320,6 @@ CraneExpected<void> CriClient::RemoveContainer(
   }
 
   return ret;
-}
-
-cri::PodSandboxMetadata CriClient::BuildPodSandboxMetaData(
-    uid_t uid, job_id_t job_id, const std::string& name) {
-  cri::PodSandboxMetadata metadata{};
-  std::string pod_id{};
-
-  // TODO: Add node hostname as name suffix.
-  if (name.empty()) {
-    pod_id = std::format("{}-{}", uid, job_id);
-    metadata.set_name(std::format("crane-pod-job-{}", job_id));
-  } else {
-    pod_id = std::format("{}-{}-{}", uid, job_id, name);
-    metadata.set_name(name);
-  }
-
-  metadata.set_uid(pod_id);
-  metadata.set_namespace_(kDefaultPodNamespace);
-
-  return metadata;
-}
-
-std::unordered_map<std::string, std::string> CriClient::BuildPodLabels(
-    uid_t uid, job_id_t job_id, const std::string& name) {
-  std::unordered_map<std::string, std::string> labels;
-  labels["uid"] = std::to_string(uid);
-  labels["job_id"] = std::to_string(job_id);
-  labels["name"] = name;
-  return labels;
-}
-
-cri::ContainerMetadata CriClient::BuildContainerMetaData(
-    uid_t uid, job_id_t job_id, const std::string& name) {
-  cri::ContainerMetadata metadata{};
-  if (!name.empty()) metadata.set_name(name);
-  return metadata;
-}
-
-std::unordered_map<std::string, std::string> CriClient::BuildContainerLabels(
-    uid_t uid, job_id_t job_id, const std::string& name) {
-  std::unordered_map<std::string, std::string> labels;
-  labels["uid"] = std::to_string(uid);
-  labels["job_id"] = std::to_string(job_id);
-  labels["name"] = name;
-  return labels;
 }
 
 // ===== Container Event Monitoring Implementation =====
@@ -391,8 +357,8 @@ bool CriClient::IsEventStreamActive() const {
 }
 
 void CriClient::ContainerEventStreamLoop_() {
-  using cri::ContainerEventResponse;
-  using cri::GetEventsRequest;
+  using api::ContainerEventResponse;
+  using api::GetEventsRequest;
 
   while (!m_event_stream_stop_) {
     try {
@@ -428,7 +394,7 @@ void CriClient::ContainerEventStreamLoop_() {
     if (!m_event_stream_stop_) {
       CRANE_INFO(
           "Container event stream disconnected, reconnecting in 5 seconds...");
-      std::this_thread::sleep_for(kDefaultCriReqTimeout);
+      std::this_thread::sleep_for(kCriDefaultReqTimeout);
     }
   }
 
@@ -436,37 +402,32 @@ void CriClient::ContainerEventStreamLoop_() {
 }
 
 void CriClient::HandleContainerEvent_(
-    const cri::ContainerEventResponse& event) {
-  // Log the event
-  auto event_type_str =
-      cri::ContainerEventType_Name(event.container_event_type());
+    const api::ContainerEventResponse& event) {
+  // Only propagate concerned events using label selection
+  if (!event.pod_sandbox_status().labels().contains(kCriDefaultLabel)) return;
 
-  CRANE_TRACE("Container event: {} {} at {}", event.container_id(),
-              event_type_str, event.created_at());
+  // Log the event
+  CRANE_TRACE("Received container event: {}", event.DebugString());
 
   // Invoke the callback if set
   util::lock_guard lock(m_event_callback_mutex_);
   if (m_event_callback_) {
-    try {
-      m_event_callback_(event);
-    } catch (const std::exception& e) {
-      CRANE_ERROR("Exception in container event callback: {}", e.what());
-    }
+    m_event_callback_(event);
   }
 }
 
 // ===== Active Container Status Query Implementation =====
 
-CraneExpected<std::vector<cri::Container>> CriClient::ListContainers() const {
-  using cri::ListContainersRequest;
-  using cri::ListContainersResponse;
+CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
+  using api::ListContainersRequest;
+  using api::ListContainersResponse;
 
   ListContainersRequest request{};
   ListContainersResponse response{};
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {
@@ -474,7 +435,7 @@ CraneExpected<std::vector<cri::Container>> CriClient::ListContainers() const {
     return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
 
-  std::vector<cri::Container> containers;
+  std::vector<api::Container> containers;
   containers.reserve(response.containers_size());
   for (const auto& container : response.containers()) {
     containers.push_back(container);
@@ -484,11 +445,11 @@ CraneExpected<std::vector<cri::Container>> CriClient::ListContainers() const {
   return containers;
 }
 
-CraneExpected<std::vector<cri::Container>> CriClient::ListContainers(
+CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
     const std::map<std::string, std::string>& label_selector) const {
-  using cri::ContainerFilter;
-  using cri::ListContainersRequest;
-  using cri::ListContainersResponse;
+  using api::ContainerFilter;
+  using api::ListContainersRequest;
+  using api::ListContainersResponse;
 
   ListContainersRequest request{};
   ListContainersResponse response{};
@@ -502,7 +463,7 @@ CraneExpected<std::vector<cri::Container>> CriClient::ListContainers(
 
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kDefaultCriReqTimeout);
+                       kCriDefaultReqTimeout);
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {
@@ -511,7 +472,7 @@ CraneExpected<std::vector<cri::Container>> CriClient::ListContainers(
     return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
 
-  std::vector<cri::Container> containers;
+  std::vector<api::Container> containers;
   containers.reserve(response.containers_size());
   for (const auto& container : response.containers()) {
     containers.push_back(container);
@@ -521,4 +482,4 @@ CraneExpected<std::vector<cri::Container>> CriClient::ListContainers(
   return containers;
 }
 
-}  // namespace Supervisor
+}  // namespace cri
