@@ -783,8 +783,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
                                                : request->num_limit();
-  if (!request->filter_task_ids().empty())
-    num_limit = std::min((size_t)request->filter_task_ids_size(), num_limit);
 
   auto *task_list = response->mutable_task_info_list();
 
