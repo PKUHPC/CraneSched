@@ -68,7 +68,6 @@ class CtldClientStateMachine {
   void SetActionRegisterCb(std::function<void(RegisterArg const&)>&& cb);
   void SetActionReadyCb(std::function<void()>&& cb);
   void SetActionDisconnectedCb(std::function<void()>&& cb);
-  void SetActionTimeoutCb(std::function<void()>&& cb);
 
   // Grpc Application-level Events:
   bool EvRecvConfigFromCtld(const crane::grpc::ConfigureCranedRequest& request);
@@ -116,7 +115,6 @@ class CtldClientStateMachine {
   void ActionRegister_(std::set<task_id_t>&& lost_jobs,
                        std::set<task_id_t>&& lost_tasks);
   void ActionReady_();
-  void ActionTimeout_();
   void ActionDisconnected_();
 
   // Internal application-level events
@@ -130,7 +128,6 @@ class CtldClientStateMachine {
 
   std::function<void(RegisterArg const&)> m_action_register_cb_;
   std::function<void()> m_action_ready_cb_;
-  std::function<void()> m_action_timeout_cb_;
   std::function<void()> m_action_disconnected_cb_;
 
   absl::Mutex m_cb_mutex_;
@@ -149,6 +146,8 @@ class CtldClientStateMachine {
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_timeout_handle_;
   std::atomic_bool m_check_reg_timeout_{false};
+
+  std::shared_ptr<spdlog::logger> m_logger_;
 };
 
 class CtldClient {

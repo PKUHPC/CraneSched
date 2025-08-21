@@ -75,7 +75,7 @@ class CranedStub {
   static crane::grpc::ExecuteStepsRequest NewExecuteTasksRequests(
       const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
 
-  std::vector<task_id_t> ExecuteSteps(
+  CraneExpected<std::vector<task_id_t>> ExecuteSteps(
       const crane::grpc::ExecuteStepsRequest &request);
 
   CraneErrCode CreateCgroupForJobs(

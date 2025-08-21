@@ -27,6 +27,7 @@
 namespace Craned {
 
 CtldClientStateMachine::CtldClientStateMachine() {
+  m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
 
   m_timeout_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
@@ -39,6 +40,8 @@ CtldClientStateMachine::CtldClientStateMachine() {
   m_timeout_handle_->start(
       std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec),
       std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec));
+  CRANE_LOGGER_TRACE(m_logger_, "Start check ctld timeout of {} sec.",
+                     g_config.CranedConf.CtldTimeoutSec);
 
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("CtldCSMTimeThr");
@@ -49,11 +52,6 @@ CtldClientStateMachine::CtldClientStateMachine() {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
             return;
-          }
-          if (m_check_reg_timeout_ && !m_timeout_handle_->active()) {
-            m_timeout_handle_->start(
-                std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec),
-                std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec));
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
@@ -84,10 +82,6 @@ void CtldClientStateMachine::SetActionDisconnectedCb(
   m_action_disconnected_cb_ = std::move(cb);
 }
 
-void CtldClientStateMachine::SetActionTimeoutCb(std::function<void()>&& cb) {
-  m_action_timeout_cb_ = std::move(cb);
-}
-
 void CtldClientStateMachine::SetActionRegisterCb(
     std::function<void(RegisterArg const&)>&& cb) {
   m_action_register_cb_ = std::move(cb);
@@ -99,7 +93,8 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REQUESTING_CONFIG) {
-    CRANE_WARN(
+    CRANE_LOGGER_WARN(
+        m_logger_,
         "EvRecvConfigFromCtld triggered at incorrect state {}. Ignoring.",
         static_cast<int>(m_state_));
     return false;
@@ -112,11 +107,13 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
     return true;
   } else {
     if (!request.ok())
-      CRANE_WARN("ConfigureCranedRequest failed from Ctld.");
+      CRANE_LOGGER_WARN(m_logger_, "ConfigureCranedRequest failed from Ctld.");
     else if (!request.has_token()) {
-      CRANE_WARN("No token in ConfigureCranedRequest from Ctld.");
+      CRANE_LOGGER_DEBUG(m_logger_,
+                         "No token in ConfigureCranedRequest from Ctld.");
     } else
-      CRANE_DEBUG(
+      CRANE_LOGGER_DEBUG(
+          m_logger_,
           "ConfigureCraned failed. Expected to recv token: {} but got {}",
           ProtoTimestampToString(m_reg_token_.value()),
           ProtoTimestampToString(request.token()));
@@ -135,8 +132,10 @@ void CtldClientStateMachine::EvConfigurationDone(
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::CONFIGURING) {
-    CRANE_WARN("EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
-               StateToString(m_state_));
+    CRANE_LOGGER_WARN(
+        m_logger_,
+        "EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
+        StateToString(m_state_));
     return;
   }
 
@@ -156,13 +155,16 @@ bool CtldClientStateMachine::EvGetRegisterReply(
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::REGISTERING) {
-    CRANE_WARN("EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
-               StateToString(m_state_));
+    CRANE_LOGGER_WARN(
+        m_logger_,
+        "EvGetRegisterReply triggered at incorrect state {}. Ignoring.",
+        StateToString(m_state_));
     return false;
   }
 
   if (m_reg_token_ != token) {
-    CRANE_TRACE("Register token mismatch when recv register reply.");
+    CRANE_LOGGER_TRACE(m_logger_,
+                       "Register token mismatch when recv register reply.");
     return false;
   }
 
@@ -182,8 +184,9 @@ void CtldClientStateMachine::EvGrpcConnected() {
   m_last_op_time_ = std::chrono::steady_clock::now();
 
   if (m_state_ != State::DISCONNECTED) {
-    CRANE_WARN("EvGrpcConnected triggered at incorrect state {}. Ignoring.",
-               StateToString(m_state_));
+    CRANE_LOGGER_WARN(
+        m_logger_, "EvGrpcConnected triggered at incorrect state {}. Ignoring.",
+        StateToString(m_state_));
     return;
   }
 
@@ -199,18 +202,37 @@ void CtldClientStateMachine::EvGrpcConnectionFailed() {
   ActionDisconnected_();
 }
 
+void CtldClientStateMachine::EvTimeout_() {
+  absl::MutexLock lk(&m_mtx_);
+  if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
+  if (m_last_op_time_.value() +
+          std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec) >
+      std::chrono::steady_clock::now())
+    return;
+  CRANE_LOGGER_DEBUG(
+      m_logger_,
+      "CtldClient register timeout, current state {}, starting handshake.",
+      StateToString(m_state_));
+  m_last_op_time_ = std::chrono::steady_clock::now();
+  m_state_ = State::REQUESTING_CONFIG;
+  g_server->SetGrpcSrvReady(false);
+  ActionRequestConfig_();
+}
+
 void CtldClientStateMachine::EvPingFailed() {
   absl::MutexLock lk(&m_mtx_);
-  CRANE_DEBUG("Ping failed, current state {}, starting handshake.",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ping failed, current state {}, starting new handshake.",
+                     StateToString(m_state_));
   m_last_op_time_ = std::chrono::steady_clock::now();
 
+  g_server->SetGrpcSrvReady(false);
   m_state_ = State::REQUESTING_CONFIG;
   ActionRequestConfig_();
 }
 
 void CtldClientStateMachine::EvPingSuccess() {
-  CRANE_DEBUG("CtldClient ping success.");
+  CRANE_LOGGER_DEBUG(m_logger_, "CtldClient ping success.");
   absl::MutexLock lk(&m_mtx_);
   m_last_op_time_ = std::chrono::steady_clock::now();
 }
@@ -221,8 +243,10 @@ bool CtldClientStateMachine::IsReadyNow() {
 }
 
 void CtldClientStateMachine::ActionRequestConfig_() {
-  CRANE_DEBUG("Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}, start "
+                     "check register operation timeout.",
+                     StateToString(m_state_));
   m_check_reg_timeout_ = true;
   if (m_reg_token_.has_value()) CRANE_DEBUG("Reset register token.");
   m_reg_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
@@ -234,12 +258,13 @@ void CtldClientStateMachine::ActionRequestConfig_() {
 
 void CtldClientStateMachine::ActionConfigure_(
     const crane::grpc::ConfigureCranedRequest& config_req) {
-  CRANE_DEBUG("Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}",
+                     StateToString(m_state_));
 
   if (config_req.job_map_size() != 0)
-    CRANE_TRACE(
-        "Recv ctld job: [{}],task: [{}]",
+    CRANE_LOGGER_TRACE(
+        m_logger_, "Recv ctld job: [{}],task: [{}]",
         absl::StrJoin(config_req.job_map() | std::ranges::views::keys, ","),
         absl::StrJoin(config_req.job_tasks_map() | std::ranges::views::keys,
                       ","));
@@ -264,8 +289,9 @@ void CtldClientStateMachine::ActionConfigure_(
 
 void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
                                              std::set<task_id_t>&& lost_tasks) {
-  CRANE_DEBUG("Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}",
+                     StateToString(m_state_));
   if (m_action_register_cb_)
     g_thread_pool->detach_task(
         [tok = m_reg_token_.value(), lost_jobs, lost_tasks, this] mutable {
@@ -275,21 +301,22 @@ void CtldClientStateMachine::ActionRegister_(std::set<task_id_t>&& lost_jobs,
 }
 
 void CtldClientStateMachine::ActionReady_() {
-  CRANE_DEBUG("Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}, stop "
+                     "check register operation timeout",
+                     StateToString(m_state_));
+  m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(true);
+  g_ctld_client->StartPingCtld();
   if (m_action_ready_cb_)
     g_thread_pool->detach_task([this] { m_action_ready_cb_(); });
 }
 
-void CtldClientStateMachine::ActionTimeout_() {
-  if (m_action_timeout_cb_)
-    g_thread_pool->detach_task([this] { m_action_timeout_cb_(); });
-}
-
 void CtldClientStateMachine::ActionDisconnected_() {
-  CRANE_DEBUG("Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}, stop "
+                     "check register operation timeout",
+                     StateToString(m_state_));
   m_check_reg_timeout_ = false;
   g_server->SetGrpcSrvReady(false);
   if (m_action_disconnected_cb_)
@@ -301,20 +328,6 @@ void CtldClient::Shutdown() {
   m_step_status_change_mtx_.Lock();
   CRANE_INFO("Cleaning up status changes in CtldClient");
   SendStatusChanges_();
-}
-
-void CtldClientStateMachine::EvTimeout_() {
-  absl::MutexLock lk(&m_mtx_);
-  if (!m_last_op_time_.has_value() || m_state_ == State::DISCONNECTED) return;
-  if (m_last_op_time_.value() +
-          std::chrono::seconds(g_config.CranedConf.CtldTimeoutSec) >
-      std::chrono::steady_clock::now())
-    return;
-  CRANE_DEBUG("CtldClient timeout, current state {}, starting handshake.",
-              StateToString(m_state_));
-  m_last_op_time_ = std::chrono::steady_clock::now();
-  m_state_ = State::REQUESTING_CONFIG;
-  ActionRequestConfig_();
 }
 
 CtldClient::CtldClient() {
@@ -329,7 +342,7 @@ CtldClient::CtldClient() {
             std::chrono::steady_clock::now())
           return true;
 
-        const auto success = Ping_();
+        const bool success = Ping_();
         if (!success)
           m_ping_ctld_ = false;
         else
@@ -380,8 +393,9 @@ void CtldClient::Init() {
                        std::ranges::to<std::set<task_id_t>>();
         auto step_ids = arg.req.job_tasks_map() | std::ranges::views::keys |
                         std::ranges::to<std::set<task_id_t>>();
-        CRANE_DEBUG("Configuring action for token {}.",
-                    ProtoTimestampToString(token));
+        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                           "Configuring action for token {}.",
+                           ProtoTimestampToString(token));
 
         std::set exact_job_ids = g_job_mgr->GetAllocatedJobs();
         std::set<task_id_t> lost_jobs{};
@@ -423,18 +437,6 @@ void CtldClient::Init() {
       [this](CtldClientStateMachine::RegisterArg const& arg) {
         CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
-
-  g_ctld_client_sm->SetActionReadyCb([] { g_ctld_client->StartPingCtld(); });
-
-  g_ctld_client_sm->SetActionTimeoutCb([] { g_ctld_client->StopPingCtld(); });
-  AddGrpcCtldConnectedCb([] { g_ctld_client_sm->EvGrpcConnected(); });
-
-  AddGrpcCtldDisconnectedCb([] {
-    g_ctld_client->StopPingCtld();
-    g_ctld_client_sm->EvGrpcConnectionFailed();
-  });
-  SetPingSuccessCb([] { g_ctld_client_sm->EvPingSuccess(); });
-  SetPingFailedCb([] { g_ctld_client_sm->EvPingFailed(); });
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address) {
@@ -503,7 +505,8 @@ std::set<task_id_t> CtldClient::GetAllStepStatusChangeId() {
 }
 
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
-  CRANE_DEBUG("Requesting config from CraneCtld...");
+  CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                     "Requesting config from CraneCtld...");
 
   crane::grpc::CranedTriggerReverseConnRequest req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
@@ -518,8 +521,9 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
   grpc::Status status =
       m_stub_->CranedTriggerReverseConn(&context, req, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("Notify CranedConnected failed: {}, {}",
-                static_cast<int>(status.error_code()), status.error_message());
+    CRANE_LOGGER_ERROR(
+        g_runtime_status.conn_logger, "Notify CranedConnected failed: {}, {}",
+        static_cast<int>(status.error_code()), status.error_message());
     return false;
   }
   return true;
@@ -528,7 +532,7 @@ bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {
 bool CtldClient::CranedRegister_(RegToken const& token,
                                  std::set<job_id_t> const& lost_jobs,
                                  std::set<step_id_t> const& lost_steps) {
-  CRANE_DEBUG("Sending CranedRegister.");
+  CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger, "Sending CranedRegister.");
 
   crane::grpc::CranedRegisterRequest ready_request;
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
@@ -566,7 +570,8 @@ bool CtldClient::CranedRegister_(RegToken const& token,
   crane::grpc::CranedRegisterReply ready_reply;
   auto status = m_stub_->CranedRegister(&context, ready_request, &ready_reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedRegister failed: {}", status.error_message());
+    CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                       "CranedRegister failed: {}", status.error_message());
     return false;
   }
 
@@ -597,7 +602,10 @@ void CtldClient::AsyncSendThread_() {
 
     if (!connected) {
       if (prev_connected) {  // Edge triggered: grpc connected -> disconnected.
-        CRANE_TRACE("Channel to CraneCtlD is disconnected.");
+        CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
+                          "Channel to CraneCtlD is disconnected.");
+        g_ctld_client->StopPingCtld();
+        g_ctld_client_sm->EvGrpcConnectionFailed();
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
       }
 
@@ -613,7 +621,9 @@ void CtldClient::AsyncSendThread_() {
 
     // Connected case:
     if (!prev_connected) {  // Edge triggered: grpc disconnected -> connected.
-      CRANE_TRACE("Channel to CraneCtlD is connected.");
+      CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
+                        "Channel to CraneCtlD is connected.");
+      g_ctld_client_sm->EvGrpcConnected();
       for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();
     }
 
@@ -701,17 +711,21 @@ bool CtldClient::Ping_() {
   crane::grpc::CranedPingRequest req;
   req.set_craned_id(m_craned_id_);
   crane::grpc::CranedPingReply reply;
-  CRANE_DEBUG("Sending CranedPing request to CraneCtlD.");
+  CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                     "Sending CranedPing request to CraneCtlD.");
   auto status = m_stub_->CranedPing(&context, req, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("Craned Ping failed: {}", status.error_message());
-    if (m_ping_failed_cb_) m_ping_failed_cb_();
+    CRANE_LOGGER_ERROR(g_runtime_status.conn_logger, "Craned Ping failed: {}",
+                       status.error_message());
+    g_ctld_client_sm->EvPingFailed();
     return false;
   }
+  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned Ping {}.",
+                     reply.ok());
   if (reply.ok()) {
-    if (m_ping_success_cb_) m_ping_success_cb_();
-  } else if (m_ping_failed_cb_)
-    m_ping_failed_cb_();
+    g_ctld_client_sm->EvPingSuccess();
+  } else
+    g_ctld_client_sm->EvPingFailed();
   return reply.ok();
 }
 

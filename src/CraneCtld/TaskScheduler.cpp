@@ -654,6 +654,12 @@ void TaskScheduler::ScheduleThread_() {
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
                       job_to_d_vec.size(), craned_id);
           if (stub == nullptr || stub->Invalid()) {
+            CRANE_TRACE(
+                "CreateCgroupForTasks for {} tasks to {} failed: craned down.",
+                job_to_d_vec.size(), craned_id);
+            failed_craned_set.emplace(craned_id);
+            for (const auto& job_to_d : job_to_d_vec)
+              failed_task_id_set.emplace(job_to_d.job_id());
             bl.DecrementCount();
             return;
           }
@@ -664,6 +670,9 @@ void TaskScheduler::ScheduleThread_() {
             return;
           }
 
+          CRANE_TRACE(
+              "CreateCgroupForTasks for {} tasks to {} failed: Rpc failure.",
+              job_to_d_vec.size(), craned_id);
           thread_pool_mtx.Lock();
 
           failed_craned_set.emplace(craned_id);
@@ -805,21 +814,37 @@ void TaskScheduler::ScheduleThread_() {
             post_sched_time_point;
       }
 
-      std::unordered_map<CranedId, std::vector<job_id_t>>
+      std::unordered_map<
+          CranedId, std::pair<std::vector<job_id_t>, uint16_t /*exit_code*/>>
           failed_to_exec_job_id_map;
       for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
         if (stub == nullptr || stub->Invalid()) {
-          for (auto& task : tasks.tasks())
-            failed_to_exec_job_id_map[craned_id].push_back(task.task_id());
+          for (auto& task : tasks.tasks()) {
+            failed_to_exec_job_id_map[craned_id].first.push_back(
+                task.task_id());
+            failed_to_exec_job_id_map[craned_id].second =
+                ExitCode::kExitCodeRpcError;
+          }
           continue;
         }
 
-        std::vector<task_id_t> failed_task_ids = stub->ExecuteSteps(tasks);
-        for (task_id_t task_id : failed_task_ids)
-          failed_to_exec_job_id_map[craned_id].push_back(task_id);
+        CraneExpected failed_task_ids = stub->ExecuteSteps(tasks);
+        if (!failed_task_ids.has_value()) {
+          for (auto& task : tasks.tasks()) {
+            failed_to_exec_job_id_map[craned_id].first.push_back(
+                task.task_id());
+            failed_to_exec_job_id_map[craned_id].second =
+                ExitCode::kExitCodeRpcError;
+          }
+        } else {
+          failed_to_exec_job_id_map[craned_id].first =
+              std::move(failed_task_ids.value());
+          failed_to_exec_job_id_map[craned_id].second =
+              ExitCode::kExitCodeExecutionError;
+        }
       }
 
       // After sending ExecuteTasks RPC, StartHook is called.
@@ -832,24 +857,25 @@ void TaskScheduler::ScheduleThread_() {
       // If any task failed during this stage,
       // call TaskStatusChangeAsync since the ownership of tasks
       // has been transferred.
-      for (auto& [craned_id, task_ids] : failed_to_exec_job_id_map) {
+      for (auto& [craned_id, task_status] : failed_to_exec_job_id_map) {
         CRANE_ERROR("Task [{}] on {} failed to execute.",
-                    absl::StrJoin(task_ids, ","), craned_id);
-        for (auto task_id : task_ids)
+                    absl::StrJoin(task_status.first, ","), craned_id);
+        for (auto task_id : task_status.first)
           TaskStatusChangeAsync(task_id, craned_id,
                                 crane::grpc::TaskStatus::Failed,
-                                ExitCode::kExitCodeExecutionError);
-        g_thread_pool->detach_task([craned_id, steps = std::move(task_ids)]() {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+                                task_status.second);
+        g_thread_pool->detach_task(
+            [craned_id, steps = std::move(task_status.first)]() {
+              auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
-          // If the craned is down, just ignore it.
-          if (stub == nullptr || stub->Invalid()) return;
+              // If the craned is down, just ignore it.
+              if (stub == nullptr || stub->Invalid()) return;
 
-          CraneErrCode err = stub->FreeSteps(steps);
-          if (err != CraneErrCode::SUCCESS)
-            CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
-                        steps.size(), craned_id);
-        });
+              CraneErrCode err = stub->FreeSteps(steps);
+              if (err != CraneErrCode::SUCCESS)
+                CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
+                            steps.size(), craned_id);
+            });
       }
 
       end = std::chrono::steady_clock::now();
@@ -917,7 +943,7 @@ void TaskScheduler::ScheduleThread_() {
           failed_task_raw_ptrs.emplace_back(task.get());
 
           task->SetStatus(crane::grpc::Failed);
-          task->SetExitCode(ExitCode::kExitCodeCgroupError);
+          task->SetExitCode(ExitCode::kExitCodeRpcError);
           task->SetEndTime(absl::Now());
         }
         ProcessFinalTasks_(failed_task_raw_ptrs);

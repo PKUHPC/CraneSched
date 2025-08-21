@@ -172,6 +172,8 @@ void ParseConfig(int argc, char** argv) {
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true);
+        Craned::g_runtime_status.conn_logger =
+            AddLogger("conn", log_level.value(), true);
       } else {
         fmt::print(stderr, "Illegal Craned debug-level format: {}.\n",
                    g_config.CranedDebugLevel);
