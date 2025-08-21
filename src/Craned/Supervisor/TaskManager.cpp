@@ -30,7 +30,6 @@
 
 #include "CforedClient.h"
 #include "CranedClient.h"
-#include "CriClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/Logger.h"
@@ -574,22 +573,13 @@ CraneErrCode ContainerInstance::Prepare() {
     return CraneErrCode::ERR_INVALID_PARAM;
   }
 
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
-
-  // TODO: Replace with job_id when refactoring.
-  uid_t uid = m_parent_step_inst_->GetStep().uid();
-  gid_t gid = m_parent_step_inst_->GetStep().gid();
-  job_id_t job_id = m_parent_step_inst_->GetStep().task_id();
-  const std::string& job_name = m_parent_step_inst_->GetStep().name();
-
   // Generate path and params.
+  job_id_t job_id = m_parent_step_inst_->GetStep().task_id();
   m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
   m_image_ref_ = m_parent_step_inst_->GetStep().container();
 
-  // FIXME: Some env like x11 port are assigned later in spawn.
-  m_env_ = GetChildProcessEnv();
-  // m_arguments_ is not applicable for container tasks.
-
+  // Check if image is pulled.
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
   auto image_id_opt = cri_client->GetImageId(m_image_ref_);
   if (!image_id_opt.has_value()) {
     // Image is not pulled. Pull the image first.
@@ -613,223 +603,74 @@ CraneErrCode ContainerInstance::Prepare() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (m_parent_step_inst_->IsBatch())
+  if (m_parent_step_inst_->IsBatch()) {
     fputs(m_parent_step_inst_->GetStep().batch_meta().sh_script().c_str(),
           fptr);
-  else  // Crun
+  } else {  // Crun
     fputs(m_parent_step_inst_->GetStep().interactive_meta().sh_script().c_str(),
           fptr);
+  }
 
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  if (chown(sh_path.c_str(), uid, gid) != 0) {
+  if (chown(sh_path.c_str(), m_parent_step_inst_->pwd.Uid(),
+            m_parent_step_inst_->pwd.Gid()) != 0) {
     CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
                 job_id, strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // Prepare the pod
-  cri::PodSandboxConfig pod_config;
-
-  // Write meta
+  // Parse user specified output path and set meta
   if (m_parent_step_inst_->IsBatch()) {
-    // Prepare file output name for batch tasks.
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
+    // For cbatch, log to user defined output directory (error path is
+    // ignored.) Note: Only directory is accepted. If file is given, use its
+    // parent dir.
     auto meta = std::make_unique<BatchInstanceMeta>();
-    std::filesystem::path p = ParseFilePathPattern_(
+    meta->parsed_output_file_pattern = ParseFilePathPattern_(
         m_parent_step_inst_->GetStep().batch_meta().output_file_pattern(),
         m_parent_step_inst_->GetStep().cwd());
-    meta->parsed_output_file_pattern = p;
 
-    // For cbatch, log to user defined output directory (error path is ignored.)
-    // Note: Only directory is accepted. If file is given, use its parent dir.
-    if (!std::filesystem::is_directory(p)) p = p.parent_path();
-
+    m_cri_output_path_ = meta->parsed_output_file_pattern;
     m_meta_ = std::move(meta);
-    pod_config.set_log_directory(p);
   } else {
-    // For crun, log to submiting path
+    // For crun, just have a placeholder for now.
+    m_cri_output_path_ = m_parent_step_inst_->GetStep().cwd();
     m_meta_ = std::make_unique<CrunInstanceMeta>();
-    pod_config.set_log_directory(m_parent_step_inst_->GetStep().cwd());
   }
   m_meta_->parsed_sh_script_path = sh_path;
 
-  // FIXME: This is just a workaround before we have CgroupManager refactored
-  // into a public library.
-  auto* linux_config = pod_config.mutable_linux();
-  {
-    // set cgroup parent
-    std::ifstream cgroup_file("/proc/self/cgroup");
-    std::string line;
-    std::filesystem::path cgroup_path;
-
-    while (std::getline(cgroup_file, line)) {
-      // cgroup v1: 10:memory:/user.slice
-      // cgroup v2: 0::/user.slice
-      auto pos = line.rfind(':');
-      if (pos != std::string::npos && pos + 1 < line.size()) {
-        cgroup_path = line.substr(pos + 1);
-        if (!cgroup_path.empty()) {
-          break;
-        }
-      }
-    }
-
-    if (cgroup_path.empty()) {
-      CRANE_ERROR("Failed to determine cgroup path from /proc/self/cgroup");
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-    linux_config->set_cgroup_parent(cgroup_path.parent_path().string());
-  }
-
-  {
-    // set security context
-    auto* userns_options = linux_config->mutable_security_context()
-                               ->mutable_namespace_options()
-                               ->mutable_userns_options();
-
-    // all containers inside the sandbox should share the user namespace.
-    userns_options->set_mode(cri::NamespaceMode::POD);
-
-    auto add_mapping = [](uint64_t host_id, uint64_t container_id,
-                          uint64_t length) {
-      cri::IDMapping mapping{};
-      mapping.set_host_id(host_id);
-      mapping.set_container_id(container_id);
-      mapping.set_length(length);
-      return mapping;
-    };
-
-    m_uid_mapping_[0] = add_mapping(uid, 0, 1);
-    m_gid_mapping_[0] = add_mapping(gid, 0, 1);
-
-    // FIXME: Need libsid. Implement later.
-    userns_options->mutable_uids()->Add()->CopyFrom(m_uid_mapping_[0]);
-    // userns_options->mutable_gids()->Add(add_mapping(subuid_start, 1,
-    // subuid_size));
-
-    userns_options->mutable_gids()->Add()->CopyFrom(m_gid_mapping_[0]);
-    // userns_options->mutable_gids()->Add(add_mapping(subgid_start, 1,
-    // subgid_size));
-
-    // fake root
-    linux_config->mutable_security_context()->mutable_run_as_user()->set_value(
-        0);
-    linux_config->mutable_security_context()->mutable_run_as_group()->set_value(
-        0);
-  }
-
-  auto pod_meta = CriClient::BuildPodSandboxMetaData(uid, job_id, job_name);
-  pod_config.set_hostname(pod_meta.name());  // Set pod name for hostname.
-  pod_config.mutable_metadata()->Swap(&pod_meta);
-
-  auto labels = CriClient::BuildPodLabels(uid, job_id, job_name);
-  pod_config.mutable_labels()->insert(labels.begin(), labels.end());
+  // Set env
+  m_env_ = GetChildProcessEnv();
 
   // Launch the pod after all configurations are set
-  auto pod_id_expt = cri_client->RunPodSandbox(pod_config);
+  if (auto err = SetPodSandboxConfig_(); err != CraneErrCode::SUCCESS)
+    return err;
+  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
   if (!pod_id_expt.has_value()) {
     CRANE_ERROR("Failed to run pod sandbox for task #{}", job_id);
     return pod_id_expt.error();
   }
-
   m_pod_id_ = std::move(pod_id_expt.value());
-  m_pod_config_ = std::move(pod_config);
+  CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, job_id);
+
+  // Create the container but not start here
+  if (auto err = SetContainerConfig_(); err != CraneErrCode::SUCCESS)
+    return err;
+  auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
+                                                       &m_container_config_);
+  if (!container_id_expt.has_value()) {
+    CRANE_ERROR("Failed to create container for task #{}", job_id);
+    return container_id_expt.error();
+  }
+  m_container_id_ = std::move(container_id_expt.value());
+  CRANE_DEBUG("Container {} created for task #{}", m_pod_id_, job_id);
 
   return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::Spawn() {
-  if (this->m_parent_step_inst_->IsCrun()) {
-    CRANE_ERROR("crun is not supported in container tasks.");
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  cri::ContainerConfig config;
   auto* cri_client = m_parent_step_inst_->GetCriClient();
-
-  // metadata
-  auto meta = CriClient::BuildContainerMetaData(
-      m_parent_step_inst_->GetStep().uid(),
-      m_parent_step_inst_->GetStep().task_id(),
-      m_parent_step_inst_->GetStep().name());
-  config.mutable_metadata()->Swap(&meta);
-
-  // labels
-  auto labels =
-      CriClient::BuildContainerLabels(m_parent_step_inst_->GetStep().uid(),
-                                      m_parent_step_inst_->GetStep().task_id(),
-                                      m_parent_step_inst_->GetStep().name());
-  config.mutable_labels()->insert(labels.begin(), labels.end());
-
-  // log_path
-  config.set_log_path(config.metadata().name() + ".log");
-
-  // image already checked and pulled in prepare()
-  config.mutable_image()->set_image(m_image_ref_);
-
-  // mount the generated script
-  auto* mount = config.add_mounts();
-  mount->set_host_path(m_meta_->parsed_sh_script_path);
-  mount->set_container_path("/tmp/crane/script.sh");
-  mount->set_propagation(cri::MountPropagation::PROPAGATION_PRIVATE);
-  // FIXME: Add more mapping.
-  mount->mutable_uidmappings()->Add()->CopyFrom(m_uid_mapping_[0]);
-  mount->mutable_gidmappings()->Add()->CopyFrom(m_gid_mapping_[0]);
-
-  // force the entrypoint to use the mounted script
-  // For container, we use `/bin/sh` as the default interpreter.
-  std::string real_exe = "/bin/sh";
-  if (m_parent_step_inst_->IsBatch() &&
-      !m_parent_step_inst_->GetStep().batch_meta().interpreter().empty())
-    real_exe = m_parent_step_inst_->GetStep().batch_meta().interpreter();
-
-  std::vector<std::string> command{real_exe, "/tmp/crane/script.sh"};
-  config.mutable_command()->Assign(command.begin(), command.end());
-
-  // envs
-  for (const auto& [name, value] : m_env_) {
-    auto* env = config.add_envs();
-    env->set_key(name);
-    env->set_value(value);
-  }
-
-  // set linux container options
-  // fake root
-  {
-    auto* linux_sec_context =
-        config.mutable_linux()->mutable_security_context();
-    auto* userns_options = linux_sec_context->mutable_namespace_options()
-                               ->mutable_userns_options();
-
-    // FIXME: Add subuid/subgid later
-    userns_options->set_mode(cri::NamespaceMode::POD);
-    userns_options->mutable_uids()->Add()->CopyFrom(m_uid_mapping_[0]);
-    userns_options->mutable_gids()->Add()->CopyFrom(m_gid_mapping_[0]);
-
-    linux_sec_context->mutable_run_as_user()->set_value(
-        m_parent_step_inst_->GetStep().uid());
-    linux_sec_context->mutable_run_as_group()->set_value(
-        m_parent_step_inst_->GetStep().gid());
-  }
-
-  auto container_id_expt = cri_client->CreateContainer(config);
-  if (!container_id_expt.has_value()) {
-    CRANE_ERROR("Failed to create container for task #{}",
-                m_parent_step_inst_->GetStep().task_id());
-    return container_id_expt.error();
-  }
-
-  // TODO: Move these to Prepare
-  m_container_id_ = std::move(container_id_expt.value());
-  m_container_config_ = std::move(config);
-  CRANE_DEBUG("Container {} created for task #{}", m_container_id_,
-              m_parent_step_inst_->GetStep().task_id());
-
   auto ret = cri_client->StartContainer(m_container_id_);
   if (!ret.has_value()) {
     CRANE_ERROR("Failed to start container for task #{}",
@@ -837,7 +678,46 @@ CraneErrCode ContainerInstance::Spawn() {
     return ret.error();
   }
 
-  // TODO: Register callback for event streaming
+  CRANE_DEBUG("Container {} started for task #{}", m_container_id_,
+              m_parent_step_inst_->GetStep().task_id());
+
+  // Subscribe to container event stream
+  if (!cri_client->IsEventStreamActive())
+    cri_client->StartContainerEventStream(
+        [](const cri::api::ContainerEventResponse& ev) {
+          // Only care about stopped and deleted events
+          if (ev.container_event_type() !=
+                  cri::api::ContainerEventType::CONTAINER_STOPPED_EVENT &&
+              ev.container_event_type() !=
+                  cri::api::ContainerEventType::CONTAINER_DELETED_EVENT)
+            return;
+
+          // TODO: Refactor with TaskStopAndDoStatusChangeInBatch()
+          for (const auto& status : ev.containers_statuses()) {
+            const auto& labels = status.labels();
+            auto it = labels.find(kCriLabelJobIdKey);
+            if (it == labels.end()) continue;
+
+            task_id_t task_id{};
+            auto [ptr, ec] =
+                std::from_chars(it->second.data(),
+                                it->second.data() + it->second.size(), task_id);
+            if (ec != std::errc{}) {
+              CRANE_ERROR("Failed to parse job_id label: {}", it->second);
+              continue;
+            }
+
+            if (status.state() == cri::api::ContainerState::CONTAINER_EXITED ||
+                status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN) {
+              g_task_mgr->TaskStopAndDoStatusChange(task_id);
+            }
+          }
+
+          return;
+        });
+
+  // This is a dummy placeholder
+  m_pid_ = 0xffff;
 
   return CraneErrCode::SUCCESS;
 }
@@ -887,9 +767,9 @@ CraneErrCode ContainerInstance::Kill(int signum) {
       CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
                   static_cast<int>(remove_pod_ret.error()));
       return CraneErrCode::ERR_GENERIC_FAILURE;
-    } else {
-      CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
     }
+
+    CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
   }
 
   return CraneErrCode::SUCCESS;
@@ -938,6 +818,192 @@ std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
   }
 
   return std::optional<TaskExitInfo>{m_exit_info_};
+}
+
+CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
+  // TODO: Replace with job_id when refactoring.
+  job_id_t job_id = m_parent_step_inst_->GetStep().task_id();
+  const std::string& job_name = m_parent_step_inst_->GetStep().name();
+  const std::string& node_name = g_config.CranedIdOfThisNode;
+
+  uid_t uid = m_parent_step_inst_->pwd.Uid();
+  gid_t gid = m_parent_step_inst_->pwd.Gid();
+
+  // metadata
+  auto* pod_meta = m_pod_config_.mutable_metadata();
+  std::string pod_id{};
+  if (job_name.empty()) {
+    pod_id = std::format("{}-{}-{}", node_name, uid, job_id);
+    pod_meta->set_name(std::format("crane-job-{}", job_id));
+  } else {
+    pod_id = std::format("{}-{}-{}-{}", node_name, uid, job_id, job_name);
+    pod_meta->set_name(job_name);
+  }
+  pod_meta->set_uid(std::move(pod_id));
+
+  // hostname
+  // TODO: Check generated hostname
+  m_pod_config_.set_hostname(std::format("{}-{}", pod_meta->name(), node_name));
+
+  // labels
+  m_pod_config_.mutable_labels()->insert(
+      {{kCriLabelUidKey, std::to_string(uid)},
+       {kCriLabelJobIdKey, std::to_string(job_id)},
+       {kCriLabelJobNameKey, job_name}});
+
+  // log directory
+  std::error_code ec;
+  std::string log_dir = std::filesystem::is_directory(m_cri_output_path_, ec)
+                            ? m_cri_output_path_
+                            : m_cri_output_path_.parent_path();
+  if (ec && ec != std::errc::no_such_file_or_directory) {
+    CRANE_ERROR("Failed to access log directory {}: {}", log_dir, ec.message());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  m_pod_config_.set_log_directory(std::move(log_dir));
+
+  // FIXME: This is just a workaround before we have CgroupManager refactored
+  // into a public library.
+  auto* linux_config = m_pod_config_.mutable_linux();
+  {
+    // set cgroup parent
+    std::ifstream cgroup_file("/proc/self/cgroup");
+    std::string line;
+    std::filesystem::path cgroup_path;
+
+    while (std::getline(cgroup_file, line)) {
+      // cgroup v1: 10:memory:/user.slice
+      // cgroup v2: 0::/user.slice
+      auto pos = line.rfind(':');
+      if (pos != std::string::npos && pos + 1 < line.size()) {
+        cgroup_path = line.substr(pos + 1);
+        if (!cgroup_path.empty()) {
+          break;
+        }
+      }
+    }
+
+    if (cgroup_path.empty()) {
+      CRANE_ERROR("Failed to determine cgroup path from /proc/self/cgroup");
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+    linux_config->set_cgroup_parent(cgroup_path.parent_path().string());
+  }
+
+  {
+    // set security context
+    auto* userns_options = linux_config->mutable_security_context()
+                               ->mutable_namespace_options()
+                               ->mutable_userns_options();
+
+    // all containers inside the sandbox should share the user namespace.
+    userns_options->set_mode(cri::api::NamespaceMode::POD);
+
+    auto add_mapping = [](uint64_t host_id, uint64_t container_id,
+                          uint64_t length) {
+      cri::api::IDMapping mapping{};
+      mapping.set_host_id(host_id);
+      mapping.set_container_id(container_id);
+      mapping.set_length(length);
+      return mapping;
+    };
+
+    m_uid_mapping_[0] = add_mapping(uid, 0, 1);
+    m_gid_mapping_[0] = add_mapping(gid, 0, 1);
+
+    // FIXME: Need libsid. Implement later.
+    userns_options->mutable_uids()->Add()->CopyFrom(m_uid_mapping_[0]);
+    // userns_options->mutable_gids()->Add(add_mapping(subuid_start, 1,
+    // subuid_size));
+
+    userns_options->mutable_gids()->Add()->CopyFrom(m_gid_mapping_[0]);
+    // userns_options->mutable_gids()->Add(add_mapping(subgid_start, 1,
+    // subgid_size));
+
+    // fake root
+    linux_config->mutable_security_context()->mutable_run_as_user()->set_value(
+        0);
+    linux_config->mutable_security_context()->mutable_run_as_group()->set_value(
+        0);
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::SetContainerConfig_() {
+  job_id_t job_id = m_parent_step_inst_->GetStep().task_id();
+  const std::string& job_name = m_parent_step_inst_->GetStep().name();
+  const std::string& node_name = g_config.CranedIdOfThisNode;
+
+  uid_t uid = m_parent_step_inst_->pwd.Uid();
+  gid_t gid = m_parent_step_inst_->pwd.Gid();
+
+  // metadata is ignored for now.
+  // labels
+  m_container_config_.mutable_labels()->insert(
+      {{kCriLabelUidKey, std::to_string(uid)},
+       {kCriLabelJobIdKey, std::to_string(job_id)},
+       {kCriLabelJobNameKey, job_name}});
+
+  // log_path
+  // NOTE: This is a relative path to pod log dir.
+  std::error_code ec;
+  std::string log_path = std::filesystem::is_directory(m_cri_output_path_, ec)
+                             ? std::format("{}.log", job_id)
+                             : m_cri_output_path_.filename().string();
+  if (ec && ec != std::errc::no_such_file_or_directory) {
+    CRANE_ERROR("Failed to access log path {}: {}", log_path, ec.message());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  m_container_config_.set_log_path(std::move(log_path));
+
+  // image already checked and pulled.
+  m_container_config_.mutable_image()->set_image(m_image_ref_);
+
+  // mount the generated script with uid/gid mapping
+  auto* mount = m_container_config_.add_mounts();
+  // FIXME: Add more mapping.
+  mount->mutable_uidmappings()->Add()->CopyFrom(m_uid_mapping_[0]);
+  mount->mutable_gidmappings()->Add()->CopyFrom(m_gid_mapping_[0]);
+  mount->set_host_path(m_meta_->parsed_sh_script_path);
+  mount->set_container_path("/tmp/crane/script.sh");
+  mount->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
+
+  // force the entrypoint to use the mounted script
+  // For container, we use `/bin/sh` as the default interpreter.
+  std::string real_exe = "/bin/sh";
+  if (m_parent_step_inst_->IsBatch() &&
+      !m_parent_step_inst_->GetStep().batch_meta().interpreter().empty())
+    real_exe = m_parent_step_inst_->GetStep().batch_meta().interpreter();
+
+  std::vector<std::string> command{real_exe, "/tmp/crane/script.sh"};
+  m_container_config_.mutable_command()->Assign(command.begin(), command.end());
+
+  // envs
+  for (const auto& [name, value] : m_env_) {
+    auto* env = m_container_config_.add_envs();
+    env->set_key(name);
+    env->set_value(value);
+  }
+
+  // set linux container options
+  {
+    auto* linux_sec_context =
+        m_container_config_.mutable_linux()->mutable_security_context();
+    auto* userns_options = linux_sec_context->mutable_namespace_options()
+                               ->mutable_userns_options();
+
+    // Fake root
+    // FIXME: Add subuid/subgid later
+    userns_options->set_mode(cri::api::NamespaceMode::POD);
+    userns_options->mutable_uids()->Add()->CopyFrom(m_uid_mapping_[0]);
+    userns_options->mutable_gids()->Add()->CopyFrom(m_gid_mapping_[0]);
+
+    linux_sec_context->mutable_run_as_user()->set_value(0);
+    linux_sec_context->mutable_run_as_group()->set_value(0);
+  }
+
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ProcInstance::Prepare() {
@@ -1225,18 +1291,15 @@ CraneErrCode ProcInstance::Spawn() {
 }
 
 CraneErrCode ProcInstance::Kill(int signum) {
-  if (m_pid_) {
+  if (m_pid_ != 0) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
     // Send the signal to the whole process group.
     int err = kill(-m_pid_, signum);
+    if (err == 0) return CraneErrCode::SUCCESS;
 
-    if (err == 0)
-      return CraneErrCode::SUCCESS;
-    else {
-      CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
-    }
+    CRANE_TRACE("Killing pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   return CraneErrCode::ERR_NON_EXISTENT;
@@ -1354,7 +1417,6 @@ TaskManager::TaskManager()
 }
 
 TaskManager::~TaskManager() {
-  CRANE_TRACE("Shutting down task manager.");
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
@@ -1363,8 +1425,12 @@ void TaskManager::Wait() {
 }
 
 void TaskManager::ShutdownSupervisor() {
-  CRANE_TRACE("All tasks finished, exiting...");
+  CRANE_TRACE("Shutdown requested, TaskManager is exiting...");
+
+  // Explicitly release CriClient
+  m_step_.StopCriClient();
   m_step_.StopCforedClient();
+
   g_craned_client->Shutdown();
   g_server->Shutdown();
   g_task_mgr->Shutdown();
@@ -1380,9 +1446,13 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
   auto task = m_step_.RemoveTaskInstance(task_id);
-  task->Cleanup();
+  auto err = task->Cleanup();
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_WARN("[Task #{}] Failed to cleanup task: {}", task_id,
+               static_cast<int>(err));
+  }
+
   bool orphaned = m_step_.orphaned;
-  // No need to free the TaskInstance structure,will destruct with TaskMgr.
   if (m_step_.AllTaskFinished()) {
     if (!orphaned)
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
@@ -1401,7 +1471,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.container.length() != 0) {
+  if (m_step_.IsContainer()) {
     // Container
     elem.instance = std::make_unique<ContainerInstance>(&m_step_);
   } else {
@@ -1414,7 +1484,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
   return ok_future;
 }
 
-void TaskManager::LaunchExecution_(ITaskInstance* task) {
+CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   // Init CriClient before preparation
   if (m_step_.IsContainer()) m_step_.InitCriClient();
 
@@ -1422,10 +1492,11 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_DEBUG("[Task #{}] Failed to prepare task", task->task_id);
-    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeFileNotFound,
-                              fmt::format("Failed to prepare task"));
-    return;
+    ActivateTaskStatusChange_(
+        task->task_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodeFileNotFound,
+        fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
+    return err;
   }
 
   // Init cfored before start the task.
@@ -1434,11 +1505,14 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
   CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
-    ActivateTaskStatusChange_(
-        task->task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format("Cannot spawn child process in task"));
+    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeSpawnProcessFail,
+                              fmt::format("Failed to spawn the task, code: {}",
+                                          static_cast<int>(err)));
+    return err;
   }
+
+  return CraneErrCode::SUCCESS;
 }
 
 std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
@@ -1509,8 +1583,10 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       CRANE_TRACE("Cannot find task for pid {}, will check next time.", pid);
       continue;
     }
+
     auto task_id = it->second;
     CRANE_TRACE("[Job #{}.{}] Receiving SIGCHLD for pid {}", task_id, 0, pid);
+
     auto* task = m_step_.GetTaskInstance(task_id);
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
@@ -1534,6 +1610,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       TaskStopAndDoStatusChange(task_id);
     }
   }
+
   for (auto task : not_found_tasks) {
     m_sigchld_queue_.enqueue(task);
   }
@@ -1620,34 +1697,36 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
+    // TODO: Replace job id with task id.
     CRANE_TRACE(
-        "Receive TerminateRunningTask Request from internal queue. "
+        "Receive TerminateRunningTask Request. "
         "Task id: {}",
         g_config.JobId);
+
+    m_step_.orphaned = elem.mark_as_orphaned;
 
     if (m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Terminating a completing task #{}, ignored.",
                   g_config.JobId);
-
       continue;
     }
 
-    int sig = SIGTERM;  // For BatchTask
-    if (m_step_.IsCrun()) sig = SIGHUP;
+    int sig = m_step_.IsBatch() ? SIGTERM : SIGHUP;
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.terminated_by_timeout) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
+
       if (elem.terminated_by_user) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
         task->terminated_by = TerminatedBy::CANCELLED_BY_USER;
       }
-      if (task->GetPid()) {
+
+      if (task->GetPid() != 0) {
         // For an Interactive task with a process running or a Batch task, we
         // just send a kill signal here.
         task->Kill(sig);
@@ -1677,12 +1756,12 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       TaskTerminateQueueElem ev_task_terminate{.terminated_by_timeout = true};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
-
     } else {
       // If the task haven't timed out, set up a new timer.
       AddTerminationTimer_(
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
     }
+
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
 }
@@ -1690,8 +1769,12 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    auto task = std::move(elem.instance);
-    task_id_t task_id = task->task_id;
+    // m_step_ is the only owner of tasks.
+    // No matter Task is spawned or not, adding to m_step_.
+    task_id_t task_id = elem.instance->task_id;
+    m_step_.AddTaskInstance(task_id, std::move(elem.instance));
+    auto* task = m_step_.GetTaskInstance(task_id);
+
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
@@ -1714,26 +1797,24 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       return;
     }
 
-    // TODO: Replace following job_id with task_id.
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
       return;
     }
 
-    LaunchExecution_(task.get());
-    if (!task->GetPid()) {
+    // TODO: Use thread pool
+    auto err = LaunchExecution_(task);
+    if (err != CraneErrCode::SUCCESS) {
       CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
       CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
                  task->GetPid());
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
-      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
+
+    elem.ok_prom.set_value(err);
   }
 }
 

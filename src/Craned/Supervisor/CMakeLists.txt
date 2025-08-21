@@ -1,8 +1,6 @@
 add_executable(csupervisor
         CranedClient.cpp
         CranedClient.h
-        CriClient.h
-        CriClient.cpp
         CforedClient.cpp
         CforedClient.h
         SupervisorServer.h
@@ -21,6 +19,7 @@ target_link_libraries(csupervisor
 
         Utility_PublicHeader
         Utility_PluginClient
+        Utility_CriClient
 
         crane_proto_lib
         cri_proto_lib

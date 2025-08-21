@@ -21,11 +21,13 @@
 
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
+#include "crane/CriClient.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
-#include "CriClient.h"
 #include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
+#include "cri/api.pb.h"
 
 namespace Supervisor {
 
@@ -87,14 +89,15 @@ class StepInstance {
   // CRI client in step
   void InitCriClient() {
     CRANE_ASSERT(g_config.Container.Enabled);
-    m_cri_client_ = std::make_unique<CriClient>();
+    m_cri_client_ = std::make_unique<cri::CriClient>();
     m_cri_client_->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
                                       g_config.Container.ImageEndpoint);
   }
-  [[nodiscard]] const CriClient* GetCriClient() const {
+  [[nodiscard]] const cri::CriClient* GetCriClient() const {
     return m_cri_client_.get();
   }
-  [[nodiscard]] CriClient* GetCriClient() { return m_cri_client_.get(); }
+  [[nodiscard]] cri::CriClient* GetCriClient() { return m_cri_client_.get(); }
+  void StopCriClient() { m_cri_client_.reset(); }
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
@@ -128,7 +131,7 @@ class StepInstance {
 
  private:
   crane::grpc::TaskToD m_step_to_supv_;
-  std::unique_ptr<CriClient> m_cri_client_;
+  std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
@@ -243,6 +246,11 @@ class ITaskInstance {
 
   virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
+  /* Perform file name substitutions
+   * %j - Job ID
+   * %u - Username
+   * %x - Job name
+   */
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
@@ -287,17 +295,25 @@ class ContainerInstance : public ITaskInstance {
                                                   int status) override;
 
  private:
+  static constexpr std::string kCriLabelJobIdKey = "job_id";
+  static constexpr std::string kCriLabelJobNameKey = "name";
+  static constexpr std::string kCriLabelUidKey = "uid";
+
+  CraneErrCode SetPodSandboxConfig_();
+  CraneErrCode SetContainerConfig_();
+
   std::string m_image_ref_;
   std::string m_pod_id_;
   std::string m_container_id_;
 
-  cri::PodSandboxConfig m_pod_config_;
-  cri::ContainerConfig m_container_config_;
+  cri::api::PodSandboxConfig m_pod_config_;
+  cri::api::ContainerConfig m_container_config_;
 
-  std::array<cri::IDMapping, 2> m_uid_mapping_{};
-  std::array<cri::IDMapping, 2> m_gid_mapping_{};
+  std::array<cri::api::IDMapping, 2> m_uid_mapping_{};
+  std::array<cri::api::IDMapping, 2> m_gid_mapping_{};
 
   std::filesystem::path m_temp_path_;
+  std::filesystem::path m_cri_output_path_;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -332,7 +348,6 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void Wait();
-
   void ShutdownSupervisor();
 
   // NOLINTBEGIN(readability-identifier-naming)
@@ -372,7 +387,7 @@ class TaskManager {
                                  crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
-  void LaunchExecution_(ITaskInstance* task);
+  CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
@@ -401,7 +416,8 @@ class TaskManager {
     // task->status=Cancelled (From Craned)
     bool terminated_by_timeout{false};  // If the task is terminated by timeout,
     // task->status=Timeout (From internal queue)
-    bool mark_as_orphaned{false};
+    bool mark_as_orphaned{false};  // If the task is considerred invalid,
+    // terminate and don't notify ctld.
   };
 
   struct ChangeTaskTimeLimitQueueElem {
