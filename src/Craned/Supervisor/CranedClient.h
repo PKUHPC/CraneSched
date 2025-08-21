@@ -17,7 +17,8 @@
  */
 
 #pragma once
-#include "SupervisorPublicDefs.h"
+
+#include "../Common/CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include "protos/Crane.grpc.pb.h"

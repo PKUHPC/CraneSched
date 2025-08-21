@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "SupervisorPublicDefs.h"
+#include "../Common/CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include "protos/Supervisor.grpc.pb.h"

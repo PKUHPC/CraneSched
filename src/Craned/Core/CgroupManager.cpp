@@ -29,7 +29,7 @@
 #  include <linux/bpf.h>
 #endif
 
-#include "CranedPublicDefs.h"
+#include "../Common/CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "crane/PluginClient.h"
