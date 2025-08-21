@@ -27,9 +27,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../Common/CranedPublicDefs.h"
 #include "CforedClient.h"
 #include "CranedClient.h"
-#include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/OS.h"
 #include "crane/PublicHeader.h"

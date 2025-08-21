@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CranedPublicDefs.h"
+#include "../Common/CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include <sys/file.h>

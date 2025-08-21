@@ -24,6 +24,7 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <concepts>
 #include <csignal>
 #include <filesystem>
 #include <forward_list>

@@ -19,7 +19,7 @@
 #pragma once
 #include <sched.h>
 
-#include "SupervisorPublicDefs.h"
+#include "../Common/CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
