@@ -731,6 +731,10 @@ class TaskScheduler {
   struct StepStatusChangeContext {
     /* ------------------------------ steps ------------------------------ */
 
+    // Step to alloc
+    std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
+        craned_step_alloc_map;
+
     // Steps will execute on craned
     std::unordered_map<CranedId,
                        std::unordered_map<job_id_t, std::set<step_id_t>>>

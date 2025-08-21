@@ -76,12 +76,49 @@ void StepInCtld::SetExitCode(uint32_t exit_code) {
 
 crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
     const CranedId& craned_id) const {
-  crane::grpc::JobToD spec;
-  spec.set_job_id(job_id);
-  spec.set_uid(uid);
-  *spec.mutable_res() =
+  crane::grpc::JobToD job_to_d;
+  job_to_d.set_job_id(job_id);
+  job_to_d.set_uid(uid);
+  *job_to_d.mutable_res() =
       crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
-  return spec;
+  return job_to_d;
+}
+
+crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
+    const CranedId& craned_id) const {
+  crane::grpc::StepToD step_to_d;
+  // Set time_limit
+  step_to_d.mutable_time_limit()->CopyFrom(
+      google::protobuf::util::TimeUtil::MillisecondsToDuration(
+          ToInt64Milliseconds(this->time_limit)));
+  auto* mutable_res_in_node = step_to_d.mutable_res();
+  *mutable_res_in_node =
+      static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
+
+  // Set type
+  step_to_d.set_type(this->type);
+
+  step_to_d.set_job_id(this->job_id);
+  step_to_d.set_step_id(this->step_id);
+  step_to_d.set_name(this->name);
+
+  step_to_d.set_node_num(this->node_num);
+
+  step_to_d.set_uid(uid);
+  step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+  step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
+  step_to_d.set_container(this->container);
+  step_to_d.set_get_user_env(this->get_user_env);
+
+  for (const auto& hostname : this->craned_ids)
+    step_to_d.mutable_nodelist()->Add()->assign(hostname);
+
+  step_to_d.mutable_start_time()->set_seconds(
+      ToUnixSeconds(this->m_start_time_));
+  step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+
+  return step_to_d;
 }
 
 crane::grpc::StepToD CommonStepInCtld::GetStepToD(
@@ -397,14 +434,23 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 void TaskInCtld::InitDaemonStepInCtld() {
   m_daemon_step_ = std::make_unique<DaemonStepInCtld>();
   /*Fields in StepInCtld*/
+  m_daemon_step_->type = type;
+  m_daemon_step_->step_type = crane::grpc::StepType::DAEMON;
   m_daemon_step_->job_id = task_id;
   m_daemon_step_->step_id = kDaemonStepId;
   m_daemon_step_->uid = uid;
   m_daemon_step_->gids = {task_to_ctld.gid()};
-
   m_daemon_step_->name = name;
+  m_daemon_step_->username = username;
+  m_daemon_step_->get_user_env = get_user_env;
+  m_daemon_step_->env = env;
+  m_daemon_step_->container = container;
+
   m_daemon_step_->time_limit = time_limit;
   m_daemon_step_->requested_node_res_view = requested_node_res_view;
+  m_daemon_step_->node_num = node_num;
+  m_daemon_step_->included_nodes = included_nodes;
+  m_daemon_step_->excluded_nodes = excluded_nodes;
   m_daemon_step_->configuring_nodes =
       CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
   m_daemon_step_->running_nodes =
@@ -412,6 +458,11 @@ void TaskInCtld::InitDaemonStepInCtld() {
   m_daemon_step_->SetSubmitTime(submit_time);
   m_daemon_step_->SetCranedIds(craned_ids);
   m_daemon_step_->SetStatus(crane::grpc::TaskStatus::Configuring);
+
+  m_daemon_step_->SetSubmitTime(submit_time);
+  m_daemon_step_->SetStartTime(start_time);
+  m_daemon_step_->SetEndTime(end_time);
+  m_daemon_step_->SetAllocatedRes(allocated_res);
 
   /*Fields in DaemonStepInCtld*/
   m_daemon_step_->partition = partition_id;
@@ -422,14 +473,24 @@ void TaskInCtld::InitDaemonStepInCtld() {
 void TaskInCtld::InitPrimaryStepInCtld() {
   m_primary_step_ = std::make_unique<CommonStepInCtld>();
   /*Fields in StepInCtld*/
+  m_primary_step_->step_type = crane::grpc::StepType::PRIMARY;
+  m_primary_step_->type = type;
   m_primary_step_->job_id = task_id;
   m_primary_step_->step_id = kDaemonStepId + 1;
   m_primary_step_->uid = uid;
   m_primary_step_->gids = {task_to_ctld.gid()};
 
   m_primary_step_->name = name;
+  m_primary_step_->username = username;
+  m_primary_step_->get_user_env = get_user_env;
+  m_primary_step_->env = env;
+  m_primary_step_->container = container;
+
   m_primary_step_->time_limit = time_limit;
   m_primary_step_->requested_node_res_view = requested_node_res_view;
+  m_primary_step_->node_num = node_num;
+  m_primary_step_->included_nodes = included_nodes;
+  m_primary_step_->excluded_nodes = excluded_nodes;
 
   m_primary_step_->SetSubmitTime(submit_time);
   m_primary_step_->SetCranedIds(craned_ids);
@@ -438,16 +499,17 @@ void TaskInCtld::InitPrimaryStepInCtld() {
       CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
   m_primary_step_->running_nodes =
       CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_primary_step_->SetSubmitTime(submit_time);
+  m_primary_step_->SetStartTime(start_time);
+  m_primary_step_->SetEndTime(end_time);
+  m_primary_step_->SetAllocatedRes(allocated_res);
 
-  /*Fields in PrimaryStepInCtld*/
-  m_primary_step_->type = type;
-  m_primary_step_->node_num = node_num;
+  /*Fields in CommonStepInCtld*/
   m_primary_step_->ntasks_per_node = ntasks_per_node;
   m_primary_step_->cpus_per_task = cpus_per_task;
   m_primary_step_->requeue_if_failed = requeue_if_failed;
-  m_primary_step_->get_user_env = get_user_env;
   m_primary_step_->cmd_line = cmd_line;
-  m_primary_step_->env = env;
+
   m_primary_step_->cwd = cwd;
   m_primary_step_->container = container;
   m_primary_step_->extra_attr = extra_attr;
