@@ -1,6 +1,8 @@
 # Create a static library for common components
 add_library(craned_common STATIC
     CranedPreCompiledHeader.h
+    DeviceManager.h
+    DeviceManager.cpp
 )
 
 # Set the precompiled header for the common library

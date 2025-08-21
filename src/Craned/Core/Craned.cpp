@@ -29,10 +29,10 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
+#include "../Common/DeviceManager.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
