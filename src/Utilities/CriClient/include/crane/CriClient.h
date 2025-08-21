@@ -17,27 +17,35 @@
  */
 
 #pragma once
-
-#include "SupervisorPreCompiledHeader.h"
-// Precompiled header comes first
-
-#include <grpcpp/channel.h>
-
-#include "SupervisorPublicDefs.h"
-#include "crane/Lock.h"
-#include "crane/PublicHeader.h"
 #include "cri/api.grpc.pb.h"
 #include "cri/api.pb.h"
+// CRI protobuf must comes at first
 
-namespace Supervisor {
+#include <absl/container/flat_hash_map.h>
+#include <google/protobuf/message.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/support/status.h>
 
-namespace cri = runtime::v1;
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <string>
+#include <thread>
 
-inline constexpr std::string kDefaultPodNamespace = "cranesched";
-inline constexpr std::chrono::seconds kDefaultCriReqTimeout =
+#include "crane/Lock.h"
+#include "crane/PublicHeader.h"
+
+namespace cri {
+
+namespace api = runtime::v1;
+
+inline constexpr std::string kCriDefaultPodNamespace = "cranesched";
+inline constexpr std::string kCriDefaultLabel = kCriDefaultPodNamespace;
+inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
+
 using ContainerEventCallback =
-    std::function<void(const cri::ContainerEventResponse&)>;
+    std::function<void(const api::ContainerEventResponse&)>;
 
 class CriClient {
  public:
@@ -60,8 +68,7 @@ class CriClient {
   // ==== Runtime Service ====
 
   // Pod
-  CraneExpected<std::string> RunPodSandbox(
-      const cri::PodSandboxConfig& config) const;
+  CraneExpected<std::string> RunPodSandbox(api::PodSandboxConfig* config) const;
 
   CraneExpected<void> StopPodSandbox(const std::string& pod_sandbox_id) const;
 
@@ -69,7 +76,8 @@ class CriClient {
 
   // Containers
   CraneExpected<std::string> CreateContainer(
-      const cri::ContainerConfig& config) const;
+      const std::string& pod_id, const api::PodSandboxConfig& pod_config,
+      api::ContainerConfig* config) const;
 
   CraneExpected<void> StartContainer(const std::string& container_id) const;
 
@@ -88,43 +96,34 @@ class CriClient {
   bool IsEventStreamActive() const;
 
   // Active Container Status Checking
-  CraneExpected<std::vector<cri::Container>> ListContainers() const;
+  CraneExpected<std::vector<api::Container>> ListContainers() const;
 
-  CraneExpected<std::vector<cri::Container>> ListContainers(
+  CraneExpected<std::vector<api::Container>> ListContainers(
       const std::map<std::string, std::string>& label_selector) const;
 
-  CraneExpected<cri::ContainerStatus> GetContainerStatus(
+  CraneExpected<api::ContainerStatus> GetContainerStatus(
       const std::string& container_id, bool verbose = false) const;
 
   // ==== Image Service ====
-
+  // TODO: Async image pulling?
   std::optional<std::string> GetImageId(const std::string& image_ref) const;
   std::optional<std::string> PullImage(const std::string& image_ref) const;
 
-  // ==== Helper Methods ====
-
-  // Generate a default PodMetadata
-  static cri::PodSandboxMetadata BuildPodSandboxMetaData(
-      uid_t uid, job_id_t job_id, const std::string& name);
-
-  // Generate default Pod labels
-  static std::unordered_map<std::string, std::string> BuildPodLabels(
-      uid_t uid, job_id_t job_id, const std::string& name);
-
-  // Generate a default ContainerMetadata
-  // TODO: Refactor these methods after we seperate job and step.
-  static cri::ContainerMetadata BuildContainerMetaData(uid_t uid,
-                                                       job_id_t job_id,
-                                                       const std::string& name);
-
-  // Generate default Container labels
-  static std::unordered_map<std::string, std::string> BuildContainerLabels(
-      uid_t uid, job_id_t job_id, const std::string& name);
-
  private:
+  // Inject labels and metadata for future selection
+  static void InjectConfig_(api::PodSandboxConfig* config) {
+    config->mutable_metadata()->set_namespace_(kCriDefaultPodNamespace);
+    config->mutable_labels()->emplace(kCriDefaultLabel,
+                                      "true");  // Default label for CRI
+  }
+  static void InjectConfig_(api::ContainerConfig* config) {
+    config->mutable_labels()->emplace(kCriDefaultLabel,
+                                      "true");  // Default label for CRI
+  }
+
   // Container Event Stream Management
   void ContainerEventStreamLoop_();
-  void HandleContainerEvent_(const cri::ContainerEventResponse& event);
+  void HandleContainerEvent_(const api::ContainerEventResponse& event);
 
   // Container event streaming
   std::thread m_event_stream_thread_;
@@ -134,8 +133,8 @@ class CriClient {
 
   std::shared_ptr<grpc::Channel> m_rs_channel_;
   std::shared_ptr<grpc::Channel> m_is_channel_;
-  std::shared_ptr<cri::RuntimeService::Stub> m_rs_stub_;
-  std::shared_ptr<cri::ImageService::Stub> m_is_stub_;
+  std::shared_ptr<api::RuntimeService::Stub> m_rs_stub_;
+  std::shared_ptr<api::ImageService::Stub> m_is_stub_;
 };
 
-}  // namespace Supervisor
+}  // namespace cri
