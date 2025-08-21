@@ -256,6 +256,7 @@ message JobToD {
   string partition = 5;
   string account = 6;
   string qos = 7;
+  StepToD daemon_step = 8;
 }
 
 enum StepType {

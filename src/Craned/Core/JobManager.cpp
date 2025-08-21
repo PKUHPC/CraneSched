@@ -111,7 +111,14 @@ JobManager::JobManager() {
   m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0},
                                           std::chrono::milliseconds{500});
 
-  // gRPC Execute Task Event
+  // gRPC Alloc step Event
+  m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_alloc_step_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanGrpcAllocStepsQueueCb_();
+      });
+
+  // gRPC Execute step Event
   m_grpc_execute_step_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_step_async_handle_->on<uvw::async_event>(
@@ -309,11 +316,9 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
       step_inst->step_to_d = std::move(step);
       EvQueueAllocateStepElem elem{.step_inst = std::move(step_inst)};
       m_grpc_alloc_step_queue_.enqueue(std::move(elem));
-      m_grpc_alloc_step_async_handle_->send();
     }
   }
-
-  return;
+  m_grpc_alloc_step_async_handle_->send();
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
@@ -410,10 +415,9 @@ void JobManager::EvCleanGrpcAllocStepsQueueCb_() {
 
     std::unique_ptr step_inst = std::move(elem.step_inst);
 
-    if (!m_job_map_.Contains(step_inst->step_to_d.job_id())) {
-      CRANE_ERROR("[Job #{}.{}]Failed to find allocation",
-                  step_inst->step_to_d.job_id(),
-                  step_inst->step_to_d.step_id());
+    if (!m_job_map_.Contains(step_inst->job_id)) {
+      CRANE_ERROR("[Job #{}.{}]Failed to find allocation", step_inst->job_id,
+                  step_inst->step_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
       continue;
     }
@@ -904,18 +908,24 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       return;
     }
   }
-
+  auto* step_ptr = step.get();
+  {
+    absl::MutexLock lk(&job->step_map_mtx);
+    job->step_map.emplace(step->step_id, std::move(step));
+  }
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErrCode err = SpawnSupervisor_(job, step.get());
+  CraneErrCode err = SpawnSupervisor_(job, step_ptr);
   if (err != CraneErrCode::SUCCESS) {
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
                     job_id));
+    absl::MutexLock lk(&job->step_map_mtx);
+    job->step_map.erase(step_id);
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
     // process. Now we put the child pid into index maps. SIGCHLD sent just
@@ -923,9 +933,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     // by timer and eventually be handled once the SIGCHLD processing callback
     // sees the pid in index maps. Now we do not support launch multiple tasks
     // in a job.
-    CRANE_TRACE("[job #{}.{}] Spawned successfully.", step->job_id,
-                step->step_id);
-    job->step_map.emplace(step->step_id, std::move(step));
+    CRANE_TRACE("[job #{}.{}] Spawned successfully.", job_id, step_id);
   }
 }
 
@@ -934,6 +942,9 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
     auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
     if (!job_ptr) {
+      continue;
+    }
+    if (!job_ptr->step_map.contains(status_change.step_id)) {
       continue;
     }
 
@@ -977,7 +988,7 @@ CraneExpected<JobInD*> JobManager::QueryJob(job_id_t job_id) {
 }
 
 std::map<job_id_t, std::set<step_id_t>> JobManager::GetAllocatedJobSteps() {
-  auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
+  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
   std::map<job_id_t, std::set<step_id_t>> job_steps;
   for (auto& [job_id, job] : *job_map_ptr) {
     job_steps[job_id] = job.GetExclusivePtr()->step_map | std::views::keys |

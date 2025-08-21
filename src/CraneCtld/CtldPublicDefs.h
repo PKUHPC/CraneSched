@@ -401,6 +401,8 @@ struct StepInCtld {
    * cancel.
    */
   crane::grpc::StepType step_type;
+  crane::grpc::TaskType type;
+
   job_id_t job_id;
   step_id_t step_id{0};
   uid_t uid;
@@ -409,9 +411,13 @@ struct StepInCtld {
 
   step_db_id_t step_db_id{0};
   std::string username;
+  bool get_user_env{false};
+  std::unordered_map<std::string, std::string> env;
+  std::string container;
 
   absl::Duration time_limit;
   ResourceView requested_node_res_view;
+  uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
@@ -478,24 +484,20 @@ struct DaemonStepInCtld : StepInCtld {
   std::string qos;
 
   [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
+
+  crane::grpc::StepToD GetStepToD(const CranedId& craned_id) const;
 };
 
 struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
 
-  crane::grpc::TaskType type;
-
-  uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
   cpu_t cpus_per_task{0};
 
   bool requeue_if_failed{false};
-  bool get_user_env{false};
 
   std::string cmd_line;
-  std::unordered_map<std::string, std::string> env;
   std::string cwd;
-  std::string container;
 
   std::string extra_attr;
 

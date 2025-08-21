@@ -177,9 +177,8 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
 
   status = m_stub_->FreeJobs(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG(
-        "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
-        m_craned_id_, status.error_message());
+    CRANE_DEBUG("FreeJobs gRPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }

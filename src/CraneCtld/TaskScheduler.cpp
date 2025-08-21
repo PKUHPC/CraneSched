@@ -28,7 +28,6 @@
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
-
 using namespace std::chrono_literals;
 
 TaskScheduler::TaskScheduler() {
@@ -658,14 +657,14 @@ void TaskScheduler::ScheduleThread_() {
         auto& task = it.first;
         task->InitDaemonStepInCtld();
         task->InitPrimaryStepInCtld();
+        auto* daemon_step = task->DaemonStep();
         for (CranedId const& craned_id : task->CranedIds()) {
           craned_daemon_step_map[craned_id].push_back(
-              task->DaemonStep()->GetJobToD(craned_id));
+              daemon_step->GetJobToD(craned_id));
         }
-        auto* primary_step = task->PrimaryStep();
-        for (const auto& craned_id : primary_step->CranedIds())
+        for (const auto& craned_id : daemon_step->CranedIds())
           craned_alloc_steps[craned_id].emplace_back(
-              primary_step->GetStepToD(craned_id));
+              daemon_step->GetStepToD(craned_id));
       }
 
       Mutex thread_pool_mtx;
@@ -682,8 +681,15 @@ void TaskScheduler::ScheduleThread_() {
           CRANE_TRACE("Send AllocJobs for {} tasks to {}", jobs.size(),
                       craned_id);
           if (stub == nullptr || stub->Invalid()) {
-            CRANE_TRACE("AllocJobs for {} jobs to {} failed: craned down.",
-                        jobs.size(), craned_id);
+            CRANE_TRACE(
+                "AllocJobs for jobs [{}] to {} failed: Craned down.",
+                absl::StrJoin(
+                    jobs | std::views::transform(
+                               [](const crane::grpc::JobToD& job_to_d) {
+                                 return std::to_string(job_to_d.job_id());
+                               }),
+                    ","),
+                craned_id);
             failed_craned_set.emplace(craned_id);
             for (const auto& job_to_d : jobs)
               failed_task_id_set.emplace(job_to_d.job_id());
@@ -696,10 +702,14 @@ void TaskScheduler::ScheduleThread_() {
             bl.DecrementCount();
             return;
           }
-
-          CRANE_TRACE(
-              "CreateCgroupForTasks for {} tasks to {} failed: Rpc failure.",
-              jobs.size(), craned_id);
+          CRANE_TRACE("AllocJobs for jobs [{}] to {} failed: Rpc failure.",
+                      absl::StrJoin(
+                          jobs | std::views::transform(
+                                     [](const crane::grpc::JobToD& job_to_d) {
+                                       return std::to_string(job_to_d.job_id());
+                                     }),
+                          ","),
+                      craned_id);
           thread_pool_mtx.Lock();
 
           failed_craned_set.emplace(craned_id);
@@ -726,16 +736,23 @@ void TaskScheduler::ScheduleThread_() {
         g_thread_pool->detach_task([&]() {
           auto& steps = craned_alloc_steps[craned_id];
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send AllocJobs for {} tasks to {}", steps.size(),
-                      craned_id);
+          CRANE_TRACE(
+              "Send AllocSteps for {} tasks to {}",
+              absl::StrJoin(
+                  steps | std::views::transform([](const auto& step_to_d) {
+                    return fmt::format("{}.{}", step_to_d.job_id(),
+                                       step_to_d.step_id());
+                  }),
+                  ","),
+              craned_id);
           if (stub == nullptr || stub->Invalid()) {
-            bl.DecrementCount();
+            primary_latch.count_down();
             return;
           }
 
           auto err = stub->AllocSteps(steps);
           if (err == CraneErrCode::SUCCESS) {
-            bl.DecrementCount();
+            primary_latch.count_down();
             return;
           }
 
@@ -753,7 +770,7 @@ void TaskScheduler::ScheduleThread_() {
           // 1. call g_meta_container->FreeResources() for the failed tasks.
           // 2. Release all cgroups related to these failed tasks.
           // 3. Move these tasks to the completed queue.
-          CRANE_ERROR("Craned #{} failed when AllocJobs.", craned_id);
+          CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
 
           primary_latch.count_down();
         });
@@ -1934,6 +1951,12 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
                     step->step_id);
         step->SetStatus(crane::grpc::TaskStatus::Running);
         context->rn_step_raw_ptrs.push_back(step);
+        if (job->PrimaryStep()) {
+          for (auto& node_id : step->CranedIds()) {
+            context->craned_step_alloc_map[node_id].emplace_back(
+                job->PrimaryStep()->GetStepToD(node_id));
+          }
+        }
       }
     }
   } else {
@@ -2105,6 +2128,11 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
           }
         }
       }
+      if (step->ConfigureFailed()) {
+        CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
+                   step->step_id);
+        step->SetStatus(step->configure_failed_status);
+      }
       if (step->FinishWithFailedStatus()) {
         step->SetStatus(step->finish_failed_status);
       } else {
@@ -2248,6 +2276,51 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       m_running_task_map_.erase(iter);
     }
   }
+  std::latch alloc_step_latch{
+      static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
+
+  for (const auto& craned_id : context.craned_step_alloc_map | std::views::keys)
+    g_thread_pool->detach_task([this, &alloc_step_latch, &craned_id, &context] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      // If the craned is down, just ignore it.
+      if (stub && !stub->Invalid()) {
+        auto err =
+            stub->AllocSteps(context.craned_step_alloc_map.at(craned_id));
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "Failed to AllocSteps for [{}] tasks on Node {}: Rpc failure",
+              absl::StrJoin(context.craned_step_alloc_map.at(craned_id) |
+                                std::views::transform(
+                                    [](const crane::grpc::StepToD& step) {
+                                      return fmt::format("{}.{}", step.job_id(),
+                                                         step.step_id());
+                                    }),
+                            ","),
+              craned_id);
+        }
+        alloc_step_latch.count_down();
+      } else {
+        CRANE_ERROR(
+            "Failed to AllocSteps for [{}] tasks on Node {}: Craned down",
+            absl::StrJoin(
+                context.craned_step_alloc_map.at(craned_id) |
+                    std::views::transform([](const crane::grpc::StepToD& step) {
+                      return fmt::format("{}.{}", step.job_id(),
+                                         step.step_id());
+                    }),
+                ","),
+            craned_id);
+        alloc_step_latch.count_down();
+        for (const auto& [job_id, step_ids] :
+             context.craned_step_exec_map.at(craned_id)) {
+          for (const auto& step_id : step_ids)
+            StepStatusChangeWithReasonAsync(
+                job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::kExitCodeCranedDown, "CranedDown");
+        }
+      }
+      alloc_step_latch.count_down();
+    });
 
   std::latch exec_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_exec_map.size())};
@@ -2281,7 +2354,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           for (const auto& step_id : step_ids)
             StepStatusChangeWithReasonAsync(
                 job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeCranedDown, "Craned");
+                ExitCode::kExitCodeCranedDown, "CranedDown");
         }
       }
       exec_step_latch.count_down();
@@ -2348,6 +2421,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     });
   }
 
+  alloc_step_latch.wait();
   exec_step_latch.wait();
   orphaned_step_latch.wait();
   cancel_step_latch.wait();

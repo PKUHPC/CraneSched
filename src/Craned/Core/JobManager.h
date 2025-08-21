@@ -31,7 +31,7 @@
 namespace Craned {
 
 constexpr int kMaxSupervisorCheckRetryCount = 10;
-// TODO: Replace this with tak execution info.
+
 using StepToD = crane::grpc::StepToD;
 struct StepInstance {
   job_id_t job_id;
@@ -66,7 +66,9 @@ struct JobInD {
   bool orphaned{false};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
-  absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
+  absl::Mutex step_map_mtx;
+  absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map
+      ABSL_GUARDED_BY(step_map_mtx);
 
   EnvMap GetJobEnvMap();
 };
@@ -254,9 +256,6 @@ class JobManager {
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>, int /*retry count*/>
       m_free_step_retry_map_ ABSL_GUARDED_BY(m_free_step_mtx_);
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
-
-  std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
-  ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
   ConcurrentQueue<EvQueueAllocateStepElem> m_grpc_alloc_step_queue_;
