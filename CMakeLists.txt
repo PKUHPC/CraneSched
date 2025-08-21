@@ -339,6 +339,13 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+find_package(Subid REQUIRED)
+if (Subid_FOUND)
+    message(STATUS "Subid found. Include: ${SUBID_INCLUDE_DIRS}; Libs: ${SUBID_LIBRARIES}")
+else ()
+    message(FATAL_ERROR "Subid library was not found.")
+endif ()
+
 if (CRANE_ENABLE_BPF)
     find_package(BPF 1.4.6 REQUIRED)
 endif ()
