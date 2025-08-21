@@ -30,7 +30,7 @@
 #endif
 
 #include "../Common/CranedPublicDefs.h"
-#include "DeviceManager.h"
+#include "../Common/DeviceManager.h"
 #include "JobManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"

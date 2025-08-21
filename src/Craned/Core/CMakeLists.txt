@@ -5,8 +5,6 @@ add_executable(craned
         CgroupManager.cpp
         JobManager.h
         JobManager.cpp
-        DeviceManager.cpp
-        DeviceManager.h
         SupervisorKeeper.cpp
         SupervisorKeeper.h
         CranedServer.h
