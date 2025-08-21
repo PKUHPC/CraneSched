@@ -19,7 +19,6 @@
 #pragma once
 #include <sched.h>
 
-#include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "crane/CriClient.h"
 // Precompiled header comes first.
@@ -96,16 +95,22 @@ class StepInstance {
   [[nodiscard]] cri::CriClient* GetCriClient() { return m_cri_client_.get(); }
   void StopCriClient() { m_cri_client_.reset(); }
 
+  // Just a convenient method for iteration on the map.
+  auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
+
+  ITaskInstance* GetTaskInstance(task_id_t task_id) {
+    return m_task_map_.at(task_id).get();
+  }
+  const ITaskInstance* GetTaskInstance(task_id_t task_id) const {
+    return m_task_map_.at(task_id).get();
+  }
+
   // OOM monitoring methods
   void InitOomBaseline();
   bool EvaluateOomOnExit();
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
-
-  ITaskInstance* GetTaskInstance(task_id_t task_id);
-  const ITaskInstance* GetTaskInstance(task_id_t task_id) const;
-
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
 
   bool AllTaskFinished() const;
@@ -177,6 +182,8 @@ struct TaskExitInfo {
   int value{0};
 };
 
+using TaskExecId = std::variant<std::string, pid_t>;
+
 class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
@@ -199,8 +206,6 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  void TaskProcStopped();
-  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
@@ -214,13 +219,12 @@ class ITaskInstance {
   virtual CraneErrCode Kill(int signum) = 0;
   virtual CraneErrCode Cleanup() = 0;
 
+  virtual std::optional<TaskExecId> GetExecId() const = 0;
   virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                           int status) = 0;
 
   task_id_t task_id;
-
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
-
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
@@ -264,7 +268,7 @@ class ITaskInstance {
 
   StepInstance* m_parent_step_inst_;
 
-  pid_t m_pid_{0};  // forked pid
+  // [[deprecated]] pid_t m_pid_{0};  // forked pid
 
   std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
@@ -296,6 +300,10 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_container_id_.empty()) return std::nullopt;
+    return m_container_id_;
+  }
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                   int status) override;
 
@@ -337,8 +345,15 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_pid_ == 0) return std::nullopt;
+    return m_pid_;
+  }
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                   int status) override;
+
+ private:
+  pid_t m_pid_{0};  // forked pid
 };
 
 class TaskManager {
@@ -445,9 +460,11 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
   ConcurrentQueue<std::pair<pid_t, int>> m_sigchld_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_task_stop_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_stop_queue_;
+  // Task is already terminated
+  std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
+  ConcurrentQueue<task_id_t> m_task_stopped_queue_;
 
+  // Task is requested to be terminated
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
@@ -465,7 +482,7 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
-  std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
+  std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
 };
 
 }  // namespace Craned::Supervisor
