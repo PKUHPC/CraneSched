@@ -120,7 +120,7 @@ message FreeJobsRequest {
   repeated uint32 job_id_list = 1;
 }
 
-message FreeJobsReply{}
+message FreeJobsReply {}
 
 message ExecuteStepsRequest {
   map<uint32, JobStepIds> job_step_ids_map = 1;

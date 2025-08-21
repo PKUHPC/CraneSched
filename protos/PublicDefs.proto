@@ -197,7 +197,7 @@ message RuntimeAttrOfTask {
   double cached_priority = 20;
 }
 
-message StepToCtld{
+message StepToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
 
@@ -274,14 +274,14 @@ message StepToD {
   uint32 uid = 6;
   repeated uint32 gid = 7;
 
-  //For execution step
+  // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;
   optional InteractiveTaskAdditionalMeta interactive_meta = 10;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 14;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
   google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
 
@@ -302,12 +302,12 @@ message StepToD {
   string extra_attr = 29;
 }
 
-message JobStepsToD{
+message JobStepsToD {
   JobToD job = 1;
   map<uint32, StepToD> steps = 2;
 }
 
-message JobStepIds{
+message JobStepIds {
   repeated uint32 steps = 1;
 }
 
@@ -666,7 +666,7 @@ message CranedRemoteMeta {
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
-  message Steps{
+  message Steps {
     repeated uint32 steps = 1;
   }
   map<uint32, Steps> lost_steps = 6;

@@ -284,8 +284,9 @@ void CtldClientStateMachine::ActionConfigure_(
 void CtldClientStateMachine::ActionRegister_(
     std::set<task_id_t>&& lost_jobs,
     std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps) {
- CRANE_LOGGER_DEBUG(m_logger_,"Ctld client state machine has entered state {}",
-              StateToString(m_state_));
+  CRANE_LOGGER_DEBUG(m_logger_,
+                     "Ctld client state machine has entered state {}",
+                     StateToString(m_state_));
   if (m_action_register_cb_)
     g_thread_pool->detach_task(
         [tok = m_reg_token_.value(), lost_jobs, lost_steps, this] mutable {
@@ -392,10 +393,10 @@ void CtldClient::Init() {
         }
         auto job_ids = job_steps_id_map | std::views::keys;
 
-       CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                            "Configuring action for token {}. Steps [{}]",
-                    ProtoTimestampToString(token),
-                    util::JobStepsToString(job_steps_id_map), ",");
+                           ProtoTimestampToString(token),
+                           util::JobStepsToString(job_steps_id_map), ",");
 
         // std::map keys are ordered, so we can use set difference.
         std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
