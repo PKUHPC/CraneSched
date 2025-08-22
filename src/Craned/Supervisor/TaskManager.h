@@ -312,8 +312,18 @@ class ContainerInstance : public ITaskInstance {
   static constexpr std::string kCriLabelJobNameKey = "name";
   static constexpr std::string kCriLabelUidKey = "uid";
 
+  inline static cri::api::IDMapping MakeIdMapping_(uid_t host_id,
+                                                   uid_t container_id,
+                                                   size_t size);
+
   CraneErrCode SetPodSandboxConfig_();
   CraneErrCode SetContainerConfig_();
+
+  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
+                                     cri::api::ContainerConfig* config);
+  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
+                                     cri::api::PodSandboxConfig* config);
+  CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
 
   std::string m_image_ref_;
   std::string m_pod_id_;
