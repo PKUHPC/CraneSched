@@ -62,7 +62,7 @@ class SubIdRanges {
   const struct subid_range& operator[](int index) const {
     return m_ranges_[index];
   }
-  
+
   const struct subid_range& At(int index) const {
     if (index < 0 || index >= m_count_ || m_ranges_ == nullptr) {
       throw std::out_of_range("SubIdRanges index out of range");
