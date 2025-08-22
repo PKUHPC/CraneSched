@@ -61,11 +61,9 @@ class CriClient {
   void InitChannelAndStub(const std::filesystem::path& runtime_service,
                           const std::filesystem::path& image_service);
 
-  // TODO: Remove these debugging methods
+  // ==== Runtime Service ====
   void Version() const;
   void RuntimeConfig() const;
-
-  // ==== Runtime Service ====
 
   // Pod
   CraneExpected<std::string> RunPodSandbox(api::PodSandboxConfig* config) const;
