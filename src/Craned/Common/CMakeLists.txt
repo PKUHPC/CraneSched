@@ -3,6 +3,8 @@ add_library(craned_common STATIC
     CranedPreCompiledHeader.h
     DeviceManager.h
     DeviceManager.cpp
+    CgroupManager.h
+    CgroupManager.cpp
 )
 
 # Set the precompiled header for the common library
@@ -12,7 +14,7 @@ target_precompile_headers(craned_common PRIVATE CranedPreCompiledHeader.h)
 target_include_directories(craned_common 
     PUBLIC 
         ${CMAKE_CURRENT_SOURCE_DIR}
-        $<$<BOOL:${CRANE_ENABLE_CGROUP_V2}>:${LIBCGROUP_PATH}/include/>
+        ${LIBCGROUP_PATH}/include/
 )
 
 # Link dependencies for the common library
@@ -20,6 +22,8 @@ target_link_libraries(craned_common
     PUBLIC
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
         concurrentqueue
+        
+        ${LIBCGROUP_BUILD_PRODUCTS}
         
         Utility_PublicHeader
         Utility_PluginClient

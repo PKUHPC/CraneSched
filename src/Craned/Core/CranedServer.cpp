@@ -20,7 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "CgroupManager.h"
+#include "../Common/CgroupManager.h"
 #include "CranedForPamServer.h"
 #include "CtldClient.h"
 #include "JobManager.h"

@@ -1,8 +1,6 @@
 add_executable(craned
         CtldClient.h
         CtldClient.cpp
-        CgroupManager.h
-        CgroupManager.cpp
         JobManager.h
         JobManager.cpp
         SupervisorKeeper.cpp
@@ -18,5 +16,4 @@ add_executable(craned
 target_link_libraries(craned
     PRIVATE
         craned_common
-        ${LIBCGROUP_BUILD_PRODUCTS}
 )
