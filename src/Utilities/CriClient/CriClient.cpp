@@ -336,14 +336,16 @@ void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
   m_event_stream_stop_ = false;
   m_event_stream_thread_ = std::thread([this] { ContainerEventStreamLoop_(); });
 
-  CRANE_DEBUG("Container event stream started");
+  CRANE_TRACE("Container event stream started");
 }
 
 void CriClient::StopContainerEventStream() {
   if (m_event_stream_thread_.joinable()) {
     m_event_stream_stop_ = true;
     m_event_stream_thread_.join();
-    CRANE_DEBUG("Container event stream stopped");
+    CRANE_TRACE("Container event stream stopped");
+  } else {
+    CRANE_TRACE("Container event stream not running");
   }
 
   {
@@ -369,7 +371,7 @@ void CriClient::ContainerEventStreamLoop_() {
       context.set_deadline(std::chrono::system_clock::now() +
                            std::chrono::minutes(5));
 
-      CRANE_DEBUG("Starting container event stream...");
+      CRANE_TRACE("Starting container event stream...");
       auto stream = m_rs_stub_->GetContainerEvents(&context, request);
 
       ContainerEventResponse response;
@@ -398,16 +400,13 @@ void CriClient::ContainerEventStreamLoop_() {
     }
   }
 
-  CRANE_DEBUG("Container event stream loop ended");
+  CRANE_TRACE("Container event stream loop ended");
 }
 
 void CriClient::HandleContainerEvent_(
     const api::ContainerEventResponse& event) {
   // Only propagate concerned events using label selection
   if (!event.pod_sandbox_status().labels().contains(kCriDefaultLabel)) return;
-
-  // Log the event
-  CRANE_TRACE("Received container event: {}", event.DebugString());
 
   // Invoke the callback if set
   util::lock_guard lock(m_event_callback_mutex_);
@@ -441,7 +440,7 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
     containers.push_back(container);
   }
 
-  CRANE_DEBUG("Listed {} containers", containers.size());
+  CRANE_TRACE("Listed {} containers", containers.size());
   return containers;
 }
 
@@ -478,7 +477,7 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
     containers.push_back(container);
   }
 
-  CRANE_DEBUG("Listed {} containers matching labels", containers.size());
+  CRANE_TRACE("Listed {} containers matching labels", containers.size());
   return containers;
 }
 

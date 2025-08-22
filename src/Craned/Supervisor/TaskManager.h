@@ -99,9 +99,12 @@ class StepInstance {
   auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
 
   ITaskInstance* GetTaskInstance(task_id_t task_id) {
+    if (!m_task_map_.contains(task_id)) return nullptr;
     return m_task_map_.at(task_id).get();
   }
+
   const ITaskInstance* GetTaskInstance(task_id_t task_id) const {
+    if (!m_task_map_.contains(task_id)) return nullptr;
     return m_task_map_.at(task_id).get();
   }
 
@@ -178,7 +181,6 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
-  int status{0};
   int value{0};
 };
 
@@ -206,9 +208,7 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  [[nodiscard]] virtual const TaskExitInfo& GetExitInfo() const {
-    return m_exit_info_;
-  }
+  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec,
@@ -222,8 +222,6 @@ class ITaskInstance {
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
-  virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                          int status) = 0;
 
   task_id_t task_id;
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
@@ -304,8 +302,9 @@ class ContainerInstance : public ITaskInstance {
     if (m_container_id_.empty()) return std::nullopt;
     return m_container_id_;
   }
-  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                  int status) override;
+
+  const TaskExitInfo& HandleContainerExited(
+      const cri::api::ContainerStatus& status);
 
  private:
   static constexpr std::string kCriLabelJobIdKey = "job_id";
@@ -366,8 +365,7 @@ class ProcInstance : public ITaskInstance {
     if (m_pid_ == 0) return std::nullopt;
     return m_pid_;
   }
-  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
-                                                  int status) override;
+  std::optional<const TaskExitInfo> HandleSigchld(pid_t pid, int status);
 
  private:
   pid_t m_pid_{0};  // forked pid
@@ -402,14 +400,14 @@ class TaskManager {
   }
 
   void AddTerminationTimer_(int64_t secs) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
+    auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handle->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
           EvTaskTimerCb_();
         });
-    termination_handel->start(std::chrono::seconds(secs),
+    termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
-    m_step_.termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handle;
   }
 
   void DelTerminationTimer_() {
@@ -426,6 +424,15 @@ class TaskManager {
                                  std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
+
+  // Just like a SIGCHLD sig handler (implictly set by uvw).
+  // Will be called in CliClient thread.
+  void HandleCriEvents(
+      std::vector<std::pair<task_id_t, cri::api::ContainerStatus>>&& events) {
+    m_cri_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
+                                    events.size());
+    m_cri_event_handle_->send();
+  }
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
 
@@ -458,12 +465,19 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
-  void EvTaskTimerCb_();
+
+  // Container exited
+  void EvCleanCriEventQueueCb_();
+
+  // Handle stopped tasks
   void EvCleanTaskStopQueueCb_();
 
+  // Handle task termination requests
+  void EvTaskTimerCb_();
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
 
@@ -472,10 +486,16 @@ class TaskManager {
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
+  // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
   std::shared_ptr<uvw::timer_handle> m_sigchld_timer_handle_;
   std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
   ConcurrentQueue<std::pair<pid_t, int>> m_sigchld_queue_;
+
+  // Handle event stream for ContainerInstance
+  std::shared_ptr<uvw::async_handle> m_cri_event_handle_;
+  ConcurrentQueue<std::pair<task_id_t, cri::api::ContainerStatus>>
+      m_cri_event_queue_;
 
   // Task is already terminated
   std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
