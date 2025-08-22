@@ -794,9 +794,9 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
 
   // labels
   m_pod_config_.mutable_labels()->insert(
-      {{kCriLabelUidKey, std::to_string(uid)},
-       {kCriLabelJobIdKey, std::to_string(job_id)},
-       {kCriLabelJobNameKey, job_name}});
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(kCriLabelJobNameKey), job_name}});
 
   // log directory
   std::error_code ec;
@@ -864,9 +864,9 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
 
   // labels
   m_container_config_.mutable_labels()->insert(
-      {{kCriLabelUidKey, std::to_string(uid)},
-       {kCriLabelJobIdKey, std::to_string(job_id)},
-       {kCriLabelJobNameKey, job_name}});
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(kCriLabelJobNameKey), job_name}});
 
   // log_path
   // NOTE: This is a relative path to pod log dir.
