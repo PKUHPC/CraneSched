@@ -65,7 +65,7 @@ void CriClient::Version() const {
     return;
   }
 
-  CRANE_TRACE("CRI replied Version: version={}", response.version());
+  CRANE_TRACE("CRI replied: version={}", response.version());
 }
 
 void CriClient::RuntimeConfig() const {
@@ -94,8 +94,7 @@ void CriClient::RuntimeConfig() const {
 #  pragma pop_macro("linux")
 #endif
 
-  CRANE_TRACE("CRI replied RuntimeConfig: cgroup_driver={}",
-              api::CgroupDriver_Name(cg));
+  CRANE_TRACE("CRI replied: cgroup_driver={}", api::CgroupDriver_Name(cg));
 }
 
 std::optional<std::string> CriClient::GetImageId(
@@ -132,6 +131,7 @@ std::optional<std::string> CriClient::PullImage(
   PullImageRequest request{};
   PullImageResponse response{};
 
+  // TODO: Fix remote image pulling timeout
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        kCriDefaultReqTimeout);

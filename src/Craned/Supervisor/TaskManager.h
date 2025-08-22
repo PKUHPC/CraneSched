@@ -30,9 +30,6 @@
 
 namespace Supervisor {
 
-inline const char* MemoryEvents = "memory.events";
-inline const char* MemoryOomControl = "memory.oom_control";
-
 enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
@@ -302,9 +299,9 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
-  static constexpr std::string kCriLabelJobIdKey = "job_id";
-  static constexpr std::string kCriLabelJobNameKey = "name";
-  static constexpr std::string kCriLabelUidKey = "uid";
+  static constexpr std::string_view kCriLabelJobIdKey = "job_id";
+  static constexpr std::string_view kCriLabelJobNameKey = "name";
+  static constexpr std::string_view kCriLabelUidKey = "uid";
 
   static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
