@@ -675,7 +675,9 @@ CraneErrCode ContainerInstance::Spawn() {
                   cri::api::ContainerEventType::CONTAINER_DELETED_EVENT)
             return;
 
-          // TODO: Refactor with TaskStopAndDoStatusChangeInBatch()
+          CRANE_TRACE("Received CRI event: {}", ev.DebugString());
+
+          std::vector<std::pair<task_id_t, cri::api::ContainerStatus>> changes;
           for (const auto& status : ev.containers_statuses()) {
             const auto& labels = status.labels();
             auto it = labels.find(kCriLabelJobIdKey);
@@ -691,12 +693,11 @@ CraneErrCode ContainerInstance::Spawn() {
             }
 
             if (status.state() == cri::api::ContainerState::CONTAINER_EXITED ||
-                status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN) {
-              g_task_mgr->TaskStopAndDoStatusChange(task_id);
-            }
+                status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN)
+              changes.emplace_back(task_id, status);
           }
 
-          return;
+          if (!changes.empty()) g_task_mgr->HandleCriEvents(std::move(changes));
         });
 
   return CraneErrCode::SUCCESS;
@@ -756,11 +757,13 @@ CraneErrCode ContainerInstance::Cleanup() {
   return err;
 }
 
-std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
-                                                                   int status) {
-  CRANE_ASSERT_MSG(pid || status,
-                   "ContainerInstance should never receive SIGCHLD.");
-  std::unreachable();
+const TaskExitInfo& ContainerInstance::HandleContainerExited(
+    const cri::api::ContainerStatus& status) {
+  m_exit_info_.is_terminated_by_signal = status.exit_code() > 127;
+  m_exit_info_.value = m_exit_info_.is_terminated_by_signal
+                           ? status.exit_code() - 127
+                           : status.exit_code();
+  return m_exit_info_;
 }
 
 CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
@@ -1378,6 +1381,12 @@ TaskManager::TaskManager()
         EvCleanTaskStopQueueCb_();
       });
 
+  m_cri_event_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_cri_event_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanCriEventQueueCb_();
+      });
+
   m_terminate_task_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
@@ -1441,7 +1450,8 @@ void TaskManager::ShutdownSupervisor() {
 
   g_craned_client->Shutdown();
   g_server->Shutdown();
-  g_task_mgr->Shutdown();
+
+  this->Shutdown();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
@@ -1596,7 +1606,8 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     auto task_id = it->second;
     CRANE_TRACE("[Job #{}.{}] Receiving SIGCHLD for pid {}", task_id, 0, pid);
 
-    auto* task = m_step_.GetTaskInstance(task_id);
+    // Only ProcInstance could receive SIGCHLD.
+    auto* task = dynamic_cast<ProcInstance*>(m_step_.GetTaskInstance(task_id));
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
 
@@ -1621,6 +1632,23 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   // Put not found tasks back to the queue
   for (auto task : not_found_tasks) {
     m_sigchld_queue_.enqueue(task);
+  }
+}
+
+void TaskManager::EvCleanCriEventQueueCb_() {
+  std::pair<task_id_t, cri::api::ContainerStatus> elem;
+  while (m_cri_event_queue_.try_dequeue(elem)) {
+    // NOTE: a CRI event comes at LEAST once.
+    auto [task_id, status] = elem;
+    auto* t = m_step_.GetTaskInstance(task_id);
+    if (t == nullptr) continue;  // Duplicated event
+    auto* task = dynamic_cast<ContainerInstance*>(t);
+
+    const auto& exit_info = task->HandleContainerExited(status);
+    CRANE_INFO("Receiving container exited event: {}. Signaled: {}, Value: {}",
+               status.id(), exit_info.is_terminated_by_signal, exit_info.value);
+
+    TaskStopAndDoStatusChange(task_id);
   }
 }
 
