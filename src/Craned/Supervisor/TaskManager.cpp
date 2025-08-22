@@ -26,7 +26,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <nlohmann/json.hpp>
 #include <utility>
 
 #include "CforedClient.h"
@@ -726,6 +725,7 @@ CraneErrCode ContainerInstance::Spawn() {
   }
 
   // Subscribe to container event stream
+  // NOTE: The callback is called in another thread!
   if (!cri_client->IsEventStreamActive())
     cri_client->StartContainerEventStream(
         [](const cri::api::ContainerEventResponse& ev) {
@@ -753,7 +753,6 @@ CraneErrCode ContainerInstance::Spawn() {
 
             if (status.state() == cri::api::ContainerState::CONTAINER_EXITED ||
                 status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN) {
-              // FIXME: Remove m_exec_id_task_id_ here.
               g_task_mgr->TaskStopAndDoStatusChange(task_id);
             }
           }
@@ -773,21 +772,17 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   if (!m_container_id_.empty()) {
     auto stop_ret = cri_client->StopContainer(m_container_id_, 10);
     if (!stop_ret.has_value()) {
-      CRANE_ERROR("Failed to stop container {}: {}", m_container_id_,
+      CRANE_DEBUG("Failed to stop container {}: {}", m_container_id_,
                   static_cast<int>(stop_ret.error()));
       // Continue with cleanup even if stop fails
-    } else {
-      CRANE_DEBUG("Container {} stopped successfully", m_container_id_);
     }
 
     // Step 2: Remove Container
     auto remove_ret = cri_client->RemoveContainer(m_container_id_);
     if (!remove_ret.has_value()) {
-      CRANE_ERROR("Failed to remove container {}: {}", m_container_id_,
+      CRANE_DEBUG("Failed to remove container {}: {}", m_container_id_,
                   static_cast<int>(remove_ret.error()));
       // Continue with pod cleanup even if container removal fails
-    } else {
-      CRANE_DEBUG("Container {} removed successfully", m_container_id_);
     }
   }
 
@@ -795,11 +790,9 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   if (!m_pod_id_.empty()) {
     auto stop_pod_ret = cri_client->StopPodSandbox(m_pod_id_);
     if (!stop_pod_ret.has_value()) {
-      CRANE_ERROR("Failed to stop pod {}: {}", m_pod_id_,
+      CRANE_DEBUG("Failed to stop pod {}: {}", m_pod_id_,
                   static_cast<int>(stop_pod_ret.error()));
       // Continue with pod removal even if stop fails
-    } else {
-      CRANE_DEBUG("Pod {} stopped successfully", m_pod_id_);
     }
 
     // Step 4: Remove Pod
@@ -807,7 +800,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     if (!remove_pod_ret.has_value()) {
       CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
                   static_cast<int>(remove_pod_ret.error()));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
@@ -817,15 +810,11 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 }
 
 CraneErrCode ContainerInstance::Cleanup() {
-  if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
-    if (!m_temp_path_.empty())
-      // FIXME: Remove Pod here
-      g_thread_pool->detach_task(
-          [p = m_temp_path_]() { util::os::DeleteFolders(p); });
-  }
-
-  // Dummy return
-  return CraneErrCode::SUCCESS;
+  // For container tasks, Kill() is idempotent.
+  // It's ok to call it (at most) twice to remove pod and container.
+  CraneErrCode err = Kill(0);
+  if (!m_temp_path_.empty()) util::os::DeleteFolders(m_temp_path_);
+  return err;
 }
 
 std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
@@ -836,7 +825,6 @@ std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
 }
 
 CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
-  // TODO: Replace with job_id when refactoring.
   job_id_t job_id = GetParentStep().task_id();
   const std::string& job_name = GetParentStep().name();
   const std::string& node_name = g_config.CranedIdOfThisNode;
@@ -844,21 +832,23 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
   uid_t uid = m_parent_step_inst_->pwd.Uid();
   gid_t gid = m_parent_step_inst_->pwd.Gid();
 
+  // Generate hash for pod name and uid.
+  std::string h16 = MakeHashId_(job_id, job_name, node_name);
+  std::string hsuffix = h16.substr(0, kCriPodSuffixLen);
+
+  std::string pod_name_base = util::SlugDns1123(
+      job_name.empty() ? std::format("job-{}", job_id) : job_name,
+      kCriDnsMaxLabelLen - /*'-'*/ 1 - kCriPodSuffixLen);
+
   // metadata
   auto* pod_meta = m_pod_config_.mutable_metadata();
-  std::string pod_id{};
-  if (job_name.empty()) {
-    pod_id = std::format("{}-{}-{}", node_name, uid, job_id);
-    pod_meta->set_name(std::format("crane-job-{}", job_id));
-  } else {
-    pod_id = std::format("{}-{}-{}-{}", node_name, uid, job_id, job_name);
-    pod_meta->set_name(job_name);
-  }
-  pod_meta->set_uid(std::move(pod_id));
+  // pod name：<pod_name_base>-<hsuffix>; pod uid: <h16>
+  pod_meta->set_name(pod_name_base + "-" + hsuffix);
+  pod_meta->set_uid(std::move(h16));
 
   // hostname
-  // TODO: Check generated hostname
-  m_pod_config_.set_hostname(std::format("{}-{}", pod_meta->name(), node_name));
+  m_pod_config_.set_hostname(util::SlugDns1123(
+      pod_meta->name() + "-" + node_name, kCriDnsMaxLabelLen));
 
   // labels
   m_pod_config_.mutable_labels()->insert(
@@ -925,7 +915,11 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
   uid_t uid = m_parent_step_inst_->pwd.Uid();
   gid_t gid = m_parent_step_inst_->pwd.Gid();
 
-  // metadata is ignored for now.
+  // TODO: Using task_id to generate unique name in pod
+  // metadata
+  m_container_config_.mutable_metadata()->set_name(
+      std::format("job-{}", job_id));
+
   // labels
   m_container_config_.mutable_labels()->insert(
       {{kCriLabelUidKey, std::to_string(uid)},
@@ -946,6 +940,12 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
 
   // image already checked and pulled.
   m_container_config_.mutable_image()->set_image(m_image_ref_);
+
+  // mount the generated script with uid/gid mapping.
+  auto* mount = m_container_config_.add_mounts();
+  mount->set_host_path(m_meta_->parsed_sh_script_path);
+  mount->set_container_path("/tmp/crane/script.sh");
+  mount->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
 
   // Inject fake root config if the task is not from root.
   if (uid != 0 &&
@@ -986,6 +986,17 @@ cri::api::IDMapping ContainerInstance::MakeIdMapping_(uid_t host_id,
   return mapping;
 }
 
+std::string ContainerInstance::MakeHashId_(job_id_t job_id,
+                                           const std::string& job_name,
+                                           const std::string& node_name) {
+  std::string h_msg =
+      std::format("{}\x1f{}\x1f{}", job_id, node_name, job_name);
+  uint64_t h64 =
+      (static_cast<uint64_t>(util::Crc32Of(h_msg, 0xA5A5A5A5U)) << 32) |
+      util::Adler32Of(h_msg, 0x3C3C3C3CU);
+  return std::format("{:016x}", h64);  // 16 hex chars, lowercase
+}
+
 CraneErrCode ContainerInstance::SetSubIdMappings_(const PasswordEntry& pwd) {
   auto subuid = pwd.SubUidRanges();
   auto subgid = pwd.SubGidRanges();
@@ -1000,6 +1011,13 @@ CraneErrCode ContainerInstance::SetSubIdMappings_(const PasswordEntry& pwd) {
 
   m_gid_mapping_ = {MakeIdMapping_(0, pwd.Gid(), 1),
                     MakeIdMapping_(subgid[0].start, 1, subgid[0].count)};
+
+  CRANE_TRACE(
+      "Adding id mapping for user (uid: {}, gid: {}). Uid map: {}, {}; Gid "
+      "map: {}, {}.",
+      pwd.Uid(), pwd.Gid(), m_uid_mapping_[0].DebugString(),
+      m_uid_mapping_[1].DebugString(), m_gid_mapping_[0].DebugString(),
+      m_gid_mapping_[1].DebugString());
 
   return CraneErrCode::SUCCESS;
 }
@@ -1036,23 +1054,12 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // mount the generated script with uid/gid mapping
-  auto* mount = config->add_mounts();
-  mount->set_host_path(m_meta_->parsed_sh_script_path);
-  mount->set_container_path("/tmp/crane/script.sh");
-  mount->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
-
-  mount->mutable_uidmappings()->Assign(m_uid_mapping_.begin(),
-                                       m_uid_mapping_.end());
-  mount->mutable_gidmappings()->Assign(m_gid_mapping_.begin(),
-                                       m_gid_mapping_.end());
-
   // set linux container options
   auto* linux_sec_context = config->mutable_linux()->mutable_security_context();
   auto* userns_options =
       linux_sec_context->mutable_namespace_options()->mutable_userns_options();
 
-  // Fake root
+  // fake root
   userns_options->set_mode(cri::api::NamespaceMode::POD);
   userns_options->mutable_uids()->Assign(m_uid_mapping_.begin(),
                                          m_uid_mapping_.end());
@@ -1061,6 +1068,14 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 
   linux_sec_context->mutable_run_as_user()->set_value(0);
   linux_sec_context->mutable_run_as_group()->set_value(0);
+
+  // modify mounts
+  for (auto& mount : *config->mutable_mounts()) {
+    mount.mutable_uidmappings()->Assign(m_uid_mapping_.begin(),
+                                        m_uid_mapping_.end());
+    mount.mutable_gidmappings()->Assign(m_gid_mapping_.begin(),
+                                        m_gid_mapping_.end());
+  }
 
   return CraneErrCode::SUCCESS;
 }
