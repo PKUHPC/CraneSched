@@ -29,9 +29,8 @@
 #  include <linux/bpf.h>
 #endif
 
-#include "../Common/CranedPublicDefs.h"
-#include "../Common/DeviceManager.h"
-#include "JobManager.h"
+#include "CranedPublicDefs.h"
+#include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
