@@ -207,7 +207,9 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
+  [[nodiscard]] virtual const TaskExitInfo& GetExitInfo() const {
+    return m_exit_info_;
+  }
 
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec,
@@ -269,8 +271,6 @@ class ITaskInstance {
 
   StepInstance* m_parent_step_inst_;
 
-  // [[deprecated]] pid_t m_pid_{0};  // forked pid
-
   std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
 
@@ -313,9 +313,16 @@ class ContainerInstance : public ITaskInstance {
   static constexpr std::string kCriLabelJobNameKey = "name";
   static constexpr std::string kCriLabelUidKey = "uid";
 
+  static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
+  static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
+  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
+
   inline static cri::api::IDMapping MakeIdMapping_(uid_t host_id,
                                                    uid_t container_id,
                                                    size_t size);
+  inline static std::string MakeHashId_(job_id_t job_id,
+                                        const std::string& job_name,
+                                        const std::string& node_name);
 
   CraneErrCode SetPodSandboxConfig_();
   CraneErrCode SetContainerConfig_();
