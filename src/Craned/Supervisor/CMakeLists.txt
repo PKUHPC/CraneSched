@@ -19,8 +19,10 @@ target_link_libraries(csupervisor
 
         Utility_PublicHeader
         Utility_PluginClient
+        Utility_CriClient
 
         crane_proto_lib
+        cri_proto_lib
 
         bs_thread_pool
 
@@ -39,7 +41,6 @@ target_link_libraries(csupervisor
         Backward::Interface
 
         $<$<BOOL:${ENABLE_BPF}>:bpf>
-
 )
 
 # Linker flag for c++ 17 filesystem library

@@ -833,13 +833,13 @@ void TaskScheduler::ScheduleThread_() {
 
         CraneExpected failed_task_ids = stub->ExecuteSteps(tasks);
         if (!failed_task_ids.has_value()) {
-          for (auto& task : tasks.tasks()) {
+          for (const auto& task : tasks.tasks()) {
             failed_to_exec_job_id_map[craned_id].first.push_back(
                 task.task_id());
             failed_to_exec_job_id_map[craned_id].second =
                 ExitCode::kExitCodeRpcError;
           }
-        } else {
+        } else if (!failed_task_ids.value().empty()) {
           failed_to_exec_job_id_map[craned_id].first =
               std::move(failed_task_ids.value());
           failed_to_exec_job_id_map[craned_id].second =
