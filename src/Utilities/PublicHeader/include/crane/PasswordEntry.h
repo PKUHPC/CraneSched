@@ -20,11 +20,20 @@
 
 #include <pwd.h>
 
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
 #include "crane/Logger.h"
 #include "shadow/subid.h"
+
+#if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 4
+// For older libsubid versions, map the function names to their legacy
+// equivalents
+#  define subid_free free
+#  define subid_get_uid_ranges get_subuid_ranges
+#  define subid_get_gid_ranges get_subgid_ranges
+#endif
 
 class SubIdRanges {
  public:
@@ -32,7 +41,10 @@ class SubIdRanges {
       : m_ranges_(ranges), m_count_(count) {}
 
   ~SubIdRanges() {
-    if (m_ranges_ != nullptr) subid_free(m_ranges_);
+    if (m_ranges_ != nullptr) {
+      // libsubid uses regular free() for cleanup, not subid_free()
+      subid_free(m_ranges_);
+    }
   }
 
   SubIdRanges(const SubIdRanges&) = delete;
@@ -46,7 +58,9 @@ class SubIdRanges {
 
   SubIdRanges& operator=(SubIdRanges&& other) noexcept {
     if (this != &other) {
-      if (m_ranges_ != nullptr) subid_free(m_ranges_);
+      if (m_ranges_ != nullptr) {
+        subid_free(m_ranges_);
+      }
       m_ranges_ = other.m_ranges_;
       m_count_ = other.m_count_;
       other.m_ranges_ = nullptr;
