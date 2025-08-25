@@ -165,6 +165,16 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         "Cancelled",
         "Configuring",
         "Invalid",
+        "Invalid",
+        "Invalid",
+        // 10 - 14
+        "Invalid",
+        "Invalid",
+        "Invalid",
+        "Invalid",
+        "Invalid",
+        // 15
+        "Invalid",
 };
 // clang-format on
 };  // namespace Internal

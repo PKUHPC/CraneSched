@@ -46,8 +46,10 @@ struct StepInstance {
 // Job allocation info, where allocation = job spec + execution info
 struct JobInD {
   JobInD() = default;
-  explicit JobInD(crane::grpc::JobToD const& job_to_d)
-      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {}
+  JobInD(crane::grpc::JobToD const& job_to_d)
+      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {
+    step_map_mtx = std::make_unique<absl::Mutex>();
+  }
 
   ~JobInD() = default;
 
@@ -66,9 +68,8 @@ struct JobInD {
   bool orphaned{false};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
-  absl::Mutex step_map_mtx;
-  absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map
-      ABSL_GUARDED_BY(step_map_mtx);
+  std::unique_ptr<absl::Mutex> step_map_mtx;
+  absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 
   EnvMap GetJobEnvMap();
 };

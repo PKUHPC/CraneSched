@@ -26,7 +26,7 @@ import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
 
 message StepStatusChangeRequest {
-  uint32 task_id = 1;
+  uint32 job_id = 1;
   uint32 step_id = 2;
   string craned_id = 3;
   TaskStatus new_status = 4;

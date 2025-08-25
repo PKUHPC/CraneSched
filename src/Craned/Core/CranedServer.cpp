@@ -361,7 +361,7 @@ grpc::Status CranedServiceImpl::StepStatusChange(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
   g_job_mgr->StepStopAndDoStatusChangeAsync(
-      request->task_id(), request->step_id(), request->new_status(),
+      request->job_id(), request->step_id(), request->new_status(),
       request->exit_code(), request->reason());
   response->set_ok(true);
   return Status::OK;

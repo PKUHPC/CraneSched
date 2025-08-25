@@ -76,6 +76,9 @@ void CranedClient::AsyncSendThread_() {
 
       CRANE_TRACE("Sending StepStatusChange for step status: {}",
                   util::StepStatusToString(elem.new_status));
+
+      request.set_job_id(g_config.JobId);
+      request.set_step_id(g_config.StepId);
       request.set_new_status(elem.new_status);
       request.set_exit_code(elem.exit_code);
       if (elem.reason.has_value()) request.set_reason(elem.reason.value());
@@ -95,7 +98,8 @@ void CranedClient::AsyncSendThread_() {
         break;
 
       } else {
-        CRANE_TRACE("StepStatusChange sent. reply.ok={}", reply.ok());
+        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
+                    util::StepStatusToString(elem.new_status), reply.ok());
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
