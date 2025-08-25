@@ -35,6 +35,12 @@ struct Config {
   std::filesystem::path CranedUnixSocketPath;
 };
 
+#define CRANE_PMIX_FENCE "CRANE_PMIX_FENCE"
+
+inline std::string GetEnvVar(const std::string& key) {
+    const char* val = std::getenv(key.c_str());
+    return val == nullptr ? "" : std::string(val);
+}
 
 inline void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, int status,
                         const char* data, size_t ndata, void* cbdata,

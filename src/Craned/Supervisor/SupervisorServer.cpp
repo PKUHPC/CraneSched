@@ -27,7 +27,7 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
-  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
+  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync(0);
   code_future.wait();
 
   CraneErrCode ok = code_future.get();

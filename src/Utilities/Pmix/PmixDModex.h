@@ -47,6 +47,8 @@ public:
 
   void PmixProcessResponse(uint32_t seq_num, const CranedId& craned_id, const std::string& data, int status);
 
+  void CleanupTimeoutRequests();
+
 private:
   static void ResponseWithError_(uint32_t seq_num, const CranedId& craned_id,
                                 int status);

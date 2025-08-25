@@ -57,6 +57,16 @@ inline std::string ToString(CollType type) {
   }
 }
 
+inline CollType StrToCollType(const std::string& str) {
+  if (str == "FENCE_TREE")      return CollType::FENCE_TREE;
+  if (str == "FENCE_RING") return CollType::FENCE_RING;
+  if (str == "FENCE_MAX")  return CollType::FENCE_MAX;
+  if (str == "CONNECT")    return CollType::CONNECT;
+  if (str == "DISCONNECT") return CollType::DISCONNECT;
+                            
+  return CollType::FENCE_MAX;
+}
+
 enum class CollTreeState : std::uint8_t {
   SYNC,
   COLLECT,
