@@ -597,6 +597,7 @@ void MongodbClient::SelectTxns(
   }
 
   mongocxx::options::find find_options;
+  // TODO: page query?
   find_options.limit(1000);
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_txn_collection_name_].find(

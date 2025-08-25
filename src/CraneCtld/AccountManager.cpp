@@ -3076,7 +3076,6 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
 void AccountManager::AddTxnLogToDB_(const std::string& actor_name,
                                     const std::string& target, TxnAction action,
                                     const std::string& info) {
-  // TODO: 将action 转为 string
   Txn txn;
   txn.creation_time = ToUnixSeconds(absl::Now());
   txn.actor = actor_name;
