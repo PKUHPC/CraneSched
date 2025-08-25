@@ -1429,14 +1429,16 @@ bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
   if (CgConstant::kCgLimitDeviceMknod) access |= BPF_DEVCG_ACC_MKNOD;
 
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &[_, type_slots_map] :
-       resource.dedicated_res_in_node().name_type_map()) {
-    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+  for (const auto &type_slots_map :
+       resource.dedicated_res_in_node().name_type_map() | std::views::values) {
+    for (const auto &slots :
+         type_slots_map.type_slots_map() | std::views::values)
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 
   auto &bpf_devices = m_cgroup_bpf_devices;
-  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+  for (const auto &this_device :
+       Craned::g_this_node_device | std::views::values) {
     if (!all_request_slots.contains(this_device->slot_id)) {
       for (const auto &dev_meta : this_device->device_file_metas) {
         int16_t op_type = 0;
