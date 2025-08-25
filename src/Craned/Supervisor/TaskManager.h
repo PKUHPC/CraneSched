@@ -549,6 +549,8 @@ class TaskManager {
 
   void SupervisorFinishInit(StepStatus status);
 
+  bool InitPmixPreFork();
+
   void Wait();
   // Shutdown supervisor asynchronously with given status, exit code and reason.
   // Status change will be sent only if daemon step.

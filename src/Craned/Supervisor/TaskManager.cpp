@@ -28,11 +28,11 @@
 #include <limits>
 #include <variant>
 
-#include "Pmix.h"
-#include "PmixCommon.h"
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
@@ -2362,7 +2362,8 @@ CraneErrCode ProcInstance::Spawn() {
     InitEnvMap();
 
     std::unordered_map<std::string, std::string> pmix_env;
-    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
+    if (m_parent_step_inst_->IsCrun() &&
+        m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
       auto result = g_pmix_server->SetupFork(0);
       if (!result) {
         fmt::print(stderr,
@@ -2696,6 +2697,26 @@ void TaskManager::SupervisorFinishInit(StepStatus status) {
   g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
 }
 
+bool TaskManager::InitPmixPreFork() {
+  if (m_step_.IsCrun() &&
+      m_step_.GetStep().interactive_meta().mpi() == "pmix") {
+    g_pmix_server = std::make_unique<pmix::PmixServer>();
+    pmix::Config pmix_config{
+        .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
+        .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
+        .CompressedRpc = g_config.CompressedRpc,
+        .CraneBaseDir = g_config.CraneBaseDir,
+        .CraneScriptDir = g_config.CraneScriptDir,
+        .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+
+    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep(),
+                             m_step_.GetStepProcessEnv()))
+      return false;
+  }
+
+  return true;
+}
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
@@ -2804,6 +2825,14 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
         task->task_id, TaskFinalizeCause::TASK_PREPARE_FAILED,
         std::format("Failed to prepare task, code: {}", static_cast<int>(err)));
     return err;
+  }
+
+  if (!InitPmixPreFork()) { 
+    CRANE_ERROR("Failed to initialize PMIx server.");
+    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeFileNotFound,
+                              fmt::format("pmix failed"));
+    return ;
   }
 
   CRANE_INFO("[Task #{}] Spawning in task", task->task_id);
