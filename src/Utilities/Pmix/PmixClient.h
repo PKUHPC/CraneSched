@@ -100,6 +100,7 @@ class PmixClient {
 
   void WaitAllStubReady() {
     std::unique_lock<std::mutex> lock(m_mutex_);
+    if (GetChannelCount() >= m_peer_node_num_) return ;
     m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_peer_node_num_; });
   }
 

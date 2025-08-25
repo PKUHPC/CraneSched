@@ -272,7 +272,7 @@ class ContainerInstance : public ITaskInstance {
 
 class ProcInstance : public ITaskInstance {
  public:
-  explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  explicit ProcInstance(StepInstance* step_spec, uint32_t local_proc_id) : ITaskInstance(step_spec), m_local_proc_id_(local_proc_id) {}
   ~ProcInstance() override = default;
 
   CraneErrCode Prepare() override;
@@ -282,6 +282,9 @@ class ProcInstance : public ITaskInstance {
 
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
                                                   int status) override;
+
+private:
+  uint32_t m_local_proc_id_;
 };
 
 class TaskManager {
@@ -294,6 +297,8 @@ class TaskManager {
 
   TaskManager& operator=(const TaskManager&) = delete;
   TaskManager& operator=(TaskManager&&) = delete;
+
+  bool InitPmixPreFork();
 
   void Wait();
 
@@ -341,7 +346,7 @@ class TaskManager {
 
   void TaskStopAndDoStatusChange(task_id_t task_id);
 
-  std::future<CraneErrCode> ExecuteTaskAsync();
+  std::future<CraneErrCode> ExecuteTaskAsync(uint32_t local_proc_id);
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 

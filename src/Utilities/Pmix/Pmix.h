@@ -23,7 +23,9 @@
 #include <pmix_server.h>
 
 #include <future>
+#include <sys/types.h>
 #include <vector>
+#include <uvw.hpp>
 
 #include "CranedClient.h"
 #include "PmixASyncServer.h"
@@ -34,6 +36,7 @@
 #include "PmixState.h"
 #include "absl/strings/str_join.h"
 #include "crane/Logger.h"
+#include "crane/PublicHeader.h"
 
 namespace pmix {
 
@@ -68,6 +71,7 @@ class PmixServer {
   const std::vector<uint32_t>& GetTaskMap() { return m_task_map_; }
   const std::string& GetNSpace() { return m_nspace_; }
   uint32_t GetTaskNum() const { return m_task_num_; }
+  uint64_t GetTimeout() const { return timeout; }
 
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
   PmixClient* GetPmixClient() const { return m_pmix_client_.get(); }
@@ -76,10 +80,14 @@ class PmixServer {
   }
 
  private:
-  bool JobSet_();
-
-  void InfoSet_(const crane::grpc::TaskToD& task,
+  void InfoSet_(const Config& config, const crane::grpc::TaskToD& task,
                 const std::unordered_map<std::string, std::string>& env_map);
+
+  bool ConnInit_(const Config& config);
+
+  bool PmixInit_() const;
+
+  bool JobSet_();
 
   template <typename T>
   pmix_info_t InfoLoad_(const std::string& key, const T& val,
@@ -88,6 +96,7 @@ class PmixServer {
   uint32_t m_uid_{};
   uint32_t m_gid_{};
   std::string m_task_id_;
+  uint32_t m_stepd_id_{0};
 
   std::string m_nspace_;  // crane.pmix.jobid
   std::string m_hostname_;
@@ -102,14 +111,23 @@ class PmixServer {
       m_task_map_; /* i'th task is located on task_map[i] node */
 
   uint32_t m_ncpus_{}; /* total possible number of cpus in job */
-  std::string m_cli_tmpdir_;
+
+  uint64_t timeout{10}; // TODO: PMIXP_TIMEOUT
+
   std::string m_server_tmpdir_;
+  std::string m_cli_tmpdir_base_;
+  std::string m_cli_tmpdir_;
 
   std::unique_ptr<CranedClient> m_craned_client_;
   std::unique_ptr<PmixClient> m_pmix_client_;
   std::unique_ptr<PmixASyncServer> m_pmix_async_server_;
 
   bool m_is_init_{false};
+
+  std::thread m_uvw_thread_;
+  std::atomic_bool m_cq_closed_{false};
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::shared_ptr<uvw::timer_handle> m_cleanup_timer_handle_;
 };
 
 }  // namespace pmix
