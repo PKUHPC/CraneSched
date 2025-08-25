@@ -26,11 +26,11 @@
 
 #include <limits>
 
-#include "Pmix.h"
-#include "PmixCommon.h"
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/CriClient.h"
@@ -1775,7 +1775,8 @@ CraneErrCode ProcInstance::Spawn() {
     InitEnvMap();
 
     std::unordered_map<std::string, std::string> pmix_env;
-    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
+    if (m_parent_step_inst_->IsCrun() &&
+        m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
       auto result = g_pmix_server->SetupFork(0);
       if (!result) {
         fmt::print(stderr,
@@ -2054,6 +2055,26 @@ TaskManager::~TaskManager() {
   g_pmix_server.reset();
 }
 
+bool TaskManager::InitPmixPreFork() {
+  if (m_step_.IsCrun() &&
+      m_step_.GetStep().interactive_meta().mpi() == "pmix") {
+    g_pmix_server = std::make_unique<pmix::PmixServer>();
+    pmix::Config pmix_config{
+        .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
+        .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
+        .CompressedRpc = g_config.CompressedRpc,
+        .CraneBaseDir = g_config.CraneBaseDir,
+        .CraneScriptDir = g_config.CraneScriptDir,
+        .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+
+    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep(),
+                             m_step_.GetStepProcessEnv()))
+      return false;
+  }
+
+  return true;
+}
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
@@ -2163,25 +2184,13 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
     return err;
   }
 
-  if (m_step_.IsCrun() &&
-    m_step_.GetStep().interactive_meta().mpi() == "pmix") {
-    g_pmix_server = std::make_unique<pmix::PmixServer>();
-    pmix::Config pmix_config{
-      .UseTls = g_config.CforedListenConf.UseTls,
-      .TlsCerts = g_config.CforedListenConf.TlsCerts,
-      .CompressedRpc = g_config.CompressedRpc,
-      .CraneBaseDir = g_config.CraneBaseDir,
-      .CraneScriptDir = g_config.CraneScriptDir,
-      .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
-    if (!g_pmix_server->Init(std::move(pmix_config), m_step_.GetStep(),
-                             m_task_->GetChildProcessEnv())) {
-      CRANE_ERROR("Failed to initialize PMIx server.");
-      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
-                                ExitCode::kExitCodeInitMpiServer,
-                                "Failed to initialize PMIx server.");
-      return;
-                             }
-    }
+  if (!InitPmixPreFork()) {
+    CRANE_ERROR("Failed to initialize PMIx server.");
+    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeFileNotFound,
+                              fmt::format("pmix failed"));
+    return ;
+  }
 
   // Init cfored before start the task.
   if (m_step_.IsCrun()) m_step_.InitCforedClient();

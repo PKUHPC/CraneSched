@@ -18,6 +18,7 @@
 
 #include "Pmix.h"
 
+#include "PmixColl.h"
 #include "PmixCommon.h"
 #include "PmixDModex.h"
 #include "absl/strings/str_split.h"
@@ -41,14 +42,6 @@ class PMIxServerModule {
    static void OpCb(pmix_status_t status, void *cbdata) {
      CRANE_DEBUG("op callback is called with status={}: {}", status,
             PMIx_Error_string(status));
-   }
-
-   static void ErrHandlerRegCb(pmix_status_t status, size_t errhandler_ref,
-                                     void *cbdata) {
-     CRANE_DEBUG(
-         "Error handler registration callback is called with status={}, "
-         "ref={}",
-         status, static_cast<int>(errhandler_ref));
    }
 
    static pmix_status_t ClientFinalizedCb(const pmix_proc_t *proc,
@@ -102,8 +95,7 @@ class PMIxServerModule {
        }
      }
 
-     // TODO: 从env中获取type，默认MAX  SLURM_PMIX_FENCE (mixed, tree, ring)
-     CollType type = CollType::FENCE_MAX;
+    CollType type = StrToCollType(GetEnvVar(CRANE_PMIX_FENCE));
 
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
@@ -114,7 +106,12 @@ class PMIxServerModule {
 
      auto coll = g_pmix_state->PmixStateCollGet(type, procs, nprocs);
 
-     if (coll == nullptr || !coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
+     if (coll == nullptr) {
+       cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
+       return PMIX_ERROR;
+     }
+
+     if (!coll->PmixCollContribLocal(type, std::string(data, ndata), cbfunc, cbdata)) {
        cbfunc(PMIX_ERROR, nullptr, 0, cbdata, nullptr, nullptr);
        return PMIX_ERROR;
      }
@@ -212,12 +209,43 @@ void OpCb(pmix_status_t status, void* cbdata) {
               PMIx_Error_string(status));
 }
 
+void ErrHandlerRegCb(pmix_status_t status, size_t errhandler_ref,
+                                  void *cbdata) {
+  CRANE_DEBUG(
+      "Errhandler registration callback is called with status={}, "
+      "ref={}",
+      status, static_cast<int>(errhandler_ref));
+}
+
+void ErrHandler_(size_t evhdlr_registration_id,
+                        pmix_status_t status,
+                        const pmix_proc_t *source,
+                        pmix_info_t info[], size_t ninfo,
+                        pmix_info_t *results, size_t nresults,
+                        pmix_event_notification_cbfunc_fn_t cbfunc,
+                        void *cbdata) {
+  /* TODO: do something more sophisticated here */
+  /* FIXME: use proper specificator for nranges */
+  CRANE_ERROR("Error handler invoked: status = {}, source = [{}:{}]",
+              status, source->nspace, source->rank);
+  //TODO: SIGKILL JOBSTEP
+  g_pmix_server->GetCranedClient()->TerminateTasks();
+}
+
 }  // namespace
 
 PmixServer::~PmixServer() {
+
+  m_cq_closed_ = true;
+  if (m_uvw_thread_.joinable()) 
+    m_uvw_thread_.join();
+
   if (!m_is_init_) return;
 
   util::os::DeleteFolders(m_server_tmpdir_);
+
+  /* deregister the errhandler */
+//  PMIx_Deregister_event_handler(0, OpCb, NULL);
 
   int rc = PMIx_server_finalize();
   if (rc != PMIX_SUCCESS)
@@ -236,52 +264,61 @@ bool PmixServer::Init(
     const Config& config, const crane::grpc::TaskToD& task,
     const std::unordered_map<std::string, std::string>& env_map) {
 
-  util::os::DeleteFolders(m_server_tmpdir_);
-  // TODO: task_id.step_id
-  m_server_tmpdir_ = fmt::format("{}pmix.crane", config.CraneBaseDir);
-  if (!util::os::CreateFolders(m_server_tmpdir_)) {
-    return false;
-  }
+  if (m_is_init_) return true;
 
-  InfoSet_(task, env_map);
+  InfoSet_(config, task, env_map);
 
-  m_craned_client_ = std::make_unique<CranedClient>();
-  m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
-
-  pmix_status_t rc;
-
-  pmix_info_t* server_info;
-  int server_info_size = 1;
-  if (PMIX_VERSION_MAJOR < 5) server_info_size = 2;
-
-  PMIX_INFO_CREATE(server_info, server_info_size);
-  if (PMIX_VERSION_MAJOR < 5)
-    PMIX_INFO_LOAD(&server_info[0], PMIX_USERID, &m_uid_, PMIX_UINT32);
-
-  PMIX_INFO_LOAD(&server_info[server_info_size - 1], PMIX_SERVER_TMPDIR,
-                 m_server_tmpdir_.c_str(), PMIX_STRING);
-  rc = PMIx_server_init(&g_k_crane_pmix_cb, server_info, server_info_size);
-  PMIX_INFO_DESTRUCT(server_info);
-  if (PMIX_SUCCESS != rc) {
-    CRANE_ERROR("Pmix Server Init failed with error {}", PMIx_Error_string(rc));
+  if (!PmixInit_()) {
+    CRANE_ERROR("PMIx_server_init failed with error");
     return false;
   }
 
   g_dmodex_req_manager = std::make_unique<PmixDModexReqManager>();
   g_pmix_state = std::make_unique<PmixState>();
 
+  m_uvw_loop_ = uvw::loop::create();
+  m_cleanup_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
 
-  if (!JobSet_()) return false;
+  m_cleanup_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+         g_dmodex_req_manager->CleanupTimeoutRequests();
+      }
+  );
 
-  if (task.node_num() > 1) {
-    m_pmix_client_ = std::make_unique<PmixClient>(m_node_num_);
-    m_pmix_async_server_ = std::make_unique<PmixASyncServer>();
-    if (!m_pmix_async_server_->Init(config))
-      return false;
+  m_cleanup_timer_handle_->start(std::chrono::seconds(10), std::chrono::seconds(10));
 
-    // TODO: must ensure that both sides have received [the message] and are ready.
-    m_pmix_client_->WaitAllStubReady();
+  m_uvw_thread_ = std::thread([this] {
+    // util::SetCurrentThreadName("PmixLoopThread_" + m_task_id_);
+
+    auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
+    idle_handle->on<uvw::idle_event>(
+        [this](const uvw::idle_event &, uvw::idle_handle &h) {
+          if (m_cq_closed_) {
+            h.parent().walk([](auto &&h) { h.close(); });
+            h.parent().stop();
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        });
+
+    if (idle_handle->start() != 0) {
+      CRANE_ERROR("Failed to start the idle event in CranedKeeper loop.");
+    }
+
+    m_uvw_loop_->run();
+  });
+
+  if (!ConnInit_(config)) {
+    CRANE_ERROR("pmix connection init failed.");
+    return false;
   }
+
+  if (!JobSet_()) {
+    CRANE_ERROR("pmix job set failed");
+    return false;
+  }
+
+
+  m_is_init_ = true;
 
   CRANE_INFO("Crun Task #{} Launch the PMIx server, dir: {}, version {}.{}.{}",
               task.task_id(), m_server_tmpdir_, PMIX_VERSION_MAJOR, PMIX_VERSION_MINOR,
@@ -328,6 +365,102 @@ PmixServer::SetupFork(uint32_t rank) {
   return std::move(env_map);
 }
 
+void PmixServer::InfoSet_(
+    const Config& config,
+    const crane::grpc::TaskToD& task,
+    const std::unordered_map<std::string, std::string>& env_map) {
+
+  m_uid_ = task.uid();
+  m_gid_ = task.gid();
+  m_task_id_ = std::to_string( task.task_id());
+
+  m_nspace_ = fmt::format("crane.pmix.{}", m_task_id_);
+
+  m_ntasks_per_node_ = task.ntasks_per_node();
+  m_node_num_ = task.node_num();
+  m_task_num_ = m_ntasks_per_node_ * m_node_num_;
+  std::string hostname;
+  hostname.resize(256);  // Resize to ensure enough space for the hostname
+  if (gethostname(hostname.data(), hostname.size()) == 0) {
+    hostname.resize(
+        strlen(hostname.c_str()));  // Resize to actual length of hostname
+  } else {
+    CRANE_ERROR("Failed to get hostname");
+    hostname = "unknown";  // Set a default value if gethostname fails
+  }
+  m_hostname_ = hostname;
+  m_node_list_str_ = env_map.at("CRANE_JOB_NODELIST");
+  std::ranges::replace(m_node_list_str_, ';', ',');
+  m_node_list_ = absl::StrSplit(m_node_list_str_, ',');
+
+  auto it = std::ranges::find(m_node_list_, m_hostname_);
+  if (it != m_node_list_.end())
+    m_node_id_ = std::ranges::distance(m_node_list_.begin(), it);
+
+  m_peer_node_list_ = std::vector(m_node_list_);
+  std::erase(m_peer_node_list_, m_hostname_);
+
+  m_task_map_ = std::vector<uint32_t>(m_task_num_);
+
+  for (size_t node = 0; node < m_node_num_; ++node) {
+    std::fill_n(m_task_map_.begin() + node * m_ntasks_per_node_, m_ntasks_per_node_, node);
+  }
+
+  m_server_tmpdir_ = fmt::format("{}pmix.crane.{}/pmix.{}", config.CraneBaseDir, m_hostname_, m_task_id_);
+
+  // TODO: cli base env PMIXP_TMPDIR_CLI
+  m_cli_tmpdir_base_ = fmt::format("{}pmix.crane.cli", config.CraneBaseDir);
+  m_cli_tmpdir_ = fmt::format("{}/spmix_appdir_{}.{}", m_cli_tmpdir_base_, m_uid_, m_task_id_);
+}
+
+bool PmixServer::ConnInit_(const Config& config) {
+  m_craned_client_ = std::make_unique<CranedClient>();
+  m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
+
+  if (m_task_num_ > 1) {
+    m_pmix_client_ = std::make_unique<PmixClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixASyncServer>();
+    if (!m_pmix_async_server_->Init(config))
+      return false;
+
+    // TODO: must ensure that both sides have received [the message] and are ready.
+    m_pmix_client_->WaitAllStubReady();
+  }
+  return true;
+}
+
+bool PmixServer::PmixInit_() const {
+  if (!util::os::CreateFolders(m_server_tmpdir_))
+    return false;
+
+  // if (!util::os::CreateFolders(m_cli_tmpdir_))
+  //   return false;
+
+  pmix_status_t rc;
+
+  pmix_info_t* server_info;
+  int server_info_size = 1;
+  if (PMIX_VERSION_MAJOR < 5) server_info_size = 2;
+
+  PMIX_INFO_CREATE(server_info, server_info_size);
+  if (PMIX_VERSION_MAJOR < 5)
+    PMIX_INFO_LOAD(&server_info[0], PMIX_USERID, &m_uid_, PMIX_UINT32);
+
+  PMIX_INFO_LOAD(&server_info[server_info_size - 1], PMIX_SERVER_TMPDIR,
+                 m_server_tmpdir_.c_str(), PMIX_STRING);
+  rc = PMIx_server_init(&g_k_crane_pmix_cb, server_info, server_info_size);
+  PMIX_INFO_DESTRUCT(server_info);
+  if (PMIX_SUCCESS != rc) {
+    CRANE_ERROR("Pmix Server Init failed with error {}", PMIx_Error_string(rc));
+    return false;
+  }
+
+  PMIx_Register_event_handler(NULL, 0, NULL, 0, ErrHandler_,
+                                    ErrHandlerRegCb, NULL);
+
+  return true;
+}
+
 bool PmixServer::JobSet_() {
     pmix_status_t rc;
 
@@ -346,17 +479,13 @@ bool PmixServer::JobSet_() {
 
   info_list.emplace_back(InfoLoad_(PMIX_SPAWNED, false, PMIX_BOOL));
 
-  // PMIX_TMPDIR cli_tmpdir_base
-  // PMIX_NSDIR cli_tmpdir
-
+  // info_list.emplace_back(InfoLoad_(PMIX_TMPDIR, m_cli_tmpdir_base_, PMIX_STRING));
+  // info_list.emplace_back(InfoLoad_(PMIX_NSDIR, m_cli_tmpdir_, PMIX_STRING));
   info_list.emplace_back(InfoLoad_(PMIX_TDIR_RMCLEAN, true, PMIX_BOOL));
 
-  info_list.emplace_back(InfoLoad_(PMIX_JOBID, m_task_id_, PMIX_STRING));
-
+  info_list.emplace_back(InfoLoad_(PMIX_JOBID, fmt::format("{}", m_task_id_), PMIX_STRING));
   info_list.emplace_back(InfoLoad_(PMIX_NODEID, m_node_id_, PMIX_UINT32));
-
   std::list<uint32_t> local_ranks;
-
   for (uint32_t rank = 0; rank < m_task_num_; rank++) {
     pmix_data_array_t* proc_data;
     PMIX_DATA_ARRAY_CREATE(proc_data, 9, PMIX_INFO);
@@ -395,13 +524,13 @@ bool PmixServer::JobSet_() {
   info_list.emplace_back(InfoLoad_(PMIX_JOB_SIZE, m_task_num_, PMIX_UINT32));
   info_list.emplace_back(
       InfoLoad_(PMIX_LOCAL_SIZE, m_ntasks_per_node_, PMIX_UINT32));
-
   info_list.emplace_back(InfoLoad_(PMIX_NODE_SIZE, m_node_num_, PMIX_UINT32));
   info_list.emplace_back(InfoLoad_(PMIX_MAX_PROCS, m_task_num_, PMIX_UINT32));
 
   // TODO：_set_topology
 
-  info_list.emplace_back(InfoLoad_(PMIX_USERID, m_uid_, PMIX_UINT32));
+  if (PMIX_VERSION_MAJOR >= 5)
+    info_list.emplace_back(InfoLoad_(PMIX_USERID, m_uid_, PMIX_UINT32));
 
   // node_list node1,node2,node3
   std::unique_ptr<char, decltype(&free)> regex(nullptr, &free);
@@ -493,49 +622,6 @@ bool PmixServer::JobSet_() {
   }
 
   return true;
-}
-
-void PmixServer::InfoSet_(
-    const crane::grpc::TaskToD& task,
-    const std::unordered_map<std::string, std::string>& env_map) {
-  // job_set
-  m_uid_ = task.uid();
-  m_gid_ = task.gid();
-  m_task_id_ = std::to_string(task.task_id());
-  // TODO: job_id.step_id
-  m_nspace_ = fmt::format("crane.pmix.{}", task.task_id());
-
-  m_ntasks_per_node_ = task.ntasks_per_node();
-  m_node_num_ = task.node_num();
-  m_task_num_ = m_ntasks_per_node_ * m_node_num_;
-
-  std::string hostname;
-  hostname.resize(256);  // Resize to ensure enough space for the hostname
-  if (gethostname(hostname.data(), hostname.size()) == 0) {
-    hostname.resize(
-        strlen(hostname.c_str()));  // Resize to actual length of hostname
-  } else {
-    CRANE_ERROR("Failed to get hostname");
-    hostname = "unknown";  // Set a default value if gethostname fails
-  }
-  m_hostname_ = hostname;
-  m_node_list_str_ = env_map.at("CRANE_JOB_NODELIST");
-  std::ranges::replace(m_node_list_str_, ';', ',');
-  m_node_list_ = absl::StrSplit(m_node_list_str_, ',');
-
-  auto it = std::ranges::find(m_node_list_, m_hostname_);
-  if (it != m_node_list_.end())
-    m_node_id_ = std::ranges::distance(m_node_list_.begin(), it);
-
-  m_peer_node_list_ = std::vector(m_node_list_);
-  std::erase(m_peer_node_list_, m_hostname_);
-
-  m_task_map_ = std::vector<uint32_t>(m_task_num_);
-
-  for (size_t node = 0; node < m_node_num_; ++node) {
-    std::fill_n(m_task_map_.begin() + node * m_ntasks_per_node_, m_ntasks_per_node_, node);
-  }
-
 }
 
 template <typename T>

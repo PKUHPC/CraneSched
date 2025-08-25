@@ -488,6 +488,8 @@ class TaskManager {
   TaskManager& operator=(const TaskManager&) = delete;
   TaskManager& operator=(TaskManager&&) = delete;
 
+  bool InitPmixPreFork();
+
   void Wait();
   void ShutdownSupervisorAsync(
       crane::grpc::TaskStatus new_status = StepStatus::Completed,
