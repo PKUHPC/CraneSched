@@ -565,34 +565,24 @@ bool MongodbClient::InsertTxn(const Txn& txn) {
 }
 
 void MongodbClient::SelectTxns(
-    const std::unordered_map<std::string, std::string>& conditions, int64_t start_time, int64_t end_time,
-    std::list<Txn>* res_txn) {
+    const std::unordered_map<std::string, std::string>& conditions,
+    int64_t start_time, int64_t end_time, std::list<Txn>* res_txn) {
   bsoncxx::builder::basic::document doc_builder;
 
   if (start_time != 0 || end_time != 0) {
     bsoncxx::builder::basic::document range_doc;
-    if (start_time != 0)
-      range_doc.append(kvp("$gte", start_time));
-    if (end_time != 0)
-      range_doc.append(kvp("$lt", end_time));
-    doc_builder.append(
-        kvp("creation_time", range_doc.view()));
+    if (start_time != 0) range_doc.append(kvp("$gte", start_time));
+    if (end_time != 0) range_doc.append(kvp("$lt", end_time));
+    doc_builder.append(kvp("creation_time", range_doc.view()));
   }
 
   for (const auto& [key, value] : conditions) {
     if (key == "action")
       doc_builder.append(kvp(key, static_cast<int64_t>(std::stoll(value))));
     else if (key == "info") {
-      doc_builder.append(
-          kvp(
-              key,
-              bsoncxx::builder::basic::make_document(
-                  kvp("$regex", value)
-              )
-          )
-      );
-    }
-    else
+      doc_builder.append(kvp(
+          key, bsoncxx::builder::basic::make_document(kvp("$regex", value))));
+    } else
       doc_builder.append(kvp(key, value));
   }
 
