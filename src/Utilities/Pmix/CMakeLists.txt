@@ -28,4 +28,5 @@ target_link_libraries(Utility_Pmix PUBLIC
         Utility_PublicHeader
         libpmix
         phmap
+        uvw
 )
