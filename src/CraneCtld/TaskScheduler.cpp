@@ -1916,8 +1916,12 @@ void TaskScheduler::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                                           crane::grpc::TaskStatus new_status,
                                           uint32_t exit_code,
                                           std::string reason) {
-  m_task_status_change_queue_.enqueue(
-      {job_id, step_id, exit_code, new_status, craned_index, reason});
+  m_task_status_change_queue_.enqueue({.job_id = job_id,
+                                       .step_id = step_id,
+                                       .exit_code = exit_code,
+                                       .new_status = new_status,
+                                       .craned_index = craned_index,
+                                       .reason = reason});
   m_task_status_change_async_handle_->send();
 }
 
@@ -1933,6 +1937,7 @@ void TaskScheduler::TaskStatusChangeAsyncCb_() {
 bool TaskScheduler::DaemonStepStatusChangeHandler_(
     crane::grpc::TaskStatus new_status, TaskInCtld* job,
     const CranedId& craned_id, StepStatusChangeContext* context) {
+  using util::StepStatusToString;
   bool all_node_ready{false};
   bool job_finished{false};
   auto* step = job->DaemonStep();
@@ -1979,8 +1984,8 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
     } else {
       CRANE_ASSERT_MSG(
           false, fmt::format("Invalid step status, current: {}, new status: {}",
-                             static_cast<int>(step->Status()),
-                             static_cast<int>(new_status)));
+                             StepStatusToString(step->Status()),
+                             StepStatusToString(new_status)));
       std::unreachable();
     }
   }
@@ -1988,7 +1993,7 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
     if (step->ConfigureFailed()) {
       step->SetStatus(step->configure_failed_status);
       CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", step->job_id,
-                 step->step_id, static_cast<int>(step->Status()));
+                 step->step_id, StepStatusToString(step->Status()));
       // Daemon step failed to configure, terminate all daemon step,
       for (const auto& node : step->CranedIds()) {
         context->craned_orphaned_steps[node][step->job_id].emplace(
@@ -2001,7 +2006,7 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
         step->SetStatus(crane::grpc::TaskStatus::Completed);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->step_id, static_cast<int>(step->Status()));
+                 step->step_id, StepStatusToString(step->Status()));
     }
     context->step_raw_ptrs.push_back(step);
     context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
@@ -2206,7 +2211,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     if (job_finished) {
       if (task->type == crane::grpc::Batch) {
-        task->SetStatus(task->PrimaryStep()->Status());
+        task->SetStatus(task->DaemonStep()->Status());
       } else {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         if (meta.interactive_type == crane::grpc::Crun) {  // Crun
@@ -2237,7 +2242,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           meta.cb_task_completed(task->TaskId(), true);
         }
 
-        task->SetStatus(task->PrimaryStep()->Status());
+        task->SetStatus(task->DaemonStep()->Status());
       }
 
       task->SetExitCode(exit_code);
@@ -2298,7 +2303,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                             ","),
               craned_id);
         }
-        alloc_step_latch.count_down();
       } else {
         CRANE_ERROR(
             "Failed to AllocSteps for [{}] tasks on Node {}: Craned down",
@@ -2310,7 +2314,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                     }),
                 ","),
             craned_id);
-        alloc_step_latch.count_down();
         for (const auto& [job_id, step_ids] :
              context.craned_step_exec_map.at(craned_id)) {
           for (const auto& step_id : step_ids)
@@ -2334,7 +2337,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         CraneExpected failed_steps =
             stub->ExecuteSteps(context.craned_step_exec_map.at(craned_id));
-        if (failed_steps.has_value()) {
+        if (failed_steps.has_value() && !failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
           for (const auto& [job_id, step_ids] : failed_steps.value()) {

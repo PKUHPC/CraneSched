@@ -454,7 +454,7 @@ struct StepInCtld {
   virtual ~StepInCtld() = default;
   void SetSubmitTime(absl::Time submit_time);
   bool ConfigureFailed() const {
-    return configure_failed_status == crane::grpc::TaskStatus::Invalid;
+    return configure_failed_status != crane::grpc::TaskStatus::Invalid;
   }
   bool FinishWithFailedStatus() const {
     return finish_failed_status != crane::grpc::TaskStatus::Invalid;

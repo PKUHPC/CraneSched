@@ -98,7 +98,7 @@ SupervisorServer::SupervisorServer() {
 
   std::filesystem::path supervisor_sock_path =
       std::filesystem::path(kDefaultSupervisorUnixSockDir) /
-      fmt::format("task_{}.sock", g_config.JobId);
+      fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
   auto unix_socket_path = fmt::format("unix://{}", supervisor_sock_path);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);

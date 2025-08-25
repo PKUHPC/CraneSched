@@ -817,7 +817,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 
   std::unordered_map<job_id_t, JobInD> job_map;
   for (const auto& [job_id, job_steps] : config_from_ctld.job_steps()) {
-    job_map[job_id] = JobInD(job_steps.job());
+    job_map.emplace(job_id, job_steps.job());
   }
 
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
