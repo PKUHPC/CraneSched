@@ -71,7 +71,7 @@ class PmixServer {
   const std::vector<uint32_t>& GetTaskMap() { return m_task_map_; }
   const std::string& GetNSpace() { return m_nspace_; }
   uint32_t GetTaskNum() const { return m_task_num_; }
-  uint64_t GetTimeout() const { return timeout; }
+  uint64_t GetTimeout() const { return m_timeout_; }
 
   CranedClient* GetCranedClient() const { return m_craned_client_.get(); }
   PmixClient* GetPmixClient() const { return m_pmix_client_.get(); }
@@ -112,7 +112,7 @@ class PmixServer {
 
   uint32_t m_ncpus_{}; /* total possible number of cpus in job */
 
-  uint64_t timeout{10}; // TODO: PMIXP_TIMEOUT
+  uint64_t m_timeout_{10}; // TODO: PMIXP_TIMEOUT
 
   std::string m_server_tmpdir_;
   std::string m_cli_tmpdir_base_;
