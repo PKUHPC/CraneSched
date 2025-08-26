@@ -338,7 +338,7 @@ message StepToD {
 
   bool get_user_env = 25;
   string submit_hostname = 26;
-  //uint32 total_gpus = 27;
+  uint32 total_gpus = 27;
   repeated string exclude_nodelist = 28;
 
   // Not used now.
