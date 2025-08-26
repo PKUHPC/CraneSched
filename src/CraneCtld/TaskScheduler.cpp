@@ -1941,19 +1941,22 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
   bool all_node_ready{false};
   bool job_finished{false};
   auto* step = job->DaemonStep();
-
-  // Configuring -> Running
-  if (new_status == crane::grpc::TaskStatus::Running) {
-    step->configuring_nodes.erase(craned_id);
-    all_node_ready = step->configuring_nodes.empty();
-
-    // All nodes replied but some failed, mark job as finished.
-    if (all_node_ready) {
-      if (step->ConfigureFailed()) {
+  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
+              step->job_id, step->StepId(), StepStatusToString(step->Status()),
+              StepStatusToString(new_status), craned_id);
+  switch (step->Status()) {
+  case crane::grpc::TaskStatus::Configuring:
+    // Configuring -> Failed / Running
+    step->NodeConfigured(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Configuring) {
+      step->SetConfigureFailedStatus(new_status);
+    }
+    if (step->AllNodesConfigured()) {
+      if (step->ConfigureFailed())
         job_finished = true;
-      } else {
-        CRANE_TRACE("[Step #{}.{}] CONFIGURING->RUNNING", step->job_id,
-                    step->step_id);
+      else {
+        CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", step->job_id,
+                    step->StepId());
         step->SetStatus(crane::grpc::TaskStatus::Running);
         context->rn_step_raw_ptrs.push_back(step);
         if (job->PrimaryStep()) {
@@ -1964,49 +1967,44 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
         }
       }
     }
-  } else {
-    if (step->Status() == crane::grpc::TaskStatus::Configuring) {
-      // Configuring -> Failed
+    break;
+  case crane::grpc::TaskStatus::Running:
+    // Running -> Completed / Failed
 
-      step->configuring_nodes.erase(craned_id);
-      step->configure_failed_status = new_status;
-      if (step->configuring_nodes.empty()) {
-        job_finished = true;
-      }
-
-    } else if (step->Status() == crane::grpc::TaskStatus::Running) {
-      // Running -> Completed / Failed
-      step->running_nodes.erase(craned_id);
-      if (new_status != crane::grpc::TaskStatus::Completed) {
-        step->finish_failed_status = new_status;
-      }
-      job_finished = step->running_nodes.empty();
-    } else {
-      CRANE_ASSERT_MSG(
-          false, fmt::format("Invalid step status, current: {}, new status: {}",
-                             StepStatusToString(step->Status()),
-                             StepStatusToString(new_status)));
-      std::unreachable();
+    step->NodeFinish(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Completed) {
+      step->SetFinishFailedStatus(new_status);
     }
+    job_finished = step->AllNodesFinished();
+    break;
+
+  default: {
+    CRANE_ASSERT_MSG(
+        false, fmt::format("Invalid step status, current: {}, new status: {}",
+                           StepStatusToString(step->Status()),
+                           StepStatusToString(new_status)));
+    std::unreachable();
   }
+  }
+
   if (job_finished) {
     if (step->ConfigureFailed()) {
-      step->SetStatus(step->configure_failed_status);
+      step->SetStatus(step->ConfigureFailedStatus());
       CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", step->job_id,
-                 step->step_id, StepStatusToString(step->Status()));
+                 step->StepId(), StepStatusToString(step->Status()));
       // Daemon step failed to configure, terminate all daemon step,
       for (const auto& node : step->CranedIds()) {
         context->craned_orphaned_steps[node][step->job_id].emplace(
-            step->step_id);
+            step->StepId());
       }
     } else {
       if (step->FinishWithFailedStatus()) {
-        step->SetStatus(step->finish_failed_status);
+        step->SetStatus(step->FinishFailedStatus());
       } else {
         step->SetStatus(crane::grpc::TaskStatus::Completed);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->step_id, StepStatusToString(step->Status()));
+                 step->StepId(), StepStatusToString(step->Status()));
     }
     context->step_raw_ptrs.push_back(step);
     context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
@@ -2017,9 +2015,10 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
 void TaskScheduler::CommonStepStatusChangeHandler_(
     crane::grpc::TaskStatus new_status, TaskInCtld* job, step_id_t step_id,
     const CranedId& craned_id, StepStatusChangeContext* context) {
+  using util::StepStatusToString;
   // PrimaryStep
   bool primary_step =
-      job->PrimaryStep() && step_id == job->PrimaryStep()->step_id;
+      job->PrimaryStep() && step_id == job->PrimaryStep()->StepId();
   CommonStepInCtld* step{nullptr};
   if (primary_step) {
     step = job->PrimaryStep();
@@ -2039,20 +2038,24 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
   // Step failed to configure, terminate step
   bool step_configure_failed{false};
 
-  if (new_status == crane::grpc::TaskStatus::Running) {
-    // Configuring -> Running
-    CRANE_ASSERT(step->Status() == crane::grpc::TaskStatus::Configuring);
-
-    step->configuring_nodes.erase(craned_id);
-    bool all_node_ready = step->configuring_nodes.empty();
-    if (all_node_ready) {
+  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
+              step->job_id, step->StepId(), StepStatusToString(step->Status()),
+              StepStatusToString(new_status), craned_id);
+  if (step->Status() == crane::grpc::TaskStatus::Configuring) {
+    // Configuring -> Running / Failed / Cancelled,
+    step->NodeConfigured(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Running) {
+      step->SetConfigureFailedStatus(new_status);
+    }
+    if (step->AllNodesConfigured()) {
       if (step->ConfigureFailed()) {
-        // The step failed to configure
+        // Configuring -> Failed
         step_configure_failed = true;
       } else {
+        // Configuring -> Running
         // All supervisor ready without failure, start execution.
         CRANE_INFO("[Step #{}.{}] is ready to run.", step->job_id,
-                   step->step_id);
+                   step->StepId());
         step->SetStatus(crane::grpc::TaskStatus::Running);
 
         // Primary:Update job status when primary step is Running.
@@ -2064,37 +2067,32 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
         // Launch step execution
         for (auto& node : step->CranedIds()) {
           context->craned_step_exec_map[node][step->job_id].insert(
-              step->step_id);
+              step->StepId());
         }
         context->rn_step_raw_ptrs.push_back(step);
       }
     }
-
-  } else {
-    // Configuring/ Running -> Completed / Failed / Cancelled,
+  } else if (step->Status() == crane::grpc::TaskStatus::Running) {
+    // Running -> Completed / Failed / Cancelled,
     // Primary: the job is completed.
 
-    if (step->Status() == crane::grpc::TaskStatus::Configuring) {
-      // Configuring -> Completed / Failed / Cancelled
-      // The step failed to configure
-      step->configuring_nodes.erase(craned_id);
-      step->configure_failed_status = new_status;
-      step_configure_failed = step->configuring_nodes.empty();
-    } else if (step->Status() == crane::grpc::TaskStatus::Running) {
-      // Running -> Completed / Failed / Cancelled
-      step->running_nodes.erase(craned_id);
-      if (new_status != crane::grpc::TaskStatus::Completed) {
-        step->finish_failed_status = new_status;
-      }
-      step_finished = step->running_nodes.empty();
-    } else {
-      std::unreachable();
+    step->NodeFinish(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Completed) {
+      step->SetFinishFailedStatus(new_status);
     }
+    step_finished = step->AllNodesFinished();
 
-    if (step_configure_failed) {
-      for (const auto& node : step->CranedIds()) {
-        context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
-      }
+  } else {
+    CRANE_ASSERT_MSG(
+        false, fmt::format("Invalid step status, current: {}, new status: {}",
+                           StepStatusToString(step->Status()),
+                           StepStatusToString(new_status)));
+    std::unreachable();
+  }
+
+  if (step_configure_failed) {
+    for (const auto& node : step->CranedIds()) {
+      context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
     }
   }
 
@@ -2102,9 +2100,9 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
   if (step_finished || step_configure_failed) {
     if (step->ConfigureFailed()) {
       CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
-                 step->step_id);
+                 step->StepId());
       // CONFIGURE_FAILED
-      step->SetStatus(step->configure_failed_status);
+      step->SetStatus(step->ConfigureFailedStatus());
       // Step failed to configure, terminate this step
       for (const auto& node : step->CranedIds()) {
         context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
@@ -2129,22 +2127,22 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
         for (const auto& comm_step : job->Steps() | std::views::values) {
           for (const auto& node : comm_step->CranedIds()) {
             context->craned_cancel_steps[node][comm_step->job_id].emplace(
-                comm_step->step_id);
+                comm_step->StepId());
           }
         }
       }
       if (step->ConfigureFailed()) {
         CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
-                   step->step_id);
-        step->SetStatus(step->configure_failed_status);
+                   step->StepId());
+        step->SetStatus(step->ConfigureFailedStatus());
       }
       if (step->FinishWithFailedStatus()) {
-        step->SetStatus(step->finish_failed_status);
+        step->SetStatus(step->FinishFailedStatus());
       } else {
         step->SetStatus(crane::grpc::TaskStatus::Completed);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->step_id, util::StepStatusToString(step->Status()));
+                 step->StepId(), util::StepStatusToString(step->Status()));
     }
 
     context->step_raw_ptrs.push_back(step);
@@ -2443,10 +2441,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
   // Steps will update in embedded db
   for (auto* step : context.rn_step_raw_ptrs) {
-    if (!g_embedded_db_client->UpdateRuntimeAttrOfStep(txn_id, step->step_db_id,
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfStep(txn_id, step->StepDbId(),
                                                        step->RuntimeAttr()))
       CRANE_ERROR("[Job #{}.{}]Failed to call UpdateRuntimeAttrOfStep()",
-                  step->job_id, step->step_id);
+                  step->job_id, step->StepId());
   }
 
   g_embedded_db_client->CommitVariableDbTransaction(txn_id);
@@ -2608,11 +2606,11 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
         std::ranges::contains(
             job_it->second->PrimaryStep()->executing_craned_ids, craned_id)) {
       const auto* step = job_it->second->PrimaryStep();
-      steps[step->step_id] = step->GetStepToD(craned_id);
+      steps[step->StepId()] = step->GetStepToD(craned_id);
     }
     for (const auto& step : job_it->second->Steps() | std::views::values)
       if (std::ranges::contains(step->executing_craned_ids, craned_id))
-        steps[step->step_id] = step->GetStepToD(craned_id);
+        steps[step->StepId()] = step->GetStepToD(craned_id);
   }
 }
 
@@ -2640,7 +2638,7 @@ void TaskScheduler::TerminateOrphanedSteps(
         StepInCtld* step{nullptr};
         if (step_id == kDaemonStepId) {
           step = job->DaemonStep();
-        } else if (step_id == job->PrimaryStep()->step_id) {
+        } else if (step_id == job->PrimaryStep()->StepId()) {
           step = job->PrimaryStep();
         } else {
           step = job->GetStep(step_id);
@@ -2649,7 +2647,7 @@ void TaskScheduler::TerminateOrphanedSteps(
           CRANE_WARN("[Step #{}.{}] Step not found in job.", step_id, job_id);
           continue;
         }
-        for (const auto& craned_id : step->running_nodes) {
+        for (const auto& craned_id : step->ExecutionNodes()) {
           craned_steps_map[craned_id][job_id].insert(step_id);
         }
       }

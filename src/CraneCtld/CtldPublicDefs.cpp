@@ -37,41 +37,83 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
+void StepInCtld::SetStepId(step_id_t id) {
+  m_step_id_ = id;
+  this->m_runtime_attr_.set_step_id(id);
+}
+void StepInCtld::SetStepDbId(step_db_id_t id) {
+  m_step_db_id_ = id;
+  this->m_runtime_attr_.set_step_db_id(id);
+}
+void StepInCtld::SetConfiguringNodes(
+    const std::unordered_set<CranedId>& nodes) {
+  this->m_configuring_nodes_ = nodes;
+  this->m_runtime_attr_.mutable_configuring_nodes()->Assign(nodes.begin(),
+                                                            nodes.end());
+}
+
+void StepInCtld::NodeConfigured(const CranedId& node) {
+  this->m_configuring_nodes_.erase(node);
+  this->m_runtime_attr_.mutable_configuring_nodes()->Assign(
+      m_configuring_nodes_.begin(), m_configuring_nodes_.end());
+}
+
+void StepInCtld::SetRunningNodes(const std::unordered_set<CranedId>& nodes) {
+  this->m_running_nodes_ = nodes;
+  this->m_runtime_attr_.mutable_running_nodes()->Assign(nodes.begin(),
+                                                        nodes.end());
+}
+
+void StepInCtld::NodeFinish(const CranedId& node) {
+  this->m_running_nodes_.erase(node);
+  this->m_runtime_attr_.mutable_running_nodes()->Assign(
+      m_running_nodes_.begin(), m_running_nodes_.end());
+}
+void StepInCtld::SetConfigureFailedStatus(crane::grpc::TaskStatus status) {
+  this->m_configure_failed_status_ = status;
+  this->m_runtime_attr_.set_configure_failed_status(status);
+}
+void StepInCtld::SetFinishFailedStatus(crane::grpc::TaskStatus status) {
+  this->m_finish_failed_status_ = status;
+  this->m_runtime_attr_.set_running_failed_status(status);
+}
+
 void StepInCtld::SetSubmitTime(absl::Time submit_time) {
   m_submit_time_ = submit_time;
-  this->runtime_attr.mutable_submit_time()->set_seconds(
+  this->m_runtime_attr_.mutable_submit_time()->set_seconds(
       ToUnixSeconds(submit_time));
 }
 void StepInCtld::SetStartTime(absl::Time start_time) {
   m_start_time_ = start_time;
-  this->runtime_attr.mutable_start_time()->set_seconds(
+  this->m_runtime_attr_.mutable_start_time()->set_seconds(
       ToUnixSeconds(start_time));
 }
 void StepInCtld::SetEndTime(absl::Time end_time) {
   m_end_time_ = end_time;
-  this->runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+  this->m_runtime_attr_.mutable_end_time()->set_seconds(
+      ToUnixSeconds(end_time));
 }
 
 void StepInCtld::SetAllocatedRes(const ResourceV2& res) {
   this->m_allocated_res_ = res;
-  *this->runtime_attr.mutable_allocated_res() =
+  *this->m_runtime_attr_.mutable_allocated_res() =
       static_cast<crane::grpc::ResourceV2>(res);
 }
 
 void StepInCtld::SetCranedIds(const std::list<CranedId>& craned_list) {
   this->craned_ids = craned_list;
-  this->runtime_attr.mutable_craned_ids()->Assign(craned_list.begin(),
-                                                  craned_list.end());
+  this->m_runtime_attr_.mutable_craned_ids()->Assign(craned_list.begin(),
+                                                     craned_list.end());
 }
 
 void StepInCtld::SetStatus(crane::grpc::TaskStatus new_status) {
   this->m_status_ = new_status;
-  this->runtime_attr.set_status(new_status);
+  this->m_runtime_attr_.set_status(new_status);
 }
 
 void StepInCtld::SetExitCode(uint32_t exit_code) {
   this->m_exit_code_ = exit_code;
-  this->runtime_attr.set_exit_code(exit_code);
+  this->m_runtime_attr_.set_exit_code(exit_code);
 }
 
 crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
@@ -437,7 +479,7 @@ void TaskInCtld::InitDaemonStepInCtld() {
   m_daemon_step_->type = type;
   m_daemon_step_->step_type = crane::grpc::StepType::DAEMON;
   m_daemon_step_->job_id = task_id;
-  m_daemon_step_->step_id = kDaemonStepId;
+  m_daemon_step_->SetStepId(kDaemonStepId);
   m_daemon_step_->uid = uid;
   m_daemon_step_->gids = {task_to_ctld.gid()};
   m_daemon_step_->name = name;
@@ -451,10 +493,10 @@ void TaskInCtld::InitDaemonStepInCtld() {
   m_daemon_step_->node_num = node_num;
   m_daemon_step_->included_nodes = included_nodes;
   m_daemon_step_->excluded_nodes = excluded_nodes;
-  m_daemon_step_->configuring_nodes =
-      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
-  m_daemon_step_->running_nodes =
-      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_daemon_step_->SetConfiguringNodes(
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>());
+  m_daemon_step_->SetRunningNodes(
+      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>());
   m_daemon_step_->SetSubmitTime(submit_time);
   m_daemon_step_->SetCranedIds(craned_ids);
   m_daemon_step_->SetStatus(crane::grpc::TaskStatus::Configuring);
@@ -476,7 +518,7 @@ void TaskInCtld::InitPrimaryStepInCtld() {
   m_primary_step_->step_type = crane::grpc::StepType::PRIMARY;
   m_primary_step_->type = type;
   m_primary_step_->job_id = task_id;
-  m_primary_step_->step_id = kDaemonStepId + 1;
+  m_primary_step_->SetStepId(kDaemonStepId + 1);
   m_primary_step_->uid = uid;
   m_primary_step_->gids = {task_to_ctld.gid()};
 
@@ -495,10 +537,10 @@ void TaskInCtld::InitPrimaryStepInCtld() {
   m_primary_step_->SetSubmitTime(submit_time);
   m_primary_step_->SetCranedIds(craned_ids);
   m_primary_step_->SetStatus(crane::grpc::TaskStatus::Configuring);
-  m_primary_step_->configuring_nodes =
-      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
-  m_primary_step_->running_nodes =
-      CranedIds() | std::ranges::to<std::unordered_set<CranedId>>();
+  m_primary_step_->SetConfiguringNodes(
+      executing_craned_ids | std::ranges::to<std::unordered_set<CranedId>>());
+  m_primary_step_->SetRunningNodes(
+      executing_craned_ids | std::ranges::to<std::unordered_set<CranedId>>());
   m_primary_step_->SetSubmitTime(submit_time);
   m_primary_step_->SetStartTime(start_time);
   m_primary_step_->SetEndTime(end_time);

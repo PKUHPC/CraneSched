@@ -404,12 +404,11 @@ struct StepInCtld {
   crane::grpc::TaskType type;
 
   job_id_t job_id;
-  step_id_t step_id{0};
+
   uid_t uid;
   std::vector<gid_t> gids;
   std::string name;
 
-  step_db_id_t step_db_id{0};
   std::string username;
   bool get_user_env{false};
   std::unordered_map<std::string, std::string> env;
@@ -421,20 +420,28 @@ struct StepInCtld {
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
-  std::unordered_set<CranedId> configuring_nodes;
+ protected:
+  /* ------------- [2] -------------
+   * Fields that won't change after this task is accepted.
+   * Also, these fields are persisted on the disk.
+   * ------------------------------- */
+  step_db_id_t m_step_db_id_{0};
+  step_id_t m_step_id_{0};
+
+  /* Fields that may change at run time.*/
+  std::unordered_set<CranedId> m_execute_nodes_;
+  std::unordered_set<CranedId> m_configuring_nodes_;
   /**
    * If any daemon/primary step launch failed, free job after recv all status
    * change from craned. If common step launch failed, free this step.
    */
-  crane::grpc::TaskStatus configure_failed_status{
+  crane::grpc::TaskStatus m_configure_failed_status_{
       crane::grpc::TaskStatus::Invalid};
 
-  std::unordered_set<CranedId> running_nodes;
-  crane::grpc::TaskStatus finish_failed_status{
+  std::unordered_set<CranedId> m_running_nodes_;
+  crane::grpc::TaskStatus m_finish_failed_status_{
       crane::grpc::TaskStatus::Invalid};
 
- protected:
-  /* Fields that may change at run time.*/
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
@@ -448,16 +455,42 @@ struct StepInCtld {
   uint32_t m_exit_code_{};
 
  private:
-  crane::grpc::RuntimeAttrOfStep runtime_attr;
+  /* ------ duplicate of the fields [1] above just for convenience ----- */
+  crane::grpc::StepToCtld m_step_to_ctld_;
+
+  /* ------ duplicate of the fields [2][3] above just for convenience ----- */
+  crane::grpc::RuntimeAttrOfStep m_runtime_attr_;
 
  public:
   virtual ~StepInCtld() = default;
+  void SetStepId(step_id_t id);
+  task_id_t StepId() const { return step_id; }
+
+  void SetStepDbId(step_db_id_t id);
+  task_id_t StepDbId() const { return step_db_id; }
   void SetSubmitTime(absl::Time submit_time);
-  bool ConfigureFailed() const {
-    return configure_failed_status != crane::grpc::TaskStatus::Invalid;
+  void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
+  void NodeConfigured(const CranedId& node);
+  bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
+  void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
+  std::unordered_set<CranedId> ExecutionNodes() const {
+    return m_execute_nodes_;
   }
+  void NodeFinish(const CranedId& node);
+  bool AllNodesFinished() const { return m_running_nodes_.empty(); }
+  void SetConfigureFailedStatus(crane::grpc::TaskStatus status);
+  bool ConfigureFailed() const {
+    return m_configure_failed_status_ != crane::grpc::TaskStatus::Invalid;
+  }
+  crane::grpc::TaskStatus ConfigureFailedStatus() const {
+    return m_configure_failed_status_;
+  }
+  void SetFinishFailedStatus(crane::grpc::TaskStatus status);
   bool FinishWithFailedStatus() const {
-    return finish_failed_status != crane::grpc::TaskStatus::Invalid;
+    return m_finish_failed_status_ != crane::grpc::TaskStatus::Invalid;
+  }
+  crane::grpc::TaskStatus FinishFailedStatus() const {
+    return m_finish_failed_status_;
   }
   absl::Time SubmitTime() const { return m_submit_time_; }
   void SetStartTime(absl::Time start_time);
@@ -474,7 +507,7 @@ struct StepInCtld {
   uint32_t ExitCode() const { return m_exit_code_; }
 
   crane::grpc::RuntimeAttrOfStep const& RuntimeAttr() const {
-    return runtime_attr;
+    return m_runtime_attr_;
   }
 };
 

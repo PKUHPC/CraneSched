@@ -200,8 +200,11 @@ message RuntimeAttrOfTask {
 message StepToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
-
+  // account, qos from job
+  uint32 job_id = 2;
   ResourceView req_resources = 3;
+  uint32 uid = 4; //Only for authorization
+  string name = 5;
 
   uint32 node_num = 9;
   uint32 ntasks_per_node = 10;
@@ -210,7 +213,7 @@ message StepToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  repeated uint32 gid = 14;  // egid
+  repeated uint32 gid = 14;
 
   InteractiveTaskAdditionalMeta interactive_meta = 22;
 
@@ -225,27 +228,33 @@ message StepToCtld {
   string container = 26;
 }
 
-message StepInEmbeddedDb {
-  RuntimeAttrOfStep runtime_attr = 1;
-  StepToCtld step_to_ctld = 2;
-}
-
 message RuntimeAttrOfStep {
-  // Fields that won't change after this task is accepted.
+  // Fields that won't change after this step is accepted.
   uint32 step_id = 1;
   int64 step_db_id = 3;
 
-  // Fields that will change after this task is accepted.
+  // Fields that will change after this step is accepted.
   int32 requeue_count = 11;
   repeated string craned_ids = 12;
   TaskStatus status = 13;
   uint32 exit_code = 14;
 
-  google.protobuf.Timestamp submit_time = 15;
-  google.protobuf.Timestamp start_time = 16;
-  google.protobuf.Timestamp end_time = 17;
+  repeated string configuring_nodes = 15;
+  TaskStatus configure_failed_status = 16;
+  repeated string running_nodes = 17;
+  TaskStatus running_failed_status = 18;
 
-  ResourceV2 allocated_res = 19;
+  google.protobuf.Timestamp submit_time = 20;
+  google.protobuf.Timestamp start_time = 21;
+  google.protobuf.Timestamp end_time = 22;
+
+  bool held = 25;
+  ResourceV2 allocated_res = 26;
+}
+
+message StepInEmbeddedDb {
+  RuntimeAttrOfStep runtime_attr = 1;
+  StepToCtld step_to_ctld = 2;
 }
 
 message JobToD {
