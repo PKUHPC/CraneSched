@@ -25,7 +25,10 @@
 #include <string>
 
 #include "crane/Logger.h"
-#include "shadow/subid.h"
+
+extern "C" {
+#include <shadow/subid.h>
+}
 
 #if !defined(SUBID_ABI_MAJOR) || SUBID_ABI_MAJOR < 4
 // For older libsubid versions, map the function names to their legacy
