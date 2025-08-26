@@ -412,7 +412,9 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   if (this->container_meta.has_value())
     step_to_d.mutable_container_meta()->CopyFrom(
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
-
+  
+  step_to_d.set_submit_hostname(StepToCtld().submit_hostname());
+  step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
   return step_to_d;
 }
 
@@ -674,6 +676,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     auto* mutable_meta = step_to_d.mutable_container_meta();
     mutable_meta->CopyFrom(StepToCtld().container_meta());
   }
+
+  step_to_d.set_submit_hostname(StepToCtld().submit_hostname());
+  step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
 
   return step_to_d;
 }
