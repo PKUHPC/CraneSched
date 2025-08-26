@@ -220,32 +220,49 @@ jobs:
           rm -f build-output.tar.gz
           tar -czf build-output.tar.gz -C output .
 
-      # Generate meta.json (human-readable metadata; replaces fingerprint.txt)
+      # Generate meta.json
       - name: Generate meta.json
         run: |
+          set -euo pipefail
           TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           SIZE_BYTES=$(stat -c %s build-output.tar.gz)
           SHA256=$(sha256sum build-output.tar.gz | awk '{print $1}')
-          cat > meta.json <<EOF
-{
-  "fingerprint": "${FINGERPRINT}",
-  "key_sha256": "${KEY_SHA256}",
-  "created_utc": "${TS}",
-  "github_run": "${RUN_URL}",
-  "backend_sha": "${CRANE_SHA}",
-  "frontend_ref": "${FE_REF}",
-  "frontend_sha": "${FE_SHA}",
-  "ci_image_tag": "${CI_IMAGE_TAG}",
-  "ci_image_digest": "${CI_IMAGE_DIGEST}",
-  "cache_buster": "${CACHE_BUSTER}",
-  "size_bytes": ${SIZE_BYTES},
-  "sha256": "${SHA256}",
-  "runner_host": "$(hostname)",
-  "runner_uname": "$(uname -srmo)"
-}
-EOF
-          # Also keep a copy inside output/ for downstream visibility and post-processing
+          RUNNER_HOST="$(hostname)"
+          RUNNER_UNAME="$(uname -srmo)"
+
+          jq -n \
+            --arg fingerprint "${FINGERPRINT}" \
+            --arg key_sha256 "${KEY_SHA256}" \
+            --arg created_utc "${TS}" \
+            --arg github_run "${RUN_URL}" \
+            --arg backend_sha "${CRANE_SHA}" \
+            --arg frontend_ref "${FE_REF}" \
+            --arg frontend_sha "${FE_SHA}" \
+            --arg ci_image_tag "${CI_IMAGE_TAG}" \
+            --arg ci_image_digest "${CI_IMAGE_DIGEST}" \
+            --arg cache_buster "${CACHE_BUSTER}" \
+            --arg sha256 "${SHA256}" \
+            --arg runner_host "${RUNNER_HOST}" \
+            --arg runner_uname "${RUNNER_UNAME}" \
+            --argjson size_bytes "${SIZE_BYTES}" \
+            '{
+              fingerprint: $fingerprint,
+              key_sha256: $key_sha256,
+              created_utc: $created_utc,
+              github_run: $github_run,
+              backend_sha: $backend_sha,
+              frontend_ref: $frontend_ref,
+              frontend_sha: $frontend_sha,
+              ci_image_tag: $ci_image_tag,
+              ci_image_digest: $ci_image_digest,
+              cache_buster: $cache_buster,
+              size_bytes: $size_bytes,
+              sha256: $sha256,
+              runner_host: $runner_host,
+              runner_uname: $runner_uname
+            }' > meta.json
+
           cp -f meta.json output/meta.json
 
       # Save to local cache only when we built (i.e., local cache miss)
