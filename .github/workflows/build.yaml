@@ -38,13 +38,16 @@ env:
   SCRIPT_PATH: /opt/actions-runner-external/script
   CACHE_PATH: /opt/actions-runner-external/cache
 
+  # Local cache directory
+  LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
+
   # Unified frontend ref across all triggers
   FRONTEND_REF: ${{ inputs.frontend_branch || 'master' }}
 
   # Cache buster for forcing rebuilds on workflow_dispatch
   CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
 
-  # CI image (tag used only for lookup; fingerprint uses resolved digest)
+  # CI image tag (digest resolved at runtime)
   CI_IMAGE_TAG: ghcr.io/nativu5/cranedev:ci
 
 jobs:
@@ -58,8 +61,7 @@ jobs:
         shell: bash -leo pipefail {0}
 
     outputs:
-      # Expose the name of the bundle artifact to the test job
-      output_bundle_artifact: build-output.tgz
+      output_bundle_artifact: build-output.tar.gz
 
     steps:
       # Checkout backend repository
@@ -76,11 +78,7 @@ jobs:
           path: CraneSched-FrontEnd
           ref: ${{ env.FRONTEND_REF }}
 
-      # Resolve CI image digest without pulling layers if possible.
-      # Strategy (first match wins):
-      # 1) skopeo inspect docker://$CI_IMAGE_TAG -> .Digest
-      # 2) podman manifest inspect $CI_IMAGE_TAG -> manifests[0].digest or config.digest
-      # 3) Fallback: podman pull, then podman image inspect -> .Digest
+      # Resolve CI image digest (try skopeo, then podman manifest, then pull+inspect)
       - name: Resolve CI image digest
         id: imagedigest
         run: |
@@ -97,24 +95,15 @@ jobs:
           resolve_with_manifest() {
             command -v podman >/dev/null 2>&1 || return 1
             RAW=$(podman manifest inspect "${IMG}" 2>/dev/null) || return 1
-            # Try manifest list first
             if echo "${RAW}" | jq -e '.manifests' >/dev/null 2>&1; then
-              # Optional: filter by current platform to improve cache hit rate
               ARCH=$(uname -m)
               OS=$(uname -s | awk '{print tolower($0)}')
-              # Normalize common arch values (e.g., x86_64 -> amd64)
-              if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
+              [ "$ARCH" = "x86_64" ] && ARCH="amd64"
               DIGEST=$(echo "${RAW}" | jq -r --arg arch "$ARCH" --arg os "$OS" \
                 '.manifests[] | select(.platform.architecture==$arch and .platform.os==$os) | .digest' | head -n1)
-              # Fallback to the first manifest if platform-filter failed
-              if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
-                DIGEST=$(echo "${RAW}" | jq -r '.manifests[0].digest')
-              fi
+              [ -z "${DIGEST}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.manifests[0].digest')
             fi
-            # Fallback to single manifest config digest
-            if [ -z "${DIGEST:-}" ] || [ "${DIGEST}" = "null" ]; then
-              DIGEST=$(echo "${RAW}" | jq -r '.config.digest' 2>/dev/null) || true
-            fi
+            [ -z "${DIGEST:-}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.config.digest' 2>/dev/null || true)
             [ -n "${DIGEST:-}" ] && [ "${DIGEST}" != "null" ] || return 1
             echo "${DIGEST}"
           }
@@ -125,62 +114,88 @@ jobs:
             podman image inspect "${IMG}" --format '{{.Digest}}'
           }
 
-          DIGEST=""
-          if [ -z "${DIGEST}" ]; then DIGEST="$(resolve_with_skopeo || true)"; fi
-          if [ -z "${DIGEST}" ]; then DIGEST="$(resolve_with_manifest || true)"; fi
-          if [ -z "${DIGEST}" ]; then DIGEST="$(resolve_with_pull || true)"; fi
-
-          if [ -z "${DIGEST}" ]; then
-            echo "Failed to resolve image digest for ${IMG}" >&2
-            exit 1
-          fi
+          DIGEST="$(resolve_with_skopeo || true)"
+          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_manifest || true)"
+          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_pull || true)"
+          [ -z "$DIGEST" ] && { echo "ERROR: failed to resolve digest for ${IMG}" >&2; exit 1; }
 
           echo "CI_IMAGE_DIGEST=${DIGEST}" | tee -a "$GITHUB_ENV"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
-      # Compute build fingerprint from both repos’ HEAD SHAs, frontend ref, CI image digest, and optional CACHE_BUSTER
-      - name: Compute build fingerprint
+      # Compute fingerprint and its sha256 key
+      - name: Compute fingerprint
         id: fp
         run: |
+          set -euo pipefail
           CRANE_SHA=$(git -C CraneSched rev-parse HEAD)
           FE_SHA=$(git -C CraneSched-FrontEnd rev-parse HEAD)
           FE_REF="${FRONTEND_REF}"
           CI_DIGEST="${CI_IMAGE_DIGEST}"
           FINGERPRINT="${CRANE_SHA}-${FE_REF}-${FE_SHA}-${CI_DIGEST}-${CACHE_BUSTER}"
-          echo "CRANE_SHA=${CRANE_SHA}" | tee -a $GITHUB_ENV
-          echo "FE_SHA=${FE_SHA}" | tee -a $GITHUB_ENV
-          echo "FE_REF=${FE_REF}" | tee -a $GITHUB_ENV
-          echo "FINGERPRINT=$FINGERPRINT" | tee -a $GITHUB_ENV
-          echo "key=build-output-${FINGERPRINT}" >> $GITHUB_OUTPUT
 
-      # Prepare workspace required regardless of cache hit/miss
-      - name: Prepare workspace
+          KEY_SHA256=$(printf '%s' "$FINGERPRINT" | sha256sum | awk '{print $1}')
+          CACHE_TGZ="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tar.gz"
+          CACHE_META="${LOCAL_CACHE_DIR}/${KEY_SHA256}.meta.json"
+
+          echo "CRANE_SHA=${CRANE_SHA}" >> "$GITHUB_ENV"
+          echo "FE_SHA=${FE_SHA}"       >> "$GITHUB_ENV"
+          echo "FE_REF=${FE_REF}"       >> "$GITHUB_ENV"
+          echo "FINGERPRINT=${FINGERPRINT}" >> "$GITHUB_ENV"
+          echo "KEY_SHA256=${KEY_SHA256}"   >> "$GITHUB_ENV"
+          echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
+          echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
+
+      # Prepare workspace and ensure local cache directory exists
+      - name: Prepare workspace & local cache
         run: |
+          set -euo pipefail
           echo "Linking $SCRIPT_PATH to $(pwd)/script"
           ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
           echo "Linking $CACHE_PATH to $(pwd)/cache"
           ln -sfT "$CACHE_PATH" "$(pwd)/cache"
-          mkdir -p output
-          mkdir -p log
+          mkdir -p output log
+          mkdir -p "${LOCAL_CACHE_DIR}" || true
+          chown "$(id -u)":"$(id -g)" "${LOCAL_CACHE_DIR}" || true
+          ls -ld "${LOCAL_CACHE_DIR}"
 
-      # Try to restore previously built outputs using the fingerprint
-      - name: Restore build output cache
-        id: restore_build
-        uses: actions/cache/restore@v4
-        with:
-          # Cache the whole output/ directory (every file is meaningful)
-          path: output
-          key: ${{ steps.fp.outputs.key }}
+      # Try local cache hit: verify meta & sha256, then unpack
+      - name: Local cache lookup
+        id: local_cache
+        run: |
+          set -euo pipefail
+          HIT=false
+          if [ -f "${CACHE_TGZ}" ] && [ -f "${CACHE_META}" ]; then
+            echo "Found local cache files:"
+            ls -lh "${CACHE_TGZ}" "${CACHE_META}"
+            EXPECT_SHA=$(jq -r '.sha256 // empty' "${CACHE_META}" || true)
+            if [ -n "${EXPECT_SHA}" ]; then
+              ACTUAL_SHA=$(sha256sum "${CACHE_TGZ}" | awk '{print $1}')
+              if [ "${EXPECT_SHA}" = "${ACTUAL_SHA}" ]; then
+                echo "Local cache checksum OK."
+                rm -rf output/*; mkdir -p output
+                tar -xzf "${CACHE_TGZ}" -C output
+                HIT=true
+              else
+                echo "WARN: checksum mismatch, ignoring local cache."
+              fi
+            else
+              echo "WARN: missing sha256 in meta.json, ignoring local cache."
+            fi
+          else
+            echo "Local cache NOT found."
+          fi
+          echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
+          echo "LOCAL_CACHE_HIT=${HIT}" >> "$GITHUB_ENV"
 
-      # Pull CI image only on cache miss (build is needed)
+      # Pull CI image only if local cache missed
       - name: Pull CI Image (only on miss)
-        if: steps.restore_build.outputs.cache-hit != 'true'
+        if: steps.local_cache.outputs.hit != 'true'
         run: |
           podman pull "${CI_IMAGE_TAG}"
 
-      # Build inside container only when cache miss
+      # Build inside container only if local cache missed
       - name: Build in Container (only on miss)
-        if: steps.restore_build.outputs.cache-hit != 'true'
+        if: steps.local_cache.outputs.hit != 'true'
         run: |
           podman run --rm \
               -v ./CraneSched:/Workspace/CraneSched \
@@ -190,36 +205,7 @@ jobs:
               -v ./cache/ccache:/root/.ccache \
               "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
 
-      # Write/refresh a human-readable fingerprint file into output/ (runs for both cache-hit and cache-miss).
-      # For cache-miss this happens BEFORE saving the cache, so the file is included in the cache.
-      - name: Write fingerprint file
-        run: |
-          TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          {
-            echo "CraneSched Build Fingerprint"
-            echo "================================"
-            echo "Timestamp (UTC):     ${TS}"
-            echo "GitHub Run:          ${RUN_URL}"
-            echo
-            echo "Backend (CraneSched):"
-            echo "  HEAD SHA:          ${CRANE_SHA}"
-            echo
-            echo "Frontend (CraneSched-FrontEnd):"
-            echo "  Ref:               ${FE_REF}"
-            echo "  HEAD SHA:          ${FE_SHA}"
-            echo
-            echo "CI Image:"
-            echo "  Tag:               ${CI_IMAGE_TAG}"
-            echo "  Digest:            ${CI_IMAGE_DIGEST}"
-            echo
-            echo "Cache Buster:        ${CACHE_BUSTER:-<empty>}"
-            echo
-            echo "Composite Fingerprint Key:"
-            echo "  ${FINGERPRINT}"
-          } > output/fingerprint.txt
-
-      # Validate that output/ is not empty; fail early if no files were produced/restored
+      # Validate that output/ is not empty; fail early
       - name: Validate non-empty output
         run: |
           if ! find output -type f -print -quit | grep -q .; then
@@ -228,25 +214,62 @@ jobs:
             exit 1
           fi
 
-      # Save outputs to cache only when newly built (after fingerprint.txt is written)
-      - name: Save build output cache (only on miss)
-        if: steps.restore_build.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: output
-          key: ${{ steps.fp.outputs.key }}
-
-      # Create a single bundle for publishing and for the downstream test job
-      - name: Create output bundle
+      # Create build-output.tar.gz (for both local cached path and artifact upload)
+      - name: Create bundle (tar.gz)
         run: |
-          tar -czf build-output.tgz -C output .
+          rm -f build-output.tar.gz
+          tar -czf build-output.tar.gz -C output .
 
-      # Upload only ONE artifact: the unified bundle for release & cross-job
-      - name: Upload output bundle
+      # Generate meta.json (human-readable metadata; replaces fingerprint.txt)
+      - name: Generate meta.json
+        run: |
+          TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          SIZE_BYTES=$(stat -c %s build-output.tar.gz)
+          SHA256=$(sha256sum build-output.tar.gz | awk '{print $1}')
+          cat > meta.json <<EOF
+{
+  "fingerprint": "${FINGERPRINT}",
+  "key_sha256": "${KEY_SHA256}",
+  "created_utc": "${TS}",
+  "github_run": "${RUN_URL}",
+  "backend_sha": "${CRANE_SHA}",
+  "frontend_ref": "${FE_REF}",
+  "frontend_sha": "${FE_SHA}",
+  "ci_image_tag": "${CI_IMAGE_TAG}",
+  "ci_image_digest": "${CI_IMAGE_DIGEST}",
+  "cache_buster": "${CACHE_BUSTER}",
+  "size_bytes": ${SIZE_BYTES},
+  "sha256": "${SHA256}",
+  "runner_host": "$(hostname)",
+  "runner_uname": "$(uname -srmo)"
+}
+EOF
+          # Also keep a copy inside output/ for downstream visibility and post-processing
+          cp -f meta.json output/meta.json
+
+      # Save to local cache only when we built (i.e., local cache miss)
+      - name: Save to local cache (only on miss)
+        if: steps.local_cache.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          TMP_DIR="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tmp"
+          mkdir -p "${TMP_DIR}"
+          cp -f build-output.tar.gz "${TMP_DIR}/"
+          cp -f meta.json "${TMP_DIR}/${KEY_SHA256}.meta.json"
+          # Atomic publish
+          rm -f "${CACHE_TGZ}" "${CACHE_META}" || true
+          mv -f "${TMP_DIR}/build-output.tar.gz" "${CACHE_TGZ}"
+          mv -f "${TMP_DIR}/${KEY_SHA256}.meta.json" "${CACHE_META}"
+          rmdir "${TMP_DIR}" || true
+          echo "Local cache stored: ${CACHE_TGZ}"
+
+      # Upload the single unified artifact for cross-job & manual download
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-output.tgz
-          path: build-output.tgz
+          name: build-output.tar.gz
+          path: build-output.tar.gz
           retention-days: 14
           if-no-files-found: error
 
@@ -269,21 +292,21 @@ jobs:
           ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
           echo "Linking $CACHE_PATH to $(pwd)/cache"
           ln -sfT "$CACHE_PATH" "$(pwd)/cache"
-          mkdir -p output
-          mkdir -p log
+          mkdir -p output log
 
-      # Download and extract the unified bundle produced by the build job
-      - name: Download build outputs
+      # Download and extract the bundle produced by the build job
+      - name: Download bundle
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build.outputs.output_bundle_artifact }}
           path: .
-      - name: Extract build outputs
+      - name: Extract bundle
         run: |
+          rm -rf output/*
           mkdir -p output
-          tar -xzf build-output.tgz -C output
+          tar -xzf build-output.tar.gz -C output
 
-      # Run AutoTest using the restored output directory
+      # Run AutoTest using the extracted output directory
       - name: Run AutoTest
         continue-on-error: true
         run: |
@@ -303,7 +326,7 @@ jobs:
           podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
           podman stop autotest || true
 
-      # Upload AutoTest results (kept independent from build bundle)
+      # Upload AutoTest results
       - name: Upload AutoTest Results
         uses: actions/upload-artifact@v4
         with:
