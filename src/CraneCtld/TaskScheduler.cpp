@@ -2144,7 +2144,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
         step->SetStatus(crane::grpc::TaskStatus::Completed);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->step_id, static_cast<int>(step->Status()));
+                 step->step_id, util::StepStatusToString(step->Status()));
     }
 
     context->step_raw_ptrs.push_back(step);

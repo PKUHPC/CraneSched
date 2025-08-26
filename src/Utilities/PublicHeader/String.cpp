@@ -472,18 +472,15 @@ std::expected<CertPair, std::string> ParseCertificate(
   return CertPair{cn, formatted_serial_number};
 }
 
-std::string_view StepIdsToString(const job_id_t job_id,
-                                 const step_id_t step_id) {
+std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id) {
   return fmt::format("{}.{}", job_id, step_id);
 }
 
-std::string_view StepIdTupleToString(
-    const std::tuple<job_id_t, step_id_t> &step) {
+std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step) {
   return StepIdsToString(std::get<0>(step), std::get<1>(step));
 }
 
-std::string_view StepIdPairToString(
-    const std::pair<job_id_t, step_id_t> &step) {
+std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step) {
   return StepIdsToString(step.first, step.second);
 }
 

@@ -265,7 +265,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
       absl::MutexLock lk(map_ptr->at(job_id).RawPtr()->step_map_mtx.get());
       job_steps[job_id] = map_ptr->at(job_id).RawPtr()->step_map |
                           std::views::keys | std::ranges::to<std::set>();
-      count += job_steps.size();
+      ++count;
     }
   }
 
@@ -280,8 +280,8 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
           stub->ShutdownSupervisor();
         }
         g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
-        shutdown_daemon_latch.count_down();
       }
+      shutdown_daemon_latch.count_down();
     });
   }
   shutdown_daemon_latch.wait();
@@ -796,7 +796,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
         CRANE_ERROR("[Step #{}.{}] Failed to find supervisor stub.", job_id,
                     step_id);
       }
-      auto code = stub->ExecuteTask();
+      auto code = stub->ExecuteStep();
       if (code != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
                     job_id, step_id, static_cast<int>(code));

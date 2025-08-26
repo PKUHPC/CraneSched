@@ -22,13 +22,14 @@
 namespace Craned {
 using grpc::ClientContext;
 
-CraneErrCode SupervisorStub::ExecuteTask() {
+CraneErrCode SupervisorStub::ExecuteStep() {
   ClientContext context;
   crane::grpc::supervisor::TaskExecutionRequest request;
   crane::grpc::supervisor::TaskExecutionReply reply;
 
   auto ok = m_stub_->ExecuteTask(&context, request, &reply);
   if (!ok.ok()) {
+    CRANE_ERROR("ExecuteStep failed: reply {},{}", ok.ok(), ok.error_message());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -114,6 +115,8 @@ void SupervisorStub::InitChannelAndStub(const std::string& endpoint) {
 
 CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t>>
 SupervisorKeeper::InitAndGetRecoveredMap() {
+  static constexpr LazyRE2 supervisor_sock_pattern(
+      R"(step_(\d+)\.(\d+)\.sock$)");
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (!std::filesystem::exists(path) ||
@@ -124,7 +127,9 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
 
     std::vector<std::filesystem::path> files;
     for (const auto& it : std::filesystem::directory_iterator(path)) {
-      if (std::filesystem::is_socket(it.path())) files.emplace_back(it.path());
+      if (std::filesystem::is_socket(it.path()) &&
+          RE2::PartialMatch(it.path().c_str(), *supervisor_sock_pattern))
+        files.emplace_back(it.path());
     }
 
     absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t> supervisor_pid;

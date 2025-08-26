@@ -1786,41 +1786,37 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     //       so we move it outside the multithreading part.
     int64_t sec = m_step_.GetStep().time_limit().seconds();
     AddTerminationTimer_(sec);
-    CRANE_TRACE("Add a timer of {} seconds", sec);
+    CRANE_INFO("Add a timer of {} seconds", sec);
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
-      CRANE_DEBUG(
-          "[Job #{}] Failed to look up password entry for uid {} of task",
-          m_step_.job_id, m_step_.uid);
+      CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
       ActivateTaskStatusChange_(
           task->task_id, crane::grpc::TaskStatus::Failed,
           ExitCode::kExitCodePermissionDenied,
-          fmt::format(
-              "[Job #{}] Failed to look up password entry for uid {} of task",
-              m_step_.job_id, m_step_.uid));
+          fmt::format("Failed to look up password entry for uid {}",
+                      m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
     }
 
-    // TODO: Replace following job_id with task_id.
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+      m_step_.AddTaskInstance(task->task_id, std::move(task));
       return;
     }
 
     LaunchExecution_(task.get());
     if (!task->GetPid()) {
-      CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
+      CRANE_WARN("[task #{}] Failed to launch process.", task->task_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
-      CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
+      CRANE_INFO("[task #{}] Launched process {}.", task->task_id,
                  task->GetPid());
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+      m_step_.AddTaskInstance(task->task_id, std::move(task));
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }

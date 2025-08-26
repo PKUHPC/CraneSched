@@ -135,20 +135,21 @@ auto FlattenMapView(const Map &m) {
          std::views::join;
 }
 
-std::string_view StepIdsToString(const job_id_t job_id,
-                                 const step_id_t step_id);
-std::string_view StepIdTupleToString(
-    const std::tuple<job_id_t, step_id_t> &step);
-std::string_view StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
+std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
+std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step);
+std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
 
 template <typename Map>
 std::string JobStepsToString(const Map &m) {
-  auto strs_view =
+  std::vector<std::string> step_strs =
       m | std::views::transform([](const auto &kv) {
-        const auto &[k, v] = kv;
-        return fmt::format("Job #{} step: {} ", k, absl::StrJoin(v, ","));
-      });
-  return absl::StrJoin(strs_view, ";");
+        const auto &[k, step_ids] = kv;
+        return step_ids | std::views::transform([k](const auto &step_id) {
+                 return StepIdsToString(k, step_id);
+               });
+      }) |
+      std::views::join | std::ranges::to<std::vector>();
+  return absl::StrJoin(step_strs, ",");
 }
 
 namespace Internal {
