@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "CranedPublicDefs.h"
+#include "CommonPublicDefs.h"
 // Precompiled header comes first.
 
 namespace Craned {

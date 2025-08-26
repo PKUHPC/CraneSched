@@ -23,7 +23,7 @@
 #include <pty.h>
 #include <sys/wait.h>
 
-#include "../Common/CranedPublicDefs.h"
+#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"

@@ -29,7 +29,6 @@
 #  include <linux/bpf.h>
 #endif
 
-#include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"

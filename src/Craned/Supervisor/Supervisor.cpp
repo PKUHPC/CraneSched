@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "../Common/CranedPublicDefs.h"
+#include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
 #include <google/protobuf/util/delimited_message_util.h>

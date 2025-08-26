@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "../Common/CranedPublicDefs.h"
+#include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include <grp.h>

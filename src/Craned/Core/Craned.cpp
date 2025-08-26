@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "../Common/CranedPublicDefs.h"
+#include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
 #include <sys/file.h>
@@ -35,11 +35,11 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
-#include "../Common/CgroupManager.h"
-#include "../Common/DeviceManager.h"
+#include "CgroupManager.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
+#include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"

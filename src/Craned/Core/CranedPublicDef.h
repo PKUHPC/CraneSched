@@ -20,54 +20,19 @@
 
 #include <filesystem>
 
-#include "CranedPreCompiledHeader.h"
+#include "PreCompiledHeader.h"
 // Precompiled header comes first
 
 #include "crane/Network.h"
 #include "crane/OS.h"
 
-// Common definitions shared between Craned and Supervisor
-namespace CranedCommon {
-
-using EnvMap = std::unordered_map<std::string, std::string>;
-
-// Container configuration structure shared by both components
-struct ContainerConfig {
-  bool Enabled{false};
-  std::filesystem::path TempDir;
-  std::string RuntimeBin;
-  std::string RuntimeState;
-  std::string RuntimeRun;
-  std::string RuntimeKill;
-  std::string RuntimeDelete;
-};
-
-// Plugin configuration structure shared by both components
-struct PluginConfig {
-  bool Enabled{false};
-  std::string PlugindSockPath;
-};
-
-// TLS certificate configuration shared by both components
-struct TlsCertConfig {
-  bool Enabled{false};
-  TlsCertificates TlsCerts;
-  std::string DomainSuffix;
-};
-
-}  // namespace CranedCommon
-
 namespace Craned {
-
-using EnvMap = CranedCommon::EnvMap;
-using ContainerConfig = CranedCommon::ContainerConfig;
-using PluginConfig = CranedCommon::PluginConfig;
-using TlsCertConfig = CranedCommon::TlsCertConfig;
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
 
+using EnvMap = std::unordered_map<std::string, std::string>;
 using RegToken = google::protobuf::Timestamp;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
@@ -105,7 +70,6 @@ struct Config {
     uint32_t CtldTimeoutSec;
   };
   CranedConfig CranedConf;
-
   struct CranedListenConf {
     std::string CranedListenAddr;
     std::string CranedListenPort;
@@ -121,8 +85,21 @@ struct Config {
     std::string UnixSocketListenAddr;
     std::string UnixSocketForPamListenAddr;
   };
-
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+    std::string RuntimeState;
+    std::string RuntimeRun;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+  };
   ContainerConfig Container;
+
+  struct PluginConfig {
+    bool Enabled{false};
+    std::string PlugindSockPath;
+  };
   PluginConfig Plugin;
 
   struct SupervisorConfig {
@@ -177,56 +154,4 @@ struct RunTimeStatus {
 inline RunTimeStatus g_runtime_status{};
 }  // namespace Craned
 
-namespace Supervisor {
-
-using EnvMap = CranedCommon::EnvMap;
-using ContainerConfig = CranedCommon::ContainerConfig;
-using PluginConfig = CranedCommon::PluginConfig;
-using TlsCertConfig = CranedCommon::TlsCertConfig;
-
-using StepToSupv = crane::grpc::TaskToD;
-
-struct TaskStatusChangeQueueElem {
-  task_id_t task_id{};
-  crane::grpc::TaskStatus new_status{};
-  uint32_t exit_code{};
-  std::optional<std::string> reason;
-};
-
-struct Config {
-  struct CforedListenConf {
-    TlsCertConfig TlsConfig;
-  };
-  CforedListenConf CforedListenConf;
-
-  ContainerConfig Container;
-  PluginConfig Plugin;
-
-  bool CompressedRpc{};
-
-  std::string SupervisorDebugLevel;
-
-  std::filesystem::path CraneBaseDir;
-  std::filesystem::path CraneScriptDir;
-  std::filesystem::path CranedUnixSocketPath;
-
-  // Only for debugging
-  std::filesystem::path SupervisorLogFile;
-
-  CranedId CranedIdOfThisNode;
-
-  std::filesystem::path SupervisorUnixSockPath;
-
-  task_id_t JobId;
-  EnvMap JobEnv;
-  step_id_t StepId;
-  StepToSupv StepSpec;
-  std::atomic_int TaskCount;
-};
-
-inline Config g_config;
-
-}  // namespace Supervisor
-
-// Global thread pool shared by both components
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
