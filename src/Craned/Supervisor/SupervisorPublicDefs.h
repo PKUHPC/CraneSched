@@ -87,6 +87,7 @@ struct Config {
   StepToSupv StepSpec;
   std::atomic_int TaskCount;
   std::string CgroupPath;  // resolved cgroup path for OOM monitoring
+  std::string CraneClusterName;
 };
 
 inline Config g_config;

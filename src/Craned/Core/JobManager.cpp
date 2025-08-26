@@ -53,13 +53,15 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
 
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
-
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   auto nodelist = daemon_step_to_d.nodelist();
   auto node_id_to_str = [nodelist, this]() -> std::string {
     uint32_t node_idx = 0;
 
     std::array<char, HOST_NAME_MAX + 1> host_name{};
+  auto node_id_to_str = [this]() -> std::string {
+    uint32_t node_idx = 0;
+    std::array<char, HOST_NAME_MAX> host_name{};
     if (gethostname(host_name.data(), host_name.size()) != 0) {
       return std::to_string(-1);  // invalid
     }
