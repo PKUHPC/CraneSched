@@ -36,6 +36,14 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
 
   // TODO: conf定义
   width = 5;
+  if (auto width_str = GetEnvVar(PMIXP_TREE_WIDTH); width_str != "") {
+    try {
+      width = std::stoi(width_str);
+    } catch (const std::exception& e) {
+      CRANE_WARN("Failed to parse {} with error {}, use default width {}",
+                 PMIXP_TREE_WIDTH, e.what(), width);
+    }
+  }
   ReverseTreeInfo(m_peerid_, m_peers_cnt_, width,
                           &m_tree_.parent_peerid, &m_tree_.childrn_cnt, &depth,
                           &max_depth);

@@ -406,6 +406,16 @@ void PmixServer::InfoSet_(
     std::fill_n(m_task_map_.begin() + node * m_ntasks_per_node_, m_ntasks_per_node_, node);
   }
 
+  auto timeout_str = GetEnvVar(CRANE_PMIX_TIMEOUT);
+  if (timeout_str != "") {
+    try {
+      m_timeout_ = std::stoul(timeout_str);
+    } catch (const std::exception& e) {
+      CRANE_WARN("Failed to parse {} with error {}, use default timeout {}s",
+                 CRANE_PMIX_TIMEOUT, e.what(), m_timeout_);
+    }
+  }
+
   m_server_tmpdir_ = fmt::format("{}pmix.crane.{}/pmix.{}", config.CraneBaseDir, m_hostname_, m_task_id_);
 
   // TODO: cli base env PMIXP_TMPDIR_CLI
