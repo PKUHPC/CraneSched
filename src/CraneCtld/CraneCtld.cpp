@@ -127,6 +127,17 @@ void ParseConfig(int argc, char** argv) {
         db_config_path = config["DbConfigPath"].as<std::string>();
       }
 
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("ClusterName is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("ClusterName is empty.");
+        std::exit(1);
+      }
+
       g_config.CraneCtldMutexFilePath =
           g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
                                               kDefaultCraneCtldMutexFile);
