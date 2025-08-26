@@ -493,10 +493,10 @@ EmbeddedDbClient::~EmbeddedDbClient() {
   }
 
   if (m_resv_db_) {
-  auto result = m_resv_db_->Close();
-  if (!result)
-    CRANE_ERROR(
-        "Error occurred when closing the embedded db of reservation data!");
+    auto result = m_resv_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of reservation data!");
   }
 }
 
