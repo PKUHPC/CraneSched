@@ -45,7 +45,6 @@ class SubIdRanges {
 
   ~SubIdRanges() {
     if (m_ranges_ != nullptr) {
-      // libsubid uses regular free() for cleanup, not subid_free()
       subid_free(m_ranges_);
     }
   }
