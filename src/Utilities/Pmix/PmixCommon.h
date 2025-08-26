@@ -35,7 +35,11 @@ struct Config {
   std::filesystem::path CranedUnixSocketPath;
 };
 
-#define CRANE_PMIX_FENCE "CRANE_PMIX_FENCE"
+constexpr const char* CRANE_PMIX_FENCE = "CRANE_PMIX_FENCE";
+constexpr const char* CRANE_PMIX_TIMEOUT = "CRANE_PMIX_TIMEOUT";
+constexpr const char* CRANE_PMIX_DIRECT_CONN_UCX = "CRANE_PMIX_DIRECT_CONN_UCX";
+constexpr const char* PMIXP_PMIXLIB_TMPDIR = "PMIXP_PMIXLIB_TMPDIR";
+constexpr const char* PMIXP_TREE_WIDTH = "PMIXP_TREE_WIDTH";
 
 inline std::string GetEnvVar(const std::string& key) {
     const char* val = std::getenv(key.c_str());
