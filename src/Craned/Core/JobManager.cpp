@@ -1052,7 +1052,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         StepStopAndDoStatusChangeAsync(
             elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
             ExitCode::kExitCodeTerminated, "Step not found.");
-      FreeJobAllocation_({job_instance->job_id});
+      FreeJobAllocation_({elem.job_id});
       continue;
     }
     absl::MutexLock lk(job_instance->step_map_mtx.get());
@@ -1066,7 +1066,8 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         StepStopAndDoStatusChangeAsync(
             elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
             ExitCode::kExitCodeTerminated, "Step not found.");
-      FreeJobAllocation_({job_instance->job_id});
+      g_thread_pool->detach_task(
+          [this, job_id = elem.job_id] { FreeJobAllocation_({job_id}); });
       continue;
     }
 
@@ -1100,7 +1101,9 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       // Try to clean up the step or job if exists.
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
       job_step_ids[elem.job_id] = {step_id};
-      this->CleanUpJobAndStepsAsync(job_step_ids);
+      g_thread_pool->detach_task([job_step_ids = std::move(job_step_ids)] {
+        g_job_mgr->CleanUpJobAndStepsAsync(job_step_ids);
+      });
     }
   }
 }

@@ -653,10 +653,18 @@ void TaskScheduler::ScheduleThread_() {
       // Job primary steps
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
+      std::vector<StepInCtld*> step_in_ctld_vec;
+
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        task->InitDaemonStepInCtld();
-        task->InitPrimaryStepInCtld();
+        std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
+        daemon_step->InitFromJob(*task);
+        step_in_ctld_vec.push_back(daemon_step.get());
+        task->SetDaemonStep(std::move(daemon_step));
+      }
+      g_embedded_db_client->AppendSteps(step_in_ctld_vec);
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
         auto* daemon_step = task->DaemonStep();
         for (CranedId const& craned_id : task->CranedIds()) {
           craned_daemon_step_map[craned_id].push_back(
@@ -731,7 +739,7 @@ void TaskScheduler::ScheduleThread_() {
       }
       bl.Wait();
 
-      std::latch primary_latch(craned_alloc_steps.size());
+      std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         g_thread_pool->detach_task([&]() {
           auto& steps = craned_alloc_steps[craned_id];
@@ -740,19 +748,19 @@ void TaskScheduler::ScheduleThread_() {
               "Send AllocSteps for {} tasks to {}",
               absl::StrJoin(
                   steps | std::views::transform([](const auto& step_to_d) {
-                    return fmt::format("{}.{}", step_to_d.job_id(),
-                                       step_to_d.step_id());
+                    return util::StepIdsToString(step_to_d.job_id(),
+                                                 step_to_d.step_id());
                   }),
                   ","),
               craned_id);
           if (stub == nullptr || stub->Invalid()) {
-            primary_latch.count_down();
+            alloc_step_latch.count_down();
             return;
           }
 
           auto err = stub->AllocSteps(steps);
           if (err == CraneErrCode::SUCCESS) {
-            primary_latch.count_down();
+            alloc_step_latch.count_down();
             return;
           }
 
@@ -772,10 +780,10 @@ void TaskScheduler::ScheduleThread_() {
           // 3. Move these tasks to the completed queue.
           CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
 
-          primary_latch.count_down();
+          alloc_step_latch.count_down();
         });
       }
-      primary_latch.wait();
+      alloc_step_latch.wait();
 
       std::list<INodeSelectionAlgo::NodeSelectionResult> failed_result_list;
       for (auto it = selection_result_list.begin();
@@ -820,6 +828,8 @@ void TaskScheduler::ScheduleThread_() {
       if (!ok) {
         CRANE_ERROR("Embedded database failed to commit manual transaction.");
       }
+
+      // TODO: Persistent daemon step.
 
       // Set succeed tasks status and do callbacks.
       for (auto& it : selection_result_list) {
@@ -1948,7 +1958,7 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
     step->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configuring) {
+    if (new_status != crane::grpc::TaskStatus::Running) {
       step->SetConfigureFailedStatus(new_status);
     }
     if (step->AllNodesConfigured()) {
@@ -1958,9 +1968,15 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
         CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", step->job_id,
                     step->StepId());
         step->SetStatus(crane::grpc::TaskStatus::Running);
+
         context->rn_step_raw_ptrs.push_back(step);
-        if (job->PrimaryStep()) {
-          for (auto& node_id : step->CranedIds()) {
+        if (!job->IsCalloc()) {
+          std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
+          primary_step->InitPrimaryStepFromJob(*job);
+          // TODO: Aggregate primary step creation
+          g_embedded_db_client->AppendSteps({primary_step.get()});
+          job->SetPrimaryStep(std::move(primary_step));
+          for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
             context->craned_step_alloc_map[node_id].emplace_back(
                 job->PrimaryStep()->GetStepToD(node_id));
           }
@@ -2439,6 +2455,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                   job->TaskId());
   }
 
+  g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+
+  g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
   // Steps will update in embedded db
   for (auto* step : context.rn_step_raw_ptrs) {
     if (!g_embedded_db_client->UpdateRuntimeAttrOfStep(txn_id, step->StepDbId(),
@@ -2446,10 +2465,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       CRANE_ERROR("[Job #{}.{}]Failed to call UpdateRuntimeAttrOfStep()",
                   step->job_id, step->StepId());
   }
-
-  g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+  g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
   // TODO: Ended steps will update in embedded db and transfer to mongodb
-
   // ProcessFinalSteps_(context.step_raw_ptrs)
   ProcessFinalTasks_(context.job_raw_ptrs);
 }
@@ -2603,13 +2620,13 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
         job_it->second->DaemonStep()->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
     if (job_it->second->PrimaryStep() &&
-        std::ranges::contains(
-            job_it->second->PrimaryStep()->executing_craned_ids, craned_id)) {
+        std::ranges::contains(job_it->second->PrimaryStep()->ExecutionNodes(),
+                              craned_id)) {
       const auto* step = job_it->second->PrimaryStep();
       steps[step->StepId()] = step->GetStepToD(craned_id);
     }
     for (const auto& step : job_it->second->Steps() | std::views::values)
-      if (std::ranges::contains(step->executing_craned_ids, craned_id))
+      if (std::ranges::contains(step->ExecutionNodes(), craned_id))
         steps[step->StepId()] = step->GetStepToD(craned_id);
   }
 }

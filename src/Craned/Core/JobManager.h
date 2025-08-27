@@ -186,6 +186,7 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
+  // Acquires Job map lock
   bool FreeJobAllocation_(const std::vector<task_id_t>& job_ids);
 
   void FreeStepAllocation_(std::vector<StepInstance*>&& steps);

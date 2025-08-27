@@ -565,7 +565,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 
   ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
       0, m_step_var_db_.get(), s_next_step_id_str_, &s_next_step_id_map_,
-      google::protobuf::Map<job_id_t, step_id_t>{});
+      crane::grpc::StepNextIdInEmbeddedDb{});
   if (!ok) return false;
 
   return true;
@@ -837,15 +837,15 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
   absl::MutexLock lock_ids(&s_step_db_id_mtx_);
 
   db_id_t step_db_id{s_next_step_db_id_};
-  google::protobuf::Map next_step_id_map_{s_next_step_id_map_};
+  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
 
   if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
 
   for (const auto& step : steps) {
-    if (!next_step_id_map_.contains(step->job_id)) {
-      next_step_id_map_[step->job_id] = 0;
+    if (!next_step_id_map.contains(step->job_id)) {
+      next_step_id_map[step->job_id] = 0;
     }
-    step->SetStepId(next_step_id_map_[step->job_id]++);
+    step->SetStepId(next_step_id_map[step->job_id]++);
     step->SetStepDbId(step_db_id++);
 
     result = StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
@@ -853,48 +853,49 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
                               &step->StepToCtld());
     if (!result) {
       CRANE_ERROR(
-          "Failed to store the fixed data of task id: {} / task db id: {}.",
-          task->TaskId(), task->TaskDbId());
+          "Failed to store the fixed data of step id: {} / step db id: {}.",
+          step->StepId(), step->StepDbId());
 
       // Just drop this batch if any of them failed.
       return false;
     }
   }
 
-  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
+  if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
 
-  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
 
-  for (const auto& task : tasks) {
-    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                              GetVariableDbEntryName_(task->TaskDbId()),
-                              &task->RuntimeAttr());
+  for (const auto& step : steps) {
+    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                              GetStepVariableDbEntryName_(step->StepDbId()),
+                              &step->RuntimeAttr());
     if (!result) {
       CRANE_ERROR(
           "Failed to store the variable data of "
-          "task id: {} / task db id: {}.",
-          task->TaskId(), task->TaskDbId());
+          "step id: {} / step db id: {}.",
+          step->StepId(), step->StepDbId());
       return false;
     }
   }
-
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
-                            &task_id);
+  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
+  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                            &db_next_step_id_map);
   if (!result) {
-    CRANE_ERROR("Failed to store next_task_id.");
+    CRANE_ERROR("Failed to store next_step_id.");
     return false;
   }
 
-  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            s_next_task_db_id_str_, &task_db_id);
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            s_next_step_db_id_str_, &step_db_id);
   if (!result) {
-    CRANE_ERROR("Failed to store next_task_db_id.");
+    CRANE_ERROR("Failed to store next_step_db_id.");
     return false;
   }
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
-  s_next_task_id_ = task_id;
-  s_next_task_db_id_ = task_db_id;
+  s_next_step_id_map_ = db_next_step_id_map;
+  s_next_step_db_id_ = step_db_id;
 
   return true;
 }

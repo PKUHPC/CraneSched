@@ -18,7 +18,6 @@
 
 #include "SupervisorServer.h"
 
-#include "../../CraneCtld/CtldPublicDefs.h"
 #include "TaskManager.h"
 
 namespace Supervisor {

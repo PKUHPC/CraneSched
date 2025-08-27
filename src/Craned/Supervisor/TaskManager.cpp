@@ -1714,6 +1714,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         "Task id: {}",
         g_config.JobId);
 
+    if (elem.mark_as_orphaned) m_step_.orphaned = true;
     if (m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Terminating a completing task #{}, ignored.",
                   g_config.JobId);
@@ -1724,7 +1725,6 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     int sig = SIGTERM;  // For BatchTask
     if (m_step_.IsCrun()) sig = SIGHUP;
 
-    if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
       if (elem.terminated_by_timeout) {

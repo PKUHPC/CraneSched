@@ -418,8 +418,8 @@ class EmbeddedDbClient {
 
     if (fetch_result.error() == DbErrorCode::kNotFound) {
       CRANE_TRACE(
-          "Key {} not found in embedded db. Initialize it with value {}", key,
-          value);
+          "Key {} not found in embedded db. Initialize it with given value.",
+          key);
 
       std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
       if (!store_result) {
@@ -630,11 +630,28 @@ class EmbeddedDbClient {
   inline static std::string const s_next_step_id_str_{"NSI"};
 
   inline static db_id_t s_next_step_db_id_;
-  inline static google::protobuf::Map<job_id_t, step_id_t> s_next_step_id_map_;
+  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_;
   inline static absl::Mutex s_step_db_id_mtx_;
   std::unique_ptr<IEmbeddedDb> m_step_var_db_;
   std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
 };
+
+template <>
+inline std::expected<void, DbErrorCode> EmbeddedDbClient::StoreTypeIntoDb_(
+    IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
+    const crane::grpc::StepNextIdInEmbeddedDb* value) {
+  using google::protobuf::io::CodedOutputStream;
+  using google::protobuf::io::StringOutputStream;
+
+  std::string buf;
+  StringOutputStream stringOutputStream(&buf);
+  CodedOutputStream codedOutputStream(&stringOutputStream);
+
+  size_t n_bytes{value->ByteSizeLong()};
+  value->SerializeToCodedStream(&codedOutputStream);
+
+  return db->Store(txn_id, key, buf.data(), n_bytes);
+}
 
 }  // namespace Ctld
 
