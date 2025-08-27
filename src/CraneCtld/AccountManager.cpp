@@ -2005,8 +2005,8 @@ CraneExpected<void> AccountManager::AddQos_(const std::string& actor_name,
       [&](mongocxx::client_session* session) {
         if (stale_qos) {
           g_db_client->UpdateQos(qos);
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS,
-                                       "$set", qos.name, "creation_time",
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                       qos.name, "creation_time",
                                        ToUnixSeconds(absl::Now()));
         } else {
           g_db_client->InsertQos(qos);

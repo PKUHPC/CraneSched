@@ -558,48 +558,39 @@ bool MongodbClient::InsertTxn(const Txn& txn) {
   document doc = TxnToDocument_(txn);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(*GetSession_(),
-          doc.view());
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(
+          *GetSession_(), doc.view());
 
   return ret != bsoncxx::stdx::nullopt;
 }
 
 void MongodbClient::SelectTxns(
-    const std::unordered_map<std::string, std::string>& conditions, int64_t start_time, int64_t end_time,
-    std::list<Txn>* res_txn) {
+    const std::unordered_map<std::string, std::string>& conditions,
+    int64_t start_time, int64_t end_time, std::list<Txn>* res_txn) {
   bsoncxx::builder::basic::document doc_builder;
 
   if (start_time != 0 || end_time != 0) {
     bsoncxx::builder::basic::document range_doc;
-    if (start_time != 0)
-      range_doc.append(kvp("$gte", start_time));
-    if (end_time != 0)
-      range_doc.append(kvp("$lte", end_time));
-    doc_builder.append(
-        kvp("creation_time", range_doc.view()));
+    if (start_time != 0) range_doc.append(kvp("$gte", start_time));
+    if (end_time != 0) range_doc.append(kvp("$lte", end_time));
+    doc_builder.append(kvp("creation_time", range_doc.view()));
   }
 
   for (const auto& [key, value] : conditions) {
     if (key == "action") {
       try {
-        // TxnAction is stored as int32; match type to avoid numeric-collation corner cases.
+        // TxnAction is stored as int32; match type to avoid numeric-collation
+        // corner cases.
         int32_t v = static_cast<int32_t>(std::stol(value));
         doc_builder.append(kvp(key, v));
       } catch (const std::exception&) {
-        CRANE_LOGGER_ERROR(m_logger_, "Invalid action value '{}'; ignoring filter.", value);
+        CRANE_LOGGER_ERROR(
+            m_logger_, "Invalid action value '{}'; ignoring filter.", value);
       }
-    }
-    else if (key == "info") {
-      doc_builder.append(
-          kvp(
-              key,
-              bsoncxx::builder::basic::make_document(
-                  kvp("$regex", value)
-              )
-          )
-      );
-    }
-    else
+    } else if (key == "info") {
+      doc_builder.append(kvp(
+          key, bsoncxx::builder::basic::make_document(kvp("$regex", value))));
+    } else
       doc_builder.append(kvp(key, value));
   }
 
