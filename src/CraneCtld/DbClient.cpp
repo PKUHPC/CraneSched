@@ -558,7 +558,7 @@ bool MongodbClient::InsertTxn(const Txn& txn) {
   document doc = TxnToDocument_(txn);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(*GetSession_(),
           doc.view());
 
   return ret != bsoncxx::stdx::nullopt;
@@ -574,14 +574,21 @@ void MongodbClient::SelectTxns(
     if (start_time != 0)
       range_doc.append(kvp("$gte", start_time));
     if (end_time != 0)
-      range_doc.append(kvp("$lt", end_time));
+      range_doc.append(kvp("$lte", end_time));
     doc_builder.append(
         kvp("creation_time", range_doc.view()));
   }
 
   for (const auto& [key, value] : conditions) {
-    if (key == "action")
-      doc_builder.append(kvp(key, static_cast<int64_t>(std::stoll(value))));
+    if (key == "action") {
+      try {
+        // TxnAction is stored as int32; match type to avoid numeric-collation corner cases.
+        int32_t v = static_cast<int32_t>(std::stol(value));
+        doc_builder.append(kvp(key, v));
+      } catch (const std::exception&) {
+        CRANE_LOGGER_ERROR(m_logger_, "Invalid action value '{}'; ignoring filter.", value);
+      }
+    }
     else if (key == "info") {
       doc_builder.append(
           kvp(
@@ -599,6 +606,11 @@ void MongodbClient::SelectTxns(
   mongocxx::options::find find_options;
   // TODO: page query?
   find_options.limit(1000);
+
+  // Return newest-first deterministically.
+  bsoncxx::builder::basic::document sort_doc;
+  sort_doc.append(kvp("creation_time", -1));
+  find_options.sort(sort_doc.view());
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_txn_collection_name_].find(
           doc_builder.view(), find_options);

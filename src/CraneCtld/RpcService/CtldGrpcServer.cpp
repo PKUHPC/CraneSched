@@ -1592,6 +1592,12 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
     grpc::ServerContext *context,
     const crane::grpc::QueryTxnLogRequest *request,
     crane::grpc::QueryTxnLogReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
   std::unordered_map<std::string, std::string> conditions;
   if (!request->actor().empty()) conditions.emplace("actor", request->actor());
   if (!request->target().empty())
@@ -1601,7 +1607,9 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
   if (!request->info().empty()) conditions.emplace("info", request->info());
 
   auto result = g_account_manager->QueryTxnList(
-      request->uid(), conditions, request->time_interval().lower_bound().seconds(), request->time_interval().upper_bound().seconds());
+      request->uid(), conditions,
+      request->time_interval().lower_bound().seconds(),
+      request->time_interval().upper_bound().seconds());
   if (!result) {
     response->set_ok(false);
     response->set_code(result.error());

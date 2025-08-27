@@ -1999,18 +1999,15 @@ CraneExpected<void> AccountManager::AddAccount_(const std::string& actor_name,
 CraneExpected<void> AccountManager::AddQos_(const std::string& actor_name,
                                             const Qos& qos,
                                             const Qos* stale_qos) {
+  // There is a same qos but was deleted,here will delete the original
+  // qos and overwrite it with the same name
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         if (stale_qos) {
-          // There is a same qos but was deleted,here will delete the original
-          // qos and overwrite it with the same name
-          mongocxx::client_session::with_transaction_cb callback =
-              [&](mongocxx::client_session* session) {
-                g_db_client->UpdateQos(qos);
-                g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS,
-                                             "$set", qos.name, "creation_time",
-                                             ToUnixSeconds(absl::Now()));
-              };
+          g_db_client->UpdateQos(qos);
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS,
+                                       "$set", qos.name, "creation_time",
+                                       ToUnixSeconds(absl::Now()));
         } else {
           g_db_client->InsertQos(qos);
         }
