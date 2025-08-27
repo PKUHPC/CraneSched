@@ -25,6 +25,7 @@
 
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/PublicHeader.h"
 
 namespace Common {
 using EnvMap = std::unordered_map<std::string, std::string>;
