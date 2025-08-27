@@ -117,4 +117,4 @@ struct Config {
 };
 
 inline Config g_config{};
-}
+}  // namespace Common
