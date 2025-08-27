@@ -218,7 +218,7 @@ jobs:
       - name: Create bundle (tar.gz)
         run: |
           rm -f build-output.tar.gz
-          tar -czf build-output.tar.gz -C output .
+          tar -czf build-output.tar.gz --exclude='*debug*' -C output .
 
       # Generate meta.json
       - name: Generate meta.json
