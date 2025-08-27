@@ -317,6 +317,7 @@ jobs:
         with:
           name: ${{ needs.build.outputs.output_bundle_artifact }}
           path: .
+
       - name: Extract bundle
         run: |
           rm -rf output/*
