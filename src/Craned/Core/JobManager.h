@@ -23,7 +23,7 @@
 
 #include <grp.h>
 
-#include "../Common/CgroupManager.h"
+#include "CgroupManager.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"

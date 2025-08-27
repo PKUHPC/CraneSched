@@ -24,7 +24,7 @@
  *
  */
 #pragma once
-#include "../Common/CranedPublicDefs.h"
+#include "CommonPublicDefs.h"
 // Precompiled header comes first.
 
 #include <libcgroup.h>
@@ -546,7 +546,7 @@ class CgroupManager {
       const std::string &cgroup_str,
       const crane::grpc::ResourceInNode &resource, bool recover);
 
-  static EnvMap GetResourceEnvMapByResInNode(
+  static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {

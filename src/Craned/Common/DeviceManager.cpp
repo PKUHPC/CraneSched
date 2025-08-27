@@ -104,7 +104,7 @@ std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
 std::unordered_map<std::string, std::string>
 DeviceManager::GetDevEnvMapByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
-  EnvMap env_map;
+  Common::EnvMap env_map;
 
   std::unordered_set<std::string> all_res_slots;
   for (const auto& device_type_slots_map :

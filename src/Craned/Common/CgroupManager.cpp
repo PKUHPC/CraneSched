@@ -501,7 +501,7 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     return cg_unique_ptr;
   }
 
-  if (g_config.Plugin.Enabled) {
+  if (Common::g_config.Plugin.Enabled) {
     // FIXME: Refactor related plugin interface and replace here.
     auto ids = ParseIdsFromCgroupStr_(cgroup_str);
     g_plugin_client->CreateCgroupHookAsync(
@@ -649,7 +649,7 @@ CgroupManager::GetJobBpfMapCgroupsV2_(
 }
 #endif
 
-EnvMap CgroupManager::GetResourceEnvMapByResInNode(
+Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
   std::unordered_map env_map = DeviceManager::GetDevEnvMapByResInNode(
       res_in_node.dedicated_res_in_node());

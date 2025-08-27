@@ -1,6 +1,6 @@
 # Create a static library for common components
 add_library(craned_common STATIC
-    CranedPreCompiledHeader.h
+    PreCompiledHeader.h
     DeviceManager.h
     DeviceManager.cpp
     CgroupManager.h
@@ -8,7 +8,7 @@ add_library(craned_common STATIC
 )
 
 # Set the precompiled header for the common library
-target_precompile_headers(craned_common PRIVATE CranedPreCompiledHeader.h)
+target_precompile_headers(craned_common PRIVATE PreCompiledHeader.h)
 
 # Include directories for the common library
 target_include_directories(craned_common 
