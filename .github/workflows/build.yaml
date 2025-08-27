@@ -21,6 +21,10 @@ on:
         description: 'Branch of FrontEnd to use'
         required: true
         default: 'master'
+      cache_buster:
+        description: 'Optional cache buster to force rebuild (any non-empty string)'
+        required: false
+        default: ''
 
 concurrency:
   group: >-
@@ -30,47 +34,168 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Self-hosted runner paths
   SCRIPT_PATH: /opt/actions-runner-external/script
   CACHE_PATH: /opt/actions-runner-external/cache
-  TEST_FAILED: false
+
+  # Local cache directory
+  LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
+
+  # Unified frontend ref across all triggers
+  FRONTEND_REF: ${{ inputs.frontend_branch || 'master' }}
+
+  # Cache buster for forcing rebuilds on workflow_dispatch
+  CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
+
+  # CI image tag (digest resolved at runtime)
+  CI_IMAGE_TAG: ghcr.io/nativu5/cranedev:ci
 
 jobs:
 
   build:
+    # Skip if this is a draft PR
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ["self-hosted", "CraneSched"]
     defaults:
       run:
         shell: bash -leo pipefail {0}
 
-    steps:
+    outputs:
+      output_bundle_artifact: build-output.tar.gz
 
-      # Checkout repo
-      - name: Checkout code
+    steps:
+      # Checkout backend repository
+      - name: Checkout backend
         uses: actions/checkout@v4
         with:
           path: CraneSched
 
-      # Checkout frontend
+      # Checkout frontend repository at the unified ref
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
           repository: PKUHPC/CraneSched-FrontEnd
           path: CraneSched-FrontEnd
-          ref: ${{ inputs.frontend_branch }}
+          ref: ${{ env.FRONTEND_REF }}
 
-      # Pull CI Image and Prepare
-      - name: Pull CI Image
+      # Resolve CI image digest (try skopeo, then podman manifest, then pull+inspect)
+      - name: Resolve CI image digest
+        id: imagedigest
         run: |
-          podman pull ghcr.io/nativu5/cranedev:ci
-          echo "Linking $SCRIPT_PATH to $(pwd)/script"
-          ln -sfT $SCRIPT_PATH $(pwd)/script
-          echo "Linking $CACHE_PATH to $(pwd)/cache"
-          ln -sfT $CACHE_PATH $(pwd)/cache
-          mkdir -p output
-          mkdir -p log
+          set -euo pipefail
+          IMG="${CI_IMAGE_TAG}"
 
-      - name: Build in Container
+          resolve_with_skopeo() {
+            command -v skopeo >/dev/null 2>&1 || return 1
+            DIGEST=$(skopeo inspect "docker://${IMG}" | jq -r '.Digest' 2>/dev/null) || return 1
+            [ -n "${DIGEST}" ] || return 1
+            echo "${DIGEST}"
+          }
+
+          resolve_with_manifest() {
+            command -v podman >/dev/null 2>&1 || return 1
+            RAW=$(podman manifest inspect "${IMG}" 2>/dev/null) || return 1
+            if echo "${RAW}" | jq -e '.manifests' >/dev/null 2>&1; then
+              ARCH=$(uname -m)
+              OS=$(uname -s | awk '{print tolower($0)}')
+              [ "$ARCH" = "x86_64" ] && ARCH="amd64"
+              DIGEST=$(echo "${RAW}" | jq -r --arg arch "$ARCH" --arg os "$OS" \
+                '.manifests[] | select(.platform.architecture==$arch and .platform.os==$os) | .digest' | head -n1)
+              [ -z "${DIGEST}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.manifests[0].digest')
+            fi
+            [ -z "${DIGEST:-}" -o "${DIGEST}" = "null" ] && DIGEST=$(echo "${RAW}" | jq -r '.config.digest' 2>/dev/null || true)
+            [ -n "${DIGEST:-}" ] && [ "${DIGEST}" != "null" ] || return 1
+            echo "${DIGEST}"
+          }
+
+          resolve_with_pull() {
+            command -v podman >/dev/null 2>&1 || return 1
+            podman pull "${IMG}" >/dev/null
+            podman image inspect "${IMG}" --format '{{.Digest}}'
+          }
+
+          DIGEST="$(resolve_with_skopeo || true)"
+          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_manifest || true)"
+          [ -z "$DIGEST" ] && DIGEST="$(resolve_with_pull || true)"
+          [ -z "$DIGEST" ] && { echo "ERROR: failed to resolve digest for ${IMG}" >&2; exit 1; }
+
+          echo "CI_IMAGE_DIGEST=${DIGEST}" | tee -a "$GITHUB_ENV"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Compute fingerprint and its sha256 key
+      - name: Compute fingerprint
+        id: fp
+        run: |
+          set -euo pipefail
+          CRANE_SHA=$(git -C CraneSched rev-parse HEAD)
+          FE_SHA=$(git -C CraneSched-FrontEnd rev-parse HEAD)
+          FE_REF="${FRONTEND_REF}"
+          CI_DIGEST="${CI_IMAGE_DIGEST}"
+          FINGERPRINT="${CRANE_SHA}-${FE_REF}-${FE_SHA}-${CI_DIGEST}-${CACHE_BUSTER}"
+
+          KEY_SHA256=$(printf '%s' "$FINGERPRINT" | sha256sum | awk '{print $1}')
+          CACHE_TGZ="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tar.gz"
+          CACHE_META="${LOCAL_CACHE_DIR}/${KEY_SHA256}.meta.json"
+
+          echo "CRANE_SHA=${CRANE_SHA}" >> "$GITHUB_ENV"
+          echo "FE_SHA=${FE_SHA}"       >> "$GITHUB_ENV"
+          echo "FE_REF=${FE_REF}"       >> "$GITHUB_ENV"
+          echo "FINGERPRINT=${FINGERPRINT}" >> "$GITHUB_ENV"
+          echo "KEY_SHA256=${KEY_SHA256}"   >> "$GITHUB_ENV"
+          echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
+          echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
+
+      # Prepare workspace and ensure local cache directory exists
+      - name: Prepare workspace & local cache
+        run: |
+          set -euo pipefail
+          echo "Linking $SCRIPT_PATH to $(pwd)/script"
+          ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
+          echo "Linking $CACHE_PATH to $(pwd)/cache"
+          ln -sfT "$CACHE_PATH" "$(pwd)/cache"
+          mkdir -p output log
+          mkdir -p "${LOCAL_CACHE_DIR}" || true
+          chown "$(id -u)":"$(id -g)" "${LOCAL_CACHE_DIR}" || true
+          ls -ld "${LOCAL_CACHE_DIR}"
+
+      # Try local cache hit: verify meta & sha256, then unpack
+      - name: Local cache lookup
+        id: local_cache
+        run: |
+          set -euo pipefail
+          HIT=false
+          if [ -f "${CACHE_TGZ}" ] && [ -f "${CACHE_META}" ]; then
+            echo "Found local cache files:"
+            ls -lh "${CACHE_TGZ}" "${CACHE_META}"
+            EXPECT_SHA=$(jq -r '.sha256 // empty' "${CACHE_META}" || true)
+            if [ -n "${EXPECT_SHA}" ]; then
+              ACTUAL_SHA=$(sha256sum "${CACHE_TGZ}" | awk '{print $1}')
+              if [ "${EXPECT_SHA}" = "${ACTUAL_SHA}" ]; then
+                echo "Local cache checksum OK."
+                rm -rf output/*; mkdir -p output
+                tar -xzf "${CACHE_TGZ}" -C output
+                HIT=true
+              else
+                echo "WARN: checksum mismatch, ignoring local cache."
+              fi
+            else
+              echo "WARN: missing sha256 in meta.json, ignoring local cache."
+            fi
+          else
+            echo "Local cache NOT found."
+          fi
+          echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
+          echo "LOCAL_CACHE_HIT=${HIT}" >> "$GITHUB_ENV"
+
+      # Pull CI image only if local cache missed
+      - name: Pull CI Image (only on miss)
+        if: steps.local_cache.outputs.hit != 'true'
+        run: |
+          podman pull "${CI_IMAGE_TAG}"
+
+      # Build inside container only if local cache missed
+      - name: Build in Container (only on miss)
+        if: steps.local_cache.outputs.hit != 'true'
         run: |
           podman run --rm \
               -v ./CraneSched:/Workspace/CraneSched \
@@ -78,77 +203,134 @@ jobs:
               -v ./output:/Workspace/output \
               -v ./script:/Workspace/script \
               -v ./cache/ccache:/root/.ccache \
-              ghcr.io/nativu5/cranedev:ci /bin/bash --login script/build.sh
+              "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
 
-      # Collect and upload artifacts
-      - name: Count Artifacts
+      # Validate that output/ is not empty; fail early
+      - name: Validate non-empty output
         run: |
-          ARTIFACT_NAME_CRANED_DEB=$(basename $(ls output/*craned.deb))
-          ARTIFACT_NAME_CRANED_RPM=$(basename $(ls output/*craned.rpm))
-          ARTIFACT_NAME_CRANECTLD_DEB=$(basename $(ls output/*cranectld.deb))
-          ARTIFACT_NAME_CRANECTLD_RPM=$(basename $(ls output/*cranectld.rpm))
-          ARTIFACT_NAME_FRONTEND=bin
-          ARTIFACT_NAME_PLUGIN=plugin
-          echo "ARTIFACT_NAME_CRANED_DEB=$ARTIFACT_NAME_CRANED_DEB" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME_CRANED_RPM=$ARTIFACT_NAME_CRANED_RPM" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME_CRANECTLD_DEB=$ARTIFACT_NAME_CRANECTLD_DEB" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME_CRANECTLD_RPM=$ARTIFACT_NAME_CRANECTLD_RPM" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME_FRONTEND=$ARTIFACT_NAME_FRONTEND" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME_PLUGIN=$ARTIFACT_NAME_PLUGIN" >> $GITHUB_ENV
+          if ! find output -type f -print -quit | grep -q .; then
+            echo "ERROR: output/ is empty; failing early." >&2
+            ls -la output || true
+            exit 1
+          fi
 
-      - name: Upload craned .deb package
+      # Create build-output.tar.gz (for both local cached path and artifact upload)
+      - name: Create bundle (tar.gz)
+        run: |
+          rm -f build-output.tar.gz
+          tar -czf build-output.tar.gz -C output .
+
+      # Generate meta.json
+      - name: Generate meta.json
+        run: |
+          set -euo pipefail
+          TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          SIZE_BYTES=$(stat -c %s build-output.tar.gz)
+          SHA256=$(sha256sum build-output.tar.gz | awk '{print $1}')
+          RUNNER_HOST="$(hostname)"
+          RUNNER_UNAME="$(uname -srmo)"
+
+          jq -n \
+            --arg fingerprint "${FINGERPRINT}" \
+            --arg key_sha256 "${KEY_SHA256}" \
+            --arg created_utc "${TS}" \
+            --arg github_run "${RUN_URL}" \
+            --arg backend_sha "${CRANE_SHA}" \
+            --arg frontend_ref "${FE_REF}" \
+            --arg frontend_sha "${FE_SHA}" \
+            --arg ci_image_tag "${CI_IMAGE_TAG}" \
+            --arg ci_image_digest "${CI_IMAGE_DIGEST}" \
+            --arg cache_buster "${CACHE_BUSTER}" \
+            --arg sha256 "${SHA256}" \
+            --arg runner_host "${RUNNER_HOST}" \
+            --arg runner_uname "${RUNNER_UNAME}" \
+            --argjson size_bytes "${SIZE_BYTES}" \
+            '{
+              fingerprint: $fingerprint,
+              key_sha256: $key_sha256,
+              created_utc: $created_utc,
+              github_run: $github_run,
+              backend_sha: $backend_sha,
+              frontend_ref: $frontend_ref,
+              frontend_sha: $frontend_sha,
+              ci_image_tag: $ci_image_tag,
+              ci_image_digest: $ci_image_digest,
+              cache_buster: $cache_buster,
+              size_bytes: $size_bytes,
+              sha256: $sha256,
+              runner_host: $runner_host,
+              runner_uname: $runner_uname
+            }' > meta.json
+
+          cp -f meta.json output/meta.json
+
+      # Save to local cache only when we built (i.e., local cache miss)
+      - name: Save to local cache (only on miss)
+        if: steps.local_cache.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          TMP_DIR="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tmp"
+          mkdir -p "${TMP_DIR}"
+          cp -f build-output.tar.gz "${TMP_DIR}/"
+          cp -f meta.json "${TMP_DIR}/${KEY_SHA256}.meta.json"
+          # Atomic publish
+          rm -f "${CACHE_TGZ}" "${CACHE_META}" || true
+          mv -f "${TMP_DIR}/build-output.tar.gz" "${CACHE_TGZ}"
+          mv -f "${TMP_DIR}/${KEY_SHA256}.meta.json" "${CACHE_META}"
+          rmdir "${TMP_DIR}" || true
+          echo "Local cache stored: ${CACHE_TGZ}"
+
+      # Upload the single unified artifact for cross-job & manual download
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME_CRANED_DEB }}
-          path: output/${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          name: build-output.tar.gz
+          path: build-output.tar.gz
           retention-days: 14
           if-no-files-found: error
 
-      - name: Upload craned .rpm package
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME_CRANED_RPM }}
-          path: output/${{ env.ARTIFACT_NAME_CRANED_RPM }}
-          retention-days: 14
-          if-no-files-found: error
+  test:
+    needs: build
+    runs-on: ["self-hosted", "CraneSched"]
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    env:
+      TEST_FAILED: false
+      SCRIPT_PATH: /opt/actions-runner-external/script
+      CACHE_PATH: /opt/actions-runner-external/cache
 
-      - name: Upload cranectld .deb package
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
-          path: output/${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
-          retention-days: 14
-          if-no-files-found: error
+    steps:
+      # Prepare workspace for AutoTest
+      - name: Prepare workspace
+        run: |
+          echo "Linking $SCRIPT_PATH to $(pwd)/script"
+          ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
+          echo "Linking $CACHE_PATH to $(pwd)/cache"
+          ln -sfT "$CACHE_PATH" "$(pwd)/cache"
+          mkdir -p output log
 
-      - name: Upload cranectld .rpm package
-        uses: actions/upload-artifact@v4
+      # Download and extract the bundle produced by the build job
+      - name: Download bundle
+        uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
-          path: output/${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
-          retention-days: 14
-          if-no-files-found: error
+          name: ${{ needs.build.outputs.output_bundle_artifact }}
+          path: .
+      - name: Extract bundle
+        run: |
+          rm -rf output/*
+          mkdir -p output
+          tar -xzf build-output.tar.gz -C output
 
-      - name: Upload frontend
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend
-          path: output/${{ env.ARTIFACT_NAME_FRONTEND }}
-          retention-days: 14
-          if-no-files-found: error
-
-      - name: Upload plugin
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugin
-          path: output/${{ env.ARTIFACT_NAME_PLUGIN }}
-          retention-days: 14
-          if-no-files-found: error
-
-      # Run AutoTest
+      # Run AutoTest using the extracted output directory
       - name: Run AutoTest
         continue-on-error: true
         run: |
-          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]')
+          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]' || echo "")
+          if [ -z "$NETWORK_ID" ]; then
+            echo "WARN: mongodb container network not found; falling back to default podman network"
+          fi
           podman run -d --rm --name autotest \
             --privileged \
             --systemd true \
@@ -156,12 +338,12 @@ jobs:
             -v ./script:/CraneSched-AutoTest/script \
             -v ./output:/CraneSched-AutoTest/output \
             -v ./log:/CraneSched-AutoTest/log \
-            --network $NETWORK_ID \
+            $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
           podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
-          podman stop autotest
+          podman stop autotest || true
 
-      # Upload AutoTest Results
+      # Upload AutoTest results
       - name: Upload AutoTest Results
         uses: actions/upload-artifact@v4
         with:
@@ -170,7 +352,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # Alarm if has failed cases
+      # Fail the job if tests failed
       - name: Alarm on test failure
         if: env.TEST_FAILED == 'true'
         run: exit 1
