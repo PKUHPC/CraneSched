@@ -204,7 +204,7 @@ message StepToCtld {
   uint32 job_id = 2;
   ResourceView req_resources = 3;
   TaskType type = 5;
-  uint32 uid = 6; //Only for authorization
+  uint32 uid = 6;  // Only for authorization
   string name = 7;
 
   uint32 node_num = 9;
