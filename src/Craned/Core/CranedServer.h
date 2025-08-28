@@ -21,6 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include "CommonPublicDefs.h"
 #include "CtldClient.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
@@ -108,7 +109,7 @@ class CranedServiceImpl : public Craned::Service {
 
 class CranedServer {
  public:
-  explicit CranedServer(const Config::CranedListenConf &listen_conf);
+  explicit CranedServer(const Common::Config::CranedListenConf &listen_conf);
 
   void Shutdown() {
     m_status_ = CranedStatus::STOPPING;

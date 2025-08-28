@@ -22,7 +22,7 @@
 
 #include "crane/String.h"
 
-namespace Craned {
+namespace Craned::Common {
 
 DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
     const std::optional<std::string>& str) {
@@ -129,4 +129,4 @@ DeviceManager::GetDevEnvMapByResInNode(
   return env_map;
 }
 
-}  // namespace Craned
+}  // namespace Craned::Common

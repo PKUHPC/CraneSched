@@ -33,9 +33,7 @@
 #  include <bpf/libbpf.h>
 #endif
 
-namespace Craned {
-
-class JobInD;
+namespace Craned::Common {
 
 namespace CgConstant {
 
@@ -594,4 +592,4 @@ class CgroupManager {
   inline static CgConstant::CgroupVersion m_cg_version_;
 };
 
-}  // namespace Craned
+}  // namespace Craned::Common

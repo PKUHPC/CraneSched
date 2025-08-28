@@ -21,7 +21,7 @@
 #include "CommonPublicDefs.h"
 // Precompiled header comes first.
 
-namespace Craned {
+namespace Craned::Common {
 using namespace std::literals;
 enum DeviceEnvInjectorEnum : uint8_t {
   CommonDevice = 0,
@@ -110,4 +110,4 @@ class DeviceManager {
 inline std::unordered_map<SlotId, std::unique_ptr<BasicDevice>>
     g_this_node_device;
 
-}  // namespace Craned
+}  // namespace Craned::Common

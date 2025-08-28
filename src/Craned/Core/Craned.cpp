@@ -45,13 +45,13 @@
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
-using Craned::g_config;
-using Craned::Partition;
+using namespace Craned::Common;
+using Craned::JobInD;
 
 CraneErrCode TryToRecoverCgForJobs(
     std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
   using namespace Craned;
-  using namespace Craned::CgConstant;
+  using namespace Common::CgConstant;
 
   std::set<job_id_t> rn_job_ids_with_cg;
   if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1) {
@@ -98,7 +98,7 @@ CraneErrCode TryToRecoverCgForJobs(
   for (job_id_t job_id : rn_job_ids_with_cg) {
     if (rn_jobs_from_ctld.contains(job_id)) {
       // Job is found in both ctld and cgroup
-      Craned::JobInD& job = rn_jobs_from_ctld.at(job_id);
+      JobInD& job = rn_jobs_from_ctld.at(job_id);
 
       CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(
@@ -145,7 +145,7 @@ CraneErrCode TryToRecoverCgForJobs(
 }
 
 void ParseCranedConfig(const YAML::Node& config) {
-  Craned::Config::CranedConfig conf{};
+  Config::CranedConfig conf{};
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
   conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
@@ -238,7 +238,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
-  std::unordered_map<std::string, std::vector<Craned::DeviceMetaInConfig>>
+  std::unordered_map<std::string, std::vector<DeviceMetaInConfig>>
       each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
@@ -414,7 +414,7 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<Craned::DeviceMetaInConfig> devices;
+          std::vector<DeviceMetaInConfig> devices;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
@@ -718,16 +718,15 @@ void ParseConfig(int argc, char** argv) {
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
       auto& [name, type, path_vec, env_injector] = dev_arg;
-      auto env_injector_enum =
-          Craned::GetDeviceEnvInjectorFromStr(env_injector);
-      if (env_injector_enum == Craned::InvalidInjector) {
+      auto env_injector_enum = GetDeviceEnvInjectorFromStr(env_injector);
+      if (env_injector_enum == InvalidInjector) {
         CRANE_ERROR("Invalid injector type:{} for device {}.",
                     env_injector.value_or("EmptyVal"), path_vec);
         std::exit(1);
       }
 
-      std::unique_ptr dev = Craned::DeviceManager::ConstructDevice(
-          name, type, path_vec, env_injector_enum);
+      std::unique_ptr dev = DeviceManager::ConstructDevice(name, type, path_vec,
+                                                           env_injector_enum);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
@@ -736,7 +735,7 @@ void ParseConfig(int argc, char** argv) {
       dev->slot_id = dev->device_file_metas.front().path;
       node_res->dedicated_res.name_type_slots_map[dev->name][dev->type].emplace(
           dev->slot_id);
-      Craned::g_this_node_device[dev->slot_id] = std::move(dev);
+      g_this_node_device[dev->slot_id] = std::move(dev);
     }
     each_node_device.clear();
   }
@@ -825,6 +824,8 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 
   TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
+  for (const auto& job_id : supv_job_ids)
+    g_supervisor_keeper->RemoveSupervisor(job_id);
 
   if (!supv_job_ids.empty()) {
     CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
@@ -849,11 +850,10 @@ void GlobalVariableInit() {
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
-  using Craned::CgroupManager;
-  using Craned::CgConstant::Controller;
+  using CgConstant::Controller;
   CgroupManager::Init();
   if (CgroupManager::GetCgroupVersion() ==
-          Craned::CgConstant::CgroupVersion::CGROUP_V1 &&
+          CgConstant::CgroupVersion::CGROUP_V1 &&
       (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER) ||
        !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER) ||
        !CgroupManager::IsMounted(Controller::DEVICES_CONTROLLER) ||
@@ -863,7 +863,7 @@ void GlobalVariableInit() {
     std::exit(1);
   }
   if (CgroupManager::GetCgroupVersion() ==
-          Craned::CgConstant::CgroupVersion::CGROUP_V2 &&
+          CgConstant::CgroupVersion::CGROUP_V2 &&
       (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER_V2) ||
        !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER_V2) ||
        !CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2))) {

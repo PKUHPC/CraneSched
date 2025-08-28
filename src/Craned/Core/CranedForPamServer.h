@@ -54,7 +54,8 @@ class CranedForPamServiceImpl : public crane::grpc::CranedForPam::Service {
 
 class CranedForPamServer {
  public:
-  explicit CranedForPamServer(const Config::CranedListenConf &listen_conf);
+  explicit CranedForPamServer(
+      const Common::Config::CranedListenConf &listen_conf);
 
   void Shutdown() {
     m_server_->Shutdown(std::chrono::system_clock::now() +

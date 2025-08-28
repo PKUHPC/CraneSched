@@ -27,7 +27,7 @@
 #include "crane/OS.h"
 #include "crane/PublicHeader.h"
 
-namespace Common {
+namespace Craned::Common {
 using EnvMap = std::unordered_map<std::string, std::string>;
 
 struct Partition {
@@ -117,4 +117,4 @@ struct Config {
 };
 
 inline Config g_config{};
-}  // namespace Common
+}  // namespace Craned::Common

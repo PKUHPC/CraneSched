@@ -338,7 +338,8 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   return Status::OK;
 }
 
-CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
+CranedServer::CranedServer(
+    const Common::Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
