@@ -18,7 +18,7 @@
 
 #pragma once
 
-// CRI Headers come at first to avoid conflict.
+// CRI Headers come at first to avoid macro conflicts.
 #include "cri/api.grpc.pb.h"
 
 // Standard Libraries
