@@ -70,7 +70,7 @@ void InitFromStdin(int argc, char** argv) {
   }
 
   g_config.JobId = msg.job_id();
-  g_config.StepId = 0;
+  g_config.StepId = msg.step_id();
   g_config.StepSpec = msg.step_spec();
   g_config.CranedIdOfThisNode = msg.craned_id();
   g_config.TaskCount = 1;
@@ -111,8 +111,9 @@ void InitFromStdin(int argc, char** argv) {
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
 
-  g_config.SupervisorLogFile = std::filesystem::path(msg.log_dir()) /
-                               fmt::format("{}.log", g_config.JobId);
+  g_config.SupervisorLogFile =
+      std::filesystem::path(msg.log_dir()) /
+      fmt::format("{}.{}.log", g_config.JobId, g_config.StepId);
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -232,6 +233,8 @@ void StartServer() {
 
   CRANE_INFO("Supervisor started.");
 
+  g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Running, 0,
+                                         std::nullopt);
   g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();
