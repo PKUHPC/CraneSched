@@ -2225,7 +2225,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     if (job_finished) {
       if (task->type == crane::grpc::Batch) {
-        task->SetStatus(task->DaemonStep()->Status());
+        task->SetStatus(task->PrimaryStep()->Status());
       } else {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         if (meta.interactive_type == crane::grpc::Crun) {  // Crun
@@ -2256,7 +2256,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           meta.cb_task_completed(task->TaskId(), true);
         }
 
-        task->SetStatus(task->DaemonStep()->Status());
+        task->SetStatus(task->PrimaryStep()->Status());
       }
 
       task->SetExitCode(exit_code);

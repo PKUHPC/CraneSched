@@ -55,6 +55,10 @@ bool StepInstance::IsCalloc() const {
          interactive_type.value() == crane::grpc::Calloc;
 }
 
+bool StepInstance::IsDaemon() const {
+  return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
+}
+
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
@@ -1453,6 +1457,9 @@ void TaskManager::Wait() {
 
 void TaskManager::ShutdownSupervisor() {
   CRANE_TRACE("All tasks finished, exiting...");
+  if (m_step_.IsDaemon())
+    g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
+                                           0, "");
   m_step_.StopCforedClient();
   g_craned_client->Shutdown();
   g_server->Shutdown();

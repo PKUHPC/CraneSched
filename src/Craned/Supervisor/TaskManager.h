@@ -81,6 +81,7 @@ class StepInstance {
   bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
+  bool IsDaemon() const;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 

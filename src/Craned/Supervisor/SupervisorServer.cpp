@@ -18,6 +18,7 @@
 
 #include "SupervisorServer.h"
 
+#include "CranedClient.h"
 #include "TaskManager.h"
 
 namespace Supervisor {
