@@ -839,7 +839,7 @@ void TaskScheduler::ScheduleThread_() {
             failed_to_exec_job_id_map[craned_id].second =
                 ExitCode::kExitCodeRpcError;
           }
-        } else {
+        } else if (!failed_task_ids.value().empty()) {
           failed_to_exec_job_id_map[craned_id].first =
               std::move(failed_task_ids.value());
           failed_to_exec_job_id_map[craned_id].second =
