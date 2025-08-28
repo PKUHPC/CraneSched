@@ -432,29 +432,30 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
   return Crc32Of(YAML::Dump(config));
 }
 
-std::string SlugDns1123(std::string s, size_t max_len) {
+std::string SlugDns1123(std::string_view s, size_t max_len) {
+  if (max_len < 1) return "";
+
   static const re2::RE2 non_dns_regex("[^a-z0-9-]+");
   static const re2::RE2 edge_dash_regex("^-+|-+$");
 
-  if (max_len < 1) return "";
-
-  absl::AsciiStrToLower(&s);
+  std::string str(s);
+  absl::AsciiStrToLower(&str);
 
   // Replace any run of non [a-z0-9-] characters with single '-'
   // (also collapses consecutive invalid chars into one '-').
-  re2::RE2::GlobalReplace(&s, non_dns_regex, "-");
+  re2::RE2::GlobalReplace(&str, non_dns_regex, "-");
 
   // Trim leading and trailing '-'
-  re2::RE2::GlobalReplace(&s, edge_dash_regex, "");
+  re2::RE2::GlobalReplace(&str, edge_dash_regex, "");
 
-  if (s.empty()) s = "x";
-  if (s.size() > max_len) {
-    s.resize(max_len);
-    re2::RE2::GlobalReplace(&s, "-+$", "");
-    if (s.empty()) s = "x";
+  if (str.empty()) str = "x";
+  if (str.size() > max_len) {
+    str.resize(max_len);
+    re2::RE2::GlobalReplace(&str, "-+$", "");
+    if (str.empty()) str = "x";
   }
 
-  return s;
+  return str;
 }
 
 std::expected<CertPair, std::string> ParseCertificate(

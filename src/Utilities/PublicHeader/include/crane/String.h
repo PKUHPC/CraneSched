@@ -98,11 +98,11 @@ std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
 std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
-std::string GenerateCommaSeparatedString(const int val);
+std::string GenerateCommaSeparatedString(int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
 
-std::string SlugDns1123(std::string s, size_t max_len);
+std::string SlugDns1123(std::string_view s, size_t max_len);
 
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string &cert_pem);
