@@ -29,6 +29,7 @@ target_link_libraries(craned_common
         Utility_PluginClient
         
         crane_proto_lib
+        cri_proto_lib
         
         bs_thread_pool
         
