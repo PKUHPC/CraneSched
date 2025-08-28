@@ -21,11 +21,13 @@
 #include "PreCompiledHeader.h"
 // Precompiled header comes first
 
-#include "crane/OS.h"
+#include "CgroupManager.h"
+#include "CommonPublicDefs.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
-using EnvMap = std::unordered_map<std::string, std::string>;
+using Common::CgroupManager;
+using Common::EnvMap;
 
 using StepToSupv = crane::grpc::TaskToD;
 
@@ -86,6 +88,6 @@ struct Config {
 };
 
 inline Config g_config;
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

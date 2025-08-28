@@ -24,7 +24,7 @@
 #include "protos/Supervisor.grpc.pb.h"
 #include "protos/Supervisor.pb.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 using grpc::Channel;
 using grpc::Server;
 using grpc::ServerContext;
@@ -81,6 +81,6 @@ class SupervisorServer {
   friend class SupervisorServiceImpl;
 };
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor
 
-inline std::unique_ptr<Supervisor::SupervisorServer> g_server;
+inline std::unique_ptr<Craned::Supervisor::SupervisorServer> g_server;

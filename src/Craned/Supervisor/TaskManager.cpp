@@ -35,7 +35,7 @@
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 StepInstance::~StepInstance() {
   if (termination_timer) {
@@ -1882,4 +1882,4 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
   }
 }
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor

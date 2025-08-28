@@ -281,7 +281,7 @@ grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
 }
 
 CranedForPamServer::CranedForPamServer(
-    const Common::Config::CranedListenConf &listen_conf) {
+    const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedForPamServiceImpl>();
 
   grpc::ServerBuilder builder;

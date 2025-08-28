@@ -25,7 +25,7 @@
 #include "CforedClient.h"
 #include "crane/PasswordEntry.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 inline const char* MemoryEvents = "memory.events";
 inline const char* MemoryOomControl = "memory.oom_control";
@@ -415,6 +415,6 @@ class TaskManager {
   std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
 };
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor
 
-inline std::unique_ptr<Supervisor::TaskManager> g_task_mgr;
+inline std::unique_ptr<Craned::Supervisor::TaskManager> g_task_mgr;

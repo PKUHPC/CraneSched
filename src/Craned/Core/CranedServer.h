@@ -109,7 +109,7 @@ class CranedServiceImpl : public Craned::Service {
 
 class CranedServer {
  public:
-  explicit CranedServer(const Common::Config::CranedListenConf &listen_conf);
+  explicit CranedServer(const Config::CranedListenConf &listen_conf);
 
   void Shutdown() {
     m_status_ = CranedStatus::STOPPING;

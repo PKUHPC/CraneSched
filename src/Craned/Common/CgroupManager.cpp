@@ -34,7 +34,7 @@
 #include "crane/String.h"
 
 namespace Craned::Common {
-CraneErrCode CgroupManager::Init() {
+CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -174,8 +174,7 @@ CraneErrCode CgroupManager::Init() {
     ControllersMounted();
 
 #ifdef CRANE_ENABLE_BPF
-    bpf_runtime_info.SetLogEnabled(
-        StrToLogLevel(g_config.CranedDebugLevel).value() < spdlog::level::info);
+    bpf_runtime_info.SetLogEnabled(debug_level < spdlog::level::info);
 #endif
 
   } else {
@@ -500,7 +499,8 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     return cg_unique_ptr;
   }
 
-  if (Common::g_config.Plugin.Enabled) {
+  // To avoid access g_config.
+  if (g_plugin_client) {
     // FIXME: Refactor related plugin interface and replace here.
     auto ids = ParseIdsFromCgroupStr_(cgroup_str);
     g_plugin_client->CreateCgroupHookAsync(

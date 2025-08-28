@@ -45,6 +45,7 @@
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
+using Craned::g_config;
 using namespace Craned::Common;
 using Craned::JobInD;
 
@@ -145,7 +146,7 @@ CraneErrCode TryToRecoverCgForJobs(
 }
 
 void ParseCranedConfig(const YAML::Node& config) {
-  Config::CranedConfig conf{};
+  Craned::Config::CranedConfig conf{};
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
   conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
@@ -238,7 +239,8 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
-  std::unordered_map<std::string, std::vector<DeviceMetaInConfig>>
+  std::unordered_map<std::string,
+                     std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
@@ -543,7 +545,7 @@ void ParseConfig(int argc, char** argv) {
           auto partition = it->as<YAML::Node>();
           std::string name;
           std::string nodes;
-          Partition part;
+          Craned::Partition part;
 
           if (partition["name"]) {
             name.assign(partition["name"].Scalar());
@@ -851,7 +853,7 @@ void GlobalVariableInit() {
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
   using CgConstant::Controller;
-  CgroupManager::Init();
+  CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
   if (CgroupManager::GetCgroupVersion() ==
           CgConstant::CgroupVersion::CGROUP_V1 &&
       (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER) ||

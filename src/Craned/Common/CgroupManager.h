@@ -510,7 +510,7 @@ class CgroupManager {
   CgroupManager &operator=(const CgroupManager &) = delete;
   CgroupManager &operator=(CgroupManager &&) = delete;
 
-  static CraneErrCode Init();
+  static CraneErrCode Init(spdlog::level::level_enum debug_level);
 
   // NOTE: These methods produce cgroup str w/o proper prefix.
   // Use CreateOrOpen_() to generate cgroup name with prefix.
