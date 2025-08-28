@@ -1997,6 +1997,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   size_t actual_size = m_task_status_change_queue_.try_dequeue_bulk(
       args.begin(), approximate_size);
   if (actual_size == 0) return;
+  args.resize(actual_size);
 
   CRANE_TRACE("Cleaning {} TaskStatusChanges...", actual_size);
 
