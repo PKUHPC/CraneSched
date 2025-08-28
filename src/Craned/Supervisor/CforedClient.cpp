@@ -419,6 +419,7 @@ void CforedClient::AsyncSendRecvThread_() {
     End,
   };
 
+  // TODO：重新创建stream连接
   std::thread output_clean_thread;
   std::atomic<bool> write_pending;
 
@@ -492,7 +493,9 @@ void CforedClient::AsyncSendRecvThread_() {
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
       CRANE_ERROR("Cfored connection failed.");
-      state = State::End;
+      // state = State::End;
+      if (output_clean_thread.joinable()) output_clean_thread.join();
+      break;
     }
 
     switch (state) {
