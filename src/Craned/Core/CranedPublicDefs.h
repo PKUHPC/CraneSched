@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <filesystem>
-
 #include "PreCompiledHeader.h"
 // Precompiled header comes first
 
