@@ -120,7 +120,7 @@ bool MongodbClient::InsertRecoveredJob(
             *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
@@ -136,7 +136,7 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
             *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
@@ -162,7 +162,7 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
             *GetSession_(), documents, insert_options);
     if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
       return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
@@ -380,7 +380,7 @@ bool MongodbClient::FetchJobRecords(
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
@@ -398,7 +398,7 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
     if (result) {
       return true;
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
@@ -415,7 +415,7 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
             *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
@@ -431,7 +431,7 @@ bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
             *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
@@ -447,7 +447,7 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
             doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
@@ -475,7 +475,7 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
         (*GetClient_())[m_db_name_][coll].delete_one(filter.view());
 
     if (result && result.value().deleted_count() == 1) return true;
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
@@ -496,7 +496,7 @@ bool MongodbClient::SelectUser(const std::string& key, const T& value,
       ViewToUser_(user_view, user);
       return true;
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
@@ -511,7 +511,7 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
       ViewToUser_(view, &user);
       user_list->emplace_back(user);
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
@@ -525,7 +525,7 @@ void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
       ViewToAccount_(view, &account);
       account_list->emplace_back(account);
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
@@ -539,7 +539,7 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
       ViewToQos_(view, &qos);
       qos_list->emplace_back(qos);
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
@@ -559,7 +559,7 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
     if (!update_result || !update_result->modified_count()) {
       return false;
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
@@ -580,7 +580,7 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
     if (!update_result || !update_result->modified_count()) {
       return false;
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
@@ -601,7 +601,7 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
     if (!update_result || !update_result->modified_count()) {
       return false;
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
