@@ -15,5 +15,4 @@ target_link_libraries(csupervisor
     PRIVATE
         craned_common
         Utility_CriClient
-        cri_proto_lib
 )
