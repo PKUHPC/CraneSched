@@ -30,9 +30,7 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <algorithm>
 #include <array>
-#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CgroupManager.h"

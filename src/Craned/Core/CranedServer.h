@@ -36,12 +36,8 @@ using grpc::Status;
 
 using crane::grpc::Craned;
 
-enum class RequestSource : std::int8_t {
-  CTLD = 0,
-  PAM = 1,
-  SUPERVISOR = 2,
-  INVALID
-};
+enum class RequestSource : std::int8_t { CTLD = 0, PAM, SUPERVISOR, INVALID };
+
 enum class CranedStatus : std::int8_t {
   INITIALIZING = 0,
   RUNNING,
