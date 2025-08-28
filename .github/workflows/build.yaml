@@ -61,7 +61,6 @@ jobs:
         shell: bash -leo pipefail {0}
 
     outputs:
-      # Artifact names (directories when downloaded via v4)
       output_bundle_artifact: build-output
       output_meta_artifact: build-meta
       key_sha256: ${{ env.KEY_SHA256 }}
@@ -322,7 +321,7 @@ jobs:
 
       # Download lightweight meta first (small; fast)
       - name: Download meta
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ needs.build.outputs.output_meta_artifact }}   # build-meta
           path: .
@@ -332,7 +331,7 @@ jobs:
         id: local_first
         run: |
           set -euo pipefail
-          META_FILE="./build-meta/meta.json"  # v4 places files under a dir named as artifact
+          META_FILE="./meta.json"
           [ -f "$META_FILE" ] || { echo "meta.json missing"; exit 1; }
 
           KEY_SHA256=$(jq -r '.key_sha256' "$META_FILE")
