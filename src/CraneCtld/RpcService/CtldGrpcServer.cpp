@@ -185,6 +185,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     kWaitRegReq = 0,
     kWaitMsg,
     kCleanData,
+    kWaitReConnect,
   };
 
   bool ok;
@@ -210,6 +211,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         }
 
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+        // TODO: 更新作业的stream writer
+        m_ctld_server_->m_mtx_.Unlock();
         CRANE_INFO("Cfored {} registered.", cfored_name);
 
         ok = stream_writer->WriteCforedRegistrationAck({});
@@ -220,11 +223,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
               "Failed to send msg to cfored {}. Connection is broken. "
               "Exiting...",
               cfored_name);
-          state = StreamState::kCleanData;
+          state = StreamState::kWaitReConnect;
         }
 
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
 
       break;
@@ -239,7 +242,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           task->SetFieldsByTaskToCtld(payload.task());
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-
+          // TODO: 重启连接时 writer_weak_ptr不可用，无法cancel task
           meta.cb_task_res_allocated =
               [writer_weak_ptr](task_id_t task_id,
                                 std::string const &allocated_craned_regex,
@@ -301,7 +304,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Failed to send msg to cfored {}. Connection is broken. "
                 "Exiting...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
           } else {
             if (result.has_value()) {
               m_ctld_server_->m_mtx_.Lock();
@@ -339,10 +342,15 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           return Status::CANCELLED;
         }
       } else {
-        state = StreamState::kCleanData;
+        state = StreamState::kWaitReConnect;
       }
     } break;
 
+    case StreamState::kWaitReConnect: {
+      CRANE_INFO("Cfored {} unexpectedly disconnected. Wait for restart.....", cfored_name);
+      stream_writer->Invalidate();
+      return Status::OK;
+    }
     case StreamState::kCleanData: {
       CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
       stream_writer->Invalidate();
