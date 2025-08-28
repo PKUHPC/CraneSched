@@ -53,7 +53,7 @@ env:
 jobs:
 
   build:
-    # Skip if this is a draft PR
+    # Skip draft PRs
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ["self-hosted", "CraneSched"]
     defaults:
@@ -61,7 +61,10 @@ jobs:
         shell: bash -leo pipefail {0}
 
     outputs:
-      output_bundle_artifact: build-output.tar.gz
+      # Artifact names (directories when downloaded via v4)
+      output_bundle_artifact: build-output
+      output_meta_artifact: build-meta
+      key_sha256: ${{ env.KEY_SHA256 }}
 
     steps:
       # Checkout backend repository
@@ -70,7 +73,7 @@ jobs:
         with:
           path: CraneSched
 
-      # Checkout frontend repository at the unified ref
+      # Checkout frontend repository at unified ref
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
@@ -78,7 +81,7 @@ jobs:
           path: CraneSched-FrontEnd
           ref: ${{ env.FRONTEND_REF }}
 
-      # Resolve CI image digest (try skopeo, then podman manifest, then pull+inspect)
+      # Resolve CI image digest (kept for metadata/fingerprint; not pinning run)
       - name: Resolve CI image digest
         id: imagedigest
         run: |
@@ -145,20 +148,18 @@ jobs:
           echo "CACHE_TGZ=${CACHE_TGZ}"     >> "$GITHUB_ENV"
           echo "CACHE_META=${CACHE_META}"   >> "$GITHUB_ENV"
 
-      # Prepare workspace and ensure local cache directory exists
+      # Prepare workspace & local cache dir
       - name: Prepare workspace & local cache
         run: |
           set -euo pipefail
-          echo "Linking $SCRIPT_PATH to $(pwd)/script"
           ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
-          echo "Linking $CACHE_PATH to $(pwd)/cache"
-          ln -sfT "$CACHE_PATH" "$(pwd)/cache"
+          ln -sfT "$CACHE_PATH"  "$(pwd)/cache"
           mkdir -p output log
           mkdir -p "${LOCAL_CACHE_DIR}" || true
           chown "$(id -u)":"$(id -g)" "${LOCAL_CACHE_DIR}" || true
           ls -ld "${LOCAL_CACHE_DIR}"
 
-      # Try local cache hit: verify meta & sha256, then unpack
+      # Local cache lookup with checksum verification
       - name: Local cache lookup
         id: local_cache
         run: |
@@ -187,13 +188,13 @@ jobs:
           echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
           echo "LOCAL_CACHE_HIT=${HIT}" >> "$GITHUB_ENV"
 
-      # Pull CI image only if local cache missed
+      # Pull CI Image only if local cache missed
       - name: Pull CI Image (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         run: |
           podman pull "${CI_IMAGE_TAG}"
 
-      # Build inside container only if local cache missed
+      # Build in container only if local cache missed
       - name: Build in Container (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         run: |
@@ -205,7 +206,7 @@ jobs:
               -v ./cache/ccache:/root/.ccache \
               "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
 
-      # Validate that output/ is not empty; fail early
+      # Validate non-empty output
       - name: Validate non-empty output
         run: |
           if ! find output -type f -print -quit | grep -q .; then
@@ -214,7 +215,7 @@ jobs:
             exit 1
           fi
 
-      # Create build-output.tar.gz (for both local cached path and artifact upload)
+      # Create bundle tar.gz
       - name: Create bundle (tar.gz)
         run: |
           rm -f build-output.tar.gz
@@ -265,7 +266,7 @@ jobs:
 
           cp -f meta.json output/meta.json
 
-      # Save to local cache only when we built (i.e., local cache miss)
+      # Save to local cache only when built (miss case)
       - name: Save to local cache (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         run: |
@@ -281,12 +282,21 @@ jobs:
           rmdir "${TMP_DIR}" || true
           echo "Local cache stored: ${CACHE_TGZ}"
 
-      # Upload the single unified artifact for cross-job & manual download
+      # Upload large bundle artifact (note: artifact name != file name)
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-output.tar.gz
+          name: build-output
           path: build-output.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
+      # Upload lightweight meta artifact
+      - name: Upload meta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-meta
+          path: meta.json
           retention-days: 3
           if-no-files-found: error
 
@@ -300,32 +310,75 @@ jobs:
       TEST_FAILED: false
       SCRIPT_PATH: /opt/actions-runner-external/script
       CACHE_PATH: /opt/actions-runner-external/cache
+      LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
 
     steps:
       # Prepare workspace for AutoTest
       - name: Prepare workspace
         run: |
-          echo "Linking $SCRIPT_PATH to $(pwd)/script"
           ln -sfT "$SCRIPT_PATH" "$(pwd)/script"
-          echo "Linking $CACHE_PATH to $(pwd)/cache"
-          ln -sfT "$CACHE_PATH" "$(pwd)/cache"
+          ln -sfT "$CACHE_PATH"  "$(pwd)/cache"
           mkdir -p output log
 
-      # Download and extract the bundle produced by the build job
-      - name: Download bundle
+      # Download lightweight meta first (small; fast)
+      - name: Download meta
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build.outputs.output_bundle_artifact }}
+          name: ${{ needs.build.outputs.output_meta_artifact }}   # build-meta
           path: .
 
-      - name: Extract bundle
+      # Try local cache using key & sha from meta.json
+      - name: Try local cache first
+        id: local_first
         run: |
-          rm -rf output/*
-          mkdir -p output
-          cd build-output.tar.gz
-          tar -xzf build-output.tar.gz -C ../output
+          set -euo pipefail
+          META_FILE="./build-meta/meta.json"  # v4 places files under a dir named as artifact
+          [ -f "$META_FILE" ] || { echo "meta.json missing"; exit 1; }
 
-      # Run AutoTest using the extracted output directory
+          KEY_SHA256=$(jq -r '.key_sha256' "$META_FILE")
+          BUNDLE_SHA=$(jq -r '.sha256' "$META_FILE")
+          echo "KEY_SHA256=$KEY_SHA256" | tee -a "$GITHUB_ENV"
+
+          CACHE_TGZ="${LOCAL_CACHE_DIR}/${KEY_SHA256}.tar.gz"
+          CACHE_META="${LOCAL_CACHE_DIR}/${KEY_SHA256}.meta.json"
+
+          HIT=false
+          if [ -f "$CACHE_TGZ" ] && [ -f "$CACHE_META" ]; then
+            EXPECT_SHA=$(jq -r '.sha256 // empty' "$CACHE_META")
+            if [ -n "$EXPECT_SHA" ]; then
+              ACTUAL_SHA=$(sha256sum "$CACHE_TGZ" | awk '{print $1}')
+              if [ "$EXPECT_SHA" = "$ACTUAL_SHA" ] && [ "$EXPECT_SHA" = "$BUNDLE_SHA" ]; then
+                echo "Local cache valid. Using ${CACHE_TGZ}"
+                rm -rf output/*; mkdir -p output
+                tar -xzf "$CACHE_TGZ" -C output
+                HIT=true
+              else
+                echo "WARN: local cache sha mismatch. meta=$EXPECT_SHA actual=$ACTUAL_SHA build=$BUNDLE_SHA"
+              fi
+            fi
+          else
+            echo "Local cache NOT found for KEY=$KEY_SHA256"
+          fi
+
+          echo "hit=${HIT}" >> "$GITHUB_OUTPUT"
+
+      # Fallback: download large bundle artifact only if local cache missed
+      - name: Download bundle (fallback)
+        if: steps.local_first.outputs.hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.output_bundle_artifact }}  # build-output
+          path: .
+
+      # Fallback: extract bundle from artifact directory
+      - name: Extract bundle (fallback)
+        if: steps.local_first.outputs.hit != 'true'
+        run: |
+          set -euo pipefail
+          rm -rf output/*; mkdir -p output
+          tar -xzf build-output.tar.gz -C output
+
+      # Run AutoTest
       - name: Run AutoTest
         continue-on-error: true
         run: |
