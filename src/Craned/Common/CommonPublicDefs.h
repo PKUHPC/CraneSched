@@ -25,39 +25,10 @@
 
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/PublicHeader.h"
 
-namespace Craned {
-
-inline constexpr uint64_t kEvSigChldResendMs = 500;
-constexpr uint64_t kCtldClientTimeoutSec = 30;
-constexpr int64_t kCranedRpcTimeoutSeconds = 5;
-
+namespace Common {
 using EnvMap = std::unordered_map<std::string, std::string>;
-using RegToken = google::protobuf::Timestamp;
-
-enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
-
-template <typename Cb, typename... Args>
-  requires std::invocable<Cb, Args...>
-struct CallbackWrapper {
-  Cb cb;
-  CallbackInvokeMode mode;
-  bool consume;
-};
-
-struct TaskStatusChangeQueueElem {
-  task_id_t step_id{};
-  crane::grpc::TaskStatus new_status{};
-  uint32_t exit_code{};
-  std::optional<std::string> reason;
-};
-
-struct TaskInfoOfUid {
-  uint32_t job_cnt;
-  uint32_t first_task_id;
-  bool cgroup_exists;
-  std::string cgroup_path;
-};
 
 struct Partition {
   std::unordered_set<std::string> nodes;
@@ -146,12 +117,4 @@ struct Config {
 };
 
 inline Config g_config{};
-
-struct RunTimeStatus {
-  std::shared_ptr<spdlog::async_logger> conn_logger;
-};
-
-inline RunTimeStatus g_runtime_status{};
-}  // namespace Craned
-
-inline std::unique_ptr<BS::thread_pool> g_thread_pool;
+}  // namespace Common

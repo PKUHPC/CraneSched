@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "SupervisorPreCompiledHeader.h"
+#include "PreCompiledHeader.h"
 // Precompiled header comes first
 
 #include "crane/OS.h"

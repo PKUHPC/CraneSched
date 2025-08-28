@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "CranedPublicDefs.h"
+#include "CommonPublicDefs.h"
 // Precompiled header comes first.
 
 namespace Craned {
@@ -102,7 +102,7 @@ class DeviceManager {
   static CraneErrCode GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);
 
-  static EnvMap GetDevEnvMapByResInNode(
+  static Common::EnvMap GetDevEnvMapByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);
 };
 

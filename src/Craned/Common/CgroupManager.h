@@ -24,7 +24,7 @@
  *
  */
 #pragma once
-#include "CranedPublicDefs.h"
+#include "CommonPublicDefs.h"
 // Precompiled header comes first.
 
 #include <libcgroup.h>
@@ -526,8 +526,6 @@ class CgroupManager {
    * corresponding running jobs and set `recovered` field for jobs with their
    * cgroup created.
    */
-  static CraneErrCode TryToRecoverCgForJobs(
-      std::unordered_map<job_id_t, JobInD> &rn_jobs_from_ctld);
 
   [[nodiscard]] static bool IsMounted(CgConstant::Controller controller) {
     return static_cast<bool>(m_mounted_controllers_ &
@@ -548,7 +546,7 @@ class CgroupManager {
       const std::string &cgroup_str,
       const crane::grpc::ResourceInNode &resource, bool recover);
 
-  static EnvMap GetResourceEnvMapByResInNode(
+  static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
@@ -560,21 +558,10 @@ class CgroupManager {
 
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
 
-#ifdef CRANE_ENABLE_BPF
-  inline static BpfRuntimeInfo bpf_runtime_info;
-#endif
- private:
-  static CgroupStrParsedIds ParseIdsFromCgroupStr_(
-      const std::string &cgroup_str);
-
+  // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
       const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
-
-  static int InitializeController_(struct cgroup &cgroup,
-                                   CgConstant::Controller controller,
-                                   bool required, bool has_cgroup,
-                                   bool &changed_cgroup);
 
   static std::set<job_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
@@ -582,14 +569,25 @@ class CgroupManager {
   static std::set<job_id_t> GetJobIdsFromCgroupV2_(
       const std::filesystem::path &root_cgroup_path);
 
-  static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
-      const std::filesystem::path &root_cgroup_path);
-
 #ifdef CRANE_ENABLE_BPF
-  inline static CraneExpected<
-      std::unordered_map<task_id_t, std::vector<BpfKey>>>
+  static CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2_(const std::filesystem::path &root_cgroup_path);
 #endif
+
+#ifdef CRANE_ENABLE_BPF
+  inline static BpfRuntimeInfo bpf_runtime_info;
+#endif
+ private:
+  static CgroupStrParsedIds ParseIdsFromCgroupStr_(
+      const std::string &cgroup_str);
+
+  static int InitializeController_(struct cgroup &cgroup,
+                                   CgConstant::Controller controller,
+                                   bool required, bool has_cgroup,
+                                   bool &changed_cgroup);
+
+  static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
+      const std::filesystem::path &root_cgroup_path);
 
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 

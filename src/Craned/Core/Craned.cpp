@@ -24,11 +24,18 @@
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
+#ifdef CRANE_ENABLE_BPF
+#  include <bpf/bpf.h>
+#  include <bpf/libbpf.h>
+#  include <linux/bpf.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <ctime>
 #include <cxxopts.hpp>
 
+#include "CgroupManager.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
@@ -40,6 +47,102 @@
 
 using Craned::g_config;
 using Craned::Partition;
+
+CraneErrCode TryToRecoverCgForJobs(
+    std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
+  using namespace Craned;
+  using namespace Craned::CgConstant;
+
+  std::set<job_id_t> rn_job_ids_with_cg;
+  if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1) {
+    // FIXME: What about the case of inconsistency?
+
+    rn_job_ids_with_cg.merge(
+        CgroupManager::GetJobIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
+    rn_job_ids_with_cg.merge(
+        CgroupManager::GetJobIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
+    rn_job_ids_with_cg.merge(
+        CgroupManager::GetJobIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
+
+  } else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
+    rn_job_ids_with_cg = CgroupManager::GetJobIdsFromCgroupV2_(
+        kSystemCgPathPrefix / kRootCgNamePrefix);
+
+#ifdef CRANE_ENABLE_BPF
+    auto job_id_bpf_key_vec_map = CgroupManager::GetJobBpfMapCgroupsV2_(
+        kSystemCgPathPrefix / kRootCgNamePrefix);
+    if (!job_id_bpf_key_vec_map) {
+      CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
+      return CraneErrCode::ERR_EBPF;
+    }
+
+    for (const auto& [job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
+      if (rn_jobs_from_ctld.find(job_id) != rn_jobs_from_ctld.end()) continue;
+
+      CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
+      for (const auto& key : bpf_key_vec) {
+        if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                                 &key, sizeof(BpfKey), BPF_ANY) < 0) {
+          CRANE_ERROR(
+              "Failed to delete BPF map major {},minor {} in cgroup id {}",
+              key.major, key.minor, key.cgroup_id);
+        }
+      }
+    }
+#endif
+  } else {
+    CRANE_WARN("Error Cgroup version is not supported");
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  for (job_id_t job_id : rn_job_ids_with_cg) {
+    if (rn_jobs_from_ctld.contains(job_id)) {
+      // Job is found in both ctld and cgroup
+      Craned::JobInD& job = rn_jobs_from_ctld.at(job_id);
+
+      CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
+      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+          CgroupManager::CgroupStrByJobId(job_id), job.job_to_d.res(), true);
+      if (cg_expt.has_value()) {
+        // Job cgroup is recovered.
+        job.cgroup = std::move(cg_expt.value());
+      } else {
+        // If the cgroup is found but is unrecoverable, just logging out.
+        CRANE_ERROR("Cgroup for job #{} is found but not recoverable.", job_id);
+      }
+
+      continue;
+    }
+
+    // Job is found in cgroup but not in ctld. Cleaning up.
+    CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
+    std::unique_ptr<CgroupInterface> cg_ptr;
+
+    // Open cgroup and destroy it.
+    auto cg_str = CgroupManager::CgroupStrByJobId(job_id);
+
+    // NOLINTBEGIN(readability-suspicious-call-argument)
+    if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V1_REQUIRED_CONTROLLERS,
+                                            NO_CONTROLLER_FLAG, true);
+    else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2)
+      cg_ptr = CgroupManager::CreateOrOpen_(cg_str, CG_V2_REQUIRED_CONTROLLERS,
+                                            NO_CONTROLLER_FLAG, true);
+    else
+      std::unreachable();
+
+    if (!cg_ptr) {
+      // FIXME: Clean incomplete cgroups!
+      CRANE_ERROR("Failed to reopen cgroup of job #{}.", job_id);
+      continue;
+    }
+
+    cg_ptr->KillAllProcesses();
+    cg_ptr->Destroy();
+  }
+
+  return CraneErrCode::SUCCESS;
+}
 
 void ParseCranedConfig(const YAML::Node& config) {
   Craned::Config::CranedConfig conf{};
@@ -720,7 +823,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     }
   }
 
-  Craned::CgroupManager::TryToRecoverCgForJobs(job_map);
+  TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
   if (!supv_job_ids.empty()) {
