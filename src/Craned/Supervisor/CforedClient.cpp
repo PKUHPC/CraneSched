@@ -22,7 +22,7 @@
 
 #include "TaskManager.h"
 #include "crane/String.h"
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 using crane::grpc::StreamTaskIOReply;
 using crane::grpc::StreamTaskIORequest;
@@ -664,4 +664,4 @@ void CforedClient::TaskX11OutPutForward(std::unique_ptr<char[]>&& data,
   m_x11_output_queue_.enqueue({std::move(data), len});
 }
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor

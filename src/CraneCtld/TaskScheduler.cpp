@@ -839,7 +839,7 @@ void TaskScheduler::ScheduleThread_() {
             failed_to_exec_job_id_map[craned_id].second =
                 ExitCode::kExitCodeRpcError;
           }
-        } else {
+        } else if (!failed_task_ids.value().empty()) {
           failed_to_exec_job_id_map[craned_id].first =
               std::move(failed_task_ids.value());
           failed_to_exec_job_id_map[craned_id].second =
@@ -1997,6 +1997,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   size_t actual_size = m_task_status_change_queue_.try_dequeue_bulk(
       args.begin(), approximate_size);
   if (actual_size == 0) return;
+  args.resize(actual_size);
 
   CRANE_TRACE("Cleaning {} TaskStatusChanges...", actual_size);
 

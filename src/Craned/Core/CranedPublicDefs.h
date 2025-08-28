@@ -23,6 +23,8 @@
 #include "PreCompiledHeader.h"
 // Precompiled header comes first
 
+#include "CgroupManager.h"
+#include "CommonPublicDefs.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 
@@ -32,7 +34,9 @@ inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
 
-using EnvMap = std::unordered_map<std::string, std::string>;
+using Common::CgroupInterface;
+using Common::CgroupManager;
+using Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };

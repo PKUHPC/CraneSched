@@ -58,7 +58,7 @@ struct JobInD {
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
 
-  std::unique_ptr<CgroupInterface> cgroup{nullptr};
+  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
   bool orphaned{false};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
@@ -85,7 +85,7 @@ class JobManager {
 
   bool AllocJobs(std::vector<JobInD>&& jobs);
 
-  CgroupInterface* GetCgForJob(task_id_t job_id);
+  Common::CgroupInterface* GetCgForJob(task_id_t job_id);
 
   bool FreeJobs(std::set<task_id_t>&& job_ids);
 

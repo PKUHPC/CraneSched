@@ -20,7 +20,7 @@
 
 #include "TaskManager.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
@@ -107,4 +107,4 @@ SupervisorServer::SupervisorServer() {
   chmod(supervisor_sock_path.c_str(), 0600);
   m_server_ = builder.BuildAndStart();
 }
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor

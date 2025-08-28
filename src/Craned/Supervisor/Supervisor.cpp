@@ -28,7 +28,7 @@
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 
-using Supervisor::g_config;
+using Craned::Supervisor::g_config;
 
 void InitFromStdin(int argc, char** argv) {
   cxxopts::Options options("CSupervisor");
@@ -194,11 +194,13 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  Craned::Common::CgroupManager::Init(
+      StrToLogLevel(g_config.SupervisorDebugLevel).value());
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-  g_task_mgr = std::make_unique<Supervisor::TaskManager>();
+  g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
 
-  g_craned_client = std::make_unique<Supervisor::CranedClient>();
+  g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(
       fmt::format("unix://{}", g_config.CranedUnixSocketPath.string()));
 
@@ -208,7 +210,7 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  g_server = std::make_unique<Supervisor::SupervisorServer>();
+  g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   // Make sure grpc server is ready to receive requests.
   std::this_thread::sleep_for(std::chrono::seconds(1));

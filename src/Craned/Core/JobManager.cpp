@@ -919,7 +919,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       if (job_instance)
         FreeJobAllocation_({job_instance->job_id});
       else {
-        StepStopAndDoStatusChangeAsync(
+        ActivateTaskStatusChangeAsync_(
             elem.step_id, crane::grpc::TaskStatus::Cancelled,
             ExitCode::kExitCodeTerminated, "Job not found.");
       }
@@ -939,7 +939,8 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to terminate task #{}", elem.step_id);
       // Supervisor dead for some reason.
-      StepStopAndDoStatusChangeAsync(
+      g_supervisor_keeper->RemoveSupervisor(elem.step_id);
+      ActivateTaskStatusChangeAsync_(
           elem.step_id, crane::grpc::TaskStatus::Cancelled,
           ExitCode::kExitCodeTerminated, "Terminated failed.");
     }

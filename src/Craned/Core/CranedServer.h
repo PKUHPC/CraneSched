@@ -21,6 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include "CommonPublicDefs.h"
 #include "CtldClient.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"

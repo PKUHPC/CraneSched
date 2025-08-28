@@ -33,9 +33,7 @@
 #  include <bpf/libbpf.h>
 #endif
 
-namespace Craned {
-
-class JobInD;
+namespace Craned::Common {
 
 namespace CgConstant {
 
@@ -512,7 +510,7 @@ class CgroupManager {
   CgroupManager &operator=(const CgroupManager &) = delete;
   CgroupManager &operator=(CgroupManager &&) = delete;
 
-  static CraneErrCode Init();
+  static CraneErrCode Init(spdlog::level::level_enum debug_level);
 
   // NOTE: These methods produce cgroup str w/o proper prefix.
   // Use CreateOrOpen_() to generate cgroup name with prefix.
@@ -594,4 +592,4 @@ class CgroupManager {
   inline static CgConstant::CgroupVersion m_cg_version_;
 };
 
-}  // namespace Craned
+}  // namespace Craned::Common

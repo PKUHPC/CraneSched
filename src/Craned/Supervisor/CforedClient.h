@@ -23,7 +23,7 @@
 
 #include "protos/Crane.grpc.pb.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 class CforedClient {
   struct X11FdInfo {
@@ -114,4 +114,4 @@ class CforedClient {
 
   absl::Mutex m_mtx_;
 };
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor

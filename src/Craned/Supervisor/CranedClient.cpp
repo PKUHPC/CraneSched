@@ -22,7 +22,7 @@
 #include "TaskManager.h"
 #include "crane/GrpcHelper.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 
 using grpc::ClientContext;
 using grpc::Status;
@@ -105,4 +105,4 @@ void CranedClient::AsyncSendThread_() {
   }
 }
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor

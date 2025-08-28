@@ -114,11 +114,15 @@ bool MongodbClient::InsertRecoveredJob(
     const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
   document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
-          *GetSession_(), doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  if (ret != bsoncxx::stdx::nullopt) return true;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
   return false;
 }
@@ -126,11 +130,15 @@ bool MongodbClient::InsertRecoveredJob(
 bool MongodbClient::InsertJob(TaskInCtld* task) {
   document doc = TaskInCtldToDocument_(task);
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
-          *GetSession_(), doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  if (ret != bsoncxx::stdx::nullopt) return true;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
 
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
   return false;
@@ -148,12 +156,15 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
   mongocxx::options::insert insert_options;
   insert_options.ordered(false);  // unordered to speed up the operation
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_many(
-          *GetSession_(), documents, insert_options);
-
-  if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
-    return true;
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].insert_many(
+            *GetSession_(), documents, insert_options);
+    if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
+      return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
 
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory TaskInCtld.");
   return false;
@@ -369,7 +380,7 @@ bool MongodbClient::FetchJobRecords(
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
     }
-  } catch (const bsoncxx::exception& e) {
+  } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 
@@ -380,12 +391,17 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   document doc;
   doc.append(kvp("job_db_inx", task_db_id));
 
-  bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find_one(doc.view());
-
-  if (result) {
-    return true;
+  try {
+    bsoncxx::stdx::optional<bsoncxx::document::value> result =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].find_one(
+            doc.view());
+    if (result) {
+      return true;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
+
   return false;
 }
 
@@ -393,42 +409,48 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
-          *GetSession_(), doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  if (ret != bsoncxx::stdx::nullopt)
-    return true;
-  else
-    return false;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return false;
 }
 
 bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
   document doc = AccountToDocument_(new_account);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_account_collection_name_].insert_one(
-          *GetSession_(), doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_account_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  if (ret != bsoncxx::stdx::nullopt)
-    return true;
-  else
-    return false;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return false;
 }
 
 bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   document doc = QosToDocument_(new_qos);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
-          doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
+            doc.view());
 
-  if (ret != bsoncxx::stdx::nullopt)
-    return true;
-  else
-    return false;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return false;
 }
 
 bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
@@ -448,13 +470,15 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   }
   document filter;
   filter.append(kvp("name", name));
-  bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
-      (*GetClient_())[m_db_name_][coll].delete_one(filter.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
+        (*GetClient_())[m_db_name_][coll].delete_one(filter.view());
 
-  if (result && result.value().deleted_count() == 1)
-    return true;
-  else
-    return false;
+    if (result && result.value().deleted_count() == 1) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return false;
 }
 
 template <typename T>
@@ -462,44 +486,61 @@ bool MongodbClient::SelectUser(const std::string& key, const T& value,
                                Ctld::User* user) {
   document doc;
   doc.append(kvp(key, value));
-  bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_user_collection_name_].find_one(doc.view());
+  try {
+    bsoncxx::stdx::optional<bsoncxx::document::value> result =
+        (*GetClient_())[m_db_name_][m_user_collection_name_].find_one(
+            doc.view());
 
-  if (result) {
-    bsoncxx::document::view user_view = result->view();
-    ViewToUser_(user_view, user);
-    return true;
+    if (result) {
+      bsoncxx::document::view user_view = result->view();
+      ViewToUser_(user_view, user);
+      return true;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return false;
 }
 
 void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_user_collection_name_].find({});
-  for (auto view : cursor) {
-    Ctld::User user;
-    ViewToUser_(view, &user);
-    user_list->emplace_back(user);
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_user_collection_name_].find({});
+    for (auto view : cursor) {
+      Ctld::User user;
+      ViewToUser_(view, &user);
+      user_list->emplace_back(user);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
 void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_account_collection_name_].find({});
-  for (auto view : cursor) {
-    Ctld::Account account;
-    ViewToAccount_(view, &account);
-    account_list->emplace_back(account);
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_account_collection_name_].find({});
+    for (auto view : cursor) {
+      Ctld::Account account;
+      ViewToAccount_(view, &account);
+      account_list->emplace_back(account);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
 void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_qos_collection_name_].find({});
-  for (auto view : cursor) {
-    Ctld::Qos qos;
-    ViewToQos_(view, &qos);
-    qos_list->emplace_back(qos);
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_qos_collection_name_].find({});
+    for (auto view : cursor) {
+      Ctld::Qos qos;
+      ViewToQos_(view, &qos);
+      qos_list->emplace_back(qos);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
@@ -510,12 +551,16 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
 
   filter.append(kvp("name", user.name));
 
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
-          *GetSession_(), filter.view(), setDocument.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
+            *GetSession_(), filter.view(), setDocument.view());
 
-  if (!update_result || !update_result->modified_count()) {
-    return false;
+    if (!update_result || !update_result->modified_count()) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
 }
@@ -527,12 +572,16 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
 
   filter.append(kvp("name", account.name));
 
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
-          *GetSession_(), filter.view(), setDocument.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
+            *GetSession_(), filter.view(), setDocument.view());
 
-  if (!update_result || !update_result->modified_count()) {
-    return false;
+    if (!update_result || !update_result->modified_count()) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
 }
@@ -544,12 +593,16 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
 
   filter.append(kvp("name", qos.name));
 
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
-          filter.view(), setDocument.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
+            filter.view(), setDocument.view());
 
-  if (!update_result || !update_result->modified_count()) {
-    return false;
+    if (!update_result || !update_result->modified_count()) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
 }

@@ -24,7 +24,7 @@
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
-namespace Supervisor {
+namespace Craned::Supervisor {
 class CranedClient {
  public:
   ~CranedClient();
@@ -52,6 +52,6 @@ class CranedClient {
   std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
 
-}  // namespace Supervisor
+}  // namespace Craned::Supervisor
 
-inline std::unique_ptr<Supervisor::CranedClient> g_craned_client;
+inline std::unique_ptr<Craned::Supervisor::CranedClient> g_craned_client;
