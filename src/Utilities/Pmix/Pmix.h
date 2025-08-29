@@ -21,32 +21,26 @@
 #include <fmt/format.h>
 #include <pmix_common.h>
 #include <pmix_server.h>
+#include <sys/types.h>
 
 #include <future>
-#include <sys/types.h>
-#include <vector>
 #include <uvw.hpp>
+#include <vector>
 
 #include "CranedClient.h"
 #include "PmixASyncServer.h"
 #include "PmixClient.h"
 #include "PmixColl.h"
 #include "PmixCommon.h"
+#include "PmixConn/PmixUcxServer.h"
 #include "PmixDModex.h"
 #include "PmixState.h"
 #include "absl/strings/str_join.h"
+#include "concurrentqueue/concurrentqueue.h"
 #include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace pmix {
-
-struct PmixNameSpace {
-  std::string nspace;
-  uint32_t node_num = 0;          /* number of nodes in this namespace */
-  uint32_t task_num = 0;          /* total number of tasks in this namespace */
-  std::vector<uint32_t> task_map; /* i'th task is located on task_map[i] node */
-  std::vector<std::string> hostlist;
-};
 
 class PmixServer {
  public:
@@ -78,6 +72,7 @@ class PmixServer {
   PmixASyncServer* GetPmixAsyncServer() const {
     return m_pmix_async_server_.get();
   }
+  uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
 
  private:
   void InfoSet_(const Config& config, const crane::grpc::TaskToD& task,

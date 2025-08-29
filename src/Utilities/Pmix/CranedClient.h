@@ -36,7 +36,7 @@ public:
 
   bool TerminateTasks();
 
-  bool BroadcastPmixPort(uint32_t pmix_port);
+  bool BroadcastPmixPort(const std::string& pmix_port);
 
 private:
   std::shared_ptr<grpc::Channel> m_channel_;
