@@ -184,7 +184,7 @@ bool PmixGrpcServer::Init(const Config& config) {
   CRANE_INFO("PMIx direct connection is listening on [{}:{}]", listen_addr, selected_port);
 
   std::thread([selected_port]() {
-    g_pmix_server->GetCranedClient()->BroadcastPmixPort(selected_port);
+    g_pmix_server->GetCranedClient()->BroadcastPmixPort(std::to_string(selected_port));
   }).detach();
 
   return true;

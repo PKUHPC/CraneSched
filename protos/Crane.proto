@@ -914,7 +914,7 @@ message BroadcastPmixPortRequest {
   string craned_id = 1; //  sender
   repeated string craned_ids = 2; // peer
   uint32 task_id = 3;
-  uint32 port = 4;
+  string port = 4;
 }
 
 message BroadcastPmixPortReply {
@@ -924,7 +924,7 @@ message BroadcastPmixPortReply {
 message ReceivePmixPortRequest {
   uint32 task_id = 1;
   message PmixPorts{
-    uint32 port = 1;
+    string port = 1;
     string craned_id = 2;
   }
   repeated PmixPorts pmix_ports = 2;
