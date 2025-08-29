@@ -20,10 +20,10 @@
 #include <sched.h>
 
 #include "SupervisorPublicDefs.h"
-#include "crane/CriClient.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "cri/api.pb.h"
