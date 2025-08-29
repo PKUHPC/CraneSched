@@ -34,7 +34,6 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
 
   m_tree_.state = CollTreeState::SYNC;
 
-  // TODO: conf定义
   width = 5;
   if (auto width_str = GetEnvVar(PMIXP_TREE_WIDTH); width_str != "") {
     try {
@@ -321,9 +320,6 @@ bool Coll::ProgressUpFwd_() {
     }
     request.set_peer_host(g_pmix_server->GetHostname());
     request.set_msg(m_tree_.downfwd_buf);
-
-    auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::pmix::PmixTreeDownwardForwardReply>();
 
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(host);
     if (!stub) {

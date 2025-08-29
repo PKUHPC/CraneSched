@@ -51,7 +51,7 @@ bool CranedClient::TerminateTasks() {
   return true;
 }
 
-bool CranedClient::BroadcastPmixPort(uint32_t pmix_port) {
+bool CranedClient::BroadcastPmixPort(const std::string& pmix_port) {
   using crane::grpc::BroadcastPmixPortReply;
   using crane::grpc::BroadcastPmixPortRequest;
 

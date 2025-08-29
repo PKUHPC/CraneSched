@@ -268,6 +268,8 @@ bool PmixServer::Init(
 
   if (m_is_init_) return true;
 
+  m_uvw_loop_ = uvw::loop::create();
+
   InfoSet_(config, task, env_map);
 
   if (!PmixInit_()) {
@@ -278,7 +280,11 @@ bool PmixServer::Init(
   g_dmodex_req_manager = std::make_unique<PmixDModexReqManager>();
   g_pmix_state = std::make_unique<PmixState>();
 
-  m_uvw_loop_ = uvw::loop::create();
+  if (!ConnInit_(config)) {
+    CRANE_ERROR("pmix connection init failed.");
+    return false;
+  }
+
   m_cleanup_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
 
   m_cleanup_timer_handle_->on<uvw::timer_event>(
@@ -308,11 +314,6 @@ bool PmixServer::Init(
 
     m_uvw_loop_->run();
   });
-
-  if (!ConnInit_(config)) {
-    CRANE_ERROR("pmix connection init failed.");
-    return false;
-  }
 
   if (!JobSet_()) {
     CRANE_ERROR("pmix job set failed");
