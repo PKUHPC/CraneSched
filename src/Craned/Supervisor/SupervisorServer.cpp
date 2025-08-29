@@ -97,7 +97,7 @@ grpc::Status SupervisorServiceImpl::ReceivePmixPort(
   }
 
   for (const auto& pmix_port : request->pmix_ports()) {
-    g_pmix_server->GetPmixClient()->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
+    g_pmix_server->GetPmixClient()->EmplacePmixStub(pmix_port.craned_id(), std::to_string(pmix_port.port()));
   }
 
   response->set_ok(true);

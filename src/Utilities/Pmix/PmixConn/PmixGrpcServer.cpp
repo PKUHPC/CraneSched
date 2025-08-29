@@ -16,9 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "PmixASyncServer.h"
+#include "PmixGrpcServer.h"
 
-#include "PmixASyncServer.h"
 #include "Pmix.h"
 #include "PmixColl.h"
 #include "PmixDModex.h"
@@ -26,10 +25,9 @@
 
 namespace pmix {
 
-grpc::ServerUnaryReactor* PmixASyncServiceImpl::SendPmixRingMsg(
+grpc::ServerUnaryReactor* PmixGrpcServiceImpl::SendPmixRingMsg(
     grpc::CallbackServerContext* context, const ::crane::grpc::pmix::SendPmixRingMsgReq* request,
     crane::grpc::pmix::SendPmixRingMsgReply *response) {
-
 
   auto* reactor = context->DefaultReactor();
 
@@ -61,7 +59,7 @@ grpc::ServerUnaryReactor* PmixASyncServiceImpl::SendPmixRingMsg(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeUpwardForward(
+grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeUpwardForward(
   grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeUpwardForwardReq *request,
   crane::grpc::pmix::PmixTreeUpwardForwardReply *response) {
 
@@ -93,7 +91,7 @@ grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeUpwardForward(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeDownwardForward(
+grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixTreeDownwardForward(
   grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixTreeDownwardForwardReq* request,
   crane::grpc::pmix::PmixTreeDownwardForwardReply* response) {
 
@@ -126,7 +124,7 @@ grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixTreeDownwardForward(
 }
 
 
-grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexRequest(
+grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexRequest(
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexRequestReq* request,
     crane::grpc::pmix::PmixDModexRequestReply* response) {
 
@@ -146,7 +144,7 @@ grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexRequest(
   return reactor;
 }
 
-grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexResponse(
+grpc::ServerUnaryReactor* PmixGrpcServiceImpl::PmixDModexResponse(
     grpc::CallbackServerContext* context, const crane::grpc::pmix::PmixDModexResponseReq* request,
     crane::grpc::pmix::PmixDModexResponseReply* response) {
   auto* reactor = context->DefaultReactor();
@@ -158,8 +156,8 @@ grpc::ServerUnaryReactor* PmixASyncServiceImpl::PmixDModexResponse(
 }
 
 
-bool PmixASyncServer::Init(const Config& config) {
-  m_service_impl_ = std::make_unique<PmixASyncServiceImpl>();
+bool PmixGrpcServer::Init(const Config& config) {
+  m_service_impl_ = std::make_unique<PmixGrpcServiceImpl>();
 
   grpc::ServerBuilder builder;
   ServerBuilderSetKeepAliveArgs(&builder);

@@ -328,6 +328,15 @@ set_target_properties(libpmix PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${PMIX_INCLUDE_DIR}"
 )
 
+# todo: if ucx enabled, use ucx
+find_package(UCX QUIET)
+if(UCX_FOUND)
+    message(STATUS "UCX found: ${UCX_INCLUDE_DIRS}")
+    add_definitions(-DHAVE_UCX)
+    set(UCX_LIBS ${UCX_LIBRARIES})
+    set(UCX_INCLUDES ${UCX_INCLUDE_DIRS})
+endif()
+
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")
     find_package(BerkeleyDB REQUIRED)

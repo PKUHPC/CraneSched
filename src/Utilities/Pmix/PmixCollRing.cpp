@@ -142,8 +142,10 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
 
     request.set_msg(coll_ring_ctx.ring_buf);
 
-    CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}", static_cast<void*>(&coll_ring_ctx), m_ring_.next_craned_id, coll_ring_ctx.seq, hop_seq, data.size(), contrib_id);
+    CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}",
+      static_cast<void*>(&coll_ring_ctx), m_ring_.next_craned_id, coll_ring_ctx.seq, hop_seq, data.size(), contrib_id);
 
+    // TODO: 自动选用不同的发送方式
     auto context = std::make_shared<grpc::ClientContext>();
     auto reply = std::make_shared<crane::grpc::pmix::SendPmixRingMsgReply>();
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_ring_.next_craned_id);
@@ -154,11 +156,10 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
     }
 
     auto self = shared_from_this();
-    stub->SendPmixRingMsg(context.get(), request, reply.get(),
-                          [context, reply, seq = coll_ring_ctx.seq,
-                           &coll_ring_ctx, self](const grpc::Status& status) {
+    stub->SendPmixRingMsgNoBlock(request,
+      [seq = coll_ring_ctx.seq, &coll_ring_ctx, self](bool ok) {
                             std::lock_guard lock_guard(self->m_lock_);
-                            if (!status.ok() || !reply->ok()) {
+                            if (!ok) {
                               CRANE_ERROR("{:p}, Cannot forward ring data",
                                           static_cast<void*>(&coll_ring_ctx));
                               coll_ring_ctx.ring_buf.clear();
