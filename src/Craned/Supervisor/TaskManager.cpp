@@ -18,27 +18,19 @@
 
 #include "TaskManager.h"
 
-#include <absl/strings/str_split.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
-#include <spdlog/fmt/bundled/core.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
-#include <utility>
 
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
-#include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
-#include "crane/Logger.h"
-#include "crane/OS.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
-#include "cri/api.pb.h"
 
 namespace Craned::Supervisor {
 
@@ -820,9 +812,9 @@ CraneErrCode ContainerInstance::Cleanup() {
 
 const TaskExitInfo& ContainerInstance::HandleContainerExited(
     const cri::api::ContainerStatus& status) {
-  m_exit_info_.is_terminated_by_signal = status.exit_code() > 127;
+  m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
   m_exit_info_.value = m_exit_info_.is_terminated_by_signal
-                           ? status.exit_code() - 127
+                           ? status.exit_code() - 128
                            : status.exit_code();
   return m_exit_info_;
 }
