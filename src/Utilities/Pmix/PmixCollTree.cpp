@@ -232,8 +232,6 @@ bool Coll::ProgressCollect_() {
     request.set_peer_host(g_pmix_server->GetHostname());
     request.set_msg(m_tree_.upfwd_buf);
 
-    auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::pmix::PmixTreeUpwardForwardReply>();
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_tree_.parent_host);
     if (!stub) {
       CRANE_ERROR("Cannot send data (size = {}), to {}", this->m_tree_.upfwd_buf, this->m_tree_.parent_host);
@@ -242,11 +240,11 @@ bool Coll::ProgressCollect_() {
       return false;
     }
     auto self = shared_from_this();
-    stub->PmixTreeUpwardForward(
-        context.get(), request, reply.get(),
-        [context, reply, seq = this->m_seq_, self](const grpc::Status& status) {
+    stub->PmixTreeUpwardForwardNoBlock(
+         request,
+        [ seq = this->m_seq_, self](bool ok) {
           std::lock_guard lock(self->m_lock_);
-          if (!status.ok() || !reply->ok()) {
+          if (!ok) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
                         self->m_tree_.upfwd_buf, self->m_tree_.parent_host);
             self->m_tree_.upfwd_buf.clear();
@@ -335,11 +333,11 @@ bool Coll::ProgressUpFwd_() {
       return false;
     }
     auto self = shared_from_this();
-    stub->PmixTreeDownwardForward(
-        context.get(), request, reply.get(),
-        [context, reply, seq = this->m_seq_, self](const grpc::Status& status) {
+    stub->PmixTreeDownwardForwardNoBlock(
+         request,
+        [ seq = this->m_seq_, self](bool ok) {
           std::lock_guard lock(self->m_lock_);
-          if (!status.ok() || !reply->ok()) {
+          if (!ok) {
             CRANE_ERROR("Cannot send data (size = {}), to {}",
                         self->m_tree_.upfwd_buf, self->m_tree_.parent_host);
             self->m_tree_.downfwd_buf.clear();
