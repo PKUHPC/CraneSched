@@ -20,10 +20,13 @@
 
 #include "PmixColl.h"
 #include "PmixCommon.h"
+#include "PmixConn/PmixGrpcClient.h"
+#include "PmixConn/PmixGrpcServer.h"
 #include "PmixDModex.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "crane/OS.h"
+#include "crane/String.h"
 #include "fmt/printf.h"
 
 namespace pmix {
@@ -228,7 +231,6 @@ void ErrHandler_(size_t evhdlr_registration_id,
   /* FIXME: use proper specificator for nranges */
   CRANE_ERROR("Error handler invoked: status = {}, source = [{}:{}]",
               status, source->nspace, source->rank);
-  //TODO: SIGKILL JOBSTEP
   g_pmix_server->GetCranedClient()->TerminateTasks();
 }
 
@@ -288,7 +290,7 @@ bool PmixServer::Init(
   m_cleanup_timer_handle_->start(std::chrono::seconds(10), std::chrono::seconds(10));
 
   m_uvw_thread_ = std::thread([this] {
-    // util::SetCurrentThreadName("PmixLoopThread_" + m_task_id_);
+    util::SetCurrentThreadName("PmixLoopThread_");
 
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
     idle_handle->on<uvw::idle_event>(
@@ -428,8 +430,14 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
   if (m_task_num_ > 1) {
-    m_pmix_client_ = std::make_unique<PmixClient>(m_node_num_);
-    m_pmix_async_server_ = std::make_unique<PmixASyncServer>();
+#ifdef HAVE_UCX
+    // TODO: ucx
+    m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
+#else
+    m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
+#endif
     if (!m_pmix_async_server_->Init(config))
       return false;
 

@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,112 +18,61 @@
 
 #pragma once
 
+#include <parallel_hashmap/phmap.h>
+
+#include <condition_variable>
+
+#include "PmixColl.h"
 #include "absl/container/node_hash_map.h"
-#include "crane/Lock.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
-#include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
-#include "protos/Pmix.grpc.pb.h"
-#include "protos/Pmix.pb.h"
-#include <parallel_hashmap/phmap.h>
-#include <condition_variable>
 
 namespace pmix {
 
-
-using AsyncGrpcCallback = std::function<void(grpc::Status)>;
-
-class PmixClient;
+using AsyncCallback = std::function<void(bool)>;
 
 class PmixStub {
  public:
-  explicit PmixStub(PmixClient *pmix_client);
+  virtual ~PmixStub() = default;
 
-  ~PmixStub() = default;
+  virtual void SendPmixRingMsgNoBlock(
+      const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) = 0;
 
-  void SendPmixRingMsg(grpc::ClientContext *context,
-                       const crane::grpc::pmix::SendPmixRingMsgReq &request,
-                       crane::grpc::pmix::SendPmixRingMsgReply *reply,
-                       AsyncGrpcCallback callback);
+  virtual void PmixTreeUpwardForwardNoBlock(
+      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request, AsyncCallback callback) = 0;
 
-  void PmixTreeUpwardForward(
-      grpc::ClientContext *context,
-      const crane::grpc::pmix::PmixTreeUpwardForwardReq &request,
-      crane::grpc::pmix::PmixTreeUpwardForwardReply *reply,
-      AsyncGrpcCallback callback);
+  virtual void PmixTreeDownwardForwardNoBlock(
+      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request, AsyncCallback callback) = 0;
 
-  void PmixTreeDownwardForward(
-      grpc::ClientContext *context,
-      const crane::grpc::pmix::PmixTreeDownwardForwardReq &request,
-      crane::grpc::pmix::PmixTreeDownwardForwardReply *reply,
-      AsyncGrpcCallback callback);
+  virtual void PmixDModexRequestNoBlock(
+      const crane::grpc::pmix::PmixDModexRequestReq &request, AsyncCallback callback) = 0;
 
-  void PmixDModexRequest(grpc::ClientContext *context,
-                         const crane::grpc::pmix::PmixDModexRequestReq &request,
-                         crane::grpc::pmix::PmixDModexRequestReply *reply,
-                         AsyncGrpcCallback callback);
-
-  void PmixDModexResponse(grpc::ClientContext *context,
-                          const crane::grpc::pmix::PmixDModexResponseReq &request,
-                          crane::grpc::pmix::PmixDModexResponseReply *reply,
-                          AsyncGrpcCallback callback);
-
-  int GetNodeId() const { return m_node_id_; }
-
- private:
-
-  PmixClient *m_pmix_client_;
-
-  std::shared_ptr<grpc::Channel> m_channel_;
-
-  std::unique_ptr<crane::grpc::pmix::Pmix::Stub> m_stub_;
-
-  CranedId m_craned_id_;
-
-  int m_node_id_;
-
-  friend class PmixClient;
+  virtual void PmixDModexResponseNoBlock(
+      const crane::grpc::pmix::PmixDModexResponseReq &request, AsyncCallback callback) = 0;
 };
 
 class PmixClient {
  public:
-  PmixClient(int node_num) : m_peer_node_num_(node_num) {}
+  explicit PmixClient(int node_num) : m_node_num_(node_num) {}
 
-  ~PmixClient() = default;
+  virtual ~PmixClient() = default;
 
-  void EmplacePmixStub(const CranedId &craned_id, uint32_t port);
+  virtual void EmplacePmixStub(const CranedId &craned_id,
+                               const std::string &port) = 0;
 
-  std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id);
+  virtual std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) = 0;
 
   uint64_t GetChannelCount() const { return m_channel_count_.load(); }
 
-  void WaitAllStubReady() {
-    std::unique_lock<std::mutex> lock(m_mutex_);
-    if (GetChannelCount() >= m_peer_node_num_) return ;
-    m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_peer_node_num_; });
-  }
+  virtual void WaitAllStubReady() = 0;
 
  private:
-  template <typename K, typename V,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using NodeHashMap = absl::node_hash_map<K, V, Hash>;
-
-  using CranedIdToStubMap = phmap::parallel_flat_hash_map<
-      CranedId,
-      std::shared_ptr<PmixStub>, phmap::priv::hash_default_hash<CranedId>,
-      phmap::priv::hash_default_eq<CranedId>,
-      std::allocator<std::pair<const CranedId, std::shared_ptr<PmixStub>>>, 4,
-      std::shared_mutex>;
-
-  CranedIdToStubMap m_craned_id_stub_map_;
-
   std::mutex m_mutex_;
   std::condition_variable m_cv_;
 
-  int m_peer_node_num_;
+  int m_node_num_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };
 
-} // namespace pmix
+}  // namespace pmix

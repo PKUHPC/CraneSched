@@ -32,6 +32,7 @@ target_link_libraries(craned_common
         Utility_PublicHeader
         Utility_PasswordEntry
         Utility_PluginClient
+        Utility_Pmix
         
         crane_proto_lib
         cri_proto_lib

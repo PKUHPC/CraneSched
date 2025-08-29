@@ -2,9 +2,17 @@ add_library(Utility_Pmix
         Pmix.cpp
         Pmix.h
         PmixASyncServer.h
-        PmixASyncServer.cpp
+
+        PmixConn/PmixGrpcServer.h
+        PmixConn/PmixGrpcServer.cpp
+        PmixConn/PmixUcxServer.h
+        PmixConn/PmixUcxServer.cpp
+        PmixConn/PmixGrpcClient.h
+        PmixConn/PmixGrpcClient.cpp
+        PmixConn/PmixUcxClient.h
+        PmixConn/PmixUcxClient.cpp
+
         PmixClient.h
-        PmixClient.cpp
         CranedClient.h
         CranedClient.cpp
         PmixColl.h
@@ -29,4 +37,5 @@ target_link_libraries(Utility_Pmix PUBLIC
         libpmix
         phmap
         uvw
+        $<$<BOOL:${UCX_FOUND}>:${UCX_LIBS}>
 )
