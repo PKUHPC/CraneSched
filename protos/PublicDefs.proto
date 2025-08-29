@@ -607,3 +607,15 @@ message CranedRemoteMeta {
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
 }
+
+enum TxnAction {
+  AddAccount = 0;
+  ModifyAccount = 1;
+  DeleteAccount = 2;
+  AddUser = 3;
+  ModifyUser = 4;
+  DeleteUser = 5;
+  AddQos = 6;
+  ModifyQos = 7;
+  DeleteQos = 8;
+}

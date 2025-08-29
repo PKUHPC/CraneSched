@@ -1588,6 +1588,46 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryTxnLog(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTxnLogRequest *request,
+    crane::grpc::QueryTxnLogReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  std::unordered_map<std::string, std::string> conditions;
+  if (!request->actor().empty()) conditions.emplace("actor", request->actor());
+  if (!request->target().empty())
+    conditions.emplace("target", request->target());
+  if (!request->action().empty())
+    conditions.emplace("action", request->action());
+  if (!request->info().empty()) conditions.emplace("info", request->info());
+
+  auto result = g_account_manager->QueryTxnList(
+      request->uid(), conditions,
+      request->time_interval().lower_bound().seconds(),
+      request->time_interval().upper_bound().seconds());
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+  } else {
+    response->set_ok(true);
+    for (auto &txn : result.value()) {
+      auto *new_txn = response->add_txn_log_list();
+      new_txn->set_actor(txn.actor);
+      new_txn->set_target(txn.target);
+      new_txn->set_action(txn.action);
+      new_txn->set_creation_time(txn.creation_time);
+      new_txn->set_info(txn.info);
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,

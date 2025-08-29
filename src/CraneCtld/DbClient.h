@@ -231,6 +231,11 @@ class MongodbClient {
   bool UpdateAccount(const Account& account);
   bool UpdateQos(const Qos& qos);
 
+  bool InsertTxn(const Txn& txn);
+  void SelectTxns(
+      const std::unordered_map<std::string, std::string>& conditions,
+      int64_t start_time, int64_t end_time, std::list<Txn>* res_txn);
+
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
 
@@ -269,6 +274,9 @@ class MongodbClient {
 
   document QosToDocument_(const Qos& qos);
 
+  void ViewToTxn_(const bsoncxx::document::view& txn_view, Txn* txn);
+  document TxnToDocument_(const Txn& txn);
+
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
@@ -280,6 +288,7 @@ class MongodbClient {
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
+  const std::string m_txn_collection_name_{"txn_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
