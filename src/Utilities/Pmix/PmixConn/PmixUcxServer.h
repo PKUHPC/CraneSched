@@ -21,8 +21,48 @@
 
 #include "PmixASyncServer.h"
 #include "PmixCommon.h"
+#include "concurrentqueue/concurrentqueue.h"
+#include "uvw/async.h"
+#ifdef HAVE_UCX
+#include <ucp/api/ucp.h>
+#endif
 
 namespace pmix {
+
+enum class PmixUcxStatus {
+  ACTIVE = 0,
+  COMPLETE,
+  FAILED
+};
+
+enum class PmixUcxMsgType {
+  PMIX_UCX_TREE_UPWARD_FORWARD = 0,
+  PMIX_UCX_TREE_DOWNWARD_FORWARD,
+  PMIX_UCX_DMDEX_REQUEST,
+  PMIX_UCX_DMDEX_RESPONSE,
+  PMIX_UCX_SEND_PMIX_RING_MSG
+};
+
+struct PmixUcxReq {
+  std::atomic<PmixUcxStatus> status{PmixUcxStatus::ACTIVE};
+  std::string data;
+  PmixUcxMsgType type;
+};
+
+class PmixUcxServiceImpl {
+public:
+  explicit PmixUcxServiceImpl() = default;
+
+  void SendPmixRingMsg(const PmixUcxReq& req);
+
+  void PmixTreeUpwardForward(const PmixUcxReq& req);
+
+  void PmixTreeDownwardForward(const PmixUcxReq& req);
+
+  void PmixDModexRequest(const PmixUcxReq& req);
+
+  void PmixDModexResponse(const PmixUcxReq& req);
+};
 
 class PmixUcxServer: public PmixASyncServer {
 public:
@@ -34,11 +74,33 @@ public:
 
   void Wait() override { }
 
+  void OnUcxReadable();
 private:
-  // std::unique_ptr<PmixGrpcServiceImpl> m_service_impl_;
-  // std::unique_ptr<Server> m_server_;
-  //
-  // friend class PmixASyncServiceImpl;
+
+  bool UcxProgress_();
+
+  static void RecvHandle_(void *request, ucs_status_t status,
+                        ucp_tag_recv_info_t *info);
+
+  template <class T>
+using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+
+  ucp_context_h m_ucp_context_{};
+  ucp_worker_h m_ucp_worker_{};
+  ucp_address_t *m_ucx_addr_{};
+  size_t m_ucx_alen_{};
+  int m_server_fd_{};
+
+  util::mutex m_mutex_;
+  std::list<std::shared_ptr<PmixUcxReq>> m_pending_reqs_;
+
+  std::unique_ptr<PmixUcxServiceImpl> m_service_impl_;
+
+  std::shared_ptr<uvw::async_handle> m_ucx_process_req_async_handle_;
+  ConcurrentQueue<std::shared_ptr<PmixUcxReq>> m_ucx_process_req_queue_;
+  void EvCleanUcxProcessReqQueueCb_();
+
+  friend class PmixUcxServiceImpl;
 };
 
 } // namespace pmix
