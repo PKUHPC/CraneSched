@@ -16,19 +16,29 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+
 #pragma once
 
+#include "PmixASyncServer.h"
 #include "PmixCommon.h"
 
 namespace pmix {
 
-class PmixASyncServer {
+class PmixUcxServer: public PmixASyncServer {
 public:
-  virtual ~PmixASyncServer() = default;
-  virtual bool Init(const Config& config) = 0;
+  explicit PmixUcxServer() = default;
 
-  virtual void Shutdown() = 0;
+  bool Init(const Config& config) override;
 
-  virtual void Wait() = 0;
+  void Shutdown() override {  }
+
+  void Wait() override { }
+
+private:
+  // std::unique_ptr<PmixGrpcServiceImpl> m_service_impl_;
+  // std::unique_ptr<Server> m_server_;
+  //
+  // friend class PmixASyncServiceImpl;
 };
+
 } // namespace pmix
