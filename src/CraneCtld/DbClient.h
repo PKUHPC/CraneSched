@@ -125,7 +125,10 @@ class MongodbClient {
   bool InsertQos(const Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
-
+  int64_t GetLastTime(mongocxx::collection& collection, std::string time_type,
+                      int64_t default_start_sec);
+  bool AggregateAccountUserJobs(std::time_t start, std::time_t end);
+  void ClusterRollupUsage();
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
@@ -280,6 +283,13 @@ class MongodbClient {
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
+  const std::string m_hour_account_user_collection_name_{
+      "hour_account_user_summary_table"};
+  const std::string m_hour_account_user_wckey_collection_name_{
+      "hour_account_user_wckey_summary_table"};
+  const std::string m_hour_summary_collection_name_{"hour_summary_table"};
+  const std::string m_day_summary_collection_name_{"day_summary_able"};
+  const std::string m_month_summary_collection_name_{"month_summary_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;

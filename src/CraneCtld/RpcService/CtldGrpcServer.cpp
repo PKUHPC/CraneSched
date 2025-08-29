@@ -815,6 +815,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   sort_and_truncate(task_list, num_limit);
   response->set_ok(true);
+  g_db_client->ClusterRollupUsage();
   return grpc::Status::OK;
 }
 

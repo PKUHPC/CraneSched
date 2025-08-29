@@ -1098,6 +1098,316 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   return DocumentConstructor_(fields, values);
 }
 
+int64_t MongodbClient::GetLastTime(mongocxx::collection& collection,
+                                   std::string time_type,
+                                   int64_t default_start_sec) {
+  try {
+    auto opts = mongocxx::options::find{};
+    opts.sort(bsoncxx::builder::basic::make_document(
+        bsoncxx::builder::basic::kvp(time_type, -1)));
+    opts.limit(1);
+    auto cursor = collection.find({}, opts);
+    for (auto&& doc : cursor) {
+      if (doc.find(time_type) != doc.end()) {
+        // hour 字段是 int64 秒数
+        int64_t hour_ts = doc[time_type].get_int64();
+        // 向上取整到下一个小时
+        std::tm tm = *std::localtime(&hour_ts);
+
+        if (tm.tm_min != 0 || tm.tm_sec != 0) {
+          tm.tm_min = 0;
+          tm.tm_sec = 0;
+          tm.tm_hour += 1;
+        }
+        tm.tm_hour += 1;  // 保存是start
+        std::time_t ceiled_tt = std::mktime(&tm);
+        return static_cast<int64_t>(ceiled_tt);  // 返回秒
+      }
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "[ERROR] GetLastTime exception: " << e.what() << std::endl;
+    return default_start_sec;
+  }
+
+  // 没查到数据，用 default_start，向下取整到小时
+  std::time_t tt = static_cast<std::time_t>(default_start_sec);
+  std::tm tm = *std::localtime(&tt);
+  tm.tm_min = 0;
+  tm.tm_sec = 0;
+  std::time_t floored_tt = std::mktime(&tm);
+  return static_cast<int64_t>(floored_tt);  // 返回秒
+}
+
+void MongodbClient::ClusterRollupUsage() {
+  auto account_user_collection =
+      (*GetClient_())[m_db_name_][m_hour_account_user_collection_name_];
+  auto account_user_wckey_collection =
+      (*GetClient_())[m_db_name_][m_hour_account_user_wckey_collection_name_];
+
+  // 默认起点
+  std::tm tm_start = {};
+  tm_start.tm_year = 2025 - 1900;
+  tm_start.tm_mon = 8 - 1;
+  tm_start.tm_mday = 26;
+  tm_start.tm_hour = 0;
+  std::time_t default_start_sec = std::mktime(&tm_start);
+
+  // 获取最后聚合小时
+  int64_t last_hour_sec =
+      GetLastTime(account_user_collection, "hour", default_start_sec);
+
+  // 当前时间
+  std::time_t now_sec =
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+
+  int64_t diff = now_sec - last_hour_sec;
+  char last_hour_buf[32], now_buf[32];
+  std::strftime(last_hour_buf, sizeof(last_hour_buf), "%Y-%m-%d %H:%M:%S",
+                std::localtime(&last_hour_sec));
+  std::strftime(now_buf, sizeof(now_buf), "%Y-%m-%d %H:%M:%S",
+                std::localtime(&now_sec));
+
+  if (diff < 3600) {
+    CRANE_ERROR("Fail {} to {}", last_hour_buf, now_buf);
+    CRANE_ERROR("Less than 1 hour since last aggregation, skip.");
+    return;
+  }
+
+  CRANE_INFO("Aggregating from {} to {}", last_hour_buf, now_buf);
+
+  AggregateAccountUserJobs(last_hour_sec, now_sec);
+}
+
+bool MongodbClient::AggregateAccountUserJobs(std::time_t start,
+                                             std::time_t end) {
+  std::time_t cur_start = start;
+  std::time_t cur_end = cur_start + 3600;
+
+  while (cur_end < end) {
+    try {
+      auto jobs = (*GetClient_())[m_db_name_][m_task_collection_name_];
+      auto account_user_collection =
+          (*GetClient_())[m_db_name_][m_hour_account_user_collection_name_];
+      auto account_user_wckey_collection =
+          (*GetClient_())[m_db_name_]
+                         [m_hour_account_user_wckey_collection_name_];
+
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << "time_end" << bsoncxx::builder::stream::open_document
+                     << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      // 保证 wckey 字段有默认值
+      // pipeline.add_fields(
+      //     bsoncxx::builder::stream::document{}
+      //     << "wckey" << bsoncxx::builder::stream::open_document << "$ifNull"
+      //     << bsoncxx::builder::stream::open_array << "$wckey"
+      //     << "_default_" << bsoncxx::builder::stream::close_array
+      //     << bsoncxx::builder::stream::close_document
+      //     << bsoncxx::builder::stream::finalize);
+
+      // 生成 hour 字段（窗口整点）
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "hour" << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+
+      // 只算一次 cpu_time/cpu_alloc
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::open_document
+          << "$subtract" << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "cpu_alloc"
+          << bsoncxx::builder::stream::open_document << "$multiply"
+          << bsoncxx::builder::stream::open_array << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      // facet
+      pipeline.facet(
+          bsoncxx::builder::stream::document{}  // 1. account_user 分支
+          << "account_user" << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$group"
+          << bsoncxx::builder::stream::open_document << "_id"
+          << bsoncxx::builder::stream::open_document << "hour" << "$hour"
+          << "account" << "$account"
+          << "username" << "$username"
+          << bsoncxx::builder::stream::close_document << "total_cpu_time"
+          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_time"
+          << bsoncxx::builder::stream::close_document << "total_cpu_alloc"
+          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_alloc"
+          << bsoncxx::builder::stream::close_document << "total_count"
+          << bsoncxx::builder::stream::open_document << "$sum" << 1
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+
+          // 2. account_user_wckey 分支
+          << "account_user_wckey"
+          << bsoncxx::builder::stream::open_array
+          // 先 $match 有 wckey 且不为 null
+          << bsoncxx::builder::stream::open_document << "$match"
+          << bsoncxx::builder::stream::open_document << "wckey"
+          << bsoncxx::builder::stream::open_document << "$exists" << true
+          << "$ne" << bsoncxx::types::b_null{}
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          // 再 $group
+          << bsoncxx::builder::stream::open_document << "$group"
+          << bsoncxx::builder::stream::open_document << "_id"
+          << bsoncxx::builder::stream::open_document << "hour" << "$hour"
+          << "account" << "$account"
+          << "username" << "$username"
+          << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
+          << "total_cpu_time" << bsoncxx::builder::stream::open_document
+          << "$sum" << "$cpu_time" << bsoncxx::builder::stream::close_document
+          << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
+          << "$sum" << "$cpu_alloc" << bsoncxx::builder::stream::close_document
+          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+          << 1 << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::finalize);
+
+      auto cursor = jobs.aggregate(pipeline);
+      // debug
+      bool has_data = false;
+      std::vector<std::string> output_lines;  // 用于收集所有数据行
+
+      for (auto&& doc : cursor) {
+        auto account_user_arr = doc["account_user"].get_array().value;
+        auto account_user_wckey_arr =
+            doc["account_user_wckey"].get_array().value;
+
+        if (account_user_arr.empty() && account_user_wckey_arr.empty()) {
+          continue;
+        }
+        has_data = true;
+
+        // 1. 处理 account_user
+        for (auto&& elem : account_user_arr) {
+          auto view = elem.get_document().view();
+          auto id = view["_id"].get_document().view();
+          int64_t hour = id["hour"].get_int64();
+          std::string account = std::string(id["account"].get_string().value);
+          std::string username = std::string(id["username"].get_string().value);
+          double total_cpu_time = view["total_cpu_time"].get_double().value;
+          double total_cpu_alloc = view["total_cpu_alloc"].get_double().value;
+          int total_count = view["total_count"].get_int32().value;
+
+          // upsert
+          auto filter = bsoncxx::builder::stream::document{}
+                        << "hour" << hour << "account" << account << "username"
+                        << username << bsoncxx::builder::stream::finalize;
+          auto update = bsoncxx::builder::stream::document{}
+                        << "$set" << bsoncxx::builder::stream::open_document
+                        << "hour" << hour << "account" << account << "username"
+                        << username << "total_cpu_time" << total_cpu_time
+                        << "total_cpu_alloc" << total_cpu_alloc << "total_count"
+                        << total_count
+                        << bsoncxx::builder::stream::close_document
+                        << bsoncxx::builder::stream::finalize;
+          account_user_collection.update_one(
+              filter.view(), update.view(),
+              mongocxx::options::update{}.upsert(true));
+
+          // 打印
+          char hour_buf[32];
+          std::tm tm_hour = *std::localtime(&hour);
+          std::strftime(hour_buf, sizeof(hour_buf), "%Y-%m-%d %H:%M:%S",
+                        &tm_hour);
+          std::ostringstream line;
+          line << R"({ "hour": ")" << hour_buf << R"(", "account": ")"
+               << account << R"(", "username": ")" << username
+               << R"(", "total_cpu_time": )" << total_cpu_time
+               << R"(, "total_cpu_alloc": )" << total_cpu_alloc
+               << R"(, "total_count": )" << total_count << " }";
+          output_lines.push_back(line.str());
+        }
+
+        // 2. 处理 account_user_wckey
+        for (auto&& elem : account_user_wckey_arr) {
+          auto view = elem.get_document().view();
+          auto id = view["_id"].get_document().view();
+          int64_t hour = id["hour"].get_int64();
+          std::string account = std::string(id["account"].get_string().value);
+          std::string username = std::string(id["username"].get_string().value);
+          std::string wckey = std::string(id["wckey"].get_string().value);
+          double total_cpu_time = view["total_cpu_time"].get_double().value;
+          double total_cpu_alloc = view["total_cpu_alloc"].get_double().value;
+          int total_count = view["total_count"].get_int32().value;
+
+          // upsert
+          auto filter = bsoncxx::builder::stream::document{}
+                        << "hour" << hour << "account" << account << "username"
+                        << username << "wckey" << wckey
+                        << bsoncxx::builder::stream::finalize;
+          auto update = bsoncxx::builder::stream::document{}
+                        << "$set" << bsoncxx::builder::stream::open_document
+                        << "hour" << hour << "account" << account << "username"
+                        << username << "wckey" << wckey << "total_cpu_time"
+                        << total_cpu_time << "total_cpu_alloc"
+                        << total_cpu_alloc << "total_count" << total_count
+                        << bsoncxx::builder::stream::close_document
+                        << bsoncxx::builder::stream::finalize;
+          account_user_wckey_collection.update_one(
+              filter.view(), update.view(),
+              mongocxx::options::update{}.upsert(true));
+
+          // 打印
+          char hour_buf[32];
+          std::tm tm_hour = *std::localtime(&hour);
+          std::strftime(hour_buf, sizeof(hour_buf), "%Y-%m-%d %H:%M:%S",
+                        &tm_hour);
+          std::ostringstream line;
+          line << R"({ "hour": ")" << hour_buf << R"(", "account": ")"
+               << account << R"(", "username": ")" << username
+               << R"(", "wckey": ")" << wckey << R"(", "total_cpu_time": )"
+               << total_cpu_time << R"(, "total_cpu_alloc": )"
+               << total_cpu_alloc << R"(, "total_count": )" << total_count
+               << " }";
+          output_lines.push_back(line.str());
+        }
+      }
+      if (has_data) {
+        // 打印 [DEBUG]
+        std::tm tm_start = *std::localtime(&cur_start);
+        std::tm tm_end = *std::localtime(&cur_end);
+        char start_buf[32], end_buf[32];
+        std::strftime(start_buf, sizeof(start_buf), "%Y-%m-%d %H:%M:%S",
+                      &tm_start);
+        std::strftime(end_buf, sizeof(end_buf), "%Y-%m-%d %H:%M:%S", &tm_end);
+
+        CRANE_INFO("[DEBUG] cur_start={} ({}), cur_end={} ({})", cur_start,
+                   start_buf, cur_end, end_buf);
+
+        for (const auto& line : output_lines) {
+          CRANE_INFO("{}", line);
+        }
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "AggregateHourlyJobsToTwoTables error: " << e.what()
+                << std::endl;
+      return false;
+    }
+    cur_start = cur_end;
+    cur_end += 3600;
+  }
+  return true;
+}
+
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
