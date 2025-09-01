@@ -41,6 +41,22 @@ constexpr const char* CRANE_PMIX_DIRECT_CONN_UCX = "CRANE_PMIX_DIRECT_CONN_UCX";
 constexpr const char* PMIXP_PMIXLIB_TMPDIR = "PMIXP_PMIXLIB_TMPDIR";
 constexpr const char* PMIXP_TREE_WIDTH = "PMIXP_TREE_WIDTH";
 
+static constexpr uint64_t kTagTypeShift   = 48;
+static constexpr uint64_t kTagTypeMask    = 0xFFFF000000000000ULL;
+static constexpr uint64_t kTagLowMask     = 0x0000FFFFFFFFFFFFULL;
+// 每个类型同时挂接的接收个数（可根据负载调大）
+static constexpr int      kInflightPerType = 256;
+// 每条消息最大长度（可配置/调优；若需要超大消息建议用 AM 或 pipeline）
+static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
+
+enum class PmixUcxMsgType : uint16_t {
+  PMIX_UCX_TREE_UPWARD_FORWARD = 0,
+  PMIX_UCX_TREE_DOWNWARD_FORWARD,
+  PMIX_UCX_DMDEX_REQUEST,
+  PMIX_UCX_DMDEX_RESPONSE,
+  PMIX_UCX_SEND_PMIX_RING_MSG
+};
+
 inline std::string GetEnvVar(const std::string& key) {
     const char* val = std::getenv(key.c_str());
     return val == nullptr ? "" : std::string(val);

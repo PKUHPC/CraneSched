@@ -53,7 +53,7 @@ class PmixStub {
 
 class PmixClient {
  public:
-  explicit PmixClient(int node_num) : m_node_num_(node_num) {}
+  explicit PmixClient() = default;
 
   virtual ~PmixClient() = default;
 
@@ -62,17 +62,9 @@ class PmixClient {
 
   virtual std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) = 0;
 
-  uint64_t GetChannelCount() const { return m_channel_count_.load(); }
+  virtual uint64_t GetChannelCount() const = 0;
 
   virtual void WaitAllStubReady() = 0;
-
- private:
-  std::mutex m_mutex_;
-  std::condition_variable m_cv_;
-
-  int m_node_num_;
-
-  std::atomic_uint64_t m_channel_count_{0};
 };
 
 }  // namespace pmix

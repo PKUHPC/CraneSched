@@ -28,59 +28,64 @@
 #endif
 
 namespace pmix {
-
-enum class PmixUcxStatus {
-  ACTIVE = 0,
-  COMPLETE,
-  FAILED
-};
-
-enum class PmixUcxMsgType {
-  PMIX_UCX_TREE_UPWARD_FORWARD = 0,
-  PMIX_UCX_TREE_DOWNWARD_FORWARD,
-  PMIX_UCX_DMDEX_REQUEST,
-  PMIX_UCX_DMDEX_RESPONSE,
-  PMIX_UCX_SEND_PMIX_RING_MSG
-};
+class PmixUcxServer;
 
 struct PmixUcxReq {
-  std::atomic<PmixUcxStatus> status{PmixUcxStatus::ACTIVE};
-  std::string data;
   PmixUcxMsgType type;
+  std::string data;
+  PmixUcxServer* self{};
 };
 
 class PmixUcxServiceImpl {
 public:
   explicit PmixUcxServiceImpl() = default;
 
-  void SendPmixRingMsg(const PmixUcxReq& req);
+  void SendPmixRingMsg(const std::string& req_data);
 
-  void PmixTreeUpwardForward(const PmixUcxReq& req);
+  void PmixTreeUpwardForward(const std::string& req_data);
 
-  void PmixTreeDownwardForward(const PmixUcxReq& req);
+  void PmixTreeDownwardForward(const std::string& req_data);
 
-  void PmixDModexRequest(const PmixUcxReq& req);
+  void PmixDModexRequest(const std::string& req_data);
 
-  void PmixDModexResponse(const PmixUcxReq& req);
+  void PmixDModexResponse(const std::string& req_data);
 };
 
 class PmixUcxServer: public PmixASyncServer {
 public:
   explicit PmixUcxServer() = default;
 
+  ~PmixUcxServer() override {
+    if (m_ucp_worker_) ucp_worker_destroy(m_ucp_worker_);
+    if (m_ucp_context_) ucp_cleanup(m_ucp_context_);
+  }
+
   bool Init(const Config& config) override;
 
   void Shutdown() override {  }
 
   void Wait() override { }
-
-  void OnUcxReadable();
 private:
 
-  bool UcxProgress_();
+  void OnUcxReadable_();
 
-  static void RecvHandle_(void *request, ucs_status_t status,
-                        ucp_tag_recv_info_t *info);
+  void RegisterReceivesAllTypes_();
+  void RegisterReceivesForType_(PmixUcxMsgType type, int cnt);
+
+  static void RecvHandle_(void* request,
+                                ucs_status_t status,
+                                const ucp_tag_recv_info_t* info,
+                                void* user_data);
+
+  static uint64_t MakeTag_(PmixUcxMsgType type, uint64_t low48) {
+    return (static_cast<uint64_t>(type) << kTagTypeShift) | (low48 & kTagLowMask);
+  }
+  static PmixUcxMsgType TagToType_(uint64_t tag) {
+    return static_cast<PmixUcxMsgType>((tag & kTagTypeMask) >> kTagTypeShift);
+  }
+  static uint64_t TagLow_(uint64_t tag) { return (tag & kTagLowMask); }
+
+  void EvCleanUcxProcessReqQueueCb_();
 
   template <class T>
 using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
@@ -96,8 +101,9 @@ using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   std::unique_ptr<PmixUcxServiceImpl> m_service_impl_;
 
+  std::shared_ptr<uvw::poll_handle> m_poll_;
   std::shared_ptr<uvw::async_handle> m_ucx_process_req_async_handle_;
-  ConcurrentQueue<std::shared_ptr<PmixUcxReq>> m_ucx_process_req_queue_;
+  ConcurrentQueue<PmixUcxReq*> m_ucx_process_req_queue_;
   void EvCleanUcxProcessReqQueueCb_();
 
   friend class PmixUcxServiceImpl;
