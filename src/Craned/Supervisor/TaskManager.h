@@ -366,6 +366,7 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is terminated by timeout,
     // task->status=Timeout (From internal queue)
     bool mark_as_orphaned{false};
+    bool terminated_by_oom{false};
   };
 
   struct ChangeTaskTimeLimitQueueElem {
@@ -384,6 +385,19 @@ class TaskManager {
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+  void EvOomMonitoringCb_();
+
+  void InitOomMonitoring_();
+
+  void StartCgroupV1OomMonitoring_();
+  void StopCgroupV1OomMonitoring_();
+
+  void StartCgroupV2OomMonitoring_();
+  void StopCgroupV2OomMonitoring_();
+
+  // Resolve actual cgroup fs path for a pid by reading /proc/<pid>/cgroup
+  std::optional<std::string> ResolveCgroupPathForPid_(pid_t pid,
+                                                      bool is_cgroup_v2);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -408,11 +422,28 @@ class TaskManager {
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_oom_monitoring_async_handle_;
+  ConcurrentQueue<task_id_t> m_oom_monitoring_queue_;
+
   std::atomic_bool m_supervisor_exit_{false};
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;
   std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
+
+  std::string m_cgroup_path_;
+  bool m_oom_monitoring_enabled_{false};
+  uint64_t m_last_oom_kill_count_{0};
+
+  std::atomic_bool m_oom_monitoring_thread_exit_{false};
+  std::thread m_oom_monitoring_thread_;
+  int m_oom_eventfd_{-1};
+  int m_memory_oom_control_fd_{-1};
+
+  std::shared_ptr<uvw::timer_handle> m_oom_timer_handle_;
+  std::shared_ptr<uvw::fs_event_handle> m_oom_fs_event_handle_;
+  std::shared_ptr<uvw::poll_handle> m_oom_v1_poll_handle_;
+  bool m_v1_oom_fired_{false};
 };
 
 }  // namespace Craned::Supervisor
