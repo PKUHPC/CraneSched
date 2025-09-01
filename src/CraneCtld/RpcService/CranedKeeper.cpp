@@ -42,8 +42,6 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
                      "Configuring craned {} with token {}", craned_id,
                      ProtoTimestampToString(token));
 
-  this->SetRegToken(token);
-
   crane::grpc::ConfigureCranedRequest request;
   request.set_ok(true);
   *request.mutable_token() = token;
@@ -501,7 +499,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
         // END state of both state machine. Free the Craned client.
         if (tag->type == CqTag::kInitializingCraned) {
           CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                             "Failed connect to {}.", craned->m_craned_id_);
+                             "Failed connect to {}, stub destroyed.",
+                             craned->m_craned_id_);
 
           // When deleting craned, the destructor will call
           // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
@@ -542,9 +541,11 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
     {
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                         "CONNECTING -> READY. New craned {} connected.",
-                         craned->m_craned_id_);
+      CRANE_LOGGER_TRACE(
+          g_runtime_status.connection_logger,
+          "CONNECTING -> READY. New craned {} with token {} connected.",
+          craned->m_craned_id_,
+          ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connected_craned_mtx_);
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
@@ -727,11 +728,14 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
                                          const RegToken &token) {
   if (m_cq_closed_) return;
 
+  CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
+              ProtoTimestampToString(token));
   util::lock_guard guard(m_unavail_craned_set_mtx_);
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
+                                      RegToken token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -768,6 +772,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   }
 
   auto *craned = new CranedStub(this);
+  craned->SetRegToken(token);
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -782,8 +787,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
-              ip_addr, g_config.CranedListenConf.CranedListenPort,
+  CRANE_TRACE("Creating a channel to {} {}:{}. Token: {}. Channel count: {}",
+              craned_id, ip_addr, ProtoTimestampToString(token),
+              g_config.CranedListenConf.CranedListenPort,
               m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
@@ -845,11 +851,17 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
-          m_connecting_craned_set_.emplace(*it);
-          g_thread_pool->detach_task([this, craned_id = it->first]() {
-            ConnectCranedNode_(craned_id);
-          });
+          m_connecting_craned_set_.emplace(it->first);
+          g_thread_pool->detach_task(
+              [this, craned_id = it->first, token = it->second] {
+                ConnectCranedNode_(craned_id, token);
+              });
           fetch_num--;
+        } else {
+          CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                             " Craned {} is already connecting or connected, "
+                             "ignore new connection request. Token {}.",
+                             it->first, ProtoTimestampToString(it->second));
         }
         ++it;
       }

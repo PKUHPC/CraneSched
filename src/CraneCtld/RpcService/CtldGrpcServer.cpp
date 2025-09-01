@@ -62,22 +62,23 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
   }
 
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
-    CRANE_TRACE("Put craned {} into unavail.", craned_id);
     g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
   } else {
     // Before configure, craned should be connected but not online
-    if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub != nullptr)
-        g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-          stub->SetRegToken(token);
-          stub->ConfigureCraned(craned_id, token);
-        });
-    } else {
+    if (g_meta_container->CheckCranedOnline(craned_id)) {
       CRANE_TRACE(
           "Already online craned {} notify craned connected, consider it down.",
           craned_id);
       g_meta_container->CranedDown(craned_id);
+    }
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (stub != nullptr) {
+      g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
+        stub->SetRegToken(token);
+        stub->ConfigureCraned(craned_id, token);
+      });
+    } else {
+      g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
     }
   }
 
