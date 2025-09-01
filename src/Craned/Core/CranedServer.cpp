@@ -363,7 +363,7 @@ grpc::Status CranedServiceImpl::ReceivePmixPort(
     return Status::OK;
   }
 
-  std::vector<std::pair<uint32_t, CranedId>> pmix_ports;
+  std::vector<std::pair<std::string, CranedId>> pmix_ports;
   for (const auto& pmix_port : request->pmix_ports()) {
     pmix_ports.emplace_back(pmix_port.port(), pmix_port.craned_id());
   }

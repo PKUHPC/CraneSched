@@ -104,7 +104,7 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ReceivePmixPort(task_id_t task_id, const std::vector<std::pair<uint32_t, CranedId>>& pmix_ports) {
+CraneErrCode SupervisorStub::ReceivePmixPort(task_id_t task_id, const std::vector<std::pair<std::string, CranedId>>& pmix_ports) {
   ClientContext context;
   crane::grpc::supervisor::ReceivePmixPortRequest request;
   crane::grpc::supervisor::ReceivePmixPortReply reply;

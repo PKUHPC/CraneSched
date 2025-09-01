@@ -398,7 +398,7 @@ class CtldServer {
 
   // TODO: test
   Mutex m_pmix_mtx_;
-  HashMap<CranedId, int64_t> m_pmix_ports_ ABSL_GUARDED_BY(m_pmix_mtx_);
+  HashMap<CranedId, std::string> m_pmix_ports_ ABSL_GUARDED_BY(m_pmix_mtx_);
 
   friend class CtldForInternalServiceImpl;
 

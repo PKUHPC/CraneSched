@@ -94,7 +94,7 @@ class CranedStub {
 
   CraneErrCode ReceivePmixPort(
       uint32_t task_id,
-      const std::vector<std::pair<uint32_t, CranedId>> &pmix_ports);
+      const std::vector<std::pair<std::string, CranedId>> &pmix_ports);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);

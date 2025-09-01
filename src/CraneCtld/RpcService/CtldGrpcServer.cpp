@@ -372,13 +372,13 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
+  // TODO: judge type
   m_ctld_server_->m_pmix_mtx_.Lock();
 
   m_ctld_server_->m_pmix_ports_.emplace(request->craned_id(), request->port());
 
   if (m_ctld_server_->m_pmix_ports_.size() == request->craned_ids().size()) {
-    std::vector<std::pair<uint32_t, CranedId>> pmix_ports;
+    std::vector<std::pair<std::string, CranedId>> pmix_ports;
     for(const auto& [craned_id, port] : m_ctld_server_->m_pmix_ports_) {
       pmix_ports.emplace_back(port, craned_id);
     }
@@ -386,7 +386,7 @@ grpc::Status CtldForInternalServiceImpl::BroadcastPmixPort(
 
     for (const auto& craned_id : request->craned_ids()) {
       std::thread([craned_id, pmix_ports, request]() {
-        auto craned_stub = g_craned_keeper->GetCranedStub(craned_id);
+        auto craned_stub  = g_craned_keeper->GetCranedStub(craned_id);
         if (!craned_stub) return;
         auto result = craned_stub->ReceivePmixPort(request->task_id(), pmix_ports);
         if (result != CraneErrCode::SUCCESS) {
