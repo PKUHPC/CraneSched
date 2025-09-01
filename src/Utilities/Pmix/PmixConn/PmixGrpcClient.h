@@ -72,7 +72,7 @@ class PmixGrpcStub : public PmixStub {
 
 class PmixGrpcClient : public PmixClient {
  public:
-  using PmixClient::PmixClient;
+  explicit PmixGrpcClient(int node_num) : m_node_num_(node_num){}
 
   ~PmixGrpcClient() override = default;
 
@@ -80,12 +80,12 @@ class PmixGrpcClient : public PmixClient {
 
   std::shared_ptr<PmixStub> GetPmixStub(const CranedId &craned_id) override;
 
-  using PmixClient::GetChannelCount;
+  uint64_t GetChannelCount() const override { return m_channel_count_.load(); }
 
   void WaitAllStubReady() override {
     std::unique_lock<std::mutex> lock(m_mutex_);
-    if (GetChannelCount() >= m_peer_node_num_) return ;
-    m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_peer_node_num_; });
+    if (GetChannelCount() >= m_node_num_) return ;
+    m_cv_.wait(lock, [this](){ return GetChannelCount() >= m_node_num_; });
   }
 
  private:
@@ -105,7 +105,7 @@ class PmixGrpcClient : public PmixClient {
   std::mutex m_mutex_;
   std::condition_variable m_cv_;
 
-  int m_peer_node_num_;
+  int m_node_num_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };

@@ -22,6 +22,7 @@
 #include "PmixCommon.h"
 #include "PmixConn/PmixGrpcClient.h"
 #include "PmixConn/PmixGrpcServer.h"
+#include "PmixConn/PmixUcxClient.h"
 #include "PmixDModex.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
@@ -432,9 +433,8 @@ bool PmixServer::ConnInit_(const Config& config) {
 
   if (m_task_num_ > 1) {
 #ifdef HAVE_UCX
-    // TODO: ucx
-    m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
-    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
+    m_pmix_client_ = std::make_unique<PmixUcxClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixUcxServer>();
 #else
     m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
     m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();

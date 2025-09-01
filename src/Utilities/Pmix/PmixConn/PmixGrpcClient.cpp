@@ -106,8 +106,8 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
   //   channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   int cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}, peer node: {}", craned_id,
-              ip_addr, port, cur_count, m_peer_node_num_);
+  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}, node num: {}", craned_id,
+              ip_addr, port, cur_count, m_node_num_);
 
   craned->m_channel_ =
       CreateTcpInsecureCustomChannel(ip_addr, port, channel_args);
@@ -121,7 +121,7 @@ void PmixGrpcClient::EmplacePmixStub(const CranedId& craned_id,
 
   {
     std::lock_guard<std::mutex> lock(m_mutex_);
-    if (cur_count >= m_peer_node_num_) {
+    if (cur_count >= m_node_num_) {
       m_cv_.notify_one();
     }
   }
