@@ -456,7 +456,7 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
   return reply;
 }
 
-CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, const std::vector<std::pair<uint32_t, CranedId>>& pmix_ports) {
+CraneErrCode CranedStub::ReceivePmixPort(uint32_t task_id, const std::vector<std::pair<std::string, CranedId>>& pmix_ports) {
   using crane::grpc::ReceivePmixPortRequest;
   using crane::grpc::ReceivePmixPortReply;
 

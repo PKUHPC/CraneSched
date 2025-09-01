@@ -57,7 +57,7 @@ class SupervisorStub {
   CraneErrCode ShutdownSupervisor();
   CraneErrCode ReceivePmixPort(
       task_id_t task_id,
-      const std::vector<std::pair<uint32_t, CranedId>>& pmix_ports);
+      const std::vector<std::pair<std::string, CranedId>>& pmix_ports);
 
  private:
   void InitChannelAndStub_(const std::string& endpoint);
