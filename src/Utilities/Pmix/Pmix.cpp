@@ -22,7 +22,10 @@
 #include "PmixCommon.h"
 #include "PmixConn/PmixGrpcClient.h"
 #include "PmixConn/PmixGrpcServer.h"
+#ifdef HAVE_UCX
 #include "PmixConn/PmixUcxClient.h"
+#include "PmixConn/PmixUcxServer.h"
+#endif
 #include "PmixDModex.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"

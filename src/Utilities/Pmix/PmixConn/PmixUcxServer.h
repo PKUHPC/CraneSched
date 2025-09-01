@@ -85,8 +85,6 @@ private:
   }
   static uint64_t TagLow_(uint64_t tag) { return (tag & kTagLowMask); }
 
-  void EvCleanUcxProcessReqQueueCb_();
-
   template <class T>
 using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 

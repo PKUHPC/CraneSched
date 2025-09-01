@@ -151,6 +151,9 @@ bool PmixUcxServer::Init(const Config& config) {
     return false;
   }
 
+  std::string addr_str;
+  PmixUcxClient* ucx_client;
+
   ucp_worker_params_t worker_params = {};
   worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
   worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
@@ -173,9 +176,9 @@ bool PmixUcxServer::Init(const Config& config) {
     goto err_efd;
   }
 
-  std::string addr_str(reinterpret_cast<const char*>(m_ucx_addr_), m_ucx_alen_);
+  addr_str = std::string(reinterpret_cast<const char*>(m_ucx_addr_), m_ucx_alen_);
 
-  auto* ucx_client = dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
+  ucx_client = dynamic_cast<PmixUcxClient*>(g_pmix_server->GetPmixClient());
   ucx_client->InitUcxWorker(m_mutex_, m_ucp_worker_);
 
   std::thread([addr_str]() {
@@ -281,6 +284,7 @@ void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
     switch (req->type) {
     case PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG:
       m_service_impl_->SendPmixRingMsg(req->data);
+      break;
     case PmixUcxMsgType::PMIX_UCX_DMDEX_REQUEST:
       m_service_impl_->PmixDModexRequest(req->data);
       break;
@@ -294,7 +298,6 @@ void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
       m_service_impl_->PmixTreeUpwardForward(req->data);
       break;
     default:
-      CRANE_ERROR("Unsupported PMIx UCX message type: {}", req->type);
     }
     delete req;
   }

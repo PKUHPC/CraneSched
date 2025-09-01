@@ -25,6 +25,8 @@
 
 namespace pmix {
 
+PmixUcxStub::PmixUcxStub(PmixUcxClient *pmix_client) : m_pmix_client_(pmix_client) {}
+
 void PmixUcxStub::SendPmixRingMsgNoBlock(
     const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG) << kTagTypeShift) | (1 & kTagLowMask);
