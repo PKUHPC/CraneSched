@@ -106,20 +106,23 @@ bool CtldClientStateMachine::EvRecvConfigFromCtld(
     ActionConfigure_(request);
     return true;
   } else {
-    if (!request.ok())
+    if (!request.ok()) {
       CRANE_LOGGER_WARN(m_logger_, "ConfigureCranedRequest failed from Ctld.");
-    else if (!request.has_token()) {
+      m_state_ = State::REQUESTING_CONFIG;
+      ActionRequestConfig_();
+    } else if (!request.has_token()) {
       CRANE_LOGGER_DEBUG(m_logger_,
                          "No token in ConfigureCranedRequest from Ctld.");
-    } else
-      CRANE_LOGGER_DEBUG(
-          m_logger_,
-          "ConfigureCraned failed. Expected to recv token: {} but got {}",
-          ProtoTimestampToString(m_reg_token_.value()),
-          ProtoTimestampToString(request.token()));
+      m_state_ = State::REQUESTING_CONFIG;
+      ActionRequestConfig_();
 
-    m_state_ = State::REQUESTING_CONFIG;
-    ActionRequestConfig_();
+    } else {
+      CRANE_LOGGER_DEBUG(m_logger_,
+                         "ConfigureCraned failed. Expected to recv token: {} "
+                         "but got {}, waiting for correct reply.",
+                         ProtoTimestampToString(m_reg_token_.value()),
+                         ProtoTimestampToString(request.token()));
+    }
 
     return false;
   }
