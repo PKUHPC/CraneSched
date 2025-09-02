@@ -52,7 +52,7 @@ class CranedStub {
     absl::MutexLock l(&m_lock_);
     bool ret = m_token_.has_value() && m_token_.value() == token;
     if (!ret) {
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "Token for {} mismatch, resetting token.",
                          m_craned_id_);
       m_token_.reset();
@@ -63,8 +63,8 @@ class CranedStub {
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
   void SetReady() {
-    CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                       "Craned {} stub ready.", m_craned_id_);
+    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
+                       m_craned_id_);
     m_registered_.store(true, std::memory_order_release);
     UpdateLastActiveTime();
 
