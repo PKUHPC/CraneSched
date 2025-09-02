@@ -29,6 +29,7 @@ namespace Craned::Supervisor {
 
 inline const char* MemoryEvents = "memory.events";
 inline const char* MemoryOomControl = "memory.oom_control";
+inline const char* CgroupEventControl = "cgroup.event_control";
 
 enum class TerminatedBy : uint8_t {
   NONE = 0,
@@ -387,7 +388,7 @@ class TaskManager {
   void EvGrpcQueryStepEnvCb_();
   void EvOomMonitoringCb_();
 
-  void InitOomMonitoring_();
+  void InitOomMonitoring_(task_id_t task_id);
 
   void StartCgroupV1OomMonitoring_();
   void StopCgroupV1OomMonitoring_();

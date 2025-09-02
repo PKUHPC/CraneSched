@@ -23,11 +23,13 @@
 #include <grp.h>
 #include <pty.h>
 #include <spdlog/fmt/bundled/core.h>
+#include <sys/eventfd.h>
 #include <sys/wait.h>
 
 #include <nlohmann/json.hpp>
 
 #include "CforedClient.h"
+#include "CgroupManager.h"
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
@@ -36,6 +38,29 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
+
+using Common::CgroupManager;
+
+// Static helper function to read OOM kill count from memory.events file
+static std::optional<uint64_t> ReadOomKillCount(
+    const std::string& memory_events_path) {
+  std::ifstream events_file(memory_events_path);
+  if (!events_file.is_open()) {
+    return std::nullopt;
+  }
+
+  std::string line;
+  while (std::getline(events_file, line)) {
+    if (line.rfind("oom_kill ", 0) == 0) {
+      std::istringstream iss(line);
+      std::string field;
+      uint64_t value = 0;
+      iss >> field >> value;
+      return value;
+    }
+  }
+  return std::nullopt;
+}
 
 StepInstance::~StepInstance() {
   if (termination_timer) {
@@ -1534,8 +1559,8 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             std::optional<std::string> reason) {
   // Stop OOM monitoring when task finishes
   if (m_oom_monitoring_enabled_) {
-    bool is_cgroup_v2 =
-        std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
+    bool is_cgroup_v2 = (Common::CgroupManager::GetCgroupVersion() ==
+                         Common::CgConstant::CgroupVersion::CGROUP_V2);
     if (is_cgroup_v2) {
       StopCgroupV2OomMonitoring_();
     } else {
@@ -1576,7 +1601,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
 
-  m_oom_monitoring_queue_.enqueue(m_step_.GetStep().task_id());
+  m_oom_monitoring_queue_.enqueue(m_step_.job_id);
   m_oom_monitoring_async_handle_->send();
   return ok_future;
 }
@@ -1764,7 +1789,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         }
         case TerminatedBy::TERMINATION_BY_OOM: {
           ActivateTaskStatusChange_(
-              crane::grpc::TaskStatus::Failed,
+              task_id, crane::grpc::TaskStatus::OutOfMemory,
               exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
           break;
         }
@@ -1824,7 +1849,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         // On OOM: force kill the whole process group to avoid parent exiting
         // normally and unify the result as signaled termination.
         sig = SIGKILL;
-        m_task_->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
+        task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
       }
       if (task->GetPid()) {
         // For an Interactive task with a process running or a Batch task, we
@@ -1926,17 +1951,25 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
 void TaskManager::EvOomMonitoringCb_() {
   task_id_t task_id;
   while (m_oom_monitoring_queue_.try_dequeue(task_id)) {
-    InitOomMonitoring_();
+    InitOomMonitoring_(task_id);
   }
 }
 
-void TaskManager::InitOomMonitoring_() {
-  bool is_cgroup_v2 =
-      std::filesystem::exists("/sys/fs/cgroup/cgroup.controllers");
+void TaskManager::InitOomMonitoring_(task_id_t task_id) {
+  bool is_cgroup_v2 = (Common::CgroupManager::GetCgroupVersion() ==
+                       Common::CgConstant::CgroupVersion::CGROUP_V2);
 
-  pid_t pid = m_task_ ? m_task_->GetPid() : 0;
+  // Get the specific task instance to monitor
+  auto task = m_step_.GetTaskInstance(task_id);
+  if (!task) {
+    CRANE_WARN("[Task #{}] Task instance not found for OOM monitoring.",
+               task_id);
+    return;
+  }
+
+  pid_t pid = task->GetPid();
   if (pid <= 0) {
-    CRANE_WARN("No valid pid for OOM monitoring.");
+    CRANE_WARN("[Task #{}] No valid pid for OOM monitoring.", task_id);
     return;
   }
 
@@ -1944,21 +1977,20 @@ void TaskManager::InitOomMonitoring_() {
   auto resolved = ResolveCgroupPathForPid_(pid, is_cgroup_v2);
   if (!resolved.has_value()) {
     CRANE_WARN(
-        "Failed to resolve cgroup path for pid {}. OOM monitoring disabled",
-        pid);
+        "[Task #{}] Failed to resolve cgroup path for pid {}. OOM monitoring "
+        "disabled",
+        task_id, pid);
     return;
   }
   m_cgroup_path_ = *resolved;
 
-  for (int i = 0; i < 20 && !std::filesystem::exists(m_cgroup_path_); ++i)
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  CRANE_DEBUG("Initializing OOM monitoring for cgroup path: {}",
-              m_cgroup_path_);
+  CRANE_DEBUG("[Task #{}] Initializing OOM monitoring for cgroup path: {}",
+              task_id, m_cgroup_path_);
 
   if (!std::filesystem::exists(m_cgroup_path_)) {
-    CRANE_WARN("Cgroup path {} does not exist, OOM monitoring disabled",
-               m_cgroup_path_);
+    CRANE_WARN(
+        "[Task #{}] Cgroup path {} does not exist, OOM monitoring disabled",
+        task_id, m_cgroup_path_);
     return;
   }
 
@@ -1973,31 +2005,46 @@ void TaskManager::InitOomMonitoring_() {
 
 std::optional<std::string> TaskManager::ResolveCgroupPathForPid_(
     pid_t pid, bool is_cgroup_v2) {
-  std::ifstream fin(fmt::format("/proc/{}/cgroup", pid));
-  if (!fin.is_open()) return std::nullopt;
-
-  std::string line;
-  if (is_cgroup_v2) {
-    while (std::getline(fin, line)) {
-      auto pos = line.find("::");
-      if (pos == std::string::npos) continue;
-      std::string rel = line.substr(pos + 2);  // includes leading '/'
-      if (rel.empty()) continue;
-      return std::string("/sys/fs/cgroup") + rel;
-    }
-  } else {
-    while (std::getline(fin, line)) {
-      auto first = line.find(":");
-      if (first == std::string::npos) continue;
-      auto second = line.find(":", first + 1);
-      if (second == std::string::npos) continue;
-      std::string ctrls = line.substr(first + 1, second - first - 1);
-      if (ctrls.find("memory") == std::string::npos) continue;
-      std::string rel = line.substr(second + 1);
-      return std::string("/sys/fs/cgroup/memory") + rel;
-    }
+  // Use CgroupManager to get cgroup information for the pid
+  auto ids_result = Common::CgroupManager::GetIdsByPid(pid);
+  if (!ids_result.has_value()) {
+    CRANE_WARN("Failed to get cgroup IDs for pid {}", pid);
+    return std::nullopt;
   }
-  return std::nullopt;
+
+  auto [job_id_opt, step_id_opt, task_id_opt] = *ids_result;
+  if (!job_id_opt.has_value()) {
+    CRANE_WARN("No valid job ID found for pid {}", pid);
+    return std::nullopt;
+  }
+
+  // Construct cgroup path using CgroupManager methods
+  std::string cgroup_str;
+  if (task_id_opt.has_value()) {
+    cgroup_str = Common::CgroupManager::CgroupStrByTaskId(
+        *job_id_opt, *step_id_opt, *task_id_opt);
+  } else if (step_id_opt.has_value()) {
+    cgroup_str =
+        Common::CgroupManager::CgroupStrByStepId(*job_id_opt, *step_id_opt);
+  } else {
+    cgroup_str = Common::CgroupManager::CgroupStrByJobId(*job_id_opt);
+  }
+
+  // Use kSystemCgPathPrefix and construct the full path
+  std::filesystem::path full_path = Common::CgConstant::kSystemCgPathPrefix /
+                                    Common::CgConstant::kRootCgNamePrefix /
+                                    cgroup_str;
+
+  if (is_cgroup_v2) {
+    return full_path.string();
+  } else {
+    // For cgroup v1, append memory controller path
+    return (Common::CgConstant::kSystemCgPathPrefix /
+            Common::CgConstant::GetControllerStringView(
+                Common::CgConstant::Controller::MEMORY_CONTROLLER) /
+            Common::CgConstant::kRootCgNamePrefix / cgroup_str)
+        .string();
+  }
 }
 
 void TaskManager::StartCgroupV2OomMonitoring_() {
@@ -2015,21 +2062,9 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
   }
 
   // Initialize baseline oom_kill counter to avoid false immediate trigger
-  {
-    std::ifstream events_file(memory_events_path);
-    if (events_file.is_open()) {
-      std::string line;
-      while (std::getline(events_file, line)) {
-        if (line.rfind("oom_kill ", 0) == 0) {
-          std::istringstream iss(line);
-          std::string field;
-          uint64_t value = 0;
-          iss >> field >> value;
-          m_last_oom_kill_count_ = value;
-          break;
-        }
-      }
-    }
+  auto initial_count = ReadOomKillCount(memory_events_path);
+  if (initial_count.has_value()) {
+    m_last_oom_kill_count_ = initial_count.value();
   }
 
   // Create file system event handle for monitoring memory.events file changes
@@ -2039,38 +2074,25 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
                                                const uvw::fs_event_event& event,
                                                uvw::fs_event_handle& handle) {
     // When memory.events file changes, check for oom_kill events
-    std::ifstream events_file(memory_events_path);
-    if (events_file.is_open()) {
-      std::string line;
-      while (std::getline(events_file, line)) {
-        if (line.rfind("oom_kill ", 0) == 0) {
-          std::istringstream iss(line);
-          std::string field;
-          uint64_t value = 0;
+    auto current_count = ReadOomKillCount(memory_events_path);
+    if (current_count.has_value() &&
+        current_count.value() > m_last_oom_kill_count_) {
+      CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
+                  m_step_.job_id);
 
-          iss >> field >> value;
-          if (value > m_last_oom_kill_count_) {
-            CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
-                        m_step_.GetStep().task_id());
-
-            if (m_step_.IsBatch()) {
-              TaskTerminateQueueElem terminate_elem{};
-              terminate_elem.terminated_by_oom = true;
-              m_task_terminate_queue_.enqueue(terminate_elem);
-              m_terminate_task_async_handle_->send();
-
-            } else {
-              ActivateTaskStatusChange_(
-                  crane::grpc::TaskStatus::Failed,
-                  static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
-                  "Task terminated due to out-of-memory (OOM)");
-            }
-            m_last_oom_kill_count_ = value;
-            break;
-          }
-        }
+      if (m_step_.IsBatch() || m_step_.IsCrun()) {
+        TaskTerminateQueueElem terminate_elem{};
+        terminate_elem.terminated_by_oom = true;
+        m_task_terminate_queue_.enqueue(terminate_elem);
+        m_terminate_task_async_handle_->send();
+      } else {
+        // calloc case: direct status change
+        ActivateTaskStatusChange_(m_step_.job_id,
+                                  crane::grpc::TaskStatus::OutOfMemory,
+                                  ExitCode::kExitCodeOOMError,
+                                  "Task terminated due to out-of-memory (OOM)");
       }
-      events_file.close();
+      m_last_oom_kill_count_ = current_count.value();
     }
   });
 
@@ -2096,7 +2118,7 @@ void TaskManager::StartCgroupV1OomMonitoring_() {
   auto mem_oom_ctrl_path =
       (std::filesystem::path(m_cgroup_path_) / MemoryOomControl).string();
   auto cgrp_event_ctrl_path =
-      (std::filesystem::path(m_cgroup_path_) / "cgroup.event_control").string();
+      (std::filesystem::path(m_cgroup_path_) / CgroupEventControl).string();
 
   if (!std::filesystem::exists(mem_oom_ctrl_path) ||
       !std::filesystem::exists(cgrp_event_ctrl_path)) {
@@ -2133,10 +2155,10 @@ void TaskManager::StartCgroupV1OomMonitoring_() {
     return;
   }
 
-  char buf[64];
-  int len = snprintf(buf, sizeof(buf), "%d %d", m_oom_eventfd_,
-                     m_memory_oom_control_fd_);
-  if (len <= 0 || write(ctrl_fd, buf, len) != len) {
+  std::string event_str =
+      fmt::format("{} {}", m_oom_eventfd_, m_memory_oom_control_fd_);
+  if (write(ctrl_fd, event_str.c_str(), event_str.size()) !=
+      static_cast<ssize_t>(event_str.size())) {
     CRANE_WARN("Failed to register OOM event to {}: {}", cgrp_event_ctrl_path,
                strerror(errno));
     close(ctrl_fd);
@@ -2164,18 +2186,19 @@ void TaskManager::StartCgroupV1OomMonitoring_() {
 
     if (!m_v1_oom_fired_) {
       CRANE_TRACE("Task #{} exceeded its memory limit (v1). Terminating it...",
-                  m_step_.GetStep().task_id());
+                  m_step_.job_id);
 
-      if (m_step_.IsBatch()) {
+      if (m_step_.IsBatch() || m_step_.IsCrun()) {
         TaskTerminateQueueElem terminate_elem{};
         terminate_elem.terminated_by_oom = true;
         m_task_terminate_queue_.enqueue(terminate_elem);
         m_terminate_task_async_handle_->send();
       } else {
-        ActivateTaskStatusChange_(
-            crane::grpc::TaskStatus::Failed,
-            static_cast<uint32_t>(ExitCode::kExitCodeOOMError),
-            "Task terminated due to out-of-memory (OOM)");
+        // calloc case: direct status change
+        ActivateTaskStatusChange_(m_step_.job_id,
+                                  crane::grpc::TaskStatus::OutOfMemory,
+                                  ExitCode::kExitCodeOOMError,
+                                  "Task terminated due to out-of-memory (OOM)");
       }
 
       m_v1_oom_fired_ = true;
