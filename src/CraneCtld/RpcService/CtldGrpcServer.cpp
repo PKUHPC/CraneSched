@@ -191,10 +191,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   bool ok;
 
   StreamCforedRequest cfored_request;
-
   auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
-  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
+  std::weak_ptr<StreamWriterProxy> proxy_weak_ptr;
 
   CRANE_TRACE("CforedStream from {} created.", context->peer());
 
@@ -211,8 +210,20 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         }
 
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-        // TODO: 更新作业的stream writer
-        m_ctld_server_->m_mtx_.Unlock();
+
+        m_ctld_server_->m_stream_proxy_mtx_.Lock();
+        auto iter = m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
+        if (iter != m_ctld_server_->m_cfored_stream_proxy_map_.end()) {
+          iter->second->SetWriter(stream_writer);
+          proxy_weak_ptr = iter->second;
+        } else {
+          auto proxy = std::make_shared<StreamWriterProxy>();
+          proxy->SetWriter(stream_writer);
+          m_ctld_server_->m_cfored_stream_proxy_map_[cfored_name] = proxy;
+          proxy_weak_ptr = proxy;
+        }
+        m_ctld_server_->m_stream_proxy_mtx_.Unlock();
+
         CRANE_INFO("Cfored {} registered.", cfored_name);
 
         ok = stream_writer->WriteCforedRegistrationAck({});
@@ -242,36 +253,43 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           task->SetFieldsByTaskToCtld(payload.task());
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-          // TODO: 重启连接时 writer_weak_ptr不可用，无法cancel task
           meta.cb_task_res_allocated =
-              [writer_weak_ptr](task_id_t task_id,
+              [proxy_weak_ptr](task_id_t task_id,
                                 std::string const &allocated_craned_regex,
                                 std::list<std::string> const &craned_ids) {
-                if (auto writer = writer_weak_ptr.lock(); writer)
-                  writer->WriteTaskResAllocReply(
-                      task_id,
-                      {std::make_pair(allocated_craned_regex, craned_ids)});
+                if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+                  proxy->WithWriter([&](CforedStreamWriter& writer) {
+                    writer.WriteTaskResAllocReply(
+                                          task_id,
+                                          {std::make_pair(allocated_craned_regex, craned_ids)});
+                  });
+                }
               };
 
-          meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
+          meta.cb_task_cancel = [proxy_weak_ptr](task_id_t task_id) {
             CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
-              writer->WriteTaskCancelRequest(task_id);
+            if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+              proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  writer.WriteTaskCancelRequest(task_id);
+                });
+            }
           };
 
-          meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
+          meta.cb_task_completed = [this, cfored_name, proxy_weak_ptr](
                                        task_id_t task_id,
                                        bool send_completion_ack) {
             CRANE_TRACE("The completion callback of task #{} has been called.",
                         task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer) {
+            if (auto proxy = proxy_weak_ptr.lock(); proxy) {
               if (send_completion_ack)
-                writer->WriteTaskCompletionAckReply(task_id);
-            } else {
-              CRANE_ERROR(
-                  "Stream writer of ia task #{} has been destroyed. "
-                  "TaskCompletionAckReply will not be sent.",
-                  task_id);
+                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  writer.WriteTaskCompletionAckReply(task_id);
+                });
+              else
+                CRANE_ERROR(
+                    "Stream writer of ia task #{} has been destroyed. "
+                    "TaskCompletionAckReply will not be sent.",
+                    task_id);
             }
 
             m_ctld_server_->m_mtx_.Lock();
@@ -366,6 +384,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       for (task_id_t task_id : running_tasks) {
         g_task_scheduler->TerminateRunningTask(task_id);
       }
+
+      m_ctld_server_->m_stream_proxy_mtx_.Lock();
+      m_ctld_server_->m_cfored_stream_proxy_map_.erase(cfored_name);
+      m_ctld_server_->m_stream_proxy_mtx_.Unlock();
 
       return Status::OK;
     }
