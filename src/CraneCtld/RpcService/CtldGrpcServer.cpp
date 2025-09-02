@@ -203,10 +203,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   bool ok;
 
   StreamCforedRequest cfored_request;
-
   auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
-  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
+  std::weak_ptr<StreamWriterProxy> proxy_weak_ptr;
   auto cb_step_res_allocated =
       [writer_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
         if (auto writer = writer_weak_ptr.lock(); writer)
@@ -282,8 +281,20 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         }
 
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-        // TODO: 更新作业的stream writer
-        m_ctld_server_->m_mtx_.Unlock();
+
+        m_ctld_server_->m_stream_proxy_mtx_.Lock();
+        auto iter = m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
+        if (iter != m_ctld_server_->m_cfored_stream_proxy_map_.end()) {
+          iter->second->SetWriter(stream_writer);
+          proxy_weak_ptr = iter->second;
+        } else {
+          auto proxy = std::make_shared<StreamWriterProxy>();
+          proxy->SetWriter(stream_writer);
+          m_ctld_server_->m_cfored_stream_proxy_map_[cfored_name] = proxy;
+          proxy_weak_ptr = proxy;
+        }
+        m_ctld_server_->m_stream_proxy_mtx_.Unlock();
+
         CRANE_INFO("Cfored {} registered.", cfored_name);
 
         ok = stream_writer->WriteCforedRegistrationAck({});
@@ -443,6 +454,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       m_ctld_server_->m_mtx_.Unlock();
 
       g_task_scheduler->TerminateRunningStep(running_steps);
+
+      m_ctld_server_->m_stream_proxy_mtx_.Lock();
+      m_ctld_server_->m_cfored_stream_proxy_map_.erase(cfored_name);
+      m_ctld_server_->m_stream_proxy_mtx_.Unlock();
 
       return Status::OK;
     }

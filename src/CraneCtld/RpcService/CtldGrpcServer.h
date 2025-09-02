@@ -173,6 +173,29 @@ class CforedStreamWriter {
       ABSL_GUARDED_BY(m_stream_mtx_);
 };
 
+class StreamWriterProxy {
+public:
+  void SetWriter(std::shared_ptr<CforedStreamWriter> writer) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    writer_ = std::move(writer);
+  }
+
+  std::shared_ptr<CforedStreamWriter> GetWriter() {
+    std::lock_guard<std::mutex> lock(mtx_);
+    return writer_;
+  }
+
+  template<typename Func>
+  void WithWriter(Func&& func) {
+    std::shared_ptr<CforedStreamWriter> writer = GetWriter();
+    if (writer) func(*writer);
+  }
+
+private:
+  std::mutex mtx_;
+  std::shared_ptr<CforedStreamWriter> writer_;
+};
+
 class CtldServer;
 
 class CtldForInternalServiceImpl final
@@ -437,6 +460,10 @@ class CtldServer {
   HashMap<std::string /* cfored_name */,
           HashMap<job_id_t, std::unordered_set<step_id_t>>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
+
+  Mutex m_stream_proxy_mtx_;
+  HashMap<std::string /* cfored_name */, std::shared_ptr<StreamWriterProxy>>
+    m_cfored_stream_proxy_map_ ABSL_GUARDED_BY(m_stream_proxy_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;
