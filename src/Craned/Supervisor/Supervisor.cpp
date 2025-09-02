@@ -193,7 +193,8 @@ void GlobalVariableInit() {
   }
 
   PasswordEntry::InitializeEntrySize();
-
+  spdlog::default_logger()->set_level(
+      StrToLogLevel(g_config.SupervisorDebugLevel).value());
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
   g_thread_pool =
@@ -205,7 +206,6 @@ void GlobalVariableInit() {
       fmt::format("unix://{}", g_config.CranedUnixSocketPath.string()));
 
   if (g_config.Plugin.Enabled) {
-    CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
@@ -218,6 +218,8 @@ void GlobalVariableInit() {
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();
   if (!ok) std::abort();
+  spdlog::default_logger()->set_level(
+      StrToLogLevel(g_config.SupervisorDebugLevel).value());
 }
 
 void StartServer() {
