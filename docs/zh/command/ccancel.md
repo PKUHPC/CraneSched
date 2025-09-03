@@ -282,3 +282,4 @@ ccancel 123.2,123.4
 - [cqueue](cqueue.md) - 查看作业队列
 - [cacct](cacct.md) - 查看作业统计信息
 - [ccontrol](ccontrol.md) - 控制作业和系统资源
+- [creport](creport.md) - 查询作业相关统计信息

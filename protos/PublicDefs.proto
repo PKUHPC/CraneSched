@@ -946,3 +946,22 @@ message LicenseInfo {
   uint32 used = 3;
   uint32 free = 4;
 }
+
+message JobSummaryItem {
+  string cluster = 1;
+  string account = 2;
+  string username = 3;
+  string qos = 4;
+  string wckey = 5;
+  double total_cpu_time = 6;
+  int64 total_count = 7;
+}
+
+message JobSizeSummaryItem {
+  string cluster = 1;
+  string account = 2;
+  string wckey = 3;
+  uint32 cpus_alloc = 4;
+  double total_cpu_time = 5;
+  int64 total_count = 6;
+}

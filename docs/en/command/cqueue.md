@@ -424,3 +424,4 @@ cqueue --step -j 100,200,300
 - [ccancel](ccancel.md) - Cancel jobs and steps
 - [cacct](cacct.md) - Query completed jobs
 - [ccontrol](ccontrol.md) - Control and query jobs/steps
+- [creport](creport.md) - Query job-related statistics

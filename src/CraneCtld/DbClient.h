@@ -30,6 +30,8 @@
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
 
+#include "protos/Crane.grpc.pb.h"
+
 namespace Ctld {
 
 template <typename T>
@@ -104,9 +106,35 @@ class MongodbClient {
     WCKEY = 3,
   };
 
+  enum class RollupType : std::uint8_t { HOUR, DAY, MONTH };
+
+  struct JobSizeSummaryKey {
+    std::string account;
+    std::string wckey;
+    uint32_t cpus_alloc;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const JobSizeSummaryKey& key) {
+      return H::combine(std::move(h), key.account, key.wckey, key.cpus_alloc);
+    }
+    bool operator==(const JobSizeSummaryKey& other) const {
+      return account == other.account && wckey == other.wckey &&
+             cpus_alloc == other.cpus_alloc;
+    }
+  };
+
+  struct JobSizeSummaryResult {
+    double total_cpu_time = 0;
+    int32_t total_count = 0;
+  };
+
   MongodbClient();  // Mongodb-c++ don't need to close the connection
+  ~MongodbClient();
   bool Init();
   bool Connect();
+  bool InitTableIndexes();
+  void CreateCollectionIndex(mongocxx::collection& coll,
+                             const std::vector<std::string>& fields);
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
@@ -135,6 +163,67 @@ class MongodbClient {
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
+
+  /* ----- Method of operating the job summary ----------- */
+  inline std::string RollupTypeToString(RollupType rollup_type);
+  bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
+                                       int64_t last_success_sec);
+  std::optional<int64_t> GetSummaryLastSuccessTimeSec(RollupType rollup_type);
+  void TriggerRetroactiveRollupFromMinEndTime(int64_t min_end_time_sec);
+  void TriggerRetroactiveRollupForAggregatedHours(
+      const std::vector<std::chrono::sys_seconds>& end_times);
+  void RollupSummary(RollupType rollup_type);
+  void ClusterRollupUsage();
+  uint32_t GetCpusAlloc(const bsoncxx::document::view& doc);
+  double GetTotalCpuTime(const bsoncxx::document::view& doc);
+  int GetTotalCount(const bsoncxx::document::view& doc);
+  void WriteReply(
+      const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>&
+          agg_map,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
+      int max_data_size);
+  bool QueryJobSizeSummaryByJobIds(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+  bsoncxx::document::value JobQueryMatch(
+      const std::string& time_field,
+      std::pair<std::chrono::sys_seconds, std::chrono::sys_seconds> range,
+      const crane::grpc::QueryJobSummaryRequest* request);
+  void QueryJobSummary(
+      const crane::grpc::QueryJobSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+  bsoncxx::document::value JobSizeQueryMatch(
+      const std::string& time_field,
+      std::pair<std::chrono::sys_seconds, std::chrono::sys_seconds> range,
+      const crane::grpc::QueryJobSizeSummaryRequest* request);
+  void QueryJobSizeSummary(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+
+  // Build a MongoDB aggregation pipeline that unions multiple time ranges.
+  //
+  // The caller chooses a "base" collection (the one used to create `pipeline`
+  // and `entry_table`) and then unions additional collections/ranges via
+  // `$unionWith`.
+  //
+  // - `ranges` are interpreted as half-open intervals [start, end) in
+  //   epoch-seconds (consistent with `$gte`/`$lt` matches).
+  // - `match_fn(range)` must return a BSON `$match` document for that range.
+  // - If `first_is_match` is true, the first range is appended as a plain
+  //   `pipeline.match(...)` (i.e. query the base collection directly).
+  //   Otherwise, all ranges are appended as `$unionWith` stages.
+  template <typename MatchFunc>
+  void AppendUnionWithRanges(
+      mongocxx::pipeline& pipeline, const std::string& coll,
+      const std::vector<std::pair<std::chrono::sys_seconds,
+                                  std::chrono::sys_seconds>>& ranges,
+      MatchFunc match_fn, bool first_is_match = true);
+  void AggregateJobSummaryByHour(int64_t start_sec, int64_t end_sec,
+                                 const std::string& task_collection_name);
+  void AggregateJobSummaryByDayOrMonth(RollupType src_type, RollupType dst_type,
+                                       int64_t period_start_sec,
+                                       int64_t period_end_sec);
+  void MongoDbSummaryThread_();
 
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
@@ -335,9 +424,6 @@ class MongodbClient {
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
-  void CreateCollectionIndex(mongocxx::collection& coll,
-                             const std::vector<std::string>& fields);
-  bool InitTableIndexes();
 
  private:
   bool CheckDefaultRootAccountUserAndInit_();
@@ -407,6 +493,14 @@ class MongodbClient {
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
   const std::string m_wckey_collection_name_{"wckey_table"};
+  const std::string m_hour_job_summary_collection_name_{
+      "hour_job_summary_table"};
+  const std::string m_day_job_summary_collection_name_{"day_job_summary_table"};
+  const std::string m_month_job_summary_collection_name_{
+      "month_job_summary_table"};
+  const std::string m_summary_time_collection_name_{"summary_time_table"};
+  static constexpr int MaxJobSummaryBatchSize =
+      5000;  // Maximum number of items per gRPC streaming batch
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
@@ -415,6 +509,10 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
+  std::thread m_roll_up_thread_;
+  std::atomic_bool m_thread_stop_{false};
+  std::shared_ptr<uvw::timer_handle> m_roll_up_jobs_timer_handle;
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
 };
 
 template <>

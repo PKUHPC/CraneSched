@@ -1086,6 +1086,45 @@ message ExecInContainerStepReply {
   string url = 3;
 }
 
+message QueryJobSummaryRequest {
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  repeated string filter_qoss = 3;
+  repeated string filter_wckeys = 4;
+  google.protobuf.Timestamp filter_start_time = 5;
+  google.protobuf.Timestamp filter_end_time = 6;
+}
+
+message QueryJobSummaryReply {
+  repeated JobSummaryItem item_list = 1;
+}
+
+message QueryJobSizeSummaryRequest {
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  repeated string filter_qoss = 3;
+  repeated string filter_wckeys = 4;
+  repeated uint32 filter_grouping_list = 5;
+  google.protobuf.Timestamp filter_start_time = 6;
+  google.protobuf.Timestamp filter_end_time = 7;
+  repeated uint32 filter_job_ids = 8;
+  repeated string filter_partitions = 9;
+  repeated string filter_nodename_list = 10;
+}
+
+message QueryJobSizeSummaryReply {
+  repeated JobSizeSummaryItem item_list = 1;
+}
+
+message ActiveAggregationManuallyRequest {
+  uint32 uid = 1;
+}
+
+message ActiveAggregationManuallyReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1143,6 +1182,9 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
+  rpc ActiveAggregationManually(ActiveAggregationManuallyRequest) returns (ActiveAggregationManuallyReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);

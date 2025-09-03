@@ -73,6 +73,7 @@ nav:
         - cinfo: command/cinfo.md
         - ceff: command/ceff.md
         - cacct: command/cacct.md
+        - creport: command/creport.md
     - Job Control:
         - ccancel: command/ccancel.md
         - ccontrol: command/ccontrol.md
@@ -195,3 +196,47 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
+
+nav:
+  - Home: index.md
+  - Deployment:
+    - Overview: deployment/index.md
+    - Frontend:
+      - Deployment: deployment/frontend/frontend.md
+      - Plugins: deployment/frontend/plugins.md
+    - Backend:
+      - Rocky Linux 9: deployment/backend/Rocky9.md
+      - Ubuntu: deployment/backend/Ubuntu.md
+      - CentOS 7: deployment/backend/CentOS7.md
+      - Packaging Guide: deployment/backend/packaging.md
+      - eBPF Support: deployment/backend/eBPF.md
+    - Configuration:
+      - Cluster Configuration: deployment/configuration/config.md
+      - Database Configuration: deployment/configuration/database.md
+      - PAM Module: deployment/configuration/pam.md
+      - Multi-node Deployment: deployment/configuration/multi-node.md
+  - Commands:
+    - Job Submission:
+        - cbatch: command/cbatch.md
+        - crun: command/crun.md
+        - calloc: command/calloc.md
+    - Job Monitoring:
+        - cqueue: command/cqueue.md
+        - cinfo: command/cinfo.md
+        - ceff: command/ceff.md
+        - cacct: command/cacct.md
+        - creport: command/creport.md       
+    - Job Control:
+        - ccancel: command/ccancel.md
+        - ccontrol: command/ccontrol.md
+    - Account Management:
+        - cacctmgr: command/cacctmgr.md
+  - Reference:
+    - Exit Codes: reference/exit_code.md
+    - Use Cases:
+        - Overview: reference/use_cases.md
+        - Multi-Node Parallel Job: reference/use_case_multi_node.md
+        - GPU-Accelerated Training: reference/use_case_gpu.md
+        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
+        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
+        

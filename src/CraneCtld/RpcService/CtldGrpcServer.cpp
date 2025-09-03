@@ -2301,6 +2301,51 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   return std::nullopt;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryJobSummary(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::QueryJobSummaryRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  g_db_client->QueryJobSummary(request, writer);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::QueryJobSizeSummaryRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  if (request->filter_job_ids().size() > 0) {
+    g_db_client->QueryJobSizeSummaryByJobIds(request, writer);
+  } else {
+    g_db_client->QueryJobSizeSummary(request, writer);
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::ActiveAggregationManuallyRequest *request,
+    ::crane::grpc::ActiveAggregationManuallyReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  // TLS + UID binding
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+  if (request->uid() != 0) {
+    response->set_ok(false);
+    response->set_reason("Only the root user can perform this operation");
+    return grpc::Status::OK;
+  }
+  g_db_client->ClusterRollupUsage();
+  response->set_ok(true);
+
+  return grpc::Status::OK;
+}
+
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf& listen_conf) {
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
 
