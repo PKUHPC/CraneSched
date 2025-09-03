@@ -1600,9 +1600,6 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
-
-  m_oom_monitoring_queue_.enqueue(m_step_.job_id);
-  m_oom_monitoring_async_handle_->send();
   return ok_future;
 }
 
@@ -1936,6 +1933,12 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                  task->GetPid());
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
       m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+
+      // Start OOM monitoring after task is spawned and registered to avoid
+      // race.
+      m_oom_monitoring_queue_.enqueue(task_id);
+      m_oom_monitoring_async_handle_->send();
+
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }
@@ -1960,7 +1963,16 @@ void TaskManager::InitOomMonitoring_(task_id_t task_id) {
                        Common::CgConstant::CgroupVersion::CGROUP_V2);
 
   // Get the specific task instance to monitor
-  auto task = m_step_.GetTaskInstance(task_id);
+  ITaskInstance* task = nullptr;
+  try {
+    task = m_step_.GetTaskInstance(task_id);
+  } catch (const std::out_of_range&) {
+    // Task may not be registered yet; avoid crashing and try later if needed.
+    CRANE_DEBUG(
+        "[Task #{}] Task instance not available yet for OOM monitoring.",
+        task_id);
+    return;
+  }
   if (!task) {
     CRANE_WARN("[Task #{}] Task instance not found for OOM monitoring.",
                task_id);
@@ -2070,6 +2082,12 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
   // Create file system event handle for monitoring memory.events file changes
   auto fs_event_handle = m_uvw_loop_->resource<uvw::fs_event_handle>();
 
+  // Log any fs_event errors explicitly for easier diagnosis.
+  fs_event_handle->on<uvw::error_event>([](const uvw::error_event& ev,
+                                           uvw::fs_event_handle&) {
+    CRANE_ERROR("CgroupV2 OOM fs_event error: {} - {}", ev.code(), ev.what());
+  });
+
   fs_event_handle->on<uvw::fs_event_event>([this, memory_events_path](
                                                const uvw::fs_event_event& event,
                                                uvw::fs_event_handle& handle) {
@@ -2096,9 +2114,16 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
     }
   });
 
-  // Start monitoring the memory.events file for changes
-  fs_event_handle->start(memory_events_path,
-                         uvw::fs_event_handle::event_flags::RECURSIVE);
+  // Start monitoring the memory.events file for changes.
+  // No RECURSIVE on Linux; use no flags to avoid ENOSYS.
+  try {
+    fs_event_handle->start(memory_events_path,
+                           static_cast<uvw::fs_event_handle::event_flags>(0));
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to start fs_event watcher on {}: {}",
+                memory_events_path, e.what());
+    return;
+  }
 
   // Store the handle for cleanup later
   m_oom_fs_event_handle_ = fs_event_handle;
