@@ -897,6 +897,18 @@ message ResetUserCredentialReply {
   repeated RichError rich_error_list = 2;
 }
 
+message QueryAccountUserSummaryItemRequest {
+  string account = 1;
+  string username = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+}
+
+message QueryAccountUserSummaryItemReply {
+  bool ok = 1;
+  repeated AccountUserSummaryItem items = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -952,6 +964,9 @@ service CraneCtld {
 
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
+
+  rpc QueryAccountUserSummaryItem(QueryAccountUserSummaryItemRequest) returns (QueryAccountUserSummaryItemReply);
+
 }
 
 service CraneCtldForInternal {
