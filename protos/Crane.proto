@@ -949,6 +949,17 @@ message QueryTxnLogReply {
   }
   repeated Txn txn_log_list = 3;
 }
+message QueryAccountUserSummaryItemRequest {
+  string account = 1;
+  string username = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+}
+
+message QueryAccountUserSummaryItemReply {
+  bool ok = 1;
+  repeated AccountUserSummaryItem items = 2;
+}
 
 message AttachInContainerTaskRequest {
   uint32 uid = 1;
@@ -1046,6 +1057,7 @@ service CraneCtld {
   /* RPCS called from ccon */
   rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
   rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc QueryAccountUserSummaryItem(QueryAccountUserSummaryItemRequest) returns (QueryAccountUserSummaryItemReply);
 }
 
 service CeffQueryService {

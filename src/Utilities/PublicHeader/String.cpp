@@ -541,4 +541,121 @@ std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
+inline std::string FormatTime(std::time_t t) {
+  std::array<char, 32> buf{};
+  std::tm tmval{};
+  localtime_r(&t, &tmval);
+  std::strftime(buf.data(), buf.size(), "%Y-%m-%d %H:%M:%S", &tmval);
+  return std::string{buf.data()};
+}
+
+// Get next time point by adding days/months, set to 0:00
+// Try to merge consecutive full-month intervals, only at month start.
+// Returns true if merged and cur is updated.
+bool TryPushMonths(std::vector<TimeRange> &result, std::time_t &cur,
+                   std::time_t end) {
+  std::tm tm_cur = *std::localtime(&cur);
+  if (tm_cur.tm_mday == 1 && tm_cur.tm_hour == 0) {
+    std::time_t month_start = cur;
+    std::time_t month_cur = cur;
+    while (true) {
+      std::tm tm_next_month = *std::localtime(&month_cur);
+      tm_next_month.tm_mon += 1;
+      tm_next_month.tm_mday = 1;
+      tm_next_month.tm_hour = 0;
+      tm_next_month.tm_min = 0;
+      tm_next_month.tm_sec = 0;
+      std::time_t next_month_first = mktime(&tm_next_month);
+      if (next_month_first <= end) {
+        month_cur = next_month_first;
+      } else {
+        break;
+      }
+    }
+    if (month_cur > month_start) {
+      result.push_back({month_start, month_cur, "month"});
+      cur = month_cur;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Try to merge consecutive full-day intervals until the next month's first day.
+bool TryPushDays(std::vector<TimeRange> &result, std::time_t &cur,
+                 std::time_t end) {
+  std::tm tm_cur = *std::localtime(&cur);
+  if (tm_cur.tm_hour == 0) {
+    std::time_t day_start = cur;
+    std::tm tm_next_month = tm_cur;
+    tm_next_month.tm_mon += 1;
+    tm_next_month.tm_mday = 1;
+    tm_next_month.tm_hour = 0;
+    tm_next_month.tm_min = 0;
+    tm_next_month.tm_sec = 0;
+    std::time_t next_month_first = mktime(&tm_next_month);
+
+    std::tm tm_end = *std::localtime(&end);
+    tm_end.tm_hour = 0;
+    tm_end.tm_min = 0;
+    tm_end.tm_sec = 0;
+    std::time_t end_trunc_to_day = mktime(&tm_end);
+
+    std::time_t day_end = std::min(next_month_first, end_trunc_to_day);
+    if (day_end > day_start) {
+      result.push_back({day_start, day_end, "day"});
+      cur = day_end;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Try to merge consecutive hour intervals until the next day start.
+bool TryPushHours(std::vector<TimeRange> &result, std::time_t &cur,
+                  std::time_t end) {
+  std::tm tm_cur = *std::localtime(&cur);
+  if (tm_cur.tm_hour != 0) {
+    std::tm tm_next_day = tm_cur;
+    tm_next_day.tm_mday += 1;
+    tm_next_day.tm_hour = 0;
+    tm_next_day.tm_min = 0;
+    tm_next_day.tm_sec = 0;
+    std::time_t next_day = mktime(&tm_next_day);
+
+    std::time_t hour_end = std::min(next_day, end);
+    result.push_back({cur, hour_end, "hour"});
+    cur = hour_end;
+    return true;
+  }
+  return false;
+}
+
+// Split a time range into merged hour/day/month intervals.
+std::vector<TimeRange> EfficientSplitTimeRange(std::time_t start,
+                                               std::time_t end) {
+  std::vector<TimeRange> result;
+  if (start >= end) return result;
+  std::time_t cur = start;
+
+  while (cur < end) {
+    if (TryPushMonths(result, cur, end)) continue;
+    if (TryPushDays(result, cur, end)) continue;
+    if (TryPushHours(result, cur, end)) continue;
+    // Handle the last partial hour interval.
+    if (cur < end) {
+      result.push_back({cur, end, "hour"});
+      cur = end;
+    }
+  }
+
+  // Print result
+  CRANE_INFO("Split result (merged):");
+  for (const auto &r : result) {
+    CRANE_INFO(" [{}] {} ~ {} ({} ~ {})", r.type, r.start, r.end,
+               FormatTime(r.start), FormatTime(r.end));
+  }
+  return result;
+}
+
 }  // namespace util

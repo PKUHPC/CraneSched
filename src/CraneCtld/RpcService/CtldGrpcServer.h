@@ -385,7 +385,16 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
   static std::optional<std::string> CheckCertAndUIDAllowed_(
       const grpc::ServerContext *context, uint32_t uid);
 
-  CtldServer *m_ctld_server_;
+grpc::Status QueryAccountUserSummaryItem(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryAccountUserSummaryItemRequest *request,
+    crane::grpc::QueryAccountUserSummaryItemReply *response) override;
+
+private:
+static std::optional<std::string> CheckCertAndUIDAllowed_(
+    const grpc::ServerContext *context, uint32_t uid);
+
+CtldServer *m_ctld_server_;
 };
 
 /***

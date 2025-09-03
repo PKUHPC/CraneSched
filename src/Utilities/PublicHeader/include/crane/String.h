@@ -39,6 +39,12 @@
 
 namespace util {
 
+struct TimeRange {
+  std::time_t start;
+  std::time_t end;
+  std::string type;  // "month" / "day" / "hour"
+};
+
 template <typename T = std::string, typename YamlNode, typename DefaultType>
   requires requires(const YamlNode &node) {
     { node.template as<T>() };
@@ -129,6 +135,17 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name,
   }
   return std::nullopt;
 }
+inline std::string FormatTime(std::time_t t);
+bool TryPushHours(std::vector<TimeRange> &result, std::time_t &cur,
+                  std::time_t end);
+bool TryPushMonths(std::vector<TimeRange> &result, std::time_t &cur,
+                   std::time_t end);
+bool TryPushDays(std::vector<TimeRange> &result, std::time_t &cur,
+                 std::time_t end);
+std::time_t NextTime(std::time_t cur, int add_days, int add_months,
+                     bool to_month_first);
+std::vector<TimeRange> EfficientSplitTimeRange(std::time_t start,
+                                               std::time_t end);
 
 template <typename Map>
 auto FlattenMapView(const Map &m) {

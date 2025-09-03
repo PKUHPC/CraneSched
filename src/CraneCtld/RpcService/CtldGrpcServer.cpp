@@ -856,6 +856,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   sort_and_truncate(task_list, num_limit);
   response->set_ok(true);
+  g_db_client->ClusterRollupUsage();
   return grpc::Status::OK;
 }
 
@@ -2053,6 +2054,19 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   }
 
   return std::nullopt;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItem(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryAccountUserSummaryItemRequest *request,
+    crane::grpc::QueryAccountUserSummaryItemReply *response) {
+  std::string user_name = request->username();
+  std::string account = request->account();
+  auto start_time = request->start_time().seconds();
+  auto end_time = request->end_time().seconds();
+  g_db_client->QueryAccountUserSummary(account, user_name, start_time, end_time,
+                                       response);
+  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
