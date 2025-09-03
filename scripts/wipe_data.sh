@@ -53,3 +53,17 @@ fi
 if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
 fi
+
+if [ "$mode" -eq 5 ] || [ "$mode" -eq 7 ]; then
+  wipe_collection hour_account_user_summary_table
+  wipe_collection hour_account_user_wckey_summary_table
+  wipe_collection day_account_user_summary_table
+  wipe_collection day_account_user_wckey_summary_table
+  wipe_collection month_account_user_summary_table
+  wipe_collection month_account_user_wckey_summary_table
+fi
+
+if [ "$mode" -eq 5 ] || [ "$mode" -eq 8 ]; then
+  wipe_collection "summary_time_table"
+fi
+
