@@ -436,12 +436,9 @@ class TaskManager {
   bool m_oom_monitoring_enabled_{false};
   uint64_t m_last_oom_kill_count_{0};
 
-  std::atomic_bool m_oom_monitoring_thread_exit_{false};
-  std::thread m_oom_monitoring_thread_;
   int m_oom_eventfd_{-1};
   int m_memory_oom_control_fd_{-1};
 
-  std::shared_ptr<uvw::timer_handle> m_oom_timer_handle_;
   std::shared_ptr<uvw::fs_event_handle> m_oom_fs_event_handle_;
   std::shared_ptr<uvw::poll_handle> m_oom_v1_poll_handle_;
   bool m_v1_oom_fired_{false};
