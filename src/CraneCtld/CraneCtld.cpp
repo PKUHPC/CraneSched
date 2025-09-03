@@ -780,6 +780,16 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbName = "crane_db";
 
+      if (config["JobAggregationTimeoutMs"]) {
+        g_config.JobAggregationTimeoutMs =
+            config["JobAggregationTimeoutMs"].as<uint32_t>();
+      }
+
+      if (config["JobAggregationBatchSize"]) {
+        g_config.JobAggregationBatchSize =
+            config["JobAggregationBatchSize"].as<uint32_t>();
+      }
+
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
@@ -1008,6 +1018,7 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
+  util::SetCurrentThreadName("CraneCtldMain");
 }
 
 void CreateFolders() {
