@@ -2113,8 +2113,9 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
         current_count.value() > m_last_oom_kill_count_) {
       CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
                   m_step_.job_id);
-  // Latch OOM so SIGCHLD handler can recognize the cause even if it runs earlier
-  m_oom_detected_latched_ = true;
+      // Latch OOM so SIGCHLD handler can recognize the cause even if it runs
+      // earlier
+      m_oom_detected_latched_ = true;
 
       if (m_step_.IsBatch() || m_step_.IsCrun()) {
         TaskTerminateQueueElem terminate_elem{};
@@ -2230,8 +2231,8 @@ void TaskManager::StartCgroupV1OomMonitoring_() {
     if (!m_v1_oom_fired_) {
       CRANE_TRACE("Task #{} exceeded its memory limit (v1). Terminating it...",
                   m_step_.job_id);
-  // Latch OOM for postmortem recognition
-  m_oom_detected_latched_ = true;
+      // Latch OOM for postmortem recognition
+      m_oom_detected_latched_ = true;
 
       if (m_step_.IsBatch() || m_step_.IsCrun()) {
         TaskTerminateQueueElem terminate_elem{};
@@ -2284,7 +2285,8 @@ void TaskManager::StopCgroupV1OomMonitoring_() {
   }
 }
 
-// Try detecting OOM after process death, to mitigate race between SIGCHLD and OOM watcher
+// Try detecting OOM after process death, to mitigate race between SIGCHLD and
+// OOM watcher
 bool TaskManager::CheckAndLatchOomPostMortem_() {
   if (m_oom_detected_latched_) return true;
 
@@ -2298,9 +2300,9 @@ bool TaskManager::CheckAndLatchOomPostMortem_() {
     auto current_count = ReadOomKillCount(memory_events_path);
     if (current_count.has_value() &&
         current_count.value() > m_last_oom_kill_count_) {
-          m_oom_detected_latched_ = true;
-          m_last_oom_kill_count_ = current_count.value();
-          return true;
+      m_oom_detected_latched_ = true;
+      m_last_oom_kill_count_ = current_count.value();
+      return true;
     }
     return false;
   }
