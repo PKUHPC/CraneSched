@@ -30,6 +30,14 @@ using crane::grpc::StreamTaskIORequest;
 CforedClient::CforedClient() {
   m_loop_ = uvw::loop::create();
 
+  m_reconnect_async_ = m_loop_->resource<uvw::async_handle>();
+  m_reconnect_async_->on<uvw::async_event>([this](const uvw::async_event&, uvw::async_handle&) {
+      while (m_wait_reconn_ && !m_stopped_) {
+        InitChannelAndStub(m_cfored_name_);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+  });
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       m_loop_->resource<uvw::idle_handle>();
 
@@ -334,17 +342,17 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   // Todo: Use cfored listen config
   if (g_config.CforedListenConf.TlsConfig.Enabled) {
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort,
-        g_config.CforedListenConf.TlsConfig.TlsCerts,
-        g_config.CforedListenConf.TlsConfig.DomainSuffix);
+    cfored_name, kCforedDefaultPort,
+    g_config.CforedListenConf.TlsConfig.TlsCerts,
+    g_config.CforedListenConf.TlsConfig.DomainSuffix);
   } else {
     m_cfored_channel_ =
-        CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
+      CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
   }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = crane::grpc::CraneForeD::NewStub(m_cfored_channel_);
-
+  if (m_fwd_thread_.joinable()) m_fwd_thread_.join();
   m_fwd_thread_ = std::thread([this] { AsyncSendRecvThread_(); });
 }
 
@@ -359,7 +367,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   bool x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
 
   // Make sure before exit all output has been drained.
-  while (!m_stopped_ || ok || x11_ok) {
+  while (!m_wait_reconn_ && (!m_stopped_ || ok || x11_ok)) {
     if (!ok && !x11_ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_output_queue_.try_dequeue(output);
@@ -419,7 +427,6 @@ void CforedClient::AsyncSendRecvThread_() {
     End,
   };
 
-  // TODO：重新创建stream连接
   std::thread output_clean_thread;
   std::atomic<bool> write_pending;
 
@@ -493,8 +500,10 @@ void CforedClient::AsyncSendRecvThread_() {
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
       CRANE_ERROR("Cfored connection failed.");
-      // state = State::End;
+      if (m_wait_reconn_) break;
+      m_wait_reconn_ = true;
       if (output_clean_thread.joinable()) output_clean_thread.join();
+      m_reconnect_async_->send();
       break;
     }
 
@@ -533,7 +542,7 @@ void CforedClient::AsyncSendRecvThread_() {
         // Issue initial read request
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
-
+        m_wait_reconn_ = false;
         // Start output forwarding thread
         output_clean_thread =
             std::thread(&CforedClient::CleanOutputQueueAndWriteToStreamThread_,
@@ -658,6 +667,7 @@ void CforedClient::TaskEnd(pid_t pid) {
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {
   CRANE_TRACE("Receive TaskOutputForward len: {}.", msg.size());
+  // TODO: size check?
   m_output_queue_.enqueue(msg);
 }
 
