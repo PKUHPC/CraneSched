@@ -30,6 +30,8 @@
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
 
+#include "protos/Crane.grpc.pb.h"
+
 namespace Ctld {
 
 template <typename T>
@@ -47,22 +49,6 @@ struct BsonFieldTrait<bool> {
     return ele.get_bool().value;
   }
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_bool;
-};
-
-template <>
-struct BsonFieldTrait<int64_t> {
-  static int64_t get(const bsoncxx::document::element& ele) {
-    return ele.get_int64().value;
-  }
-  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int64;
-};
-
-template <>
-struct BsonFieldTrait<int32_t> {
-  static int32_t get(const bsoncxx::document::element& ele) {
-    return ele.get_int32().value;
-  }
-  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int32;
 };
 
 template <>
@@ -95,6 +81,26 @@ class MongodbClient {
   using document = bsoncxx::builder::basic::document;
   using sub_array = bsoncxx::builder::basic::sub_array;
   using sub_document = bsoncxx::builder::basic::sub_document;
+  struct JobSummary {
+    enum class Type : std::uint8_t { HOUR, DAY, MONTH };
+  };
+
+  // Task aggregation information for acc_usage tables
+  struct JobAggregationInfo {
+    std::string account;
+    std::string username;
+    std::string qos;
+    std::string wckey;
+    std::chrono::sys_seconds start_time;
+    std::chrono::sys_seconds end_time;
+    double total_cpus;
+  };
+
+  struct MongoServerVersion {
+    int major{0};
+    int minor{0};
+    int patch{0};
+  };
 
  public:
   enum class EntityType {
@@ -106,8 +112,17 @@ class MongodbClient {
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
+  ~MongodbClient();
   bool Init();
   bool Connect();
+
+  // Job summary (hour/day/month tables) relies on aggregation features.
+  // - Queries use $unionWith (MongoDB >= 4.4)
+  // - Aggregation uses $merge (MongoDB >= 4.2)
+  // We intentionally disable the feature on older servers to avoid crashes.
+  [[nodiscard]] bool JobSummaryEnabled() const {
+    return m_job_summary_enabled_;
+  }
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
@@ -137,9 +152,81 @@ class MongodbClient {
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
+  bool QueryJobSizeSummary(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+  grpc::Status QueryJobSummary(
+      const crane::grpc::QueryJobSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+
+  // Real-time aggregation: append task to acc_usage tables
+  void AppendToAccUsageTable(const bsoncxx::document::view& task_doc,
+                             mongocxx::client_session* session = nullptr);
+  void AppendToAccUsageTable(const TaskInCtld* task,
+                             mongocxx::client_session* session = nullptr);
+
+  // Mark task as aggregated in task_table
+  void MarkTaskAsAggregated(const bsoncxx::oid& task_id);
+
+  // Recovery functions for startup
+  void RecoverMissingAggregations_();
+
+ private:
+  [[nodiscard]] bool MongoVersionAtLeast_(int major, int minor) const {
+    if (m_mongo_server_version_.major != major)
+      return m_mongo_server_version_.major > major;
+    return m_mongo_server_version_.minor >= minor;
+  }
+
+  bool UpdateJobSummaryLastSuccessTime_(JobSummary::Type summary_type,
+                                        std::chrono::sys_seconds last_success);
+  static std::string JobSummaryTypeToString_(JobSummary::Type summary_type);
+  std::optional<std::chrono::sys_seconds> GetJobSummaryLastSuccessTime_(
+      JobSummary::Type summary_type);
+
+  // Initial aggregation completion tracking
+  bool GetInitialAggregationCompleted_(JobSummary::Type type);
+  void SetInitialAggregationCompleted_(JobSummary::Type type, bool completed);
+
+  std::chrono::sys_seconds GetJobMinStartTime_();
+
+  // Execute aggregation for a single hour (worker function for thread pool)
+  // Returns: discovered min_start on success, std::nullopt on failure
+  std::optional<int64_t> AggregateJobSummaryForSingleHour_(
+      std::chrono::sys_seconds hour_start, std::chrono::sys_seconds hour_end,
+      const std::string& task_collection_name, int64_t cached_min_start);
+
+  bool AggregateJobSummaryByHour_(std::chrono::sys_seconds start_sec,
+                                  std::chrono::sys_seconds end_sec,
+                                  const std::string& task_collection_name);
+  bool AggregateJobSummaryByDayOrMonth_(
+      JobSummary::Type src_type, JobSummary::Type dst_type,
+      std::chrono::sys_seconds period_start_tp,
+      std::chrono::sys_seconds period_end_tp);
+
+  // New acc_usage aggregation helpers - each handles one granularity
+  void AppendToHourTable_(const JobAggregationInfo& info,
+                          mongocxx::client_session* session = nullptr);
+  void AppendToDayTable_(const JobAggregationInfo& info,
+                         mongocxx::client_session* session = nullptr);
+  void AppendToMonthTable_(const JobAggregationInfo& info,
+                           mongocxx::client_session* session = nullptr);
+
+  // Day/Month aggregation functions (for new cluster initialization only)
+  void AggregateAccUsageToDayOrMonth_(JobSummary::Type src_type,
+                                      JobSummary::Type dst_type,
+                                      std::chrono::sys_seconds period_start,
+                                      std::chrono::sys_seconds period_end);
+
+  // Recovery helper functions
+  void RecoverNewClusterAggregations_(bool hour_done, bool day_done,
+                                      bool month_done);
+  void RecoverExistingClusterAggregations_();
+
   /* ----- Method of operating the account table ----------- */
+ public:
   bool InsertUser(const User& new_user);
-  bool InsertWckey(const Ctld::Wckey& new_wckey);
+  bool InsertWckey(const Wckey& new_wckey);
   bool InsertAccount(const Account& new_account);
   bool InsertQos(const Qos& new_qos);
 
@@ -348,8 +435,10 @@ class MongodbClient {
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
+
   void CreateCollectionIndex(mongocxx::collection& coll,
-                             const std::vector<std::string>& fields);
+                             const std::vector<std::string>& fields,
+                             bool unique);
   bool InitTableIndexes();
 
  private:
@@ -368,8 +457,66 @@ class MongodbClient {
   document DocumentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
-  template <typename ViewValue, typename T>
-  T ViewValueOr_(const ViewValue& view_value, const T& default_value);
+  template <typename T>
+  T ViewValueOr_(const bsoncxx::document::element& view_value,
+                 const T& default_value) {
+    if (!view_value) {
+      return default_value;
+    }
+    if (view_value.type() == BsonFieldTrait<T>::bson_type)
+      return BsonFieldTrait<T>::get(view_value);
+
+    return default_value;
+  }
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  T ViewGetArithmeticValue_(const bsoncxx::document::element& view_value) {
+    switch (view_value.type()) {
+    case bsoncxx::type::k_bool:
+      return static_cast<T>(view_value.get_bool().value);
+    case bsoncxx::type::k_int32:
+      return static_cast<T>(view_value.get_int32().value);
+    case bsoncxx::type::k_int64:
+      return static_cast<T>(view_value.get_int64().value);
+    case bsoncxx::type::k_double:
+      return static_cast<T>(view_value.get_double().value);
+    default:
+      throw std::runtime_error(
+          "Non-arithmetic type in ViewGetArithmeticValue_");
+    }
+  }
+
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  T ViewValueOr_(const bsoncxx::document::element& view_value,
+                 const T& default_value) {
+    if (!view_value) {
+      return default_value;
+    }
+    switch (view_value.type()) {
+    case bsoncxx::type::k_bool:
+      return static_cast<T>(view_value.get_bool().value);
+    case bsoncxx::type::k_int32:
+      return static_cast<T>(view_value.get_int32().value);
+    case bsoncxx::type::k_int64:
+      return static_cast<T>(view_value.get_int64().value);
+    case bsoncxx::type::k_double:
+      return static_cast<T>(view_value.get_double().value);
+    default:
+      return default_value;
+    }
+  }
+
+  bool ViewValueOr_(const bsoncxx::document::element& view_value,
+                    const bool& default_value) {
+    if (!view_value) {
+      return default_value;
+    }
+    if (view_value.type() == bsoncxx::type::k_bool)
+      return view_value.get_bool().value;
+    else
+      return default_value;
+  }
 
   mongocxx::client* GetClient_();
   mongocxx::client_session* GetSession_();
@@ -426,14 +573,25 @@ class MongodbClient {
   const std::string m_wckey_collection_name_{"wckey_table"};
   const std::string m_license_resource_collection_name_{
       "license_resource_table"};
+
+  const std::string m_summary_time_collection_name_{"summary_time_table"};
+  const std::string m_acc_usage_hour_collection_name_{"acc_usage_hour_table"};
+  const std::string m_acc_usage_day_collection_name_{"acc_usage_day_table"};
+  const std::string m_acc_usage_month_collection_name_{"acc_usage_month_table"};
+  static constexpr int MaxJobSummaryBatchSize =
+      5000;  // Maximum number of items per gRPC streaming batch
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;
 
+  MongoServerVersion m_mongo_server_version_{};
+  bool m_job_summary_enabled_{true};
+
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
+  std::atomic_bool m_thread_stop_{false};
 };
 
 template <>

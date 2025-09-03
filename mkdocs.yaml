@@ -70,22 +70,23 @@ nav:
       - Lua Guide: deployment/configuration/lua_guide.md
       - Prolog & Epilog Guide: deployment/configuration/prolog_epilog_guide.md
   - Commands:
-    - Job Submission:
-        - cbatch: command/cbatch.md
-        - crun: command/crun.md
-        - calloc: command/calloc.md
-    - Job Monitoring:
-        - cqueue: command/cqueue.md
-        - cinfo: command/cinfo.md
-        - ceff: command/ceff.md
-        - cacct: command/cacct.md
-    - Job Control:
-        - ccancel: command/ccancel.md
-        - ccontrol: command/ccontrol.md
-    - Container:
-        - ccon: command/ccon.md
-    - Account Management:
-        - cacctmgr: command/cacctmgr.md
+      - Job Submission:
+          - cbatch: command/cbatch.md
+          - crun: command/crun.md
+          - calloc: command/calloc.md
+      - Job Monitoring:
+          - cqueue: command/cqueue.md
+          - cinfo: command/cinfo.md
+          - ceff: command/ceff.md
+          - cacct: command/cacct.md
+          - creport: command/creport.md
+      - Job Control:
+          - ccancel: command/ccancel.md
+          - ccontrol: command/ccontrol.md
+      - Container:
+          - ccon: command/ccon.md
+      - Account Management:
+          - cacctmgr: command/cacctmgr.md
   - Reference:
     - Exit Codes: reference/exit_code.md
     - Job Status: reference/job_status.md
@@ -218,3 +219,4 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
+

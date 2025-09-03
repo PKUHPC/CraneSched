@@ -404,3 +404,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [ccancel](ccancel.md) - Cancel jobs and steps
 - [ceff](ceff.md) - View job efficiency statistics
 - [ccon](ccon.md) - Container job management
+- [creport](creport.md) - Query job-related statistics

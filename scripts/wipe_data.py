@@ -24,6 +24,11 @@ class Collection(Enum):
     WCKEY = "wckey_table"
     RESOURCE = "license_resource_table"
 
+    SUMMARY = "summary_time_table"
+    ACC_HOUR = "acc_usage_hour_table"
+    ACC_DAY = "acc_usage_day_table"
+    ACC_MONTH = "acc_usage_month_table"
+
 
 def load_config(crane_path: str, db_path: str = None):
     """Load and validate configurations."""
@@ -188,6 +193,11 @@ def parse_arguments():
         action="store_true",
         help="Include resource_table in MongoDB wipe.",
     )
+    parser.add_argument(
+        "-s", "--summary_tale",
+        action="store_true",
+        help="Include hour/day/month/summary_table in MongoDB wipe.",
+    )
     return parser.parse_args()
 
 
@@ -234,7 +244,11 @@ def _main():
                 Collection.TASK,
                 Collection.USER,
                 Collection.WCKEY,
-                Collection.RESOURCE
+                Collection.RESOURCE,
+                Collection.SUMMARY,
+                Collection.ACC_HOUR,
+                Collection.ACC_DAY,
+                Collection.ACC_MONTH
             ]  # Default to all
         else:
             if args.acct_table:
@@ -249,6 +263,11 @@ def _main():
                 to_wipe.append(Collection.WCKEY)
             if args.resource_table:
                 to_wipe.append(Collection.RESOURCE)
+            if args.summary_tale:
+                to_wipe.append(Collection.SUMMARY)
+                to_wipe.append(Collection.ACC_HOUR)
+                to_wipe.append(Collection.ACC_DAY)
+                to_wipe.append(Collection.ACC_MONTH)
         wipe_mongo(db, to_wipe)
 
     # Handle embedded database cleanup
