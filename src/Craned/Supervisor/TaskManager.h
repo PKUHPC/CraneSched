@@ -400,6 +400,10 @@ class TaskManager {
   std::optional<std::string> ResolveCgroupPathForPid_(pid_t pid,
                                                       bool is_cgroup_v2);
 
+  // Postmortem OOM detection to mitigate race: check memory.events (v2)
+  // or rely on v1 latch when SIGCHLD arrives before OOM watcher.
+  bool CheckAndLatchOomPostMortem_();
+
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -435,6 +439,9 @@ class TaskManager {
   std::string m_cgroup_path_;
   bool m_oom_monitoring_enabled_{false};
   uint64_t m_last_oom_kill_count_{0};
+  // Latch flags to bridge races between SIGCHLD and OOM events
+  bool m_oom_detected_latched_{false};
+  bool m_oom_postmortem_retried_{false};
 
   int m_oom_eventfd_{-1};
   int m_memory_oom_control_fd_{-1};

@@ -1568,6 +1568,9 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
     }
     m_oom_monitoring_enabled_ = false;
   }
+  // Reset OOM detection latches for next task
+  m_oom_detected_latched_ = false;
+  m_oom_postmortem_retried_ = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
@@ -1771,6 +1774,19 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (m_step_.IsBatch() || m_step_.IsCrun()) {
       // For a Batch task, the end of the process means it is done.
       if (exit_info.is_terminated_by_signal) {
+        // If the task was killed by signal but we haven't yet marked who
+        // terminated it, do a last-chance OOM postmortem detection to avoid
+        // racing with OOM watcher (SIGCHLD may arrive first).
+        if (task->terminated_by == TerminatedBy::NONE) {
+          if (CheckAndLatchOomPostMortem_()) {
+            task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
+          } else if (!m_oom_postmortem_retried_) {
+            // Defer once to give OOM event watcher a chance to fire.
+            m_oom_postmortem_retried_ = true;
+            m_task_stop_queue_.enqueue(task_id);
+            return;
+          }
+        }
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER: {
           ActivateTaskStatusChange_(
@@ -2097,6 +2113,8 @@ void TaskManager::StartCgroupV2OomMonitoring_() {
         current_count.value() > m_last_oom_kill_count_) {
       CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
                   m_step_.job_id);
+  // Latch OOM so SIGCHLD handler can recognize the cause even if it runs earlier
+  m_oom_detected_latched_ = true;
 
       if (m_step_.IsBatch() || m_step_.IsCrun()) {
         TaskTerminateQueueElem terminate_elem{};
@@ -2212,6 +2230,8 @@ void TaskManager::StartCgroupV1OomMonitoring_() {
     if (!m_v1_oom_fired_) {
       CRANE_TRACE("Task #{} exceeded its memory limit (v1). Terminating it...",
                   m_step_.job_id);
+  // Latch OOM for postmortem recognition
+  m_oom_detected_latched_ = true;
 
       if (m_step_.IsBatch() || m_step_.IsCrun()) {
         TaskTerminateQueueElem terminate_elem{};
@@ -2262,5 +2282,34 @@ void TaskManager::StopCgroupV1OomMonitoring_() {
     close(m_memory_oom_control_fd_);
     m_memory_oom_control_fd_ = -1;
   }
+}
+
+// Try detecting OOM after process death, to mitigate race between SIGCHLD and OOM watcher
+bool TaskManager::CheckAndLatchOomPostMortem_() {
+  if (m_oom_detected_latched_) return true;
+
+  bool is_cgroup_v2 = (Common::CgroupManager::GetCgroupVersion() ==
+                       Common::CgConstant::CgroupVersion::CGROUP_V2);
+
+  if (is_cgroup_v2) {
+    if (m_cgroup_path_.empty()) return false;
+    std::string memory_events_path =
+        (std::filesystem::path(m_cgroup_path_) / MemoryEvents).string();
+    auto current_count = ReadOomKillCount(memory_events_path);
+    if (current_count.has_value() &&
+        current_count.value() > m_last_oom_kill_count_) {
+          m_oom_detected_latched_ = true;
+          m_last_oom_kill_count_ = current_count.value();
+          return true;
+    }
+    return false;
+  }
+
+  // v1: rely on the poll latch; counts are not available reliably
+  if (m_v1_oom_fired_) {
+    m_oom_detected_latched_ = true;
+    return true;
+  }
+  return false;
 }
 }  // namespace Craned::Supervisor
