@@ -45,7 +45,9 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       step_to_d(step_to_d),
       supv_pid(supv_pid) {}
 
-bool StepInstance::IsDaemon() const { return step_id == kDaemonStepId; }
+bool StepInstance::IsDaemon() const {
+  return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
+}
 
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());

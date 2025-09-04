@@ -152,7 +152,7 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
         }
         auto [job_id, step_id, pid] = supv_ids.value();
         CRANE_DEBUG("[Step #{}.{}] Supervisor socket {} recovered, pid: {}",
-                    job_id, step_id, file.string(), job_id, pid);
+                    job_id, step_id, file.string(), pid);
 
         absl::WriterMutexLock lk(&m_mutex_);
         m_supervisor_map_.emplace(std::make_pair(job_id, step_id), stub);
