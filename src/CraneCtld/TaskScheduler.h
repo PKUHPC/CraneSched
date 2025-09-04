@@ -991,6 +991,29 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  // Store Resource reduction events happened during scheduling here.
+  // Cases:
+  // 1. Reservation created: resources on nodes are reduced.
+  // 2. Reservation deleted: resources in reservation are reduced.
+  // 3. Reservation modified (not implemented): resources in old reservation and
+  // on nodes of new reservation are reduced.
+  struct ResReduceEvent {
+    using affected_resv_t = ResvId;
+    using affected_nodes_t = std::pair<absl::Time, std::vector<CranedId>>;
+    
+    std::variant<affected_resv_t, affected_nodes_t> affected_resources;
+  };
+
+  std::vector<ResReduceEvent> m_res_reduce_events_
+      ABSL_GUARDED_BY(m_res_reduce_events_mtx_);
+  Mutex m_res_reduce_events_mtx_;
+
+  // Should be called before reducing resources from nodes or reservations.
+  void AddResReduceEvent_(ResReduceEvent&& event) {
+    LockGuard guard(&m_res_reduce_events_mtx_);
+    m_res_reduce_events_.emplace_back(std::move(event));
+  }
 };
 
 }  // namespace Ctld

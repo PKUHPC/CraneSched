@@ -600,6 +600,48 @@ void TaskScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
 
       {
+        // All events reduce resources during scheduling should be handled here.
+        // Resource increase(such as job ended) events are not considered here,
+        // because they won't lead to schedule failure.
+
+        // NOTICE: Craned down events are not handled here, because related jobs
+        // will not be started successfully. However, features added in the
+        // future which reduce resources during scheduling should be handled
+        // here.
+
+        // Check:
+        // 1. for non-reservation jobs, if the allocated nodes are still
+        //    available.
+        // 2. for reservation jobs:
+        // -  If the reservation still exists.
+        // -  If the allocated nodes are still in the reservation and the
+        //    reservation still has enough resource.
+
+        m_res_reduce_events_mtx_.Lock();
+
+        // Eearliest end time of new reservations on craned created during
+        // scheduling.
+        absl::flat_hash_map<CranedId, absl::Time> craned_id_change_time_map;
+        absl::flat_hash_set<ResvId> affected_resv_set;
+        for (const ResReduceEvent& event : m_res_reduce_events_) {
+          if (std::holds_alternative<ResvId>(event.affected_resources)) {
+            affected_resv_set.insert(
+                std::get<ResvId>(event.affected_resources));
+          } else {
+            auto& affected_nodes =
+                std::get<std::pair<absl::Time, std::vector<CranedId>>>(
+                    event.affected_resources);
+            absl::Time end_time = affected_nodes.first;
+            for (const CranedId& craned_id : affected_nodes.second) {
+              auto it = craned_id_change_time_map.find(craned_id);
+              if (it == craned_id_change_time_map.end() ||
+                  it->second > end_time) {
+                craned_id_change_time_map[craned_id] = end_time;
+              }
+            }
+          }
+        }
+
         std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
 
         LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -612,37 +654,72 @@ void TaskScheduler::ScheduleThread_() {
             job->SetStartTime(job_in_scheduler->start_time);
             if (!job_in_scheduler->reason.empty()) {
               job->pending_reason = job_in_scheduler->reason;
-            } else {
-              PartitionId const& partition_id = job->partition_id;
-
-              job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
-              job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
-              job->nodes_alloc = job->CranedIds().size();
-              job->SetStatus(crane::grpc::TaskStatus::Running);
-
-              job->allocated_craneds_regex =
-                  util::HostNameListToStr(job->CranedIds());
-
-              for (CranedId const& craned_id : job->CranedIds())
-                g_meta_container->MallocResourceFromNode(
-                    craned_id, job->TaskId(), job->AllocatedRes());
-              if (job->reservation != "") {
-                g_meta_container->MallocResourceFromResv(
-                    job->reservation, job->TaskId(), job->AllocatedRes());
-              }
-
-              if (job->ShouldLaunchOnAllNodes()) {
-                for (auto const& craned_id : job->CranedIds())
-                  job->executing_craned_ids.emplace_back(craned_id);
-              } else {
-                job->executing_craned_ids.emplace_back(
-                    job->CranedIds().front());
-              }
-
-              jobs_to_run.push_back(std::move(job));
-              m_pending_task_map_.erase(it);
-              break;
+              continue;
             }
+            absl::Time end_time =
+                job_in_scheduler->start_time + job_in_scheduler->time_limit;
+            if (job_in_scheduler->reservation.empty()) {
+              // Non-reservation job.
+              for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
+                auto it = craned_id_change_time_map.find(craned_id);
+                if (it != craned_id_change_time_map.end() &&
+                    it->second < end_time) {
+                  job_in_scheduler->reason = "Resource changed";
+                }
+              }
+            } else if (affected_resv_set.contains(
+                           job_in_scheduler->reservation)) {
+              // Reservation job, till now, reservation always reserves whole
+              // nodes, so we only need to check if the reservation ends after
+              // job ends and if the allocated nodes are still in the
+              // reservation.
+              const auto& resv_meta = g_meta_container->GetResvMetaPtr(
+                  job_in_scheduler->reservation);
+              if (resv_meta.get() == nullptr) {
+                job_in_scheduler->reason = "Reservation deleted";
+              } else if (resv_meta->end_time < end_time) {
+                job_in_scheduler->reason = "Resource";
+              } else {
+                for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
+                  if (!resv_meta->craned_ids.contains(craned_id)) {
+                    job_in_scheduler->reason = "Reservation changed";
+                    break;
+                  }
+                }
+              }
+            }
+            if (!job_in_scheduler->reason.empty()) {
+              job->pending_reason = job_in_scheduler->reason;
+              continue;
+            }
+
+            PartitionId const& partition_id = job->partition_id;
+
+            job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
+            job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
+            job->nodes_alloc = job->CranedIds().size();
+            job->SetStatus(crane::grpc::TaskStatus::Running);
+
+            job->allocated_craneds_regex =
+                util::HostNameListToStr(job->CranedIds());
+
+            for (CranedId const& craned_id : job->CranedIds())
+              g_meta_container->MallocResourceFromNode(craned_id, job->TaskId(),
+                                                       job->AllocatedRes());
+            if (job->reservation != "") {
+              g_meta_container->MallocResourceFromResv(
+                  job->reservation, job->TaskId(), job->AllocatedRes());
+            }
+
+            if (job->ShouldLaunchOnAllNodes()) {
+              for (auto const& craned_id : job->CranedIds())
+                job->executing_craned_ids.emplace_back(craned_id);
+            } else {
+              job->executing_craned_ids.emplace_back(job->CranedIds().front());
+            }
+
+            jobs_to_run.push_back(std::move(job));
+            m_pending_task_map_.erase(it);
           } else {
             CRANE_TRACE(
                 "Pending job #{} not found in pending map, may has been "
@@ -650,6 +727,10 @@ void TaskScheduler::ScheduleThread_() {
                 job_in_scheduler->job_id);
           }
         }
+
+        // Resource has been subtracted, other resource reduce events are
+        // allowed now.
+        m_res_reduce_events_mtx_.Unlock();
 
         end = std::chrono::steady_clock::now();
         CRANE_TRACE(
@@ -1486,12 +1567,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
 
   if (start_time < now) CRANE_WARN("Reservation start time is in the past");
 
-  PartitionId partition = request.partition();
-
-  ResvId resv_name = request.reservation_name();
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  if (resv_meta_map->contains(resv_name))
-    return std::unexpected("Reservation name already exists");
+  const PartitionId& partition = request.partition();
 
   if (!partition.empty()) {
     auto all_partitions_meta_map =
@@ -1561,6 +1637,8 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     }
   }
 
+  const ResvId& resv_name = request.reservation_name();
+
   ResvMeta resv{.name = resv_name,
                 .part_id = partition,
                 .start_time = start_time,
@@ -1577,12 +1655,18 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
                 .res_avail = allocated_res,
                 .rn_job_res_map = {}};
 
+  LockGuard resource_guard(&m_res_reduce_events_mtx_);
+  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
   const auto& [it, ok] = resv_meta_map->emplace(resv_name, std::move(resv));
   if (!ok) {
-    CRANE_ERROR("Failed to insert reservation meta for reservation {}",
-                resv_name);
-    return std::unexpected(fmt::format(
-        "Failed to insert reservation meta for reservation {}", resv_name));
+    CRANE_ERROR(
+        "Failed to insert reservation meta : Reservation name {} already "
+        "exists",
+        resv_name);
+    return std::unexpected(
+        fmt::format("Failed to insert reservation meta : Reservation name {} "
+                    "already exists",
+                    resv_name));
   }
 
   for (auto& [craned_meta, res] : craned_meta_res_vec) {
@@ -1619,7 +1703,10 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
     const crane::grpc::DeleteReservationRequest& request) {
   crane::grpc::DeleteReservationReply reply;
 
-  ResvId resv_name = request.reservation_name();
+  const ResvId& resv_name = request.reservation_name();
+
+  LockGuard resource_guard(&m_res_reduce_events_mtx_);
+
   auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
 
   auto res = DeleteResvMeta_(resv_meta_map, resv_name);
@@ -1778,6 +1865,8 @@ void TaskScheduler::CleanResvTimerQueueCb_(
     int64_t secs = absl::ToInt64Seconds(end_time - now);
     auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
                                               uvw::timer_handle& handle) {
+      LockGuard resource_guard(&m_res_reduce_events_mtx_);
+
       auto reservation_meta_map = g_meta_container->GetResvMetaMapPtr();
       auto err = DeleteResvMeta_(reservation_meta_map, reservation_id);
 

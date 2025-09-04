@@ -261,7 +261,7 @@ struct ResvMeta {
   std::unordered_set<std::string> accounts;
   std::unordered_set<std::string> users;
 
-  std::vector<CranedId> craned_ids;
+  absl::flat_hash_set<CranedId> craned_ids;
   ResourceV2 res_total;
   ResourceV2 res_avail;
   absl::flat_hash_map<task_id_t, ResourceV2> rn_job_res_map;
