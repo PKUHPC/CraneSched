@@ -434,7 +434,6 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_ = std::make_unique<CranedClient>();
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
-  if (m_task_num_ > 1) {
 #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_node_num_);
     m_pmix_async_server_ = std::make_unique<PmixUcxServer>();
@@ -447,7 +446,6 @@ bool PmixServer::ConnInit_(const Config& config) {
 
     // TODO: must ensure that both sides have received [the message] and are ready.
     m_pmix_client_->WaitAllStubReady();
-  }
   return true;
 }
 
