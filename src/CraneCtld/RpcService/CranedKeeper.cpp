@@ -38,11 +38,9 @@ CranedStub::~CranedStub() {
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id,
                                  const RegToken &token) {
-  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                      "Configuring craned {} with token {}", craned_id,
                      ProtoTimestampToString(token));
-
-  this->SetRegToken(token);
 
   crane::grpc::ConfigureCranedRequest request;
   request.set_ok(true);
@@ -58,7 +56,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id,
   auto status = m_stub_->Configure(&context, request, &reply);
   if (!status.ok()) {
     CRANE_LOGGER_ERROR(
-        g_runtime_status.connection_logger,
+        g_runtime_status.conn_logger,
         "ConfigureCraned RPC for Node {} returned with status not ok: {}. "
         "Resetting token.",
         craned_id, status.error_message());
@@ -383,8 +381,8 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
     }
     m_uvw_loop_->run();
   });
-  g_runtime_status.connection_logger = AddLogger(
-      "connection", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+  g_runtime_status.conn_logger = AddLogger(
+      "conn", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
 }
 
 CranedKeeper::~CranedKeeper() {
@@ -500,8 +498,9 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       } else {
         // END state of both state machine. Free the Craned client.
         if (tag->type == CqTag::kInitializingCraned) {
-          CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                             "Failed connect to {}.", craned->m_craned_id_);
+          CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                             "Failed connect to {}, stub destroyed.",
+                             craned->m_craned_id_);
 
           // When deleting craned, the destructor will call
           // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
@@ -512,7 +511,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
             g_thread_pool->detach_task(
                 [this, craned_id = craned->m_craned_id_] {
                   m_craned_disconnected_cb_(craned_id);
-                  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+                  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                                      "Craned {} disconnected.", craned_id);
                 });
           }
@@ -520,7 +519,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           WriterLock lock(&m_connected_craned_mtx_);
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
-          CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+          CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Unknown tag type: {}", (int)tag->type);
         }
       }
@@ -542,17 +541,23 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
     {
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                         "CONNECTING -> READY. New craned {} connected.",
-                         craned->m_craned_id_);
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "{} -> READY. New craned {} with token {} connected.",
+                         static_cast<int>(craned->m_prev_channel_state_),
+                         craned->m_craned_id_,
+                         ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connected_craned_mtx_);
+      CRANE_ASSERT(
+          !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
     }
     RegToken token;
     {
       util::lock_guard guard(m_unavail_craned_set_mtx_);
+      CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
+      CRANE_ASSERT(m_connecting_craned_set_.contains(craned->m_craned_id_));
       token = m_unavail_craned_set_.at(craned->m_craned_id_);
       m_unavail_craned_set_.erase(craned->m_craned_id_);
       m_connecting_craned_set_.erase(craned->m_craned_id_);
@@ -578,7 +583,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     else
       next_tag_type = std::nullopt;
 
-    CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                        "{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
                        (int)craned->m_prev_channel_state_,
                        craned->m_failure_retry_times_,
@@ -587,7 +592,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    CRANE_LOGGER_WARN(g_runtime_status.connection_logger,
+    CRANE_LOGGER_WARN(g_runtime_status.conn_logger,
                       "Unexpected InitializingCraned SHUTDOWN state!");
     next_tag_type = std::nullopt;
     break;
@@ -602,7 +607,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     } else {
       // prev    current       next
       // Any  -> CONNECTING -> CONNECTING
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "{} -> CONNECTING -> CONNECTING",
                          (int)craned->m_prev_channel_state_);
       next_tag_type = CqTag::kInitializingCraned;
@@ -613,7 +618,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   case GRPC_CHANNEL_IDLE:
     // InitializingCraned: BEGIN -> IDLE state switching is handled in
     // CranedKeeper::RegisterNewCraneds. Execution should never reach here.
-    CRANE_LOGGER_ERROR(g_runtime_status.connection_logger,
+    CRANE_LOGGER_ERROR(g_runtime_status.conn_logger,
                        "Unexpected InitializingCraned IDLE state!");
     break;
   }
@@ -638,14 +643,13 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     if (craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
       // prev          current       next
       // CONNECTING -> CONNECTING -> END
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "CONNECTING -> CONNECTING -> END");
       next_tag_type = std::nullopt;
     } else {
       // prev    now
       // IDLE -> CONNECTING
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                         "IDLE -> CONNECTING");
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "IDLE -> CONNECTING");
       next_tag_type = CqTag::kEstablishedCraned;
     }
     break;
@@ -727,11 +731,14 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
                                          const RegToken &token) {
   if (m_cq_closed_) return;
 
+  CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
+              ProtoTimestampToString(token));
   util::lock_guard guard(m_unavail_craned_set_mtx_);
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
+                                      RegToken token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -768,6 +775,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   }
 
   auto *craned = new CranedStub(this);
+  craned->SetRegToken(token);
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -782,9 +790,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
-              ip_addr, g_config.CranedListenConf.CranedListenPort,
-              m_channel_count_.fetch_add(1) + 1);
+  CRANE_TRACE("Creating a channel to {} {}:{}. Token: {}. Channel count: {}",
+              craned_id, ip_addr, g_config.CranedListenConf.CranedListenPort,
+              ProtoTimestampToString(token), m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.TlsConfig.Enabled) {
     SetTlsHostnameOverride(&channel_args, craned_id,
@@ -821,7 +829,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
-
+  CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);
   util::lock_guard guard(craned_keeper->m_unavail_craned_set_mtx_);
   craned_keeper->m_channel_count_.fetch_sub(1);
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
@@ -845,11 +853,17 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
-          m_connecting_craned_set_.emplace(*it);
-          g_thread_pool->detach_task([this, craned_id = it->first]() {
-            ConnectCranedNode_(craned_id);
-          });
+          m_connecting_craned_set_.emplace(it->first);
+          g_thread_pool->detach_task(
+              [this, craned_id = it->first, token = it->second] {
+                ConnectCranedNode_(craned_id, token);
+              });
           fetch_num--;
+        } else {
+          CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                             " Craned {} is already connecting or connected, "
+                             "ignore new connection request. Token {}.",
+                             it->first, ProtoTimestampToString(it->second));
         }
         ++it;
       }
