@@ -999,31 +999,27 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.job_id);
 
     if (!job_instance) {
-      CRANE_DEBUG(
-          "[Step #{}.{}] Terminating a non-existent step, sending a dummy "
-          "status change to sync Ctld.",
-          elem.job_id, elem.step_id);
+      CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.", elem.job_id,
+                  elem.step_id);
 
-      if (!elem.mark_as_orphaned)
-        StepStopAndDoStatusChangeAsync(
-            elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
-            ExitCode::kExitCodeTerminated, "Step not found.");
+      // if (!elem.mark_as_orphaned)
+      //   StepStopAndDoStatusChangeAsync(
+      //       elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
+      //       ExitCode::kExitCodeTerminated, "Step not found.");
       continue;
     }
     absl::MutexLock lk(job_instance->step_map_mtx.get());
     if (!job_instance->step_map.contains(elem.step_id)) {
-      CRANE_DEBUG(
-          "[Step #{}.{}] Terminating a non-existent step, sending a dummy "
-          "status change to sync Ctld.",
-          elem.job_id, elem.step_id);
+      CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.", elem.job_id,
+                  elem.step_id);
 
-      if (!elem.mark_as_orphaned)
-        g_ctld_client->StepStatusChangeAsync(
-            {.job_id = elem.job_id,
-             .step_id = elem.step_id,
-             .new_status = crane::grpc::TaskStatus::Cancelled,
-             .exit_code = ExitCode::kExitCodeTerminated,
-             .reason = "Step not found."});
+      // if (!elem.mark_as_orphaned)
+      //   g_ctld_client->StepStatusChangeAsync(
+      //       {.job_id = elem.job_id,
+      //        .step_id = elem.step_id,
+      //        .new_status = crane::grpc::TaskStatus::Cancelled,
+      //        .exit_code = ExitCode::kExitCodeTerminated,
+      //        .reason = "Step not found."});
       continue;
     }
 
