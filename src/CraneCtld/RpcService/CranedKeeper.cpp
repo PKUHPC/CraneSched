@@ -548,12 +548,16 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
                          ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connected_craned_mtx_);
+      CRANE_ASSERT(
+          !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
     }
     RegToken token;
     {
       util::lock_guard guard(m_unavail_craned_set_mtx_);
+      CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
+      CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
       token = m_unavail_craned_set_.at(craned->m_craned_id_);
       m_unavail_craned_set_.erase(craned->m_craned_id_);
       m_connecting_craned_set_.erase(craned->m_craned_id_);
