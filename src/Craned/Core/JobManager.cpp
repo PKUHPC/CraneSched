@@ -1008,7 +1008,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         StepStopAndDoStatusChangeAsync(
             elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
             ExitCode::kExitCodeTerminated, "Step not found.");
-      FreeJobAllocation_({elem.job_id});
       continue;
     }
     absl::MutexLock lk(job_instance->step_map_mtx.get());
