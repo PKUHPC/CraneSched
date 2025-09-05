@@ -2163,12 +2163,6 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
     std::unreachable();
   }
 
-  if (step_configure_failed) {
-    for (const auto& node : step->CranedIds()) {
-      context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
-    }
-  }
-
   // Step finish: configure failed or execution status change
   if (step_finished || step_configure_failed) {
     if (step->ConfigureFailed()) {
@@ -2178,7 +2172,8 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
       step->SetStatus(step->ConfigureFailedStatus());
       // Step failed to configure, terminate this step
       for (const auto& node : step->CranedIds()) {
-        context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
+        if (node != craned_id)
+          context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
       }
 
       if (primary_step) {
