@@ -37,7 +37,7 @@ struct Config {
 
 constexpr const char* CRANE_PMIX_FENCE = "CRANE_PMIX_FENCE";
 constexpr const char* CRANE_PMIX_TIMEOUT = "CRANE_PMIX_TIMEOUT";
-constexpr const char* CRANE_PMIX_DIRECT_CONN_UCX = "CRANE_PMIX_DIRECT_CONN_UCX";
+constexpr const char* CRANE_PMIX_DIRECT_CONN = "CRANE_PMIX_DIRECT_CONN"; // tcp, ucx
 constexpr const char* PMIXP_PMIXLIB_TMPDIR = "PMIXP_PMIXLIB_TMPDIR";
 constexpr const char* PMIXP_TREE_WIDTH = "PMIXP_TREE_WIDTH";
 
@@ -45,7 +45,7 @@ static constexpr uint64_t kTagTypeShift   = 48;
 static constexpr uint64_t kTagTypeMask    = 0xFFFF000000000000ULL;
 static constexpr uint64_t kTagLowMask     = 0x0000FFFFFFFFFFFFULL;
 // 每个类型同时挂接的接收个数（可根据负载调大）
-static constexpr int      kInflightPerType = 256;
+static constexpr int      kInflightPerType = 2;
 // 每条消息最大长度（可配置/调优；若需要超大消息建议用 AM 或 pipeline）
 static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
 

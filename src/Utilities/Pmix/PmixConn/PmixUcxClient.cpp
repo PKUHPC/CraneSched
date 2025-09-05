@@ -40,7 +40,12 @@ void PmixUcxStub::SendPmixRingMsgNoBlock(
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
   param.cb.send = SendHandle_;
   param.user_data = &callback;
-  ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  if (req == nullptr) {
+    CRANE_TRACE("ucx send request completed immediately");
+    callback(true);
+    return ;
+  }
 }
 
 void PmixUcxStub::PmixTreeUpwardForwardNoBlock(
@@ -109,6 +114,7 @@ void PmixUcxStub::PmixDModexResponseNoBlock(
 
 void PmixUcxStub::SendHandle_(void *request, ucs_status_t status,
                               void *user_data) {
+  CRANE_TRACE("ucx callback send handle is called");
   auto* callback = static_cast<AsyncCallback*>(user_data);
   if (UCS_PTR_IS_PTR(request) || status != UCS_OK) {
     (*callback)(false);
@@ -140,8 +146,7 @@ void PmixUcxClient::EmplacePmixStub(const CranedId &craned_id, const std::string
   }
 
   size_t cur_count = m_channel_count_.fetch_add(1) + 1;
-  CRANE_TRACE("Creating a channel to {} {}. Channel count: {}, node num: {}", craned_id,
-              port, cur_count, m_node_num_);
+  CRANE_TRACE("Creating a channel to {}. Channel count: {}, node num: {}", craned_id, cur_count, m_node_num_);
 
   m_craned_id_stub_map_.emplace(craned_id, craned);
   {

@@ -271,7 +271,7 @@ bool PmixServer::Init(
     const std::unordered_map<std::string, std::string>& env_map) {
 
   if (m_is_init_) return true;
-
+  
   m_uvw_loop_ = uvw::loop::create();
 
   InfoSet_(config, task, env_map);
@@ -434,6 +434,18 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_ = std::make_unique<CranedClient>();
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
+  auto env_val = GetEnvVar(CRANE_PMIX_DIRECT_CONN);
+  if (env_val == "ucx") {
+    #ifndef HAVE_UCX
+      CRANE_ERROR("UCX support is not compiled in.");
+      return false;
+    #endif
+    m_pmix_client_ = std::make_unique<PmixUcxClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixUcxServer>();
+  } else if (env_val == "tcp") {
+    m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
+    m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
+  } else {
 #ifdef HAVE_UCX
     m_pmix_client_ = std::make_unique<PmixUcxClient>(m_node_num_);
     m_pmix_async_server_ = std::make_unique<PmixUcxServer>();
@@ -441,11 +453,13 @@ bool PmixServer::ConnInit_(const Config& config) {
     m_pmix_client_ = std::make_unique<PmixGrpcClient>(m_node_num_);
     m_pmix_async_server_ = std::make_unique<PmixGrpcServer>();
 #endif
-    if (!m_pmix_async_server_->Init(config))
-      return false;
+  }
+
+  if (!m_pmix_async_server_->Init(config))
+    return false;
 
     // TODO: must ensure that both sides have received [the message] and are ready.
-    m_pmix_client_->WaitAllStubReady();
+  m_pmix_client_->WaitAllStubReady();
   return true;
 }
 

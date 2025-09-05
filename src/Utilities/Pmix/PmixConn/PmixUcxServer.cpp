@@ -24,8 +24,12 @@
 namespace pmix {
 
 void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
+  CRANE_TRACE("PmixUcxServiceImpl::SendPmixRingMsg is called");
   crane::grpc::pmix::SendPmixRingMsgReq request;
-  if (!request.ParseFromString(req_data)) return;
+  if (!request.ParseFromString(req_data)) {
+    CRANE_ERROR("Failed to parse SendPmixRingMsgReq from string");
+     return;
+  }
 
   std::vector<pmix_proc_t> procs;
 
@@ -141,7 +145,6 @@ bool PmixUcxServer::Init(const Config& config) {
   ucp_params.features = UCP_FEATURE_TAG | UCP_FEATURE_WAKEUP;
   // ucp_params.request_size = sizeof(PmixUcxReq);
   // ucp_params.request_init    = request_init;
-  // ucp_params.request_cleanup = NULL;
   ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES;
 
   status = ucp_init(&ucp_params, ucp_config, &m_ucp_context_);
@@ -157,7 +160,6 @@ bool PmixUcxServer::Init(const Config& config) {
   ucp_worker_params_t worker_params = {};
   worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
   worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
-
   status = ucp_worker_create(m_ucp_context_, &worker_params, &m_ucp_worker_);
   if (status != UCS_OK) {
     CRANE_ERROR("Fail to create UCX worker: %s", ucs_status_string(status));
@@ -195,14 +197,13 @@ bool PmixUcxServer::Init(const Config& config) {
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanUcxProcessReqQueueCb_();
       });
-
+      
   RegisterReceivesAllTypes_();
 
   {
     util::lock_guard g(m_mutex_);
     auto s = ucp_worker_arm(m_ucp_worker_);
     if (s == UCS_ERR_BUSY) {
-      // 若 busy，进一次 progress, 再 arm
       while (ucp_worker_progress(m_ucp_worker_) > 0) {}
       (void)ucp_worker_arm(m_ucp_worker_);
     }
@@ -255,7 +256,7 @@ void PmixUcxServer::RegisterReceivesForType_(PmixUcxMsgType type, int cnt) {
 
     ucp_tag_recv_nbx(
       m_ucp_worker_,
-      req->data.data(), req->data.size(),
+      reinterpret_cast<void*>(req->data.data()), req->data.size(),
       tag_value, tag_mask,
       &param
     );
@@ -264,7 +265,7 @@ void PmixUcxServer::RegisterReceivesForType_(PmixUcxMsgType type, int cnt) {
 
 void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag_recv_info_t* info,
                                 void* user_data) {
-
+  CRANE_TRACE("ucx callback recv handle is called");
   auto* req = static_cast<PmixUcxReq*>(user_data);
   PmixUcxServer* self = req->self;
   auto type = req->type;
@@ -280,24 +281,25 @@ void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag
 
 void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
   PmixUcxReq* req;
+
   while (m_ucx_process_req_queue_.try_dequeue(req)) {
+    std::string data(req->data.data(), req->data.size());
     switch (req->type) {
     case PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG:
-      m_service_impl_->SendPmixRingMsg(req->data);
+      m_service_impl_->SendPmixRingMsg(data);
       break;
     case PmixUcxMsgType::PMIX_UCX_DMDEX_REQUEST:
-      m_service_impl_->PmixDModexRequest(req->data);
+      m_service_impl_->PmixDModexRequest(data);
       break;
     case PmixUcxMsgType::PMIX_UCX_DMDEX_RESPONSE:
-      m_service_impl_->PmixDModexResponse(req->data);
+      m_service_impl_->PmixDModexResponse(data);
       break;
     case PmixUcxMsgType::PMIX_UCX_TREE_DOWNWARD_FORWARD:
-      m_service_impl_->PmixTreeDownwardForward(req->data);
+      m_service_impl_->PmixTreeDownwardForward(data);
       break;
     case PmixUcxMsgType::PMIX_UCX_TREE_UPWARD_FORWARD:
-      m_service_impl_->PmixTreeUpwardForward(req->data);
+      m_service_impl_->PmixTreeUpwardForward(data);
       break;
-    default:
     }
     delete req;
   }
