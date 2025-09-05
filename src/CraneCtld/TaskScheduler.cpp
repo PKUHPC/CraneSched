@@ -2138,7 +2138,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
         }
 
         // Launch step execution
-        for (auto& node : step->CranedIds()) {
+        for (auto& node : step->ExecutionNodes()) {
           context->craned_step_exec_map[node][step->job_id].insert(
               step->StepId());
         }
@@ -2171,7 +2171,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
       // CONFIGURE_FAILED
       step->SetStatus(step->ConfigureFailedStatus());
       // Step failed to configure, terminate this step
-      for (const auto& node : step->CranedIds()) {
+      for (const auto& node : step->ExecutionNodes()) {
         if (node != craned_id)
           context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
       }
@@ -2193,7 +2193,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
 
         // Cancel all other step with CANCELED status
         for (const auto& comm_step : job->Steps() | std::views::values) {
-          for (const auto& node : comm_step->CranedIds()) {
+          for (const auto& node : comm_step->ExecutionNodes()) {
             context->craned_cancel_steps[node][comm_step->job_id].emplace(
                 comm_step->StepId());
           }
