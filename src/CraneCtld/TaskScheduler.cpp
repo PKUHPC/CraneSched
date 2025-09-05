@@ -2264,20 +2264,20 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
 
     // Free job allocation
-    std::optional<crane::grpc::TaskStatus> job_finished{std::nullopt};
+    std::optional<crane::grpc::TaskStatus> job_finished_status{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
     if (step_id == kDaemonStepId) {
       // job finish if all daemon step sent complete status or some daemon step
       // failed to configure.
-      job_finished = DaemonStepStatusChangeHandler_(new_status, task.get(),
-                                                    craned_index, &context);
+      job_finished_status = DaemonStepStatusChangeHandler_(
+          new_status, task.get(), craned_index, &context);
     } else {
       CommonStepStatusChangeHandler_(new_status, task.get(), step_id,
                                      craned_index, &context);
     }
 
-    if (job_finished.has_value()) {
+    if (job_finished_status.has_value()) {
       // Job status set CommonStepStatusChangeHandler_
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -2310,6 +2310,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         }
       }
 
+      task->SetStatus(job_finished_status.value());
       task->SetExitCode(exit_code);
       task->SetEndTime(absl::Now());
 
@@ -2343,7 +2344,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // so we don't have any branch code here and just put it into mongodb.
 
       CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  util::StepStatusToString(job_finished.value()));
+                  util::StepStatusToString(job_finished_status.value()));
       m_running_task_map_.erase(iter);
     }
   }
