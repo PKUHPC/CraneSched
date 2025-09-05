@@ -627,6 +627,7 @@ struct TaskInCtld {
    * -------------------------------- */
   int32_t requeue_count{0};
   std::list<CranedId> craned_ids;
+  crane::grpc::TaskStatus primary_status{};
   crane::grpc::TaskStatus status{};
   uint32_t exit_code{};
   bool held{false};
@@ -719,6 +720,9 @@ struct TaskInCtld {
   std::list<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear();
   void CranedIdsAdd(CranedId const& i);
+
+  void SetPrimaryStepStatus(crane::grpc::TaskStatus val);
+  crane::grpc::TaskStatus PrimaryStepStatus() const { return primary_status; }
 
   void SetStatus(crane::grpc::TaskStatus val);
   crane::grpc::TaskStatus Status() const { return status; }

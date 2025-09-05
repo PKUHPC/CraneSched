@@ -542,6 +542,11 @@ void TaskInCtld::CranedIdsAdd(CranedId const& i) {
   *runtime_attr.mutable_craned_ids()->Add() = i;
 }
 
+void TaskInCtld::SetPrimaryStepStatus(crane::grpc::TaskStatus val) {
+  primary_status = val;
+  runtime_attr.set_primary_step_status(val);
+}
+
 void TaskInCtld::SetStatus(crane::grpc::TaskStatus val) {
   status = val;
   runtime_attr.set_status(val);

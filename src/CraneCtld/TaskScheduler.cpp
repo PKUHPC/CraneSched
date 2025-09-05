@@ -2076,10 +2076,9 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
                  step->StepId(), StepStatusToString(step->Status()));
     }
-    auto job_status = step->Status();
     context->step_raw_ptrs.push_back(step);
     context->step_ptrs.emplace_back(job->ReleaseDaemonStep());
-    return job_status;
+    return job->PrimaryStepStatus();
   }
   return std::nullopt;
 }
@@ -2219,6 +2218,8 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
 
     context->step_raw_ptrs.push_back(step);
     if (primary_step) {
+      job->SetPrimaryStepStatus(step->Status());
+      context->rn_job_raw_ptrs.push_back(job);
       context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
     } else {
       context->step_ptrs.emplace_back(job->EraseStep(step_id));

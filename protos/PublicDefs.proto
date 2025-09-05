@@ -195,6 +195,8 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 allocated_res = 19;
   double cached_priority = 20;
+
+  TaskStatus primary_step_status = 21;
 }
 
 message StepToCtld {
