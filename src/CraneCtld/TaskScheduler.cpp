@@ -2062,6 +2062,8 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
       step->SetStatus(step->ConfigureFailedStatus());
       CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", step->job_id,
                  step->StepId(), StepStatusToString(step->Status()));
+      // Job finish with failed status
+      job->SetPrimaryStepStatus(step->Status());
       // Daemon step failed to configure, terminate all daemon step,
       for (const auto& node : step->CranedIds()) {
         context->craned_orphaned_steps[node][step->job_id].emplace(
