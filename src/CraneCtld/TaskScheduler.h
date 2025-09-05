@@ -784,12 +784,11 @@ class TaskScheduler {
    * @param job the TaskInCtld
    * @param craned_id status change source craned
    * @param context
-   * @return true if Job finished
+   * @return nullopt if job not finish or job finish status
    * */
-  bool DaemonStepStatusChangeHandler_(crane::grpc::TaskStatus new_status,
-                                      TaskInCtld* job,
-                                      const CranedId& craned_id,
-                                      StepStatusChangeContext* context);
+  std::optional<crane::grpc::TaskStatus> DaemonStepStatusChangeHandler_(
+      crane::grpc::TaskStatus new_status, TaskInCtld* job,
+      const CranedId& craned_id, StepStatusChangeContext* context);
 
   /**
    *
@@ -798,7 +797,6 @@ class TaskScheduler {
    * @param step_id
    * @param craned_id status change source craned
    * @param context
-   * @return Step status
    * */
   void CommonStepStatusChangeHandler_(crane::grpc::TaskStatus new_status,
                                       TaskInCtld* job, step_id_t step_id,

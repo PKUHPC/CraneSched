@@ -1997,7 +1997,8 @@ void TaskScheduler::TaskStatusChangeAsyncCb_() {
     m_clean_task_status_change_handle_->send();
 }
 
-bool TaskScheduler::DaemonStepStatusChangeHandler_(
+std::optional<crane::grpc::TaskStatus>
+TaskScheduler::DaemonStepStatusChangeHandler_(
     crane::grpc::TaskStatus new_status, TaskInCtld* job,
     const CranedId& craned_id, StepStatusChangeContext* context) {
   using util::StepStatusToString;
@@ -2075,10 +2076,12 @@ bool TaskScheduler::DaemonStepStatusChangeHandler_(
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
                  step->StepId(), StepStatusToString(step->Status()));
     }
+    auto job_status = step->Status();
     context->step_raw_ptrs.push_back(step);
-    context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
+    context->step_ptrs.emplace_back(job->ReleaseDaemonStep());
+    return job_status;
   }
-  return job_finished;
+  return std::nullopt;
 }
 
 void TaskScheduler::CommonStepStatusChangeHandler_(
@@ -2215,10 +2218,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
     }
 
     context->step_raw_ptrs.push_back(step);
-    // Primary: Update job status when primary step Finish.
     if (primary_step) {
-      job->SetStatus(step->Status());
-      context->rn_job_raw_ptrs.push_back(job);
       context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
     } else {
       context->step_ptrs.emplace_back(job->EraseStep(step_id));
@@ -2258,13 +2258,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
-          "Ignoring unknown task id {} in CleanTaskStatusChangeQueueCb_.",
+          "[Job #{}] Ignoring unknown job in CleanTaskStatusChangeQueueCb_.",
           task_id);
       continue;
     }
 
     // Free job allocation
-    bool job_finished{false};
+    std::optional<crane::grpc::TaskStatus> job_finished{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
     if (step_id == kDaemonStepId) {
@@ -2277,7 +2277,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                                      craned_index, &context);
     }
 
-    if (job_finished) {
+    if (job_finished.has_value()) {
       // Job status set CommonStepStatusChangeHandler_
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -2342,7 +2342,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // It means all task status changes will put the task into mongodb,
       // so we don't have any branch code here and just put it into mongodb.
 
-      CRANE_TRACE("Move task#{} to the Completed Queue", task_id);
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  util::StepStatusToString(job_finished.value()));
       m_running_task_map_.erase(iter);
     }
   }
