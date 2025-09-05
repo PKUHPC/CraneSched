@@ -27,6 +27,7 @@ using moodycamel::ConcurrentQueue;
 using RegToken = google::protobuf::Timestamp;
 
 using task_db_id_t = int64_t;
+using step_db_id_t = int64_t;
 
 // *****************************************************
 // TaskScheduler Constants
@@ -318,6 +319,29 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
+  InteractiveMetaInTask() = default;
+  InteractiveMetaInTask& operator=(const InteractiveMetaInTask& other) {
+    interactive_type = other.interactive_type;
+    cb_task_res_allocated = other.cb_task_res_allocated;
+    cb_task_completed = other.cb_task_completed;
+    cb_task_cancel = other.cb_task_cancel;
+    status_change_cnt = other.status_change_cnt;
+    has_been_cancelled_on_front_end =
+        other.has_been_cancelled_on_front_end.load();
+    has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
+    return *this;
+  }
+
+  InteractiveMetaInTask(const InteractiveMetaInTask& other) {
+    interactive_type = other.interactive_type;
+    cb_task_res_allocated = other.cb_task_res_allocated;
+    cb_task_completed = other.cb_task_completed;
+    cb_task_cancel = other.cb_task_cancel;
+    status_change_cnt = other.status_change_cnt;
+    has_been_cancelled_on_front_end =
+        other.has_been_cancelled_on_front_end.load();
+    has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
+  }
   crane::grpc::InteractiveTaskType interactive_type;
 
   std::function<void(task_id_t, std::string const&,
@@ -360,6 +384,194 @@ struct BatchMetaInTask {
   std::string interpreter;
   std::string output_file_pattern;
   std::string error_file_pattern;
+};
+struct TaskInCtld;
+
+using StepInteractiveMeta = InteractiveMetaInTask;
+
+struct StepInCtld {
+  /**
+   * DAEMON, INTERACTIVE, BATCH or COMMON. only COMMON step is allowed to
+   * cancel.
+   */
+  crane::grpc::TaskType type;
+
+  job_id_t job_id;
+
+  uid_t uid;
+  std::vector<gid_t> gids;
+  std::string name;
+
+  uint32_t ntasks_per_node{0};
+  cpu_t cpus_per_task{0};
+
+  bool requeue_if_failed{false};
+  bool get_user_env{false};
+  std::unordered_map<std::string, std::string> env;
+  std::string container;
+
+  absl::Duration time_limit;
+  ResourceView requested_node_res_view;
+  uint32_t node_num{0};
+  std::unordered_set<std::string> included_nodes;
+  std::unordered_set<std::string> excluded_nodes;
+
+ protected:
+  /* ------------- [2] -------------
+   * Fields that won't change after this task is accepted.
+   * Also, these fields are persisted on the disk.
+   * ------------------------------- */
+  step_db_id_t m_step_db_id_{0};
+  step_id_t m_step_id_{0};
+  crane::grpc::StepType step_type{crane::grpc::StepType::INVALID};
+
+  /* Fields that may change at run time.*/
+  std::int32_t m_requeue_count_{0};
+  ResourceV2 m_allocated_res_;
+
+  std::unordered_set<CranedId> m_craned_ids_;
+  std::unordered_set<CranedId> m_execute_nodes_;
+  std::unordered_set<CranedId> m_configuring_nodes_;
+  std::unordered_set<CranedId> m_running_nodes_;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time m_submit_time_;
+  absl::Time m_start_time_;
+  absl::Time m_end_time_;
+
+  crane::grpc::TaskStatus m_configure_failed_status_{
+      crane::grpc::TaskStatus::Invalid};
+  crane::grpc::TaskStatus m_finish_failed_status_{
+      crane::grpc::TaskStatus::Invalid};
+  crane::grpc::TaskStatus m_status_{crane::grpc::TaskStatus::Invalid};
+  uint32_t m_exit_code_{};
+
+  bool m_held_{false};
+
+ private:
+  /* ------ duplicate of the fields [1] above just for convenience ----- */
+  crane::grpc::StepToCtld m_step_to_ctld_;
+
+  /* ------ duplicate of the fields [2][3] above just for convenience ----- */
+  crane::grpc::RuntimeAttrOfStep m_runtime_attr_;
+
+ public:
+  virtual ~StepInCtld();
+  void SetStepType(crane::grpc::StepType type);
+  crane::grpc::StepType StepType() const;
+  void SetStepToCtld(const crane::grpc::StepToCtld& step_to_ctld) {
+    m_step_to_ctld_ = step_to_ctld;
+  }
+  const crane::grpc::StepToCtld& StepToCtld() const;
+  crane::grpc::StepToCtld* MutableStepToCtld();
+  void SetStepId(step_id_t id);
+  task_id_t StepId() const { return m_step_id_; }
+  void SetStepDbId(step_db_id_t id);
+  task_id_t StepDbId() const { return m_step_db_id_; }
+
+  void SetRequeueCount(std::int32_t count);
+  std::int32_t RequeueCount() const { return m_requeue_count_; }
+  void SetAllocatedRes(const ResourceV2& res);
+  ResourceV2 AllocatedRes() const { return m_allocated_res_; }
+
+  void SetCranedIds(const std::unordered_set<CranedId>& craned_list);
+  const std::unordered_set<CranedId>& CranedIds() const {
+    return m_craned_ids_;
+  }
+  void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
+  std::unordered_set<CranedId> ExecutionNodes() const {
+    return m_execute_nodes_;
+  }
+
+  void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
+  void NodeConfigured(const CranedId& node);
+  bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
+  void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
+  void NodeFinish(const CranedId& node);
+  bool AllNodesFinished() const { return m_running_nodes_.empty(); }
+
+  void SetSubmitTime(absl::Time submit_time);
+  absl::Time SubmitTime() const { return m_submit_time_; }
+  void SetStartTime(absl::Time start_time);
+  absl::Time StartTime() const { return m_start_time_; }
+  void SetEndTime(absl::Time end_time);
+  absl::Time EndTime() const { return m_end_time_; }
+
+  void SetConfigureFailedStatus(crane::grpc::TaskStatus status);
+  bool ConfigureFailed() const {
+    return m_configure_failed_status_ != crane::grpc::TaskStatus::Invalid;
+  }
+  crane::grpc::TaskStatus ConfigureFailedStatus() const {
+    return m_configure_failed_status_;
+  }
+  void SetFinishFailedStatus(crane::grpc::TaskStatus status);
+  bool FinishWithFailedStatus() const {
+    return m_finish_failed_status_ != crane::grpc::TaskStatus::Invalid;
+  }
+  crane::grpc::TaskStatus FinishFailedStatus() const {
+    return m_finish_failed_status_;
+  }
+  void SetStatus(crane::grpc::TaskStatus new_status);
+  crane::grpc::TaskStatus Status() const { return m_status_; }
+  void SetExitCode(uint32_t exit_code);
+  uint32_t ExitCode() const { return m_exit_code_; }
+
+  void SetHeld(bool held);
+  bool Held() const { return m_held_; }
+
+  crane::grpc::RuntimeAttrOfStep const& RuntimeAttr() const {
+    return m_runtime_attr_;
+  }
+  virtual void RecoverFromDb(const TaskInCtld& job,
+                             crane::grpc::StepInEmbeddedDb const& step_in_db);
+  [[nodiscard]] virtual crane::grpc::StepToD GetStepToD(
+      const CranedId& craned_id) const = 0;
+};
+
+struct DaemonStepInCtld : StepInCtld {
+  std::string partition;
+  std::string account;
+  std::string qos;
+
+  ~DaemonStepInCtld() override = default;
+  void InitFromJob(const TaskInCtld& job);
+  [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
+
+  [[nodiscard]] crane::grpc::StepToD GetStepToD(
+      const CranedId& craned_id) const override;
+
+  void RecoverFromDb(const TaskInCtld& job,
+                     const crane::grpc::StepInEmbeddedDb& step_in_db) override;
+};
+
+struct CommonStepInCtld : StepInCtld {
+  /* -------- [1] Fields that are set at the submission time. ------- */
+
+  std::string cmd_line;
+  std::string cwd;
+
+  std::string extra_attr;
+
+  // TODO: fill this field
+  std::optional<StepInteractiveMeta> ia_meta;
+
+  /* -----------
+   * Fields that may change at run time.
+   * However, these fields are NOT persisted on the disk.
+   * ----------- */
+
+  std::string allocated_craneds_regex;
+  std::string pending_reason;
+  ~CommonStepInCtld() override = default;
+  void InitPrimaryStepFromJob(const TaskInCtld& job);
+  [[nodiscard]] bool SetFieldsByStepToCtld(
+      const crane::grpc::StepToCtld& step_to_ctld);
+  [[nodiscard]] crane::grpc::StepToD GetStepToD(
+      const CranedId& craned_id) const override;
+  void RecoverFromDb(const TaskInCtld& job,
+                     const crane::grpc::StepInEmbeddedDb& step_in_db) override;
 };
 
 struct TaskInCtld {
@@ -415,9 +627,16 @@ struct TaskInCtld {
    * -------------------------------- */
   int32_t requeue_count{0};
   std::list<CranedId> craned_ids;
+  crane::grpc::TaskStatus primary_status{};
   crane::grpc::TaskStatus status{};
   uint32_t exit_code{};
   bool held{false};
+  // DAEMON step
+  std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
+  // BATCH or INTERACTIVE step
+  std::unique_ptr<CommonStepInCtld> m_primary_step_;
+  // COMMON steps
+  std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -472,6 +691,11 @@ struct TaskInCtld {
   // =================== Get Attr ==================
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
+  bool IsCalloc() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           task_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Calloc;
+  }
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
@@ -497,6 +721,9 @@ struct TaskInCtld {
   void CranedIdsClear();
   void CranedIdsAdd(CranedId const& i);
 
+  void SetPrimaryStepStatus(crane::grpc::TaskStatus val);
+  crane::grpc::TaskStatus PrimaryStepStatus() const { return primary_status; }
+
   void SetStatus(crane::grpc::TaskStatus val);
   crane::grpc::TaskStatus Status() const { return status; }
 
@@ -521,6 +748,46 @@ struct TaskInCtld {
   void SetHeld(bool val);
   bool const& Held() const { return held; }
 
+  void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
+    m_daemon_step_ = std::move(step);
+  }
+  DaemonStepInCtld* DaemonStep() const { return m_daemon_step_.get(); }
+  DaemonStepInCtld* ReleaseDaemonStep() { return m_daemon_step_.release(); }
+
+  void SetPrimaryStep(std::unique_ptr<CommonStepInCtld>&& step) {
+    m_primary_step_ = std::move(step);
+  }
+  CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
+  CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
+
+  void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
+    // Common step can only be interactive step started by crun.
+    CRANE_ASSERT(step->type == crane::grpc::TaskType::Interactive);
+    CRANE_ASSERT(step->StepToCtld().interactive_meta().interactive_type() ==
+                 crane::grpc::InteractiveTaskType::Crun);
+    m_steps_.emplace(step->StepId(), std::move(step));
+  }
+
+  CommonStepInCtld* GetStep(step_id_t step) const {
+    if (m_steps_.contains(step)) {
+      return m_steps_.at(step).get();
+    }
+    return nullptr;
+  }
+  std::unique_ptr<CommonStepInCtld> EraseStep(step_id_t step_id) {
+    if (m_steps_.contains(step_id)) {
+      auto step =
+          std::unique_ptr<CommonStepInCtld>(m_steps_.at(step_id).release());
+      m_steps_.erase(step_id);
+      return step;
+    }
+    return nullptr;
+  }
+  std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> const&
+  Steps() {
+    return m_steps_;
+  }
+
   void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
@@ -535,10 +802,6 @@ struct TaskInCtld {
   // TaskInCtld. Note that mutable_elapsed_time() is not set here for
   // performance reason. The caller should set it manually.
   void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info);
-
-  crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const;
-
-  crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 };
 
 struct Qos {

@@ -38,13 +38,9 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
-  // TODO: Set reason here.
-  g_task_scheduler->TaskStatusChangeAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code());
+  g_task_scheduler->StepStatusChangeAsync(
+      request->job_id(), request->step_id(), request->craned_id(),
+      request->new_status(), request->exit_code(), request->reason());
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -119,26 +115,30 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  // Some job allocation lost
-  std::set<task_id_t> orphaned_job_ids;
+  std::unordered_map<job_id_t, std::set<step_id_t>> orphaned_steps;
+
+  // Some job or step lost, terminate them with orphaned status
   if (!request->remote_meta().lost_jobs().empty()) {
     CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
                absl::StrJoin(request->remote_meta().lost_jobs(), ","));
+    for (const auto &job_id : request->remote_meta().lost_jobs()) {
+      orphaned_steps[job_id].emplace(kDaemonStepId);
+    }
   }
-  orphaned_job_ids.insert(request->remote_meta().lost_jobs().begin(),
-                          request->remote_meta().lost_jobs().end());
-  if (!request->remote_meta().lost_tasks().empty()) {
-    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
-                          request->remote_meta().lost_tasks().end());
 
-  if (!orphaned_job_ids.empty())
-    g_thread_pool->detach_task(
-        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
-          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
-        });
+  if (!request->remote_meta().lost_steps().empty()) {
+    for (const auto &[job_id, steps] : request->remote_meta().lost_steps()) {
+      orphaned_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
+    }
+    CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
+               util::JobStepsToString(orphaned_steps));
+  }
+
+  if (!orphaned_steps.empty())
+    g_thread_pool->detach_task([steps = std::move(orphaned_steps),
+                                craned = request->craned_id()] mutable {
+      g_task_scheduler->TerminateOrphanedSteps(steps, craned);
+    });
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());

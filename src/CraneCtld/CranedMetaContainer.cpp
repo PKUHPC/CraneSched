@@ -269,6 +269,8 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
         task_id, reservation_id);
     return;
   }
+  CRANE_DEBUG("[Job #{}] Freeing resource from reservation {}", task_id,
+              reservation_id);
 
   ResourceV2 const& resources = resource_iter->second.resources;
 

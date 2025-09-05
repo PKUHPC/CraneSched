@@ -70,7 +70,7 @@ void InitFromStdin(int argc, char** argv) {
   }
 
   g_config.JobId = msg.job_id();
-  g_config.StepId = 0;
+  g_config.StepId = msg.step_id();
   g_config.StepSpec = msg.step_spec();
   g_config.CranedIdOfThisNode = msg.craned_id();
   g_config.TaskCount = 1;
@@ -111,8 +111,13 @@ void InitFromStdin(int argc, char** argv) {
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
 
-  g_config.SupervisorLogFile = std::filesystem::path(msg.log_dir()) /
-                               fmt::format("{}.log", g_config.JobId);
+  g_config.SupervisorLogFile =
+      std::filesystem::path(msg.log_dir()) /
+      fmt::format("{}.{}.log", g_config.JobId, g_config.StepId);
+
+  g_config.SupervisorUnixSockPath =
+      std::filesystem::path(kDefaultSupervisorUnixSockDir) /
+      fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -160,7 +165,7 @@ void GlobalVariableInit() {
   msg.set_ok(ok);
   if (!ok) {
     SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    ostream.Flush();
+    ostream.Close();
     std::abort();
   }
 
@@ -216,6 +221,7 @@ void GlobalVariableInit() {
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+
   ok &= ostream.Flush();
   if (!ok) std::abort();
 }
@@ -232,8 +238,11 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
-  CRANE_INFO("Supervisor started.");
+  CRANE_INFO("Supervisor started step type: {}.",
+             static_cast<int>(g_config.StepSpec.step_type()));
 
+  g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Running, 0,
+                                         std::nullopt);
   g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();
