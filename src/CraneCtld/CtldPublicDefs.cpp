@@ -363,8 +363,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
   SetExecutionNodes(job.executing_craned_ids |
                     std::ranges::to<std::unordered_set>());
-  SetConfiguringNodes(CranedIds());
-  SetRunningNodes(CranedIds());
+  SetConfiguringNodes(ExecutionNodes());
+  SetRunningNodes(ExecutionNodes());
 
   SetSubmitTime(job.SubmitTime());
   SetStartTime(job.StartTime());
