@@ -131,10 +131,10 @@ std::optional<std::string> CriClient::PullImage(
   PullImageRequest request{};
   PullImageResponse response{};
 
-  // TODO: Fix remote image pulling timeout
+  // TODO: Make it configurable in config files, now setting to 1 minutes
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       kCriDefaultReqTimeout);
+                       kCriDefaultImagePullingTimeout);
 
   auto* image = request.mutable_image();
   image->set_image(image_ref);
