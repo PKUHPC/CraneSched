@@ -892,7 +892,7 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
 
   // Inject fake root config if task is not from root
   if (uid != 0 &&
-      InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_container_config_) !=
+      InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
           CraneErrCode::SUCCESS) {
     CRANE_ERROR("Failed to inject fake root config for task #{}",
                 GetParentStep().task_id());
