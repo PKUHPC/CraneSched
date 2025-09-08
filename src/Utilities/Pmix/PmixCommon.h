@@ -44,9 +44,9 @@ constexpr const char* PMIXP_TREE_WIDTH = "PMIXP_TREE_WIDTH";
 static constexpr uint64_t kTagTypeShift   = 48;
 static constexpr uint64_t kTagTypeMask    = 0xFFFF000000000000ULL;
 static constexpr uint64_t kTagLowMask     = 0x0000FFFFFFFFFFFFULL;
-// 每个类型同时挂接的接收个数（可根据负载调大）
-static constexpr int      kInflightPerType = 2;
-// 每条消息最大长度（可配置/调优；若需要超大消息建议用 AM 或 pipeline）
+
+static constexpr int kInflightPerType = 32;
+
 static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
 
 enum class PmixUcxMsgType : uint16_t {

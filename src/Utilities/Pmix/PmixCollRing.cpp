@@ -187,7 +187,12 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
 void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
   bool result = false;
 
-  assert(coll_ring_ctx.in_use);
+  if (!coll_ring_ctx.in_use) {
+    CRANE_ERROR("{:p}: coll_ring_ctx is not in use, seq={}, please check!",
+                static_cast<void*>(this), coll_ring_ctx.seq);
+    g_pmix_server->GetCranedClient()->TerminateTasks();
+    return;
+  }
 
   CRANE_TRACE("{:p}: ProgressCollectRing_ is called, seq={}, state={}",
               static_cast<void*>(this), coll_ring_ctx.seq, ToString(coll_ring_ctx.state));
