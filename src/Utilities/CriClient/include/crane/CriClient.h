@@ -43,6 +43,8 @@ inline constexpr std::string kCriDefaultPodNamespace = "cranesched";
 inline constexpr std::string kCriDefaultLabel = kCriDefaultPodNamespace;
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
+inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
+    std::chrono::seconds(60);
 
 using ContainerEventCallback =
     std::function<void(const api::ContainerEventResponse&)>;
@@ -98,9 +100,6 @@ class CriClient {
 
   CraneExpected<std::vector<api::Container>> ListContainers(
       const std::map<std::string, std::string>& label_selector) const;
-
-  CraneExpected<api::ContainerStatus> GetContainerStatus(
-      const std::string& container_id, bool verbose = false) const;
 
   // ==== Image Service ====
   // TODO: Async image pulling?
