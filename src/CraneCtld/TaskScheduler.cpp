@@ -1418,36 +1418,44 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateResv(
 
 std::expected<void, std::string> TaskScheduler::CreateResv_(
     const crane::grpc::CreateReservationRequest& request) {
+  std::vector<std::string> validation_errors;
+
   std::unordered_set<std::string> allowed_accounts;
   for (const auto& account : request.allowed_accounts()) {
     if (!g_account_manager->GetExistedAccountInfo(account)) {
-      return std::unexpected(fmt::format("Account {} not found", account));
+      validation_errors.push_back(account);
     }
     allowed_accounts.insert(account);
   }
-
   std::unordered_set<std::string> denied_accounts;
   for (const auto& account : request.denied_accounts()) {
     if (!g_account_manager->GetExistedAccountInfo(account)) {
-      return std::unexpected(fmt::format("Account {} not found", account));
+      validation_errors.push_back(account);
     }
     denied_accounts.insert(account);
+  }
+  if (!validation_errors.empty()) {
+    return std::unexpected(fmt::format("Invalid Accounts: {}",
+                                       absl::StrJoin(validation_errors, ", ")));
   }
 
   std::unordered_set<std::string> allowed_users;
   for (const auto& user : request.allowed_users()) {
     if (!g_account_manager->GetExistedUserInfo(user)) {
-      return std::unexpected(fmt::format("User {} not found", user));
+      validation_errors.push_back(user);
     }
     allowed_users.insert(user);
   }
-
   std::unordered_set<std::string> denied_users;
   for (const auto& user : request.denied_users()) {
     if (!g_account_manager->GetExistedUserInfo(user)) {
-      return std::unexpected(fmt::format("User {} not found", user));
+      validation_errors.push_back(user);
     }
     denied_users.insert(user);
+  }
+  if (!validation_errors.empty()) {
+    return std::unexpected(fmt::format("Invalid Users: {}",
+                                       absl::StrJoin(validation_errors, ", ")));
   }
 
   std::list<CranedId> craned_ids;
@@ -1470,100 +1478,103 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
 
   PartitionId partition = request.partition();
 
+  if (partition.empty()) {
+    return std::unexpected("No partition specified");
+  }
+
+  auto all_partitions_meta_map =
+      g_meta_container->GetAllPartitionsMetaMapConstPtr();
+  if (!all_partitions_meta_map->contains(partition)) {
+    return std::unexpected(fmt::format("Partition {} not found", partition));
+  }
+
+  const auto part_meta_ptr =
+      all_partitions_meta_map->at(partition).GetExclusivePtr();
+
+  if (node_num == 0) {
+    // NodeCnt is valid only when craned_regex is empty
+    if (!request.has_node_num()) {
+      return std::unexpected("No nodes specified");
+    } else {
+      node_num = request.node_num();
+    }
+    // If craned_ids is empty, test all nodes in the partition
+    for (CranedId const& craned_id : part_meta_ptr->craned_ids) {
+      craned_ids.emplace_back(craned_id);
+    }
+    if (craned_ids.size() < node_num) {
+      return std::unexpected(
+          fmt::format("Not enough nodes in partition {}. "
+                      "Requested: {}, Available: {}",
+                      partition, node_num, craned_ids.size()));
+    }
+  } else {
+    // Check if all nodes are in the partition
+    for (CranedId const& craned_id : craned_ids) {
+      if (!part_meta_ptr->craned_ids.contains(craned_id)) {
+        validation_errors.push_back(craned_id);
+      }
+    }
+    if (!validation_errors.empty()) {
+      return std::unexpected(
+          fmt::format("Nodes not in partition {}: {}", partition,
+                      util::HostNameListToStr(validation_errors)));
+    }
+
+    ResvId resv_name = request.reservation_name();
+    auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
+    if (resv_meta_map->contains(resv_name)) {
+      return std::unexpected("Reservation name already exists");
+    }
+  }
+
   ResvId resv_name = request.reservation_name();
   auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  if (resv_meta_map->contains(resv_name))
+  if (resv_meta_map->contains(resv_name)) {
     return std::unexpected("Reservation name already exists");
-
-  if (!partition.empty()) {
-    auto all_partitions_meta_map =
-        g_meta_container->GetAllPartitionsMetaMapConstPtr();
-    if (!all_partitions_meta_map->contains(partition)) {
-      return std::unexpected(fmt::format("Partition {} not found", partition));
-    }
-
-    const auto part_meta_ptr =
-        all_partitions_meta_map->at(partition).GetExclusivePtr();
-
-    if (node_num == 0) {
-      if (!request.node_num().has_value()) {
-        return std::unexpected("No nodes specified");
-      } else {
-        node_num = request.node_num().value();
-      }
-      // If craned_ids is empty, test all nodes in the partition
-      for (CranedId const& craned_id : part_meta_ptr->craned_ids) {
-        craned_ids.emplace_back(craned_id);
-      }
-      if (craned_ids.size() < node_num) {
-        return std::unexpected(
-            fmt::format("Not enough nodes in partition {}. "
-                        "Requested: {}, Available: {}",
-                        partition, node_num, craned_ids.size()));
-      }
-    } else {
-      // Check if all nodes are in the partition
-      for (CranedId const& craned_id : craned_ids) {
-        if (!part_meta_ptr->craned_ids.contains(craned_id)) {
-          return std::unexpected(fmt::format("Node {} is not in partition {}",
-                                             craned_id, partition));
-        }
-      }
-    }
-  } else if (node_num == 0) {
-    return std::unexpected("No nodes specified");
   }
 
   std::vector<std::pair<CranedMetaContainer::CranedMetaPtr, ResourceInNode>>
       craned_meta_res_vec;
   ResourceV2 allocated_res;
   {
-    LockGuard running_guard(&m_running_task_map_mtx_);
-
-    bool allow_failure = node_num > craned_ids.size();
+    std::vector<CranedId> nodes_not_found;
+    std::vector<CranedId> nodes_conflicted;
 
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
       if (!craned_meta) {
-        if (!allow_failure) {
-          return std::unexpected(fmt::format("Node {} not found", craned_id));
-        } else {
-          continue;
-        }
+        nodes_not_found.emplace_back(craned_id);
+        continue;
       }
 
+      bool failed = false;
       // use static_meta in case of craned dead
       ResourceInNode res_avail = craned_meta->static_meta.res;
       for (task_id_t task_id :
            craned_meta->rn_task_res_map | std::views::keys) {
+        LockGuard running_guard(&m_running_task_map_mtx_);
         const auto& task = m_running_task_map_.at(task_id);
         absl::Time task_end_time = task->StartTime() + task->time_limit;
 
         if (task_end_time > start_time) {
-          if (!allow_failure) {
-            return std::unexpected(
-                fmt::format("Node {} has running tasks "
-                            "that end after the reservation start time",
-                            craned_id));
-          } else {
-            continue;
-          }
+          nodes_conflicted.emplace_back(craned_id);
+          failed = true;
+          break;
         }
       }
+      if (failed) continue;
 
       for (const auto& resv :
            craned_meta->resv_in_node_map | std::views::values) {
         if (resv.start_time < end_time && resv.end_time > start_time) {
-          if (!allow_failure) {
-            return std::unexpected(
-                fmt::format("Node {} has reservations that overlap with the "
-                            "new reservation",
-                            craned_id));
-          } else {
-            continue;
-          }
+          nodes_conflicted.emplace_back(craned_id);
+          failed = true;
+          break;
         }
       }
+      if (failed) continue;
+
       allocated_res.AddResourceInNode(craned_id, res_avail);
       craned_meta_res_vec.emplace_back(std::move(craned_meta),
                                        std::move(res_avail));
@@ -1572,11 +1583,24 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
       }
     }
 
-    if (allow_failure && craned_meta_res_vec.size() < node_num) {
-      return std::unexpected(
-          fmt::format("Not enough nodes available for reservation. "
-                      "Requested: {}, Available: {}",
-                      node_num, craned_meta_res_vec.size()));
+    if (craned_meta_res_vec.size() < node_num) {
+      std::string failed_msg = fmt::format(
+          "Not enough nodes available for reservation. "
+          "Requested: {}, Available: {}",
+          node_num, craned_meta_res_vec.size());
+      if (!nodes_not_found.empty()) {
+        failed_msg +=
+            "\n" + fmt::format("Nodes not found: {}",
+                               util::HostNameListToStr(nodes_not_found));
+      }
+      if (!nodes_conflicted.empty()) {
+        failed_msg +=
+            "\n" +
+            fmt::format(
+                "Nodes conflicted by running jobs or other reservation: {}",
+                util::HostNameListToStr(nodes_conflicted));
+      }
+      return std::unexpected(failed_msg);
     }
   }
 
