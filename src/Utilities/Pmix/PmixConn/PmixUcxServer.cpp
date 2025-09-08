@@ -23,12 +23,12 @@
 
 namespace pmix {
 
-void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
+void PmixUcxServiceImpl::SendPmixRingMsg(const std::vector<char>& req_data) {
   CRANE_TRACE("PmixUcxServiceImpl::SendPmixRingMsg is called");
   crane::grpc::pmix::SendPmixRingMsgReq request;
-  if (!request.ParseFromString(req_data)) {
-    CRANE_ERROR("Failed to parse SendPmixRingMsgReq from string");
-     return;
+  if (!request.ParseFromArray(req_data.data(), req_data.size())) {
+    CRANE_ERROR("Failed to parse SendPmixRingMsg from string");
+    return;
   }
 
   std::vector<pmix_proc_t> procs;
@@ -52,10 +52,14 @@ void PmixUcxServiceImpl::SendPmixRingMsg(const std::string& req_data) {
   coll->ProcessRingRequest(request.pmix_ring_msg_hdr(), request.msg());
 }
 
-void PmixUcxServiceImpl::PmixTreeUpwardForward(const std::string& req_data) {
+void PmixUcxServiceImpl::PmixTreeUpwardForward(const std::vector<char>& req_data) {
+  CRANE_TRACE("PmixUcxServiceImpl::PmixTreeUpwardForward is called");
   crane::grpc::pmix::PmixTreeUpwardForwardReq request;
 
-  if (!request.ParseFromString(req_data)) return ;
+  if (!request.ParseFromArray(req_data.data(), req_data.size())) {
+    CRANE_ERROR("Failed to parse PmixTreeUpwardForward from string");
+     return;
+  }
 
   std::vector<pmix_proc_t> procs;
   for (const auto &proc : request.pmix_procs()) {
@@ -77,9 +81,13 @@ void PmixUcxServiceImpl::PmixTreeUpwardForward(const std::string& req_data) {
   coll->PmixCollTreeChild(request.peer_host(), request.seq(), request.msg());
 }
 
-void PmixUcxServiceImpl::PmixTreeDownwardForward(const std::string& req_data) {
+void PmixUcxServiceImpl::PmixTreeDownwardForward(const std::vector<char>& req_data) {
+  CRANE_TRACE("PmixUcxServiceImpl::PmixTreeDownwardForward is called");
   crane::grpc::pmix::PmixTreeDownwardForwardReq request;
-  if (!request.ParseFromString(req_data)) return ;
+  if (!request.ParseFromArray(req_data.data(), req_data.size())) {
+    CRANE_ERROR("Failed to parse PmixTreeDownwardForward from string");
+     return;
+  }
 
   std::vector<pmix_proc_t> procs;
   for (const auto &proc : request.pmix_procs()) {
@@ -101,10 +109,14 @@ void PmixUcxServiceImpl::PmixTreeDownwardForward(const std::string& req_data) {
   coll->PmixCollTreeParent(request.peer_host(), request.seq(), request.msg());
 }
 
-void PmixUcxServiceImpl::PmixDModexRequest(const std::string& req_data) {
+void PmixUcxServiceImpl::PmixDModexRequest(const std::vector<char>& req_data) {
+  CRANE_TRACE("PmixUcxServiceImpl::PmixDModexRequest is called");
   crane::grpc::pmix::PmixDModexRequestReq request;
 
-  if (!request.ParseFromString(req_data)) return;
+if (!request.ParseFromArray(req_data.data(), req_data.size())) {
+    CRANE_ERROR("Failed to parse PmixDModexRequest from string");
+     return;
+  }
 
   pmix_proc_t proc;
   auto& nspace_str = request.pmix_proc().nspace();
@@ -115,9 +127,13 @@ void PmixUcxServiceImpl::PmixDModexRequest(const std::string& req_data) {
       request.seq_num(), request.craned_id(), proc, request.local_namespace());
 }
 
-void PmixUcxServiceImpl::PmixDModexResponse(const std::string& req_data) {
+void PmixUcxServiceImpl::PmixDModexResponse(const std::vector<char>& req_data) {
+  CRANE_TRACE("PmixUcxServiceImpl::PmixDModexResponse is called");
   crane::grpc::pmix::PmixDModexResponseReq request;
-  if (!request.ParseFromString(req_data)) return ;
+  if (!request.ParseFromArray(req_data.data(), req_data.size())) {
+    CRANE_ERROR("Failed to parse PmixDModexResponse from string");
+     return;
+  }
 
   g_dmodex_req_manager->PmixProcessResponse(
       request.seq_num(), request.craned_id(), request.data(), request.status());
@@ -271,7 +287,7 @@ void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag
   auto type = req->type;
   if (UCS_OK == status && info) {
     req->data.resize(info->length);
-    self->m_ucx_process_req_queue_.enqueue(req);
+    self->m_ucx_process_req_queue_.enqueue(std::move(req));
     self->m_ucx_process_req_async_handle_->send();
   } else {
     CRANE_ERROR("UCX send request failed: %s", ucs_status_string(status));
@@ -282,24 +298,22 @@ void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag
 
 void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {
   PmixUcxReq* req;
-
   while (m_ucx_process_req_queue_.try_dequeue(req)) {
-    std::string data(req->data.data(), req->data.size());
     switch (req->type) {
     case PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG:
-      m_service_impl_->SendPmixRingMsg(data);
+      m_service_impl_->SendPmixRingMsg(req->data);
       break;
     case PmixUcxMsgType::PMIX_UCX_DMDEX_REQUEST:
-      m_service_impl_->PmixDModexRequest(data);
+      m_service_impl_->PmixDModexRequest(req->data);
       break;
     case PmixUcxMsgType::PMIX_UCX_DMDEX_RESPONSE:
-      m_service_impl_->PmixDModexResponse(data);
+      m_service_impl_->PmixDModexResponse(req->data);
       break;
     case PmixUcxMsgType::PMIX_UCX_TREE_DOWNWARD_FORWARD:
-      m_service_impl_->PmixTreeDownwardForward(data);
+      m_service_impl_->PmixTreeDownwardForward(req->data);
       break;
     case PmixUcxMsgType::PMIX_UCX_TREE_UPWARD_FORWARD:
-      m_service_impl_->PmixTreeUpwardForward(data);
+      m_service_impl_->PmixTreeUpwardForward(req->data);
       break;
     }
     delete req;

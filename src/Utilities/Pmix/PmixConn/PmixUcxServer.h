@@ -40,15 +40,15 @@ class PmixUcxServiceImpl {
 public:
   explicit PmixUcxServiceImpl() = default;
 
-  void SendPmixRingMsg(const std::string& req_data);
+  void SendPmixRingMsg(const std::vector<char>& req_data);
 
-  void PmixTreeUpwardForward(const std::string& req_data);
+  void PmixTreeUpwardForward(const std::vector<char>& req_data);
 
-  void PmixTreeDownwardForward(const std::string& req_data);
+  void PmixTreeDownwardForward(const std::vector<char>& req_data);
 
-  void PmixDModexRequest(const std::string& req_data);
+  void PmixDModexRequest(const std::vector<char>& req_data);
 
-  void PmixDModexResponse(const std::string& req_data);
+  void PmixDModexResponse(const std::vector<char>& req_data);
 };
 
 class PmixUcxServer: public PmixASyncServer {

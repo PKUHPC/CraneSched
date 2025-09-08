@@ -66,7 +66,6 @@ private:
 
   CranedId m_craned_id_;
 
-  
   template <class T>
 using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
