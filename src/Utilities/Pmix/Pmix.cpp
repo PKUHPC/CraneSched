@@ -273,6 +273,9 @@ bool PmixServer::Init(
   if (m_is_init_) return true;
   
   m_uvw_loop_ = uvw::loop::create();
+  m_thread_pool_ = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("PmixThreadPool"); });
 
   InfoSet_(config, task, env_map);
 
@@ -437,6 +440,7 @@ bool PmixServer::ConnInit_(const Config& config) {
   m_craned_client_->InitChannelAndStub(config.CranedUnixSocketPath);
 
   auto env_val = GetEnvVar(CRANE_PMIX_DIRECT_CONN);
+  // env_val = "tcp";
   if (env_val == "ucx") {
     #ifndef HAVE_UCX
       CRANE_ERROR("UCX support is not compiled in.");

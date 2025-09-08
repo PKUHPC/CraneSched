@@ -20,18 +20,28 @@
 
 #include <ucp/api/ucp.h>
 
+#include "Pmix.h"
 #include "PmixCommon.h"
+#include "PmixState.h"
 #include "crane/Logger.h"
 
 namespace pmix {
 
-PmixUcxStub::PmixUcxStub(PmixUcxClient *pmix_client) : m_pmix_client_(pmix_client) {}
+PmixUcxStub::PmixUcxStub(PmixUcxClient *pmix_client) : m_pmix_client_(pmix_client) {
+    m_callback_req_async_handle_ =
+      g_pmix_server->GetUvwLoop()->resource<uvw::async_handle>();
+  m_callback_req_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanCallbackReqQueueCb_();
+      });
+}
 
 void PmixUcxStub::SendPmixRingMsgNoBlock(
     const crane::grpc::pmix::SendPmixRingMsgReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG) << kTagTypeShift) | (1 & kTagLowMask);
-  std::string data;
-  if (!request.SerializeToString(&data)) {
+  
+  std::vector<char> data(request.ByteSizeLong());
+  if (!request.SerializeToArray(data.data(), data.size())) {
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
@@ -44,8 +54,8 @@ void PmixUcxStub::SendPmixRingMsgNoBlock(
   void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
   if (req == nullptr) {
     CRANE_TRACE("ucx SendPmixRingMsgNoBlock completed immediately");
-    // 不能直接执行callback，否则会再次请求锁，导致卡住
-    std::thread([callback](){ callback(true); }).detach();
+    m_callback_req_queue_.enqueue(callback);
+    m_callback_req_async_handle_->send();
     return ;
   }
 }
@@ -53,8 +63,8 @@ void PmixUcxStub::SendPmixRingMsgNoBlock(
 void PmixUcxStub::PmixTreeUpwardForwardNoBlock(
     const crane::grpc::pmix::PmixTreeUpwardForwardReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_TREE_UPWARD_FORWARD) << kTagTypeShift) | (1 & kTagLowMask);
-  std::string data;
-  if (!request.SerializeToString(&data)) {
+  std::vector<char> data(request.ByteSizeLong());
+  if (!request.SerializeToArray(data.data(), data.size())) {
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
@@ -63,14 +73,20 @@ void PmixUcxStub::PmixTreeUpwardForwardNoBlock(
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
   param.cb.send = SendHandle_;
   param.user_data = &callback;
-  ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  if (req == nullptr) {
+    CRANE_TRACE("ucx PmixTreeUpwardForwardNoBlock completed immediately");
+    m_callback_req_queue_.enqueue(callback);
+    m_callback_req_async_handle_->send();
+    return ;
+  }
 }
 
 void PmixUcxStub::PmixTreeDownwardForwardNoBlock(
     const crane::grpc::pmix::PmixTreeDownwardForwardReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_TREE_DOWNWARD_FORWARD) << kTagTypeShift) | (1 & kTagLowMask);
-  std::string data;
-  if (!request.SerializeToString(&data)) {
+  std::vector<char> data(request.ByteSizeLong());
+  if (!request.SerializeToArray(data.data(), data.size())) {
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
@@ -79,14 +95,20 @@ void PmixUcxStub::PmixTreeDownwardForwardNoBlock(
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
   param.cb.send = SendHandle_;
   param.user_data = &callback;
-  ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  if (req == nullptr) {
+    CRANE_TRACE("ucx PmixTreeDownwardForwardNoBlock completed immediately");
+    m_callback_req_queue_.enqueue(callback);
+    m_callback_req_async_handle_->send();
+    return ;
+  }
 }
 
 void PmixUcxStub::PmixDModexRequestNoBlock(
     const crane::grpc::pmix::PmixDModexRequestReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_DMDEX_REQUEST) << kTagTypeShift) | (1 & kTagLowMask);
-  std::string data;
-  if (!request.SerializeToString(&data)) {
+  std::vector<char> data(request.ByteSizeLong());
+  if (!request.SerializeToArray(data.data(), data.size())) {
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
@@ -95,14 +117,20 @@ void PmixUcxStub::PmixDModexRequestNoBlock(
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
   param.cb.send = SendHandle_;
   param.user_data = &callback;
-  ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  if (req == nullptr) {
+    CRANE_TRACE("ucx PmixDModexRequestNoBlock completed immediately");
+    m_callback_req_queue_.enqueue(callback);
+    m_callback_req_async_handle_->send();
+    return ;
+  }
 }
 
 void PmixUcxStub::PmixDModexResponseNoBlock(
     const crane::grpc::pmix::PmixDModexResponseReq &request, AsyncCallback callback) {
   ucp_tag_t tag = (static_cast<uint64_t>(PmixUcxMsgType::PMIX_UCX_DMDEX_RESPONSE) << kTagTypeShift) | (1 & kTagLowMask);
-  std::string data;
-  if (!request.SerializeToString(&data)) {
+  std::vector<char> data(request.ByteSizeLong());
+  if (!request.SerializeToArray(data.data(), data.size())) {
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
@@ -111,7 +139,13 @@ void PmixUcxStub::PmixDModexResponseNoBlock(
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
   param.cb.send = SendHandle_;
   param.user_data = &callback;
-  ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
+  if (req == nullptr) {
+    CRANE_TRACE("ucx PmixDModexResponseNoBlock completed immediately");
+    m_callback_req_queue_.enqueue(callback);
+    m_callback_req_async_handle_->send();
+    return ;
+  }
 }
 
 void PmixUcxStub::SendHandle_(void *request, ucs_status_t status,
@@ -124,6 +158,14 @@ void PmixUcxStub::SendHandle_(void *request, ucs_status_t status,
     (*callback)(true);
   }
   ucp_request_free(request);
+}
+
+
+void PmixUcxStub::EvCleanCallbackReqQueueCb_(){
+  AsyncCallback callback;
+  while (m_callback_req_queue_.try_dequeue(callback)) {
+    callback(true);
+  }
 }
 
 void PmixUcxClient::EmplacePmixStub(const CranedId &craned_id, const std::string& port) {

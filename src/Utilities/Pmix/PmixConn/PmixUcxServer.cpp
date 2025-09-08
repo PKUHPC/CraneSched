@@ -275,7 +275,9 @@ void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag
     self->m_ucx_process_req_async_handle_->send();
   } else {
     CRANE_ERROR("UCX send request failed: %s", ucs_status_string(status));
+    delete req;
   }
+  self->RegisterReceivesForType_(type, 1);
 }
 
 void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {

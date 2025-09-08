@@ -45,7 +45,7 @@ static constexpr uint64_t kTagTypeShift   = 48;
 static constexpr uint64_t kTagTypeMask    = 0xFFFF000000000000ULL;
 static constexpr uint64_t kTagLowMask     = 0x0000FFFFFFFFFFFFULL;
 
-static constexpr int kInflightPerType = 32;
+static constexpr int kInflightPerType = 64;
 
 static constexpr size_t   kRecvMaxBytes    = 1 << 20; // 1MB
 

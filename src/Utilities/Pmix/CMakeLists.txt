@@ -37,5 +37,6 @@ target_link_libraries(Utility_Pmix PUBLIC
         libpmix
         phmap
         uvw
+        bs_thread_pool
         $<$<BOOL:${UCX_FOUND}>:${UCX_LIBS}>
 )

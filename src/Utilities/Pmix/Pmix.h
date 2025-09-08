@@ -26,6 +26,7 @@
 #include <future>
 #include <uvw.hpp>
 #include <vector>
+#include <BS_thread_pool.hpp>
 
 #include "CranedClient.h"
 #include "PmixASyncServer.h"
@@ -73,6 +74,7 @@ class PmixServer {
     return m_pmix_async_server_.get();
   }
   uvw::loop* GetUvwLoop() const { return m_uvw_loop_.get(); }
+  BS::thread_pool* GetThreadPool() const { return m_thread_pool_.get(); }
 
  private:
   void InfoSet_(const Config& config, const crane::grpc::TaskToD& task,
@@ -123,6 +125,8 @@ class PmixServer {
   std::atomic_bool m_cq_closed_{false};
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_cleanup_timer_handle_;
+
+  std::unique_ptr<BS::thread_pool> m_thread_pool_;
 };
 
 }  // namespace pmix

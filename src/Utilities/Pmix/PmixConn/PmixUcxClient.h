@@ -22,6 +22,9 @@
 #include <ucp/api/ucp_compat.h>
 #include <ucp/api/ucp_def.h>
 
+#include "concurrentqueue/concurrentqueue.h"
+#include "uvw/async.h"
+
 #include "PmixClient.h"
 #include "crane/Lock.h"
 #include "protos/Pmix.grpc.pb.h"
@@ -62,6 +65,14 @@ private:
   ucp_ep_h m_ep_;
 
   CranedId m_craned_id_;
+
+  
+  template <class T>
+using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+
+  std::shared_ptr<uvw::async_handle> m_callback_req_async_handle_;
+  ConcurrentQueue<AsyncCallback> m_callback_req_queue_;
+  void EvCleanCallbackReqQueueCb_();
 
   friend class PmixUcxClient;
 };
