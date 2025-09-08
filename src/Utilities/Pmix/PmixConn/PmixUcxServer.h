@@ -32,7 +32,7 @@ class PmixUcxServer;
 
 struct PmixUcxReq {
   PmixUcxMsgType type;
-  std::vector<char> data;;
+  std::vector<char> data;
   PmixUcxServer* self{};
 };
 

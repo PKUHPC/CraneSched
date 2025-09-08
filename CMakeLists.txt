@@ -120,7 +120,7 @@ option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
-option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" ON)
 
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
@@ -333,7 +333,7 @@ find_package(UCX QUIET)
 if(UCX_FOUND)
     message(STATUS "UCX found: ${UCX_INCLUDE_DIRS}")
     add_definitions(-DHAVE_UCX)
-    set(UCX_LIBS ${UCX_LIBRARIES})
+    set(UCX_LIBS /usr/lib64/libucp.so.0 /usr/lib64/libucs.so /usr/lib64/libuct.so)
     set(UCX_INCLUDES ${UCX_INCLUDE_DIRS})
 endif()
 

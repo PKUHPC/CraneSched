@@ -35,6 +35,7 @@ void PmixUcxStub::SendPmixRingMsgNoBlock(
     CRANE_ERROR("Failed to serialize SendPmixRingMsgReq to string");
     return ;
   }
+  
   ucp_request_param_t param;
   memset(&param, 0, sizeof(param));
   param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
@@ -42,8 +43,9 @@ void PmixUcxStub::SendPmixRingMsgNoBlock(
   param.user_data = &callback;
   void* req = ucp_tag_send_nbx(m_ep_, data.data(), data.size(), tag, &param);
   if (req == nullptr) {
-    CRANE_TRACE("ucx send request completed immediately");
-    callback(true);
+    CRANE_TRACE("ucx SendPmixRingMsgNoBlock completed immediately");
+    // 不能直接执行callback，否则会再次请求锁，导致卡住
+    std::thread([callback](){ callback(true); }).detach();
     return ;
   }
 }

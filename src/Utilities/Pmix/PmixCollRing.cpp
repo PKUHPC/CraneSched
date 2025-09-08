@@ -145,9 +145,6 @@ bool Coll::CollRingContrib_(CollRingCtx& coll_ring_ctx, uint32_t contrib_id,
     CRANE_DEBUG("coll_ctx {:p}: transit data to nodeid={}, seq={}, hop={}, size={}, contrib={}",
       static_cast<void*>(&coll_ring_ctx), m_ring_.next_craned_id, coll_ring_ctx.seq, hop_seq, data.size(), contrib_id);
 
-    // TODO: 自动选用不同的发送方式
-    auto context = std::make_shared<grpc::ClientContext>();
-    auto reply = std::make_shared<crane::grpc::pmix::SendPmixRingMsgReply>();
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_ring_.next_craned_id);
     if (!stub) {
       CRANE_ERROR("{:p}, PmixStub is not get, cannot forward ring data", static_cast<void*>(&coll_ring_ctx));
@@ -192,16 +189,22 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
 
   assert(coll_ring_ctx.in_use);
 
+  CRANE_TRACE("{:p}: ProgressCollectRing_ is called, seq={}, state={}",
+              static_cast<void*>(this), coll_ring_ctx.seq, ToString(coll_ring_ctx.state));
   do {
     result = false;
     switch (coll_ring_ctx.state) {
     case CollRingState::SYNC:
+      CRANE_TRACE("{:p}: SYNC state is processing, seq={}",
+                  static_cast<void*>(this), coll_ring_ctx.seq);
       if (coll_ring_ctx.contrib_local || coll_ring_ctx.contrib_prev != 0) {
         coll_ring_ctx.state = CollRingState::PROGRESS;
         result = true;
       }
       break;
     case CollRingState::PROGRESS:
+    CRANE_TRACE("{:p}: PROGRESS state is processing, seq={}",
+                  static_cast<void*>(this), coll_ring_ctx.seq);
       /* check for all data is collected and forwarded */
         if (m_peers_cnt_ -
             (coll_ring_ctx.contrib_prev + static_cast<uint32_t>(coll_ring_ctx.contrib_local)) == 0) {
@@ -235,7 +238,8 @@ void Coll::RingReleaseFn(void* rel_data) {
 }
 
 void Coll::InvokeCallBackRing_(CollRingCtx& coll_ring_ctx) {
-
+  CRANE_DEBUG("{:p}: InvokeCallBackRing_ is called, seq={}",
+              static_cast<void*>(this), coll_ring_ctx.seq);
   if (!m_cbfunc_)
       return ;
 
@@ -264,9 +268,9 @@ void Coll::ResetCollRing_(CollRingCtx& coll_ring_ctx) {
 bool Coll::ProcessRingRequest(
     const crane::grpc::pmix::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg) {
 
-  CRANE_DEBUG("collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}", hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(), hdr.msgsize());
-
   std::lock_guard lock_guard(this->m_lock_);
+
+  CRANE_DEBUG("collective message from nodeid={}, contrib_id={}, seq={}, hop={}, msgsize={}", hdr.craned_id(), hdr.contrib_id(), hdr.seq(), hdr.hop_seq(), hdr.msgsize());
 
   if (m_seq_-1 == hdr.seq()) {
     CRANE_DEBUG("{:p}: unexpected contrib from {}, coll->seq={}, seq={}", static_cast<void*>(this), hdr.craned_id(), m_seq_, hdr.seq());

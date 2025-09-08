@@ -270,13 +270,12 @@ void PmixUcxServer::RecvHandle_(void* request, ucs_status_t status,const ucp_tag
   PmixUcxServer* self = req->self;
   auto type = req->type;
   if (UCS_OK == status && info) {
+    req->data.resize(info->length);
     self->m_ucx_process_req_queue_.enqueue(req);
     self->m_ucx_process_req_async_handle_->send();
   } else {
     CRANE_ERROR("UCX send request failed: %s", ucs_status_string(status));
   }
-
-  self->RegisterReceivesForType_(type, 1);
 }
 
 void PmixUcxServer::EvCleanUcxProcessReqQueueCb_() {

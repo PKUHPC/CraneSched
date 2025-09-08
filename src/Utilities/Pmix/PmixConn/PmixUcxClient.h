@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <thread>
 #include <ucp/api/ucp_compat.h>
 #include <ucp/api/ucp_def.h>
 
@@ -110,6 +111,8 @@ using NodeHashMap = absl::node_hash_map<K, V, Hash>;
   int m_node_num_;
 
   std::atomic_uint64_t m_channel_count_{0};
+  std::atomic_bool m_running_{true};
+  std::thread m_progress_thread_;
 };
 
 

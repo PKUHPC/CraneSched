@@ -103,7 +103,6 @@ class PMIxServerModule {
      }
 
     CollType type = StrToCollType(GetEnvVar(CRANE_PMIX_FENCE));
-
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
 
