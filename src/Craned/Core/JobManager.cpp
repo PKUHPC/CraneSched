@@ -920,7 +920,15 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(),
         false, Common::CgConstant::kCgMinMem);
     if (cg_expt.has_value()) {
-      job->cgroup = std::move(cg_expt.value());
+      auto& cg_ptr = cg_expt.value();
+
+      if (g_config.Plugin.Enabled) {
+        // FIXME: Refactor related plugin interface and replace here.
+        g_plugin_client->CreateCgroupHookAsync(
+            job->job_id, step->step_to_d.username(), step->step_to_d.account(),
+            cg_ptr->CgroupName(), job->job_to_d.res());
+      }
+      job->cgroup = std::move(cg_ptr);
     } else {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
       ActivateTaskStatusChangeAsync_(
