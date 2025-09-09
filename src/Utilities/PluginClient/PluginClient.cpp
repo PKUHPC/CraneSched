@@ -255,13 +255,17 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 }
 
 void PluginClient::CreateCgroupHookAsync(
-    task_id_t task_id, const std::string& cgroup,
-    const crane::grpc::ResourceInNode& resource) {
+    task_id_t task_id, const std::string& username, const std::string& account,
+    const std::string& cgroup, const crane::grpc::ResourceInNode& resource) {
+  CRANE_TRACE("[Plugin] Sending CreateCgroupHookAsync.{} {}", username,
+              account);
   auto request =
       std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
   request->set_task_id(task_id);
   request->set_cgroup(cgroup);
   request->mutable_resource()->CopyFrom(resource);
+  request->set_username(username);
+  request->set_account(account);
 
   HookEvent e{HookType::CREATE_CGROUP,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};

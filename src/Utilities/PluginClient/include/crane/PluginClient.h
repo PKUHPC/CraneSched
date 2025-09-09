@@ -74,7 +74,9 @@ class PluginClient {
       std::vector<crane::grpc::plugin::CranedEventInfo> events);
 
   // Launched by Craned
-  void CreateCgroupHookAsync(task_id_t task_id, const std::string& cgroup,
+  void CreateCgroupHookAsync(task_id_t task_id, const std::string& username,
+                             const std::string& account,
+                             const std::string& cgroup,
                              const crane::grpc::ResourceInNode& resource);
   void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
 
