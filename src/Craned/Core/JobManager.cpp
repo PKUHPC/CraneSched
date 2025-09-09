@@ -251,14 +251,14 @@ void JobManager::EvCleanCheckSupervisorQueueCb_() {
 
 bool JobManager::EvCheckSupervisorRunning_() {
   std::vector<task_id_t> job_ids;
+  std::vector<job_id_t> missing_jobs;
   {
     absl::MutexLock lk(&m_release_cg_mtx_);
     for (auto& [job_id, retry_count] : m_release_job_retry_map_) {
       // TODO: replace following with step_id
       auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
       if (!job_ptr) {
-        CRANE_WARN("[Job #{}] does not exist when check supervisor running.",
-                   job_id);
+        missing_jobs.emplace_back(job_id);
         continue;
       }
       for (const auto& [step_id, step] : job_ptr->step_map) {
@@ -288,9 +288,17 @@ bool JobManager::EvCheckSupervisorRunning_() {
         }
       }
     }
+    for (task_id_t job_id : missing_jobs) {
+      m_release_job_retry_map_.erase(job_id);
+    }
     for (task_id_t job_id : job_ids) {
       m_release_job_retry_map_.erase(job_id);
     }
+  }
+
+  if (!missing_jobs.empty()) {
+    CRANE_TRACE("Job [{}] does not exist, skip cgroup clean up.",
+                absl::StrJoin(missing_jobs, ","));
   }
 
   if (!job_ids.empty()) {
