@@ -261,6 +261,10 @@ bool JobManager::EvCheckSupervisorRunning_() {
         missing_jobs.emplace_back(job_id);
         continue;
       }
+      if (job_ptr->step_map.empty()) {
+        CRANE_DEBUG("[Job #{}] has no step, just clean up.", job_id);
+        job_ids.push_back(job_id);
+      }
       for (const auto& [step_id, step] : job_ptr->step_map) {
         bool exists = false;
         if (kill(step->supv_pid, 0) == 0) {
