@@ -502,9 +502,6 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
                              "Failed connect to {}, stub destroyed.",
                              craned->m_craned_id_);
 
-          // When deleting craned, the destructor will call
-          // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
-          // into the re-connecting queue again.
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
           if (m_craned_disconnected_cb_) {
@@ -583,11 +580,11 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     else
       next_tag_type = std::nullopt;
 
-    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                       "{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
-                       (int)craned->m_prev_channel_state_,
-                       craned->m_failure_retry_times_,
-                       craned->s_maximum_retry_times_);
+    CRANE_LOGGER_TRACE(
+        g_runtime_status.conn_logger,
+        "[Node #{}] {} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
+        craned->m_craned_id_, (int)craned->m_prev_channel_state_,
+        craned->m_failure_retry_times_, craned->s_maximum_retry_times_);
     break;
   }
 
@@ -608,7 +605,8 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       // prev    current       next
       // Any  -> CONNECTING -> CONNECTING
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "{} -> CONNECTING -> CONNECTING",
+                         "[Node #{}] {} -> CONNECTING -> CONNECTING",
+                         craned->m_craned_id_,
                          (int)craned->m_prev_channel_state_);
       next_tag_type = CqTag::kInitializingCraned;
     }
@@ -644,12 +642,14 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
       // prev          current       next
       // CONNECTING -> CONNECTING -> END
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "CONNECTING -> CONNECTING -> END");
+                         "[Node #{}] CONNECTING -> CONNECTING -> END",
+                         craned->m_craned_id_);
       next_tag_type = std::nullopt;
     } else {
       // prev    now
       // IDLE -> CONNECTING
-      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "IDLE -> CONNECTING");
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "[Node #{}] IDLE -> CONNECTING", craned->m_craned_id_);
       next_tag_type = CqTag::kEstablishedCraned;
     }
     break;
@@ -659,7 +659,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // prev     current
     // READY -> IDLE (the only edge)
 
-    // CRANE_TRACE("READY -> IDLE");
+    CRANE_TRACE("[Node #{}] READY -> IDLE", craned->m_craned_id_);
     craned->m_disconnected_ = true;
     craned->m_registered_ = false;
 
@@ -861,7 +861,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
           fetch_num--;
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                             " Craned {} is already connecting or connected, "
+                             "Craned {} is already connecting or connected, "
                              "ignore new connection request. Token {}.",
                              it->first, ProtoTimestampToString(it->second));
         }
