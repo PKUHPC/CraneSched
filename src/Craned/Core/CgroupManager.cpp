@@ -597,12 +597,6 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     return cg_unique_ptr;
   }
 
-  if (g_config.Plugin.Enabled) {
-    // FIXME: Refactor related plugin interface and replace here.
-    auto ids = ParseIdsFromCgroupStr_(cgroup_str);
-    g_plugin_client->CreateCgroupHookAsync(
-        std::get<0>(ids).value_or(0), cg_unique_ptr->CgroupName(), resource);
-  }
 
   CRANE_TRACE("Setting cgroup {}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
               cgroup_str, resource.allocatable_res_in_node().cpu_core_limit(),

@@ -245,6 +245,7 @@ message TaskToD {
 
   // Not used now.
   string extra_attr = 29;
+  string username = 30;
 }
 
 message BatchTaskAdditionalMeta {
