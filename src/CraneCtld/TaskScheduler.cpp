@@ -2062,9 +2062,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     task->SetExitCode(exit_code);
     task->SetEndTime(absl::Now());
 
-    for (CranedId const& craned_id : task->CranedIds()) {
+    for (CranedId const& craned_id : task->executing_craned_ids) {
       craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
-
+    }
+    for (CranedId const& craned_id : task->CranedIds()) {
       auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
       if (node_to_task_map_it == m_node_to_tasks_map_.end()) [[unlikely]] {
         CRANE_ERROR("Failed to find craned_id {} in m_node_to_tasks_map_",
