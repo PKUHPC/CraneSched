@@ -237,6 +237,10 @@ void JobManager::EvCleanCheckSupervisorQueueCb_() {
   absl::MutexLock lk(&m_release_cg_mtx_);
   while (m_check_supervisor_queue_.try_dequeue(job_ids)) {
     for (task_id_t job_id : job_ids) {
+      if (m_release_job_retry_map_.contains(job_id)) {
+        CRANE_DEBUG("[Job #{}] already waiting to release, ignored.", job_id);
+        continue;
+      }
       m_release_job_retry_map_.emplace(job_id, 0);
     }
     if (!m_check_supervisor_timer_handle_->active())
@@ -248,22 +252,35 @@ void JobManager::EvCleanCheckSupervisorQueueCb_() {
 bool JobManager::EvCheckSupervisorRunning_() {
   std::vector<task_id_t> job_ids;
   {
-    std::error_code ec;
     absl::MutexLock lk(&m_release_cg_mtx_);
     for (auto& [job_id, retry_count] : m_release_job_retry_map_) {
       // TODO: replace following with step_id
       auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-      for (const auto& step : job_ptr->step_map | std::views::values) {
-        auto exists = std::filesystem::exists(
-            fmt::format("/proc/{}", step->supv_pid), ec);
-        if (ec) {
-          CRANE_WARN("Failed to check supervisor for Job #{} is running.",
-                     job_id);
-          continue;
+      if (!job_ptr) {
+        CRANE_WARN("[Job #{}] does not exist when check supervisor running.",
+                   job_id);
+        continue;
+      }
+      for (const auto& [step_id, step] : job_ptr->step_map) {
+        bool exists = false;
+        if (kill(step->supv_pid, 0) == 0) {
+          exists = true;
+        } else {
+          if (errno == ESRCH) {
+            exists = false;
+          } else {
+            CRANE_ERROR(
+                "Failed to detect step supervisor pid #{}:{}, consider it "
+                "exit.",
+                step->supv_pid, strerror(errno));
+            exists = false;
+          }
         }
         if (!exists) {
           job_ids.emplace_back(job_id);
         } else {
+          CRANE_TRACE("[Step #{}.{}] Step supervisor pid {} still exists.",
+                      job_id, step_id, step->supv_pid);
           retry_count++;
         }
         if (retry_count > kMaxSupervisorCheckRetryCount) {
