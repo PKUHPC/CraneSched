@@ -242,7 +242,10 @@ void PmixUcxServer::OnUcxReadable_() {
   do {
     {
       util::lock_guard g(m_mutex_);
-      while (ucp_worker_progress(m_ucp_worker_) > 0) {}
+      // TODO: _ucx_progress
+      while (ucp_worker_progress(m_ucp_worker_) > 0) {
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+      }
       status = ucp_worker_arm(m_ucp_worker_);
     }
   } while (status == UCS_ERR_BUSY);
@@ -256,6 +259,7 @@ void PmixUcxServer::RegisterReceivesAllTypes_() {
   RegisterReceivesForType_(PmixUcxMsgType::PMIX_UCX_SEND_PMIX_RING_MSG,    kInflightPerType);
 }
 
+// FIXME: req and data resize?
 void PmixUcxServer::RegisterReceivesForType_(PmixUcxMsgType type, int cnt) {
   const ucp_tag_t tag_value = (static_cast<uint64_t>(type) << kTagTypeShift);
   const ucp_tag_t tag_mask  = kTagTypeMask;
