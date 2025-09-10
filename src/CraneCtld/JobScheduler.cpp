@@ -5015,6 +5015,26 @@ void JobScheduler::QueryJobsInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
+bool TaskScheduler::QueryTaskUseId(task_id_t task_id, crane::grpc::TaskToCtld* task) {
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  auto iter = m_running_task_map_.find(task_id);
+  if (iter == m_running_task_map_.end()) return false;
+
+  *task = iter->second->TaskToCtld();
+  task->set_nodelist(iter->second->GetAllocatedCranedsRegex());
+  return true;
+}
+
+bool TaskScheduler::QueryTaskUseId(task_id_t task_id, crane::grpc::TaskToCtld* task) {
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  auto iter = m_running_task_map_.find(task_id);
+  if (iter == m_running_task_map_.end()) return false;
+
+  *task = iter->second->TaskToCtld();
+  task->set_nodelist(iter->second->GetAllocatedCranedsRegex());
+  return true;
+}
+
 void JobScheduler::QueryRnJobOnCtldForNodeConfig(
     const CranedId& craned_id, crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_job_map_mtx_);

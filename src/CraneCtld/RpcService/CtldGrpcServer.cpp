@@ -467,6 +467,42 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           }
         } break;
 
+        case StreamCforedRequest::TASK_META_REQUEST: {
+          auto const &payload = cfored_request.payload_task_meta_req();
+          CRANE_TRACE("Recv TaskMetaReq of Task #{}", payload.task_id());
+          std::string failure_reason;
+          bool ok = true;
+          crane::grpc::TaskToCtld task;
+          if (!g_task_scheduler->QueryTaskUseId(payload.task_id(), &task)) {
+            ok = false;
+            failure_reason = "Task not found";
+          } else {
+            if (payload.uid() != task.uid() && !g_account_manager->CheckUidIsAdmin(payload.uid())) {
+              ok = false;
+              failure_reason = "permission denied";
+            }
+          }
+          stream_writer->WriteTaskMetaReply(ok, failure_reason, task, payload.cattach_pid());
+        } break;
+
+        case StreamCforedRequest::JOB_META_REQUEST: { // TODO: change to JOB_META_REQUEST
+          auto const &payload = cfored_request.payload_job_meta_req();
+          CRANE_TRACE("Recv JobMetaReq of Job #{}", payload.job_id());
+          std::string failure_reason;
+          bool ok = true;
+          crane::grpc::JobToCtld job;
+          if (!g_job_scheduler->QueryJobUseId(payload.job_id(), &job)) {
+            ok = false;
+            failure_reason = "Job not found";
+          } else {
+            if (payload.uid() != job.uid() && !g_account_manager->CheckUidIsAdmin(payload.uid())) {
+              ok = false;
+              failure_reason = "permission denied";
+            }
+          }
+          stream_writer->WriteJobMetaReply(ok, failure_reason, job, payload.cattach_pid());
+        } break;
+
         case StreamCforedRequest::JOB_COMPLETION_REQUEST: {
           auto const& payload = cfored_request.payload_job_complete_req();
           CRANE_TRACE("[Step #{}.{}] Recv StepCompletionReq.", payload.job_id(),
