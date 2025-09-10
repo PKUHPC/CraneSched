@@ -356,6 +356,19 @@ void ITaskInstance::ResetChildProcSigHandler_() {
 }
 
 CraneErrCode ITaskInstance::SetChildProcessProperty_() {
+  // Reset OOM score adjustment for child process
+  std::filesystem::path oom_score_adj_file =
+      fmt::format("/proc/{}/oom_score_adj", getpid());
+  std::ofstream oom_score_adj_stream(oom_score_adj_file);
+  if (oom_score_adj_stream.is_open()) {
+    oom_score_adj_stream << "0";
+    oom_score_adj_stream.close();
+  } else {
+    fmt::print(stderr,
+               "[Subprocess] Error: Failed to open oom_score_adj file: pid #{}",
+               getpid());
+  }
+
   int ngroups = 0;
   auto& pwd = m_parent_step_inst_->pwd;
   // We should not check rc here. It must be -1.
