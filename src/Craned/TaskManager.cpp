@@ -446,10 +446,13 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
               task_id, crane::grpc::TaskStatus::Failed,
               sigchld_info.value + ExitCode::kTerminationSignalBase,
               std::nullopt);
-      } else
-        ActivateTaskStatusChangeAsync_(task_id,
-                                       crane::grpc::TaskStatus::Completed,
+      } else if (sigchld_info.value == 0) {
+        ActivateTaskStatusChangeAsync_(
+            task_id, crane::grpc::TaskStatus::Completed, 0, std::nullopt);
+      } else {
+        ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                        sigchld_info.value, std::nullopt);
+      }
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
@@ -458,9 +461,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
             task_id, crane::grpc::TaskStatus::Completed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
+      else if (sigchld_info.value == 0)
+        ActivateTaskStatusChangeAsync_(
+            task_id, crane::grpc::TaskStatus::Completed, 0, std::nullopt);
       else
-        ActivateTaskStatusChangeAsync_(task_id,
-                                       crane::grpc::TaskStatus::Completed,
+        ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                        sigchld_info.value, std::nullopt);
     }
   }
