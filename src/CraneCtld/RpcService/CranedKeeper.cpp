@@ -446,6 +446,10 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
         });
       }
       WriterLock lock(&m_connected_craned_mtx_);
+
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "Craned {} stub destroyed: timeout.",
+                         craned->m_craned_id_);
       m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
       m_tag_sync_allocator_->delete_object(tag);
       continue;
@@ -502,14 +506,15 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
                              "Failed connect to {}, stub destroyed.",
                              craned->m_craned_id_);
 
+          // Callback in destructor will erase from connecting queue.
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
+          CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                             "Craned {} disconnected.", craned->m_craned_id_);
           if (m_craned_disconnected_cb_) {
             g_thread_pool->detach_task(
                 [this, craned_id = craned->m_craned_id_] {
                   m_craned_disconnected_cb_(craned_id);
-                  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                                     "Craned {} disconnected.", craned_id);
                 });
           }
 
@@ -874,7 +879,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 }
 
 void CranedKeeper::EvCheckTimeoutCb_() {
-  absl::ReaderMutexLock lk(&m_connected_craned_mtx_);
+  absl::MutexLock lk(&m_connected_craned_mtx_);
   auto now = std::chrono::steady_clock::now();
   for (auto &[craned_id, stub] : m_connected_craned_id_stub_map_) {
     if (stub->m_shutting_down_) continue;
