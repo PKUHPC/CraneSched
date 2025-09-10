@@ -539,6 +539,8 @@ struct TaskInCtld {
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const;
 
   crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
+
+  const std::string& GetAllocatedCranedsRegex() const { return allocated_craneds_regex; }
 };
 
 struct Qos {
