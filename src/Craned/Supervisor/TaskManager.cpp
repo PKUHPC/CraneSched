@@ -1738,9 +1738,13 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
               task_id, crane::grpc::TaskStatus::Failed,
               exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
         }
-      } else
+      } else if (exit_info.value == 0) {
         ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
+                                  0, std::nullopt);
+      } else {
+        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                   exit_info.value, std::nullopt);
+      }
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
@@ -1748,8 +1752,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         ActivateTaskStatusChange_(
             task_id, crane::grpc::TaskStatus::Completed,
             exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
-      else
+      else if (exit_info.value == 0)
         ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
+                                  0, std::nullopt);
+      else
+        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                   exit_info.value, std::nullopt);
     }
   }
