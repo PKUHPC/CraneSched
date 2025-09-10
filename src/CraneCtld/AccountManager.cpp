@@ -68,11 +68,12 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
     if (!result) return result;
   }
 
-  return AddUser_(new_user, account, stale_user);
+  return AddUser_(op_user->name, new_user, account, stale_user);
 }
 
 CraneExpected<void> AccountManager::AddAccount(uint32_t uid,
                                                const Account& new_account) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -91,6 +92,7 @@ CraneExpected<void> AccountManager::AddAccount(uint32_t uid,
         return std::unexpected(CraneErrCode::ERR_INVALID_PARENT_ACCOUNT);
     }
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -142,10 +144,11 @@ CraneExpected<void> AccountManager::AddAccount(uint32_t uid,
       return std::unexpected(CraneErrCode::ERR_DEFAULT_QOS_NOT_INHERITED);
   }
 
-  return AddAccount_(new_account, find_parent, stale_account);
+  return AddAccount_(actor_name, new_account, find_parent, stale_account);
 }
 
 CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -154,6 +157,7 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -164,7 +168,7 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
   if (find_qos && !find_qos->deleted)
     return std::unexpected(CraneErrCode::ERR_DB_QOS_ALREADY_EXISTS);
 
-  return AddQos_(new_qos, find_qos);
+  return AddQos_(actor_name, new_qos, find_qos);
 }
 
 CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
@@ -187,11 +191,12 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
 
-  return DeleteUser_(*user, account);
+  return DeleteUser_(op_user->name, *user, account);
 }
 
 CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
                                                   const std::string& name) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -202,6 +207,7 @@ CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -214,11 +220,12 @@ CraneExpected<void> AccountManager::DeleteAccount(uint32_t uid,
   if (!account->child_accounts.empty() || !account->users.empty())
     return std::unexpected(CraneErrCode::ERR_ACCOUNT_HAS_CHILDREN);
 
-  return DeleteAccount_(*account);
+  return DeleteAccount_(actor_name, *account);
 }
 
 CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
                                               const std::string& name) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -227,6 +234,7 @@ CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -238,7 +246,7 @@ CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
   if (qos->reference_count != 0)
     return std::unexpected(CraneErrCode::ERR_QOS_REFERENCES_EXIST);
 
-  return DeleteQos_(name);
+  return DeleteQos_(actor_name, name);
 }
 
 AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
@@ -543,7 +551,7 @@ CraneExpected<void> AccountManager::ModifyAdminLevel(uint32_t uid,
 
   if (new_level == user->admin_level) return {};
 
-  return SetUserAdminLevel_(name, new_level);
+  return SetUserAdminLevel_(op_user->name, name, new_level);
 }
 
 CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
@@ -566,7 +574,7 @@ CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
 
   if (user_ptr->default_account == def_account) return result;
 
-  return SetUserDefaultAccount_(user, def_account);
+  return SetUserDefaultAccount_(op_user->name, user, def_account);
 }
 
 CraneExpected<void> AccountManager::ModifyUserDefaultQos(
@@ -580,6 +588,7 @@ CraneExpected<void> AccountManager::ModifyUserDefaultQos(
   CraneExpected<void> result{};
   // Account might be empty. In that case, ues user->default_account.
   std::string actual_account = account;
+  std::string actor_name;
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -588,13 +597,15 @@ CraneExpected<void> AccountManager::ModifyUserDefaultQos(
     result = CheckIfUserHasPermOnUserOfAccountNoLock_(
         *user_result.value(), p_target_user, &actual_account, false);
     if (!result) return result;
+    actor_name = user_result.value()->name;
   }
 
   result = CheckSetUserDefaultQosNoLock_(*p_target_user, actual_account,
                                          partition, value);
   if (!result) return result;
 
-  return SetUserDefaultQos_(*p_target_user, actual_account, partition, value);
+  return SetUserDefaultQos_(actor_name, *p_target_user, actual_account,
+                            partition, value);
 }
 
 CraneExpected<void> AccountManager::AddUserAllowedPartition(
@@ -622,7 +633,8 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition(
   result = CheckAddUserAllowedPartitionNoLock_(p, account_ptr, new_partition);
   if (!result) return result;
 
-  return AddUserAllowedPartition_(*p, *account_ptr, new_partition);
+  return AddUserAllowedPartition_(user_result.value()->name, *p, *account_ptr,
+                                  new_partition);
 }
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
@@ -655,7 +667,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
       CheckSetUserAllowedPartitionNoLock_(account_ptr, partition_list);
   if (!rich_result) return rich_result;
 
-  return SetUserAllowedPartition_(*p, *account_ptr, partition_list);
+  return SetUserAllowedPartition_(op_user_res.value()->name, *p, *account_ptr,
+                                  partition_list);
 }
 
 CraneExpected<void> AccountManager::AddUserAllowedQos(
@@ -684,7 +697,8 @@ CraneExpected<void> AccountManager::AddUserAllowedQos(
   result = CheckAddUserAllowedQosNoLock_(p, account_ptr, partition, new_qos);
   if (!result) return result;
 
-  return AddUserAllowedQos_(*p, *account_ptr, partition, new_qos);
+  return AddUserAllowedQos_(user_result.value()->name, *p, *account_ptr,
+                            partition, new_qos);
 }
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
@@ -719,8 +733,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
       CheckSetUserAllowedQosNoLock_(p, account_ptr, partition, qos_list, force);
   if (!rich_result) return rich_result;
 
-  return SetUserAllowedQos_(*p, *account_ptr, partition, default_qos,
-                            std::move(qos_list), force);
+  return SetUserAllowedQos_(user_result.value()->name, *p, *account_ptr,
+                            partition, default_qos, std::move(qos_list), force);
 }
 
 CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
@@ -748,7 +762,8 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
   result = CheckDeleteUserAllowedPartitionNoLock_(*p, actual_account, value);
   if (!result) return result;
 
-  return DeleteUserAllowedPartition_(*p, actual_account, value);
+  return DeleteUserAllowedPartition_(user_result.value()->name, *p,
+                                     actual_account, value);
 }
 
 CraneExpected<void> AccountManager::DeleteUserAllowedQos(
@@ -777,7 +792,8 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos(
                                             value, force);
   if (!result) return result;
 
-  return DeleteUserAllowedQos_(*p, value, actual_account, partition, force);
+  return DeleteUserAllowedQos_(user_result.value()->name, *p, value,
+                               actual_account, partition, force);
 }
 
 CraneExpected<void> AccountManager::ModifyAccount(
@@ -786,6 +802,7 @@ CraneExpected<void> AccountManager::ModifyAccount(
     const std::string& value, bool force) {
   CraneExpected<void> result{};
 
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -796,6 +813,7 @@ CraneExpected<void> AccountManager::ModifyAccount(
 
     result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   switch (operation_type) {
@@ -807,13 +825,15 @@ CraneExpected<void> AccountManager::ModifyAccount(
     switch (modify_field) {
     case crane::grpc::ModifyField::Partition: {
       result = CheckAddAccountAllowedPartitionNoLock_(account, value);
-      return !result ? result : AddAccountAllowedPartition_(name, value);
+      return !result ? result
+                     : AddAccountAllowedPartition_(actor_name, name, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       result = CheckAddAccountAllowedQosNoLock_(account, value);
-      return !result ? result : AddAccountAllowedQos_(*account, value);
+      return !result ? result
+                     : AddAccountAllowedQos_(actor_name, *account, value);
     }
 
     default:
@@ -828,14 +848,15 @@ CraneExpected<void> AccountManager::ModifyAccount(
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckSetAccountDescriptionNoLock_(account);
-      return !result ? result : SetAccountDescription_(name, value);
+      return !result ? result : SetAccountDescription_(actor_name, name, value);
     }
     case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckSetAccountDefaultQosNoLock_(account, value);
-      return !result ? result : SetAccountDefaultQos_(*account, value);
+      return !result ? result
+                     : SetAccountDefaultQos_(actor_name, *account, value);
     }
 
     default:
@@ -850,7 +871,9 @@ CraneExpected<void> AccountManager::ModifyAccount(
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckDeleteAccountAllowedPartitionNoLock_(account, value, force);
-      return !result ? result : DeleteAccountAllowedPartition_(*account, value);
+      return !result
+                 ? result
+                 : DeleteAccountAllowedPartition_(actor_name, *account, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
@@ -860,7 +883,8 @@ CraneExpected<void> AccountManager::ModifyAccount(
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckDeleteAccountAllowedQosNoLock_(account, value, force);
-      return !result ? result : DeleteAccountAllowedQos_(*account, value);
+      return !result ? result
+                     : DeleteAccountAllowedQos_(actor_name, *account, value);
     }
 
     default:
@@ -878,6 +902,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
     uint32_t uid, const std::string& account_name,
     std::unordered_set<std::string>&& partition_list, bool force) {
   CraneExpected<void> result{};
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -889,6 +914,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
 
     result = CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
     if (!result) return std::unexpected(FormatRichErr(result.error(), ""));
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -904,7 +930,8 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
 
   if (!rich_result) return rich_result;
 
-  return SetAccountAllowedPartition_(*account, std::move(partition_list));
+  return SetAccountAllowedPartition_(actor_name, *account,
+                                     std::move(partition_list));
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
@@ -912,6 +939,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
     const std::string& default_qos, std::unordered_set<std::string>&& qos_list,
     bool force) {
   CraneExpected<void> result{};
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -923,6 +951,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
 
     result = CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
     if (!result) return std::unexpected(FormatRichErr(result.error(), ""));
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -936,13 +965,14 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
 
   auto rich_result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
   return !rich_result ? rich_result
-                      : SetAccountAllowedQos_(*account, default_qos,
+                      : SetAccountAllowedQos_(actor_name, *account, default_qos,
                                               std::move(qos_list));
 }
 
 CraneExpected<void> AccountManager::ModifyQos(
     uint32_t uid, const std::string& name,
     crane::grpc::ModifyField modify_field, const std::string& value) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -951,6 +981,7 @@ CraneExpected<void> AccountManager::ModifyQos(
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -1024,6 +1055,7 @@ CraneExpected<void> AccountManager::ModifyQos(
 CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
                                                  const std::string& name,
                                                  bool block) {
+  std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -1034,6 +1066,7 @@ CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
 
     auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
     if (!result) return result;
+    actor_name = op_user->name;
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -1043,7 +1076,7 @@ CraneExpected<void> AccountManager::BlockAccount(uint32_t uid,
 
   if (account->blocked == block) return {};
 
-  return BlockAccountNoLock_(name, block);
+  return BlockAccountNoLock_(actor_name, name, block);
 }
 
 CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
@@ -1059,16 +1092,31 @@ CraneExpected<void> AccountManager::BlockUser(uint32_t uid,
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   std::string actual_account = account;
+  std::string actor_name;
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
         *user_result.value(), user, &actual_account, false);
     if (!result) return result;
+    actor_name = user_result.value()->name;
   }
 
   if (user->account_to_attrs_map.at(actual_account).blocked == block) return {};
 
-  return BlockUserNoLock_(name, actual_account, block);
+  return BlockUserNoLock_(actor_name, name, actual_account, block);
+}
+
+CraneExpected<std::list<Txn>> AccountManager::QueryTxnList(
+    uint32_t uid,
+    const std::unordered_map<std::string, std::string>& conditions,
+    int64_t start_time, int64_t end_time) {
+  auto result = CheckUidIsAdmin(uid);
+  if (!result) return std::unexpected(result.error());
+
+  std::list<Txn> txn_list;
+  g_db_client->SelectTxns(conditions, start_time, end_time, &txn_list);
+
+  return std::move(txn_list);
 }
 
 bool AccountManager::CheckUserPermissionToPartition(
@@ -1798,7 +1846,8 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
                                       name, "reference_count", num);
 }
 
-CraneExpected<void> AccountManager::AddUser_(const User& user,
+CraneExpected<void> AccountManager::AddUser_(const std::string& actor_name,
+                                             const User& user,
                                              const Account* account,
                                              const User* stale_user) {
   const std::string& object_account = user.default_account;
@@ -1862,6 +1911,8 @@ CraneExpected<void> AccountManager::AddUser_(const User& user,
           // Insert the new user
           g_db_client->InsertUser(res_user);
         }
+        AddTxnLogToDB_(actor_name, name, TxnAction::AddUser,
+                       res_user.UserToString());
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -1877,7 +1928,8 @@ CraneExpected<void> AccountManager::AddUser_(const User& user,
   return {};
 }
 
-CraneExpected<void> AccountManager::AddAccount_(const Account& account,
+CraneExpected<void> AccountManager::AddAccount_(const std::string& actor_name,
+                                                const Account& account,
                                                 const Account* parent,
                                                 const Account* stale_account) {
   const std::string& name = account.name;
@@ -1925,6 +1977,8 @@ CraneExpected<void> AccountManager::AddAccount_(const Account& account,
         for (const auto& qos : res_account.allowed_qos_list) {
           IncQosReferenceCountInDb_(qos, 1);
         }
+        AddTxnLogToDB_(actor_name, name, TxnAction::AddAccount,
+                       res_account.AccountToString());
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -1942,34 +1996,35 @@ CraneExpected<void> AccountManager::AddAccount_(const Account& account,
   return {};
 }
 
-CraneExpected<void> AccountManager::AddQos_(const Qos& qos,
+CraneExpected<void> AccountManager::AddQos_(const std::string& actor_name,
+                                            const Qos& qos,
                                             const Qos* stale_qos) {
-  if (stale_qos) {
-    // There is a same qos but was deleted,here will delete the original
-    // qos and overwrite it with the same name
-    mongocxx::client_session::with_transaction_cb callback =
-        [&](mongocxx::client_session* session) {
+  // There is a same qos but was deleted,here will delete the original
+  // qos and overwrite it with the same name
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        if (stale_qos) {
           g_db_client->UpdateQos(qos);
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
                                        qos.name, "creation_time",
                                        ToUnixSeconds(absl::Now()));
-        };
+        } else {
+          g_db_client->InsertQos(qos);
+        }
+        AddTxnLogToDB_(actor_name, qos.name, TxnAction::AddQos,
+                       qos.QosToString());
+      };
 
-    if (!g_db_client->CommitTransaction(callback)) {
-      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-    }
-  } else {
-    // Insert the new qos
-    if (!g_db_client->InsertQos(qos))
-      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-  }
+  if (!g_db_client->CommitTransaction(callback))
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
 
   m_qos_map_[qos.name] = std::make_unique<Qos>(qos);
 
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteUser_(const User& user,
+CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
+                                                const User& user,
                                                 const std::string& account) {
   const std::string& name = user.name;
 
@@ -2021,8 +2076,14 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
                                        "$pull", coordinatorAccount,
                                        /*account name*/ "coordinators", name);
         }
-
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::DeleteUser,
+            fmt::format("remove_accounts: {}, remove_coordinator_accounts: {}, "
+                        "deleted: {}",
+                        fmt::join(remove_accounts, ", "),
+                        fmt::join(remove_coordinator_accounts, ", "),
+                        res_user.deleted));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2043,7 +2104,8 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
+CraneExpected<void> AccountManager::DeleteAccount_(
+    const std::string& actor_name, const Account& account) {
   const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
@@ -2060,6 +2122,7 @@ CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
         for (const auto& qos : account.allowed_qos_list) {
           IncQosReferenceCountInDb_(qos, -1);
         }
+        AddTxnLogToDB_(actor_name, name, TxnAction::DeleteAccount, "");
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2078,18 +2141,26 @@ CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteQos_(const std::string& name) {
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                    name, "deleted", true)) {
+CraneExpected<void> AccountManager::DeleteQos_(const std::string& actor_name,
+                                               const std::string& name) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                     name, "deleted", true);
+        AddTxnLogToDB_(actor_name, name, TxnAction::DeleteQos, "");
+      };
+
+  if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-  }
+
   m_qos_map_[name]->deleted = true;
 
   return {};
 }
 
 CraneExpected<void> AccountManager::AddUserAllowedPartition_(
-    const User& user, const Account& account, const std::string& partition) {
+    const std::string& actor_name, const User& user, const Account& account,
+    const std::string& partition) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
 
@@ -2106,11 +2177,13 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Add: account: {}, partition: {}",
+                                   account_name, partition));
       };
 
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-  }
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2121,8 +2194,8 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition_(
 }
 
 CraneExpected<void> AccountManager::AddUserAllowedQos_(
-    const User& user, const Account& account, const std::string& partition,
-    const std::string& qos) {
+    const std::string& actor_name, const User& user, const Account& account,
+    const std::string& partition, const std::string& qos) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
 
@@ -2155,6 +2228,9 @@ CraneExpected<void> AccountManager::AddUserAllowedQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Add: account: {}, partition: {}, qos: {}",
+                                   account_name, partition, qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2170,13 +2246,17 @@ CraneExpected<void> AccountManager::AddUserAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::SetUserAdminLevel_(
-    const std::string& name, User::AdminLevel new_level) {
+    const std::string& actor_name, const std::string& name,
+    User::AdminLevel new_level) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      name, "admin_level",
                                      static_cast<int>(new_level));
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("admin_level: {}",
+                                   User::AdminLevelToString(new_level)));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2189,12 +2269,15 @@ CraneExpected<void> AccountManager::SetUserAdminLevel_(
 }
 
 CraneExpected<void> AccountManager::SetUserDefaultAccount_(
-    const std::string& user, const std::string& def_account) {
+    const std::string& actor_name, const std::string& user,
+    const std::string& def_account) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      user, "default_account", def_account);
+        AddTxnLogToDB_(actor_name, user, TxnAction::ModifyUser,
+                       fmt::format("default_account: {}", def_account));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2207,8 +2290,8 @@ CraneExpected<void> AccountManager::SetUserDefaultAccount_(
 }
 
 CraneExpected<void> AccountManager::SetUserDefaultQos_(
-    const User& user, const std::string& account, const std::string& partition,
-    const std::string& qos) {
+    const std::string& actor_name, const User& user, const std::string& account,
+    const std::string& partition, const std::string& qos) {
   const std::string& name = user.name;
 
   User res_user(user);
@@ -2231,6 +2314,10 @@ CraneExpected<void> AccountManager::SetUserDefaultQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("account: {}, partition: {}, default_qos: {}", account,
+                        partition, qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2244,7 +2331,7 @@ CraneExpected<void> AccountManager::SetUserDefaultQos_(
 }
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
-    const User& user, const Account& account,
+    const std::string& actor_name, const User& user, const Account& account,
     const std::unordered_set<std::string>& partition_list) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
@@ -2263,6 +2350,10 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("Set: account: {}, partition_list:[{}]", account_name,
+                        fmt::join(partition_list, ",")));
       };
 
   // Update to database
@@ -2279,9 +2370,9 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
 }
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
-    const User& user, const Account& account, const std::string& partition,
-    const std::string& default_qos, std::unordered_set<std::string>&& qos_list,
-    bool force) {
+    const std::string& actor_name, const User& user, const Account& account,
+    const std::string& partition, const std::string& default_qos,
+    std::unordered_set<std::string>&& qos_list, bool force) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
 
@@ -2310,6 +2401,10 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("Set: account: {}, partition: {}, qos_list: {}",
+                        account_name, partition, fmt::join(qos_list, ",")));
       };
 
   // Update to database
@@ -2326,7 +2421,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
-    const User& user, const std::string& account,
+    const std::string& actor_name, const User& user, const std::string& account,
     const std::string& partition) {
   const std::string& name = user.name;
 
@@ -2338,6 +2433,9 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
             "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
                 partition,
             std::string(""));
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyUser,
+            fmt::format("Del: account: {}, partition: {}", account, partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2352,8 +2450,8 @@ CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
 }
 
 CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
-    const User& user, const std::string& qos, const std::string& account,
-    const std::string& partition, bool force) {
+    const std::string& actor_name, const User& user, const std::string& qos,
+    const std::string& account, const std::string& partition, bool force) {
   const std::string& name = user.name;
 
   User res_user(user);
@@ -2387,6 +2485,9 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Del: account: {}, partition: {}, qos: {}",
+                                   account, partition, qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2400,13 +2501,16 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
-    const std::string& name, const std::string& partition) {
+    const std::string& actor_name, const std::string& name,
+    const std::string& partition) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$addToSet", name, "allowed_partition",
                                      partition);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Add: partition: {}", partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2418,7 +2522,8 @@ CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
 }
 
 CraneExpected<void> AccountManager::AddAccountAllowedQos_(
-    const Account& account, const std::string& qos) {
+    const std::string& actor_name, const Account& account,
+    const std::string& qos) {
   const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
@@ -2431,6 +2536,8 @@ CraneExpected<void> AccountManager::AddAccountAllowedQos_(
                                      "$addToSet", name, "allowed_qos_list",
                                      qos);
         IncQosReferenceCountInDb_(qos, 1);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Add: qos: {}", qos));
       };
 
   // Update to database
@@ -2448,11 +2555,14 @@ CraneExpected<void> AccountManager::AddAccountAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::SetAccountDescription_(
-    const std::string& name, const std::string& description) {
+    const std::string& actor_name, const std::string& name,
+    const std::string& description) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "description", description);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("description: {}", description));
       };
 
   // Update to database
@@ -2466,13 +2576,16 @@ CraneExpected<void> AccountManager::SetAccountDescription_(
 }
 
 CraneExpected<void> AccountManager::SetAccountDefaultQos_(
-    const Account& account, const std::string& qos) {
+    const std::string& actor_name, const Account& account,
+    const std::string& qos) {
   const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "default_qos", qos);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("default_qos: {}", qos));
       };
 
   // Update to database
@@ -2485,7 +2598,8 @@ CraneExpected<void> AccountManager::SetAccountDefaultQos_(
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
-    const Account& account, std::unordered_set<std::string>&& partition_list) {
+    const std::string& actor_name, const Account& account,
+    std::unordered_set<std::string>&& partition_list) {
   const std::string& name = account.name;
 
   std::list<std::string> deleted_partition;
@@ -2510,6 +2624,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
                                        "$set", name, "allowed_partition",
                                        partition_list);
         }
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("Set: partition_list: {}",
+                                   fmt::join(partition_list, ",")));
       };
 
   if (!g_db_client->CommitTransaction(callback))
@@ -2527,7 +2644,8 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
-    const Account& account, const std::string& default_qos,
+    const std::string& actor_name, const Account& account,
+    const std::string& default_qos,
     std::unordered_set<std::string>&& qos_list) {
   const std::string& name = account.name;
 
@@ -2567,6 +2685,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
             IncQosReferenceCountInDb_(qos, 1);
           }
         }
+        AddTxnLogToDB_(
+            actor_name, name, TxnAction::ModifyAccount,
+            fmt::format("Set: qos_list: {}", fmt::join(qos_list, ",")));
       };
 
   if (!g_db_client->CommitTransaction(callback))
@@ -2595,10 +2716,13 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
 }
 
 CraneExpected<void> AccountManager::DeleteAccountAllowedPartition_(
-    const Account& account, const std::string& partition) {
+    const std::string& actor_name, const Account& account,
+    const std::string& partition) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
+        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
+                       fmt::format("Del: partition: {}", partition));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2611,12 +2735,15 @@ CraneExpected<void> AccountManager::DeleteAccountAllowedPartition_(
 }
 
 CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
-    const Account& account, const std::string& qos) {
+    const std::string& actor_name, const Account& account,
+    const std::string& qos) {
   int change_num;
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         change_num = DeleteAccountAllowedQosFromDBNoLock_(account.name, qos);
         IncQosReferenceCountInDb_(qos, -change_num);
+        AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
+                       fmt::format("Del: qos: {}", qos));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2629,14 +2756,17 @@ CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
   return {};
 }
 
-CraneExpected<void> AccountManager::BlockUserNoLock_(const std::string& name,
-                                                     const std::string& account,
-                                                     bool block) {
+CraneExpected<void> AccountManager::BlockUserNoLock_(
+    const std::string& actor_name, const std::string& name,
+    const std::string& account, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(
             MongodbClient::EntityType::USER, "$set", name,
             "account_to_attrs_map." + account + ".blocked", block);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser,
+                       fmt::format("Set: account_to_attrs_map.{}.blocked: {}",
+                                   account, block));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2648,12 +2778,14 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(const std::string& name,
   return {};
 }
 
-CraneExpected<void> AccountManager::BlockAccountNoLock_(const std::string& name,
-                                                        bool block) {
+CraneExpected<void> AccountManager::BlockAccountNoLock_(
+    const std::string& actor_name, const std::string& name, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "blocked", block);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
+                       fmt::format("blocked: {}", block));
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2936,6 +3068,18 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
   m_account_map_[account->name]->allowed_partition.remove(partition);
 
   return true;
+}
+
+void AccountManager::AddTxnLogToDB_(const std::string& actor_name,
+                                    const std::string& target, TxnAction action,
+                                    const std::string& info) {
+  Txn txn;
+  txn.creation_time = ToUnixSeconds(absl::Now());
+  txn.actor = actor_name;
+  txn.target = target;
+  txn.action = action;
+  txn.info = info;
+  g_db_client->InsertTxn(txn);
 }
 
 bool AccountManager::PaternityTestNoLock_(const std::string& parent,
