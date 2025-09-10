@@ -122,6 +122,19 @@ message ShutdownSupervisorRequest {}
 
 message ShutdownSupervisorReply {}
 
+message ReceivePmixPortRequest {
+  uint32 task_id = 1;
+  message PmixPorts{
+    bytes port = 1;
+    string craned_id = 2;
+  }
+  repeated PmixPorts pmix_ports = 2;
+}
+
+message ReceivePmixPortReply {
+  bool ok = 1;
+}
+
 service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
@@ -129,4 +142,5 @@ service Supervisor {
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
 }

@@ -29,6 +29,8 @@
 
 #include "CforedClient.h"
 #include "CranedClient.h"
+#include "Pmix.h"
+#include "PmixCommon.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
 #include "crane/OS.h"
@@ -1330,8 +1332,22 @@ CraneErrCode ProcInstance::Spawn() {
       this->GetCrunMeta()->x11_port = msg.x11_port();
       SetupChildProcessCrunX11_();
     }
+    std::unordered_map<std::string, std::string> pmix_env;
+    if (m_parent_step_inst_->IsCrun() &&
+        m_parent_step_inst_->GetStep().interactive_meta().mpi() == "pmix") {
+      auto result = g_pmix_server->SetupFork(0);
+      if (!result) {
+        fmt::print(stderr,
+                   "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
+        std::abort();
+      }
+      pmix_env = result.value();
+    }
 
     m_env_ = GetChildProcessEnv();
+    for (const auto& [k, v] : pmix_env) {
+      m_env_.emplace(k, v);
+    }
 
     // Apply environment variables
     err = SetChildProcessEnv_();
@@ -1494,6 +1510,27 @@ TaskManager::TaskManager()
 TaskManager::~TaskManager() {
   CRANE_TRACE("Shutting down task manager.");
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  g_pmix_server.reset();
+}
+
+bool TaskManager::InitPmixPreFork() {
+  if (m_step_.IsCrun() &&
+      m_step_.GetStep().interactive_meta().mpi() == "pmix") {
+    g_pmix_server = std::make_unique<pmix::PmixServer>();
+    pmix::Config pmix_config{
+        .UseTls = g_config.CforedListenConf.TlsConfig.Enabled,
+        .TlsCerts = g_config.CforedListenConf.TlsConfig.TlsCerts,
+        .CompressedRpc = g_config.CompressedRpc,
+        .CraneBaseDir = g_config.CraneBaseDir,
+        .CraneScriptDir = g_config.CraneScriptDir,
+        .CranedUnixSocketPath = g_config.CranedUnixSocketPath};
+
+    if (!g_pmix_server->Init(pmix_config, m_step_.GetStep(),
+                             m_step_.GetStepProcessEnv()))
+      return false;
+  }
+
+  return true;
 }
 
 void TaskManager::Wait() {
@@ -1531,7 +1568,8 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   }
 }
 
-std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
+std::future<CraneErrCode> TaskManager::ExecuteTaskAsync(
+    uint32_t local_proc_id) {
   CRANE_INFO("[Job #{}] Executing task.", m_step_.job_id);
 
   std::promise<CraneErrCode> ok_promise;
@@ -1544,7 +1582,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
     elem.instance = std::make_unique<ContainerInstance>(&m_step_);
   } else {
     // Process
-    elem.instance = std::make_unique<ProcInstance>(&m_step_);
+    elem.instance = std::make_unique<ProcInstance>(&m_step_, local_proc_id);
   }
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
@@ -1561,6 +1599,14 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
                               ExitCode::kExitCodeFileNotFound,
                               fmt::format("Failed to prepare task"));
     return;
+  }
+
+  if (!InitPmixPreFork()) {
+    CRANE_ERROR("Failed to initialize PMIx server.");
+    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeFileNotFound,
+                              fmt::format("pmix failed"));
+    return ;
   }
 
   CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);

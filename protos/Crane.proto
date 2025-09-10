@@ -897,6 +897,43 @@ message ResetUserCredentialReply {
   repeated RichError rich_error_list = 2;
 }
 
+message SendPmixRingMsgReq {
+  message PmixRingMsgHdr {
+    uint32 contrib_id = 1;
+    uint32 seq = 2;
+    uint32 hop_seq = 3;
+    string craned_id = 4;
+    uint32 msgsize = 5;
+  };
+
+  PmixRingMsgHdr pmix_ring_msg_hdr = 1;
+  repeated PmixProc pmix_procs = 2;
+  bytes msg = 3;
+}
+message BroadcastPmixPortRequest {
+  string craned_id = 1; //  sender
+  repeated string craned_ids = 2; // peer
+  uint32 task_id = 3;
+  bytes port = 4;
+}
+
+message BroadcastPmixPortReply {
+  bool ok = 1;
+}
+
+message ReceivePmixPortRequest {
+  uint32 task_id = 1;
+  message PmixPorts{
+    bytes port = 1;
+    string craned_id = 2;
+  }
+  repeated PmixPorts pmix_ports = 2;
+}
+
+message ReceivePmixPortReply {
+  bool ok = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -960,6 +997,7 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
@@ -973,6 +1011,7 @@ service Craned {
   rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
   rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
+  rpc ReceivePmixPort(ReceivePmixPortRequest) returns (ReceivePmixPortReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
@@ -989,6 +1028,8 @@ service Craned {
   rpc QuerySshStepEnvVariables(QuerySshStepEnvVariablesRequest) returns (QuerySshStepEnvVariablesReply);
   /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
   rpc StepStatusChange(StepStatusChangeRequest) returns (StepStatusChangeReply);
+  /* ----------------------------------- Called from PMIX  -------------------------------------------------------- */
+  rpc BroadcastPmixPort(BroadcastPmixPortRequest) returns (BroadcastPmixPortReply);
 }
 
 service CranedForPam {

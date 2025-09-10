@@ -18,6 +18,7 @@
 
 #include "SupervisorServer.h"
 
+#include "Pmix.h"
 #include "TaskManager.h"
 
 namespace Craned::Supervisor {
@@ -26,7 +27,7 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
-  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
+  std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync(0);
   code_future.wait();
 
   CraneErrCode ok = code_future.get();
@@ -81,6 +82,24 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
     crane::grpc::supervisor::TerminateTaskReply* response) {
   g_task_mgr->TerminateTaskAsync(request->mark_orphaned(),
                                  request->terminated_by_user());
+  response->set_ok(true);
+  return Status::OK;
+}
+
+grpc::Status SupervisorServiceImpl::ReceivePmixPort(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::ReceivePmixPortRequest* request,
+    crane::grpc::supervisor::ReceivePmixPortReply* response) {
+
+  if (!g_pmix_server || !g_pmix_server->GetPmixClient()) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  for (const auto& pmix_port : request->pmix_ports()) {
+    g_pmix_server->GetPmixClient()->EmplacePmixStub(pmix_port.craned_id(), pmix_port.port());
+  }
+
   response->set_ok(true);
   return Status::OK;
 }

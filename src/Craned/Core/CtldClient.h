@@ -193,6 +193,9 @@ class CtldClient {
 
   void StepStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
+  void BroadcastPmixPort(const crane::grpc::BroadcastPmixPortRequest& request,
+    crane::grpc::BroadcastPmixPortReply* response);
+
   [[nodiscard]] std::set<step_id_t> GetAllStepStatusChangeId();
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };

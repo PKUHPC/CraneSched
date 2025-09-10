@@ -388,6 +388,10 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          for (auto& name : name_list) {
+            g_config.NodeList.insert(name);
+          }
+
           if (node["cpu"])
             node_res->allocatable_res.cpu_count =
                 cpu_t(std::stoul(node["cpu"].as<std::string>()));

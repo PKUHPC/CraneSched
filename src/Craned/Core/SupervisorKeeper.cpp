@@ -104,6 +104,29 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
+CraneErrCode SupervisorStub::ReceivePmixPort(task_id_t task_id, const std::vector<std::pair<std::string, CranedId>>& pmix_ports) {
+  ClientContext context;
+  crane::grpc::supervisor::ReceivePmixPortRequest request;
+  crane::grpc::supervisor::ReceivePmixPortReply reply;
+
+  request.set_task_id(task_id);
+
+  auto pmix_port_list = request.mutable_pmix_ports();
+  for (const auto& pmix_port : pmix_ports) {
+    auto pmix_port_req = pmix_port_list->Add();
+    pmix_port_req->set_craned_id(pmix_port.second);
+    pmix_port_req->set_port(pmix_port.first);
+  }
+
+  auto ok = m_stub_->ReceivePmixPort(&context, request, &reply);
+  if (!ok.ok() || !reply.ok()) {
+    CRANE_WARN("ReceivePmixPort failed: reply {},{}", reply.ok(), ok.error_message());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 void SupervisorStub::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.

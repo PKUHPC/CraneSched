@@ -273,6 +273,11 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+
+  //Crun input will forward to these tasks
+  optional uint32 input_task_id = 8;
+
+  string mpi = 9;
 }
 
 message TaskInfo {
@@ -606,4 +611,9 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }

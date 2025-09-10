@@ -120,7 +120,7 @@ option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
-option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" ON)
 
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
@@ -306,6 +306,36 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
+
+set(WITH_PMIX "" CACHE PATH "PMIx installation directory")
+if(NOT WITH_PMIX)
+    set(WITH_PMIX "/usr/local")
+endif()
+
+find_path(PMIX_INCLUDE_DIR pmix.h PATHS "${WITH_PMIX}/include" NO_DEFAULT_PATH)
+find_library(PMIX_LIBRARY pmix PATHS "${WITH_PMIX}/lib" NO_DEFAULT_PATH)
+
+if(NOT PMIX_INCLUDE_DIR OR NOT PMIX_LIBRARY)
+    message(FATAL_ERROR "Could not find PMIx in ${WITH_PMIX}")
+endif()
+
+message(STATUS "Found PMIx include: ${PMIX_INCLUDE_DIR}")
+message(STATUS "Found PMIx library: ${PMIX_LIBRARY}")
+
+add_library(libpmix SHARED IMPORTED)
+set_target_properties(libpmix PROPERTIES
+        IMPORTED_LOCATION "${PMIX_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${PMIX_INCLUDE_DIR}"
+)
+
+# todo: if ucx enabled, use ucx
+find_package(UCX QUIET)
+if(UCX_FOUND)
+    message(STATUS "UCX found: ${UCX_INCLUDE_DIRS}")
+    add_definitions(-DHAVE_UCX)
+    set(UCX_LIBS /usr/lib64/libucp.so.0 /usr/lib64/libucs.so /usr/lib64/libuct.so)
+    set(UCX_INCLUDES ${UCX_INCLUDE_DIRS})
+endif()
 
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")

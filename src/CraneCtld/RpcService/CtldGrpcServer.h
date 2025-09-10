@@ -198,6 +198,11 @@ class CtldForInternalServiceImpl final
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
+  grpc::Status BroadcastPmixPort(
+     grpc::ServerContext *context,
+     const crane::grpc::BroadcastPmixPortRequest *request,
+     crane::grpc::BroadcastPmixPortReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };
@@ -390,6 +395,10 @@ class CtldServer {
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;
+
+  // TODO: test
+  Mutex m_pmix_mtx_;
+  HashMap<CranedId, std::string> m_pmix_ports_ ABSL_GUARDED_BY(m_pmix_mtx_);
 
   friend class CtldForInternalServiceImpl;
 

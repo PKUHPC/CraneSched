@@ -36,6 +36,9 @@ class SupervisorStub {
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
   CraneErrCode ShutdownSupervisor();
+  CraneErrCode ReceivePmixPort(
+      task_id_t task_id,
+      const std::vector<std::pair<std::string, CranedId>>& pmix_ports);
 
   void InitChannelAndStub(const std::string& endpoint);
 

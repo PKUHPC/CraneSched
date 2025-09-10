@@ -14,4 +14,5 @@ add_executable(csupervisor
 target_link_libraries(csupervisor
     PRIVATE
         craned_common
+        Utility_Pmix
 )
