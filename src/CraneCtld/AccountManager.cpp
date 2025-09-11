@@ -184,7 +184,8 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  auto result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
+  // Deleting a user only requires verifying administrator privileges.
+  auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
   if (!result) return result;
 
   // The provided account is invalid.
