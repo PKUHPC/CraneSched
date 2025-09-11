@@ -116,6 +116,7 @@ class CforedClient {
   std::atomic<bool> m_wait_reconn_{false};
   std::atomic<bool> m_output_drained_{false};
 
+  std::atomic<size_t> m_output_queue_bytes_{0};
   ConcurrentQueue<std::string> m_output_queue_;
   ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
       m_x11_input_queue_;

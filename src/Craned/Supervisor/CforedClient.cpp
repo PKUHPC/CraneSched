@@ -434,6 +434,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
 
     if (ok) {
+      m_output_queue_bytes_.fetch_sub(output.size(), std::memory_order_relaxed);
+
       StreamTaskIORequest request;
       request.set_type(StreamTaskIORequest::TASK_OUTPUT);
 
@@ -735,8 +737,20 @@ void CforedClient::TaskEnd(task_id_t task_id) {
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {
   CRANE_TRACE("Receive TaskOutputForward len: {}.", msg.size());
-  // TODO: size check?
+
+  if (msg.size() > kMaxOutputQueueBytes) {
+    CRANE_WARN("Task output message size {} exceeds 1MB, discard!", msg.size());
+    return;
+  }
+
+  size_t cur_bytes = m_output_queue_bytes_.load(std::memory_order_relaxed);
+  if (cur_bytes + msg.size() > kMaxOutputQueueBytes) {
+    CRANE_WARN("Output queue size {} + msg {} exceeds 1MB, discard!", cur_bytes, msg.size());
+    return;
+  }
+
   m_output_queue_.enqueue(msg);
+  m_output_queue_bytes_.fetch_add(msg.size(), std::memory_order_relaxed);
 }
 
 void CforedClient::TaskX11OutPutForward(std::unique_ptr<char[]>&& data,
