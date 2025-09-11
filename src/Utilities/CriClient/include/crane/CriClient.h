@@ -124,7 +124,13 @@ class CriClient {
 
   // Container event streaming
   std::thread m_event_stream_thread_;
-  std::atomic_bool m_event_stream_stop_;
+  std::atomic_bool m_event_stream_stop_{true};
+
+  // Cancellable context for gRPC stream
+  std::shared_ptr<grpc::ClientContext> m_event_stream_context_;
+  util::mutex m_event_stream_context_mutex_;
+
+  // Container event callback
   ContainerEventCallback m_event_callback_;
   util::mutex m_event_callback_mutex_;
 

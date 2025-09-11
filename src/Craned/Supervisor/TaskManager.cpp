@@ -730,8 +730,9 @@ CraneErrCode ContainerInstance::Spawn() {
                   cri::api::ContainerEventType::CONTAINER_DELETED_EVENT)
             return;
 
-          CRANE_TRACE("Received CRI event: {}", ev.DebugString());
+          CRANE_TRACE("Received CRI event:\n{}", ev.DebugString());
 
+          // TODO: Add handler for pod status changes?
           std::vector<std::pair<task_id_t, cri::api::ContainerStatus>> changes;
           for (const auto& status : ev.containers_statuses()) {
             const auto& labels = status.labels();
