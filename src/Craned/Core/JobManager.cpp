@@ -144,11 +144,25 @@ JobManager::JobManager() {
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanChangeTaskTimeLimitQueueCb_();
       });
+  m_change_task_time_limit_timer_handle_ =
+      m_uvw_loop_->resource<uvw::timer_handle>();
+  m_change_task_time_limit_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle& handle) {
+        m_change_task_time_limit_async_handle_->send();
+      });
+  m_change_task_time_limit_timer_handle_->start(
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanTerminateTaskQueueCb_();
+      });
+  m_terminate_step_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_terminate_step_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle& handle) {
+        m_terminate_step_async_handle_->send();
       });
 
   m_uvw_thread_ = std::thread([this]() {
