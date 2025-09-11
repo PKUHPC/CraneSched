@@ -1810,8 +1810,9 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    auto task = std::move(elem.instance);
-    task_id_t task_id = task->task_id;
+    task_id_t task_id = elem.instance->task_id;
+    m_step_.AddTaskInstance(task_id, std::move(elem.instance));
+    auto* task = m_step_.GetTaskInstance(task_id);
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
@@ -1836,11 +1837,10 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_ASSERT_MSG(false, "Calloc step, no script to run.");
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(task->task_id, std::move(task));
       return;
     }
 
-    LaunchExecution_(task.get());
+    LaunchExecution_(task);
     if (!task->GetPid()) {
       CRANE_WARN("[task #{}] Failed to launch process.", task->task_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
@@ -1848,7 +1848,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_INFO("[task #{}] Launched process {}.", task->task_id,
                  task->GetPid());
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(task->task_id, std::move(task));
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }

@@ -2079,16 +2079,14 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
         step->SetStatus(crane::grpc::TaskStatus::Running);
 
         context->rn_step_raw_ptrs.push_back(step);
-        if (!job->IsCalloc()) {
-          std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
-          primary_step->InitPrimaryStepFromJob(*job);
-          // TODO: Aggregate primary step creation
-          g_embedded_db_client->AppendSteps({primary_step.get()});
-          job->SetPrimaryStep(std::move(primary_step));
-          for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
-            context->craned_step_alloc_map[node_id].emplace_back(
-                job->PrimaryStep()->GetStepToD(node_id));
-          }
+        std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
+        primary_step->InitPrimaryStepFromJob(*job);
+        // TODO: Aggregate primary step creation
+        g_embedded_db_client->AppendSteps({primary_step.get()});
+        job->SetPrimaryStep(std::move(primary_step));
+        for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
+          context->craned_step_alloc_map[node_id].emplace_back(
+              job->PrimaryStep()->GetStepToD(node_id));
         }
       }
     }
