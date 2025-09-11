@@ -34,9 +34,9 @@ inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
 
-using Common::CgroupInterface;
-using Common::CgroupManager;
-using Common::EnvMap;
+using ::Craned::Common::CgroupInterface;
+using ::Craned::Common::CgroupManager;
+using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
