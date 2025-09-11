@@ -1478,26 +1478,25 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
 
   PartitionId partition = request.partition();
 
-  if (partition.empty()) {
-    return std::unexpected("No partition specified");
-  }
-
-  auto all_partitions_meta_map =
-      g_meta_container->GetAllPartitionsMetaMapConstPtr();
-  if (!all_partitions_meta_map->contains(partition)) {
-    return std::unexpected(fmt::format("Partition {} not found", partition));
-  }
-
-  const auto part_meta_ptr =
-      all_partitions_meta_map->at(partition).GetExclusivePtr();
-
   if (node_num == 0) {
+    if (partition.empty()) {
+      return std::unexpected("No partition specified");
+    }
     // NodeCnt is valid only when craned_regex is empty
     if (!request.has_node_num()) {
       return std::unexpected("No nodes specified");
     } else {
       node_num = request.node_num();
     }
+
+    auto all_partitions_meta_map =
+        g_meta_container->GetAllPartitionsMetaMapConstPtr();
+    if (!all_partitions_meta_map->contains(partition)) {
+      return std::unexpected(fmt::format("Partition {} not found", partition));
+    }
+    const auto part_meta_ptr =
+        all_partitions_meta_map->at(partition).GetExclusivePtr();
+
     // If craned_ids is empty, test all nodes in the partition
     for (CranedId const& craned_id : part_meta_ptr->craned_ids) {
       craned_ids.emplace_back(craned_id);
@@ -1509,16 +1508,28 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
                       partition, node_num, craned_ids.size()));
     }
   } else {
-    // Check if all nodes are in the partition
-    for (CranedId const& craned_id : craned_ids) {
-      if (!part_meta_ptr->craned_ids.contains(craned_id)) {
-        validation_errors.push_back(craned_id);
+    if (!partition.empty()) {
+      auto all_partitions_meta_map =
+          g_meta_container->GetAllPartitionsMetaMapConstPtr();
+      if (!all_partitions_meta_map->contains(partition)) {
+        return std::unexpected(
+            fmt::format("Partition {} not found", partition));
       }
-    }
-    if (!validation_errors.empty()) {
-      return std::unexpected(
-          fmt::format("Nodes not in partition {}: {}", partition,
-                      util::HostNameListToStr(validation_errors)));
+
+      const auto part_meta_ptr =
+          all_partitions_meta_map->at(partition).GetExclusivePtr();
+
+      // Check if all nodes are in the partition
+      for (CranedId const& craned_id : craned_ids) {
+        if (!part_meta_ptr->craned_ids.contains(craned_id)) {
+          validation_errors.push_back(craned_id);
+        }
+      }
+      if (!validation_errors.empty()) {
+        return std::unexpected(
+            fmt::format("Nodes not in partition {}: {}", partition,
+                        util::HostNameListToStr(validation_errors)));
+      }
     }
 
     ResvId resv_name = request.reservation_name();
