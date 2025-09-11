@@ -553,6 +553,11 @@ void TaskInCtld::SetStatus(crane::grpc::TaskStatus val) {
   runtime_attr.set_status(val);
 }
 
+void TaskInCtld::SetPrimaryStepExitCode(uint32_t val) {
+  primary_exit_code = val;
+  runtime_attr.set_primary_step_exit_code(val);
+}
+
 void TaskInCtld::SetExitCode(uint32_t val) {
   exit_code = val;
   runtime_attr.set_exit_code(val);

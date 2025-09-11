@@ -197,6 +197,7 @@ message RuntimeAttrOfTask {
   double cached_priority = 20;
 
   TaskStatus primary_step_status = 21;
+  uint32 primary_step_exit_code = 22;
 }
 
 message StepToCtld {

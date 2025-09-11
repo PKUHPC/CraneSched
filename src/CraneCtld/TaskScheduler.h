@@ -793,13 +793,15 @@ class TaskScheduler {
   /**
    *
    * @param new_status step status
+   * @param exit_code
    * @param job the TaskInCtld
    * @param step_id
    * @param craned_id status change source craned
    * @param context
    * */
   void CommonStepStatusChangeHandler_(crane::grpc::TaskStatus new_status,
-                                      TaskInCtld* job, step_id_t step_id,
+                                      uint32_t exit_code, TaskInCtld* job,
+                                      step_id_t step_id,
                                       const CranedId& craned_id,
                                       StepStatusChangeContext* context);
   void CleanTaskStatusChangeQueueCb_();
