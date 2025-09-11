@@ -162,7 +162,8 @@ class CranedServer {
       return false;
     if (m_status_ == CranedStatus::RECONFIGURING)
       // Only PAM can send requests during recovery or stopping.
-      return request_source == RequestSource::PAM;
+      return request_source == RequestSource::PAM ||
+             request_source == RequestSource::SUPERVISOR;
 
     return true;
   }

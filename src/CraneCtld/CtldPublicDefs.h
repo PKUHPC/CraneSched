@@ -47,7 +47,7 @@ constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
 
 // Clean TaskStatusChangeQueue when timeout or exceeding batch num
-constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
+constexpr uint32_t kTaskStatusChangeTimeoutMS = 100;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
 
 //*********************************************************
