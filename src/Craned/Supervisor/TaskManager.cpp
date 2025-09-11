@@ -636,6 +636,8 @@ CraneErrCode ContainerInstance::Prepare() {
   if (!util::os::CreateFoldersForFile(sh_path)) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
+  chown(m_temp_path_.c_str(), m_parent_step_inst_->pwd.Uid(),
+        m_parent_step_inst_->pwd.Gid());
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
@@ -938,9 +940,14 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
 
   // mount the generated script with uid/gid mapping.
   auto* mount = m_container_config_.add_mounts();
-  mount->set_host_path(m_meta_->parsed_sh_script_path);
-  mount->set_container_path("/tmp/crane/script.sh");
+  mount->set_host_path(m_temp_path_);
+  mount->set_container_path("/tmp/crane");
   mount->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
+
+  auto mounted_exe_path = std::format(
+      "/tmp/crane/{}", std::filesystem::path(m_meta_->parsed_sh_script_path)
+                           .filename()
+                           .string());
 
   // Inject fake root config if the task is not from root.
   if (uid != 0 &&
@@ -958,7 +965,7 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
       !GetParentStep().batch_meta().interpreter().empty())
     real_exe = GetParentStep().batch_meta().interpreter();
 
-  std::vector<std::string> command{real_exe, "/tmp/crane/script.sh"};
+  std::vector<std::string> command{real_exe, mounted_exe_path};
   m_container_config_.mutable_command()->Assign(command.begin(), command.end());
 
   // envs
@@ -971,12 +978,14 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
   return CraneErrCode::SUCCESS;
 }
 
-cri::api::IDMapping ContainerInstance::MakeIdMapping_(uid_t host_id,
-                                                      uid_t container_id,
+// Setup mapping for kid <-> uid. For kernel id and userspace id, See:
+// https://www.kernel.org/doc/html/next/filesystems/idmappings.html
+cri::api::IDMapping ContainerInstance::MakeIdMapping_(uid_t kernel_id,
+                                                      uid_t userspace_id,
                                                       size_t size) {
   cri::api::IDMapping mapping{};
-  mapping.set_host_id(host_id);
-  mapping.set_container_id(container_id);
+  mapping.set_host_id(kernel_id);
+  mapping.set_container_id(userspace_id);
   mapping.set_length(size);
   return mapping;
 }
@@ -1001,25 +1010,22 @@ CraneErrCode ContainerInstance::SetSubIdMappings_(const PasswordEntry& pwd) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  m_uid_mapping_ = {MakeIdMapping_(0, pwd.Uid(), 1),
-                    MakeIdMapping_(subuid[0].start, 1, subuid[0].count)};
+  // K8s/Containerd currently assume only one continuous range is set for
+  // userns. Otherwise, netns in userns will fail.
+  m_userns_uid_mapping_ = MakeIdMapping_(subuid[0].start, 0, subuid[0].count);
+  m_userns_gid_mapping_ = MakeIdMapping_(subgid[0].start, 0, subgid[0].count);
 
-  m_gid_mapping_ = {MakeIdMapping_(0, pwd.Gid(), 1),
-                    MakeIdMapping_(subgid[0].start, 1, subgid[0].count)};
-
-  CRANE_TRACE(
-      "Adding id mapping for user (uid: {}, gid: {}). Uid map: {}, {}; Gid "
-      "map: {}, {}.",
-      pwd.Uid(), pwd.Gid(), m_uid_mapping_[0].DebugString(),
-      m_uid_mapping_[1].DebugString(), m_gid_mapping_[0].DebugString(),
-      m_gid_mapping_[1].DebugString());
+  // Use idmapped mounts for fake root.
+  // Code below could be unintuitive. See vfsuid for details.
+  m_mount_uid_mapping_ = MakeIdMapping_(subuid[0].start, pwd.Uid(), 1);
+  m_mount_gid_mapping_ = MakeIdMapping_(subgid[0].start, pwd.Gid(), 1);
 
   return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::InjectFakeRootConfig_(
     const PasswordEntry& pwd, cri::api::PodSandboxConfig* config) {
-  if (m_uid_mapping_.empty() || m_gid_mapping_.empty() ||
+  if (m_userns_uid_mapping_.length() == 0 &&
       SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -1031,10 +1037,8 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 
   // Fake root
   userns_options->set_mode(cri::api::NamespaceMode::POD);
-  userns_options->mutable_uids()->Assign(m_uid_mapping_.begin(),
-                                         m_uid_mapping_.end());
-  userns_options->mutable_gids()->Assign(m_gid_mapping_.begin(),
-                                         m_gid_mapping_.end());
+  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
+  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
 
   linux_sec_context->mutable_run_as_user()->set_value(0);
   linux_sec_context->mutable_run_as_group()->set_value(0);
@@ -1044,7 +1048,7 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 
 CraneErrCode ContainerInstance::InjectFakeRootConfig_(
     const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
-  if (m_uid_mapping_.empty() || m_gid_mapping_.empty() ||
+  if (m_userns_uid_mapping_.length() == 0 &&
       SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -1056,20 +1060,16 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 
   // fake root
   userns_options->set_mode(cri::api::NamespaceMode::POD);
-  userns_options->mutable_uids()->Assign(m_uid_mapping_.begin(),
-                                         m_uid_mapping_.end());
-  userns_options->mutable_gids()->Assign(m_gid_mapping_.begin(),
-                                         m_gid_mapping_.end());
+  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
+  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
 
   linux_sec_context->mutable_run_as_user()->set_value(0);
   linux_sec_context->mutable_run_as_group()->set_value(0);
 
-  // modify mounts
+  // modify mounts, see comments regarding *mapping members
   for (auto& mount : *config->mutable_mounts()) {
-    mount.mutable_uidmappings()->Assign(m_uid_mapping_.begin(),
-                                        m_uid_mapping_.end());
-    mount.mutable_gidmappings()->Assign(m_gid_mapping_.begin(),
-                                        m_gid_mapping_.end());
+    mount.mutable_uidmappings()->Add()->CopyFrom(m_mount_uid_mapping_);
+    mount.mutable_gidmappings()->Add()->CopyFrom(m_mount_gid_mapping_);
   }
 
   return CraneErrCode::SUCCESS;

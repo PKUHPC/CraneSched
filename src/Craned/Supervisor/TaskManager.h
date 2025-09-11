@@ -315,8 +315,8 @@ class ContainerInstance : public ITaskInstance {
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
 
-  inline static cri::api::IDMapping MakeIdMapping_(uid_t host_id,
-                                                   uid_t container_id,
+  inline static cri::api::IDMapping MakeIdMapping_(uid_t kernel_id,
+                                                   uid_t userspace_id,
                                                    size_t size);
   inline static std::string MakeHashId_(job_id_t job_id,
                                         const std::string& job_name,
@@ -338,8 +338,16 @@ class ContainerInstance : public ITaskInstance {
   cri::api::PodSandboxConfig m_pod_config_;
   cri::api::ContainerConfig m_container_config_;
 
-  std::array<cri::api::IDMapping, 2> m_uid_mapping_{};
-  std::array<cri::api::IDMapping, 2> m_gid_mapping_{};
+  // These are used for keep-id mounts in rootless containers.
+  cri::api::IDMapping m_mount_uid_mapping_;
+  cri::api::IDMapping m_mount_gid_mapping_;
+
+  // This is a workaround for CRI which only supports only one id
+  // mapping in user namespace. See:
+  // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
+  // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
+  cri::api::IDMapping m_userns_uid_mapping_;
+  cri::api::IDMapping m_userns_gid_mapping_;
 
   std::filesystem::path m_temp_path_;
   std::filesystem::path m_cri_output_path_;
