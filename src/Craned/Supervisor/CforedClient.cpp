@@ -530,6 +530,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
 
     if (ok) {
+      m_output_queue_bytes_.fetch_sub(output.size(), std::memory_order_relaxed);
+
       StreamStepIORequest request;
       request.set_type(fwd_req.type);
       std::visit(
