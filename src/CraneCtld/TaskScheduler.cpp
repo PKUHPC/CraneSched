@@ -2081,7 +2081,6 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
         context->rn_step_raw_ptrs.push_back(step);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
-        // TODO: Aggregate primary step creation
         g_embedded_db_client->AppendSteps({primary_step.get()});
         job->SetPrimaryStep(std::move(primary_step));
         for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
@@ -2139,8 +2138,9 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
 }
 
 void TaskScheduler::CommonStepStatusChangeHandler_(
-    crane::grpc::TaskStatus new_status, TaskInCtld* job, step_id_t step_id,
-    const CranedId& craned_id, StepStatusChangeContext* context) {
+    crane::grpc::TaskStatus new_status, uint32_t exit_code, TaskInCtld* job,
+    step_id_t step_id, const CranedId& craned_id,
+    StepStatusChangeContext* context) {
   using util::StepStatusToString;
   // PrimaryStep
   bool primary_step =
@@ -2269,6 +2269,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
     context->step_raw_ptrs.push_back(step);
     if (primary_step) {
       job->SetPrimaryStepStatus(step->Status());
+      job->SetPrimaryStepExitCode(exit_code);
       context->rn_job_raw_ptrs.push_back(job);
       context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
     } else {
@@ -2324,7 +2325,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       job_finished_status = DaemonStepStatusChangeHandler_(
           new_status, task.get(), craned_index, &context);
     } else {
-      CommonStepStatusChangeHandler_(new_status, task.get(), step_id,
+      CommonStepStatusChangeHandler_(new_status, exit_code, task.get(), step_id,
                                      craned_index, &context);
     }
 
@@ -2362,7 +2363,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
 
       task->SetStatus(job_finished_status.value());
-      task->SetExitCode(exit_code);
+      task->SetExitCode(task->PrimaryStepExitCode());
       task->SetEndTime(absl::Now());
 
       for (CranedId const& craned_id : task->CranedIds()) {

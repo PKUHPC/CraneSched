@@ -629,6 +629,7 @@ struct TaskInCtld {
   std::list<CranedId> craned_ids;
   crane::grpc::TaskStatus primary_status{};
   crane::grpc::TaskStatus status{};
+  uint32_t primary_exit_code{};
   uint32_t exit_code{};
   bool held{false};
   // DAEMON step
@@ -726,6 +727,9 @@ struct TaskInCtld {
 
   void SetStatus(crane::grpc::TaskStatus val);
   crane::grpc::TaskStatus Status() const { return status; }
+
+  void SetPrimaryStepExitCode(uint32_t val);
+  uint32_t PrimaryStepExitCode() const { return primary_exit_code; }
 
   void SetExitCode(uint32_t val);
   uint32_t ExitCode() const { return exit_code; }
