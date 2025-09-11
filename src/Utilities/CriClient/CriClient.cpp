@@ -342,6 +342,15 @@ void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
 void CriClient::StopContainerEventStream() {
   if (m_event_stream_thread_.joinable()) {
     m_event_stream_stop_ = true;
+
+    // Cancel the gRPC context to immediately unblock stream operations
+    {
+      util::lock_guard lock(m_event_stream_context_mutex_);
+      if (m_event_stream_context_) {
+        m_event_stream_context_->TryCancel();
+      }
+    }
+
     m_event_stream_thread_.join();
     CRANE_TRACE("Container event stream stopped");
   } else {
@@ -363,16 +372,21 @@ void CriClient::ContainerEventStreamLoop_() {
   using api::GetEventsRequest;
 
   while (!m_event_stream_stop_) {
+    std::shared_ptr<grpc::ClientContext> current_context;
+
     try {
       GetEventsRequest request{};
-      grpc::ClientContext context;
 
-      // Set a reasonable timeout for the stream
-      context.set_deadline(std::chrono::system_clock::now() +
-                           std::chrono::minutes(5));
+      // Create and store a cancellable context
+      {
+        util::lock_guard lock(m_event_stream_context_mutex_);
+        m_event_stream_context_ = std::make_shared<grpc::ClientContext>();
+        current_context = m_event_stream_context_;
+      }
 
       CRANE_TRACE("Starting container event stream...");
-      auto stream = m_rs_stub_->GetContainerEvents(&context, request);
+      auto stream =
+          m_rs_stub_->GetContainerEvents(current_context.get(), request);
 
       ContainerEventResponse response;
       while (stream->Read(&response) && !m_event_stream_stop_) {
@@ -392,10 +406,17 @@ void CriClient::ContainerEventStreamLoop_() {
       }
     }
 
+    // Clear the shared context after each attempt
+    {
+      util::lock_guard lock(m_event_stream_context_mutex_);
+      m_event_stream_context_.reset();
+    }
+
     // Reconnection delay if not stopping
     if (!m_event_stream_stop_) {
       CRANE_INFO(
-          "Container event stream disconnected, reconnecting in 5 seconds...");
+          "Container event stream disconnected, reconnecting in {} seconds...",
+          kCriDefaultReqTimeout);
       std::this_thread::sleep_for(kCriDefaultReqTimeout);
     }
   }
