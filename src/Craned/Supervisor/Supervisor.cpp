@@ -240,7 +240,9 @@ void StartServer() {
 
   CRANE_INFO("Supervisor started step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
-
+  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON)
+    ::Craned::Supervisor::g_runtime_status.Status =
+        Craned::Supervisor::StepStatus::Running;
   g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Running, 0,
                                          std::nullopt);
   g_server->Wait();
