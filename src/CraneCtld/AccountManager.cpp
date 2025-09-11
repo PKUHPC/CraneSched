@@ -38,7 +38,7 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  result = CheckIfUserHasHigherPrivThan_(*op_user, new_user.admin_level);
+  result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
   if (!result) return result;
 
   // User must specify an account
@@ -180,6 +180,9 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
+  if (name == "root" && (account == "ROOT" || account.empty()))
+    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+
   // Deleting a user only requires verifying administrator privileges.
   auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
   if (!result) return result;
@@ -187,6 +190,7 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   // The provided account is invalid.
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+
 
   return DeleteUser_(*user, account);
 }
