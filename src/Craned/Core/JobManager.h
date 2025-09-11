@@ -273,9 +273,11 @@ class JobManager {
   ConcurrentQueue<StepStatusChangeQueueElem> m_task_status_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;
 
   // The function which will be called when SIGINT is triggered.
