@@ -68,6 +68,8 @@ inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
+inline constexpr size_t kMaxOutputQueueBytes = 1 * 1024 * 1024ULL;
+
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
 inline const char* const kDefaultCraneCtldMutexFile =
     "cranectld/cranectld.lock";
