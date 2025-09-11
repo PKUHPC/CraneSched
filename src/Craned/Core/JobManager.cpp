@@ -36,14 +36,16 @@ namespace Craned {
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
-      step_to_d(step_to_d) {}
+      step_to_d(step_to_d),
+      status(StepStatus::Configuring) {}
 
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
                            pid_t supv_pid)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
       step_to_d(step_to_d),
-      supv_pid(supv_pid) {}
+      supv_pid(supv_pid),
+      status(StepStatus::Running) {}
 
 bool StepInstance::IsDaemon() const {
   return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
@@ -920,15 +922,18 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
     auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
     if (!job_ptr) {
-      CRANE_ERROR("[Job #{}] Job allocation not found.", status_change.job_id);
+      CRANE_ERROR("[Job #{}] Job allocation not found for StepStatusChange.",
+                  status_change.job_id);
       continue;
     }
     absl::MutexLock lk(job_ptr->step_map_mtx.get());
     if (!job_ptr->step_map.contains(status_change.step_id)) {
-      CRANE_ERROR("[Step #{}.{}] Step allocation not found.",
-                  status_change.job_id, status_change.step_id);
+      CRANE_ERROR(
+          "[Step #{}.{}] Step allocation not found for StepStatusChange.",
+          status_change.job_id, status_change.step_id);
       continue;
     }
+    auto* step = job_ptr->step_map.at(status_change.step_id).get();
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
@@ -1012,6 +1017,7 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
   StepTerminateQueueElem elem;
+  std::vector<StepTerminateQueueElem> not_ready_elems;
   while (m_step_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
@@ -1056,6 +1062,14 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     }
 
     for (auto step_id : terminate_step_ids) {
+      auto* step = job_instance->step_map.at(step_id).get();
+      if (step->status != StepStatus::Running) {
+        CRANE_DEBUG(
+            "[Step #{}.{}] Terminating a non-running step, will do it later.",
+            elem.job_id, elem.step_id);
+        not_ready_elems.emplace_back(std::move(elem));
+        break;
+      }
       auto stub = g_supervisor_keeper->GetStub(elem.job_id, step_id);
       if (!stub) {
         CRANE_ERROR("[Step #{}.{}] Supervisor not found", elem.job_id, step_id);
@@ -1079,6 +1093,9 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         g_job_mgr->CleanUpJobAndStepsAsync(job_step_ids);
       });
     }
+  }
+  for (auto& not_ready_elem : not_ready_elems) {
+    m_step_terminate_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 
@@ -1132,8 +1149,23 @@ void JobManager::StepStopAndDoStatusChangeAsync(
 
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
+  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
     if (auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id); job_ptr) {
+      absl::MutexLock lk(job_ptr->step_map_mtx.get());
+      if (!job_ptr->step_map.contains(elem.step_id)) {
+        CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
+                    elem.job_id, elem.step_id);
+        continue;
+      }
+      auto* step = job_ptr->step_map.at(elem.step_id).get();
+      if (step->status != StepStatus::Running) {
+        CRANE_DEBUG(
+            "[Step #{}.{}] Terminating a non-running step, will do it later.",
+            elem.job_id, elem.step_id);
+        not_ready_elems.emplace_back(std::move(elem));
+        continue;
+      }
       auto stub = g_supervisor_keeper->GetStub(elem.job_id, elem.step_id);
       if (!stub) {
         CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
@@ -1151,6 +1183,9 @@ void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
                   elem.job_id);
       elem.ok_prom.set_value(false);
     }
+  }
+  for (auto& not_ready_elem : not_ready_elems) {
+    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 

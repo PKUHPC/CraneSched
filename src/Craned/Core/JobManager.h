@@ -33,12 +33,15 @@ namespace Craned {
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 
 using StepToD = crane::grpc::StepToD;
+using StepStatus = crane::grpc::TaskStatus;
 struct StepInstance {
   job_id_t job_id;
   step_id_t step_id;
   pid_t supv_pid;
   crane::grpc::StepToD step_to_d;
+  StepStatus status{StepStatus::Invalid};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
+  // For step recovery
   StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid);
   [[nodiscard]] bool IsDaemon() const;
 };
@@ -92,8 +95,6 @@ class JobManager {
   ~JobManager();
 
   bool AllocJobs(std::vector<JobInD>&& jobs);
-
-  Common::CgroupInterface* GetCgForJob(task_id_t job_id);
 
   /**
    * Terminate all job steps on the node and clean up.

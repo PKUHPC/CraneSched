@@ -28,7 +28,7 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
   CRANE_ASSERT(g_config.StepSpec.step_type() != crane::grpc::StepType::DAEMON);
-  g_config.StepExecuted.store(true);
+  g_runtime_status.Status = StepStatus::Running;
   std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
   code_future.wait();
 
@@ -60,9 +60,7 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
   response->set_job_id(g_config.JobId);
   response->set_step_id(g_config.StepId);
   response->set_supervisor_pid(getpid());
-  response->set_ok(g_config.StepSpec.step_type() ==
-                       crane::grpc::StepType::DAEMON ||
-                   g_config.StepExecuted);
+  response->set_ok(g_runtime_status.Status == StepStatus::Running);
   return Status::OK;
 }
 
