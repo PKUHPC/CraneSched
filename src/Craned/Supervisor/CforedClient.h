@@ -64,8 +64,6 @@ class CforedClient {
 
   uint16_t InitUvX11FwdHandler(pid_t pid);
 
-  void StartUvLoopThread();
-
   bool TaskOutputFinish(task_id_t task_id);
   bool TaskProcessStop(task_id_t task_id);
   void TaskEnd(task_id_t task_id);
@@ -76,6 +74,22 @@ class CforedClient {
   uint16_t SetupX11forwarding_();
 
   static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
+  struct CreateStdoutFwdQueueElem {
+    TaskFwdMeta meta;
+    std::promise<bool> promise;
+  };
+  ConcurrentQueue<CreateStdoutFwdQueueElem> m_create_stdout_fwd_handler_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_clean_stdout_fwd_handler_queue_async_handle_;
+  void CleanStdoutFwdHandlerQueueCb_();
+
+  struct CreateX11FwdQueueElem {
+    std::promise<uint16_t> promise;
+  };
+  ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_handler_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_clean_x11_fwd_handler_queue_async_handle_;
+  void CleanX11FwdHandlerQueueCb_();
 
   void AsyncSendRecvThread_();
 

@@ -324,10 +324,7 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
     CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
                 m_parent_step_inst_->x11_fwd, meta->x11_port);
   }
-
-  // TODO: It's ok here to start the uv loop thread, since currently 1 task only
-  //  corresponds to 1 step.
-  parent_cfored_client->StartUvLoopThread();
+  CRANE_INFO("Task #{} fwd ready.", task_id);
   return true;
 }
 
@@ -1493,7 +1490,6 @@ void TaskManager::ShutdownSupervisor() {
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
                                            0, "");
   }
-  m_step_.StopCforedClient();
   g_craned_client->Shutdown();
   g_server->Shutdown();
   g_task_mgr->Shutdown();
@@ -1512,6 +1508,7 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
+    m_step_.StopCforedClient();
     if (!orphaned)
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
