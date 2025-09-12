@@ -1495,7 +1495,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
       for (CranedId const& craned_id : part_meta_ptr->craned_ids) {
         craned_ids.emplace_back(craned_id);
       }
-      if (request.has_node_num()) {
+      if (request.node_num() != 0) {
         // NodeCnt is valid only when craned_regex is empty
         node_num = request.node_num();
         if (craned_ids.size() < node_num) {

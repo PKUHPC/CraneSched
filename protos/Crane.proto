@@ -511,7 +511,7 @@ message CreateReservationRequest {
   repeated string allowed_users = 9;
   repeated string denied_users = 10;
 
-  optional uint32 node_num = 11;
+  uint32 node_num = 11;
 }
 
 message CreateReservationReply {
