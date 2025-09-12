@@ -218,7 +218,7 @@ void GlobalVariableInit() {
   g_server = std::make_unique<Craned::Supervisor::SupervisorServer>();
 
   // Make sure grpc server is ready to receive requests.
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
 
