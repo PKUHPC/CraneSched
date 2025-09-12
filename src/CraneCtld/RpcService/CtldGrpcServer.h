@@ -67,7 +67,7 @@ class CforedStreamWriter {
 
   bool WriteTaskResAllocReply(
       task_id_t task_id,
-      std::expected<std::pair<std::string, std::list<CranedId>>, std::string>
+      std::expected<std::pair<std::string, std::vector<CranedId>>, std::string>
           res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
