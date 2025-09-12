@@ -36,6 +36,7 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
+using Common::kStepRequestCheckIntervalMs;
 
 StepInstance::~StepInstance() {
   if (termination_timer) {
@@ -1418,6 +1419,14 @@ TaskManager::TaskManager()
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanTerminateTaskQueueCb_();
       });
+  m_terminate_task_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_terminate_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        m_terminate_task_async_handle_->send();
+      });
+  m_terminate_task_timer_handle_->start(
+      std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
+      std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
   m_change_task_time_limit_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
@@ -1425,6 +1434,15 @@ TaskManager::TaskManager()
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanChangeTaskTimeLimitQueueCb_();
       });
+  m_change_task_time_limit_timer_handle_ =
+      m_uvw_loop_->resource<uvw::timer_handle>();
+  m_change_task_time_limit_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        m_change_task_time_limit_async_handle_->send();
+      });
+  m_change_task_time_limit_timer_handle_->start(
+      std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
+      std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
@@ -1493,7 +1511,6 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
-  // No need to free the TaskInstance structure,will destruct with TaskMgr.
   if (m_step_.AllTaskFinished()) {
     if (!orphaned)
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
@@ -1739,6 +1756,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
 void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
+  std::vector<TaskTerminateQueueElem> not_ready_elems;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
@@ -1746,6 +1764,11 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         g_config.JobId);
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
+    if (!g_runtime_status.Executed) {
+      not_ready_elems.emplace_back(std::move(elem));
+      CRANE_DEBUG("Task is not ready to terminate, will check next time.");
+      continue;
+    }
     if (m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Terminating a completing task #{}, ignored.",
                   g_config.JobId);
@@ -1775,8 +1798,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         // For an Interactive task with no process running, it ends immediately.
         ActivateTaskStatusChange_(task_id, crane::grpc::Completed,
                                   ExitCode::kExitCodeTerminated, std::nullopt);
+      } else {
+        CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
       }
     }
+  }
+  for (auto& not_ready_elem : not_ready_elems) {
+    m_task_terminate_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 
@@ -1784,7 +1812,18 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
   ChangeTaskTimeLimitQueueElem elem;
+  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
+    if (!g_runtime_status.Executed) {
+      not_ready_elems.emplace_back(std::move(elem));
+      CRANE_DEBUG(
+          "Task is not ready to change time limit, will check next time.");
+      continue;
+    }
+    if (m_step_.AllTaskFinished()) {
+      CRANE_DEBUG("Change timelimit for a completing task, ignored.");
+      continue;
+    }
     // Delete the old timer.
     DelTerminationTimer_();
 
@@ -1805,11 +1844,16 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
+  for (auto& not_ready_elem : not_ready_elems) {
+    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
+  }
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
+    g_runtime_status.Executed = true;
+    g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
     auto* task = m_step_.GetTaskInstance(task_id);
@@ -1834,7 +1878,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
-      CRANE_ASSERT_MSG(false, "Calloc step, no script to run.");
+      CRANE_DEBUG("Calloc step, no script to run.");
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       m_pid_task_id_map_[task->GetPid()] = task->task_id;
       return;

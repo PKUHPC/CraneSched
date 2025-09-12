@@ -32,7 +32,7 @@
 #include "protos/Supervisor.pb.h"
 
 namespace Craned {
-
+using Common::kStepRequestCheckIntervalMs;
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
@@ -164,6 +164,9 @@ JobManager::JobManager() {
       [this](const uvw::timer_event&, uvw::timer_handle& handle) {
         m_terminate_step_async_handle_->send();
       });
+  m_terminate_step_timer_handle_->start(
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
+      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("JobMgrLoopThr");
@@ -948,6 +951,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
     auto* step = job_ptr->step_map.at(status_change.step_id).get();
+    step->status = status_change.new_status;
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
@@ -1074,6 +1078,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     } else {
       terminate_step_ids = {elem.step_id};
     }
+    bool can_terminate_now = true;
 
     for (auto step_id : terminate_step_ids) {
       auto* step = job_instance->step_map.at(step_id).get();
@@ -1082,8 +1087,13 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
             "[Step #{}.{}] Terminating a non-running step, will do it later.",
             elem.job_id, elem.step_id);
         not_ready_elems.emplace_back(std::move(elem));
+        can_terminate_now = false;
         break;
       }
+    }
+    if (!can_terminate_now) continue;
+
+    for (auto step_id : terminate_step_ids) {
       auto stub = g_supervisor_keeper->GetStub(elem.job_id, step_id);
       if (!stub) {
         CRANE_ERROR("[Step #{}.{}] Supervisor not found", elem.job_id, step_id);
@@ -1096,10 +1106,11 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         // Supervisor dead for some reason.
         CRANE_ERROR("[Step #{}.{}] Failed to terminate.", elem.job_id, step_id);
         if (!elem.mark_as_orphaned)
-          StepStopAndDoStatusChangeAsync(
+          StepStatusChangeAsync(
               elem.job_id, step_id, crane::grpc::TaskStatus::Cancelled,
               ExitCode::kExitCodeTerminated, "Terminated failed.");
       }
+      CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);
       // Try to clean up the step or job if exists.
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
       job_step_ids[elem.job_id] = {step_id};
@@ -1152,9 +1163,10 @@ void JobManager::CleanUpJobAndStepsAsync(
   }
 }
 
-void JobManager::StepStopAndDoStatusChangeAsync(
-    job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
-    uint32_t exit_code, std::optional<std::string> reason) {
+void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                                       crane::grpc::TaskStatus new_status,
+                                       uint32_t exit_code,
+                                       std::optional<std::string> reason) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, util::StepStatusToString(new_status));
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,

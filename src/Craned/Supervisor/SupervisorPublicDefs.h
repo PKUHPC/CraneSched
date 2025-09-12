@@ -91,6 +91,7 @@ inline Config g_config;
 
 struct RuntimeStatus {
   std::atomic<StepStatus> Status{StepStatus::Configuring};
+  std::atomic_bool Executed{false};
 };
 
 inline RuntimeStatus g_runtime_status;
