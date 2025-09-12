@@ -53,6 +53,8 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
   if (stale_user && !stale_user->deleted) {
     if (stale_user->account_to_attrs_map.contains(object_account))
       return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
+    result = CheckIfUserHasHigherPrivThan_(*op_user, stale_user->admin_level);
+    if (!result) return result;
   }
 
   // Check whether the account exists
