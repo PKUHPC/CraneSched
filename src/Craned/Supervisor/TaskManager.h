@@ -399,9 +399,11 @@ class TaskManager {
   ConcurrentQueue<task_id_t> m_task_stop_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_terminate_task_timer_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
@@ -411,7 +413,7 @@ class TaskManager {
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
 
-  std::atomic_bool m_supervisor_exit_{false};
+  std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;

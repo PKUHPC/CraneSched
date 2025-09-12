@@ -28,7 +28,6 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
   CRANE_ASSERT(g_config.StepSpec.step_type() != crane::grpc::StepType::DAEMON);
-  g_runtime_status.Status = StepStatus::Running;
   std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
   code_future.wait();
 

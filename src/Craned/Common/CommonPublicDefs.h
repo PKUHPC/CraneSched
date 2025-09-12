@@ -29,4 +29,5 @@
 
 namespace Craned::Common {
 using EnvMap = std::unordered_map<std::string, std::string>;
+constexpr uint32_t kStepRequestCheckIntervalMs = 500;
 }  // namespace Craned::Common

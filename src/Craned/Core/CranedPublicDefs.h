@@ -33,7 +33,6 @@ namespace Craned {
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 constexpr uint64_t kCtldClientTimeoutSec = 30;
 constexpr int64_t kCranedRpcTimeoutSeconds = 5;
-constexpr uint32_t kStepRequestCheckIntervalMs = 500;
 
 using Common::CgroupInterface;
 using Common::CgroupManager;

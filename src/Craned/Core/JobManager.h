@@ -127,10 +127,10 @@ class JobManager {
   void CleanUpJobAndStepsAsync(
       const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps);
 
-  void StepStopAndDoStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                                      crane::grpc::TaskStatus new_status,
-                                      uint32_t exit_code,
-                                      std::optional<std::string> reason);
+  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                             crane::grpc::TaskStatus new_status,
+                             uint32_t exit_code,
+                             std::optional<std::string> reason);
 
   // Wait internal libuv base loop to exit...
   void Wait();
