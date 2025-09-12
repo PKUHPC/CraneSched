@@ -1675,7 +1675,7 @@ void TaskManager::EvTaskTimerCb_() {
 
   DelTerminationTimer_();
 
-  if (m_step_.IsBatch()) {
+  if (m_step_.IsBatch() || m_step_.IsCrun()) {
     m_task_terminate_queue_.enqueue(
         TaskTerminateQueueElem{.terminated_by_timeout = true});
     m_terminate_task_async_handle_->send();
