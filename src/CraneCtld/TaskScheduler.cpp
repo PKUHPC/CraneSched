@@ -1529,8 +1529,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     return std::unexpected("Reservation name already exists");
   }
 
-  std::vector<CranedMetaContainer::CranedMetaPtr>
-      craned_meta_vec;
+  std::vector<CranedMetaContainer::CranedMetaPtr> craned_meta_vec;
   ResourceV2 allocated_res;
   {
     LockGuard running_guard(&m_running_task_map_mtx_);
