@@ -18,6 +18,7 @@
 
 #include "CranedKeeper.h"
 
+#include "CranedMetaContainer.h"
 #include "TaskScheduler.h"
 
 namespace Ctld {

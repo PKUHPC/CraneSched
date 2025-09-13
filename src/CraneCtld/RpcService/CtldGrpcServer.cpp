@@ -244,7 +244,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_task_res_allocated =
               [writer_weak_ptr](task_id_t task_id,
                                 std::string const &allocated_craned_regex,
-                                std::list<std::string> const &craned_ids) {
+                                std::vector<std::string> const &craned_ids) {
                 if (auto writer = writer_weak_ptr.lock(); writer)
                   writer->WriteTaskResAllocReply(
                       task_id,
