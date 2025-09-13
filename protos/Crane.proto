@@ -510,6 +510,8 @@ message CreateReservationRequest {
   repeated string denied_accounts = 8;
   repeated string allowed_users = 9;
   repeated string denied_users = 10;
+
+  uint32 node_num = 11;
 }
 
 message CreateReservationReply {
