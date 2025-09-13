@@ -1529,8 +1529,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     return std::unexpected("Reservation name already exists");
   }
 
-  std::vector<std::pair<CranedMetaContainer::CranedMetaPtr, ResourceInNode>>
-      craned_meta_res_vec;
+  std::vector<CranedMetaContainer::CranedMetaPtr> craned_meta_vec;
   ResourceV2 allocated_res;
   {
     LockGuard running_guard(&m_running_task_map_mtx_);
@@ -1570,18 +1569,17 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
 
       // use static_meta in case of craned dead
       allocated_res.AddResourceInNode(craned_id, craned_meta->static_meta.res);
-      craned_meta_res_vec.emplace_back(std::move(craned_meta),
-                                       std::move(craned_meta->static_meta.res));
-      if (craned_meta_res_vec.size() >= node_num) {
+      craned_meta_vec.emplace_back(std::move(craned_meta));
+      if (craned_meta_vec.size() >= node_num) {
         break;
       }
     }
 
-    if (craned_meta_res_vec.size() < node_num) {
+    if (craned_meta_vec.size() < node_num) {
       std::string failed_msg = fmt::format(
           "Not enough nodes available for reservation. "
           "Requested: {}, Available: {}",
-          node_num, craned_meta_res_vec.size());
+          node_num, craned_meta_vec.size());
       if (!nodes_not_found.empty()) {
         failed_msg +=
             ". " + fmt::format("Nodes not found: {}",
@@ -1625,11 +1623,12 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     return std::unexpected(fmt::format(
         "Failed to insert reservation meta for reservation {}", resv_name));
   }
-  for (auto& [craned_meta, res] : craned_meta_res_vec) {
+  for (auto& craned_meta : craned_meta_vec) {
     const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
-        resv_name, CranedMeta::ResvInNode{.start_time = start_time,
-                                          .end_time = end_time,
-                                          .res_total = std::move(res)});
+        resv_name,
+        CranedMeta::ResvInNode{.start_time = start_time,
+                               .end_time = end_time,
+                               .res_total = craned_meta->static_meta.res});
     if (!ok) {
       CRANE_ERROR("Failed to insert reservation resource to {}",
                   craned_meta->static_meta.hostname);
