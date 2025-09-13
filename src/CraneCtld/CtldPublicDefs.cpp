@@ -526,9 +526,9 @@ void TaskInCtld::SetUsername(std::string const& val) {
   runtime_attr.set_username(val);
 }
 
-void TaskInCtld::SetCranedIds(std::list<CranedId>&& val) {
+void TaskInCtld::SetCranedIds(std::vector<CranedId>&& val) {
   runtime_attr.mutable_craned_ids()->Assign(val.begin(), val.end());
-  craned_ids = val;
+  craned_ids = std::move(val);
 }
 
 void TaskInCtld::CranedIdsClear() {
@@ -659,6 +659,9 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   if (val.has_begin_time()) {
     begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
   }
+
+  exclusive = val.exclusive();
+
   SetHeld(val.hold());
 }
 
@@ -671,8 +674,6 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
   username = runtime_attr.username();
 
   requeue_count = runtime_attr.requeue_count();
-  craned_ids = runtime_attr.craned_ids() | std::ranges::to<std::list>();
-  primary_status = runtime_attr.primary_step_status();
 
   primary_status = runtime_attr.primary_step_status();
   status = runtime_attr.status();

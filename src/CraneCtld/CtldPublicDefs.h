@@ -247,53 +247,28 @@ struct CranedMeta {
   std::string state_reason;
   absl::Time last_busy_time;
 
-  // *********************************************************
-  // TODO: Refactor as Unused LogicalPartition
-  // Store the information of the slices of allocated resource.
-  // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, ResourceInNode> rn_task_res_map;
-  // *********************************************************
 
-  // *********************************************************
-  // TODO: Refactor as Reservation LogicalPartition (Might be pointer)
-  struct ResvInNode {
-    absl::Time start_time;
-    absl::Time end_time;
-    ResourceInNode res_total;
-  };
-
-  // Store total resource of each reservation.
-  absl::flat_hash_map<ResvId, ResvInNode> resv_in_node_map;
-  // **********************************************************
-};
-
-struct LogicalPartition {
-  absl::Time start_time;
-  absl::Time end_time;
-
-  ResourceV2 res_total;
-  ResourceV2 res_avail;
-  ResourceV2 res_in_use;
-
-  std::list<CranedId> craned_ids;
-
-  struct RnTaskRes {
-    absl::Time end_time;  // sync with TaskInCtld
-    ResourceV2 resources;
-  };
-
-  absl::flat_hash_map<task_id_t, RnTaskRes> rn_task_res_map;
+  absl::flat_hash_map<ResvId, std::pair<absl::Time, absl::Time>>
+      resv_in_node_map;
 };
 
 struct ResvMeta {
   ResvId name;
   PartitionId part_id;
-  LogicalPartition logical_part;
+  absl::Time start_time;
+  absl::Time end_time;
 
   bool accounts_black_list{false};
   bool users_black_list{false};
   std::unordered_set<std::string> accounts;
   std::unordered_set<std::string> users;
+
+  absl::flat_hash_set<CranedId> craned_ids;
+  ResourceV2 res_total;
+  ResourceV2 res_avail;
+  absl::flat_hash_map<task_id_t, ResourceV2> rn_job_res_map;
+  absl::flat_hash_set<task_id_t> pd_job_ids;
 };
 
 struct PartitionGlobalMeta {
@@ -345,7 +320,7 @@ struct InteractiveMetaInTask {
   crane::grpc::InteractiveTaskType interactive_type;
 
   std::function<void(task_id_t, std::string const&,
-                     std::list<std::string> const&)>
+                     std::vector<std::string> const&)>
       cb_task_res_allocated;
 
   std::function<void(task_id_t, bool)> cb_task_completed;
@@ -610,6 +585,8 @@ struct TaskInCtld {
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
 
+  bool exclusive{false};
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -624,7 +601,7 @@ struct TaskInCtld {
    * Also, these fields are persisted on the disk.
    * -------------------------------- */
   int32_t requeue_count{0};
-  std::list<CranedId> craned_ids;
+  std::vector<CranedId> craned_ids;
   crane::grpc::TaskStatus primary_status{};
   crane::grpc::TaskStatus status{};
   uint32_t primary_exit_code{};
@@ -715,8 +692,8 @@ struct TaskInCtld {
   void SetUsername(std::string const& val);
   std::string const& Username() const { return username; }
 
-  void SetCranedIds(std::list<CranedId>&& val);
-  std::list<CranedId> const& CranedIds() const { return craned_ids; }
+  void SetCranedIds(std::vector<CranedId>&& val);
+  std::vector<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear();
   void CranedIdsAdd(CranedId const& i);
 
