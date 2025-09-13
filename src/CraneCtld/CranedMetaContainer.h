@@ -145,7 +145,7 @@ class CranedMetaContainer final {
   ResvMetaMapPtr GetResvMetaMapPtr();
 
   void MallocResourceFromResv(ResvId resv_id, task_id_t task_id,
-                              const LogicalPartition::RnTaskRes& res);
+                              const ResourceV2& res);
 
   void FreeResourceFromResv(ResvId reservation_id, task_id_t task_id);
 
