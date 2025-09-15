@@ -76,6 +76,6 @@ if [ "$mode" -eq 5 ] || [ "$mode" -eq 8 ] || [ "$mode" -eq 3 ]; then
 fi
 
 if [ "$mode" -eq 10 ]; then
-  batch_insert_collection "task_table" "/Workspace/CraneSched/scripts/tasks_bulk.json"
+  batch_insert_collection "task_table" "./tasks_bulk.json"
   exit 0
 fi
