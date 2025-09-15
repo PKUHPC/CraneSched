@@ -186,16 +186,14 @@ class MongodbClient {
       const std::string& account, const std::string& username,
       std::time_t start, std::time_t end,
       crane::grpc::QueryAccountUserSummaryItemReply* response);
-  bool AggregateAccountUserDayorMonth(mongocxx::collection& src_coll,
-                                      mongocxx::collection& dst_coll,
-                                      const std::string& src_time_field,
-                                      const std::string& dst_time_field,
-                                      std::time_t cur_start,
-                                      std::time_t cur_end, bool enable_log);
+  bool AggregateAccountUserDayorMonth(
+      mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
+      const std::string& src_time_field, const std::string& dst_time_field,
+      std::time_t cur_start, std::time_t cur_end, bool print_debug_log);
   bool AggregateAccountUserWckeyDayorMonth(
       mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
       const std::string& src_time_field, const std::string& dst_time_field,
-      std::time_t cur_start, std::time_t cur_end, bool enable_log);
+      std::time_t cur_start, std::time_t cur_end, bool print_debug_log);
 
   bool HandleHourAccountUserResult(const bsoncxx::array::view& arr,
                                    mongocxx::collection& dst_collection,

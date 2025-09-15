@@ -1903,8 +1903,8 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
                                                 std::tm& tm_last) {
   // Default time: 2025-07-01 00:00:00
   std::tm default_time = {};
-  default_time.tm_year = 2024 - 1900;
-  default_time.tm_mon = 7 - 1;
+  default_time.tm_year = 2020 - 1900;
+  default_time.tm_mon = 1 - 1;
   default_time.tm_mday = 1;
 
   try {
@@ -2100,7 +2100,7 @@ void MongodbClient::ClusterRollupUsage() {
 bool MongodbClient::AggregateAccountUserDayorMonth(
     mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
     const std::string& src_time_field, const std::string& dst_time_field,
-    std::time_t cur_start, std::time_t cur_end, bool enable_log) {
+    std::time_t cur_start, std::time_t cur_end, bool print_debug_log) {
   mongocxx::pipeline pipeline;
   pipeline.match(bsoncxx::builder::stream::document{}
                  << src_time_field << bsoncxx::builder::stream::open_document
@@ -2148,7 +2148,7 @@ bool MongodbClient::AggregateAccountUserDayorMonth(
     dst_coll.update_one(filter.view(), update.view(),
                         mongocxx::options::update{}.upsert(true));
 
-    if (enable_log) {
+    if (print_debug_log) {
       CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(doc));
     }
     has_data = true;
@@ -2160,7 +2160,7 @@ bool MongodbClient::AggregateAccountUserDayorMonth(
 bool MongodbClient::AggregateAccountUserWckeyDayorMonth(
     mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
     const std::string& src_time_field, const std::string& dst_time_field,
-    std::time_t cur_start, std::time_t cur_end, bool enable_log) {
+    std::time_t cur_start, std::time_t cur_end, bool print_debug_log) {
   mongocxx::pipeline pipeline;
   pipeline.match(bsoncxx::builder::stream::document{}
                  << src_time_field << bsoncxx::builder::stream::open_document
@@ -2211,7 +2211,7 @@ bool MongodbClient::AggregateAccountUserWckeyDayorMonth(
     dst_coll.update_one(filter.view(), update.view(),
                         mongocxx::options::update{}.upsert(true));
 
-    if (enable_log) {
+    if (print_debug_log) {
       CRANE_INFO("Aggregated account_user_wckey: {}", bsoncxx::to_json(doc));
     }
     has_data = true;
@@ -2225,7 +2225,7 @@ bool MongodbClient::AggregatePeriodFromLower(
     bool is_day_flag  // true=hour->day, false=day->month
 
 ) {
-  bool enable_log = true;
+  bool print_debug_log = false;
   std::time_t cur_start;
   std::tm tm_end = {};
   std::time_t cur_end;
@@ -2283,7 +2283,7 @@ bool MongodbClient::AggregatePeriodFromLower(
       auto dst_coll = (*GetClient_())[m_db_name_][dst_account_user_table];
       bool has_account_user = AggregateAccountUserDayorMonth(
           src_coll, dst_coll, src_time_field, dst_time_field, cur_start,
-          cur_end, enable_log);
+          cur_end, print_debug_log);
 
       // Aggregate account_user_wckey
       auto src_coll_wckey =
@@ -2292,10 +2292,10 @@ bool MongodbClient::AggregatePeriodFromLower(
           (*GetClient_())[m_db_name_][dst_account_user_wckey_table];
       bool has_account_user_wckey = AggregateAccountUserWckeyDayorMonth(
           src_coll_wckey, dst_coll_wckey, src_time_field, dst_time_field,
-          cur_start, cur_end, enable_log);
+          cur_start, cur_end, print_debug_log);
 
       // Only print window log if there is any data
-      if (enable_log && (has_account_user || has_account_user_wckey)) {
+      if (print_debug_log && (has_account_user || has_account_user_wckey)) {
         std::string start_str = util::FormatTime(cur_start);
         std::string end_str = util::FormatTime(cur_end);
         CRANE_INFO("{} aggregation window: {} -> {}", dst_time_field, start_str,
@@ -2406,7 +2406,7 @@ bool MongodbClient::HandleHourAccountUserWckeyResult(
 }
 
 bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
-  bool print_debug_log = true;
+  bool print_debug_log = false;
 
   std::time_t cur_start = start;
   std::time_t cur_end = cur_start + 3600;
@@ -2525,7 +2525,7 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
                       has_wckey;
       }
 
-      if (has_user || has_wckey) {
+      if (print_debug_log && (has_user || has_wckey)) {
         CRANE_INFO("hour aggregation window: {} -> {}",
                    util::FormatTime(cur_start), util::FormatTime(cur_end));
       }
@@ -2545,7 +2545,7 @@ void MongodbClient::QueryAndAgg(
     std::time_t range_start, std::time_t range_end, const std::string& account,
     const std::string& username,
     std::unordered_map<Key, AggResult, KeyHash>& agg_map) {
-  bool print_debug_log = true;  // Set to false to disable debug logs
+  bool print_debug_log = false;  // Set to false to disable debug logs
 
   if (print_debug_log) {
     CRANE_INFO("[DEBUG] Dumping all documents in collection: {}", table);
