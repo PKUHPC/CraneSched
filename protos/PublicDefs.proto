@@ -121,6 +121,7 @@ enum TaskStatus {
 enum TaskType {
   Interactive = 0;
   Batch = 1;
+  Container = 2;
 }
 
 enum InteractiveTaskType {
@@ -153,9 +154,10 @@ message TaskToCtld {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
+    ContainerTaskAdditionalMeta container_meta = 23;
   }
 
-  string extra_attr = 23;
+  string extra_attr = 30;
 
   string cmd_line = 31;
   string cwd = 32;  // Current working directory
@@ -163,7 +165,6 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
 
   string reservation = 36;
   bool exclusive = 37;
@@ -224,26 +225,26 @@ message TaskToD {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 11;
     InteractiveTaskAdditionalMeta interactive_meta = 12;
+    ContainerTaskAdditionalMeta container_meta = 13;
   }
 
-  map<string, string> env = 13;
-  string cwd = 14;
+  map<string, string> env = 14;
+  string cwd = 15;
 
-  repeated string allocated_nodes = 15;
+  repeated string allocated_nodes = 16;
 
-  string name = 16;
-  string account = 17;
-  string qos = 18;
+  string name = 17;
+  string account = 18;
+  string qos = 19;
 
-  repeated string excludes = 19;
-  repeated string nodelist = 20;
+  repeated string excludes = 20;
+  repeated string nodelist = 21;
 
-  uint32 node_num = 21;
-  uint32 ntasks_per_node = 22;
-  double cpus_per_task = 23;
+  uint32 node_num = 22;
+  uint32 ntasks_per_node = 23;
+  double cpus_per_task = 24;
 
-  bool get_user_env = 24;
-  string container = 25;
+  bool get_user_env = 25;
 
   // Not used now.
   string extra_attr = 29;
@@ -280,6 +281,39 @@ message InteractiveTaskAdditionalMeta {
   optional uint32 input_task_id = 8;
 }
 
+message ContainerTaskAdditionalMeta {
+
+  message ImageInfo {
+    string image = 1;
+    string username = 2;
+    string password = 3;
+    string server_address = 4;
+  }
+
+  string name = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  ImageInfo image = 6;
+
+  string entrypoint = 11;
+  string command = 12;
+  repeated string args = 13;
+  string workdir = 14;
+  map<string, string> env = 15; // env in container
+  bool detached = 16;
+
+  bool userns = 21;
+  uint32 run_as_user = 22;
+  uint32 run_as_group = 23;
+  
+  map<string, string> mounts = 24;
+  map<int32, int32> ports = 25;
+
+  // Crun input will forward to these tasks
+  optional uint32 input_task_id = 8;
+}
+
 message TaskInfo {
   // Static task information
   TaskType type = 1;
@@ -308,8 +342,11 @@ message TaskInfo {
   string extra_attr = 21;
   string reservation = 22;
 
-  string container = 23;
-  /* 24-29 Reserved */
+  // This is only used when querying Container tasks.
+  // For other types of tasks, this field is ignored.
+  optional ContainerTaskAdditionalMeta container_meta = 23;
+
+  /* 26-29 Reserved */
 
   // Dynamic task information
   bool held = 30;

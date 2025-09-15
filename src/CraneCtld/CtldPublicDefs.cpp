@@ -37,6 +37,78 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
+ContainerMetaInTask::ContainerMetaInTask(
+    const crane::grpc::ContainerTaskAdditionalMeta& rhs)
+    : image_info{.image = rhs.image().image(),
+                 .username = rhs.image().username(),
+                 .password = rhs.image().password(),
+                 .server_address = rhs.image().server_address()},
+      name(rhs.name()),
+      labels(rhs.labels().begin(), rhs.labels().end()),
+      annotations(rhs.annotations().begin(), rhs.annotations().end()),
+      entrypoint(rhs.entrypoint()),
+      command(rhs.command()),
+      args(rhs.args().begin(), rhs.args().end()),
+      workdir(rhs.workdir()),
+      env(rhs.env().begin(), rhs.env().end()),
+      detached(rhs.detached()),
+      userns(rhs.userns()),
+      run_as_user(rhs.run_as_user()),
+      run_as_group(rhs.run_as_group()),
+      mounts(rhs.mounts().begin(), rhs.mounts().end()),
+      port_mappings(rhs.ports().begin(), rhs.ports().end()) {}
+
+ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
+  crane::grpc::ContainerTaskAdditionalMeta result;
+
+  auto* image = result.mutable_image();
+  image->set_image(this->image_info.image);
+  image->set_username(this->image_info.username);
+  image->set_password(this->image_info.password);
+  image->set_server_address(this->image_info.server_address);
+
+  result.set_name(this->name);
+
+  auto* labels_map = result.mutable_labels();
+  for (const auto& label : this->labels) {
+    (*labels_map)[label.first] = label.second;
+  }
+
+  auto* annotations_map = result.mutable_annotations();
+  for (const auto& annotation : this->annotations) {
+    (*annotations_map)[annotation.first] = annotation.second;
+  }
+
+  result.set_entrypoint(this->entrypoint);
+  result.set_command(this->command);
+  for (const auto& arg : this->args) {
+    result.add_args(arg);
+  }
+  result.set_workdir(this->workdir);
+
+  auto* env_map = result.mutable_env();
+  for (const auto& env_var : this->env) {
+    (*env_map)[env_var.first] = env_var.second;
+  }
+
+  result.set_detached(this->detached);
+  result.set_userns(this->userns);
+  result.set_run_as_user(this->run_as_user);
+  result.set_run_as_group(this->run_as_group);
+
+  auto* mounts_map = result.mutable_mounts();
+  for (const auto& mount : this->mounts) {
+    (*mounts_map)[mount.first] = mount.second;
+  }
+
+  auto* ports_map = result.mutable_ports();
+  for (const auto& port : this->port_mappings) {
+    (*ports_map)[port.first] = port.second;
+  }
+
+  return result;
+}
+
 bool TaskInCtld::IsX11() const {
   if (!IsInteractive()) return false;
   auto const& ia_meta = this->task_to_ctld.interactive_meta();
@@ -52,7 +124,7 @@ bool TaskInCtld::IsX11WithPty() const {
 bool TaskInCtld::ShouldLaunchOnAllNodes() const {
   // For cbatch tasks whose --node > 1,
   // only execute the command at the first allocated node.
-  if (type == crane::grpc::Batch) return false;
+  if (type != crane::grpc::Interactive) return false;
 
   const auto& ia_meta = TaskToCtld().interactive_meta();
   // For calloc tasks we still need to execute a dummy empty task to
@@ -131,7 +203,7 @@ void TaskInCtld::SetEndTime(absl::Time const& val) {
 }
 
 void TaskInCtld::SetEndTimeByUnixSecond(uint64_t val) {
-  if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
+  val = std::min<uint64_t>(val, kTaskMaxTimeStampSec);
   end_time = absl::FromUnixSeconds(val);
   runtime_attr.mutable_end_time()->set_seconds(val);
 }
@@ -163,14 +235,17 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   type = val.type();
 
-  if (type == crane::grpc::Batch) {
+  if (IsBatch()) {
     meta.emplace<BatchMetaInTask>(BatchMetaInTask{
         .sh_script = val.batch_meta().sh_script(),
         .interpreter = val.batch_meta().interpreter(),
         .output_file_pattern = val.batch_meta().output_file_pattern(),
         .error_file_pattern = val.batch_meta().error_file_pattern(),
     });
-  } else {
+  } else if (IsContainer()) {
+    meta.emplace<ContainerMetaInTask>(
+        static_cast<ContainerMetaInTask>(val.container_meta()));
+  } else if (IsInteractive()) {
     auto& ia_meta = std::get<InteractiveMetaInTask>(meta);
     ia_meta.interactive_type = val.interactive_meta().interactive_type();
   }
@@ -192,7 +267,6 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   cmd_line = val.cmd_line();
   cwd = val.cwd();
-  container = val.container();
 
   for (const auto& [k, v] : val.env()) env[k] = v;
 
@@ -226,9 +300,9 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
                       runtime_attr.craned_ids().end());
     allocated_craneds_regex = util::HostNameListToStr(craned_ids);
 
-    if (type == crane::grpc::Batch)
+    if (type == crane::grpc::Batch || type == crane::grpc::Container) {
       executing_craned_ids.emplace_back(craned_ids.front());
-    else {
+    } else if (type == crane::grpc::Interactive) {
       const auto& int_meta = std::get<InteractiveMetaInTask>(meta);
       if (int_meta.interactive_type == crane::grpc::Calloc)
         // For calloc tasks we still need to execute a dummy empty task to
@@ -238,6 +312,8 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
         // For crun tasks we need to execute tasks on all allocated nodes.
         for (auto const& craned_id : craned_ids)
           executing_craned_ids.emplace_back(craned_id);
+    } else {
+      std::unreachable();
     }
 
     allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
@@ -276,10 +352,18 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
                                              excluded_nodes.end());
 
-  task_info->set_container(container);
   task_info->set_extra_attr(extra_attr);
   task_info->set_reservation(reservation);
 
+  // Only pass container meta if it's a container task
+  // This is because ccon command requires more info than cqueue/cacct.
+  if (IsContainer()) {
+    auto* meta_info = task_info->mutable_container_meta();
+    meta_info->mutable_image()->set_image(
+        std::get<ContainerMetaInTask>(meta).image_info.image);
+  }
+
+  // Dynamic fields
   task_info->set_held(held);
   task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                               executing_craned_ids.end());
@@ -288,7 +372,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
 
   task_info->set_exit_code(runtime_attr.exit_code());
-  task_info->set_priority(cached_priority);
+  task_info->set_priority(cached_priority);  // FIXME: A BUG?
 
   task_info->set_status(status);
   if (Status() == crane::grpc::Pending) {
@@ -341,7 +425,6 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
   task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   task_to_d.set_cwd(this->cwd);
-  task_to_d.set_container(this->container);
   task_to_d.set_get_user_env(this->get_user_env);
 
   for (const auto& hostname : this->CranedIds())
@@ -353,11 +436,15 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = task_to_d.mutable_batch_meta();
     mutable_meta->CopyFrom(this->task_to_ctld.batch_meta());
-  } else {
+  } else if (this->type == crane::grpc::Interactive) {
     const auto& proto_ia_meta = this->task_to_ctld.interactive_meta();
     auto* mutable_meta = task_to_d.mutable_interactive_meta();
     mutable_meta->CopyFrom(proto_ia_meta);
+  } else if (this->type == crane::grpc::Container) {
+    auto* mutable_meta = task_to_d.mutable_container_meta();
+    mutable_meta->CopyFrom(this->task_to_ctld.container_meta());
   }
+
   return task_to_d;
 }
 

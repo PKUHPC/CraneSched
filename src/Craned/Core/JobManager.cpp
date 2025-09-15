@@ -792,7 +792,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_ptr.get();
 
   // Check if the step is acceptable.
-  if (!step->step_to_d.container().empty() && !g_config.Container.Enabled) {
+  if (step->step_to_d.has_container_meta() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
     ActivateTaskStatusChangeAsync_(step->step_to_d.task_id(),
