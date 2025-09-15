@@ -317,7 +317,6 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
 
   task_to_d.set_task_id(this->TaskId());
   task_to_d.set_name(this->name);
-  task_to_d.set_username(this->username);
   task_to_d.set_account(this->account);
   task_to_d.set_qos(this->qos);
   task_to_d.set_partition(this->partition_id);
