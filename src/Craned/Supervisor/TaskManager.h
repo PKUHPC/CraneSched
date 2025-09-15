@@ -19,6 +19,7 @@
 #pragma once
 #include <sched.h>
 
+#include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
@@ -48,8 +49,7 @@ class StepInstance {
         step_id(0),
         task_ids({}),
         uid(step.uid()),
-        gid(step.gid()),
-        container(step.container()) {
+        gid(step.gid()) {
     interactive_type =
         step.type() == crane::grpc::TaskType::Interactive
             ? std::optional(step.interactive_meta().interactive_type())
@@ -128,8 +128,7 @@ class StepInstance {
   gid_t gid;
   PasswordEntry pwd;
 
-  std::string container;
-
+  // TODO: Move these into a variant.
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
   bool pty;
   bool x11;
