@@ -2118,9 +2118,12 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
       job->SetPrimaryStepStatus(step->Status());
       // Daemon step failed to configure, terminate all daemon step,
       for (const auto& node : step->CranedIds()) {
+        if (node == craned_id) continue;
         context->craned_orphaned_steps[node][step->job_id].emplace(
             step->StepId());
       }
+
+      context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
     } else {
       if (step->FinishWithFailedStatus()) {
         step->SetStatus(step->FinishFailedStatus());
@@ -2446,6 +2449,30 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       alloc_step_latch.count_down();
     });
 
+  std::latch free_step_latch(
+      static_cast<std::ptrdiff_t>(context.craned_step_free_map.size()));
+  for (const auto& craned_id :
+       context.craned_step_free_map | std::views::keys) {
+    g_thread_pool->detach_task([&free_step_latch, craned_id, &context] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        auto err = stub->FreeSteps(context.craned_step_free_map.at(craned_id));
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to FreeSteps for [{}] steps on Node {}: {}",
+                      util::JobStepsToString(
+                          context.craned_step_free_map.at(craned_id)),
+                      craned_id, CraneErrStr(err));
+        }
+      } else {
+        CRANE_ERROR(
+            "Failed to FreeSteps for [{}] steps on Node {}, stub invalid",
+            util::JobStepsToString(context.craned_step_free_map.at(craned_id)),
+            craned_id);
+      }
+      free_step_latch.count_down();
+    });
+  }
+
   std::latch exec_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_exec_map.size())};
   for (const auto& craned_id :
@@ -2546,6 +2573,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
 
   alloc_step_latch.wait();
+  free_step_latch.wait();
   exec_step_latch.wait();
   orphaned_step_latch.wait();
   cancel_step_latch.wait();

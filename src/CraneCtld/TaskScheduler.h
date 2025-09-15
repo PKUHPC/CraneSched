@@ -743,6 +743,10 @@ class TaskScheduler {
     // Steps will execute on craned
     std::unordered_map<CranedId,
                        std::unordered_map<job_id_t, std::set<step_id_t>>>
+        craned_step_free_map;
+    // Steps will execute on craned
+    std::unordered_map<CranedId,
+                       std::unordered_map<job_id_t, std::set<step_id_t>>>
         craned_step_exec_map;
     // Error steps to terminate with orphaned status
     std::unordered_map<CranedId,
