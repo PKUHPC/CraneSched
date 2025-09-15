@@ -743,6 +743,7 @@ void CforedClient::TaskOutPutForward(const std::string& msg) {
     return;
   }
 
+  // TODO: Keep the latest message?
   size_t cur_bytes = m_output_queue_bytes_.load(std::memory_order_relaxed);
   if (cur_bytes + msg.size() > kMaxOutputQueueBytes) {
     CRANE_WARN("Output queue size {} + msg {} exceeds 1MB, discard!", cur_bytes, msg.size());
