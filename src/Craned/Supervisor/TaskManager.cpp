@@ -36,7 +36,9 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
-bool StepInstance::IsContainer() const noexcept { return !container.empty(); }
+bool StepInstance::IsContainer() const noexcept {
+  return m_step_to_supv_.has_container_meta();
+}
 
 bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
@@ -616,7 +618,7 @@ CraneErrCode ContainerInstance::Prepare() {
   // Generate path and params.
   job_id_t job_id = GetParentStep().task_id();
   m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
-  m_image_ref_ = GetParentStep().container();
+  m_image_ref_ = GetParentStep().container_meta().image().image();
 
   // Check if image is pulled.
   auto* cri_client = m_parent_step_inst_->GetCriClient();
@@ -625,8 +627,7 @@ CraneErrCode ContainerInstance::Prepare() {
     // Image is not pulled. Pull the image first.
     image_id_opt = cri_client->PullImage(m_image_ref_);
     if (!image_id_opt.has_value()) {
-      CRANE_ERROR("Failed to pull image {} for task #{}",
-                  GetParentStep().container(), job_id);
+      CRANE_ERROR("Failed to pull image {} for task #{}", m_image_ref_, job_id);
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
   }

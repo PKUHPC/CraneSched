@@ -325,12 +325,15 @@ crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
 
-    if (task->type == crane::grpc::Batch) {
+    if (task->IsBatch()) {
       auto *mutable_meta = mutable_task->mutable_batch_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
-    } else {
+    } else if (task->IsInteractive()) {
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
+    } else if (task->IsContainer()) {
+      mutable_task->mutable_container_meta()->CopyFrom(
+          task->TaskToCtld().container_meta());
     }
   }
 

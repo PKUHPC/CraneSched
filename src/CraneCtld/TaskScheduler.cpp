@@ -145,7 +145,7 @@ bool TaskScheduler::Init() {
 
       bool mark_task_as_failed = false;
 
-      if (task->type != crane::grpc::Batch) {
+      if (task->type == crane::grpc::Interactive) {
         CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
         mark_task_as_failed = true;
       }
@@ -2080,9 +2080,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
 
-    if (task->type == crane::grpc::Batch) {
+    if (task->type == crane::grpc::Batch ||
+        task->type == crane::grpc::Container) {
       task->SetStatus(new_status);
-    } else {
+    } else if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
       if (meta.interactive_type == crane::grpc::Crun) {  // Crun
         if (++meta.status_change_cnt < task->executing_craned_ids.size()) {
@@ -2113,6 +2114,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
 
       task->SetStatus(new_status);
+    } else {
+      std::unreachable();
     }
 
     task->SetExitCode(exit_code);
@@ -3151,7 +3154,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
-  if (task->type == crane::grpc::Batch) {
+  if (task->IsBatch()) {
     auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
     if (!batch_meta->has_open_mode_append())
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
