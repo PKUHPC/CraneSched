@@ -1903,7 +1903,7 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
                                                 std::tm& tm_last) {
   // Default time: 2025-07-01 00:00:00
   std::tm default_time = {};
-  default_time.tm_year = 2025 - 1900;
+  default_time.tm_year = 2024 - 1900;
   default_time.tm_mon = 7 - 1;
   default_time.tm_mday = 1;
 
@@ -2067,9 +2067,33 @@ bool MongodbClient::RollupDayToMonth() {
 }
 
 void MongodbClient::ClusterRollupUsage() {
+  using std::chrono::duration_cast;
+  using std::chrono::milliseconds;
+  using std::chrono::steady_clock;
+
+  auto start_total = steady_clock::now();
+
+  auto start = steady_clock::now();
   RollupHourTable();
+  auto end = steady_clock::now();
+  auto dur1 = duration_cast<milliseconds>(end - start).count();
+  CRANE_INFO("RollupHourTable used {} ms", dur1);
+
+  start = steady_clock::now();
   RollupHourToDay();
+  end = steady_clock::now();
+  auto dur2 = duration_cast<milliseconds>(end - start).count();
+  CRANE_INFO("RollupHourToDay used {} ms", dur2);
+
+  start = steady_clock::now();
   RollupDayToMonth();
+  end = steady_clock::now();
+  auto dur3 = duration_cast<milliseconds>(end - start).count();
+  CRANE_INFO("RollupDayToMonth used {} ms", dur3);
+
+  auto end_total = steady_clock::now();
+  auto total = duration_cast<milliseconds>(end_total - start_total).count();
+  CRANE_INFO("ClusterRollupUsage total used {} ms", total);
 }
 
 // Aggregate account_user table

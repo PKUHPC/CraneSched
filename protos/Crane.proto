@@ -958,7 +958,8 @@ message QueryAccountUserSummaryItemRequest {
 
 message QueryAccountUserSummaryItemReply {
   bool ok = 1;
-  repeated AccountUserSummaryItem items = 2;
+  string cluster = 2;
+  repeated AccountUserSummaryItem items = 3;
 }
 
 message AttachInContainerTaskRequest {
