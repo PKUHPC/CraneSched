@@ -844,7 +844,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   sort_and_truncate(task_list, num_limit);
   response->set_ok(true);
-  g_db_client->ClusterRollupUsage();
   return grpc::Status::OK;
 }
 
@@ -1691,7 +1690,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
+  g_db_client->ClusterRollupUsage();
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
@@ -2052,6 +2051,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItem(
   std::string account = request->account();
   auto start_time = request->start_time().seconds();
   auto end_time = request->end_time().seconds();
+  response->set_cluster(g_config.CraneClusterName);
   g_db_client->QueryAccountUserSummary(account, user_name, start_time, end_time,
                                        response);
   return grpc::Status::OK;
