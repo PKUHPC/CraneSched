@@ -1446,12 +1446,12 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
 
     if (!task_instance->processes.empty()) {
-      // For an Interactive task with a process running or a Batch task, we
+      // For a crun task with a process running or a Batch task, we
       // just send a kill signal here.
       for (auto&& [pid, pr_instance] : task_instance->processes)
         KillProcessInstance_(pr_instance.get(), sig);
-    } else if (task_instance->task.type() == crane::grpc::Interactive) {
-      // For an Interactive task with no process running, it ends immediately.
+    } else if (task_instance->IsCalloc()) {
+      // For a calloc task with no process running, it ends immediately.
       ActivateTaskStatusChangeAsync_(elem.task_id, crane::grpc::Completed,
                                      ExitCode::kExitCodeTerminated,
                                      std::nullopt);

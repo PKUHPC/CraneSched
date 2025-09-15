@@ -1,6 +1,8 @@
 # Raw fetch_content managed packages
 set(FETCHCONTENT_QUIET OFF)
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 # Suppress all warning on all third party libraries
 add_compile_options(-w)
 
