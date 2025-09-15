@@ -59,7 +59,7 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
   response->set_job_id(g_config.JobId);
   response->set_step_id(g_config.StepId);
   response->set_supervisor_pid(getpid());
-  response->set_ok(g_runtime_status.Status == StepStatus::Running);
+  response->set_ok(g_runtime_status.Started);
   return Status::OK;
 }
 

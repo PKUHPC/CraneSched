@@ -1628,6 +1628,11 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   std::vector<std::pair<pid_t, int>> not_found_tasks;
   std::pair<pid_t, int> elem;
   while (m_sigchld_queue_.try_dequeue(elem)) {
+    if (g_runtime_status.Status.load() != StepStatus::Completing) {
+      CRANE_INFO("Step completing now, prev status: {}.",
+                 util::StepStatusToString(g_runtime_status.Status.load()));
+      g_runtime_status.Status = StepStatus::Completing;
+    }
     auto [pid, status] = elem;
     auto it = m_pid_task_id_map_.find(pid);
     if (it == m_pid_task_id_map_.end()) {
@@ -1761,7 +1766,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         g_config.JobId);
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
-    if (!g_runtime_status.Executed) {
+    if (!g_runtime_status.CanStepOperate()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
@@ -1811,7 +1816,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
   std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (!g_runtime_status.Executed) {
+    if (!g_runtime_status.CanStepOperate()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Task is not ready to change time limit, will check next time.");
@@ -1849,7 +1854,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    g_runtime_status.Executed = true;
+    g_runtime_status.Started = true;
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));

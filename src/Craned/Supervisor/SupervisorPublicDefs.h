@@ -91,7 +91,11 @@ inline Config g_config;
 
 struct RuntimeStatus {
   std::atomic<StepStatus> Status{StepStatus::Configuring};
-  std::atomic_bool Executed{false};
+  std::atomic_bool Started{false};
+  [[nodiscard]] bool CanStepOperate() const {
+    // TOD
+    return Status == StepStatus::Running;
+  }
 };
 
 inline RuntimeStatus g_runtime_status;

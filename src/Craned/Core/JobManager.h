@@ -44,6 +44,7 @@ struct StepInstance {
   // For step recovery
   StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid);
   [[nodiscard]] bool IsDaemon() const;
+  [[nodiscard]] bool CanOperate() const;
 };
 
 // Job allocation info, where allocation = job spec + execution info

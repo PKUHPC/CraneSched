@@ -51,6 +51,8 @@ bool StepInstance::IsDaemon() const {
   return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
 }
 
+bool StepInstance::CanOperate() const { return status != StepStatus::Running; }
+
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
@@ -1082,7 +1084,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 
     for (auto step_id : terminate_step_ids) {
       auto* step = job_instance->step_map.at(step_id).get();
-      if (step->status != StepStatus::Running) {
+      if (step->CanOperate()) {
         CRANE_DEBUG(
             "[Step #{}.{}] Terminating a non-running step, will do it later.",
             elem.job_id, elem.step_id);
@@ -1185,7 +1187,7 @@ void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
         continue;
       }
       auto* step = job_ptr->step_map.at(elem.step_id).get();
-      if (step->status != StepStatus::Running) {
+      if (step->CanOperate()) {
         CRANE_DEBUG(
             "[Step #{}.{}] Terminating a non-running step, will do it later.",
             elem.job_id, elem.step_id);
