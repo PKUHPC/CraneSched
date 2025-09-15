@@ -317,6 +317,7 @@ message DeleteUserRequest {
   uint32 uid = 1;
   repeated string user_list = 2;
   string account = 3;
+  bool force = 4;
 }
 
 message DeleteUserReply {
