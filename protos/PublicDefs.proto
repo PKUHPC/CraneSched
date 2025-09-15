@@ -497,6 +497,7 @@ enum ErrCode {
   ERR_REVOKE_CERTIFICATE = 74;
 
   ERR_IDENTITY_MISMATCH = 75;
+  ERR_NOT_FORCE = 76;
 }
 
 enum EntityType {
