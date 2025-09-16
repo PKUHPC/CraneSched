@@ -54,7 +54,7 @@ jobs:
 
   prepare:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [ "self-hosted", "CraneSched" ]
+    runs-on: ubuntu-latest
     outputs:
       frontend_ref: ${{ steps.set_ref.outputs.frontend_ref }}
     defaults:
@@ -79,6 +79,7 @@ jobs:
           fi
           
           echo "frontend_ref=$FRONTEND_REF" >> $GITHUB_OUTPUT
+          echo "FrontEnd branch: $FRONTEND_REF"
 
   build:
     needs: prepare
