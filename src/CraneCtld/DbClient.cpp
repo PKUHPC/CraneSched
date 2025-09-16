@@ -566,16 +566,16 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
 }
 
 bool MongodbClient::UpdateUser(const Ctld::User& user) {
-  document doc = UserToDocument_(user), setDocument, filter;
+  document doc = UserToDocument_(user), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", user.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
-            *GetSession_(), filter.view(), setDocument.view());
+            *GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -587,16 +587,16 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
 }
 
 bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
-  document doc = AccountToDocument_(account), setDocument, filter;
+  document doc = AccountToDocument_(account), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", account.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
-            *GetSession_(), filter.view(), setDocument.view());
+            *GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -608,16 +608,16 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
 }
 
 bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
-  document doc = QosToDocument_(qos), setDocument, filter;
+  document doc = QosToDocument_(qos), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", qos.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
-            filter.view(), setDocument.view());
+            filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -741,17 +741,17 @@ template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& mapItem : value) {
-      auto mapKey = mapItem.first;
-      auto mapValue = mapItem.second;
+  doc.append(kvp(key, [&value](sub_document map_value_document) {
+    for (const auto& map_item : value) {
+      auto map_key = map_item.first;
+      auto map_value = map_item.second;
 
-      mapValueDocument.append(kvp(mapKey, [&mapValue](sub_array pairArray) {
-        pairArray.append(mapValue.first);  // pair->first, default qos
+      map_value_document.append(kvp(map_key, [&map_value](sub_array pair_array) {
+        pair_array.append(map_value.first);  // pair->first, default qos
 
-        array listArray;
-        for (const auto& s : mapValue.second) listArray.append(s);
-        pairArray.append(listArray);
+        array list_array;
+        for (const auto& s : map_value.second) list_array.append(s);
+        pair_array.append(list_array);
       }));
     }
   }));
@@ -761,21 +761,21 @@ template <>
 void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
                                                    const std::string& key,
                                                    const DeviceMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& mapItem : value) {
-      const auto& device_name = mapItem.first;
-      const auto& pair_val = mapItem.second;
+  doc.append(kvp(key, [&value](sub_document map_value_document) {
+    for (const auto& map_item : value) {
+      const auto& device_name = map_item.first;
+      const auto& pair_val = map_item.second;
       uint64_t total = pair_val.first;
       const auto& type_count_map = pair_val.second;
 
-      mapValueDocument.append(
-          kvp(device_name, [&total, &type_count_map](sub_document deviceDoc) {
-            deviceDoc.append(kvp("total", static_cast<int64_t>(total)));
-            deviceDoc.append(
-                kvp("type_count_map", [&type_count_map](sub_document typeDoc) {
-                  for (const auto& typeItem : type_count_map) {
-                    typeDoc.append(kvp(typeItem.first,
-                                       static_cast<int64_t>(typeItem.second)));
+      map_value_document.append(
+          kvp(device_name, [&total, &type_count_map](sub_document device_doc) {
+            device_doc.append(kvp("total", static_cast<int64_t>(total)));
+            device_doc.append(
+                kvp("type_count_map", [&type_count_map](sub_document type_doc) {
+                  for (const auto& type_item : type_count_map) {
+                    type_doc.append(kvp(type_item.first,
+                                       static_cast<int64_t>(type_item.second)));
                   }
                 }));
           }));
@@ -794,64 +794,64 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
 
   const auto& v = value.value();
 
-  doc.append(kvp(key, [&v](sub_document containerDoc) {
+  doc.append(kvp(key, [&v](sub_document container_doc) {
     // Serialize ImageInfo
-    containerDoc.append(kvp("image_info", [&v](sub_document imageDoc) {
-      imageDoc.append(kvp("image", v.image_info.image));
+    container_doc.append(kvp("image_info", [&v](sub_document image_doc) {
+      image_doc.append(kvp("image", v.image_info.image));
       // NOTE: We do not serialize auth related fields for security reason
     }));
 
     // Basic fields
-    containerDoc.append(kvp("name", v.name));
-    containerDoc.append(kvp("entrypoint", v.entrypoint));
-    containerDoc.append(kvp("command", v.command));
-    containerDoc.append(kvp("workdir", v.workdir));
-    containerDoc.append(kvp("detached", v.detached));
-    containerDoc.append(kvp("userns", v.userns));
-    containerDoc.append(
+    container_doc.append(kvp("name", v.name));
+    container_doc.append(kvp("entrypoint", v.entrypoint));
+    container_doc.append(kvp("command", v.command));
+    container_doc.append(kvp("workdir", v.workdir));
+    container_doc.append(kvp("detached", v.detached));
+    container_doc.append(kvp("userns", v.userns));
+    container_doc.append(
         kvp("run_as_user", static_cast<int32_t>(v.run_as_user)));
-    containerDoc.append(
+    container_doc.append(
         kvp("run_as_group", static_cast<int32_t>(v.run_as_group)));
 
     // Serialize args array
-    containerDoc.append(kvp("args", [&v](sub_array argsArray) {
+    container_doc.append(kvp("args", [&v](sub_array args_array) {
       for (const auto& arg : v.args) {
-        argsArray.append(arg);
+        args_array.append(arg);
       }
     }));
 
     // Serialize labels map
-    containerDoc.append(kvp("labels", [&v](sub_document labelsDoc) {
+    container_doc.append(kvp("labels", [&v](sub_document labels_doc) {
       for (const auto& label : v.labels) {
-        labelsDoc.append(kvp(label.first, label.second));
+        labels_doc.append(kvp(label.first, label.second));
       }
     }));
 
     // Serialize annotations map
-    containerDoc.append(kvp("annotations", [&v](sub_document annotationsDoc) {
+    container_doc.append(kvp("annotations", [&v](sub_document annotations_doc) {
       for (const auto& annotation : v.annotations) {
-        annotationsDoc.append(kvp(annotation.first, annotation.second));
+        annotations_doc.append(kvp(annotation.first, annotation.second));
       }
     }));
 
     // Serialize env map
-    containerDoc.append(kvp("env", [&v](sub_document envDoc) {
+    container_doc.append(kvp("env", [&v](sub_document env_doc) {
       for (const auto& env_var : v.env) {
-        envDoc.append(kvp(env_var.first, env_var.second));
+        env_doc.append(kvp(env_var.first, env_var.second));
       }
     }));
 
     // Serialize mounts map
-    containerDoc.append(kvp("mounts", [&v](sub_document mountsDoc) {
+    container_doc.append(kvp("mounts", [&v](sub_document mounts_doc) {
       for (const auto& mount : v.mounts) {
-        mountsDoc.append(kvp(mount.first, mount.second));
+        mounts_doc.append(kvp(mount.first, mount.second));
       }
     }));
 
     // Serialize port_mappings map
-    containerDoc.append(kvp("port_mappings", [&v](sub_document portsDoc) {
+    container_doc.append(kvp("port_mappings", [&v](sub_document ports_doc) {
       for (const auto& port : v.port_mappings) {
-        portsDoc.append(
+        ports_doc.append(
             kvp(std::to_string(port.first), static_cast<int32_t>(port.second)));
       }
     }));
