@@ -2084,15 +2084,4 @@ bool TaskManager::EvaluateOomOnExit_() {
     return cur > m_baseline_oom_kill_count_;
   }
 }
-// Overload that optionally returns a textual reason (currently minimal)
-bool TaskManager::EvaluateOomOnExit_(pid_t /*pid*/, std::string* debug_reason) {
-  bool ret = EvaluateOomOnExit_();
-  if (debug_reason) {
-    if (!ret)
-      *debug_reason = "no-oom";
-    else
-      *debug_reason = "oom-detected";
-  }
-  return ret;
-}
 }  // namespace Craned::Supervisor

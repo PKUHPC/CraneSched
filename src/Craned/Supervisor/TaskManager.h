@@ -389,9 +389,6 @@ class TaskManager {
 
   void InitOomBaselineForPid_(pid_t pid);
   bool EvaluateOomOnExit_();
-  // Backward-compatible overload: accept pid (ignored, uses stored cgroup) and
-  // optional debug_reason
-  bool EvaluateOomOnExit_(pid_t pid, std::string* debug_reason = nullptr);
 
   // Resolve actual cgroup fs path for a pid by reading /proc/<pid>/cgroup
   std::optional<std::string> ResolveCgroupPathForPid_(pid_t pid,
