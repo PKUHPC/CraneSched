@@ -490,6 +490,7 @@ message QueryTasksInfoRequest {
   TimeInterval filter_submit_time_interval = 9;
   TimeInterval filter_start_time_interval = 10;
   TimeInterval filter_end_time_interval = 11;
+  repeated TaskType filter_task_types = 12;
 
   bool option_include_completed_tasks = 15;
 }
