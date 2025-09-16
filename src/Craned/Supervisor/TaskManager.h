@@ -58,6 +58,12 @@ class StepInstance {
   bool x11;
   bool x11_fwd;
 
+  std::string cgroup_path;   // resolved cgroup path
+  bool is_cgroup_v2{false};  // whether current system using cgroup v2
+  bool oom_baseline_inited{false};
+  uint64_t baseline_oom_kill_count{0};  // v1 & v2
+  uint64_t baseline_oom_count{0};       // v2 only
+
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
@@ -390,12 +396,6 @@ class TaskManager {
   void InitOomBaselineForPid_(pid_t pid);
   bool EvaluateOomOnExit_();
 
-  // Resolve actual cgroup fs path for a pid by reading /proc/<pid>/cgroup
-  std::optional<std::string> ResolveCgroupPathForPid_(pid_t pid,
-                                                      bool is_cgroup_v2);
-
-  // Removed: event-loop OOM monitoring and postmortem latch.
-
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -424,15 +424,6 @@ class TaskManager {
 
   StepInstance m_step_;
   std::unordered_map<pid_t, task_id_t> m_pid_task_id_map_;
-
-  // Cgroup path for this task/job
-  std::string m_cgroup_path_;
-  bool m_is_cgroup_v2_{false};
-  bool m_baseline_inited_{false};
-  // Baseline counts captured right after spawn
-  uint64_t m_baseline_oom_kill_count_{
-      0};                             // v1 & v2 (oom_kill or oom_kill field)
-  uint64_t m_baseline_oom_count_{0};  // v2 only (oom field)
 };
 
 }  // namespace Craned::Supervisor

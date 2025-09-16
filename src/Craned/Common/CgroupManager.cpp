@@ -702,6 +702,90 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
+std::optional<std::string> CgroupManager::ResolveCgroupPathForPid(pid_t pid) {
+  auto ids_result = GetIdsByPid(pid);
+  if (!ids_result.has_value()) {
+    CRANE_WARN("[CgroupManager] Failed to get cgroup IDs for pid {}", pid);
+    return std::nullopt;
+  }
+
+  auto [job_id_opt, step_id_opt, task_id_opt] = *ids_result;
+  if (!job_id_opt.has_value()) {
+    CRANE_TRACE(
+        "[CgroupManager] No valid job id found in cgroup path of pid {}", pid);
+    return std::nullopt;
+  }
+
+  std::string cgroup_str;
+  if (task_id_opt.has_value()) {
+    cgroup_str = CgroupStrByTaskId(*job_id_opt, *step_id_opt, *task_id_opt);
+  } else if (step_id_opt.has_value()) {
+    cgroup_str = CgroupStrByStepId(*job_id_opt, *step_id_opt);
+  } else {
+    cgroup_str = CgroupStrByJobId(*job_id_opt);
+  }
+
+  bool is_cgv2 = (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2);
+  if (is_cgv2) {
+    std::filesystem::path full_path = CgConstant::kSystemCgPathPrefix /
+                                      CgConstant::kRootCgNamePrefix /
+                                      cgroup_str;
+    return full_path.string();
+  }
+
+  // v1 memory controller path
+  std::filesystem::path full_path =
+      CgConstant::kSystemCgPathPrefix /
+      CgConstant::GetControllerStringView(
+          CgConstant::Controller::MEMORY_CONTROLLER) /
+      CgConstant::kRootCgNamePrefix / cgroup_str;
+  return full_path.string();
+}
+
+bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
+                                                bool is_cgroup_v2,
+                                                uint64_t &oom_kill,
+                                                uint64_t &oom) {
+  oom_kill = 0;
+  oom = 0;
+  std::error_code ec;
+  if (!std::filesystem::exists(cg_path, ec)) {
+    CRANE_TRACE("[CgroupManager] cgroup path '{}' not exists when read OOM",
+                cg_path);
+    return false;
+  }
+  if (is_cgroup_v2) {
+    auto events_file =
+        (std::filesystem::path(cg_path) / "memory.events").string();
+    std::ifstream ifs(events_file);
+    if (!ifs.is_open()) return false;
+    std::string key;
+    uint64_t val;
+    while (ifs >> key >> val) {
+      if (key == "oom")
+        oom = val;
+      else if (key == "oom_kill")
+        oom_kill = val;
+    }
+    return true;
+  }
+  auto v1_file =
+      (std::filesystem::path(cg_path) / "memory.oom_control").string();
+  std::ifstream ifs(v1_file);
+  if (!ifs.is_open()) return false;
+  std::string line;
+  while (std::getline(ifs, line)) {
+    std::istringstream iss(line);
+    std::string k;
+    uint64_t v;
+    if (iss >> k >> v && k == "oom_kill") {
+      oom_kill = v;
+      break;
+    }
+  }
+  return true;
+}
+
 bool Cgroup::SetControllerValue(CgConstant::Controller controller,
                                 CgConstant::ControllerFile controller_file,
                                 uint64_t value) {

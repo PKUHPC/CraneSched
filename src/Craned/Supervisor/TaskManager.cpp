@@ -1938,144 +1938,51 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
   }
 }
 
-std::optional<std::string> TaskManager::ResolveCgroupPathForPid_(
-    pid_t pid, bool is_cgroup_v2) {
-  // Use CgroupManager to get cgroup information for the pid
-  auto ids_result = Common::CgroupManager::GetIdsByPid(pid);
-  if (!ids_result.has_value()) {
-    CRANE_WARN("Failed to get cgroup IDs for pid {}", pid);
-    return std::nullopt;
-  }
-
-  auto [job_id_opt, step_id_opt, task_id_opt] = *ids_result;
-  if (!job_id_opt.has_value()) {
-    CRANE_WARN("No valid job ID found for pid {}", pid);
-    return std::nullopt;
-  }
-
-  // Construct cgroup path using CgroupManager methods
-  std::string cgroup_str;
-  if (task_id_opt.has_value()) {
-    cgroup_str = Common::CgroupManager::CgroupStrByTaskId(
-        *job_id_opt, *step_id_opt, *task_id_opt);
-  } else if (step_id_opt.has_value()) {
-    cgroup_str =
-        Common::CgroupManager::CgroupStrByStepId(*job_id_opt, *step_id_opt);
-  } else {
-    cgroup_str = Common::CgroupManager::CgroupStrByJobId(*job_id_opt);
-  }
-
-  // Use kSystemCgPathPrefix and construct the full path
-  std::filesystem::path full_path = Common::CgConstant::kSystemCgPathPrefix /
-                                    Common::CgConstant::kRootCgNamePrefix /
-                                    cgroup_str;
-
-  if (is_cgroup_v2) {
-    return full_path.string();
-  } else {
-    // For cgroup v1, append memory controller path
-    return (Common::CgConstant::kSystemCgPathPrefix /
-            Common::CgConstant::GetControllerStringView(
-                Common::CgConstant::Controller::MEMORY_CONTROLLER) /
-            Common::CgConstant::kRootCgNamePrefix / cgroup_str)
-        .string();
-  }
-}
-
-static void ReadMemoryEventsCounts(const std::string& path, uint64_t& oom,
-                                   uint64_t& oom_kill) {
-  std::ifstream ifs(path);
-  if (!ifs.is_open()) return;
-  std::string key;
-  uint64_t val;
-  while (ifs >> key >> val) {
-    if (key == "oom")
-      oom = val;
-    else if (key == "oom_kill")
-      oom_kill = val;
-  }
-}
-
 void TaskManager::InitOomBaselineForPid_(pid_t pid) {
-  m_is_cgroup_v2_ = (Common::CgroupManager::GetCgroupVersion() ==
-                     Common::CgConstant::CgroupVersion::CGROUP_V2);
-  auto cgp = ResolveCgroupPathForPid_(pid, m_is_cgroup_v2_);
+  m_step_.is_cgroup_v2 = (Common::CgroupManager::GetCgroupVersion() ==
+                          Common::CgConstant::CgroupVersion::CGROUP_V2);
+  auto cgp = Common::CgroupManager::ResolveCgroupPathForPid(pid);
   if (!cgp.has_value()) return;
-  m_cgroup_path_ = *cgp;
-  if (m_is_cgroup_v2_) {
-    uint64_t oom = 0, oom_kill = 0;
-    ReadMemoryEventsCounts(
-        (std::filesystem::path(m_cgroup_path_) / MemoryEvents).string(), oom,
-        oom_kill);
-    m_baseline_oom_count_ = oom;
-    m_baseline_oom_kill_count_ = oom_kill;
-  } else {
-    std::string path =
-        (std::filesystem::path(m_cgroup_path_) / MemoryOomControl).string();
-    std::ifstream fin(path);
-    std::string line;
-    while (std::getline(fin, line)) {
-      std::istringstream iss(line);
-      std::string k;
-      uint64_t v;
-      if (iss >> k >> v) {
-        if (k == "oom_kill") {
-          m_baseline_oom_kill_count_ = v;
-          break;
-        }
-      }
-    }
-  }
-  m_baseline_inited_ = true;
+  m_step_.cgroup_path = *cgp;
+  uint64_t oom_kill = 0, oom = 0;
+  Common::CgroupManager::ReadOomCountsFromCgroupPath(
+      m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom);
+  m_step_.baseline_oom_kill_count = oom_kill;
+  if (m_step_.is_cgroup_v2) m_step_.baseline_oom_count = oom;
+  m_step_.oom_baseline_inited = true;
   CRANE_DEBUG("[OOM] Baseline inited: v2={}, path={}, oom={}, oom_kill={}",
-              m_is_cgroup_v2_, m_cgroup_path_, m_baseline_oom_count_,
-              m_baseline_oom_kill_count_);
+              m_step_.is_cgroup_v2, m_step_.cgroup_path,
+              m_step_.baseline_oom_count, m_step_.baseline_oom_kill_count);
 }
 
 bool TaskManager::EvaluateOomOnExit_() {
-  if (!m_baseline_inited_ || m_cgroup_path_.empty()) {
+  if (!m_step_.oom_baseline_inited || m_step_.cgroup_path.empty()) {
     CRANE_TRACE("[OOM] Skip evaluation: baseline_inited={} path='{}'",
-                m_baseline_inited_, m_cgroup_path_);
+                m_step_.oom_baseline_inited, m_step_.cgroup_path);
     return false;
   }
-  if (m_is_cgroup_v2_) {
-    uint64_t oom = 0, oom_kill = 0;
-    ReadMemoryEventsCounts(
-        (std::filesystem::path(m_cgroup_path_) / MemoryEvents).string(), oom,
-        oom_kill);
+  uint64_t oom_kill = 0, oom = 0;
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(
+          m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom))
+    return false;
+  if (m_step_.is_cgroup_v2) {
     CRANE_DEBUG(
         "[OOM] Evaluate v2 path={} baseline(oom={},oom_kill={}) "
         "current(oom={},oom_kill={})",
-        m_cgroup_path_, m_baseline_oom_count_, m_baseline_oom_kill_count_, oom,
-        oom_kill);
-    if (oom_kill > m_baseline_oom_kill_count_) return true;
-    if (oom > m_baseline_oom_count_ && oom_kill == m_baseline_oom_kill_count_) {
-      // just set log
+        m_step_.cgroup_path, m_step_.baseline_oom_count,
+        m_step_.baseline_oom_kill_count, oom, oom_kill);
+    if (oom_kill > m_step_.baseline_oom_kill_count) return true;
+    if (oom > m_step_.baseline_oom_count &&
+        oom_kill == m_step_.baseline_oom_kill_count)
       CRANE_DEBUG(
           "[OOM] oom counter increased without kill (delta_oom={} "
           "delta_kill=0) -> not classified as OOM",
-          oom - m_baseline_oom_count_);
-    }
+          oom - m_step_.baseline_oom_count);
     return false;
-  } else {
-    std::string path =
-        (std::filesystem::path(m_cgroup_path_) / MemoryOomControl).string();
-    std::ifstream fin(path);
-    std::string line;
-    uint64_t cur = 0;
-    while (std::getline(fin, line)) {
-      std::istringstream iss(line);
-      std::string k;
-      uint64_t v;
-      if (iss >> k >> v && k == "oom_kill") {
-        cur = v;
-        break;
-      }
-    }
-    CRANE_DEBUG(
-        "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
-        m_cgroup_path_, m_baseline_oom_kill_count_, cur);
-    return cur > m_baseline_oom_kill_count_;
   }
+  CRANE_DEBUG(
+      "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
+      m_step_.cgroup_path, m_step_.baseline_oom_kill_count, oom_kill);
+  return oom_kill > m_step_.baseline_oom_kill_count;
 }
 }  // namespace Craned::Supervisor

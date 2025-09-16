@@ -556,6 +556,18 @@ class CgroupManager {
 
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
 
+  // Resolve actual cgroup fs path (memory controller path for v1, unified
+  // path for v2) for a pid inside crane hierarchy.
+  static std::optional<std::string> ResolveCgroupPathForPid(pid_t pid);
+
+  // Read OOM related counters from a cgroup path. For cgroup v2, both
+  // oom_kill and oom are read from memory.events. For cgroup v1, only
+  // oom_kill is read from memory.oom_control and 'oom' will stay 0.
+  // Returns false on any failure.
+  static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
+                                          bool is_cgroup_v2, uint64_t &oom_kill,
+                                          uint64_t &oom);
+
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
       const std::string &cgroup_str, ControllerFlags preferred_controllers,
