@@ -296,6 +296,17 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
+  bool has_task_types_constraint = !request->filter_task_types().empty();
+  if (has_task_types_constraint) {
+    filter.append(kvp("type", [&request](sub_document type_doc) {
+      array type_array;
+      for (const auto& type : request->filter_task_types()) {
+        type_array.append(static_cast<std::int32_t>(type));
+      }
+      type_doc.append(kvp("$in", type_array));
+    }));
+  }
+
   mongocxx::options::find option;
   option = option.limit(limit);
 

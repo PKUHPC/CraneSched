@@ -2288,6 +2288,15 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
+  bool no_task_types_constraint = request->filter_task_types().empty();
+  std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
+                                         request->filter_task_types().end());
+  auto task_rng_filter_task_type = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_types_constraint ||
+           req_task_types.contains(task.type);
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
@@ -2304,6 +2313,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
+                      ranges::views::filter(task_rng_filter_task_type) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
