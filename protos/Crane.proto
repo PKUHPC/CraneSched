@@ -579,8 +579,7 @@ message StreamCallocReply {
     string allocated_craned_regex = 2;
   }
 
-  message TaskCancelRequest {
-  }
+  message TaskCancelRequest {}
 
   message TaskCompletionAckReply {
     bool ok = 1;
@@ -752,8 +751,7 @@ message StreamCrunReply {
     string allocated_craned_regex = 2;
   }
 
-  message TaskCancelRequest {
-  }
+  message TaskCancelRequest {}
 
   message TaskCompletionAckReply {
     bool ok = 1;
@@ -802,8 +800,7 @@ message StreamTaskIORequest {
     bytes msg = 1;
   }
 
-  message SupervisorUnRegisterReq {
-  }
+  message SupervisorUnRegisterReq {}
 
   message TaskX11OutputReq {
     bytes msg = 1;
