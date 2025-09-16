@@ -322,6 +322,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ResetUserCredentialRequest *request,
       crane::grpc::ResetUserCredentialReply *response) override;
 
+  grpc::Status QueryTxnLog(grpc::ServerContext *context,
+                           const crane::grpc::QueryTxnLogRequest *request,
+                           crane::grpc::QueryTxnLogReply *response) override;
+
   grpc::Status QueryClusterInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryClusterInfoRequest *request,

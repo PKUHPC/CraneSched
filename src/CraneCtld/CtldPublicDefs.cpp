@@ -276,6 +276,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->set_container(container);
   task_info->set_extra_attr(extra_attr);
+  task_info->set_reservation(reservation);
 
   task_info->set_held(held);
   task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
