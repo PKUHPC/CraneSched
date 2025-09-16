@@ -607,6 +607,65 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   return true;
 }
 
+bool MongodbClient::InsertTxn(const Txn& txn) {
+  document doc = TxnToDocument_(txn);
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  return ret != bsoncxx::stdx::nullopt;
+}
+
+void MongodbClient::SelectTxns(
+    const std::unordered_map<std::string, std::string>& conditions,
+    int64_t start_time, int64_t end_time, std::list<Txn>* res_txn) {
+  bsoncxx::builder::basic::document doc_builder;
+
+  if (start_time != 0 || end_time != 0) {
+    bsoncxx::builder::basic::document range_doc;
+    if (start_time != 0) range_doc.append(kvp("$gte", start_time));
+    if (end_time != 0) range_doc.append(kvp("$lte", end_time));
+    doc_builder.append(kvp("creation_time", range_doc.view()));
+  }
+
+  for (const auto& [key, value] : conditions) {
+    if (key == "action") {
+      try {
+        // TxnAction is stored as int32; match type to avoid numeric-collation
+        // corner cases.
+        int32_t v = static_cast<int32_t>(std::stol(value));
+        doc_builder.append(kvp(key, v));
+      } catch (const std::exception&) {
+        CRANE_LOGGER_ERROR(
+            m_logger_, "Invalid action value '{}'; ignoring filter.", value);
+      }
+    } else if (key == "info") {
+      doc_builder.append(kvp(
+          key, bsoncxx::builder::basic::make_document(kvp("$regex", value))));
+    } else
+      doc_builder.append(kvp(key, value));
+  }
+
+  mongocxx::options::find find_options;
+  // TODO: page query?
+  find_options.limit(1000);
+
+  // Return newest-first deterministically.
+  bsoncxx::builder::basic::document sort_doc;
+  sort_doc.append(kvp("creation_time", -1));
+  find_options.sort(sort_doc.view());
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_txn_collection_name_].find(
+          doc_builder.view(), find_options);
+
+  for (auto view : cursor) {
+    Txn txn;
+    ViewToTxn_(view, &txn);
+    res_txn->emplace_back(txn);
+  }
+}
+
 bool MongodbClient::CommitTransaction(
     const mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
@@ -915,6 +974,30 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
              absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToTxn_(const bsoncxx::document::view& txn_view,
+                               Txn* txn) {
+  try {
+    txn->actor = txn_view["actor"].get_string().value;
+    txn->target = txn_view["target"].get_string().value;
+    txn->action = static_cast<crane::grpc::TxnAction>(
+        txn_view["action"].get_int32().value);
+    txn->creation_time = txn_view["creation_time"].get_int64().value;
+    txn->info = txn_view["info"].get_string().value;
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
+  std::array<std::string, 5> fields{
+      "creation_time", "actor", "target", "action", "info",
+  };
+  std::tuple<int64_t, std::string, std::string, int32_t, std::string> values{
+      txn.creation_time, txn.actor, txn.target, txn.action, txn.info};
 
   return DocumentConstructor_(fields, values);
 }

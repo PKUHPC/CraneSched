@@ -899,6 +899,28 @@ message ResetUserCredentialReply {
   repeated RichError rich_error_list = 2;
 }
 
+message QueryTxnLogRequest {
+  uint32 uid = 1;
+  string actor = 2;
+  string target = 3;
+  string action = 4;
+  string info = 5;
+  TimeInterval time_interval = 6;
+}
+
+message QueryTxnLogReply {
+  bool ok = 1;
+  ErrCode code = 2;
+  message Txn {
+    string actor = 1;
+    string target = 2;
+    TxnAction action = 3;
+    string info = 4;
+    int64 creation_time = 5;
+  }
+  repeated Txn txn_log_list = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -940,6 +962,8 @@ service CraneCtld {
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
+
+  rpc QueryTxnLog(QueryTxnLogRequest) returns (QueryTxnLogReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
