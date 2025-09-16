@@ -2060,8 +2060,13 @@ bool TaskManager::EvaluateOomOnExit_() {
         m_cgroup_path_, m_baseline_oom_count_, m_baseline_oom_kill_count_, oom,
         oom_kill);
     if (oom_kill > m_baseline_oom_kill_count_) return true;
-    if (oom > m_baseline_oom_count_ && oom_kill == m_baseline_oom_kill_count_)
-      return true;  // alloc fail w/o kill
+    if (oom > m_baseline_oom_count_ && oom_kill == m_baseline_oom_kill_count_) {
+      // just set log
+      CRANE_DEBUG(
+          "[OOM] oom counter increased without kill (delta_oom={} "
+          "delta_kill=0) -> not classified as OOM",
+          oom - m_baseline_oom_count_);
+    }
     return false;
   } else {
     std::string path =
