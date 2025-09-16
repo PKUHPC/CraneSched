@@ -1903,8 +1903,8 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
                                                 std::tm& tm_last) {
   // Default time: 2025-07-01 00:00:00
   std::tm default_time = {};
-  default_time.tm_year = 2020 - 1900;
-  default_time.tm_mon = 1 - 1;
+  default_time.tm_year = 2024 - 1900;
+  default_time.tm_mon = 9 - 1;
   default_time.tm_mday = 1;
 
   try {
@@ -2125,6 +2125,11 @@ bool MongodbClient::AggregateAccountUserDayorMonth(
   auto cursor = src_coll.aggregate(pipeline);
 
   bool has_data = false;
+  constexpr size_t kBatchSize = 1000;  // Batch size for bulk_write
+  std::vector<mongocxx::model::update_one> bulk_ops;
+  std::vector<bsoncxx::document::value> filter_docs;
+  std::vector<bsoncxx::document::value> update_docs;
+
   for (auto&& doc : cursor) {
     auto id = doc["_id"].get_document().view();
     int64_t period = cur_start;
@@ -2134,25 +2139,47 @@ bool MongodbClient::AggregateAccountUserDayorMonth(
     double cpu_alloc = doc["total_cpu_alloc"].get_double().value;
     int count = doc["total_count"].get_int32().value;
 
-    auto filter = bsoncxx::builder::stream::document{}
-                  << dst_time_field << period << "account" << account
-                  << "username" << username
-                  << bsoncxx::builder::stream::finalize;
-    auto update = bsoncxx::builder::stream::document{}
-                  << "$set" << bsoncxx::builder::stream::open_document
-                  << dst_time_field << period << "account" << account
-                  << "username" << username << "total_cpu_time" << cpu_time
-                  << "total_cpu_alloc" << cpu_alloc << "total_count" << count
-                  << bsoncxx::builder::stream::close_document
-                  << bsoncxx::builder::stream::finalize;
-    dst_coll.update_one(filter.view(), update.view(),
-                        mongocxx::options::update{}.upsert(true));
+    // Create filter and update documents as bsoncxx::document::value to ensure
+    // buffer lifetime
+    bsoncxx::document::value filter_doc =
+        bsoncxx::builder::stream::document{}
+        << dst_time_field << period << "account" << account << "username"
+        << username << bsoncxx::builder::stream::finalize;
+    bsoncxx::document::value update_doc =
+        bsoncxx::builder::stream::document{}
+        << "$set" << bsoncxx::builder::stream::open_document << dst_time_field
+        << period << "account" << account << "username" << username
+        << "total_cpu_time" << cpu_time << "total_cpu_alloc" << cpu_alloc
+        << "total_count" << count << bsoncxx::builder::stream::close_document
+        << bsoncxx::builder::stream::finalize;
+
+    filter_docs.push_back(std::move(filter_doc));
+    update_docs.push_back(std::move(update_doc));
+
+    mongocxx::model::update_one update_op{filter_docs.back().view(),
+                                          update_docs.back().view()};
+    update_op.upsert(true);
+    bulk_ops.push_back(std::move(update_op));
 
     if (print_debug_log) {
       CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(doc));
     }
     has_data = true;
+
+    // When batch size is reached, perform bulk write and clear buffers
+    if (bulk_ops.size() == kBatchSize) {
+      dst_coll.bulk_write(bulk_ops);
+      bulk_ops.clear();
+      filter_docs.clear();
+      update_docs.clear();
+    }
   }
+
+  // Write remaining operations in the last batch
+  if (!bulk_ops.empty()) {
+    dst_coll.bulk_write(bulk_ops);
+  }
+
   return has_data;
 }
 
@@ -2334,6 +2361,12 @@ bool MongodbClient::HandleHourAccountUserResult(
     const bsoncxx::array::view& arr, mongocxx::collection& dst_collection,
     bool print_debug_log) {
   bool has_data = false;
+  constexpr size_t kBatchSize = 1000;
+  std::vector<mongocxx::model::update_one> bulk_ops;
+  std::vector<bsoncxx::document::value> filter_docs;
+  std::vector<bsoncxx::document::value> update_docs;
+
+  size_t count = 0;
   for (auto&& elem : arr) {
     auto view = elem.get_document().view();
     auto id = view["_id"].get_document().view();
@@ -2344,25 +2377,45 @@ bool MongodbClient::HandleHourAccountUserResult(
     double total_cpu_alloc = view["total_cpu_alloc"].get_double().value;
     int total_count = view["total_count"].get_int32().value;
 
-    // upsert
-    auto filter = bsoncxx::builder::stream::document{}
-                  << "hour" << hour << "account" << account << "username"
-                  << username << bsoncxx::builder::stream::finalize;
-    auto update = bsoncxx::builder::stream::document{}
-                  << "$set" << bsoncxx::builder::stream::open_document << "hour"
-                  << hour << "account" << account << "username" << username
-                  << "total_cpu_time" << total_cpu_time << "total_cpu_alloc"
-                  << total_cpu_alloc << "total_count" << total_count
-                  << bsoncxx::builder::stream::close_document
-                  << bsoncxx::builder::stream::finalize;
-    dst_collection.update_one(filter.view(), update.view(),
-                              mongocxx::options::update{}.upsert(true));
+    bsoncxx::document::value filter_doc = bsoncxx::builder::stream::document{}
+                                          << "hour" << hour << "account"
+                                          << account << "username" << username
+                                          << bsoncxx::builder::stream::finalize;
+    bsoncxx::document::value update_doc =
+        bsoncxx::builder::stream::document{}
+        << "$set" << bsoncxx::builder::stream::open_document << "hour" << hour
+        << "account" << account << "username" << username << "total_cpu_time"
+        << total_cpu_time << "total_cpu_alloc" << total_cpu_alloc
+        << "total_count" << total_count
+        << bsoncxx::builder::stream::close_document
+        << bsoncxx::builder::stream::finalize;
+
+    filter_docs.push_back(std::move(filter_doc));
+    update_docs.push_back(std::move(update_doc));
+
+    mongocxx::model::update_one update_op{filter_docs.back().view(),
+                                          update_docs.back().view()};
+    update_op.upsert(true);
+    bulk_ops.push_back(std::move(update_op));
 
     if (print_debug_log) {
       CRANE_INFO("BSON JSON: {}", bsoncxx::to_json(view));
     }
     has_data = true;
+    ++count;
+
+    if (bulk_ops.size() == kBatchSize) {
+      dst_collection.bulk_write(bulk_ops);
+      bulk_ops.clear();
+      filter_docs.clear();
+      update_docs.clear();
+    }
   }
+
+  if (!bulk_ops.empty()) {
+    dst_collection.bulk_write(bulk_ops);
+  }
+
   return has_data;
 }
 
@@ -2371,6 +2424,11 @@ bool MongodbClient::HandleHourAccountUserWckeyResult(
     const bsoncxx::array::view& arr, mongocxx::collection& dst_collection,
     bool print_debug_log) {
   bool has_data = false;
+  constexpr size_t kBatchSize = 1000;  // Batch size for bulk_write
+  std::vector<mongocxx::model::update_one> bulk_ops;
+  std::vector<bsoncxx::document::value> filter_docs;
+  std::vector<bsoncxx::document::value> update_docs;
+
   for (auto&& elem : arr) {
     auto view = elem.get_document().view();
     auto id = view["_id"].get_document().view();
@@ -2382,26 +2440,48 @@ bool MongodbClient::HandleHourAccountUserWckeyResult(
     double total_cpu_alloc = view["total_cpu_alloc"].get_double().value;
     int total_count = view["total_count"].get_int32().value;
 
-    // upsert
-    auto filter = bsoncxx::builder::stream::document{}
-                  << "hour" << hour << "account" << account << "username"
-                  << username << "wckey" << wckey
-                  << bsoncxx::builder::stream::finalize;
-    auto update = bsoncxx::builder::stream::document{}
-                  << "$set" << bsoncxx::builder::stream::open_document << "hour"
-                  << hour << "account" << account << "username" << username
-                  << "wckey" << wckey << "total_cpu_time" << total_cpu_time
-                  << "total_cpu_alloc" << total_cpu_alloc << "total_count"
-                  << total_count << bsoncxx::builder::stream::close_document
-                  << bsoncxx::builder::stream::finalize;
-    dst_collection.update_one(filter.view(), update.view(),
-                              mongocxx::options::update{}.upsert(true));
+    // Create filter and update documents as bsoncxx::document::value to ensure
+    // buffer lifetime
+    bsoncxx::document::value filter_doc =
+        bsoncxx::builder::stream::document{}
+        << "hour" << hour << "account" << account << "username" << username
+        << "wckey" << wckey << bsoncxx::builder::stream::finalize;
+    bsoncxx::document::value update_doc =
+        bsoncxx::builder::stream::document{}
+        << "$set" << bsoncxx::builder::stream::open_document << "hour" << hour
+        << "account" << account << "username" << username << "wckey" << wckey
+        << "total_cpu_time" << total_cpu_time << "total_cpu_alloc"
+        << total_cpu_alloc << "total_count" << total_count
+        << bsoncxx::builder::stream::close_document
+        << bsoncxx::builder::stream::finalize;
+
+    filter_docs.push_back(std::move(filter_doc));
+    update_docs.push_back(std::move(update_doc));
+
+    mongocxx::model::update_one update_op{filter_docs.back().view(),
+                                          update_docs.back().view()};
+    update_op.upsert(true);
+    bulk_ops.push_back(std::move(update_op));
 
     if (print_debug_log) {
       CRANE_INFO("BSON JSON: {}", bsoncxx::to_json(view));
     }
     has_data = true;
+
+    // When batch size is reached, perform bulk write and clear buffers
+    if (bulk_ops.size() == kBatchSize) {
+      dst_collection.bulk_write(bulk_ops);
+      bulk_ops.clear();
+      filter_docs.clear();
+      update_docs.clear();
+    }
   }
+
+  // Write remaining operations in the last batch
+  if (!bulk_ops.empty()) {
+    dst_collection.bulk_write(bulk_ops);
+  }
+
   return has_data;
 }
 
