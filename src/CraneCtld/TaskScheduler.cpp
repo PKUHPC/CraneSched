@@ -587,6 +587,8 @@ void TaskScheduler::ScheduleThread_() {
       num_tasks_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
                                            m_pending_task_map_.size());
 
+      m_res_reduce_events_mtx_.Lock();
+
       begin = std::chrono::steady_clock::now();
 
       m_node_selection_algo_->NodeSelect(running_jobs, pending_jobs);
@@ -599,471 +601,472 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
-      {
-        // All events reduce resources during scheduling should be handled here.
-        // Resource increase(such as job ended) events are not considered here,
-        // because they won't lead to schedule failure.
+      // All events reduce resources during scheduling should be handled here.
+      // Resource increase(such as job ended) events are not considered here,
+      // because they won't lead to schedule failure.
 
-        // NOTICE: Craned down events are not handled here, because related jobs
-        // will not be started successfully. However, features added in the
-        // future which reduce resources during scheduling should be handled
-        // here.
+      // NOTICE: Craned down events are not handled here, because related jobs
+      // will not be started successfully. However, features added in the
+      // future which reduce resources during scheduling should be handled
+      // here.
 
-        // Check:
-        // 1. for non-reservation jobs, if the allocated nodes are still
-        //    available.
-        // 2. for reservation jobs:
-        // -  If the reservation still exists.
-        // -  If the allocated nodes are still in the reservation and the
-        //    reservation still has enough resource.
+      // Check:
+      // 1. for non-reservation jobs, if the allocated nodes are still
+      //    available.
+      // 2. for reservation jobs:
+      // -  If the reservation still exists.
+      // -  If the allocated nodes are still in the reservation and the
+      //    reservation still has enough resource.
 
-        m_res_reduce_events_mtx_.Lock();
+      // Eearliest end time of new reservations on craned created during
+      // scheduling.
+      absl::flat_hash_map<CranedId, absl::Time> craned_id_change_time_map;
+      absl::flat_hash_set<ResvId> affected_resv_set;
+      for (const ResReduceEvent& event : m_res_reduce_events_) {
+        if (std::holds_alternative<ResvId>(event.affected_resources)) {
+          affected_resv_set.insert(std::get<ResvId>(event.affected_resources));
+        } else {
+          auto& affected_nodes =
+              std::get<std::pair<absl::Time, std::vector<CranedId>>>(
+                  event.affected_resources);
+          absl::Time end_time = affected_nodes.first;
+          for (const CranedId& craned_id : affected_nodes.second) {
+            auto it = craned_id_change_time_map.find(craned_id);
+            if (it == craned_id_change_time_map.end() ||
+                it->second > end_time) {
+              craned_id_change_time_map[craned_id] = end_time;
+            }
+          }
+        }
+      }
 
-        // Eearliest end time of new reservations on craned created during
-        // scheduling.
-        absl::flat_hash_map<CranedId, absl::Time> craned_id_change_time_map;
-        absl::flat_hash_set<ResvId> affected_resv_set;
-        for (const ResReduceEvent& event : m_res_reduce_events_) {
-          if (std::holds_alternative<ResvId>(event.affected_resources)) {
-            affected_resv_set.insert(
-                std::get<ResvId>(event.affected_resources));
-          } else {
-            auto& affected_nodes =
-                std::get<std::pair<absl::Time, std::vector<CranedId>>>(
-                    event.affected_resources);
-            absl::Time end_time = affected_nodes.first;
-            for (const CranedId& craned_id : affected_nodes.second) {
+      std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
+
+      LockGuard pending_guard(&m_pending_task_map_mtx_);
+
+      for (auto& job_in_scheduler : pending_jobs) {
+        auto it = m_pending_task_map_.find(job_in_scheduler->job_id);
+        if (it != m_pending_task_map_.end()) {
+          auto& job = it->second;
+          job->SetCachedPriority(job_in_scheduler->priority);
+          job->SetStartTime(job_in_scheduler->start_time);
+          if (!job_in_scheduler->reason.empty()) {
+            job->pending_reason = job_in_scheduler->reason;
+            continue;
+          }
+          absl::Time end_time =
+              job_in_scheduler->start_time + job_in_scheduler->time_limit;
+          if (job_in_scheduler->reservation.empty()) {
+            // Non-reservation job.
+            for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
               auto it = craned_id_change_time_map.find(craned_id);
-              if (it == craned_id_change_time_map.end() ||
-                  it->second > end_time) {
-                craned_id_change_time_map[craned_id] = end_time;
+              if (it != craned_id_change_time_map.end() &&
+                  it->second < end_time) {
+                job_in_scheduler->reason = "Resource changed";
               }
             }
-          }
-        }
-
-        std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
-
-        LockGuard pending_guard(&m_pending_task_map_mtx_);
-
-        for (auto& job_in_scheduler : pending_jobs) {
-          auto it = m_pending_task_map_.find(job_in_scheduler->job_id);
-          if (it != m_pending_task_map_.end()) {
-            auto& job = it->second;
-            job->SetCachedPriority(job_in_scheduler->priority);
-            job->SetStartTime(job_in_scheduler->start_time);
-            if (!job_in_scheduler->reason.empty()) {
-              job->pending_reason = job_in_scheduler->reason;
-              continue;
-            }
-            absl::Time end_time =
-                job_in_scheduler->start_time + job_in_scheduler->time_limit;
-            if (job_in_scheduler->reservation.empty()) {
-              // Non-reservation job.
-              for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
-                auto it = craned_id_change_time_map.find(craned_id);
-                if (it != craned_id_change_time_map.end() &&
-                    it->second < end_time) {
-                  job_in_scheduler->reason = "Resource changed";
-                }
-              }
-            } else if (affected_resv_set.contains(
-                           job_in_scheduler->reservation)) {
-              // Reservation job, till now, reservation always reserves whole
-              // nodes, so we only need to check if the reservation ends after
-              // job ends and if the allocated nodes are still in the
-              // reservation.
-              const auto& resv_meta = g_meta_container->GetResvMetaPtr(
-                  job_in_scheduler->reservation);
-              if (resv_meta.get() == nullptr) {
-                job_in_scheduler->reason = "Reservation deleted";
-              } else if (resv_meta->end_time < end_time) {
-                job_in_scheduler->reason = "Resource";
-              } else {
-                for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
-                  if (!resv_meta->craned_ids.contains(craned_id)) {
-                    job_in_scheduler->reason = "Reservation changed";
-                    break;
-                  }
-                }
-              }
-            }
-            if (!job_in_scheduler->reason.empty()) {
-              job->pending_reason = job_in_scheduler->reason;
-              continue;
-            }
-
-            PartitionId const& partition_id = job->partition_id;
-
-            job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
-            job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
-            job->nodes_alloc = job->CranedIds().size();
-            job->SetStatus(crane::grpc::TaskStatus::Running);
-
-            job->allocated_craneds_regex =
-                util::HostNameListToStr(job->CranedIds());
-
-            for (CranedId const& craned_id : job->CranedIds())
-              g_meta_container->MallocResourceFromNode(craned_id, job->TaskId(),
-                                                       job->AllocatedRes());
-            if (job->reservation != "") {
-              g_meta_container->MallocResourceFromResv(
-                  job->reservation, job->TaskId(), job->AllocatedRes());
-            }
-
-            if (job->ShouldLaunchOnAllNodes()) {
-              for (auto const& craned_id : job->CranedIds())
-                job->executing_craned_ids.emplace_back(craned_id);
+          } else if (affected_resv_set.contains(
+                         job_in_scheduler->reservation)) {
+            // Reservation job, till now, reservation always reserves whole
+            // nodes, so we only need to check if the reservation ends after
+            // job ends and if the allocated nodes are still in the
+            // reservation.
+            const auto& resv_meta =
+                g_meta_container->GetResvMetaPtr(job_in_scheduler->reservation);
+            if (resv_meta.get() == nullptr) {
+              job_in_scheduler->reason = "Reservation deleted";
+            } else if (resv_meta->end_time < end_time) {
+              job_in_scheduler->reason = "Resource";
             } else {
-              job->executing_craned_ids.emplace_back(job->CranedIds().front());
+              for (const CranedId& craned_id : job_in_scheduler->craned_ids) {
+                if (!resv_meta->craned_ids.contains(craned_id)) {
+                  job_in_scheduler->reason = "Reservation changed";
+                  break;
+                }
+              }
             }
-
-            jobs_to_run.push_back(std::move(job));
-            m_pending_task_map_.erase(it);
-          } else {
-            CRANE_TRACE(
-                "Pending job #{} not found in pending map, may has been "
-                "canceled",
-                job_in_scheduler->job_id);
           }
-        }
-
-        // Resource has been subtracted, other resource reduce events are
-        // allowed now.
-        m_res_reduce_events_mtx_.Unlock();
-
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "Set task fields costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-
-        begin = std::chrono::steady_clock::now();
-
-        // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
-        // ids to node maps immediately before CreateCgroupForTasks to ensure
-        // that if a CraneD crash, the callback of CranedKeeper can call
-        // TerminateTasksOnCraned in which m_node_to_tasks_map_ will be searched
-        // and send TerminateTasksOnCraned to appropriate CraneD to release the
-        // cgroups.
-
-        // NOTE: If unlock pending_map here, jobs may be unable to be find
-        // before transferring to running_map or DB.
-
-        m_task_indexes_mtx_.Lock();
-        for (auto& job : jobs_to_run) {
-          for (CranedId const& craned_id : job->CranedIds())
-            m_node_to_tasks_map_[craned_id].emplace(job->TaskId());
-        }
-        m_task_indexes_mtx_.Unlock();
-
-        // RPC is time-consuming. Clustering rpc to one craned for performance.
-        HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_cgroup_map;
-
-        for (auto& job : jobs_to_run) {
-          for (CranedId const& craned_id : job->CranedIds())
-            craned_cgroup_map[craned_id].push_back(job->GetJobToD(craned_id));
-        }
-
-        Mutex thread_pool_mtx;
-        HashSet<CranedId> failed_craned_set;
-        HashSet<task_id_t> failed_task_id_set;
-
-        absl::BlockingCounter bl(craned_cgroup_map.size());
-        for (auto&& iter : craned_cgroup_map) {
-          CranedId const& craned_id = iter.first;
-          auto& job_to_d_vec = iter.second;
-
-          g_thread_pool->detach_task([&]() {
-            auto stub = g_craned_keeper->GetCranedStub(craned_id);
-            CRANE_TRACE("Send CreateCgroupForJobs for {} jobs to {}",
-                        job_to_d_vec.size(), craned_id);
-            if (stub == nullptr || stub->Invalid()) {
-              failed_craned_set.emplace(craned_id);
-              for (const auto& job_to_d : job_to_d_vec)
-                failed_task_id_set.emplace(job_to_d.job_id());
-              bl.DecrementCount();
-              return;
-            }
-
-            auto err = stub->CreateCgroupForJobs(job_to_d_vec);
-            if (err == CraneErrCode::SUCCESS) {
-              bl.DecrementCount();
-              return;
-            }
-
-            thread_pool_mtx.Lock();
-
-            failed_craned_set.emplace(craned_id);
-            for (const auto& job_to_d : job_to_d_vec)
-              failed_task_id_set.emplace(job_to_d.job_id());
-
-            thread_pool_mtx.Unlock();
-
-            // If jobs in task_uid_pairs failed to start, they will be moved to
-            // the completed jobs and do the following steps:
-            // 1. call g_meta_container->FreeResources() for the failed jobs.
-            // 2. Release all cgroups related to these failed jobs.
-            // 3. Move these jobs to the completed queue.
-            CRANE_ERROR("Craned #{} failed when CreateCgroupForJob.",
-                        craned_id);
-
-            bl.DecrementCount();
-          });
-        }
-        bl.Wait();
-
-        std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
-        std::vector<std::unique_ptr<TaskInCtld>> jobs_failed_to_create_cg;
-
-        for (auto& job : jobs_to_run) {
-          if (failed_task_id_set.contains(job->TaskId())) {
-            jobs_failed_to_create_cg.emplace_back(std::move(job));
-          } else {
-            jobs_created.emplace_back(std::move(job));
-          }
-        }
-
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "CreateCgroupForJobs costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-
-        begin = std::chrono::steady_clock::now();
-
-        // Now we have the ownerships of succeeded jobs in `jobs_started` and
-        // the ownerships of failed jobs in `jobs_failed_to_create_cg`.
-        // For jobs whose cgroups are created successfully,
-        // add them to m_node_to_tasks_map_.
-        // For failed jobs,
-        // free all the resource and move them to the completed queue.
-
-        // First handle successful jobs in `jobs_started`.
-
-        // Prepare ExecuteTasksRequest.
-        // We do this since the ownership of tasks will be transferred outside
-        // this thread in the following step to move these tasks to ram and DB
-        // running queue before we call stub->ExecuteTasks().
-        HashMap<CranedId, std::vector<TaskInCtld*>>
-            craned_task_to_exec_raw_ptrs_map;
-        std::vector<crane::grpc::TaskInfo> tasks_post_start;
-        for (auto& job : jobs_created) {
-          // We need to copy TaskInCtld here since the ownership of job will be
-          // transferred before we call StartHook.
-          if (g_config.Plugin.Enabled) {
-            crane::grpc::TaskInfo task_info;
-            job->SetFieldsOfTaskInfo(&task_info);
-            tasks_post_start.emplace_back(std::move(task_info));
-          }
-
-          for (const auto& craned_id : job->executing_craned_ids)
-            craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(job.get());
-        }
-
-        HashMap<CranedId, crane::grpc::ExecuteStepsRequest>
-            craned_exec_requests_map;
-        for (auto& [craned_id, tasks_raw_ptrs] :
-             craned_task_to_exec_raw_ptrs_map) {
-          crane::grpc::ExecuteStepsRequest req;
-          for (TaskInCtld* task : tasks_raw_ptrs) {
-            req.mutable_tasks()->Add(task->GetTaskToD(craned_id));
-          }
-          craned_exec_requests_map.emplace(craned_id, std::move(req));
-        }
-
-        // Move jobs into running queue.
-        txn_id_t txn_id{0};
-        bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-        if (!ok) {
-          CRANE_ERROR(
-              "TaskScheduler failed to start transaction when scheduling.");
-        }
-
-        for (auto& job : jobs_created) {
-          // IMPORTANT: job must be put into running_task_map before any
-          // time-consuming operation, otherwise TaskStatusChange RPC will come
-          // earlier before job is put into running_task_map.
-          g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
-                                                        job->RuntimeAttr());
-        }
-
-        ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
-        if (!ok) {
-          CRANE_ERROR("Embedded database failed to commit manual transaction.");
-        }
-
-        // Set succeed tasks status and do callbacks.
-        for (auto& job : jobs_created) {
-          if (job->type == crane::grpc::Interactive) {
-            const auto& meta = std::get<InteractiveMetaInTask>(job->meta);
-            std::get<InteractiveMetaInTask>(job->meta).cb_task_res_allocated(
-                job->TaskId(), job->allocated_craneds_regex, job->CranedIds());
-          }
-
-          // The ownership of TaskInCtld is transferred to the running queue.
-          m_running_task_map_mtx_.Lock();
-          m_running_task_map_.emplace(job->TaskId(), std::move(job));
-          m_running_task_map_mtx_.Unlock();
-        }
-
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "Move tasks into running queue costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-
-        begin = std::chrono::steady_clock::now();
-
-        // TODO: Refactor here! Add filter chain for post-scheduling stage.
-        absl::Time post_sched_time_point = absl::Now();
-        for (auto const& craned_id :
-             craned_exec_requests_map | std::ranges::views::keys) {
-          g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
-              post_sched_time_point;
-        }
-
-        std::unordered_map<
-            CranedId, std::pair<std::vector<job_id_t>, uint16_t /*exit_code*/>>
-            failed_to_exec_job_id_map;
-        for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send ExecuteTasks for {} tasks to {}",
-                      tasks.tasks_size(), craned_id);
-          if (stub == nullptr || stub->Invalid()) {
-            auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
-            for (auto& task : tasks.tasks()) {
-              job_vec.emplace_back(task.task_id());
-            }
-            code = ExitCode::kExitCodeRpcError;
+          if (!job_in_scheduler->reason.empty()) {
+            job->pending_reason = job_in_scheduler->reason;
             continue;
           }
 
-          CraneExpected failed_task_ids = stub->ExecuteSteps(tasks);
-          if (!failed_task_ids.has_value()) {
-            auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
-            for (auto& task : tasks.tasks()) {
-              job_vec.emplace_back(task.task_id());
-            }
-            code = ExitCode::kExitCodeRpcError;
-          } else if (!failed_task_ids.value().empty()) {
-            auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
-            job_vec = std::move(failed_task_ids.value());
-            code = ExitCode::kExitCodeExecutionError;
-          }
-        }
+          PartitionId const& partition_id = job->partition_id;
 
-        // After sending ExecuteTasks RPC, StartHook is called.
-        // This must before checking failed tasks as TaskStatusChangeAsync may
-        // trigger EndHook.
-        if (g_config.Plugin.Enabled && !tasks_post_start.empty()) {
-          g_plugin_client->StartHookAsync(std::move(tasks_post_start));
-        }
+          job->SetEndTime(end_time);
+          job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
+          job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
+          job->allocated_res_view.SetToZero();
+          job->allocated_res_view += job->AllocatedRes();
+          job->nodes_alloc = job->CranedIds().size();
+          job->SetStatus(crane::grpc::TaskStatus::Running);
 
-        // If any task failed during this stage,
-        // call TaskStatusChangeAsync since the ownership of tasks
-        // has been transferred.
-        for (auto& [craned_id, task_status] : failed_to_exec_job_id_map) {
-          CRANE_ERROR("Task [{}] on {} failed to execute.",
-                      absl::StrJoin(task_status.first, ","), craned_id);
-          for (auto task_id : task_status.first)
-            TaskStatusChangeAsync(task_id, craned_id,
-                                  crane::grpc::TaskStatus::Failed,
-                                  task_status.second);
-          g_thread_pool->detach_task(
-              [craned_id, steps = std::move(task_status.first)]() {
-                auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          job->allocated_craneds_regex =
+              util::HostNameListToStr(job->CranedIds());
 
-                // If the craned is down, just ignore it.
-                if (stub == nullptr || stub->Invalid()) return;
-
-                CraneErrCode err = stub->FreeSteps(steps);
-                if (err != CraneErrCode::SUCCESS)
-                  CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
-                              steps.size(), craned_id);
-              });
-        }
-
-        end = std::chrono::steady_clock::now();
-        CRANE_TRACE(
-            "ExecuteTasks costed {} ms",
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                .count());
-
-        schedule_end = end;
-        CRANE_TRACE(
-            "Scheduling {} pending tasks. {} get scheduled. Time elapsed: {}ms",
-            num_tasks_single_schedule, num_tasks_single_execution,
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                schedule_end - schedule_begin)
-                .count());
-
-        // Note: If unlock pending_map here, jobs may be unable to be find
-        // before transferring to DB.
-        if (!jobs_failed_to_create_cg.empty()) {
-          // Then handle failed tasks in `jobs_failed_to_create_cg` if there's
-          // any.
-          begin = std::chrono::steady_clock::now();
-
-          for (auto& job : jobs_failed_to_create_cg) {
-            for (CranedId const& craned_id : job->CranedIds())
-              g_meta_container->FreeResourceFromNode(craned_id, job->TaskId());
-            if (job->reservation != "")
-              g_meta_container->FreeResourceFromResv(job->reservation,
-                                                     job->TaskId());
-            g_account_meta_container->FreeQosResource(*job);
+          for (CranedId const& craned_id : job->CranedIds())
+            g_meta_container->MallocResourceFromNode(craned_id, job->TaskId(),
+                                                     job->AllocatedRes());
+          if (job->reservation != "") {
+            g_meta_container->MallocResourceFromResv(
+                job->reservation, job->TaskId(), job->AllocatedRes());
           }
 
-          // Construct the map for cgroups to be released of all failed tasks
-          HashMap<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
-              craned_cgroup_map_to_release;
-          for (auto& job : jobs_failed_to_create_cg) {
-            for (CranedId const& craned_id : job->CranedIds())
-              craned_cgroup_map_to_release[craned_id].emplace_back(
-                  job->TaskId(), job->uid);
+          if (job->ShouldLaunchOnAllNodes()) {
+            for (auto const& craned_id : job->CranedIds())
+              job->executing_craned_ids.emplace_back(craned_id);
+          } else {
+            job->executing_craned_ids.emplace_back(job->CranedIds().front());
           }
 
-          // Release the cgroups asynchronously.
-          for (auto const& iter : craned_cgroup_map_to_release) {
-            CranedId const& craned_id = iter.first;
-            auto& task_uid_pairs = iter.second;
+          jobs_to_run.push_back(std::move(job));
+          m_pending_task_map_.erase(it);
+        } else {
+          CRANE_TRACE(
+              "Pending job #{} not found in pending map, may has been "
+              "canceled",
+              job_in_scheduler->job_id);
+        }
+      }
 
-            g_thread_pool->detach_task([=, cgroups_to_release =
-                                               std::move(task_uid_pairs)]() {
+      // Resource has been subtracted, other resource reduce events are
+      // allowed now.
+      m_res_reduce_events_.clear();
+      m_res_reduce_events_mtx_.Unlock();
+
+      num_tasks_single_execution = jobs_to_run.size();
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Set task fields costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      begin = std::chrono::steady_clock::now();
+
+      // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
+      // ids to node maps immediately before CreateCgroupForTasks to ensure
+      // that if a CraneD crash, the callback of CranedKeeper can call
+      // TerminateTasksOnCraned in which m_node_to_tasks_map_ will be searched
+      // and send TerminateTasksOnCraned to appropriate CraneD to release the
+      // cgroups.
+
+      // NOTE: If unlock pending_map here, jobs may be unable to be find
+      // before transferring to running_map or DB.
+
+      m_task_indexes_mtx_.Lock();
+      for (auto& job : jobs_to_run) {
+        for (CranedId const& craned_id : job->CranedIds())
+          m_node_to_tasks_map_[craned_id].emplace(job->TaskId());
+      }
+      m_task_indexes_mtx_.Unlock();
+
+      // RPC is time-consuming. Clustering rpc to one craned for performance.
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_cgroup_map;
+
+      for (auto& job : jobs_to_run) {
+        for (CranedId const& craned_id : job->CranedIds())
+          craned_cgroup_map[craned_id].push_back(job->GetJobToD(craned_id));
+      }
+
+      Mutex thread_pool_mtx;
+      HashSet<CranedId> failed_craned_set;
+      HashSet<task_id_t> failed_task_id_set;
+
+      absl::BlockingCounter bl(craned_cgroup_map.size());
+      for (auto&& iter : craned_cgroup_map) {
+        CranedId const& craned_id = iter.first;
+        auto& job_to_d_vec = iter.second;
+
+        g_thread_pool->detach_task([&]() {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          CRANE_TRACE("Send CreateCgroupForJobs for {} jobs to {}",
+                      job_to_d_vec.size(), craned_id);
+          if (stub == nullptr || stub->Invalid()) {
+            failed_craned_set.emplace(craned_id);
+            for (const auto& job_to_d : job_to_d_vec)
+              failed_task_id_set.emplace(job_to_d.job_id());
+            bl.DecrementCount();
+            return;
+          }
+
+          auto err = stub->CreateCgroupForJobs(job_to_d_vec);
+          if (err == CraneErrCode::SUCCESS) {
+            bl.DecrementCount();
+            return;
+          }
+
+          thread_pool_mtx.Lock();
+
+          failed_craned_set.emplace(craned_id);
+          for (const auto& job_to_d : job_to_d_vec)
+            failed_task_id_set.emplace(job_to_d.job_id());
+
+          thread_pool_mtx.Unlock();
+
+          // If jobs in task_uid_pairs failed to start, they will be moved to
+          // the completed jobs and do the following steps:
+          // 1. call g_meta_container->FreeResources() for the failed jobs.
+          // 2. Release all cgroups related to these failed jobs.
+          // 3. Move these jobs to the completed queue.
+          CRANE_ERROR("Craned #{} failed when CreateCgroupForJob.", craned_id);
+
+          bl.DecrementCount();
+        });
+      }
+      bl.Wait();
+
+      std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
+      std::vector<std::unique_ptr<TaskInCtld>> jobs_failed_to_create_cg;
+
+      for (auto& job : jobs_to_run) {
+        if (failed_task_id_set.contains(job->TaskId())) {
+          jobs_failed_to_create_cg.emplace_back(std::move(job));
+        } else {
+          jobs_created.emplace_back(std::move(job));
+        }
+      }
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "CreateCgroupForJobs costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      begin = std::chrono::steady_clock::now();
+
+      // Now we have the ownerships of succeeded jobs in `jobs_started` and
+      // the ownerships of failed jobs in `jobs_failed_to_create_cg`.
+      // For jobs whose cgroups are created successfully,
+      // add them to m_node_to_tasks_map_.
+      // For failed jobs,
+      // free all the resource and move them to the completed queue.
+
+      // First handle successful jobs in `jobs_started`.
+
+      // Prepare ExecuteTasksRequest.
+      // We do this since the ownership of tasks will be transferred outside
+      // this thread in the following step to move these tasks to ram and DB
+      // running queue before we call stub->ExecuteTasks().
+      HashMap<CranedId, std::vector<TaskInCtld*>>
+          craned_task_to_exec_raw_ptrs_map;
+      std::vector<crane::grpc::TaskInfo> tasks_post_start;
+      for (auto& job : jobs_created) {
+        // We need to copy TaskInCtld here since the ownership of job will be
+        // transferred before we call StartHook.
+        if (g_config.Plugin.Enabled) {
+          crane::grpc::TaskInfo task_info;
+          job->SetFieldsOfTaskInfo(&task_info);
+          tasks_post_start.emplace_back(std::move(task_info));
+        }
+
+        for (const auto& craned_id : job->executing_craned_ids)
+          craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(job.get());
+      }
+
+      HashMap<CranedId, crane::grpc::ExecuteStepsRequest>
+          craned_exec_requests_map;
+      for (auto& [craned_id, tasks_raw_ptrs] :
+           craned_task_to_exec_raw_ptrs_map) {
+        crane::grpc::ExecuteStepsRequest req;
+        for (TaskInCtld* task : tasks_raw_ptrs) {
+          req.mutable_tasks()->Add(task->GetTaskToD(craned_id));
+        }
+        craned_exec_requests_map.emplace(craned_id, std::move(req));
+      }
+
+      // Move jobs into running queue.
+      txn_id_t txn_id{0};
+      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+      if (!ok) {
+        CRANE_ERROR(
+            "TaskScheduler failed to start transaction when scheduling.");
+      }
+
+      for (auto& job : jobs_created) {
+        // IMPORTANT: job must be put into running_task_map before any
+        // time-consuming operation, otherwise TaskStatusChange RPC will come
+        // earlier before job is put into running_task_map.
+        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
+                                                      job->RuntimeAttr());
+      }
+
+      ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+      if (!ok) {
+        CRANE_ERROR("Embedded database failed to commit manual transaction.");
+      }
+
+      // Set succeed tasks status and do callbacks.
+      for (auto& job : jobs_created) {
+        if (job->type == crane::grpc::Interactive) {
+          const auto& meta = std::get<InteractiveMetaInTask>(job->meta);
+          std::get<InteractiveMetaInTask>(job->meta).cb_task_res_allocated(
+              job->TaskId(), job->allocated_craneds_regex, job->CranedIds());
+        }
+
+        // The ownership of TaskInCtld is transferred to the running queue.
+        m_running_task_map_mtx_.Lock();
+        m_running_task_map_.emplace(job->TaskId(), std::move(job));
+        m_running_task_map_mtx_.Unlock();
+      }
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Move tasks into running queue costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      begin = std::chrono::steady_clock::now();
+
+      // TODO: Refactor here! Add filter chain for post-scheduling stage.
+      absl::Time post_sched_time_point = absl::Now();
+      for (auto const& craned_id :
+           craned_exec_requests_map | std::ranges::views::keys) {
+        g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
+            post_sched_time_point;
+      }
+
+      std::unordered_map<
+          CranedId, std::pair<std::vector<job_id_t>, uint16_t /*exit_code*/>>
+          failed_to_exec_job_id_map;
+      for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
+                    craned_id);
+        if (stub == nullptr || stub->Invalid()) {
+          auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
+          for (auto& task : tasks.tasks()) {
+            job_vec.emplace_back(task.task_id());
+          }
+          code = ExitCode::kExitCodeRpcError;
+          continue;
+        }
+
+        CraneExpected failed_task_ids = stub->ExecuteSteps(tasks);
+        if (!failed_task_ids.has_value()) {
+          auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
+          for (auto& task : tasks.tasks()) {
+            job_vec.emplace_back(task.task_id());
+          }
+          code = ExitCode::kExitCodeRpcError;
+        } else if (!failed_task_ids.value().empty()) {
+          auto& [job_vec, code] = failed_to_exec_job_id_map[craned_id];
+          job_vec = std::move(failed_task_ids.value());
+          code = ExitCode::kExitCodeExecutionError;
+        }
+      }
+
+      // After sending ExecuteTasks RPC, StartHook is called.
+      // This must before checking failed tasks as TaskStatusChangeAsync may
+      // trigger EndHook.
+      if (g_config.Plugin.Enabled && !tasks_post_start.empty()) {
+        g_plugin_client->StartHookAsync(std::move(tasks_post_start));
+      }
+
+      // If any task failed during this stage,
+      // call TaskStatusChangeAsync since the ownership of tasks
+      // has been transferred.
+      for (auto& [craned_id, task_status] : failed_to_exec_job_id_map) {
+        CRANE_ERROR("Task [{}] on {} failed to execute.",
+                    absl::StrJoin(task_status.first, ","), craned_id);
+        for (auto task_id : task_status.first)
+          TaskStatusChangeAsync(task_id, craned_id,
+                                crane::grpc::TaskStatus::Failed,
+                                task_status.second);
+        g_thread_pool->detach_task(
+            [craned_id, steps = std::move(task_status.first)]() {
               auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
               // If the craned is down, just ignore it.
               if (stub == nullptr || stub->Invalid()) return;
 
-              CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups_to_release);
+              CraneErrCode err = stub->FreeSteps(steps);
               if (err != CraneErrCode::SUCCESS)
-                CRANE_ERROR(
-                    "Failed to Release cgroup RPC for {} tasks on Node {}",
-                    cgroups_to_release.size(), craned_id);
+                CRANE_ERROR("Failed to FreeSteps RPC for {} tasks on Node {}",
+                            steps.size(), craned_id);
             });
-          }
-
-          // Move failed tasks to the completed queue.
-          std::vector<TaskInCtld*> failed_task_raw_ptrs;
-          for (auto& job : jobs_failed_to_create_cg) {
-            failed_task_raw_ptrs.emplace_back(job.get());
-
-            job->SetStatus(crane::grpc::Failed);
-            job->SetExitCode(ExitCode::kExitCodeCgroupError);
-            job->SetEndTime(absl::Now());
-          }
-          ProcessFinalTasks_(failed_task_raw_ptrs);
-
-          // Failed tasks have been handled properly. Free them explicitly.
-          jobs_failed_to_create_cg.clear();
-
-          end = std::chrono::steady_clock::now();
-          CRANE_TRACE(
-              "Handling failed tasks costed {} ms",
-              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                  .count());
-        }
       }
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "ExecuteTasks costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      schedule_end = end;
+      CRANE_TRACE(
+          "Scheduling {} pending tasks. {} get scheduled. Time elapsed: {}ms",
+          num_tasks_single_schedule, num_tasks_single_execution,
+          std::chrono::duration_cast<std::chrono::milliseconds>(schedule_end -
+                                                                schedule_begin)
+              .count());
+
+      // Note: If unlock pending_map here, jobs may be unable to be find
+      // before transferring to DB.
+      if (!jobs_failed_to_create_cg.empty()) {
+        // Then handle failed tasks in `jobs_failed_to_create_cg` if there's
+        // any.
+        begin = std::chrono::steady_clock::now();
+
+        for (auto& job : jobs_failed_to_create_cg) {
+          for (CranedId const& craned_id : job->CranedIds())
+            g_meta_container->FreeResourceFromNode(craned_id, job->TaskId());
+          if (job->reservation != "")
+            g_meta_container->FreeResourceFromResv(job->reservation,
+                                                   job->TaskId());
+          g_account_meta_container->FreeQosResource(*job);
+        }
+
+        // Construct the map for cgroups to be released of all failed tasks
+        HashMap<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
+            craned_cgroup_map_to_release;
+        for (auto& job : jobs_failed_to_create_cg) {
+          for (CranedId const& craned_id : job->CranedIds())
+            craned_cgroup_map_to_release[craned_id].emplace_back(job->TaskId(),
+                                                                 job->uid);
+        }
+
+        // Release the cgroups asynchronously.
+        for (auto const& iter : craned_cgroup_map_to_release) {
+          CranedId const& craned_id = iter.first;
+          auto& task_uid_pairs = iter.second;
+
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
+            auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+            // If the craned is down, just ignore it.
+            if (stub == nullptr || stub->Invalid()) return;
+
+            CraneErrCode err = stub->ReleaseCgroupForJobs(cgroups_to_release);
+            if (err != CraneErrCode::SUCCESS)
+              CRANE_ERROR(
+                  "Failed to Release cgroup RPC for {} tasks on Node {}",
+                  cgroups_to_release.size(), craned_id);
+          });
+        }
+
+        // Move failed tasks to the completed queue.
+        std::vector<TaskInCtld*> failed_task_raw_ptrs;
+        for (auto& job : jobs_failed_to_create_cg) {
+          failed_task_raw_ptrs.emplace_back(job.get());
+
+          job->SetStatus(crane::grpc::Failed);
+          job->SetExitCode(ExitCode::kExitCodeCgroupError);
+          job->SetEndTime(absl::Now());
+        }
+        ProcessFinalTasks_(failed_task_raw_ptrs);
+
+        // Failed tasks have been handled properly. Free them explicitly.
+        jobs_failed_to_create_cg.clear();
+
+        end = std::chrono::steady_clock::now();
+        CRANE_TRACE(
+            "Handling failed tasks costed {} ms",
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                .count());
+      }
+
     } else {
       m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                        std::memory_order::release);
@@ -1623,6 +1626,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     }
   }
 
+  m_res_reduce_events_mtx_.Lock();
   std::vector<CranedMetaContainer::CranedMetaPtr> craned_meta_vec;
   ResourceV2 allocated_res;
   {
@@ -1686,11 +1690,11 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
                 "Nodes conflicted by running jobs or other reservation: {}",
                 util::HostNameListToStr(nodes_conflicted));
       }
+      m_res_reduce_events_mtx_.Unlock();
       return std::unexpected(failed_msg);
     }
   }
 
-  m_res_reduce_events_mtx_.Lock();
   const ResvId& resv_name = request.reservation_name();
   auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
   if (resv_meta_map->contains(resv_name)) {
@@ -1709,11 +1713,11 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
       affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
     }
   }
+  craned_meta_vec.clear();
+
   AddResReduceEvent_(ResReduceEvent{
       std::make_pair(start_time, std::move(affected_nodes_vec))});
-
   m_res_reduce_events_mtx_.Unlock();
-  craned_meta_vec.clear();
 
   ResvMeta resv{.name = resv_name,
                 .part_id = partition,
@@ -2580,7 +2584,12 @@ bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
     }
   }
 
-  if (nodes_to_sched.size() < job->node_num) return false;
+  if (nodes_to_sched.size() < job->node_num) {
+    CRANE_TRACE(
+        "Only {} nodes are available for job #{} but {} nodes are required.",
+        nodes_to_sched.size(), job->job_id, job->node_num);
+    return false;
+  }
 
   job->allocated_res.SetToZero();
 
@@ -2632,22 +2641,30 @@ void SchedulerAlgo::NodeSelect(
 
   // For nodes in partition, reservations and running jobs on node are collected
   absl::flat_hash_map<CranedId, NodeState> node_state_map;
+
+  absl::flat_hash_map<PartitionId, std::vector<CranedId>> part_node_ids_map;
   absl::flat_hash_map<PartitionId, std::vector<NodeState*>>
       part_node_state_ptrs_map;
 
   {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
 
     for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
       if (!part_pd_job_ptr_map.contains(partition_id)) {
         continue;  // no pending jobs, skip
       }
-      auto& node_info_vec = part_node_state_ptrs_map[partition_id];
       auto part_meta_ptr = partition_metas.GetExclusivePtr();
-      node_info_vec.reserve(part_meta_ptr->craned_ids.size());
-      for (const auto& craned_id : part_meta_ptr->craned_ids) {
+      part_node_ids_map.emplace(
+          partition_id, std::vector<CranedId>{part_meta_ptr->craned_ids.begin(),
+                                              part_meta_ptr->craned_ids.end()});
+    }
+  }
+
+  {
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+    for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
+      for (const auto& craned_id : craned_ids) {
         auto it = node_state_map.find(craned_id);
         if (it == node_state_map.end()) {
           auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
@@ -2655,17 +2672,32 @@ void SchedulerAlgo::NodeSelect(
             CRANE_ERROR("Craned {} not found", craned_id);
             continue;
           }
+          if (!craned_meta->alive || craned_meta->drain) {
+            CRANE_TRACE("Craned {} is not alive or in drain mode, skip it",
+                        craned_id);
+            continue;
+          }
           it = node_state_map
                    .emplace(craned_id,
                             NodeState(craned_id, craned_meta->res_total))
                    .first;
         }
-        node_info_vec.emplace_back(&it->second);
       }
     }
   }
 
-  // For nodes in reservation, res_avail on node and running jobs are collected
+  for (const auto& [partition_id, craned_ids] : part_node_ids_map) {
+    auto& node_info_vec = part_node_state_ptrs_map[partition_id];
+    node_info_vec.reserve(craned_ids.size());
+    for (const auto& craned_id : craned_ids) {
+      auto it = node_state_map.find(craned_id);
+      if (it == node_state_map.end()) continue;
+      node_info_vec.emplace_back(&it->second);
+    }
+  }
+
+  // For nodes in reservation, res_avail on node and running jobs are
+  // collected
   absl::flat_hash_map<
       ResvId, std::pair<absl::Time, absl::flat_hash_map<CranedId, NodeState>>>
       resv_node_state_map;
@@ -2704,20 +2736,22 @@ void SchedulerAlgo::NodeSelect(
         auto& [resv_end_time, resv_craned_meta] =
             resv_node_state_map[reservation_id];
         resv_end_time = resv_meta->end_time;
-        auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
         for (const auto& [craned_id, res] :
              resv_meta->res_total.EachNodeResMap()) {
           auto it =
               resv_craned_meta.emplace(craned_id, NodeState(craned_id, res));
-          resv_node_info.emplace_back(&it.first->second);
+        }
+        auto& resv_node_info = resv_node_state_ptrs_map[reservation_id];
+        for (auto& [craned_id, node_state] : resv_craned_meta) {
+          resv_node_info.emplace_back(&node_state);
         }
       } else {
         for (const auto& [craned_id, res] :
              resv_meta->res_total.EachNodeResMap()) {
           auto node_state_it = node_state_map.find(craned_id);
           if (node_state_it != node_state_map.end()) {
-            node_state_it->second.allocated_res.emplace_back(
-                resv_meta->end_time, res);
+            node_state_it->second.reserved_res.emplace_back(
+                resv_meta->start_time, resv_meta->end_time, res);
           }
         }
       }
@@ -2734,7 +2768,15 @@ void SchedulerAlgo::NodeSelect(
           }
         }
       } else {
-        auto& craned_id_node_map = resv_node_state_map[job->reservation].second;
+        auto it = resv_node_state_map.find(job->reservation);
+        if (it == resv_node_state_map.end()) {
+          CRANE_ERROR(
+              "Reservation {} of running job #{} not found in resv_node_state_"
+              "map",
+              job->reservation, job->job_id);
+          continue;
+        }
+        auto& craned_id_node_map = it->second.second;
         for (auto& [craned_id, res] : job->allocated_res.EachNodeResMap()) {
           craned_id_node_map.at(craned_id).allocated_res.emplace_back(
               job->end_time, res);
@@ -2794,7 +2836,7 @@ void SchedulerAlgo::NodeSelect(
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
 
     if (!ok) {
-      job->start_time = absl::InfiniteFuture();
+      // job->start_time = absl::InfiniteFuture();
       job->reason = "Resource";
     } else {
       if constexpr (kAlgoTraceOutput) {
@@ -2806,23 +2848,36 @@ void SchedulerAlgo::NodeSelect(
       scheduler->UpdateNodeSelector(job);
 
       if (job->start_time != now) {
-        for (const CranedId& craned_id : job->craned_ids) {
-          auto it = craned_id_first_resv_map.find(craned_id);
-          if (it != craned_id_first_resv_map.end() &&
-              it->second < now + job->time_limit) {
-            job->reason = "Resource Reserved";
-            break;
+        if (job->reservation.empty()) {
+          for (const CranedId& craned_id : job->craned_ids) {
+            auto it = craned_id_first_resv_map.find(craned_id);
+            if (it != craned_id_first_resv_map.end() &&
+                it->second < now + job->time_limit) {
+              job->reason = "Resource Reserved";
+              break;
+            }
           }
-        }
-        if (!job->reason.empty()) {
-          continue;
-        }
-        for (const CranedId& craned_id : job->craned_ids) {
-          const auto& res_avail = node_state_map.at(craned_id).res_avail;
-          if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
-                res_avail)) {
-            job->reason = "Resource";
-            break;
+          if (!job->reason.empty()) {
+            continue;
+          }
+          for (const CranedId& craned_id : job->craned_ids) {
+            const auto& res_avail = node_state_map.at(craned_id).res_avail;
+            if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
+                  res_avail)) {
+              job->reason = "Resource";
+              break;
+            }
+          }
+        } else {
+          for (const CranedId& craned_id : job->craned_ids) {
+            const auto& res_avail = resv_node_state_map.at(job->reservation)
+                                        .second.at(craned_id)
+                                        .res_avail;
+            if (!(job->allocated_res.EachNodeResMap().at(craned_id) <=
+                  res_avail)) {
+              job->reason = "Resource";
+              break;
+            }
           }
         }
         if (job->reason.empty()) {
