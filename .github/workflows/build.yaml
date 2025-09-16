@@ -52,10 +52,43 @@ env:
 
 jobs:
 
+  prepare:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: [ "self-hosted", "CraneSched" ]
+    outputs:
+      frontend_ref: ${{ steps.setref.outputs.frontend_ref }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - name: Decide frontend branch
+        id: set_ref
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="master"
+          FRONTEND_REF="$DEFAULT_BRANCH"
+          
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            CANDIDATE="${GITHUB_HEAD_REF}"
+            echo "Checking if FrontEnd has branch: $CANDIDATE"
+            if git ls-remote --exit-code --heads https://github.com/PKUHPC/CraneSched-FrontEnd.git "$CANDIDATE"; then
+              FRONTEND_REF="$CANDIDATE"
+            fi
+          elif [ -n "${{ github.event.inputs.frontend_branch || '' }}" ]; then
+            FRONTEND_REF="${{ github.event.inputs.frontend_branch }}"
+          fi
+          
+          echo "frontend_ref=$FRONTEND_REF" >> $GITHUB_OUTPUT
+
   build:
+    needs: prepare
     # Skip draft PRs
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ["self-hosted", "CraneSched"]
+    runs-on: [ "self-hosted", "CraneSched" ]
+
+    env:
+      FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
+
     defaults:
       run:
         shell: bash -leo pipefail {0}
@@ -300,8 +333,8 @@ jobs:
           if-no-files-found: error
 
   test:
-    needs: build
-    runs-on: ["self-hosted", "CraneSched"]
+    needs: [ prepare, build ]
+    runs-on: [ "self-hosted", "CraneSched" ]
     defaults:
       run:
         shell: bash -leo pipefail {0}
@@ -310,6 +343,7 @@ jobs:
       SCRIPT_PATH: /opt/actions-runner-external/script
       CACHE_PATH: /opt/actions-runner-external/cache
       LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
+      FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
 
     steps:
       # Prepare workspace for AutoTest
