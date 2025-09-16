@@ -31,12 +31,13 @@ CforedClient::CforedClient() {
   m_loop_ = uvw::loop::create();
 
   m_reconnect_async_ = m_loop_->resource<uvw::async_handle>();
-  m_reconnect_async_->on<uvw::async_event>([this](const uvw::async_event&, uvw::async_handle&) {
-      while (m_wait_reconn_ && !m_stopped_) {
-        InitChannelAndStub(m_cfored_name_);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      }
-  });
+  m_reconnect_async_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        while (m_wait_reconn_ && !m_stopped_) {
+          InitChannelAndStub(m_cfored_name_);
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+      });
 
   std::shared_ptr<uvw::idle_handle> idle_handle =
       m_loop_->resource<uvw::idle_handle>();
@@ -342,12 +343,12 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   // Todo: Use cfored listen config
   if (g_config.CforedListenConf.TlsConfig.Enabled) {
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-    cfored_name, kCforedDefaultPort,
-    g_config.CforedListenConf.TlsConfig.TlsCerts,
-    g_config.CforedListenConf.TlsConfig.DomainSuffix);
+        cfored_name, kCforedDefaultPort,
+        g_config.CforedListenConf.TlsConfig.TlsCerts,
+        g_config.CforedListenConf.TlsConfig.DomainSuffix);
   } else {
     m_cfored_channel_ =
-      CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
+        CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
   }
 
   // std::unique_ptr will automatically release the dangling stub.
@@ -678,7 +679,8 @@ void CforedClient::TaskOutPutForward(const std::string& msg) {
   // TODO: Keep the latest message?
   size_t cur_bytes = m_output_queue_bytes_.load(std::memory_order_relaxed);
   if (cur_bytes + msg.size() > kMaxOutputQueueBytes) {
-    CRANE_WARN("Output queue size {} + msg {} exceeds 1MB, discard!", cur_bytes, msg.size());
+    CRANE_WARN("Output queue size {} + msg {} exceeds 1MB, discard!", cur_bytes,
+               msg.size());
     return;
   }
 

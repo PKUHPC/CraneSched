@@ -212,7 +212,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
         cfored_name = cfored_request.payload_cfored_reg().cfored_name();
 
         m_ctld_server_->m_stream_proxy_mtx_.Lock();
-        auto iter = m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
+        auto iter =
+            m_ctld_server_->m_cfored_stream_proxy_map_.find(cfored_name);
         if (iter != m_ctld_server_->m_cfored_stream_proxy_map_.end()) {
           iter->second->SetWriter(stream_writer);
           proxy_weak_ptr = iter->second;
@@ -255,13 +256,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
           meta.cb_task_res_allocated =
               [proxy_weak_ptr](task_id_t task_id,
-                                std::string const &allocated_craned_regex,
-                                std::list<std::string> const &craned_ids) {
+                               std::string const &allocated_craned_regex,
+                               std::list<std::string> const &craned_ids) {
                 if (auto proxy = proxy_weak_ptr.lock(); proxy) {
-                  proxy->WithWriter([&](CforedStreamWriter& writer) {
+                  proxy->WithWriter([&](CforedStreamWriter &writer) {
                     writer.WriteTaskResAllocReply(
-                                          task_id,
-                                          {std::make_pair(allocated_craned_regex, craned_ids)});
+                        task_id,
+                        {std::make_pair(allocated_craned_regex, craned_ids)});
                   });
                 }
               };
@@ -269,9 +270,9 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_task_cancel = [proxy_weak_ptr](task_id_t task_id) {
             CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
             if (auto proxy = proxy_weak_ptr.lock(); proxy) {
-              proxy->WithWriter([&](CforedStreamWriter& writer) {
-                  writer.WriteTaskCancelRequest(task_id);
-                });
+              proxy->WithWriter([&](CforedStreamWriter &writer) {
+                writer.WriteTaskCancelRequest(task_id);
+              });
             }
           };
 
@@ -282,7 +283,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                         task_id);
             if (auto proxy = proxy_weak_ptr.lock(); proxy) {
               if (send_completion_ack)
-                proxy->WithWriter([&](CforedStreamWriter& writer) {
+                proxy->WithWriter([&](CforedStreamWriter &writer) {
                   writer.WriteTaskCompletionAckReply(task_id);
                 });
               else
@@ -343,12 +344,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             ok = false;
             failure_reason = "Task not found";
           } else {
-            if (payload.uid() != task.uid() && !g_account_manager->CheckUidIsAdmin(payload.uid())) {
+            if (payload.uid() != task.uid() &&
+                !g_account_manager->CheckUidIsAdmin(payload.uid())) {
               ok = false;
               failure_reason = "permission denied";
             }
           }
-          stream_writer->WriteTaskMetaReply(ok, failure_reason, task, payload.cattach_pid());
+          stream_writer->WriteTaskMetaReply(ok, failure_reason, task,
+                                            payload.cattach_pid());
         } break;
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
@@ -383,7 +386,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
     } break;
 
     case StreamState::kWaitReConnect: {
-      CRANE_INFO("Cfored {} unexpectedly disconnected. Wait for restart.....", cfored_name);
+      CRANE_INFO("Cfored {} unexpectedly disconnected. Wait for restart.....",
+                 cfored_name);
       stream_writer->Invalidate();
       return Status::OK;
     }

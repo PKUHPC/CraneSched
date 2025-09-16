@@ -2308,7 +2308,8 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(filtered_rng, append_fn);
 }
 
-bool TaskScheduler::QueryTaskUseId(task_id_t task_id, crane::grpc::TaskToCtld* task) {
+bool TaskScheduler::QueryTaskUseId(task_id_t task_id,
+                                   crane::grpc::TaskToCtld* task) {
   LockGuard running_guard(&m_running_task_map_mtx_);
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) return false;
