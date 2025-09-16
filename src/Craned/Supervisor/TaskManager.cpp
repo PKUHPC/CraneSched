@@ -41,27 +41,6 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
-// Static helper function to read OOM kill count from memory.events file
-static std::optional<uint64_t> ReadOomKillCount(
-    const std::string& memory_events_path) {
-  std::ifstream events_file(memory_events_path);
-  if (!events_file.is_open()) {
-    return std::nullopt;
-  }
-
-  std::string line;
-  while (std::getline(events_file, line)) {
-    if (line.rfind("oom_kill ", 0) == 0) {
-      std::istringstream iss(line);
-      std::string field;
-      uint64_t value = 0;
-      iss >> field >> value;
-      return value;
-    }
-  }
-  return std::nullopt;
-}
-
 StepInstance::~StepInstance() {
   if (termination_timer) {
     termination_timer->close();
@@ -1776,7 +1755,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::OutOfMemory,
               exit_info.value + ExitCode::kTerminationSignalBase,
-              std::optional<std::string>("Detected by cgroup counter diff"));
+              std::optional<std::string>("Detected by oom_kill counter delta"));
           break;
         default:
           ActivateTaskStatusChange_(
@@ -1788,7 +1767,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::OutOfMemory, exit_info.value,
               std::optional<std::string>(
-                  "Detected by cgroup counter diff (no signal)"));
+                  "Detected by oom_kill counter delta (no signal)"));
         } else {
           ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
                                     exit_info.value, std::nullopt);
