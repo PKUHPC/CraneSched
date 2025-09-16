@@ -195,7 +195,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
                        "Job ID always has value when RE2 matches.");
 
       response->set_ok(true);
-      response->set_task_id(job_id_opt.value());
+      response->set_job_id(job_id_opt.value());
       return Status::OK;
     }
 

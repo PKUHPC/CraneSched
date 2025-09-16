@@ -314,15 +314,15 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
-          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
+          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.job_id());
           if (g_task_scheduler->TerminatePendingOrRunningIaTask(
-                  payload.task_id()) != CraneErrCode::SUCCESS)
-            stream_writer->WriteTaskCompletionAckReply(payload.task_id());
+                  payload.job_id()) != CraneErrCode::SUCCESS)
+            stream_writer->WriteTaskCompletionAckReply(payload.job_id());
           else {
             CRANE_TRACE(
                 "Termination of task #{} succeeded. "
                 "Leave TaskCompletionAck to TaskStatusChange.",
-                payload.task_id());
+                payload.job_id());
           }
         } break;
 

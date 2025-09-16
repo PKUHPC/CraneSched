@@ -182,7 +182,7 @@ message QueryStepFromPortRequest {
 
 message QueryStepFromPortReply {
   bool ok = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
 }
 
 message QueryStepFromPortForwardRequest {
@@ -194,7 +194,7 @@ message QueryStepFromPortForwardRequest {
 message QueryStepFromPortForwardReply {
   bool ok = 1;
   bool from_user = 2;
-  uint32 task_id = 3;
+  uint32 job_id = 3;
   string cgroup_path = 4;
 }
 
@@ -546,8 +546,9 @@ message StreamCallocRequest {
   }
 
   message TaskCompleteReq {
-    uint32 task_id = 1;
-    TaskStatus status = 2;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
+    TaskStatus status = 3;
   }
 
   CallocRequestType type = 1;
@@ -568,8 +569,9 @@ message StreamCallocReply {
 
   message TaskIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    string failure_reason = 4;
   }
 
   message TaskResAllocatedReply {
@@ -578,7 +580,6 @@ message StreamCallocReply {
   }
 
   message TaskCancelRequest {
-    uint32 task_id = 1;
   }
 
   message TaskCompletionAckReply {
@@ -616,9 +617,10 @@ message StreamCforedRequest {
 
   message TaskCompleteReq {
     string cfored_name = 1;
-    uint32 task_id = 2;
-    TaskStatus status = 3;
-    InteractiveTaskType interactive_type = 4;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    TaskStatus status = 4;
+    InteractiveTaskType interactive_type = 5;
   }
 
   message GracefulExitReq {
@@ -646,24 +648,28 @@ message StreamCtldReply {
   message TaskIdReply {
     int32 pid = 1;
     bool ok = 2;
-    uint32 task_id = 3;
-    string failure_reason = 4;
+    uint32 job_id = 3;
+    uint32 step_id = 4;
+    string failure_reason = 5;
   }
 
   message TaskResAllocatedReply {
-    uint32 task_id = 1;
-    bool ok = 2;
-    string allocated_craned_regex = 3;
-    string failure_reason = 4;
-    repeated string craned_ids = 5;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
+    bool ok = 3;
+    string allocated_craned_regex = 4;
+    string failure_reason = 5;
+    repeated string craned_ids = 6;
   }
 
   message TaskCancelRequest {
-    uint32 task_id = 1;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
   }
 
   message TaskCompletionAckReply {
-    uint32 task_id = 1;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
   }
 
   message CforedRegistrationAck {
@@ -701,19 +707,16 @@ message StreamCrunRequest {
   }
 
   message TaskCompleteReq {
-    uint32 task_id = 1;
-    TaskStatus status = 2;
+    TaskStatus status = 1;
   }
 
   message TaskIOForwardReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
-    bool eof = 3;
+    bytes msg = 1;
+    bool eof = 2;
   }
 
   message TaskX11ForwardReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
+    bytes msg = 1;
   }
 
   CrunRequestType type = 1;
@@ -739,8 +742,9 @@ message StreamCrunReply {
 
   message TaskIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    string failure_reason = 4;
   }
 
   message TaskResAllocatedReply {
@@ -749,7 +753,6 @@ message StreamCrunReply {
   }
 
   message TaskCancelRequest {
-    uint32 task_id = 1;
   }
 
   message TaskCompletionAckReply {
@@ -791,24 +794,19 @@ message StreamTaskIORequest {
 
   message SupervisorRegisterReq {
     string craned_id = 1;
-    uint32 task_id = 2;
+    uint32 job_id = 2;
     uint32 step_id = 3;
   }
 
   message TaskOutputReq {
-    bytes msg = 2;
+    bytes msg = 1;
   }
 
   message SupervisorUnRegisterReq {
-    string craned_id = 1;
-    uint32 task_id = 2;
-    uint32 step_id = 3;
   }
 
   message TaskX11OutputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
+    bytes msg = 1;
   }
 
   SupervisorRequestType type = 1;
@@ -834,10 +832,8 @@ message StreamTaskIOReply {
   }
 
   message TaskInputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
-    bool eof = 4;
+    bytes msg = 1;
+    bool eof = 2;
   }
 
   message SupervisorUnregisterReply {
@@ -845,9 +841,7 @@ message StreamTaskIOReply {
   }
 
   message TaskX11InputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
+    bytes msg = 1;
   }
 
   SupervisorReplyType type = 1;

@@ -55,7 +55,9 @@ class CforedStreamWriter {
     if (res.has_value()) {
       task_id_reply->set_ok(true);
       task_id_reply->set_pid(calloc_pid);
-      task_id_reply->set_task_id(res.value());
+      task_id_reply->set_job_id(res.value());
+      // FIXME: Use step id from scheduler
+      task_id_reply->set_step_id(1);
     } else {
       task_id_reply->set_ok(false);
       task_id_reply->set_pid(calloc_pid);
@@ -75,7 +77,9 @@ class CforedStreamWriter {
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
-    task_res_alloc_reply->set_task_id(task_id);
+    task_res_alloc_reply->set_job_id(task_id);
+    // FIXME: Use step id from scheduler
+    task_res_alloc_reply->set_step_id(1);
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
@@ -101,7 +105,9 @@ class CforedStreamWriter {
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 
     auto *task_completion_ack = reply.mutable_payload_task_completion_ack();
-    task_completion_ack->set_task_id(task_id);
+    task_completion_ack->set_job_id(task_id);
+    // FIXME: Use step id from scheduler
+    task_completion_ack->set_step_id(1);
 
     return m_stream_->Write(reply);
   }
@@ -114,7 +120,9 @@ class CforedStreamWriter {
     reply.set_type(StreamCtldReply::TASK_CANCEL_REQUEST);
 
     auto *task_cancel_req = reply.mutable_payload_task_cancel_request();
-    task_cancel_req->set_task_id(task_id);
+    task_cancel_req->set_job_id(task_id);
+    // FIXME: Use step id from scheduler
+    task_cancel_req->set_step_id(1);
 
     return m_stream_->Write(reply);
   }
