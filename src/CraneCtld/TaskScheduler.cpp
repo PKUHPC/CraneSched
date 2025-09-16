@@ -1690,28 +1690,30 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
     }
   }
 
+  m_res_reduce_events_mtx_.Lock();
   const ResvId& resv_name = request.reservation_name();
   auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
   if (resv_meta_map->contains(resv_name)) {
+    m_res_reduce_events_mtx_.Unlock();
     return std::unexpected("Reservation name already exists");
   }
 
-  {
-    LockGuard resource_guard(&m_res_reduce_events_mtx_);
-    std::vector<CranedId> affected_nodes_vec;
-    for (auto& craned_meta : craned_meta_vec) {
-      const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
-          resv_name, std::make_pair(start_time, end_time));
-      if (!ok) {
-        CRANE_ERROR("Failed to insert reservation resource to {}",
-                    craned_meta->static_meta.hostname);
-      } else {
-        affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
-      }
+  std::vector<CranedId> affected_nodes_vec;
+  for (auto& craned_meta : craned_meta_vec) {
+    const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
+        resv_name, std::make_pair(start_time, end_time));
+    if (!ok) {
+      CRANE_ERROR("Failed to insert reservation resource to {}",
+                  craned_meta->static_meta.hostname);
+    } else {
+      affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
     }
-    AddResReduceEvent_(ResReduceEvent{
-        std::make_pair(start_time, std::move(affected_nodes_vec))});
   }
+  AddResReduceEvent_(ResReduceEvent{
+      std::make_pair(start_time, std::move(affected_nodes_vec))});
+
+  m_res_reduce_events_mtx_.Unlock();
+  craned_meta_vec.clear();
 
   ResvMeta resv{.name = resv_name,
                 .part_id = partition,
@@ -1769,9 +1771,7 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
 
   const ResvId& resv_name = request.reservation_name();
 
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-
-  auto res = DeleteResvMeta_(resv_meta_map, resv_name);
+  auto res = DeleteResvMeta_(resv_name);
   if (res.has_value()) {
     reply.set_ok(true);
   } else {
@@ -1783,20 +1783,29 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
 }
 
 std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
-    CranedMetaContainer::ResvMetaMapPtr& resv_meta_map, const ResvId& resv_id) {
+    const ResvId& resv_id) {
+  m_res_reduce_events_mtx_.Lock();
+  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
   CRANE_TRACE("Deleting reservation {}", resv_id);
   if (!resv_meta_map->contains(resv_id)) {
+    m_res_reduce_events_mtx_.Unlock();
     return std::unexpected(fmt::format("Reservation {} not found", resv_id));
   }
 
   const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
 
   if (!resv_meta->rn_job_res_map.empty()) {
+    m_res_reduce_events_mtx_.Unlock();
     return std::unexpected(fmt::format(
         "Not allowed to delete reservation {} with running tasks", resv_id));
   }
 
-  for (const auto& craned_id : resv_meta->craned_ids) {
+  const auto craned_ids = std::move(resv_meta->craned_ids);
+  resv_meta_map->erase(resv_id);
+  AddResReduceEvent_(ResReduceEvent{resv_id});
+  m_res_reduce_events_mtx_.Unlock();
+
+  for (const auto& craned_id : craned_ids) {
     auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id);
     if (!craned_meta_ptr) {
       CRANE_ERROR("Node {} not found when deleting reservation {}", craned_id,
@@ -1813,12 +1822,6 @@ std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
       continue;
     }
     reservation_resource_map.erase(it);
-  }
-
-  {
-    LockGuard resource_guard(&m_res_reduce_events_mtx_);
-    resv_meta_map->erase(resv_id);
-    AddResReduceEvent_(ResReduceEvent{resv_id});
   }
 
   // TODO: Implement Rollback?
@@ -1931,8 +1934,7 @@ void TaskScheduler::CleanResvTimerQueueCb_(
     int64_t secs = absl::ToInt64Seconds(end_time - now);
     auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
                                               uvw::timer_handle& handle) {
-      auto reservation_meta_map = g_meta_container->GetResvMetaMapPtr();
-      auto err = DeleteResvMeta_(reservation_meta_map, reservation_id);
+      auto err = DeleteResvMeta_(reservation_id);
 
       if (err.has_value()) {
         handle.close();

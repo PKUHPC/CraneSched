@@ -840,9 +840,7 @@ class TaskScheduler {
   std::expected<void, std::string> CreateResv_(
       const crane::grpc::CreateReservationRequest& request);
 
-  std::expected<void, std::string> DeleteResvMeta_(
-      CranedMetaContainer::ResvMetaMapPtr& resv_meta_map,
-      const ResvId& resv_id);
+  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
 
  private:
   template <class... Ts>
@@ -1007,11 +1005,12 @@ class TaskScheduler {
 
   std::vector<ResReduceEvent> m_res_reduce_events_
       ABSL_GUARDED_BY(m_res_reduce_events_mtx_);
-  Mutex m_res_reduce_events_mtx_;  // lock after get resv_meta
+  Mutex m_res_reduce_events_mtx_;  // lock before get resv_meta to avoid
+                                   // inconsistency, unlock before release
+                                   // resources for efficiency
 
   // Should be called before reducing resources from nodes or reservations.
   void AddResReduceEvent_(ResReduceEvent&& event) {
-    LockGuard guard(&m_res_reduce_events_mtx_);
     m_res_reduce_events_.emplace_back(std::move(event));
   }
 };
