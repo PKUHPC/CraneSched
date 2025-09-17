@@ -282,7 +282,6 @@ message InteractiveTaskAdditionalMeta {
 }
 
 message ContainerTaskAdditionalMeta {
-
   message ImageInfo {
     string image = 1;
     string username = 2;
@@ -299,13 +298,13 @@ message ContainerTaskAdditionalMeta {
   string command = 11;
   repeated string args = 12;
   string workdir = 13;
-  map<string, string> env = 14; // env in container
+  map<string, string> env = 14;  // env in container
   bool detached = 15;
 
   bool userns = 21;
   uint32 run_as_user = 22;
   uint32 run_as_group = 23;
-  
+
   map<string, string> mounts = 24;
   map<int32, int32> ports = 25;
 
