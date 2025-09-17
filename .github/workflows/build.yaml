@@ -41,9 +41,6 @@ env:
   # Local cache directory
   LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
 
-  # Unified frontend ref across all triggers
-  FRONTEND_REF: ${{ inputs.frontend_branch || 'master' }}
-
   # Cache buster for forcing rebuilds on workflow_dispatch
   CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
 
