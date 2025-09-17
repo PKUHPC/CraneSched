@@ -45,6 +45,7 @@ struct StepInstance {
   StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid);
   [[nodiscard]] bool IsDaemon() const;
   [[nodiscard]] bool CanOperate() const;
+  [[nodiscard]] std::string StepIdString() const;
 };
 
 // Job allocation info, where allocation = job spec + execution info
@@ -69,7 +70,6 @@ struct JobInD {
   crane::grpc::JobToD job_to_d;
 
   std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
-  bool orphaned{false};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
@@ -106,6 +106,9 @@ class JobManager {
 
   void AllocSteps(std::vector<StepToD>&& steps);
 
+  void FreeSteps(
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
+
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
@@ -125,8 +128,14 @@ class JobManager {
 
   bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
-  void CleanUpJobAndStepsAsync(
-      const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps);
+  /**
+   *
+   * @param jobs completing jobs to clean up
+   * @param steps completing step to clean up, for daemon steps will send
+   * ShutdownSupervisor
+   */
+  void CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
+                               std::vector<StepInstance*>&& steps);
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::TaskStatus new_status,
@@ -147,6 +156,9 @@ class JobManager {
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+  using JobMap = util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD>;
+  using UidMap = util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
+                                     absl::flat_hash_set<job_id_t>>;
 
   struct EvQueueAllocateJobElem {
     std::promise<bool> ok_prom;
@@ -190,7 +202,11 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  // Acquires Job map lock
+  std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
+  std::optional<JobInD> FreeJobInfoNoLock_(
+      job_id_t job_id, JobMap::MapExclusivePtr& job_map_ptr,
+      UidMap::MapExclusivePtr& uid_map_ptr);
+
   bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
 
   void FreeStepAllocation_(std::vector<StepInstance*>&& steps);
@@ -227,11 +243,9 @@ class JobManager {
   static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
-  util::AtomicHashMap<absl::flat_hash_map, job_id_t, JobInD> m_job_map_;
+  JobMap m_job_map_;
 
-  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<job_id_t>>
-      m_uid_to_job_ids_map_;
+  UidMap m_uid_to_job_ids_map_;
 
   bool EvCheckSupervisorRunning_();
 

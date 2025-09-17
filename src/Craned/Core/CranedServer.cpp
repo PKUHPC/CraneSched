@@ -268,7 +268,7 @@ grpc::Status CranedServiceImpl::FreeSteps(
   }
   CRANE_TRACE("Receive FreeSteps RPC for [{}]",
               util::JobStepsToString(job_steps_map));
-  g_job_mgr->CleanUpJobAndStepsAsync(job_steps_map);
+  g_job_mgr->FreeSteps(std::move(job_steps_map));
 
   return Status::OK;
 }
