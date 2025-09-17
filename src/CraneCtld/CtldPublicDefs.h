@@ -379,7 +379,6 @@ struct ContainerMetaInTask {
   std::unordered_map<std::string, std::string> labels;
   std::unordered_map<std::string, std::string> annotations;
 
-  std::string entrypoint;
   std::string command;
   std::vector<std::string> args;
   std::string workdir;

@@ -267,6 +267,7 @@ class ITaskInstance {
 
   StepInstance* m_parent_step_inst_;
 
+  // TODO: Move this into ProcessInstance
   std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
 
@@ -330,7 +331,7 @@ class ContainerInstance : public ITaskInstance {
                                      cri::api::PodSandboxConfig* config);
   CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
 
-  std::string m_image_ref_;
+  std::string m_image_id_;
   std::string m_pod_id_;
   std::string m_container_id_;
 
@@ -348,8 +349,7 @@ class ContainerInstance : public ITaskInstance {
   cri::api::IDMapping m_userns_uid_mapping_;
   cri::api::IDMapping m_userns_gid_mapping_;
 
-  std::filesystem::path m_temp_path_;
-  std::filesystem::path m_cri_output_path_;
+  std::filesystem::path m_data_path_;
 };
 
 class ProcInstance : public ITaskInstance {

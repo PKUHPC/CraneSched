@@ -28,6 +28,7 @@
 #include "CgroupManager.h"
 #include "CranedClient.h"
 #include "SupervisorServer.h"
+#include "crane/OS.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
@@ -229,6 +230,14 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
       env_map["XAUTHORITY"] = this->GetCrunMeta()->x11_auth_path;
     }
   }
+
+  if (this->m_parent_step_inst_->IsContainer()) {
+    const auto& ca_meta = this->GetParentStep().container_meta();
+    for (const auto& [name, value] : ca_meta.env()) {
+      env_map.emplace(name, value);
+    }
+  }
+
   return env_map;
 }
 
@@ -610,76 +619,32 @@ std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
-  if (this->m_parent_step_inst_->IsCrun()) {
-    CRANE_ERROR("crun is not supported in container tasks.");
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
+  job_id_t job_id = GetParentStep().task_id();
+  const auto& ca_meta = GetParentStep().container_meta();
 
   // Generate path and params.
-  job_id_t job_id = GetParentStep().task_id();
-  m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
-  m_image_ref_ = GetParentStep().container_meta().image().image();
+  m_data_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
 
-  // Check if image is pulled.
+  // Create private dir for container task
+  if (!util::os::CreateFolders(m_data_path_)) {
+    CRANE_ERROR("Failed to create data dir {} for task #{}", m_data_path_,
+                job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // Always pull the latest image before running the container
   auto* cri_client = m_parent_step_inst_->GetCriClient();
-  auto image_id_opt = cri_client->GetImageId(m_image_ref_);
+  auto image_id_opt = cri_client->PullImage(
+      ca_meta.image().image(), ca_meta.image().username(),
+      ca_meta.image().password(), ca_meta.image().server_address());
+
   if (!image_id_opt.has_value()) {
-    // Image is not pulled. Pull the image first.
-    image_id_opt = cri_client->PullImage(m_image_ref_);
-    if (!image_id_opt.has_value()) {
-      CRANE_ERROR("Failed to pull image {} for task #{}", m_image_ref_, job_id);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-  }
-
-  // Write script into the temp folder
-  auto sh_path = m_temp_path_ / fmt::format("Crane-{}.sh", job_id);
-  if (!util::os::CreateFoldersForFile(sh_path)) {
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  chown(m_temp_path_.c_str(), m_parent_step_inst_->pwd.Uid(),
-        m_parent_step_inst_->pwd.Gid());
-
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", job_id);
+    CRANE_ERROR("Failed to pull image {} for task #{}", ca_meta.image().image(),
+                job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (m_parent_step_inst_->IsBatch()) {
-    fputs(GetParentStep().batch_meta().sh_script().c_str(), fptr);
-  } else {  // Crun
-    fputs(GetParentStep().interactive_meta().sh_script().c_str(), fptr);
-  }
-
-  fclose(fptr);
-
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  if (chown(sh_path.c_str(), m_parent_step_inst_->pwd.Uid(),
-            m_parent_step_inst_->pwd.Gid()) != 0) {
-    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
-                job_id, strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // Parse user specified output path and set meta
-  if (m_parent_step_inst_->IsBatch()) {
-    // For cbatch, log to user defined output directory (error path is
-    // ignored.) Note: Only directory is accepted. If file is given, use its
-    // parent dir.
-    auto meta = std::make_unique<BatchInstanceMeta>();
-    meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        GetParentStep().batch_meta().output_file_pattern(),
-        GetParentStep().cwd());
-
-    m_cri_output_path_ = meta->parsed_output_file_pattern;
-    m_meta_ = std::move(meta);
-  } else {
-    // For crun, just have a placeholder for now.
-    m_cri_output_path_ = GetParentStep().cwd();
-    m_meta_ = std::make_unique<CrunInstanceMeta>();
-  }
-  m_meta_->parsed_sh_script_path = sh_path;
+  m_image_id_ = std::move(image_id_opt.value());
 
   // Set env
   m_env_ = GetChildProcessEnv();
@@ -712,12 +677,6 @@ CraneErrCode ContainerInstance::Prepare() {
 
 CraneErrCode ContainerInstance::Spawn() {
   auto* cri_client = m_parent_step_inst_->GetCriClient();
-  auto ret = cri_client->StartContainer(m_container_id_);
-  if (!ret.has_value()) {
-    CRANE_ERROR("Failed to start container for task #{}",
-                GetParentStep().task_id());
-    return ret.error();
-  }
 
   // Subscribe to container event stream
   // NOTE: The callback is called in another thread!
@@ -731,7 +690,7 @@ CraneErrCode ContainerInstance::Spawn() {
                   cri::api::ContainerEventType::CONTAINER_DELETED_EVENT)
             return;
 
-          CRANE_TRACE("Received CRI event:\n{}", ev.DebugString());
+          CRANE_TRACE("Received CRI event: {}", ev.ShortDebugString());
 
           // TODO: Add handler for pod status changes?
           std::vector<std::pair<task_id_t, cri::api::ContainerStatus>> changes;
@@ -756,6 +715,13 @@ CraneErrCode ContainerInstance::Spawn() {
 
           if (!changes.empty()) g_task_mgr->HandleCriEvents(std::move(changes));
         });
+
+  auto ret = cri_client->StartContainer(m_container_id_);
+  if (!ret.has_value()) {
+    CRANE_ERROR("Failed to start container for task #{}",
+                GetParentStep().task_id());
+    return ret.error();
+  }
 
   return CraneErrCode::SUCCESS;
 }
@@ -810,7 +776,6 @@ CraneErrCode ContainerInstance::Cleanup() {
   // For container tasks, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove pod and container.
   CraneErrCode err = Kill(0);
-  if (!m_temp_path_.empty()) util::os::DeleteFolders(m_temp_path_);
   return err;
 }
 
@@ -825,6 +790,8 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
 
 CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
   job_id_t job_id = GetParentStep().task_id();
+  const auto& ca_meta = GetParentStep().container_meta();
+
   const std::string& job_name = GetParentStep().name();
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
@@ -856,21 +823,20 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
        {std::string(kCriLabelJobNameKey), job_name}});
 
   // log directory
-  std::error_code ec;
-  std::string log_dir = std::filesystem::is_directory(m_cri_output_path_, ec)
-                            ? m_cri_output_path_
-                            : m_cri_output_path_.parent_path();
-  if (ec && ec != std::errc::no_such_file_or_directory) {
-    CRANE_ERROR("Failed to access log directory {}: {}", log_dir, ec.message());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+  m_pod_config_.set_log_directory(m_data_path_);
+
+  // TODO: What about the port allocation when multiple containers in a pod?
+  for (const auto& port : ca_meta.ports()) {
+    auto* p = m_pod_config_.add_port_mappings();
+    p->set_host_port(port.first);
+    p->set_container_port(port.second);
   }
-  m_pod_config_.set_log_directory(std::move(log_dir));
 
   // FIXME: This is just a workaround before we have CgroupManager refactored
   // into a public library.
-  auto* linux_config = m_pod_config_.mutable_linux();
   {
     // set cgroup parent
+    auto* linux_config = m_pod_config_.mutable_linux();
     std::ifstream cgroup_file("/proc/self/cgroup");
     std::string line;
     std::filesystem::path cgroup_path;
@@ -894,13 +860,30 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
     linux_config->set_cgroup_parent(cgroup_path.parent_path().string());
   }
 
-  // Inject fake root config if task is not from root
-  if (uid != 0 &&
-      InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
+  // security context
+  auto* sec_ctx = m_pod_config_.mutable_linux()->mutable_security_context();
+  if (uid != 0) {
+    // Non root task can use userns or run_as_user/run_as_group.
+    if (ca_meta.userns()) {
+      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
           CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to inject fake root config for task #{}",
-                GetParentStep().task_id());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+        CRANE_ERROR("Failed to inject fake root config for task #{}", job_id);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
+      // Set run_as_user and run_as_group if not using userns.
+      // TODO: egid and supplemental groups?
+      sec_ctx->mutable_run_as_user()->set_value(uid);
+      sec_ctx->mutable_run_as_group()->set_value(gid);
+    } else {
+      CRANE_ERROR("Unsupported identity setting for container task #{}",
+                  job_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+  } else {
+    // Root task will not use userns but can set run_as_user/run_as_group.
+    sec_ctx->mutable_run_as_user()->set_value(ca_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(ca_meta.run_as_group());
   }
 
   return CraneErrCode::SUCCESS;
@@ -927,48 +910,58 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
 
   // log_path
   // NOTE: This is a relative path to pod log dir.
-  std::error_code ec;
-  std::string log_path = std::filesystem::is_directory(m_cri_output_path_, ec)
-                             ? std::format("{}.log", job_id)
-                             : m_cri_output_path_.filename().string();
-  if (ec && ec != std::errc::no_such_file_or_directory) {
-    CRANE_ERROR("Failed to access log path {}: {}", log_path, ec.message());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
+  std::string log_path = std::format("{}.log", job_id);
   m_container_config_.set_log_path(std::move(log_path));
 
   // image already checked and pulled.
-  m_container_config_.mutable_image()->set_image(m_image_ref_);
+  m_container_config_.mutable_image()->set_image(m_image_id_);
 
   // mount the generated script with uid/gid mapping.
-  auto* mount = m_container_config_.add_mounts();
-  mount->set_host_path(m_temp_path_);
-  mount->set_container_path("/tmp/crane");
-  mount->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
+  const auto& ca_meta = GetParentStep().container_meta();
+  for (const auto& mount : ca_meta.mounts()) {
+    auto* m = m_container_config_.add_mounts();
 
-  auto mounted_exe_path = std::format(
-      "/tmp/crane/{}", std::filesystem::path(m_meta_->parsed_sh_script_path)
-                           .filename()
-                           .string());
+    std::filesystem::path host_path(mount.first);
+    if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
 
-  // Inject fake root config if the task is not from root.
-  if (uid != 0 &&
-      InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_container_config_) !=
-          CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to inject fake root config for task #{}",
-                GetParentStep().task_id());
-    return CraneErrCode::ERR_SYSTEM_ERR;
+    m->set_host_path(std::move(host_path));
+    m->set_container_path(mount.second);
+    m->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
   }
 
-  // Force the entrypoint to use the mounted script
-  // For container, we use `/bin/sh` as the default interpreter.
-  std::string real_exe = "/bin/sh";
-  if (m_parent_step_inst_->IsBatch() &&
-      !GetParentStep().batch_meta().interpreter().empty())
-    real_exe = GetParentStep().batch_meta().interpreter();
+  // security context
+  auto* sec_ctx =
+      m_container_config_.mutable_linux()->mutable_security_context();
+  if (uid != 0) {
+    // Non root task can use userns or run_as_user/run_as_group.
+    if (ca_meta.userns()) {
+      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd,
+                                &m_container_config_) !=
+          CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to inject fake root config for task #{}", job_id);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
+      // Set run_as_user and run_as_group if not using userns
+      // TODO: egid and supplemental groups?
+      sec_ctx->mutable_run_as_user()->set_value(uid);
+      sec_ctx->mutable_run_as_group()->set_value(gid);
+    } else {
+      CRANE_ERROR(
+          "Container task #{} is not allowed to use other identities when not "
+          "using userns",
+          job_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+  } else {
+    // Root task will not use userns but can set run_as_user/run_as_group.
+    sec_ctx->mutable_run_as_user()->set_value(ca_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(ca_meta.run_as_group());
+  }
 
-  std::vector<std::string> command{real_exe, mounted_exe_path};
-  m_container_config_.mutable_command()->Assign(command.begin(), command.end());
+  // command and args
+  m_container_config_.mutable_command()->Add()->assign(ca_meta.command());
+  m_container_config_.mutable_args()->CopyFrom(ca_meta.args());
 
   // envs
   for (const auto& [name, value] : m_env_) {
