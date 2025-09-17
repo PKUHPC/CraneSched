@@ -332,8 +332,8 @@ crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
     } else if (task->IsContainer()) {
-      mutable_task->mutable_container_meta()->CopyFrom(
-          task->TaskToCtld().container_meta());
+      auto *mutable_meta = mutable_task->mutable_container_meta();
+      mutable_meta->CopyFrom(task->TaskToCtld().container_meta());
     }
   }
 
