@@ -401,7 +401,7 @@ void CranedKeeper::Shutdown() {
   m_cq_closed_ = true;
 
   {
-    util::lock_guard l(m_connected_craned_mtx_);
+    util::lock_guard l(m_connect_craned_mtx_);
     for (auto &&[craned_id, stub] : m_connected_craned_id_stub_map_) {
       stub->m_channel_.reset();
     }
@@ -445,7 +445,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           m_craned_disconnected_cb_(craned_id);
         });
       }
-      WriterLock lock(&m_connected_craned_mtx_);
+      WriterLock lock(&m_connect_craned_mtx_);
 
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "Craned {} stub destroyed: timeout.",
@@ -518,7 +518,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
                 });
           }
 
-          WriterLock lock(&m_connected_craned_mtx_);
+          WriterLock lock(&m_connect_craned_mtx_);
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
@@ -542,6 +542,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
+    RegToken token;
     {
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "{} -> READY. New craned {} with token {} connected.",
@@ -549,15 +550,12 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
                          craned->m_craned_id_,
                          ProtoTimestampToString(craned->m_token_.value()));
 
-      WriterLock lock(&m_connected_craned_mtx_);
+      WriterLock lock(&m_connect_craned_mtx_);
+      util::lock_guard guard(m_unavail_craned_set_mtx_);
       CRANE_ASSERT(
           !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
-    }
-    RegToken token;
-    {
-      util::lock_guard guard(m_unavail_craned_set_mtx_);
       CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
       CRANE_ASSERT(m_connecting_craned_set_.contains(craned->m_craned_id_));
       token = m_unavail_craned_set_.at(craned->m_craned_id_);
@@ -705,18 +703,18 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 }
 
 uint32_t CranedKeeper::AvailableCranedCount() {
-  absl::ReaderMutexLock r_lock(&m_connected_craned_mtx_);
+  absl::ReaderMutexLock r_lock(&m_connect_craned_mtx_);
   return m_connected_craned_id_stub_map_.size();
 }
 
 bool CranedKeeper::IsCranedConnected(const CranedId &craned_id) {
-  ReaderLock lock(&m_connected_craned_mtx_);
+  ReaderLock lock(&m_connect_craned_mtx_);
   return m_connected_craned_id_stub_map_.contains(craned_id);
 }
 
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
-  ReaderLock lock(&m_connected_craned_mtx_);
+  ReaderLock lock(&m_connect_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
   if (iter != m_connected_craned_id_stub_map_.end()) return iter->second;
 
@@ -834,10 +832,10 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
-  CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);
-  util::lock_guard guard(craned_keeper->m_unavail_craned_set_mtx_);
+  util::lock_guard guard(craned_keeper->m_connect_craned_mtx_);
   craned_keeper->m_channel_count_.fetch_sub(1);
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
+  CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);
 }
 
 void CranedKeeper::PeriodConnectCranedThreadFunc_() {
@@ -848,7 +846,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
     // Use a window to limit the maximum number of connecting craned nodes.
     {
-      absl::ReaderMutexLock connected_reader_lock(&m_connected_craned_mtx_);
+      absl::ReaderMutexLock connected_reader_lock(&m_connect_craned_mtx_);
       util::lock_guard guard(m_unavail_craned_set_mtx_);
 
       uint32_t fetch_num =
@@ -879,7 +877,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 }
 
 void CranedKeeper::EvCheckTimeoutCb_() {
-  absl::MutexLock lk(&m_connected_craned_mtx_);
+  absl::MutexLock lk(&m_connect_craned_mtx_);
   auto now = std::chrono::steady_clock::now();
   for (auto &[craned_id, stub] : m_connected_craned_id_stub_map_) {
     if (stub->m_shutting_down_) continue;

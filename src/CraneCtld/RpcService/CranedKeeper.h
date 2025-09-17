@@ -218,15 +218,15 @@ class CranedKeeper {
   std::unique_ptr<std::pmr::synchronized_pool_resource> m_pmr_pool_res_;
   std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
-  Mutex m_connected_craned_mtx_ ABSL_ACQUIRED_BEFORE(m_unavail_craned_set_mtx_);
+  Mutex m_connect_craned_mtx_ ABSL_ACQUIRED_BEFORE(m_unavail_craned_set_mtx_);
   NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
-      m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connected_craned_mtx_);
+      m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
   std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
   std::unordered_set<CranedId> m_connecting_craned_set_
-      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
+      ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;
