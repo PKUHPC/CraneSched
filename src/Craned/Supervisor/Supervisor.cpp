@@ -82,7 +82,7 @@ void InitFromStdin(int argc, char** argv) {
       msg.cfored_listen_conf().use_tls();
   g_config.CforedListenConf.TlsConfig.TlsCerts.CertContent =
       msg.cfored_listen_conf().tls_certs().cert_content();
-  g_config.CforedListenConf.TlsConfig.TlsCerts.CaContent =
+  g_config.CforedListenConf.TlsConfig.CaContent =
       msg.cfored_listen_conf().tls_certs().ca_content();
   g_config.CforedListenConf.TlsConfig.TlsCerts.KeyContent =
       msg.cfored_listen_conf().tls_certs().key_content();

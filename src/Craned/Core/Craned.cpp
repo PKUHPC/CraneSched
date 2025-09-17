@@ -351,8 +351,8 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
           if (auto result = util::ParseCertConfig(
-                  "InternalCaFilePath", tls_config, &tls_certs.CaFilePath,
-                  &tls_certs.CaContent);
+                  "CaFilePath", tls_config, &g_tls_config.CaFilePath,
+                  &g_tls_config.CaContent);
               result) {
             CRANE_ERROR(result.value());
             std::exit(1);

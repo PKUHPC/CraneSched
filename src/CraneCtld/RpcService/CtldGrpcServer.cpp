@@ -1910,7 +1910,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     ServerBuilderAddTcpTlsListeningPort(
         &internal_builder, cranectld_listen_addr,
         listen_conf.CraneCtldForInternalListenPort,
-        listen_conf.TlsConfig.InternalCerts);
+        listen_conf.TlsConfig.InternalCerts, listen_conf.TlsConfig.CaContent);
   else
     ServerBuilderAddTcpInsecureListeningPort(
         &internal_builder, cranectld_listen_addr,
@@ -1934,7 +1934,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (listen_conf.TlsConfig.Enabled) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.TlsConfig.ExternalCerts);
+                                        listen_conf.TlsConfig.ExternalCerts, listen_conf.TlsConfig.CaContent);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
