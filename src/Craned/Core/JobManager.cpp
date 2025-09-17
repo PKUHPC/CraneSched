@@ -53,7 +53,7 @@ bool StepInstance::IsDaemon() const {
 
 bool StepInstance::CanOperate() const { return status != StepStatus::Running; }
 std::string StepInstance::StepIdString() const {
-  return fmt::format("{}:{}", job_id, step_id);
+  return fmt::format("{}.{}", job_id, step_id);
 }
 
 EnvMap JobInD::GetJobEnvMap() {
@@ -272,7 +272,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
       steps_to_free.emplace_back(step.get());
     }
     if (job->step_map.size() != 1) {
-      CRANE_ERROR("Job #{} has only one step: daemon step.", job_id);
+      CRANE_DEBUG("Job #{} to free has more one step.", job_id);
     }
     jobs_to_free.emplace_back(std::move(job.value()));
   }
@@ -353,6 +353,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
   std::vector<JobInD> jobs_to_clean;
   std::vector<StepInstance*> steps_to_clean;
   {
+    std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto& [step, retry_count] : m_completing_step_retry_map_) {
       job_id_t job_id = step->job_id;
@@ -371,15 +372,19 @@ bool JobManager::EvCheckSupervisorRunning_() {
       } else {
         if (exists) continue;
       }
-      steps_to_clean.push_back(step);
+      exit_steps.push_back(step);
     }
-    for (auto* step : steps_to_clean) {
+    for (auto* step : exit_steps) {
       m_completing_step_retry_map_.erase(step);
-      if (!m_completing_job_.contains(step->job_id)) continue;
-      m_completing_job_.at(step->job_id).step_map.erase(step->step_id);
-      if (m_completing_job_.at(step->job_id).step_map.empty()) {
-        jobs_to_clean.emplace_back(
-            std::move(m_completing_job_.at(step->job_id)));
+      if (!m_completing_job_.contains(step->job_id)) {
+        steps_to_clean.push_back(step);
+        continue;
+      }
+      auto& job = m_completing_job_.at(step->job_id);
+      steps_to_clean.push_back(job.step_map.at(step->step_id).release());
+      job.step_map.erase(step->step_id);
+      if (job.step_map.empty()) {
+        jobs_to_clean.emplace_back(std::move(job));
         m_completing_job_.erase(step->job_id);
       }
     }

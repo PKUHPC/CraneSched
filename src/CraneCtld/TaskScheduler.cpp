@@ -2255,15 +2255,14 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
           }
         }
       }
-      if (step->ConfigureFailed()) {
-        CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
-                   step->StepId());
-        step->SetStatus(step->ConfigureFailedStatus());
-      }
       if (step->FinishWithFailedStatus()) {
         step->SetStatus(step->FinishFailedStatus());
       } else {
         step->SetStatus(crane::grpc::TaskStatus::Completed);
+      }
+      for (const auto& node : step->CranedIds()) {
+        context->craned_step_free_map[node][step->job_id].insert(
+            step->StepId());
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
                  step->StepId(), util::StepStatusToString(step->Status()));
