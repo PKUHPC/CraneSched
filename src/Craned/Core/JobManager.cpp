@@ -288,7 +288,9 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
     }
   }
 
-  this->CleanUpJobAndStepsAsync(std::move(job_steps));
+  g_thread_pool->detach_task([this, steps = std::move(job_steps)] {
+    this->CleanUpJobAndStepsAsync(std::move(steps));
+  });
   return true;
 }
 
@@ -1097,10 +1099,7 @@ bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
 void JobManager::CleanUpJobAndStepsAsync(
     const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps) {
   {
-    std::ptrdiff_t step_count = std::ranges::fold_left(
-        steps, 0,
-        [](auto acc, const auto kv) { return acc + kv.second.size(); });
-    std::latch shutdown_daemon_latch{step_count};
+    std::latch shutdown_daemon_latch{static_cast<std::ptrdiff_t>(steps.size())};
     for (auto job_id : steps | std::views::keys) {
       g_thread_pool->detach_task([&shutdown_daemon_latch, &steps, job_id] {
         for (const auto step_id : steps.at(job_id)) {
