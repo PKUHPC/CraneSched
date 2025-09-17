@@ -381,6 +381,10 @@ bool JobManager::EvCheckSupervisorRunning_() {
         continue;
       }
       auto& job = m_completing_job_.at(step->job_id);
+      if (!job.step_map.contains(step->step_id)) {
+        steps_to_clean.push_back(step);
+        continue;
+      }
       steps_to_clean.push_back(job.step_map.at(step->step_id).release());
       job.step_map.erase(step->step_id);
       if (job.step_map.empty()) {
