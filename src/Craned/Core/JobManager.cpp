@@ -347,6 +347,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
     }
     for (auto* step : steps_to_clean) {
       m_completing_step_retry_map_.erase(step);
+      if (!m_completing_job_.contains(step->job_id)) continue;
       m_completing_job_.at(step->job_id).step_map.erase(step->step_id);
       if (m_completing_job_.at(step->job_id).step_map.empty()) {
         jobs_to_clean.emplace_back(
