@@ -287,6 +287,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
       }
     }
   }
+  CRANE_DEBUG("Completing steps [{}].", util::JobStepsToString(job_steps));
 
   g_thread_pool->detach_task([this, steps = std::move(job_steps)] {
     this->CleanUpJobAndStepsAsync(std::move(steps));
@@ -365,7 +366,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
                       }) | std::views::transform(util::StepIdPairToString),
                       ","));
     FreeStepAllocation_(std::move(steps_to_clean));
-    FreeJobAllocation_(std::move(jobs_to_clean));
+    if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
   }
 
   return m_completing_step_retry_map_.empty();

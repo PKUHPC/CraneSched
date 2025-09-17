@@ -281,7 +281,7 @@ grpc::Status CranedServiceImpl::FreeJobs(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Receive ReleaseCgroupForTasks RPC for Job [{}]",
+  CRANE_TRACE("Receive FreeJobs RPC for Job [{}]",
               absl::StrJoin(request->job_id_list(), ","));
 
   g_job_mgr->FreeJobs(
