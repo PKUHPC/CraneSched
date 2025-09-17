@@ -149,6 +149,13 @@ Licenses:
   - name: ansys
     quantity: 100
 
+
+HealthCheck:
+  Program: /usr/sbin/nhc
+  Interval: 60
+  NodeState: ANY # IDLE, ALLOC, MIXED, ANY
+  Cycle: false
+
 # Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
 # if this option is set to true.
 # Default value is false.
