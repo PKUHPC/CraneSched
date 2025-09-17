@@ -32,7 +32,7 @@ CranedStub::CranedStub(CranedKeeper *craned_keeper)
   // The most part of jobs are done in CranedKeeper::RegisterCraneds().
 }
 
-CranedStub::~CranedStub() {
+void CranedStub::Fini() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
@@ -450,6 +450,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "Craned {} stub destroyed: timeout.",
                          craned->m_craned_id_);
+      craned->Fini();
       m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
       m_tag_sync_allocator_->delete_object(tag);
       continue;
@@ -507,6 +508,9 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
                              craned->m_craned_id_);
 
           // Callback in destructor will erase from connecting queue.
+
+          util::lock_guard guard(m_connect_craned_mtx_);
+          craned->Fini();
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
@@ -519,6 +523,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           }
 
           WriterLock lock(&m_connect_craned_mtx_);
+          craned->Fini();
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
@@ -832,7 +837,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
-  util::lock_guard guard(craned_keeper->m_connect_craned_mtx_);
+  craned_keeper->m_connect_craned_mtx_.AssertHeld();
   craned_keeper->m_channel_count_.fetch_sub(1);
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
   CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);

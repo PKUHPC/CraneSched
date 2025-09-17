@@ -41,7 +41,8 @@ class CranedStub {
   CranedStub &operator=(const CranedStub &) = delete;
   CranedStub &operator=(CranedStub &&) = delete;
 
-  ~CranedStub();
+  ~CranedStub() = default;
+  void Fini();
 
   void SetRegToken(const RegToken &token) {
     absl::MutexLock l(&m_lock_);
