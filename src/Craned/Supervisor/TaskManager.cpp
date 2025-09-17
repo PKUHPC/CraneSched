@@ -1535,7 +1535,7 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
   // One-shot model: nothing to stop, just proceed to cleanup.
-  m_baseline_inited_ = false;
+  m_step_.oom_baseline_inited = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
@@ -1945,8 +1945,12 @@ void TaskManager::InitOomBaselineForPid_(pid_t pid) {
   if (!cgp.has_value()) return;
   m_step_.cgroup_path = *cgp;
   uint64_t oom_kill = 0, oom = 0;
-  Common::CgroupManager::ReadOomCountsFromCgroupPath(
-      m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom);
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(
+          m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom)) {
+    CRANE_TRACE("[OOM] Baseline read failed, will retry later. path={}",
+                m_step_.cgroup_path);
+    return;
+  }
   m_step_.baseline_oom_kill_count = oom_kill;
   if (m_step_.is_cgroup_v2) m_step_.baseline_oom_count = oom;
   m_step_.oom_baseline_inited = true;
