@@ -89,8 +89,10 @@ class CforedClient {
       std::atomic<bool>* write_pending);
 
   std::atomic<bool> m_stopped_{false};
+  std::atomic<bool> m_wait_reconn_{false};
   std::atomic<bool> m_output_drained_{false};
 
+  std::atomic<size_t> m_output_queue_bytes_{0};
   ConcurrentQueue<std::string> m_output_queue_;
   ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
       m_x11_input_queue_;
@@ -101,6 +103,8 @@ class CforedClient {
 
   std::shared_ptr<uvw::loop> m_loop_;
   std::thread m_ev_thread_;
+
+  std::shared_ptr<uvw::async_handle> m_reconnect_async_;
 
   std::string m_cfored_name_;
   std::unordered_map<pid_t, TaskFwdMeta> m_fwd_meta_map;
