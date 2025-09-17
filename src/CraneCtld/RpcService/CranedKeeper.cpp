@@ -890,7 +890,8 @@ void CranedKeeper::EvCheckTimeoutCb_() {
             std::chrono::seconds(g_config.CtldConf.CranedTimeout) <
         now) {
       stub->m_shutting_down_ = true;
-      CRANE_DEBUG("Craned {} going to down because timeout", craned_id);
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "Craned {} going to down because timeout", craned_id);
     }
   }
 }
