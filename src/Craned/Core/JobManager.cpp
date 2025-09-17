@@ -257,8 +257,8 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 }
 
 bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
-  std::unordered_map<job_id_t, std::set<step_id_t>> job_steps;
-  uint32_t count = 0;
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps;
+  std::vector<uid_t> uid_vec;
   {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
@@ -266,42 +266,29 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
         CRANE_WARN("Try to free nonexistent job#{}", job_ids);
         return false;
       }
-      absl::MutexLock lk(map_ptr->at(job_id).RawPtr()->step_map_mtx.get());
-      job_steps[job_id] = map_ptr->at(job_id).RawPtr()->step_map |
-                          std::views::keys | std::ranges::to<std::set>();
-      ++count;
+      auto* job = map_ptr->at(job_id).RawPtr();
+      uid_vec.push_back(job->Uid());
+      absl::MutexLock lk(job->step_map_mtx.get());
+      job_steps[job_id] = job->step_map | std::views::keys |
+                          std::ranges::to<std::unordered_set>();
+    }
+  }
+  {
+    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    for (auto [idx, job_id] : job_ids | std::ranges::views::enumerate) {
+      bool erase{false};
+      {
+        auto& value = uid_map->at(uid_vec[idx]);
+        value.RawPtr()->erase(job_id);
+        erase = value.RawPtr()->empty();
+      }
+      if (erase) {
+        uid_map->erase(uid_vec[idx]);
+      }
     }
   }
 
-  std::latch shutdown_daemon_latch{count};
-  for (auto job_id : job_steps | std::views::keys) {
-    g_thread_pool->detach_task([&shutdown_daemon_latch, &job_steps, job_id] {
-      for (const auto step_id : job_steps[job_id]) {
-        auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-        if (!stub) {
-          CRANE_ERROR("[Step #{}.{}]Failed to get stub.", job_id, step_id);
-        } else {
-          stub->ShutdownSupervisor();
-        }
-        g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
-      }
-      shutdown_daemon_latch.count_down();
-    });
-  }
-  shutdown_daemon_latch.wait();
-
-  // Will clean up job and step instances.
-  absl::MutexLock lk(&m_free_step_mtx_);
-  for (auto& [job_id, steps] : job_steps) {
-    for (const auto step_id : steps) {
-      if (m_free_step_retry_map_.contains({job_id, step_id})) {
-        CRANE_DEBUG("[Step #{}.{}] is already in clean retry map, ignoring it.",
-                    job_id, step_id);
-        continue;
-      }
-      m_free_step_retry_map_[{job_id, step_id}] = 0;
-    }
-  }
+  this->CleanUpJobAndStepsAsync(std::move(job_steps));
   return true;
 }
 
@@ -333,79 +320,52 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
 }
 
 bool JobManager::EvCheckSupervisorRunning_() {
-  std::vector<std::pair<job_id_t, step_id_t>> step_ids;
-  std::vector<job_id_t> jobs;
-  std::vector<StepInstance*> step_inst_vec;
-  std::vector<std::pair<job_id_t, step_id_t>> missing_steps;
+  std::vector<JobInD> jobs_to_clean;
+  std::vector<StepInstance*> steps_to_clean;
   {
-    absl::MutexLock lk(&m_free_step_mtx_);
-    for (auto& [ids, retry_count] : m_free_step_retry_map_) {
-      auto [job_id, step_id] = ids;
-      auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-      if (!job_ptr) {
-        CRANE_TRACE("[Step #{}.{}] Job does not exist, ignore clean up.",
-                    job_id, step_id);
-        missing_steps.emplace_back(ids);
-        continue;
-      }
-      absl::MutexLock step_lk(job_ptr->step_map_mtx.get());
-      if (!job_ptr->step_map.contains(step_id)) {
-        CRANE_TRACE("[Step #{}.{}] Step does not exist, ignore clean up.",
-                    job_id, step_id);
-        missing_steps.emplace_back(ids);
-        continue;
-      }
-      auto& step = job_ptr->step_map.at(step_id);
-
+    absl::MutexLock lk(&m_free_job_step_mtx_);
+    for (auto& [step, retry_count] : m_completing_step_retry_map_) {
+      job_id_t job_id = step->job_id;
+      step_id_t step_id = step->step_id;
       auto exists = kill(step->supv_pid, 0) == 0;
 
       if (exists) {
         retry_count++;
-        continue;
       }
-      if (retry_count > kMaxSupervisorCheckRetryCount) {
+      if (retry_count >= kMaxSupervisorCheckRetryCount) {
         CRANE_WARN(
             "[Step #{}.{}] Supervisor is still running after {} checks, will "
-            "remove its cgroup.",
+            "clean up now!",
             job_id, step_id, kMaxSupervisorCheckRetryCount);
         // TODO: Send status change for dead step
+      } else {
+        if (exists) continue;
       }
-      step_ids.emplace_back(ids);
-      step_inst_vec.push_back(step.release());
-      job_ptr->step_map.erase(step_id);
-      if (job_ptr->step_map.empty()) {
-        jobs.emplace_back(job_id);
+      steps_to_clean.push_back(step);
+    }
+    for (auto* step : steps_to_clean) {
+      m_completing_step_retry_map_.erase(step);
+      m_completing_job_.at(step->job_id).step_map.erase(step->step_id);
+      if (m_completing_job_.at(step->job_id).step_map.empty()) {
+        jobs_to_clean.emplace_back(
+            std::move(m_completing_job_.at(step->job_id)));
+        m_completing_job_.erase(step->job_id);
       }
-    }
-    for (const auto& ids : missing_steps) {
-      m_free_step_retry_map_.erase(ids);
-    }
-    for (const auto& ids : step_ids) {
-      m_free_step_retry_map_.erase(ids);
     }
   }
 
-  if (!missing_steps.empty()) {
-    CRANE_TRACE("Step [{}] does not exist, skip cgroup clean up.",
-                absl::StrJoin(missing_steps | std::views::transform(
-                                                  util::StepIdPairToString),
-                              ","));
-  }
-
-  if (!step_ids.empty()) {
+  if (!steps_to_clean.empty()) {
     CRANE_TRACE(
         "Supervisor for Step [{}] found to be exited",
-        absl::StrJoin(
-            step_ids | std::views::transform(util::StepIdPairToString), ","));
-
-    g_thread_pool->detach_task([this, jobs = std::move(jobs),
-                                steps = std::move(step_inst_vec)] mutable {
-      FreeStepAllocation_(std::move(steps));
-      FreeJobAllocation_(jobs);
-    });
+        absl::StrJoin(steps_to_clean | std::views::transform([](auto* step) {
+                        return std::make_pair(step->job_id, step->step_id);
+                      }) | std::views::transform(util::StepIdPairToString),
+                      ","));
+    FreeStepAllocation_(std::move(steps_to_clean));
+    FreeJobAllocation_(std::move(jobs_to_clean));
   }
 
-  return m_free_step_retry_map_.empty();
+  return m_completing_step_retry_map_.empty();
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -793,33 +753,17 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
   }
 }
 
-bool JobManager::FreeJobAllocation_(const std::vector<task_id_t>& job_ids) {
-  CRANE_DEBUG("Freeing job [{}] allocation.", absl::StrJoin(job_ids, ","));
+bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
+  CRANE_DEBUG("Freeing job [{}] allocation.",
+              absl::StrJoin(jobs | std::views::transform([](auto& job) {
+                              return job.job_id;
+                            }) | std::views::common,
+                            ","));
   std::unordered_map<task_id_t, CgroupInterface*> job_cg_map;
   std::vector<uid_t> uid_vec;
-  {
-    auto map_ptr = m_job_map_.GetMapExclusivePtr();
-    for (auto job_id : job_ids) {
-      JobInD* job = map_ptr->at(job_id).RawPtr();
 
-      job_cg_map[job_id] = job->cgroup.release();
-      uid_vec.push_back(job->Uid());
-      map_ptr->erase(job_id);
-    }
-  }
-  {
-    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
-    for (auto [idx, job_id] : job_ids | std::ranges::views::enumerate) {
-      bool erase{false};
-      {
-        auto& value = uid_map->at(uid_vec[idx]);
-        value.RawPtr()->erase(job_id);
-        erase = value.RawPtr()->empty();
-      }
-      if (erase) {
-        uid_map->erase(uid_vec[idx]);
-      }
-    }
+  for (auto& job : jobs) {
+    job_cg_map[job.job_id] = job.cgroup.release();
   }
 
   for (auto [job_id, cgroup] : job_cg_map) {
@@ -1113,12 +1057,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
               ExitCode::kExitCodeTerminated, "Terminated failed.");
       }
       CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);
-      // Try to clean up the step or job if exists.
-      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
-      job_step_ids[elem.job_id] = {step_id};
-      g_thread_pool->detach_task([job_step_ids = std::move(job_step_ids)] {
-        g_job_mgr->CleanUpJobAndStepsAsync(job_step_ids);
-      });
     }
   }
   for (auto& not_ready_elem : not_ready_elems) {
@@ -1158,10 +1096,74 @@ bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
 
 void JobManager::CleanUpJobAndStepsAsync(
     const std::unordered_map<job_id_t, std::unordered_set<step_id_t>>& steps) {
-  absl::MutexLock lk(&m_free_step_mtx_);
-  for (const auto [job_id, step_ids] : steps) {
-    for (const auto step_id : step_ids)
-      m_free_step_retry_map_[std::make_pair(job_id, step_id)] = 0;
+  {
+    std::ptrdiff_t step_count = std::ranges::fold_left(
+        steps, 0,
+        [](auto acc, const auto kv) { return acc + kv.second.size(); });
+    std::latch shutdown_daemon_latch{step_count};
+    for (auto job_id : steps | std::views::keys) {
+      g_thread_pool->detach_task([&shutdown_daemon_latch, &steps, job_id] {
+        for (const auto step_id : steps.at(job_id)) {
+          auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
+          if (!stub) {
+            CRANE_ERROR("[Step #{}.{}] Failed to get stub.", job_id, step_id);
+          } else {
+            stub->ShutdownSupervisor();
+          }
+          g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
+        }
+        shutdown_daemon_latch.count_down();
+      });
+    }
+    shutdown_daemon_latch.wait();
+  }
+
+  std::vector<JobInD> jobs_to_clean;
+  std::vector<StepInstance*> step_instances;
+  {
+    auto map_ptr = m_job_map_.GetMapExclusivePtr();
+    for (const auto [job_id, step_ids] : steps) {
+      if (!map_ptr->contains(job_id)) {
+        CRANE_TRACE("[Job #{}] not found in job_map");
+        continue;
+      }
+      auto* job = map_ptr->at(job_id).RawPtr();
+      absl::MutexLock lock(job->step_map_mtx.get());
+      for (const auto step_id : step_ids) {
+        if (!job->step_map.contains(step_id)) {
+          CRANE_TRACE("[Step #{}.{}] not found in step_map", job_id, step_id);
+          continue;
+        }
+        step_instances.push_back(job->step_map.at(step_id).get());
+      }
+      if (step_ids.size() == job->step_map.size() &&
+          std::ranges::equal(step_ids, job->step_map | std::views::keys)) {
+        jobs_to_clean.emplace_back(std::move(*job));
+        map_ptr->erase(job_id);
+      } else {
+        for (auto step_id : step_ids) {
+          job->step_map.erase(step_id);
+        }
+      }
+    }
+  }
+
+  absl::MutexLock lk(&m_free_job_step_mtx_);
+  for (auto* step : step_instances) {
+    if (m_completing_step_retry_map_.contains(step)) {
+      CRANE_DEBUG("[Step #{}.{}] is already completing, ignore clean up.",
+                  step->job_id, step->step_id);
+      continue;
+    }
+    m_completing_step_retry_map_[step] = 0;
+  }
+  for (auto&& job : jobs_to_clean) {
+    job_id_t job_id = job.job_id;
+    if (m_completing_job_.contains(job_id)) {
+      CRANE_DEBUG("[Job #{}] is already completing, ignore clean up.", job_id);
+      continue;
+    }
+    m_completing_job_.emplace(job_id, std::move(job));
   }
 }
 

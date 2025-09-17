@@ -262,30 +262,12 @@ grpc::Status CranedServiceImpl::FreeSteps(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  std::ptrdiff_t num_steps{0};
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
   for (const auto &[job_id, steps] : request->job_step_ids_map()) {
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
-    num_steps += steps.steps().size();
   }
   CRANE_TRACE("Receive FreeSteps RPC for [{}]",
               util::JobStepsToString(job_steps_map));
-
-  std::latch latch(num_steps);
-  for (auto [job_id, step_ids] : job_steps_map) {
-    for (step_id_t step_id : step_ids)
-      g_thread_pool->detach_task([&latch, job_id, step_id] {
-        auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-        if (!stub) {
-          CRANE_ERROR("[Step #{}.{}]Failed to get stub.", job_id, step_id);
-        } else {
-          stub->ShutdownSupervisor();
-        }
-        g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
-        latch.count_down();
-      });
-  }
-  latch.wait();
   g_job_mgr->CleanUpJobAndStepsAsync(job_steps_map);
 
   return Status::OK;

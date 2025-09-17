@@ -191,7 +191,7 @@ class JobManager {
   };
 
   // Acquires Job map lock
-  bool FreeJobAllocation_(const std::vector<task_id_t>& job_ids);
+  bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
 
   void FreeStepAllocation_(std::vector<StepInstance*>&& steps);
 
@@ -258,9 +258,12 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
-  absl::Mutex m_free_step_mtx_;
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>, int /*retry count*/>
-      m_free_step_retry_map_ ABSL_GUARDED_BY(m_free_step_mtx_);
+  absl::Mutex m_free_job_step_mtx_;
+  std::unordered_map<StepInstance*, int /*retry count*/>
+      m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
+  std::unordered_map<job_id_t, JobInD> m_completing_job_
+      ABSL_GUARDED_BY(m_free_job_step_mtx_);
+
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_step_async_handle_;
