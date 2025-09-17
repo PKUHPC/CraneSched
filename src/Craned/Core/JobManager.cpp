@@ -1130,19 +1130,20 @@ void JobManager::CleanUpJobAndStepsAsync(
       }
       auto* job = map_ptr->at(job_id).RawPtr();
       absl::MutexLock lock(job->step_map_mtx.get());
-      for (const auto step_id : step_ids) {
-        if (!job->step_map.contains(step_id)) {
-          CRANE_TRACE("[Step #{}.{}] not found in step_map", job_id, step_id);
-          continue;
-        }
-        step_instances.push_back(job->step_map.at(step_id).get());
-      }
       if (step_ids.size() == job->step_map.size() &&
           std::ranges::equal(step_ids, job->step_map | std::views::keys)) {
+        for (const auto step_id : step_ids) {
+          if (!job->step_map.contains(step_id)) {
+            CRANE_TRACE("[Step #{}.{}] not found in step_map", job_id, step_id);
+            continue;
+          }
+          step_instances.push_back(job->step_map.at(step_id).release());
+        }
         jobs_to_clean.emplace_back(std::move(*job));
         map_ptr->erase(job_id);
       } else {
         for (auto step_id : step_ids) {
+          step_instances.push_back(job->step_map.at(step_id).release());
           job->step_map.erase(step_id);
         }
       }
