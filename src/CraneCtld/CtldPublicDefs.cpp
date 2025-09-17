@@ -46,7 +46,6 @@ ContainerMetaInTask::ContainerMetaInTask(
       name(rhs.name()),
       labels(rhs.labels().begin(), rhs.labels().end()),
       annotations(rhs.annotations().begin(), rhs.annotations().end()),
-      entrypoint(rhs.entrypoint()),
       command(rhs.command()),
       args(rhs.args().begin(), rhs.args().end()),
       workdir(rhs.workdir()),
@@ -79,7 +78,6 @@ ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
     (*annotations_map)[annotation.first] = annotation.second;
   }
 
-  result.set_entrypoint(this->entrypoint);
   result.set_command(this->command);
   for (const auto& arg : this->args) {
     result.add_args(arg);

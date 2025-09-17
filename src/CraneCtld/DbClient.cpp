@@ -746,13 +746,14 @@ void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
       auto map_key = map_item.first;
       auto map_value = map_item.second;
 
-      map_value_document.append(kvp(map_key, [&map_value](sub_array pair_array) {
-        pair_array.append(map_value.first);  // pair->first, default qos
+      map_value_document.append(
+          kvp(map_key, [&map_value](sub_array pair_array) {
+            pair_array.append(map_value.first);  // pair->first, default qos
 
-        array list_array;
-        for (const auto& s : map_value.second) list_array.append(s);
-        pair_array.append(list_array);
-      }));
+            array list_array;
+            for (const auto& s : map_value.second) list_array.append(s);
+            pair_array.append(list_array);
+          }));
     }
   }));
 }
@@ -771,13 +772,13 @@ void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
       map_value_document.append(
           kvp(device_name, [&total, &type_count_map](sub_document device_doc) {
             device_doc.append(kvp("total", static_cast<int64_t>(total)));
-            device_doc.append(
-                kvp("type_count_map", [&type_count_map](sub_document type_doc) {
-                  for (const auto& type_item : type_count_map) {
-                    type_doc.append(kvp(type_item.first,
-                                       static_cast<int64_t>(type_item.second)));
-                  }
-                }));
+            device_doc.append(kvp("type_count_map", [&type_count_map](
+                                                        sub_document type_doc) {
+              for (const auto& type_item : type_count_map) {
+                type_doc.append(kvp(type_item.first,
+                                    static_cast<int64_t>(type_item.second)));
+              }
+            }));
           }));
     }
   }));
@@ -803,7 +804,6 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
 
     // Basic fields
     container_doc.append(kvp("name", v.name));
-    container_doc.append(kvp("entrypoint", v.entrypoint));
     container_doc.append(kvp("command", v.command));
     container_doc.append(kvp("workdir", v.workdir));
     container_doc.append(kvp("detached", v.detached));
@@ -1188,9 +1188,6 @@ ContainerMetaInTask MongodbClient::BsonToContainerMeta(
     // Parse basic fields
     if (auto name_elem = container_doc["name"]) {
       result.name = name_elem.get_string().value;
-    }
-    if (auto entrypoint_elem = container_doc["entrypoint"]) {
-      result.entrypoint = entrypoint_elem.get_string().value;
     }
     if (auto command_elem = container_doc["command"]) {
       result.command = command_elem.get_string().value;

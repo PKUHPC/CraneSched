@@ -103,8 +103,11 @@ class CriClient {
 
   // ==== Image Service ====
   // TODO: Async image pulling?
-  std::optional<std::string> GetImageId(const std::string& image_ref) const;
-  std::optional<std::string> PullImage(const std::string& image_ref) const;
+  std::optional<std::string> GetImageId(const std::string& image_name) const;
+  std::optional<std::string> PullImage(const std::string& image_name,
+                                       const std::string& username,
+                                       const std::string& password,
+                                       const std::string& server_addr) const;
 
  private:
   // Inject labels and metadata for future selection
