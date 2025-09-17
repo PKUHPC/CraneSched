@@ -554,6 +554,10 @@ class CgroupManager {
     return m_cg_version_;
   }
 
+  [[nodiscard]] static bool IsCgV2() {
+    return m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2;
+  }
+
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
 
   // Resolve actual cgroup fs path (memory controller path for v1, unified
@@ -565,8 +569,7 @@ class CgroupManager {
   // oom_kill is read from memory.oom_control and 'oom' will stay 0.
   // Returns false on any failure.
   static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
-                                          bool is_cgroup_v2, uint64_t &oom_kill,
-                                          uint64_t &oom);
+                                          uint64_t &oom_kill, uint64_t &oom);
 
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(

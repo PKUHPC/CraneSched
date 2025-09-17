@@ -23,7 +23,6 @@
 #include <grp.h>
 #include <pty.h>
 #include <spdlog/fmt/bundled/core.h>
-#include <sys/eventfd.h>
 #include <sys/wait.h>
 
 #include <nlohmann/json.hpp>
@@ -132,6 +131,56 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 }
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
+
+void StepInstance::InitOomBaseline(pid_t pid) {
+  auto cgp = Common::CgroupManager::ResolveCgroupPathForPid(pid);
+  if (!cgp.has_value()) return;
+  cgroup_path = *cgp;
+  uint64_t oom_kill = 0, oom = 0;
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
+                                                          oom)) {
+    CRANE_TRACE("[OOM] Baseline read failed, will retry later. path={}",
+                cgroup_path);
+    return;
+  }
+  baseline_oom_kill_count = oom_kill;
+  if (Common::CgroupManager::IsCgV2()) baseline_oom_count = oom;
+  oom_baseline_inited = true;
+  CRANE_DEBUG("[OOM] Baseline inited: v2={}, path={}, oom={}, oom_kill={}",
+              Common::CgroupManager::IsCgV2(), cgroup_path, baseline_oom_count,
+              baseline_oom_kill_count);
+}
+
+bool StepInstance::EvaluateOomOnExit() {
+  if (!oom_baseline_inited || cgroup_path.empty()) {
+    CRANE_TRACE("[OOM] Skip evaluation: baseline_inited={} path='{}'",
+                oom_baseline_inited, cgroup_path);
+    return false;
+  }
+  uint64_t oom_kill = 0, oom = 0;
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
+                                                          oom))
+    return false;
+  if (Common::CgroupManager::IsCgV2()) {
+    CRANE_DEBUG(
+        "[OOM] Evaluate v2 path={} baseline(oom={},oom_kill={}) "
+        "current(oom={},oom_kill={})",
+        cgroup_path, baseline_oom_count, baseline_oom_kill_count, oom,
+        oom_kill);
+    if (oom_kill > baseline_oom_kill_count) return true;
+    if (oom > baseline_oom_count && oom_kill == baseline_oom_kill_count)
+      CRANE_DEBUG(
+          "[OOM] v2: detected oom growth (delta_oom={}) but no oom_kill growth "
+          "("
+          "delta_kill=0) -> not classified as OOM",
+          oom - baseline_oom_count);
+    return false;
+  }
+  CRANE_DEBUG(
+      "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
+      cgroup_path, baseline_oom_kill_count, oom_kill);
+  return oom_kill > baseline_oom_kill_count;
+}
 
 ITaskInstance::~ITaskInstance() {
   if (m_parent_step_inst_->IsCrun()) {
@@ -1739,7 +1788,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (m_step_.IsBatch() || m_step_.IsCrun()) {
       bool considered_signal = exit_info.is_terminated_by_signal;
       if (task->terminated_by == TerminatedBy::NONE) {
-        if (EvaluateOomOnExit_()) {
+        if (m_step_.EvaluateOomOnExit()) {
           task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
         }
       }
@@ -1924,7 +1973,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       m_pid_task_id_map_[spawned_pid] = task->task_id;
       pid_t pid_for_baseline = spawned_pid;
       m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
-      InitOomBaselineForPid_(pid_for_baseline);
+      m_step_.InitOomBaseline(pid_for_baseline);
 
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
@@ -1936,57 +1985,5 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
   while (m_grpc_query_step_env_queue_.try_dequeue(elem)) {
     elem.set_value(m_step_.GetStepProcessEnv());
   }
-}
-
-void TaskManager::InitOomBaselineForPid_(pid_t pid) {
-  m_step_.is_cgroup_v2 = (Common::CgroupManager::GetCgroupVersion() ==
-                          Common::CgConstant::CgroupVersion::CGROUP_V2);
-  auto cgp = Common::CgroupManager::ResolveCgroupPathForPid(pid);
-  if (!cgp.has_value()) return;
-  m_step_.cgroup_path = *cgp;
-  uint64_t oom_kill = 0, oom = 0;
-  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(
-          m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom)) {
-    CRANE_TRACE("[OOM] Baseline read failed, will retry later. path={}",
-                m_step_.cgroup_path);
-    return;
-  }
-  m_step_.baseline_oom_kill_count = oom_kill;
-  if (m_step_.is_cgroup_v2) m_step_.baseline_oom_count = oom;
-  m_step_.oom_baseline_inited = true;
-  CRANE_DEBUG("[OOM] Baseline inited: v2={}, path={}, oom={}, oom_kill={}",
-              m_step_.is_cgroup_v2, m_step_.cgroup_path,
-              m_step_.baseline_oom_count, m_step_.baseline_oom_kill_count);
-}
-
-bool TaskManager::EvaluateOomOnExit_() {
-  if (!m_step_.oom_baseline_inited || m_step_.cgroup_path.empty()) {
-    CRANE_TRACE("[OOM] Skip evaluation: baseline_inited={} path='{}'",
-                m_step_.oom_baseline_inited, m_step_.cgroup_path);
-    return false;
-  }
-  uint64_t oom_kill = 0, oom = 0;
-  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(
-          m_step_.cgroup_path, m_step_.is_cgroup_v2, oom_kill, oom))
-    return false;
-  if (m_step_.is_cgroup_v2) {
-    CRANE_DEBUG(
-        "[OOM] Evaluate v2 path={} baseline(oom={},oom_kill={}) "
-        "current(oom={},oom_kill={})",
-        m_step_.cgroup_path, m_step_.baseline_oom_count,
-        m_step_.baseline_oom_kill_count, oom, oom_kill);
-    if (oom_kill > m_step_.baseline_oom_kill_count) return true;
-    if (oom > m_step_.baseline_oom_count &&
-        oom_kill == m_step_.baseline_oom_kill_count)
-      CRANE_DEBUG(
-          "[OOM] oom counter increased without kill (delta_oom={} "
-          "delta_kill=0) -> not classified as OOM",
-          oom - m_step_.baseline_oom_count);
-    return false;
-  }
-  CRANE_DEBUG(
-      "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
-      m_step_.cgroup_path, m_step_.baseline_oom_kill_count, oom_kill);
-  return oom_kill > m_step_.baseline_oom_kill_count;
 }
 }  // namespace Craned::Supervisor

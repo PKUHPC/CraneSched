@@ -29,7 +29,6 @@ namespace Craned::Supervisor {
 
 inline const char* MemoryEvents = "memory.events";
 inline const char* MemoryOomControl = "memory.oom_control";
-inline const char* CgroupEventControl = "cgroup.event_control";
 
 enum class TerminatedBy : uint8_t {
   NONE = 0,
@@ -58,8 +57,7 @@ class StepInstance {
   bool x11;
   bool x11_fwd;
 
-  std::string cgroup_path;   // resolved cgroup path
-  bool is_cgroup_v2{false};  // whether current system using cgroup v2
+  std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
@@ -107,6 +105,10 @@ class StepInstance {
   void StopCforedClient() { m_cfored_client_.reset(); }
 
   EnvMap GetStepProcessEnv() const;
+
+  // OOM monitoring methods
+  void InitOomBaseline(pid_t pid);
+  bool EvaluateOomOnExit();
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
@@ -392,9 +394,6 @@ class TaskManager {
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
-
-  void InitOomBaselineForPid_(pid_t pid);
-  bool EvaluateOomOnExit_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 

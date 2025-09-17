@@ -725,25 +725,14 @@ std::optional<std::string> CgroupManager::ResolveCgroupPathForPid(pid_t pid) {
     cgroup_str = CgroupStrByJobId(*job_id_opt);
   }
 
-  bool is_cgv2 = (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2);
-  if (is_cgv2) {
-    std::filesystem::path full_path = CgConstant::kSystemCgPathPrefix /
-                                      CgConstant::kRootCgNamePrefix /
-                                      cgroup_str;
-    return full_path.string();
-  }
-
-  // v1 memory controller path
-  std::filesystem::path full_path =
-      CgConstant::kSystemCgPathPrefix /
-      CgConstant::GetControllerStringView(
-          CgConstant::Controller::MEMORY_CONTROLLER) /
-      CgConstant::kRootCgNamePrefix / cgroup_str;
+  // Return generic cgroup path, let the caller decide which controller to
+  // access
+  std::filesystem::path full_path = CgConstant::kSystemCgPathPrefix /
+                                    CgConstant::kRootCgNamePrefix / cgroup_str;
   return full_path.string();
 }
 
 bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
-                                                bool is_cgroup_v2,
                                                 uint64_t &oom_kill,
                                                 uint64_t &oom) {
   oom_kill = 0;
@@ -754,7 +743,7 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
                 cg_path);
     return false;
   }
-  if (is_cgroup_v2) {
+  if (IsCgV2()) {
     auto events_file =
         (std::filesystem::path(cg_path) / "memory.events").string();
     std::ifstream ifs(events_file);
@@ -769,8 +758,13 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
     }
     return true;
   }
-  auto v1_file =
-      (std::filesystem::path(cg_path) / "memory.oom_control").string();
+
+  auto memory_cgroup_path =
+      CgConstant::kSystemCgPathPrefix /
+      CgConstant::GetControllerStringView(
+          CgConstant::Controller::MEMORY_CONTROLLER) /
+      std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
+  auto v1_file = (memory_cgroup_path / "memory.oom_control").string();
   std::ifstream ifs(v1_file);
   if (!ifs.is_open()) return false;
   std::string line;
