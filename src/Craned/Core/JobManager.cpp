@@ -1207,19 +1207,22 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
   std::latch shutdown_daemon_latch{static_cast<std::ptrdiff_t>(steps.size())};
   for (auto* step : steps) {
-    if (step->IsDaemon())
-      g_thread_pool->detach_task([&shutdown_daemon_latch, step] {
-        auto stub = g_supervisor_keeper->GetStub(step->job_id, step->step_id);
-        if (!stub) {
-          CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
-                      step->step_id);
-        } else {
-          stub->ShutdownSupervisor();
-        }
-        g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
+    if (!step->IsDaemon()) {
+      shutdown_daemon_latch.count_down();
+      continue;
+    }
+    g_thread_pool->detach_task([&shutdown_daemon_latch, step] {
+      auto stub = g_supervisor_keeper->GetStub(step->job_id, step->step_id);
+      if (!stub) {
+        CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
+                    step->step_id);
+      } else {
+        stub->ShutdownSupervisor();
+      }
+      g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
 
-        shutdown_daemon_latch.count_down();
-      });
+      shutdown_daemon_latch.count_down();
+    });
   }
   shutdown_daemon_latch.wait();
 
