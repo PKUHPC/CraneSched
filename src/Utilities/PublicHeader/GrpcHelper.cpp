@@ -94,7 +94,8 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 // Internal enforced mutual TLS (mTLS) authentication
 void ServerBuilderAddTcpTlsListeningPortForInternal(
     grpc::ServerBuilder* builder, const std::string& address,
-    const std::string& port, const TlsCertificates& certs, const std::string& ca_content) {
+    const std::string& port, const TlsCertificates& certs,
+    const std::string& ca_content) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
@@ -115,7 +116,8 @@ void ServerBuilderAddTcpTlsListeningPortForInternal(
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs, const std::string& ca_content) {
+                                         const TlsCertificates& certs,
+                                         const std::string& ca_content) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
