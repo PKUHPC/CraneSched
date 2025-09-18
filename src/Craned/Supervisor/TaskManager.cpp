@@ -171,8 +171,7 @@ bool StepInstance::EvaluateOomOnExit() {
     if (oom > baseline_oom_count && oom_kill == baseline_oom_kill_count)
       CRANE_DEBUG(
           "[OOM] v2: detected oom growth (delta_oom={}) but no oom_kill growth "
-          "("
-          "delta_kill=0) -> not classified as OOM",
+          "(delta_kill=0) -> not classified as OOM",
           oom - baseline_oom_count);
     return false;
   }
