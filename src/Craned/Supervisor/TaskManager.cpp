@@ -139,7 +139,7 @@ void StepInstance::InitOomBaseline(pid_t pid) {
   uint64_t oom_kill = 0, oom = 0;
   if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
                                                           oom)) {
-    CRANE_TRACE("[OOM] Baseline read failed, will retry later. path={}",
+    CRANE_ERROR("[OOM] Failed to read OOM counts from cgroup path , path={}",
                 cgroup_path);
     return;
   }

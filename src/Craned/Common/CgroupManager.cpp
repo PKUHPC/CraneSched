@@ -737,12 +737,14 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   oom_kill = 0;
   oom = 0;
   std::error_code ec;
-  if (!std::filesystem::exists(cg_path, ec)) {
-    CRANE_TRACE("cgroup path '{}' not exists when read OOM: {}", cg_path,
-                ec.message());
-    return false;
-  }
+
   if (IsCgV2()) {
+    // For cgroup v2, check the provided path directly
+    if (!std::filesystem::exists(cg_path, ec)) {
+      CRANE_TRACE("cgroup path '{}' not exists when read OOM: {}", cg_path,
+                  ec.message());
+      return false;
+    }
     auto events_file =
         (std::filesystem::path(cg_path) / "memory.events").string();
     std::ifstream ifs(events_file);
@@ -758,11 +760,20 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
     return true;
   }
 
+  // For cgroup v1, construct the memory controller specific path
   auto memory_cgroup_path =
       CgConstant::kSystemCgPathPrefix /
       CgConstant::GetControllerStringView(
           CgConstant::Controller::MEMORY_CONTROLLER) /
       std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix);
+
+  // Check if the memory controller specific path exists
+  if (!std::filesystem::exists(memory_cgroup_path, ec)) {
+    CRANE_TRACE("cgroup memory path '{}' not exists when read OOM: {}",
+                memory_cgroup_path.string(), ec.message());
+    return false;
+  }
+
   auto v1_file = (memory_cgroup_path / "memory.oom_control").string();
   std::ifstream ifs(v1_file);
   if (!ifs.is_open()) return false;
