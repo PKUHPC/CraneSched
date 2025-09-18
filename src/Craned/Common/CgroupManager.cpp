@@ -705,14 +705,13 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
 std::optional<std::string> CgroupManager::ResolveCgroupPathForPid(pid_t pid) {
   auto ids_result = GetIdsByPid(pid);
   if (!ids_result.has_value()) {
-    CRANE_WARN("[CgroupManager] Failed to get cgroup IDs for pid {}", pid);
+    CRANE_WARN("Failed to get cgroup IDs for pid {}", pid);
     return std::nullopt;
   }
 
   auto [job_id_opt, step_id_opt, task_id_opt] = *ids_result;
   if (!job_id_opt.has_value()) {
-    CRANE_TRACE(
-        "[CgroupManager] No valid job id found in cgroup path of pid {}", pid);
+    CRANE_TRACE("No valid job id found in cgroup path of pid {}", pid);
     return std::nullopt;
   }
 
@@ -739,8 +738,8 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   oom = 0;
   std::error_code ec;
   if (!std::filesystem::exists(cg_path, ec)) {
-    CRANE_TRACE("[CgroupManager] cgroup path '{}' not exists when read OOM",
-                cg_path);
+    CRANE_TRACE("cgroup path '{}' not exists when read OOM: {}", cg_path,
+                ec.message());
     return false;
   }
   if (IsCgV2()) {

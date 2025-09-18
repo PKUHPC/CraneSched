@@ -1824,7 +1824,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
               std::optional<std::string>(
                   "Detected by oom_kill counter delta (no signal)"));
         } else {
-          ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
+          ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                     exit_info.value, std::nullopt);
         }
       }
