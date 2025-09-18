@@ -257,7 +257,7 @@ std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
         resolved_path /
         fmt::format("Crane-{}.out", m_parent_step_inst_->GetStep().task_id());
 
-  std::string resolved_path_pattern = std::move(resolved_path.string());
+  std::string resolved_path_pattern = resolved_path;
   absl::StrReplaceAll(
       {{"%j", std::to_string(m_parent_step_inst_->GetStep().task_id())},
        {"%u", m_parent_step_inst_->pwd.Username()},
