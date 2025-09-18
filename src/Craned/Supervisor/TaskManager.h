@@ -37,6 +37,8 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
+enum class TerminationReason : uint8_t { NONE = 0, USER, TIMEOUT, OOM };
+
 struct ITaskInstance;
 
 class StepInstance {
@@ -370,12 +372,8 @@ class TaskManager {
   };
 
   struct TaskTerminateQueueElem {
-    bool terminated_by_user{false};  // If the task is canceled by user,
-    // task->status=Cancelled (From Craned)
-    bool terminated_by_timeout{false};  // If the task is terminated by timeout,
-    // task->status=Timeout (From internal queue)
+    TerminationReason termination_reason{TerminationReason::NONE};
     bool mark_as_orphaned{false};
-    bool terminated_by_oom{false};
   };
 
   struct ChangeTaskTimeLimitQueueElem {

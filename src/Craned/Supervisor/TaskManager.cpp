@@ -1673,7 +1673,8 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
                                      bool terminated_by_user) {
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
-  elem.terminated_by_user = terminated_by_user;
+  elem.termination_reason =
+      terminated_by_user ? TerminationReason::USER : TerminationReason::NONE;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
@@ -1751,8 +1752,8 @@ void TaskManager::EvTaskTimerCb_() {
   DelTerminationTimer_();
 
   if (m_step_.IsBatch()) {
-    m_task_terminate_queue_.enqueue(
-        TaskTerminateQueueElem{.terminated_by_timeout = true});
+    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+        .termination_reason = TerminationReason::TIMEOUT});
     m_terminate_task_async_handle_->send();
   } else {
     ActivateTaskStatusChange_(m_step_.job_id,
@@ -1866,20 +1867,14 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
-      if (elem.terminated_by_timeout) {
+      if (elem.termination_reason == TerminationReason::TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
-      if (elem.terminated_by_user) {
+      if (elem.termination_reason == TerminationReason::USER) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
         task->terminated_by = TerminatedBy::CANCELLED_BY_USER;
-      }
-      if (elem.terminated_by_oom) {
-        // On OOM: force kill the whole process group to avoid parent exiting
-        // normally and unify the result as signaled termination.
-        sig = SIGKILL;
-        task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
       }
       if (task->GetPid()) {
         // For an Interactive task with a process running or a Batch task, we
@@ -1887,7 +1882,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         task->Kill(sig);
       } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
-        ActivateTaskStatusChange_(task_id, crane::grpc::Completed,
+        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
                                   ExitCode::kExitCodeTerminated, std::nullopt);
       }
     }
@@ -1908,7 +1903,8 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
     if (now - start_time >= new_time_limit) {
       // If the task times out, terminate it.
-      TaskTerminateQueueElem ev_task_terminate{.terminated_by_timeout = true};
+      TaskTerminateQueueElem ev_task_terminate{.termination_reason =
+                                                   TerminationReason::TIMEOUT};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
 
