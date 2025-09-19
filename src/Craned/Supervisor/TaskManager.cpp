@@ -623,11 +623,41 @@ CraneErrCode ContainerInstance::Prepare() {
   const auto& ca_meta = GetParentStep().container_meta();
 
   // Generate path and params.
-  m_data_path_ = g_config.Container.TempDir / fmt::format("{}", job_id);
+  m_data_path_ = std::filesystem::path(GetParentStep().cwd()) /
+                 fmt::format(kContainerLogDirPattern, job_id);
 
   // Create private dir for container task
-  if (!util::os::CreateFolders(m_data_path_)) {
+  if (std::filesystem::exists(m_data_path_)) {
+    struct stat statbuf{};
+    if (stat(m_data_path_.c_str(), &statbuf) != 0) {
+      CRANE_ERROR("Failed to stat data dir {} for task #{}", m_data_path_,
+                  job_id);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    if (statbuf.st_uid != m_parent_step_inst_->pwd.Uid() ||
+        statbuf.st_gid != GetParentStep().gid()) {
+      CRANE_ERROR(
+          "Data dir {} for task #{} has incorrect owner {}:{}, "
+          "expected {}:{}",
+          m_data_path_, job_id, statbuf.st_uid, statbuf.st_gid,
+          m_parent_step_inst_->pwd.Uid(), GetParentStep().gid());
+    }
+  } else if (!util::os::CreateFolders(m_data_path_)) {
     CRANE_ERROR("Failed to create data dir {} for task #{}", m_data_path_,
+                job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // chown & chmod for the user
+  if (chmod(m_data_path_.c_str(), 0755) != 0) {
+    CRANE_ERROR("Failed to chmod data dir {} for task #{}", m_data_path_,
+                job_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (chown(m_data_path_.c_str(), GetParentStep().uid(),
+            GetParentStep().gid()) != 0) {
+    CRANE_ERROR("Failed to chown data dir {} for task #{}", m_data_path_,
                 job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
@@ -721,6 +751,17 @@ CraneErrCode ContainerInstance::Spawn() {
     CRANE_ERROR("Failed to start container for task #{}",
                 GetParentStep().task_id());
     return ret.error();
+  }
+
+  // chown the log file for user
+  {
+    std::string log_path_str{m_data_path_ / kContainerLogFile};
+    if (chown(log_path_str.c_str(), GetParentStep().uid(),
+              GetParentStep().gid()) != 0) {
+      CRANE_ERROR("Failed to chown container log file for task #{}",
+                  GetParentStep().task_id());
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   }
 
   return CraneErrCode::SUCCESS;
@@ -908,10 +949,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
        {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
        {std::string(kCriLabelJobNameKey), job_name}});
 
-  // log_path
-  // NOTE: This is a relative path to pod log dir.
-  std::string log_path = std::format("{}.log", job_id);
-  m_container_config_.set_log_path(std::move(log_path));
+  // log_path (a relative path to pod log dir)
+  m_container_config_.set_log_path(kContainerLogFile);
 
   // image already checked and pulled.
   m_container_config_.mutable_image()->set_image(m_image_id_);

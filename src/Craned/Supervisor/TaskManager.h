@@ -19,6 +19,8 @@
 #pragma once
 #include <sched.h>
 
+#include <string_view>
+
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
@@ -310,6 +312,9 @@ class ContainerInstance : public ITaskInstance {
   static constexpr std::string_view kCriLabelJobIdKey = "job_id";
   static constexpr std::string_view kCriLabelJobNameKey = "name";
   static constexpr std::string_view kCriLabelUidKey = "uid";
+
+  static constexpr std::string_view kContainerLogDirPattern = "{}.out";
+  static constexpr std::string_view kContainerLogFile = "container.log";
 
   static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
