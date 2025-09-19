@@ -670,9 +670,15 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
   task_db_id = runtime_attr.task_db_id();
   username = runtime_attr.username();
 
+  requeue_count = runtime_attr.requeue_count();
+  craned_ids = runtime_attr.craned_ids() | std::ranges::to<std::list>();
+  primary_status = runtime_attr.primary_step_status();
+
+  primary_status = runtime_attr.primary_step_status();
+  status = runtime_attr.status();
+  primary_exit_code = runtime_attr.primary_step_exit_code();
   exit_code = runtime_attr.exit_code();
 
-  status = runtime_attr.status();
   held = runtime_attr.held();
   cached_priority = runtime_attr.cached_priority();
 

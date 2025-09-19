@@ -230,8 +230,7 @@ grpc::Status CranedServiceImpl::AllocJobs(
 
   std::vector<JobInD> jobs;
   for (const auto &job_to_d : request->jobs()) {
-    CRANE_TRACE("Allocating job #{}, uid {}", job_to_d.job_id(),
-                job_to_d.uid());
+    CRANE_INFO("Allocating job #{}, uid {}", job_to_d.job_id(), job_to_d.uid());
     jobs.emplace_back(job_to_d);
   }
 

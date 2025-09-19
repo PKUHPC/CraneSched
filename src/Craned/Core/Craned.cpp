@@ -865,6 +865,27 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                     JobInD{config_from_ctld.job_steps().at(job_id).job()});
   }
 
+  using Craned::StepStatus;
+
+  std::set<job_id_t> completing_jobs{};
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+      completing_steps{};
+  for (auto [job_id, step_id] : step_map | std::views::keys) {
+    auto status =
+        config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
+    CRANE_TRACE("[Step #{}.{}] is {}", job_id, step_id,
+                util::StepStatusToString(status));
+    if (status == StepStatus::Completing) {
+      if (step_id == kDaemonStepId) {
+        CRANE_TRACE("[Job #{}] is completing", job_id);
+        completing_jobs.insert(job_id);
+      } else {
+        CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+        completing_steps[job_id].insert(step_id);
+      }
+    }
+  }
+
   TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
   for (const auto& [job_id, step_ids] : invalid_steps)
@@ -877,6 +898,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
 
   g_server->MarkSupervisorAsRecovered();
+  g_thread_pool->detach_task([jobs = std::move(completing_jobs),
+                              steps = std::move(completing_steps)] mutable {
+    g_job_mgr->FreeJobs(std::move(jobs));
+    g_job_mgr->FreeSteps(std::move(steps));
+  });
 }
 
 void GlobalVariableInit() {

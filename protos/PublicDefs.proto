@@ -331,6 +331,7 @@ message StepToD {
 message JobStepsToD {
   JobToD job = 1;
   map<uint32, StepToD> steps = 2;
+  map<uint32, TaskStatus> step_status = 3;
 }
 
 message JobStepIds {

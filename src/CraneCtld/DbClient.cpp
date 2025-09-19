@@ -144,7 +144,7 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   return false;
 }
 
-bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
+bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
   if (tasks.empty()) return false;
   std::vector<bsoncxx::document::value> documents;
 
@@ -405,7 +405,7 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   return false;
 }
 
-bool MongodbClient::InsertSteps(const std::vector<StepInCtld*>& steps) {
+bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   if (steps.empty()) return false;
   std::vector<bsoncxx::document::value> documents;
 

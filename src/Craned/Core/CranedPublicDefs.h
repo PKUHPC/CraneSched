@@ -50,7 +50,7 @@ struct CallbackWrapper {
 };
 
 inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
-  return fmt::format("{}:{}", step.job_id(), step.step_id());
+  return fmt::format("{}.{}", step.job_id(), step.step_id());
 }
 
 struct StepStatusChangeQueueElem {

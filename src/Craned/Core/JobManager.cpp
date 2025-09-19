@@ -287,8 +287,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
                     }) | std::views::common,
                     ","));
 
-  this->CleanUpJobAndStepsAsync(std::move(jobs_to_free),
-                                std::move(steps_to_free));
+  CleanUpJobAndStepsAsync(std::move(jobs_to_free), std::move(steps_to_free));
 
   return true;
 }
@@ -302,9 +301,9 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
   CRANE_TRACE("Allocating step [{}].",
               absl::StrJoin(steps | std::views::transform(GetStepIdStr), ","));
 
-  auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
   for (const auto& step : steps) {
-    if (!job_map_ptr->contains(step.job_id())) {
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(step.job_id());
+    if (!job_ptr) {
       CRANE_WARN("Try to allocate step for nonexistent job#{}, ignoring it.",
                  step.job_id());
     } else {
@@ -1209,26 +1208,28 @@ bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
 
 void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
-  std::latch shutdown_daemon_latch{static_cast<std::ptrdiff_t>(steps.size())};
+  std::latch shutdown_step_latch{static_cast<std::ptrdiff_t>(steps.size())};
   for (auto* step : steps) {
-    if (!step->IsDaemon()) {
-      shutdown_daemon_latch.count_down();
-      continue;
-    }
-    g_thread_pool->detach_task([&shutdown_daemon_latch, step] {
+    g_thread_pool->detach_task([&shutdown_step_latch, step] {
       auto stub = g_supervisor_keeper->GetStub(step->job_id, step->step_id);
       if (!stub) {
         CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
                     step->step_id);
       } else {
-        stub->ShutdownSupervisor();
+        CRANE_TRACE("[Step #{}.{}] Shutting down supervisor.", step->job_id,
+                    step->step_id);
+        auto err = stub->ShutdownSupervisor();
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("[Step #{}.{}] Failed to shutdown supervisor.",
+                      step->job_id, step->step_id);
+        }
       }
       g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
 
-      shutdown_daemon_latch.count_down();
+      shutdown_step_latch.count_down();
     });
   }
-  shutdown_daemon_latch.wait();
+  shutdown_step_latch.wait();
 
   absl::MutexLock lk(&m_free_job_step_mtx_);
   for (auto* step : steps) {

@@ -422,6 +422,7 @@ void CtldClient::Init() {
 
         std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
         std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
+        std::unordered_map<job_id_t, std::set<step_id_t>> valid_steps{};
         for (auto job_id : valid_jobs) {
           const auto& ctld_steps = job_steps_id_map.at(job_id);
           const auto& craned_steps = exact_job_steps.at(job_id);
@@ -432,21 +433,54 @@ void CtldClient::Init() {
               craned_steps, ctld_steps,
               std::inserter(invalid_steps[job_id],
                             invalid_steps[job_id].end()));
+          std::ranges::set_intersection(
+              ctld_steps, craned_steps,
+              std::inserter(valid_steps[job_id], valid_steps[job_id].end()));
+        }
+        std::set<job_id_t> completing_jobs{};
+        std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
+            completing_steps{};
+        for (const auto& [job_id, steps] : valid_steps) {
+          for (const auto& step_id : steps) {
+            auto status =
+                arg.req.job_steps().at(job_id).step_status().at(step_id);
+            CRANE_TRACE("[Step #{}.{}] is {}", job_id, step_id,
+                        util::StepStatusToString(status));
+            if (status == StepStatus::Completing) {
+              if (step_id == kDaemonStepId) {
+                CRANE_TRACE("[Job #{}] is completing", job_id);
+                completing_jobs.insert(job_id);
+              } else {
+                CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+                completing_steps[job_id].insert(step_id);
+              }
+            }
+          }
         }
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
         if (!invalid_steps.empty()) {
-          CRANE_DEBUG("Terminating orphaned : [{}].",
-                      util::JobStepsToString(invalid_steps));
+          CRANE_INFO("Terminating orphaned : [{}].",
+                     util::JobStepsToString(invalid_steps));
           for (auto [job_id, steps] : invalid_steps) {
             for (auto step_id : steps)
               g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
           }
         }
         if (!invalid_jobs.empty()) {
-          CRANE_DEBUG("Freeing invalid jobs: [{}].",
-                      absl::StrJoin(invalid_jobs, ","));
+          CRANE_INFO("Freeing invalid jobs: [{}].",
+                     absl::StrJoin(invalid_jobs, ","));
           g_job_mgr->FreeJobs(std::move(invalid_jobs));
+        }
+        if (!completing_jobs.empty()) {
+          CRANE_INFO("Terminating completing jobs: [{}].",
+                     absl::StrJoin(completing_jobs, ","));
+          g_job_mgr->FreeJobs(std::move(completing_jobs));
+        }
+        if (!completing_steps.empty()) {
+          CRANE_INFO("Terminating completing steps: [{}].",
+                     util::JobStepsToString(completing_steps));
+          g_job_mgr->FreeSteps(std::move(completing_steps));
         }
       },
       CallbackInvokeMode::ASYNC, false);

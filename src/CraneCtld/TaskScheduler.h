@@ -603,17 +603,17 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void ProcessFinalSteps_(std::vector<StepInCtld*> const& steps);
+  static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
   static void PersistAndTransferStepsToMongodb_(
-      std::vector<StepInCtld*> const& steps);
+      std::unordered_set<StepInCtld*> const& steps);
 
-  static void ProcessFinalTasks_(std::vector<TaskInCtld*> const& tasks);
+  static void ProcessFinalTasks_(const std::unordered_set<TaskInCtld*>& tasks);
 
   static void CallPluginHookForFinalTasks_(
-      std::vector<TaskInCtld*> const& tasks);
+      std::unordered_set<TaskInCtld*> const& tasks);
 
   static void PersistAndTransferTasksToMongodb_(
-      std::vector<TaskInCtld*> const& tasks);
+      std::unordered_set<TaskInCtld*> const& tasks);
 
   CraneErrCode TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -757,21 +757,21 @@ class TaskScheduler {
                        std::unordered_map<job_id_t, std::set<step_id_t>>>
         craned_cancel_steps{};
     // Steps will update in embeddedDb
-    std::vector<StepInCtld*> rn_step_raw_ptrs;
-    std::vector<StepInCtld*> step_raw_ptrs;
+    std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
+    std::unordered_set<StepInCtld*> step_raw_ptrs;
     // Carry the ownership of StepInCtld for completed step automatic
     // destruction.
-    std::vector<std::unique_ptr<StepInCtld>> step_ptrs;
+    std::unordered_set<std::unique_ptr<StepInCtld>> step_ptrs;
 
     /* ------------------------------ jobs ------------------------------ */
 
     std::unordered_map<CranedId, std::vector<job_id_t>> craned_jobs_to_free;
     // Jobs will update in embedded db
-    std::vector<TaskInCtld*> rn_job_raw_ptrs{};
+    std::unordered_set<TaskInCtld*> rn_job_raw_ptrs{};
     // Carry the ownership of TaskInCtld for automatic destruction.
-    std::vector<std::unique_ptr<TaskInCtld>> job_ptrs;
+    std::unordered_set<std::unique_ptr<TaskInCtld>> job_ptrs;
     // Ended jobs will transfer from embedded db to mongodb
-    std::vector<TaskInCtld*> job_raw_ptrs;
+    std::unordered_set<TaskInCtld*> job_raw_ptrs;
   };
 
   enum StepStatus : uint8_t {

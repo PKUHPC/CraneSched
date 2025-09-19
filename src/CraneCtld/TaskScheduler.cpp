@@ -707,6 +707,7 @@ void TaskScheduler::ScheduleThread_() {
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
+        task->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*task);
         step_in_ctld_vec.push_back(daemon_step.get());
@@ -939,10 +940,10 @@ void TaskScheduler::ScheduleThread_() {
         }
 
         // Move failed tasks to the completed queue.
-        std::vector<TaskInCtld*> failed_task_raw_ptrs;
+        std::unordered_set<TaskInCtld*> failed_task_raw_ptrs;
         for (auto& it : failed_result_list) {
           auto& task = it.first;
-          failed_task_raw_ptrs.emplace_back(task.get());
+          failed_task_raw_ptrs.emplace(task.get());
 
           task->SetStatus(crane::grpc::Failed);
           task->SetExitCode(ExitCode::kExitCodeRpcError);
@@ -1924,9 +1925,8 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
 
-  std::vector<TaskInCtld*> pd_task_raw_ptrs;
-  for (auto& task : pending_task_ptr_vec)
-    pd_task_raw_ptrs.emplace_back(task.get());
+  std::unordered_set<TaskInCtld*> pd_task_raw_ptrs;
+  for (auto& task : pending_task_ptr_vec) pd_task_raw_ptrs.emplace(task.get());
   ProcessFinalTasks_(pd_task_raw_ptrs);
 }
 
@@ -2078,7 +2078,7 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
                     step->StepId());
         step->SetStatus(crane::grpc::TaskStatus::Running);
 
-        context->rn_step_raw_ptrs.push_back(step);
+        context->rn_step_raw_ptrs.insert(step);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
         g_embedded_db_client->AppendSteps({primary_step.get()});
@@ -2090,8 +2090,10 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
       }
     }
     break;
+
   case crane::grpc::TaskStatus::Running:
-    // Running -> Completed / Failed
+  case crane::grpc::TaskStatus::Completing:
+    // Completing -> Completed / Failed
 
     step->NodeFinish(craned_id);
     if (new_status != crane::grpc::TaskStatus::Completed) {
@@ -2133,8 +2135,8 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
                  step->StepId(), StepStatusToString(step->Status()));
     }
-    context->step_raw_ptrs.push_back(step);
-    context->step_ptrs.emplace_back(job->ReleaseDaemonStep());
+    context->step_raw_ptrs.insert(step);
+    context->step_ptrs.emplace(job->ReleaseDaemonStep());
     return job->PrimaryStepStatus();
   }
   return std::nullopt;
@@ -2190,7 +2192,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
         // Primary:Update job status when primary step is Running.
         if (primary_step) {
           job->SetStatus(crane::grpc::TaskStatus::Running);
-          context->rn_job_raw_ptrs.push_back(job);
+          context->rn_job_raw_ptrs.insert(job);
         }
 
         // Launch step execution
@@ -2198,7 +2200,7 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
           context->craned_step_exec_map[node][step->job_id].insert(
               step->StepId());
         }
-        context->rn_step_raw_ptrs.push_back(step);
+        context->rn_step_raw_ptrs.insert(step);
       }
     }
   } else if (step->Status() == crane::grpc::TaskStatus::Running) {
@@ -2233,6 +2235,8 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
       }
 
       if (primary_step) {
+        job->DaemonStep()->SetStatus(crane::grpc::Completing);
+        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
         // Primary step CONFIGURE_FAILED, free daemon step, will send status
         // change.
         for (const auto& node : job->DaemonStep()->CranedIds()) {
@@ -2242,6 +2246,8 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
     } else {
       // Step COMPLETED
       if (primary_step) {
+        job->DaemonStep()->SetStatus(crane::grpc::Completing);
+        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
         // Primary step finish, free daemon step, will send status change.
         for (const auto& node : job->DaemonStep()->CranedIds()) {
           context->craned_jobs_to_free[node].emplace_back(job->TaskId());
@@ -2254,28 +2260,30 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
                 comm_step->StepId());
           }
         }
+      } else {
+        for (const auto& node : step->ExecutionNodes()) {
+          context->craned_step_free_map[node][step->job_id].insert(
+              step->StepId());
+        }
       }
       if (step->FinishWithFailedStatus()) {
         step->SetStatus(step->FinishFailedStatus());
       } else {
         step->SetStatus(crane::grpc::TaskStatus::Completed);
       }
-      for (const auto& node : step->CranedIds()) {
-        context->craned_step_free_map[node][step->job_id].insert(
-            step->StepId());
-      }
+
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
                  step->StepId(), util::StepStatusToString(step->Status()));
     }
 
-    context->step_raw_ptrs.push_back(step);
+    context->step_raw_ptrs.insert(step);
     if (primary_step) {
       job->SetPrimaryStepStatus(step->Status());
       job->SetPrimaryStepExitCode(exit_code);
-      context->rn_job_raw_ptrs.push_back(job);
-      context->step_ptrs.emplace_back(job->ReleasePrimaryStep());
+      context->rn_job_raw_ptrs.insert(job);
+      context->step_ptrs.emplace(job->ReleasePrimaryStep());
     } else {
-      context->step_ptrs.emplace_back(job->EraseStep(step_id));
+      context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
 
@@ -2389,8 +2397,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                                                task->TaskId());
       g_account_meta_container->FreeQosResource(*task);
 
-      context.job_raw_ptrs.emplace_back(task.get());
-      context.job_ptrs.emplace_back(std::move(task));
+      context.job_raw_ptrs.insert(task.get());
+      context.job_ptrs.emplace(std::move(task));
 
       // As for now, task status change includes only
       // Pending / Running -> Completed / Failed / Cancelled.
@@ -2437,12 +2445,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                     }),
                 ","),
             craned_id);
-        for (const auto& [job_id, step_ids] :
-             context.craned_step_exec_map.at(craned_id)) {
-          for (const auto& step_id : step_ids)
-            StepStatusChangeWithReasonAsync(
-                job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeCranedDown, "CranedDown");
+        for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
+          StepStatusChangeWithReasonAsync(
+              steps.job_id(), steps.step_id(), craned_id,
+              crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+              "CranedDown");
         }
       }
       alloc_step_latch.count_down();
@@ -2555,9 +2562,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   std::latch free_job_latch{
       static_cast<std::ptrdiff_t>(context.craned_jobs_to_free.size())};
   for (const auto& craned_id : context.craned_jobs_to_free | std::views::keys) {
-    g_thread_pool->detach_task([&free_job_latch, craned_id, &context]() {
+    g_thread_pool->detach_task([this, &free_job_latch, craned_id, &context] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
+      bool success{false};
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         const auto& jobs = context.craned_jobs_to_free.at(craned_id);
@@ -2565,6 +2572,14 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to FreeJobs for [{}] on Node {}",
                       absl::StrJoin(jobs, ","), craned_id);
+        } else
+          success = true;
+      }
+      if (!success) {
+        for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
+          StepStatusChangeWithReasonAsync(
+              job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::kExitCodeRpcError, "Rpc failure when free job");
         }
       }
       free_job_latch.count_down();
@@ -2749,21 +2764,24 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
   for (const auto& job_id : it->second) {
     auto job_it = m_running_task_map_.find(job_id);
     if (job_it == m_running_task_map_.end()) continue;
-
-    *job_steps[job_id].mutable_job() =
-        job_it->second->DaemonStep()->GetJobToD(craned_id);
+    auto* daemon_step = job_it->second->DaemonStep();
+    *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
-    steps[job_it->second->DaemonStep()->StepId()] =
-        job_it->second->DaemonStep()->GetStepToD(craned_id);
+    auto& step_status = *job_steps[job_id].mutable_step_status();
+    steps[daemon_step->StepId()] = daemon_step->GetStepToD(craned_id);
+    step_status[daemon_step->StepId()] = daemon_step->Status();
     if (job_it->second->PrimaryStep() &&
         std::ranges::contains(job_it->second->PrimaryStep()->ExecutionNodes(),
                               craned_id)) {
       const auto* step = job_it->second->PrimaryStep();
       steps[step->StepId()] = step->GetStepToD(craned_id);
+      step_status[step->StepId()] = step->Status();
     }
     for (const auto& step : job_it->second->Steps() | std::views::values)
-      if (std::ranges::contains(step->ExecutionNodes(), craned_id))
+      if (std::ranges::contains(step->ExecutionNodes(), craned_id)) {
         steps[step->StepId()] = step->GetStepToD(craned_id);
+        step_status[step->StepId()] = step->Status();
+      }
   }
 }
 
@@ -3548,13 +3566,14 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   }
 }
 
-void TaskScheduler::ProcessFinalSteps_(std::vector<StepInCtld*> const& steps) {
+void TaskScheduler::ProcessFinalSteps_(
+    std::unordered_set<StepInCtld*> const& steps) {
   PersistAndTransferStepsToMongodb_(steps);
   // CallPluginHookForFinalTasks_(tasks);
 }
 
 void TaskScheduler::PersistAndTransferStepsToMongodb_(
-    std::vector<StepInCtld*> const& steps) {
+    std::unordered_set<StepInCtld*> const& steps) {
   if (steps.empty()) return;
 
   txn_id_t txn_id;
@@ -3587,13 +3606,14 @@ void TaskScheduler::PersistAndTransferStepsToMongodb_(
   }
 }
 
-void TaskScheduler::ProcessFinalTasks_(const std::vector<TaskInCtld*>& tasks) {
+void TaskScheduler::ProcessFinalTasks_(
+    const std::unordered_set<TaskInCtld*>& tasks) {
   PersistAndTransferTasksToMongodb_(tasks);
   CallPluginHookForFinalTasks_(tasks);
 }
 
 void TaskScheduler::CallPluginHookForFinalTasks_(
-    std::vector<TaskInCtld*> const& tasks) {
+    std::unordered_set<TaskInCtld*> const& tasks) {
   if (g_config.Plugin.Enabled && !tasks.empty()) {
     std::vector<crane::grpc::TaskInfo> tasks_post_comp;
     for (TaskInCtld* task : tasks) {
@@ -3606,7 +3626,7 @@ void TaskScheduler::CallPluginHookForFinalTasks_(
 }
 
 void TaskScheduler::PersistAndTransferTasksToMongodb_(
-    std::vector<TaskInCtld*> const& tasks) {
+    std::unordered_set<TaskInCtld*> const& tasks) {
   if (tasks.empty()) return;
 
   txn_id_t txn_id;

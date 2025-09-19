@@ -81,6 +81,8 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
     return CraneErrCode::SUCCESS;
   }
 
+  CRANE_WARN("TerminateTask failed: reply {},{}", reply.ok(),
+             ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
@@ -93,6 +95,8 @@ CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
   auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
+  CRANE_WARN("ChangeTaskTimeLimit failed: reply {},{}", reply.ok(),
+             ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
@@ -104,6 +108,7 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   auto ok = m_stub_->ShutdownSupervisor(&context, request, &reply);
   if (ok.ok()) return CraneErrCode::SUCCESS;
 
+  CRANE_WARN("ShutdownSupervisor failed: ok,{}", ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
@@ -181,7 +186,7 @@ void SupervisorKeeper::AddSupervisor(job_id_t job_id, step_id_t step_id) {
   absl::WriterMutexLock lk(&m_mutex_);
   if (auto it = m_supervisor_map_.find({job_id, step_id});
       it != m_supervisor_map_.end()) {
-    CRANE_ERROR("[Step #{}.{}]Duplicate supervisor", job_id, step_id);
+    CRANE_ERROR("[Step #{}.{}] Duplicate supervisor", job_id, step_id);
     return;
   }
 
@@ -192,10 +197,10 @@ void SupervisorKeeper::RemoveSupervisor(job_id_t job_id, step_id_t step_id) {
   absl::WriterMutexLock lk(&m_mutex_);
   if (auto it = m_supervisor_map_.find({job_id, step_id});
       it != m_supervisor_map_.end()) {
-    CRANE_TRACE("[Step #{}.{}]Removing supervisor", job_id, step_id);
+    CRANE_TRACE("[Step #{}.{}] Removing supervisor", job_id, step_id);
     m_supervisor_map_.erase(it);
   } else {
-    CRANE_ERROR("[Step #{}.{}]Try to remove non-existent supervisor", job_id,
+    CRANE_ERROR("[Step #{}.{}] Try to remove non-existent supervisor", job_id,
                 step_id);
   }
 }

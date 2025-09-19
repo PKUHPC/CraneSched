@@ -111,7 +111,7 @@ class MongodbClient {
   bool InsertRecoveredJob(
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
-  bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
+  bool InsertJobs(const std::unordered_set<TaskInCtld*>& tasks);
 
   bool FetchJobRecords(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response,
@@ -120,7 +120,7 @@ class MongodbClient {
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
   /* ----- Method of operating the step table ----------- */
-  bool InsertSteps(const std::vector<StepInCtld*>& steps);
+  bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
 
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
