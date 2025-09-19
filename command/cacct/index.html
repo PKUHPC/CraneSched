@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cacct 查看作业信息 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cacct \u67e5\u770b\u4f5c\u4e1a\u4fe1\u606f";
+        var mkdocs_page_input_path = "command/cacct.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cacct 查看作业信息</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">主要参数</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">cacct 查看作业信息</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cacct">cacct 查看作业信息</h1>
+<p><strong>cacct可以查看队列中的作业信息。</strong></p>
+<p>查看集群中所有队列的作业信息（包括所有状态），默认输出100条信息。</p>
+<pre><code class="language-Bash">cacct
+</code></pre>
+<p><strong>cacct运行结果展示</strong></p>
+<p><img alt="cacctmgr" src="../../images/cacct/cacct.png" /></p>
+<p><strong>主要输出项</strong></p>
+<ul>
+<li><strong>TaskId</strong>：作业号</li>
+<li><strong>TaskName</strong>: 作业名</li>
+<li><strong>Partition</strong>：作业所在分区</li>
+<li><strong>Account</strong>：作业所属账户</li>
+<li><strong>AllocCPUs</strong>：作业分配的CPU数量</li>
+<li><strong>State</strong>：作业状态</li>
+<li><strong>ExitCode</strong>：作业状态码</li>
+</ul>
+<h4 id="_1"><strong>主要参数</strong></h4>
+<ul>
+<li><strong>-A/--account string</strong>：指定查询作业的所属账户，指定多个账户时用逗号隔开</li>
+<li><strong>-C/--config string：</strong>配置文件路径(默认为 "/etc/crane/config.yaml")</li>
+<li><strong>-E/--end-time string</strong>：指定查询该时间之前结束的作业，例：cacct -E=~2023-03-14T10:00:00</li>
+<li><strong>-o/--format string：</strong>指定输出格式。由百分号（%）后接一个字符或字符串标识。 在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符或字符串（不区分大小写）：</li>
+<li><strong>%a/%Account：</strong> 显示作业关联的账户</li>
+<li><strong>%c/%AllocCpus：</strong>显示作业已分配的 CPU 数量</li>
+<li><strong>%e/%CpuPerNode：</strong>显示作业每个节点请求的 CPU 数量</li>
+<li><strong>%h/%ElapsedTime：</strong>显示作业自启动以来的已用时间</li>
+<li><strong>%j/%JobId：</strong>显示作业 ID</li>
+<li><strong>%k/%Comment：</strong>显示作业的备注</li>
+<li><strong>%l/%NodeList：</strong>显示作业正在运行的节点列表</li>
+<li><strong>%m/%TimeLimit：</strong>显示作业的时间限制</li>
+<li><strong>%n/%MemPerNode：</strong>显示作业每个节点请求的内存量</li>
+<li><strong>%N/%NodeNum：</strong>显示作业请求的节点数量</li>
+<li><strong>%n/%Name：</strong>显示作业名称</li>
+<li><strong>%P/%Partition：</strong>显示作业运行所在的分区</li>
+<li><strong>%p/%Priority：</strong>显示作业的优先级</li>
+<li><strong>%Q/%QOS</strong>：显示作业的服务质量（QoS）级别</li>
+<li><strong>%R/%Reason：</strong>显示作业挂起的原因</li>
+<li><strong>%r/%ReqNodes：</strong>显示作业请求的节点</li>
+<li><strong>%S/%StartTime：</strong>显示作业的开始时间</li>
+<li><strong>%s/%SubmitTime：</strong>显示作业的提交时间</li>
+<li><strong>%t/%State：</strong>显示作业的当前状态</li>
+<li><strong>%T/%JobType：</strong>显示作业类型</li>
+<li><strong>%u/%Uid</strong>：**显示作业的 UID</li>
+<li><strong>%U/%User：</strong>显示提交作业的用户</li>
+<li><strong>%x/%ExcludeNodes：</strong>显示作业排除的节点</li>
+<li>每个格式标识符或字符串可用宽度说明符修改（如 "%.5j" ）。 若指定宽度，则会被格式化为至少达到该宽度。 若格式无效或无法识别，程序会报错并终止。 <ul>
+<li><strong>例：--format "%.5j %.20n %t"</strong> 会输出作业 ID（最小宽度 5）、名称（最小宽度 20）和状态。</li>
+</ul>
+</li>
+<li><strong>-F/-full</strong>：显示完整信息</li>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-j/--job string</strong>：指定查询作业号，指定多个作业号时用逗号隔开。如 -j=2,3,4</li>
+<li><strong>--json</strong>：json格式输出命令执行结果</li>
+<li><strong>-m/--max-lines</strong> <strong>uint32</strong>：指定输出结果的最大条数。如-m=500表示最多输出500行查询结果</li>
+<li><strong>-n/ --name string</strong>：指定查询作业名，指定多个作业名时用逗号隔开</li>
+<li><strong>-N/--no header</strong>：输出隐藏表头</li>
+<li><strong>-p/--partition string</strong>：指定要查看的分区，多个分区名用逗号隔开，默认为全部</li>
+<li><strong>-q/--qos string</strong>：指定要查看的Qos，多个Qos用逗号隔开，默认为全部</li>
+<li><strong>-S/--start-time string</strong>：筛选开始时间在特定时间段内的作业，可使用闭区间（时间格式：2024-01-02T15:04:05~2024-01-11T11:12:41 ）或半开区间（时间格式：2024-01-02T15:04:05~ 或 ~2024-01-11T11:12:41 ）</li>
+<li><strong>-t/--state string</strong>：指定要查看的作业状态，支持的状态：pending(p)（挂起 ）、running(r)（运行中 ）、completed(c)（已完成 ）、failed(f)（失败 ）、cancelled(x)（已取消 ）、time-limit-exceeded(t)（超时 ）、all（所有 ）。（默认 “all” ）</li>
+<li><strong>-s/--submit-time string</strong>：筛选提交时间在特定时间段内的作业，可使用闭区间（时间格式：2024-01-02T15:04:05~2024-01-11T11:12:41 ）或半开区间（时间格式：2024-01-02T15:04:05~ 或 ~2024-01-11T11:12:41 ）</li>
+<li><strong>-u/--user string</strong>：指定查询某个用户的作业，指定多个用户时用逗号隔开</li>
+<li><strong>-v/--version：</strong>查询版本号</li>
+<li>例：</li>
+</ul>
+<pre><code class="language-SQL">cacct
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/cacct.png" /></p>
+<pre><code class="language-SQL">cacct -h
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/h.png" /></p>
+<pre><code class="language-SQL">cacct -N
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/N.png" /></p>
+<pre><code class="language-SQL">cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/S.png" /></p>
+<pre><code class="language-SQL">cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/E.png" /></p>
+<pre><code class="language-SQL">cacct -j=30618,30619,30620
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/j.png" /></p>
+<pre><code class="language-SQL">cacct -u=cranetest
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/u.png" /></p>
+<pre><code class="language-SQL">cacct -A=CraneTest
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/A.png" /></p>
+<pre><code class="language-SQL">cacct -m=10
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/m.png" /></p>
+<pre><code class="language-C">cacct -p GPU
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/p.png" /></p>
+<pre><code class="language-C">cacct -n=Test_Job
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/nt.png" /></p>
+<pre><code class="language-SQL">cacct -o=&quot;%j %.10n %P %a %t&quot;
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/o.png" /></p>
+<pre><code class="language-Bash">cacct -A ROOT -m 10
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/am.png" /></p>
+<pre><code class="language-Bash">cacct -m 10 -j 783925,783889 -t=c -F
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/mj.png" /></p>
+<pre><code class="language-Bash">cacct -n test
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/ntest.png" /></p>
+<pre><code class="language-Bash">cacct -q test_qos
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/qt.png" /></p>
+<pre><code class="language-Bash">cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T110:00:00 -p CPU -t c
+</code></pre>
+<p><img alt="cacctmgr" src="../../images/cacct/me.png" /></p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../.." class="btn btn-neutral float-left" title="欢迎使用 CraneSched 文档"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../cacctmgr/" class="btn btn-neutral float-right" title="cacctmgr 管理用户/账户信息">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../.." style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../cacctmgr/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

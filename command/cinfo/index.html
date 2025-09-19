@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cinfo 查看节点与分区状态 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cinfo \u67e5\u770b\u8282\u70b9\u4e0e\u5206\u533a\u72b6\u6001";
+        var mkdocs_page_input_path = "command/cinfo.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cinfo 查看节点与分区状态</a>
+    <ul class="current">
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">cinfo 查看节点与分区状态</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cinfo">cinfo 查看节点与分区状态</h1>
+<p><strong>cinfo可查询各分区节点的队列资源信息。</strong></p>
+<p>查看分区节点状态：</p>
+<pre><code class="language-bash">cinfo
+</code></pre>
+<p><strong>cinfo运行结果展示</strong></p>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_running.png" /></p>
+<p><strong>主要输出项</strong>
+- <strong>PARTITION</strong>：分区名
+- <strong>AVAIL</strong>： 分区状态
+  - up:  可用
+  - down:不可用
+- <strong>NODES</strong>：节点数
+- <strong>STATE</strong>： 节点状态
+  - <strong>idle</strong>： 空闲
+  - mix： 节点部分核心可以使用
+  - alloc： 节点已被占用
+  - down： 节点不可用
+- <strong>NODELIST</strong>： 节点列表</p>
+<p><strong>主要参数</strong>
+- <strong>-h/--help</strong>: 显示帮助
+- <strong>-C/--config string</strong>：配置文件路径(默认为 "/etc/crane/config.yaml")
+- <strong>-d/--dead</strong>：只显示无响应节点
+- <strong>-i/--iterate uint</strong>：指定间隔秒数刷新查询结果。如 -i=3表示每隔三秒输出一次查询结果
+- <strong>-o/--format string</strong> 指定输出格式
+  - <strong>% p /% Partition</strong> —— 显示当前环境中的所有分区
+  - <strong>% a/% Avail</strong> —— 显示节点的状态
+  - <strong>% n/% Nodes</strong> —— 显示分区节点的数量
+  - <strong>% s/% State</strong> —— 显示分区节点的状态
+  - <strong>% l/% NodeList</strong> —— 显示分区中的所有节点列表</p>
+<p>每个格式标识符或字符串都可以用宽度说明符修改（例如，“%.5j” ）。如果指定了宽度，字段将被格式化为至少达到该宽度。如果格式无效或无法识别，程序将报错并终止。</p>
+<ul>
+<li><strong>--json</strong>：json格式输出命令执行结果</li>
+<li><strong>-n/--nodes string</strong>：显示指定节点信息，多个节点用逗号隔开。例：cinfo -n crane01,crane02</li>
+<li><strong>-N/--noheader</strong>：输出隐藏表头</li>
+<li><strong>-p/--partition string</strong>：显示指定分区信息，多个分区用逗号隔开。例：cinfo -p CPU,GPU</li>
+<li><strong>-r/--responding</strong>：只显示有响应节点</li>
+<li><strong>-t/--states string</strong>：仅显示状态的信息。状态可以为(不区分大小写): IDLE, MIX, ALLOC和DOWN</li>
+<li><strong>-v/--version</strong>：查询版本号</li>
+</ul>
+<p>例：</p>
+<pre><code>cinfo
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_running.png" /></p>
+<pre><code>cinfo -h
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_h.png" /></p>
+<pre><code>cinfo -N
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_n.png" /></p>
+<pre><code>cinfo -d
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_d.png" /></p>
+<pre><code>cinfo -i 3
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_i3.png" /></p>
+<pre><code>cinfo -n crane01,crane02,crane03
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_n123.png" /></p>
+<pre><code class="language-SQL">cinfo -p GPU,CPU
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_p.png" /></p>
+<pre><code class="language-SQL">cinfo -r
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_r.png" /></p>
+<pre><code class="language-SQL">cinfo -t IDLE
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_t.png" /></p>
+<pre><code class="language-Bash">cinfo -v
+</code></pre>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_v.png" /></p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../ceff/" class="btn btn-neutral float-left" title="ceff 查看作业运行实况"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../cqueue/" class="btn btn-neutral float-right" title="cqueue 查看作业队列">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../ceff/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../cqueue/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
