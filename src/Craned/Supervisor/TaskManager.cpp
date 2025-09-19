@@ -132,10 +132,14 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
-void StepInstance::InitOomBaseline(pid_t pid) {
-  auto cgp = Common::CgroupManager::ResolveCgroupPathForPid(pid);
-  if (!cgp.has_value()) return;
-  cgroup_path = *cgp;
+void StepInstance::InitOomBaseline() {
+  // Use cgroup path passed from Craned
+  if (g_config.CgroupPath.empty()) {
+    CRANE_ERROR("[OOM] No cgroup path provided from Craned");
+    return;
+  }
+  cgroup_path = g_config.CgroupPath;
+
   uint64_t oom_kill = 0, oom = 0;
   if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
                                                           oom)) {
@@ -1674,7 +1678,7 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
   elem.termination_reason =
-      terminated_by_user ? TerminationReason::USER : TerminationReason::NONE;
+      terminated_by_user ? TerminatedBy::CANCELLED_BY_USER : TerminatedBy::NONE;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
@@ -1753,7 +1757,7 @@ void TaskManager::EvTaskTimerCb_() {
 
   if (m_step_.IsBatch()) {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
-        .termination_reason = TerminationReason::TIMEOUT});
+        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
   } else {
     ActivateTaskStatusChange_(m_step_.job_id,
@@ -1867,10 +1871,10 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
-      if (elem.termination_reason == TerminationReason::TIMEOUT) {
+      if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
-      if (elem.termination_reason == TerminationReason::USER) {
+      if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
@@ -1903,8 +1907,8 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
     if (now - start_time >= new_time_limit) {
       // If the task times out, terminate it.
-      TaskTerminateQueueElem ev_task_terminate{.termination_reason =
-                                                   TerminationReason::TIMEOUT};
+      TaskTerminateQueueElem ev_task_terminate{
+          .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
 
@@ -1966,9 +1970,8 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
                  spawned_pid);
       m_pid_task_id_map_[spawned_pid] = task->task_id;
-      pid_t pid_for_baseline = spawned_pid;
       m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
-      m_step_.InitOomBaseline(pid_for_baseline);
+      m_step_.InitOomBaseline();
 
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }

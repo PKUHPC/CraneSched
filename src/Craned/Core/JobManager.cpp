@@ -519,6 +519,16 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.mutable_env()->clear();
     init_req.mutable_env()->insert(res_env_map.begin(), res_env_map.end());
 
+    // Pass cgroup path to supervisor for OOM monitoring
+    if (job->cgroup) {
+      std::string cgroup_path_str = job->cgroup->CgroupPath().string();
+      init_req.set_cgroup_path(cgroup_path_str);
+      CRANE_TRACE("[Task #{}] Setting cgroup path: {}", task_id,
+                  cgroup_path_str);
+    } else {
+      CRANE_WARN("[Task #{}] No cgroup available for job", task_id);
+    }
+
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
       container_conf->set_temp_dir(g_config.Container.TempDir);

@@ -37,8 +37,6 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
-enum class TerminationReason : uint8_t { NONE = 0, USER, TIMEOUT, OOM };
-
 struct ITaskInstance;
 
 class StepInstance {
@@ -109,7 +107,7 @@ class StepInstance {
   EnvMap GetStepProcessEnv() const;
 
   // OOM monitoring methods
-  void InitOomBaseline(pid_t pid);
+  void InitOomBaseline();
   bool EvaluateOomOnExit();
 
   void AddTaskInstance(task_id_t task_id,
@@ -372,7 +370,7 @@ class TaskManager {
   };
 
   struct TaskTerminateQueueElem {
-    TerminationReason termination_reason{TerminationReason::NONE};
+    TerminatedBy termination_reason{TerminatedBy::NONE};
     bool mark_as_orphaned{false};
   };
 
