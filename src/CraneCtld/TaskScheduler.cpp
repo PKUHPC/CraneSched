@@ -145,7 +145,7 @@ bool TaskScheduler::Init() {
 
       bool mark_task_as_failed = false;
 
-      if (task->type != crane::grpc::Batch) {
+      if (task->type == crane::grpc::Interactive) {
         CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
         mark_task_as_failed = true;
       }
@@ -833,7 +833,7 @@ void TaskScheduler::ScheduleThread_() {
 
         CraneExpected failed_task_ids = stub->ExecuteSteps(tasks);
         if (!failed_task_ids.has_value()) {
-          for (auto& task : tasks.tasks()) {
+          for (const auto& task : tasks.tasks()) {
             failed_to_exec_job_id_map[craned_id].first.push_back(
                 task.task_id());
             failed_to_exec_job_id_map[craned_id].second =
@@ -2079,9 +2079,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
 
-    if (task->type == crane::grpc::Batch) {
+    if (task->type == crane::grpc::Batch ||
+        task->type == crane::grpc::Container) {
       task->SetStatus(new_status);
-    } else {
+    } else if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
       if (meta.interactive_type == crane::grpc::Crun) {  // Crun
         if (++meta.status_change_cnt < task->executing_craned_ids.size()) {
@@ -2112,6 +2113,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
 
       task->SetStatus(new_status);
+    } else {
+      std::unreachable();
     }
 
     task->SetExitCode(exit_code);
@@ -2284,6 +2287,14 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
+  bool no_task_types_constraint = request->filter_task_types().empty();
+  std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
+                                         request->filter_task_types().end());
+  auto task_rng_filter_task_type = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_types_constraint || req_task_types.contains(task.type);
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
@@ -2300,6 +2311,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
+                      ranges::views::filter(task_rng_filter_task_type) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -3150,7 +3162,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
-  if (task->type == crane::grpc::Batch) {
+  if (task->IsBatch()) {
     auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
     if (!batch_meta->has_open_mode_append())
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
