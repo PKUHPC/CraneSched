@@ -89,6 +89,35 @@ struct BsonFieldTrait<bsoncxx::document::view> {
   static constexpr bsoncxx::type bson_type = bsoncxx::type::k_document;
 };
 
+template <typename T>
+class ThreadSafeQueue {
+ public:
+  void Push(T&& value) {
+    std::lock_guard<std::mutex> lock(m_);
+    q_.push(std::move(value));
+    cv_.notify_one();
+  }
+  bool Pop(T& value) {
+    std::unique_lock<std::mutex> lock(m_);
+    cv_.wait(lock, [&] { return !q_.empty() || finished_; });
+    if (q_.empty()) return false;
+    value = std::move(q_.front());
+    q_.pop();
+    return true;
+  }
+  void SetFinished() {
+    std::lock_guard<std::mutex> lock(m_);
+    finished_ = true;
+    cv_.notify_all();
+  }
+
+ private:
+  std::queue<T> q_;
+  std::mutex m_;
+  std::condition_variable cv_;
+  bool finished_{false};
+};
+
 class MongodbClient {
  private:
   using array = bsoncxx::builder::basic::array;
@@ -201,6 +230,18 @@ class MongodbClient {
   bool HandleHourAccountUserWckeyResult(const bsoncxx::array::view& arr,
                                         mongocxx::collection& dst_collection,
                                         bool print_debug_log);
+  bool HandleAccountUserAggArray(const bsoncxx::array::view& arr,
+                                 mongocxx::collection& dst_coll,
+                                 const std::string& dst_time_field,
+                                 bool print_debug_log);
+  bool HandleAccountUserWckeyAggArray(const bsoncxx::array::view& arr,
+                                      mongocxx::collection& dst_coll,
+                                      const std::string& dst_time_field,
+                                      bool print_debug_log);
+  bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end,
+                             bool print_debug_log);
+  bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end,
+                            bool print_debug_log);
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
