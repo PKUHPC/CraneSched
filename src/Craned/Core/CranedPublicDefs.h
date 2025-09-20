@@ -81,6 +81,8 @@ struct Config {
     struct TlsCertsConfig {
       bool Enabled{false};
       TlsCertificates TlsCerts;
+      std::string CaFilePath;
+      std::string CaContent;
       std::string DomainSuffix;
     };
 

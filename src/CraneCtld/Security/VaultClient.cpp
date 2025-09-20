@@ -60,8 +60,6 @@ bool VaultClient::InitFromConfig(const Config::VaultConfig& vault_config) {
   // Init Pki
   m_pki_root_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*m_root_client_, Vault::SecretMount{"pki"}});
-  m_pki_external_ = std::make_unique<Vault::Pki>(
-      Vault::Pki{*m_root_client_, Vault::SecretMount{"pki_external"}});
 
   CRANE_TRACE("Successfully connected to Vault, username: {}",
               vault_config.Username);
@@ -79,7 +77,7 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
 
   try {
     std::optional<std::string> resp =
-        m_pki_external_->sign(Vault::Path{"external"}, parameters);
+        m_pki_root_->sign(Vault::Path{"CraneSched"}, parameters);
     if (!resp) return std::nullopt;
 
     nlohmann::json json = nlohmann::json::parse(resp.value());
@@ -105,10 +103,10 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
 
 bool VaultClient::RevokeCert(const std::string& serial_number) {
   try {
-    std::optional<std::string> resp = Post_(
-        *m_root_client_,
-        GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
-        Vault::Parameters{{"serial_number", serial_number}});
+    std::optional<std::string> resp =
+        Post_(*m_root_client_,
+              GetPkiUrl_(Vault::SecretMount{"pki"}, Vault::Path{"revoke"}),
+              Vault::Parameters{{"serial_number", serial_number}});
 
     if (!resp) return false;
 
@@ -131,7 +129,7 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
 
   try {
     std::optional<std::string> resp =
-        m_pki_external_->readCertificate(Vault::Path{serial_number});
+        m_pki_root_->readCertificate(Vault::Path{serial_number});
     if (!resp) return false;
 
     nlohmann::json json = nlohmann::json::parse(resp.value());
