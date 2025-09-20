@@ -3370,6 +3370,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       task->pending_reason = "Held";
       continue;
     }
+    if (task->begin_time > now) {
+      task->pending_reason = "BeginTime";
+      continue;
+    }
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)
