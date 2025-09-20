@@ -3371,7 +3371,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       continue;
     }
     if (task->begin_time > now) {
-      task->pending_reason = "(BeginTime)";
+      task->pending_reason = "BeginTime";
       continue;
     }
     // Admin may manually specify the priority of a task.

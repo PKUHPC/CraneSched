@@ -400,6 +400,7 @@ struct TaskInCtld {
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
