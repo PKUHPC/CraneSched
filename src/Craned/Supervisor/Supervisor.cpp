@@ -95,6 +95,9 @@ void InitFromStdin(int argc, char** argv) {
     g_config.JobEnv.emplace(key, value);
   }
 
+  // Cgroup path for OOM monitoring
+  g_config.CgroupPath = msg.cgroup_path();
+
   // Container config
   g_config.Container.Enabled = msg.has_container_config();
   if (g_config.Container.Enabled) {

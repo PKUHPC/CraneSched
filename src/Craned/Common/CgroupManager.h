@@ -102,6 +102,13 @@ inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
 
+// Common cgroup filename constants
+// cgroup v2 memory events file used to read OOM and OOM_KILL counters
+inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
+// cgroup v1 memory oom control file used to read OOM_KILL counter
+inline constexpr std::string_view kMemoryOomControlFileV1 =
+    "memory.oom_control";
+
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
@@ -554,7 +561,22 @@ class CgroupManager {
     return m_cg_version_;
   }
 
+  [[nodiscard]] static bool IsCgV2() {
+    return m_cg_version_ == CgConstant::CgroupVersion::CGROUP_V2;
+  }
+
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
+
+  // Resolve actual cgroup fs path (memory controller path for v1, unified
+  // path for v2) for a pid inside crane hierarchy.
+  static std::optional<std::string> ResolveCgroupPathForPid(pid_t pid);
+
+  // Read OOM related counters from a cgroup path. For cgroup v2, both
+  // oom_kill and oom are read from memory.events. For cgroup v1, only
+  // oom_kill is read from memory.oom_control and 'oom' will stay 0.
+  // Returns false on any failure.
+  static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
+                                          uint64_t &oom_kill, uint64_t &oom);
 
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(

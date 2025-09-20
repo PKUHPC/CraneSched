@@ -28,6 +28,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CforedClient.h"
+#include "CgroupManager.h"
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
@@ -36,6 +37,8 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
+
+using Common::CgroupManager;
 
 StepInstance::~StepInstance() {
   if (termination_timer) {
@@ -129,6 +132,59 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
+void StepInstance::InitOomBaseline() {
+  // Use cgroup path passed from Craned
+  if (g_config.CgroupPath.empty()) {
+    CRANE_ERROR("[OOM] No cgroup path provided from Craned");
+    return;
+  }
+  cgroup_path = g_config.CgroupPath;
+
+  uint64_t oom_kill = 0, oom = 0;
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
+                                                          oom)) {
+    CRANE_ERROR("[OOM] Failed to read OOM counts from cgroup path , path={}",
+                cgroup_path);
+    return;
+  }
+  baseline_oom_kill_count = oom_kill;
+  if (Common::CgroupManager::IsCgV2()) baseline_oom_count = oom;
+  oom_baseline_inited = true;
+  CRANE_DEBUG("[OOM] Baseline inited: v2={}, path={}, oom={}, oom_kill={}",
+              Common::CgroupManager::IsCgV2(), cgroup_path, baseline_oom_count,
+              baseline_oom_kill_count);
+}
+
+bool StepInstance::EvaluateOomOnExit() {
+  if (!oom_baseline_inited || cgroup_path.empty()) {
+    CRANE_TRACE("[OOM] Skip evaluation: baseline_inited={} path='{}'",
+                oom_baseline_inited, cgroup_path);
+    return false;
+  }
+  uint64_t oom_kill = 0, oom = 0;
+  if (!Common::CgroupManager::ReadOomCountsFromCgroupPath(cgroup_path, oom_kill,
+                                                          oom))
+    return false;
+  if (Common::CgroupManager::IsCgV2()) {
+    CRANE_DEBUG(
+        "[OOM] Evaluate v2 path={} baseline(oom={},oom_kill={}) "
+        "current(oom={},oom_kill={})",
+        cgroup_path, baseline_oom_count, baseline_oom_kill_count, oom,
+        oom_kill);
+    if (oom_kill > baseline_oom_kill_count) return true;
+    if (oom > baseline_oom_count && oom_kill == baseline_oom_kill_count)
+      CRANE_DEBUG(
+          "[OOM] v2: detected oom growth (delta_oom={}) but no oom_kill growth "
+          "(delta_kill=0) -> not classified as OOM",
+          oom - baseline_oom_count);
+    return false;
+  }
+  CRANE_DEBUG(
+      "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
+      cgroup_path, baseline_oom_kill_count, oom_kill);
+  return oom_kill > baseline_oom_kill_count;
+}
+
 ITaskInstance::~ITaskInstance() {
   if (m_parent_step_inst_->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
@@ -205,7 +261,7 @@ std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
         resolved_path /
         fmt::format("Crane-{}.out", m_parent_step_inst_->GetStep().task_id());
 
-  std::string resolved_path_pattern = std::move(resolved_path.string());
+  std::string resolved_path_pattern = resolved_path;
   absl::StrReplaceAll(
       {{"%j", std::to_string(m_parent_step_inst_->GetStep().task_id())},
        {"%u", m_parent_step_inst_->pwd.Username()},
@@ -1530,6 +1586,8 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             crane::grpc::TaskStatus new_status,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
+  // One-shot model: nothing to stop, just proceed to cleanup.
+  m_step_.oom_baseline_inited = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
   bool orphaned = m_step_.orphaned;
@@ -1619,7 +1677,8 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
                                      bool terminated_by_user) {
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
-  elem.terminated_by_user = terminated_by_user;
+  elem.termination_reason =
+      terminated_by_user ? TerminatedBy::CANCELLED_BY_USER : TerminatedBy::NONE;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
@@ -1697,8 +1756,8 @@ void TaskManager::EvTaskTimerCb_() {
   DelTerminationTimer_();
 
   if (m_step_.IsBatch()) {
-    m_task_terminate_queue_.enqueue(
-        TaskTerminateQueueElem{.terminated_by_timeout = true});
+    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
   } else {
     ActivateTaskStatusChange_(m_step_.job_id,
@@ -1731,21 +1790,30 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     const auto& exit_info = task->GetExitInfo();
     if (m_step_.IsBatch() || m_step_.IsCrun()) {
-      // For a Batch task, the end of the process means it is done.
-      if (exit_info.is_terminated_by_signal) {
+      bool considered_signal = exit_info.is_terminated_by_signal;
+      if (task->terminated_by == TerminatedBy::NONE) {
+        if (m_step_.EvaluateOomOnExit()) {
+          task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
+        }
+      }
+      if (considered_signal) {
         switch (task->terminated_by) {
-        case TerminatedBy::CANCELLED_BY_USER: {
+        case TerminatedBy::CANCELLED_BY_USER:
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Cancelled,
               exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
           break;
-        }
-        case TerminatedBy::TERMINATION_BY_TIMEOUT: {
+        case TerminatedBy::TERMINATION_BY_TIMEOUT:
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
               exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
           break;
-        }
+        case TerminatedBy::TERMINATION_BY_OOM:
+          ActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::OutOfMemory,
+              exit_info.value + ExitCode::kTerminationSignalBase,
+              std::optional<std::string>("Detected by oom_kill counter delta"));
+          break;
         default:
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
@@ -1755,8 +1823,15 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
                                   0, std::nullopt);
       } else {
-        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
-                                  exit_info.value, std::nullopt);
+        if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
+          ActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::OutOfMemory, exit_info.value,
+              std::optional<std::string>(
+                  "Detected by oom_kill counter delta (no signal)"));
+        } else {
+          ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
+                                    exit_info.value, std::nullopt);
+        }
       }
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
@@ -1796,10 +1871,10 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
-      if (elem.terminated_by_timeout) {
+      if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
-      if (elem.terminated_by_user) {
+      if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
@@ -1811,7 +1886,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         task->Kill(sig);
       } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
-        ActivateTaskStatusChange_(task_id, crane::grpc::Completed,
+        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
                                   ExitCode::kExitCodeTerminated, std::nullopt);
       }
     }
@@ -1832,7 +1907,8 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
     if (now - start_time >= new_time_limit) {
       // If the task times out, terminate it.
-      TaskTerminateQueueElem ev_task_terminate{.terminated_by_timeout = true};
+      TaskTerminateQueueElem ev_task_terminate{
+          .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
 
@@ -1849,6 +1925,10 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
     auto task = std::move(elem.instance);
+    if (!task) {
+      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
+      continue;
+    }
     task_id_t task_id = task->task_id;
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
@@ -1882,14 +1962,17 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     }
 
     LaunchExecution_(task.get());
-    if (!task->GetPid()) {
+    pid_t spawned_pid = task->GetPid();
+    if (!spawned_pid) {
       CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
       CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
-                 task->GetPid());
-      m_pid_task_id_map_[task->GetPid()] = task->task_id;
+                 spawned_pid);
+      m_pid_task_id_map_[spawned_pid] = task->task_id;
       m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+      m_step_.InitOomBaseline();
+
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
   }
@@ -1901,5 +1984,4 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
     elem.set_value(m_step_.GetStepProcessEnv());
   }
 }
-
 }  // namespace Craned::Supervisor

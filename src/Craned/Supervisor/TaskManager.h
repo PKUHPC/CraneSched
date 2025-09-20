@@ -27,9 +27,6 @@
 
 namespace Craned::Supervisor {
 
-inline const char* MemoryEvents = "memory.events";
-inline const char* MemoryOomControl = "memory.oom_control";
-
 enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
@@ -56,6 +53,11 @@ class StepInstance {
   bool pty;
   bool x11;
   bool x11_fwd;
+
+  std::string cgroup_path;  // resolved cgroup path
+  bool oom_baseline_inited{false};
+  uint64_t baseline_oom_kill_count{0};  // v1 & v2
+  uint64_t baseline_oom_count{0};       // v2 only
 
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
@@ -100,6 +102,10 @@ class StepInstance {
   void StopCforedClient() { m_cfored_client_.reset(); }
 
   EnvMap GetStepProcessEnv() const;
+
+  // OOM monitoring methods
+  void InitOomBaseline();
+  bool EvaluateOomOnExit();
 
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
@@ -361,10 +367,7 @@ class TaskManager {
   };
 
   struct TaskTerminateQueueElem {
-    bool terminated_by_user{false};  // If the task is canceled by user,
-    // task->status=Cancelled (From Craned)
-    bool terminated_by_timeout{false};  // If the task is terminated by timeout,
-    // task->status=Timeout (From internal queue)
+    TerminatedBy termination_reason{TerminatedBy::NONE};
     bool mark_as_orphaned{false};
   };
 
