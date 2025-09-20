@@ -375,7 +375,7 @@ struct TaskInCtld {
 
   std::string reservation;
 
-  bool exclusive;
+  bool exclusive{false};
 
  private:
   /* ------------- [2] -------------

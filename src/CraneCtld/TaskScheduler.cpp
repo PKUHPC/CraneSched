@@ -570,6 +570,9 @@ void TaskScheduler::ScheduleThread_() {
             std::make_unique<PdJobInScheduler>(it.second.get()));
       }
 
+      // ScheduleThread_ is the only thread move jobs from pending to
+      // running, so it's safe to release m_pending_task_map_mtx_ before
+      // locking m_running_task_map_mtx_.
       m_pending_task_map_mtx_.Unlock();
 
       m_running_task_map_mtx_.Lock();
@@ -588,6 +591,8 @@ void TaskScheduler::ScheduleThread_() {
                                            m_pending_task_map_.size());
 
       m_res_reduce_events_mtx_.Lock();
+      m_res_reduce_events_.clear();
+      m_res_reduce_events_mtx_.Unlock();
 
       begin = std::chrono::steady_clock::now();
 
@@ -599,16 +604,16 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
+      m_res_reduce_events_mtx_.Lock();
+
       begin = std::chrono::steady_clock::now();
 
       // All events reduce resources during scheduling should be handled here.
       // Resource increase(such as job ended) events are not considered here,
       // because they won't lead to schedule failure.
 
-      // NOTICE: Craned down events are not handled here, because related jobs
-      // will not be started successfully. However, features added in the
-      // future which reduce resources during scheduling should be handled
-      // here.
+      // NOTICE: Features added in the future which reduce resources on node or
+      // reservation should be handled here.
 
       // Check:
       // 1. for non-reservation jobs, if the allocated nodes are still
@@ -731,7 +736,6 @@ void TaskScheduler::ScheduleThread_() {
 
       // Resource has been subtracted, other resource reduce events are
       // allowed now.
-      m_res_reduce_events_.clear();
       m_res_reduce_events_mtx_.Unlock();
 
       num_tasks_single_execution = jobs_to_run.size();
@@ -1715,7 +1719,7 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
   }
   craned_meta_vec.clear();
 
-  AddResReduceEvent_(ResReduceEvent{
+  AddResReduceEvent(ResReduceEvent{
       std::make_pair(start_time, std::move(affected_nodes_vec))});
   m_res_reduce_events_mtx_.Unlock();
 
@@ -1806,7 +1810,7 @@ std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
 
   const auto craned_ids = std::move(resv_meta->craned_ids);
   resv_meta_map->erase(resv_id);
-  AddResReduceEvent_(ResReduceEvent{resv_id});
+  AddResReduceEvent(ResReduceEvent{resv_id});
   m_res_reduce_events_mtx_.Unlock();
 
   for (const auto& craned_id : craned_ids) {
@@ -2836,7 +2840,7 @@ void SchedulerAlgo::NodeSelect(
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
 
     if (!ok) {
-      // job->start_time = absl::InfiniteFuture();
+      // Leave start_time unset
       job->reason = "Resource";
     } else {
       if constexpr (kAlgoTraceOutput) {

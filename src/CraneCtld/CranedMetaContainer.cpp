@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "RpcService/CranedKeeper.h"
+#include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -77,6 +78,8 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
+  g_task_scheduler->LockResReduceEvents();
+
   auto raw_part_metas_map = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
@@ -88,11 +91,16 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[craned_id];
   if (!node_meta->alive) {
+    g_task_scheduler->UnlockResReduceEvents();
     CRANE_TRACE("Craned {} trying to down, but it's not alive, skip clean.",
                 craned_id);
     return;
   }
   node_meta->alive = false;
+
+  g_task_scheduler->AddResReduceEvent(TaskScheduler::ResReduceEvent{
+      std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+  g_task_scheduler->UnlockResReduceEvents();
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -248,7 +256,6 @@ void CranedMetaContainer::MallocResourceFromResv(ResvId resv_id,
   const auto& resv_meta = resv_meta_map_[resv_id];
 
   resv_meta->res_avail -= res;
-  // resv_meta->res_in_use += res;
 
   resv_meta->rn_job_res_map.emplace(job_id, res);
 }
@@ -273,7 +280,6 @@ void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
   ResourceV2 const& resources = iter->second;
 
   resv_meta->res_avail += resources;
-  // resv_meta->res_in_use -= resources;
 
   resv_meta->rn_job_res_map.erase(iter);
 }
@@ -781,6 +787,12 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     event.set_allocated_start_time(timestamp.release());
   }
 
+  if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
+    g_task_scheduler->LockResReduceEvents();
+  }
+
+  std::vector<CranedId> affected_nodes;
+
   for (auto craned_id : request.craned_ids()) {
     if (!craned_meta_map_.Contains(craned_id)) {
       reply.add_not_modified_nodes(craned_id);
@@ -792,27 +804,34 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
-        if (g_config.Plugin.Enabled && craned_meta->drain != true) {
-          // Set node event info
-          event.set_node_name(craned_id);
-          event.set_control_state(crane::grpc::CranedControlState::CRANE_DRAIN);
-          event_list.emplace_back(event);
+        if (craned_meta->drain == false) {
+          if (g_config.Plugin.Enabled) {
+            // Set node event info
+            event.set_node_name(craned_id);
+            event.set_control_state(
+                crane::grpc::CranedControlState::CRANE_DRAIN);
+            event_list.emplace_back(event);
+          }
+          craned_meta->drain = true;
+          affected_nodes.push_back(craned_id);
         }
 
-        craned_meta->drain = true;
         craned_meta->state_reason = request.reason();
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
-        if (g_config.Plugin.Enabled && craned_meta->drain != false) {
-          // Set node event info
-          event.set_node_name(craned_id);
-          event.set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
-          event_list.emplace_back(event);
+        if (craned_meta->drain == true) {
+          if (g_config.Plugin.Enabled) {
+            // Set node event info
+            event.set_node_name(craned_id);
+            event.set_control_state(
+                crane::grpc::CranedControlState::CRANE_NONE);
+            event_list.emplace_back(event);
+          }
+          craned_meta->drain = false;
+          craned_meta->state_reason.clear();
         }
 
-        craned_meta->drain = false;
-        craned_meta->state_reason.clear();
         reply.add_modified_nodes(craned_id);
       } else {
         reply.add_not_modified_nodes(craned_id);
@@ -822,6 +841,11 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
       reply.add_not_modified_nodes(craned_id);
       reply.add_not_modified_reasons("Can't change the state of a DOWN node!");
     }
+  }
+  if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
+    g_task_scheduler->AddResReduceEvent(TaskScheduler::ResReduceEvent{
+        std::make_pair(absl::InfinitePast(), std::move(affected_nodes))});
+    g_task_scheduler->UnlockResReduceEvents();
   }
 
   if (g_config.Plugin.Enabled && !event_list.empty()) {

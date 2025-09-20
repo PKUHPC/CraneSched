@@ -836,11 +836,25 @@ class TaskScheduler {
   crane::grpc::DeleteReservationReply DeleteResv(
       const crane::grpc::DeleteReservationRequest& request);
 
- private:
-  std::expected<void, std::string> CreateResv_(
-      const crane::grpc::CreateReservationRequest& request);
+  // Store Resource reduction events happened during scheduling here.
+  // Cases:
+  // 1. Craned node down/drain: resources on nodes are reduced.
+  // 2. Reservation created: resources on nodes are reduced.
+  // 3. Reservation deleted: resources in reservation are reduced.
+  // 4. Reservation modified (not implemented): resources in old reservation and
+  // on nodes of new reservation are reduced.
+  struct ResReduceEvent {
+    using affected_resv_t = ResvId;
+    using affected_nodes_t = std::pair<absl::Time, std::vector<CranedId>>;
 
-  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
+    std::variant<affected_resv_t, affected_nodes_t> affected_resources;
+  };
+
+  void AddResReduceEvent(ResReduceEvent&& event) {
+    m_res_reduce_events_.emplace_back(std::move(event));
+  }
+  void LockResReduceEvents() { m_res_reduce_events_mtx_.Lock(); }
+  void UnlockResReduceEvents() { m_res_reduce_events_mtx_.Unlock(); }
 
  private:
   template <class... Ts>
@@ -867,6 +881,11 @@ class TaskScheduler {
   CraneErrCode TerminateRunningTaskNoLock_(TaskInCtld* task);
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
+
+  std::expected<void, std::string> CreateResv_(
+      const crane::grpc::CreateReservationRequest& request);
+
+  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
 
   std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
@@ -990,29 +1009,9 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  // Store Resource reduction events happened during scheduling here.
-  // Cases:
-  // 1. Reservation created: resources on nodes are reduced.
-  // 2. Reservation deleted: resources in reservation are reduced.
-  // 3. Reservation modified (not implemented): resources in old reservation and
-  // on nodes of new reservation are reduced.
-  struct ResReduceEvent {
-    using affected_resv_t = ResvId;
-    using affected_nodes_t = std::pair<absl::Time, std::vector<CranedId>>;
-
-    std::variant<affected_resv_t, affected_nodes_t> affected_resources;
-  };
-
   std::vector<ResReduceEvent> m_res_reduce_events_
       ABSL_GUARDED_BY(m_res_reduce_events_mtx_);
-  Mutex m_res_reduce_events_mtx_;  // lock before get resv_meta to avoid
-                                   // inconsistency, unlock before release
-                                   // resources for efficiency
-
-  // Should be called before reducing resources from nodes or reservations.
-  void AddResReduceEvent_(ResReduceEvent&& event) {
-    m_res_reduce_events_.emplace_back(std::move(event));
-  }
+  Mutex m_res_reduce_events_mtx_;  // lock before get resv_meta & craned_meta
 };
 
 }  // namespace Ctld
