@@ -745,7 +745,8 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
                   ec.message());
       return false;
     }
-    auto events_file = std::filesystem::path(cg_path) / "memory.events";
+    auto events_file =
+        std::filesystem::path(cg_path) / CgConstant::kMemoryEventsFileV2;
     std::ifstream ifs(events_file);
     if (!ifs.is_open()) return false;
     std::string key;
@@ -773,7 +774,7 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
     return false;
   }
 
-  auto v1_file = memory_cgroup_path / "memory.oom_control";
+  auto v1_file = memory_cgroup_path / CgConstant::kMemoryOomControlFileV1;
   std::ifstream ifs(v1_file);
   if (!ifs.is_open()) return false;
   std::string line;

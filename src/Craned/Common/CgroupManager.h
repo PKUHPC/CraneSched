@@ -102,6 +102,13 @@ inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
 
+// Common cgroup filename constants
+// cgroup v2 memory events file used to read OOM and OOM_KILL counters
+inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
+// cgroup v1 memory oom control file used to read OOM_KILL counter
+inline constexpr std::string_view kMemoryOomControlFileV1 =
+    "memory.oom_control";
+
 #ifdef CRANE_ENABLE_BPF
 inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";

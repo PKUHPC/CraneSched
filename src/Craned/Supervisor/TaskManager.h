@@ -27,9 +27,6 @@
 
 namespace Craned::Supervisor {
 
-inline const char* MemoryEvents = "memory.events";
-inline const char* MemoryOomControl = "memory.oom_control";
-
 enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
