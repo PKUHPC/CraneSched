@@ -71,9 +71,17 @@ void CranedClient::AsyncSendThread_() {
     }
 
     {
-      absl::MutexLock lock(&m_mutex_);
-      while (!m_task_status_change_queue_.empty()) {
-        auto& elem = m_task_status_change_queue_.front();
+      std::list<StepStatusChangeQueueElem> elems;
+      m_mutex_.Lock();
+      if (!m_task_status_change_queue_.empty()) {
+        elems.splice(elems.end(), m_task_status_change_queue_);
+        m_mutex_.Unlock();
+      } else {
+        m_mutex_.Unlock();
+      }
+
+      while (!elems.empty()) {
+        auto& elem = elems.front();
         grpc::ClientContext context;
         crane::grpc::StepStatusChangeRequest request;
         crane::grpc::StepStatusChangeReply reply;
@@ -95,12 +103,18 @@ void CranedClient::AsyncSendThread_() {
               "NewStatus: {}, reason: {} | {}, code: {}",
               util::StepStatusToString(elem.new_status), status.error_message(),
               context.debug_error_string(), int(status.error_code()));
+          elems.pop_front();
           break;
         }
         CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
                     util::StepStatusToString(elem.new_status), reply.ok());
-        m_task_status_change_queue_.pop_front();
       }
+      m_mutex_.Lock();
+      if (!elems.empty()) {
+        m_task_status_change_queue_.splice(m_task_status_change_queue_.begin(),
+                                           elems);
+      }
+      m_mutex_.Unlock();
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }

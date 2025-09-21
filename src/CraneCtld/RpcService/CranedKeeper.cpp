@@ -260,7 +260,7 @@ CraneErrCode CranedStub::FreeSteps(
 
   Status status = m_stub_->FreeSteps(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG("AllocSteps RPC for Node {} returned with status not ok: {}",
+    CRANE_DEBUG("FreeSteps RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;

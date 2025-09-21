@@ -756,6 +756,7 @@ struct TaskInCtld {
   bool const& Held() const { return held; }
 
   void SetDaemonStep(std::unique_ptr<DaemonStepInCtld>&& step) {
+    CRANE_ASSERT(!m_daemon_step_);
     m_daemon_step_ = std::move(step);
   }
   DaemonStepInCtld* DaemonStep() const { return m_daemon_step_.get(); }

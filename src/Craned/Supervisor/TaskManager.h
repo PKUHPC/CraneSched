@@ -80,12 +80,10 @@ class StepInstance {
   };
   ~StepInstance();
 
-  [[nodiscard]] bool IsBatch() const;
-  [[nodiscard]] bool IsCrun() const;
-  [[nodiscard]] bool IsCalloc() const;
-  [[nodiscard]] bool IsDaemon() const;
-  [[nodiscard]] bool CanOperate() const;
-  [[nodiscard]] bool Started() const;
+  [[nodiscard]] bool IsBatch() const noexcept;
+  [[nodiscard]] bool IsCrun() const noexcept;
+  [[nodiscard]] bool IsCalloc() const noexcept;
+  [[nodiscard]] bool IsDaemon() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 

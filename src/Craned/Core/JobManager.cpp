@@ -670,7 +670,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     close(supervisor_craned_pipe[0]);
 
     // Message will send to stdin of Supervisor for its init.
-    for (int retry_count{0}; retry_count < 5; --retry_count) {
+    for (int retry_count{0}; retry_count < 5; ++retry_count) {
       if (-1 == dup2(craned_supervisor_fd, STDIN_FILENO)) {
         if (errno == EINTR) {
           fmt::print(
@@ -689,7 +689,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       break;
     }
 
-    for (int retry_count{0}; retry_count < 5; --retry_count) {
+    for (int retry_count{0}; retry_count < 5; ++retry_count) {
       if (-1 == dup2(supervisor_craned_fd, STDOUT_FILENO)) {
         if (errno == EINTR) {
           fmt::print(

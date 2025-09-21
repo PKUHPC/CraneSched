@@ -233,6 +233,14 @@ bool TaskScheduler::Init() {
     CRANE_ERROR("Failed to retrieve embedded DB step snapshot!");
     return false;
   }
+  CRANE_INFO("{} step(s) fetched from DB.",
+             std::ranges::fold_left(
+                 step_snapshot.steps | std::views::values |
+                     std::views::transform(
+                         [](const auto& step_vec) { return step_vec.size(); }),
+                 0, std::plus{}));
+  std::unordered_map<job_id_t, std::vector<crane::grpc::StepInEmbeddedDb>>
+      invalid_steps;
   for (auto&& [job_id, steps] : step_snapshot.steps) {
     // Only running jobs have steps
     if (!m_running_task_map_.contains(job_id)) {
@@ -244,9 +252,12 @@ bool TaskScheduler::Init() {
     auto& job = *m_running_task_map_.at(job_id);
     for (auto&& step_info : steps) {
       StepInCtld* step;
+      step_id_t step_id = step_info.runtime_attr().step_id();
       auto step_type = step_info.runtime_attr().step_type();
       if (step_type == crane::grpc::StepType::INVALID) {
-        CRANE_ERROR("Invalid step type, ignored!");
+        CRANE_ERROR("[Step #{}{}] Invalid step type, dropped!", job_id,
+                    step_id);
+        invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
       if (step_type == crane::grpc::StepType::DAEMON) {
@@ -255,8 +266,23 @@ bool TaskScheduler::Init() {
         step = new CommonStepInCtld();
       }
       step->RecoverFromDb(job, step_info);
-      AcquireStepAttributes(job, step);
-      CheckStepValidity(job, step);
+      if (auto err_expt = AcquireStepAttributes(job, step);
+          !err_expt.has_value()) {
+        CRANE_ERROR(
+            "[Step #{}{}] AcquireStepAttributes failed: {}, step dropped!",
+            job_id, step_id, CraneErrStr(err_expt.error()));
+        delete step;
+        invalid_steps[job_id].emplace_back(std::move(step_info));
+
+        continue;
+      }
+      if (auto err_expt = CheckStepValidity(job, step); !err_expt.has_value()) {
+        CRANE_ERROR("[Step #{}{}] CheckStepValidity failed: {}, step dropped!",
+                    job_id, step_id, CraneErrStr(err_expt.error()));
+        delete step;
+        invalid_steps[job_id].emplace_back(std::move(step_info));
+        continue;
+      }
       if (step_type == crane::grpc::StepType::DAEMON) {
         std::unique_ptr<DaemonStepInCtld> step_ptr(
             dynamic_cast<DaemonStepInCtld*>(step));
@@ -795,7 +821,7 @@ void TaskScheduler::ScheduleThread_() {
 
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
-        g_thread_pool->detach_task([&]() {
+        g_thread_pool->detach_task([&, craned_id] {
           auto& steps = craned_alloc_steps[craned_id];
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE(
@@ -2416,7 +2442,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
 
   for (const auto& craned_id : context.craned_step_alloc_map | std::views::keys)
-    g_thread_pool->detach_task([this, &alloc_step_latch, &craned_id, &context] {
+    g_thread_pool->detach_task([this, &alloc_step_latch, craned_id, &context] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
@@ -2483,8 +2509,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       static_cast<std::ptrdiff_t>(context.craned_step_exec_map.size())};
   for (const auto& craned_id :
        context.craned_step_exec_map | std::views::keys) {
-    g_thread_pool->detach_task([this, &exec_step_latch, &craned_id,
-                                &context]() {
+    g_thread_pool->detach_task([this, &exec_step_latch, craned_id, &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
@@ -2522,7 +2547,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       static_cast<std::ptrdiff_t>(context.craned_orphaned_steps.size())};
   for (const auto& craned_id :
        context.craned_orphaned_steps | std::views::keys) {
-    g_thread_pool->detach_task([&orphaned_step_latch, &craned_id, &context]() {
+    g_thread_pool->detach_task([&orphaned_step_latch, craned_id, &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
@@ -2542,7 +2567,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   std::latch cancel_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_cancel_steps.size())};
   for (const auto& craned_id : context.craned_cancel_steps | std::views::keys) {
-    g_thread_pool->detach_task([&cancel_step_latch, &craned_id, &context]() {
+    g_thread_pool->detach_task([&cancel_step_latch, craned_id, &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
@@ -2826,15 +2851,29 @@ void TaskScheduler::TerminateOrphanedSteps(
   }
 
   for (const auto& [craned_id, craned_steps] : craned_steps_map) {
-    for (const auto& [job_id, step_ids] : craned_steps) {
-      for (const auto& step_id : step_ids) {
-        StepStatusChangeAsync(job_id, step_id, craned_id,
-                              crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeCranedDown, "Craned down");
+    if (craned_id == excluded_node) continue;
+    g_thread_pool->detach_task([this, craned_id, &craned_steps_map] {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      auto& node_job_steps = craned_steps_map[craned_id];
+      bool success{false};
+      if (!stub || stub->Invalid()) {
+        if (auto err = stub->TerminateOrphanedSteps(node_job_steps);
+            err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to terminate orphaned steps [{}] on node {}.",
+                      util::JobStepsToString(node_job_steps), craned_id);
+        } else
+          success = true;
       }
-    }
+      if (!success)
+        for (const auto& [job_id, step_ids] : node_job_steps) {
+          for (const auto& step_id : step_ids) {
+            StepStatusChangeAsync(job_id, step_id, craned_id,
+                                  crane::grpc::TaskStatus::Failed,
+                                  ExitCode::kExitCodeCranedDown, "Craned down");
+          }
+        }
+    });
   }
-  for (const auto& [craned_id, craned_steps] : craned_steps_map) {}
 }
 
 void MinLoadFirst::NodeSelectionInfo::InitCostAndTimeAvailResMap(
@@ -3585,7 +3624,7 @@ void TaskScheduler::PersistAndTransferStepsToMongodb_(
                   step->job_id, step->StepId());
   }
 
-  g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+  g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
 
   // TODO: Step finish before job, persist step into mongodb
 

@@ -98,7 +98,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
   return ok_future.get();
 }
 
-uint16_t CforedClient::InitUvX11FwdHandler(pid_t pid) {
+uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
   CreateX11FwdQueueElem elem;
   auto port_future = elem.promise.get_future();
   m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));

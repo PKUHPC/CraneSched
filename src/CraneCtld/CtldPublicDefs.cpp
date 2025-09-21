@@ -288,10 +288,6 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
 crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
     const CranedId& craned_id) const {
   crane::grpc::StepToD step_to_d;
-  // Set time_limit
-  step_to_d.mutable_time_limit()->CopyFrom(
-      google::protobuf::util::TimeUtil::MillisecondsToDuration(
-          ToInt64Milliseconds(this->time_limit)));
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node =
       static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
@@ -318,6 +314,8 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   step_to_d.mutable_start_time()->set_seconds(
       ToUnixSeconds(this->m_start_time_));
+  step_to_d.mutable_submit_time()->set_seconds(
+      ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
 
   return step_to_d;
@@ -420,17 +418,15 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
 
 bool CommonStepInCtld::SetFieldsByStepToCtld(
     const crane::grpc::StepToCtld& step_to_ctld) {
-  // For common step
+  // Not implemented yet
+  CRANE_ASSERT(false);
   return false;
 }
 
 crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     const CranedId& craned_id) const {
   crane::grpc::StepToD step_to_d;
-  // Set time_limit
-  step_to_d.mutable_time_limit()->CopyFrom(
-      google::protobuf::util::TimeUtil::MillisecondsToDuration(
-          ToInt64Milliseconds(this->time_limit)));
+
   auto* mutable_res_in_node = step_to_d.mutable_res();
   *mutable_res_in_node =
       static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
@@ -440,7 +436,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.set_step_type(this->step_type);
 
   step_to_d.set_job_id(this->job_id);
-  step_to_d.set_step_id(1);
+  step_to_d.set_step_id(m_step_id_);
   step_to_d.set_name(this->name);
 
   step_to_d.set_node_num(this->node_num);
@@ -460,6 +456,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.mutable_start_time()->set_seconds(
       ToUnixSeconds(this->m_start_time_));
+  step_to_d.mutable_submit_time()->set_seconds(
+      ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
 
   if (this->type == crane::grpc::Batch) {

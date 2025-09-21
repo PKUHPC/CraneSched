@@ -47,19 +47,21 @@ StepInstance::~StepInstance() {
   }
 }
 
-bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
+bool StepInstance::IsBatch() const noexcept {
+  return !interactive_type.has_value();
+}
 
-bool StepInstance::IsCrun() const {
+bool StepInstance::IsCrun() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Crun;
 }
 
-bool StepInstance::IsCalloc() const {
+bool StepInstance::IsCalloc() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Calloc;
 }
 
-bool StepInstance::IsDaemon() const {
+bool StepInstance::IsDaemon() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
 
@@ -414,7 +416,6 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
   }
   oom_score_adj_stream.close();
 
-  int ngroups = 0;
   auto& pwd = m_parent_step_inst_->pwd;
   std::vector<gid_t> gids = m_parent_step_inst_->gids;
 
@@ -427,6 +428,7 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
+  // FIXME: gids[0] or pwd.Gid()
   rc = setresgid(gids[0], gids[0], gids[0]);
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setegid() failed: {}\n",
@@ -735,6 +737,7 @@ CraneErrCode ContainerInstance::Prepare() {
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+  // FIXME: gids[0] or pwd.Gid()
   if (chown(sh_path.c_str(), m_parent_step_inst_->GetStep().uid(),
             m_parent_step_inst_->gids[0]) != 0) {
     CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
@@ -1928,15 +1931,15 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {
-  struct ExecuteTaskElem elem;
+  ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    g_runtime_status.Started = true;
-    g_runtime_status.Status = StepStatus::Running;
-    task_id_t task_id = elem.instance->task_id;
     if (!elem.instance) {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
+    g_runtime_status.Started = true;
+    g_runtime_status.Status = StepStatus::Running;
+    task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
     auto* task = m_step_.GetTaskInstance(task_id);
     // Add a timer to limit the execution time of a task.

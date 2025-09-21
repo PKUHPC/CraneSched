@@ -907,7 +907,7 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
     CRANE_ERROR("Failed to store next_step_db_id.");
     return false;
   }
-  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
 
   s_next_step_id_map_ = db_next_step_id_map;
   s_next_step_db_id_ = step_db_id;

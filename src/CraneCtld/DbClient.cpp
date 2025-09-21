@@ -1395,6 +1395,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
 MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
     crane::grpc::StepInEmbeddedDb const& step) {
   // TODO: Implement this  function
+  CRANE_ASSERT(false);
   return {};
 }
 

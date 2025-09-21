@@ -282,7 +282,7 @@ void CtldClientStateMachine::ActionConfigure_(
 }
 
 void CtldClientStateMachine::ActionRegister_(
-    std::set<task_id_t>&& lost_jobs,
+    std::set<job_id_t>&& lost_jobs,
     std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps) {
   CRANE_LOGGER_DEBUG(m_logger_,
                      "Ctld client state machine has entered state {}",
@@ -407,8 +407,8 @@ void CtldClient::Init() {
           exact_job_steps[k].insert(v.begin(), v.end());
         }
         auto exact_job_ids = exact_job_steps | std::views::keys;
-        std::set<task_id_t> lost_jobs{};
-        std::set<task_id_t> invalid_jobs{};
+        std::set<job_id_t> lost_jobs{};
+        std::set<job_id_t> invalid_jobs{};
         std::set<job_id_t> valid_jobs{};
 
         std::ranges::set_difference(job_ids, exact_job_ids,

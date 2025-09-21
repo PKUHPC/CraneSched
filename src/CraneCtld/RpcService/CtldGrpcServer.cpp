@@ -130,9 +130,9 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     for (const auto &[job_id, steps] : request->remote_meta().lost_steps()) {
       orphaned_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
     }
-    CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
-               util::JobStepsToString(orphaned_steps));
   }
+  CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
+             util::JobStepsToString(orphaned_steps));
 
   if (!orphaned_steps.empty())
     g_thread_pool->detach_task([steps = std::move(orphaned_steps),

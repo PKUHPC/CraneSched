@@ -306,7 +306,8 @@ class EmbeddedDbClient {
   bool UpdateStepToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
                                 crane::grpc::StepToCtld const& step_to_ctld) {
     return StoreTypeIntoDbIfExists_(m_step_fixed_db_.get(), txn_id,
-                                    GetFixedDbEntryName_(db_id), &step_to_ctld)
+                                    GetStepFixedDbEntryName_(db_id),
+                                    &step_to_ctld)
         .has_value();
   }
 

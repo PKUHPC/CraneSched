@@ -115,7 +115,7 @@ class CtldClientStateMachine {
   void ActionRequestConfig_();
   void ActionConfigure_(const crane::grpc::ConfigureCranedRequest& config_req);
   void ActionRegister_(
-      std::set<task_id_t>&& lost_jobs,
+      std::set<job_id_t>&& lost_jobs,
       std::unordered_map<job_id_t, std::set<step_id_t>>&& lost_steps);
   void ActionReady_();
   void ActionDisconnected_();

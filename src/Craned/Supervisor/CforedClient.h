@@ -62,7 +62,7 @@ class CforedClient {
   bool InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id, int stdin_write,
                                         int stdout_read, bool pty);
 
-  uint16_t InitUvX11FwdHandler(pid_t pid);
+  uint16_t InitUvX11FwdHandler(task_id_t task_id);
 
   bool TaskOutputFinish(task_id_t task_id);
   bool TaskProcessStop(task_id_t task_id);

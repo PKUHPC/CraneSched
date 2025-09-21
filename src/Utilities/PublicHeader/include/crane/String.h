@@ -141,15 +141,15 @@ std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
 
 template <typename Map>
 std::string JobStepsToString(const Map &m) {
-  std::vector<std::string> step_strs =
+  auto step_strs_view =
       m | std::views::transform([](const auto &kv) {
-        const auto &[k, step_ids] = kv;
-        return step_ids | std::views::transform([k](const auto &step_id) {
-                 return StepIdsToString(k, step_id);
+        return kv.second |
+               std::views::transform([key = kv.first](const auto &step_id) {
+                 return StepIdsToString(key, step_id);
                });
       }) |
       std::views::join | std::ranges::to<std::vector>();
-  return absl::StrJoin(step_strs, ",");
+  return absl::StrJoin(step_strs_view, ",");
 }
 
 namespace Internal {
@@ -164,9 +164,9 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         "ExceedTimeLimit",
         // 5 - 9
         "Cancelled",
+        "OutOfMemory",
         "Configuring",
-        "Invalid",
-        "Invalid",
+        "Completing",
         "Invalid",
         // 10 - 14
         "Invalid",
