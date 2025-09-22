@@ -116,7 +116,7 @@ struct Config {
     enum NodeStateEnum {
       IDLE, ALLOC, MIXED, ANY
     };
-
+    bool Enable{false};
     std::string Program;
     uint64_t Interval;
     std::string NodeState;

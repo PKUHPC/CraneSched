@@ -60,6 +60,8 @@ void CranedMetaContainer::CranedUp(
 
   node_meta->alive = true;
 
+  node_meta->drain = !remote_meta.health_check_result().healthy();
+
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -767,6 +769,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   return reply;
 }
 
+// TODO: health check faild, ChangeNodeState to drain
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
