@@ -248,7 +248,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
             "3 times.",
             task_id, stdout_read, uv_strerror(err));
         elem.promise.set_value(false);
-        continue;
+        break;
       }
 
       CRANE_DEBUG(
@@ -270,6 +270,10 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       elem.promise.set_value(false);
       continue;
       // TODO: handle failed status
+    }
+    {
+      absl::MutexLock lock(&m_mtx_);
+      m_fwd_meta_map[task_id] = meta;
     }
     auto poll_cb = [this, task_id, meta](const uvw::poll_event&,
                                          uvw::poll_handle& h) {
@@ -353,8 +357,6 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
         });
     immediate->start();
 
-    absl::MutexLock lock(&m_mtx_);
-    m_fwd_meta_map[task_id] = std::move(meta);
     elem.promise.set_value(true);
   }
 }

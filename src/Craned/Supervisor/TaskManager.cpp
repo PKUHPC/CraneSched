@@ -1602,7 +1602,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
 void TaskManager::LaunchExecution_(ITaskInstance* task) {
   // Prepare for execution
-  CRANE_INFO("[Task #{}] Preparing task");
+  CRANE_INFO("[Task #{}] Preparing task", task->task_id);
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_DEBUG("[Task #{}] Failed to prepare task", task->task_id);

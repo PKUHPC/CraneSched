@@ -731,6 +731,9 @@ void TaskScheduler::ScheduleThread_() {
           craned_alloc_steps;
       std::vector<StepInCtld*> step_in_ctld_vec;
 
+      Mutex thread_pool_mtx;
+      HashSet<task_id_t> failed_task_id_set;
+
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         task->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
@@ -740,24 +743,23 @@ void TaskScheduler::ScheduleThread_() {
         task->SetDaemonStep(std::move(daemon_step));
       }
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
-        // TODO: Handle this failure
-        CRANE_ERROR("Failed to append steps to embedded database.");
-      }
-      for (auto& it : selection_result_list) {
-        auto& task = it.first;
-        auto* daemon_step = task->DaemonStep();
-        for (CranedId const& craned_id : task->CranedIds()) {
-          craned_daemon_step_map[craned_id].push_back(
-              daemon_step->GetJobToD(craned_id));
+        for (auto& task : selection_result_list | std::views::keys) {
+          failed_task_id_set.insert(task->TaskId());
         }
-        for (const auto& craned_id : daemon_step->CranedIds())
-          craned_alloc_steps[craned_id].emplace_back(
-              daemon_step->GetStepToD(craned_id));
+        CRANE_ERROR("Failed to append steps to embedded database.");
+      } else {
+        for (auto& it : selection_result_list) {
+          auto& task = it.first;
+          auto* daemon_step = task->DaemonStep();
+          for (CranedId const& craned_id : task->CranedIds()) {
+            craned_daemon_step_map[craned_id].push_back(
+                daemon_step->GetJobToD(craned_id));
+          }
+          for (const auto& craned_id : daemon_step->CranedIds())
+            craned_alloc_steps[craned_id].emplace_back(
+                daemon_step->GetStepToD(craned_id));
+        }
       }
-
-      Mutex thread_pool_mtx;
-      HashSet<CranedId> failed_craned_set;
-      HashSet<task_id_t> failed_task_id_set;
 
       absl::BlockingCounter bl(craned_daemon_step_map.size());
       for (auto&& iter : craned_daemon_step_map) {
@@ -800,7 +802,6 @@ void TaskScheduler::ScheduleThread_() {
                       craned_id);
           thread_pool_mtx.Lock();
 
-          failed_craned_set.emplace(craned_id);
           for (const auto& job_to_d : jobs)
             failed_task_id_set.emplace(job_to_d.job_id());
 
@@ -824,16 +825,15 @@ void TaskScheduler::ScheduleThread_() {
         g_thread_pool->detach_task([&, craned_id] {
           auto& steps = craned_alloc_steps[craned_id];
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE(
-              "Send AllocSteps for {} tasks to {}",
-              absl::StrJoin(
-                  steps | std::views::transform([](const auto& step_to_d) {
-                    return util::StepIdsToString(step_to_d.job_id(),
-                                                 step_to_d.step_id());
-                  }),
-                  ","),
-              craned_id);
+          CRANE_TRACE("Send AllocSteps for [{}] steps to {}",
+                      util::StepToDRangeIdString(steps), craned_id);
           if (stub == nullptr || stub->Invalid()) {
+            thread_pool_mtx.Lock();
+            for (const auto& step_to_d : steps)
+              failed_task_id_set.emplace(step_to_d.job_id());
+            thread_pool_mtx.Unlock();
+            CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: Craned down.",
+                        util::StepToDRangeIdString(steps), craned_id);
             alloc_step_latch.count_down();
             return;
           }
@@ -843,13 +843,13 @@ void TaskScheduler::ScheduleThread_() {
             alloc_step_latch.count_down();
             return;
           }
+          CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
+                      util::StepToDRangeIdString(steps), craned_id,
+                      CraneErrStr(err), craned_id);
 
           thread_pool_mtx.Lock();
-
-          failed_craned_set.emplace(craned_id);
           for (const auto& step_to_d : steps)
             failed_task_id_set.emplace(step_to_d.job_id());
-
           thread_pool_mtx.Unlock();
 
           // If tasks in task_uid_pairs failed to start,
@@ -908,8 +908,6 @@ void TaskScheduler::ScheduleThread_() {
       if (!ok) {
         CRANE_ERROR("Embedded database failed to commit manual transaction.");
       }
-
-      // TODO: Persistent daemon step.
 
       // Set succeed tasks status and do callbacks.
       for (auto& it : selection_result_list) {
@@ -3898,6 +3896,7 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& task,
   AllocatableResource& step_alloc_res =
       step->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(step_alloc_res.cpu_count);
+  // FIXME: core_double must greater than 0, so as job.
 
   double step_mem_per_cpu = (double)step_alloc_res.memory_bytes / core_double;
   if (step_alloc_res.memory_bytes == 0) {

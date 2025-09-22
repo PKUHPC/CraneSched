@@ -59,8 +59,6 @@ std::string StepInstance::StepIdString() const {
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
-  // TODO: Move all job level env to here.
-  env_map.emplace("CRANE_JOB_ID", std::to_string(job_to_d.job_id()));
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 

@@ -469,9 +469,9 @@ struct StepInCtld {
   const crane::grpc::StepToCtld& StepToCtld() const;
   crane::grpc::StepToCtld* MutableStepToCtld();
   void SetStepId(step_id_t id);
-  task_id_t StepId() const { return m_step_id_; }
+  step_id_t StepId() const { return m_step_id_; }
   void SetStepDbId(step_db_id_t id);
-  task_id_t StepDbId() const { return m_step_db_id_; }
+  step_db_id_t StepDbId() const { return m_step_db_id_; }
 
   void SetRequeueCount(std::int32_t count);
   std::int32_t RequeueCount() const { return m_requeue_count_; }

@@ -396,7 +396,7 @@ void CtldClient::Init() {
         CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                            "Configuring action for token {}. Steps [{}]",
                            ProtoTimestampToString(token),
-                           util::JobStepsToString(job_steps_id_map), ",");
+                           util::JobStepsToString(job_steps_id_map));
 
         // std::map keys are ordered, so we can use set difference.
         std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
