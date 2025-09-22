@@ -154,7 +154,13 @@ issue_internal (){
 
     private_key=$(echo "$output" | jq -r '.data.private_key')
     echo "$private_key" > /etc/crane/tls/internal.key
-    chmod 600 /etc/crane/tls/internal.key
+    if chgrp crane /etc/crane/tls/internal.key; then
+      echo "chgrp success"
+      chmod 640 /etc/crane/tls/internal.key
+    else
+      echo "chgrp failed，group not exist"
+      chmod 600 /etc/crane/tls/internal.key
+    fi
 
     ca=$(echo "$output" | jq -r '.data.issuing_ca')
     echo "$ca" > /etc/crane/tls/ca.pem
@@ -178,7 +184,13 @@ issue_external() {
 
     private_key=$(echo "$output" | jq -r '.data.private_key')
     echo "$private_key" > /etc/crane/tls/external.key
-    chmod 600 /etc/crane/tls/external.key
+    if chgrp crane /etc/crane/tls/external.key; then
+      echo "chgrp success"
+      chmod 640 /etc/crane/tls/internal.key
+    else
+      echo "chgrp failed，group not exist"
+      chmod 600 /etc/crane/tls/internal.key
+    fi
 
     ca=$(echo "$output" | jq -r '.data.issuing_ca')
     echo "$ca" > /etc/crane/tls/ca.pem

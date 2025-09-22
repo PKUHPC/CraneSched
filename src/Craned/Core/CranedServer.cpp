@@ -361,6 +361,11 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
+  if (!m_server_) {
+    CRANE_ERROR("Cannot start gRPC server!");
+    std::exit(1);
+  }
+
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
