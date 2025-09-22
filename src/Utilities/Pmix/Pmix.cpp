@@ -104,6 +104,8 @@ class PMIxServerModule {
      }
 
     CollType type = StrToCollType(GetEnvVar(CRANE_PMIX_FENCE));
+    // FIXME: ring have some bugs
+    type = CollType::FENCE_TREE;
      if (type == CollType::FENCE_MAX) {
        type = CollType::FENCE_TREE;
 
@@ -442,7 +444,7 @@ bool PmixServer::ConnInit_(const Config& config) {
   auto env_val = GetEnvVar(CRANE_PMIX_DIRECT_CONN);
   // env_val = "tcp";
   if (env_val == "ucx") {
-    #ifndef HAVE_UCX
+    #ifndef HAVE_UCX 
       CRANE_ERROR("UCX support is not compiled in.");
       return false;
     #endif

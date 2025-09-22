@@ -24,6 +24,7 @@
 #include "ReverseTree.h"
 #include "crane/Logger.h"
 #include "crane/String.h"
+#include <absl/strings/cord.h>
 
 namespace pmix {
 
@@ -34,7 +35,7 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
 
   m_tree_.state = CollTreeState::SYNC;
 
-  width = 5;
+  width = 2;
   if (auto width_str = GetEnvVar(PMIXP_TREE_WIDTH); width_str != "") {
     try {
       width = std::stoi(width_str);
@@ -52,6 +53,11 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
   m_tree_.chldrn_ids.resize(width);
   m_tree_.contrib_child.resize(width);
   m_tree_.childrn_cnt = ReverseTreeDirectChildren(m_peerid_, m_peers_cnt_, width, depth, &m_tree_.chldrn_ids);
+  
+  CRANE_TRACE("coll {:p}: tree: peerid={}, peer_cnt = {}, parentid={}, childrn_cnt={}, max_depth={}, width={}, chidrn_ids={}",
+              static_cast<void*>(this), m_peerid_, m_peers_cnt_, m_tree_.parent_peerid,
+              m_tree_.childrn_cnt, max_depth, width, absl::StrJoin(m_tree_.chldrn_ids, ","));
+
 
   if (m_tree_.parent_peerid == -1) {
     /* if we are the root of the tree:
@@ -99,6 +105,9 @@ bool Coll::PmixCollTreeInit_(const std::set<std::string>& hostset) {
     auto iter = std::next(hostset.begin(), m_tree_.chldrn_ids[i]);
     m_tree_.childrn_hosts[i] = *iter;
   }
+  CRANE_TRACE("coll {:p}: tree: parent_host={}, childrn_cnt={}, childrn_hosts={}",
+              static_cast<void*>(this), m_tree_.parent_host, m_tree_.childrn_cnt,
+              absl::StrJoin(m_tree_.childrn_hosts, ","));
 
   ResetCollTreeUpFwd_();
   ResetCollTreeDownFwd_();
@@ -193,15 +202,13 @@ void Coll::ProgressCollectTree_() {
       break;
     default:
       CRANE_ERROR("{:p}: unknown state {}", static_cast<void*>(this), ToString(m_tree_.state));
-      g_pmix_server->GetCranedClient()->TerminateTasks();
-      break;
     }
   } while (result);
 }
 
 bool Coll::ProgressCollect_() {
 
-  CRANE_DEBUG("{:p}: state={}, local={}, child_cntr={}", static_cast<void*>(this), ToString(m_tree_.state), m_tree_.contrib_local, m_tree_.contrib_children);
+  CRANE_DEBUG("{:p}: progress collect: state={}, local={}, child_cntr={}", static_cast<void*>(this), ToString(m_tree_.state), m_tree_.contrib_local, m_tree_.contrib_children);
 
   if (CollTreeState::COLLECT != m_tree_.state)
     return false;
@@ -217,7 +224,7 @@ bool Coll::ProgressCollect_() {
   m_tree_.state = CollTreeState::UPFWD;
 
   if (!m_tree_.parent_host.empty()) {
-    CRANE_DEBUG("{:p}: send data to {}", static_cast<void*>(this), m_tree_.parent_host);
+    CRANE_DEBUG("{:p}: ProgressCollect_: send data to parent {}, seq: {}", static_cast<void*>(this), m_tree_.parent_host, m_seq_);
     m_tree_.upfwd_status = CollTreeSndState::ACTIVE;
 
     crane::grpc::pmix::PmixTreeUpwardForwardReq request{};
@@ -230,6 +237,7 @@ bool Coll::ProgressCollect_() {
     }
     request.set_peer_host(g_pmix_server->GetHostname());
     request.set_msg(m_tree_.upfwd_buf);
+    request.set_seq(this->m_seq_);
 
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(m_tree_.parent_host);
     if (!stub) {
@@ -281,6 +289,11 @@ bool Coll::ProgressUpFwd_() {
 
   assert(m_tree_.state == CollTreeState::UPFWD);
 
+  CRANE_TRACE("{:p}: progress upfwd: state={}, snd_status={}, local={}, child_cntr={}, seq_num={}",
+              static_cast<void*>(this), ToString(m_tree_.state),
+              static_cast<int>(m_tree_.upfwd_status),
+              m_tree_.contrib_local, m_tree_.contrib_children, m_seq_);
+
   switch (m_tree_.upfwd_status) {
     case CollTreeSndState::FAILED:
       PmixCollLocalCbNodata_(PMIX_ERROR);
@@ -310,6 +323,7 @@ bool Coll::ProgressUpFwd_() {
   m_tree_.downfwd_cb_wait = m_tree_.childrn_cnt;
 
   for (const auto& host : m_tree_.childrn_hosts) {
+    CRANE_DEBUG("{:p}: ProgressUpFwd_: send data to parent {}, seq: {}", static_cast<void*>(this), m_tree_.parent_host, m_seq_);
     crane::grpc::pmix::PmixTreeDownwardForwardReq request{};
 
     for (size_t i = 0; i < m_pset_.nprocs; i++) {
@@ -320,6 +334,7 @@ bool Coll::ProgressUpFwd_() {
     }
     request.set_peer_host(g_pmix_server->GetHostname());
     request.set_msg(m_tree_.downfwd_buf);
+    request.set_seq(this->m_seq_);
 
     auto stub = g_pmix_server->GetPmixClient()->GetPmixStub(host);
     if (!stub) {
@@ -474,8 +489,8 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
     child_id = std::distance(m_tree_.childrn_hosts.begin(), it);
   }
 
-  CRANE_DEBUG("{:p}: contrib/rem from node_id={}, child_id={}, state={}, size={}",
-              static_cast<void*>(this), peer_host, child_id, ToString(m_tree_.state), data.size());
+  CRANE_DEBUG("{:p}: contrib/rem from node_id={}, child_id={}, seq: {}, native_seq: {}, state={}, size={}",
+              static_cast<void*>(this), peer_host, child_id, seq, m_seq_, ToString(m_tree_.state), data.size());
 
   switch (m_tree_.state) {
   case CollTreeState::SYNC:
@@ -512,7 +527,7 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
   if (m_tree_.contrib_child[child_id]) {
     CRANE_DEBUG("multiple contribs from {}:(x:{})", peer_host, child_id);
     ProgressCollectTree_();
-    return true;
+    goto proceed;
   }
 
   m_tree_.upfwd_buf.append(data);
@@ -520,12 +535,12 @@ bool Coll::PmixCollTreeChild(const CranedId& peer_host, uint32_t seq,
   m_tree_.contrib_child[child_id] = true;
   m_tree_.contrib_children++;
 
+proceed:
   ProgressCollectTree_();
 
   CRANE_DEBUG("finish nodeid={}, child={}", peer_host, child_id);
 
   return true;
-
 error:
   ResetCollTree_();
 error2:
@@ -605,6 +620,8 @@ error2:
 
 void Coll::ResetCollTree_() {
 
+  CRANE_TRACE("{:p}: reset coll tree: state={}, seq: {}, ", static_cast<void*>(this), ToString(m_tree_.state), m_seq_);
+  
   switch (m_tree_.state) {
     case CollTreeState::SYNC:
       break;

@@ -73,8 +73,8 @@ static int GeometricSeries(int width, int depth)
 	 * the root - we need to return analog in the w=1 tree which is
 	 * (depth+1).
 	 */
-	return width == 1 ?
-		depth+1 : (1 - InitPow(width, depth+1)) / (1 - width);
+	return (width == 1) ?
+		(depth+1) : (1 - (InitPow(width, (depth+1)))) / (1 - width);
 }
 
 static int Dep(int total, int width)
@@ -92,12 +92,12 @@ static int Dep(int total, int width)
 static int SearchTree(int id, int node, int max_children, int width,
 		       int *parent_id, int *next_max_children, int *depth)
 {
-	int current, next, next_children;
+  int current, next, next_children;
 	int i;
 
 	*depth = *depth + 1;
 	current = node + 1;
-	next_children = max_children / width - 1;
+	next_children = (max_children / width) - 1;
 
 	if (id == current) {
 		*parent_id = node;
@@ -128,7 +128,7 @@ void ReverseTreeInfo(int rank, int num_nodes, int width,
 		  int *parent, int *num_children,
 		  int *depth, int *max_depth)
 {
-	int max_children;
+  int max_children;
 	int p, c;
 
 	/* sanity check */
@@ -165,7 +165,7 @@ void ReverseTreeInfo(int rank, int num_nodes, int width,
 	*depth = 0;
 	SearchTree(rank, 0, max_children, width, &p, &c, depth);
 
-	if (rank + c >= num_nodes)
+	if ((rank + c) >= num_nodes)
 		c = num_nodes - rank - 1;
 
 	*parent = p;
@@ -190,9 +190,9 @@ int ReverseTreeDirectChildren(int rank, int num_nodes, int width,
 	}
 	max_rank_children = GeometricSeries(width, sub_depth);
 	current = rank + 1;
-	child_distance = max_rank_children / width;
+	child_distance = (max_rank_children / width);
 	for (i = 0; i < width && current < num_nodes; i++) {
-		children->emplace_back(current);
+		(*children)[i] = current;
 		current += child_distance;
 	}
 	return i;

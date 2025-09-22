@@ -65,6 +65,9 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
     return false;
   }
 
+  CRANE_TRACE("coll {:p}: init: type={}, peers={}, peerid={} ({}), hostlist={}", static_cast<void*>(this), ToString(m_type_), 
+    m_peers_cnt_, m_peerid_, g_pmix_server->GetHostname(), absl::StrJoin(hostname_set, ","));
+
   switch (type) {
     case CollType::FENCE_TREE:
       this->PmixCollTreeInit_(hostname_set);
