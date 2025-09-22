@@ -74,7 +74,7 @@ void CranedClient::AsyncSendThread_() {
       std::list<StepStatusChangeQueueElem> elems;
       m_mutex_.Lock();
       if (!m_task_status_change_queue_.empty()) {
-        elems.splice(elems.end(), m_task_status_change_queue_);
+        elems.splice(elems.end(), std::move(m_task_status_change_queue_));
         m_mutex_.Unlock();
       } else {
         m_mutex_.Unlock();
@@ -103,16 +103,16 @@ void CranedClient::AsyncSendThread_() {
               "NewStatus: {}, reason: {} | {}, code: {}",
               util::StepStatusToString(elem.new_status), status.error_message(),
               context.debug_error_string(), int(status.error_code()));
-          elems.pop_front();
           break;
         }
+        elems.pop_front();
         CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
                     util::StepStatusToString(elem.new_status), reply.ok());
       }
       m_mutex_.Lock();
       if (!elems.empty()) {
         m_task_status_change_queue_.splice(m_task_status_change_queue_.begin(),
-                                           elems);
+                                           std::move(elems));
       }
       m_mutex_.Unlock();
     }
