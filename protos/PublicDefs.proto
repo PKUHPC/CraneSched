@@ -927,6 +927,11 @@ message NetworkInterface {
   repeated string ipv6_addresses = 4;
 }
 
+message HealthCheckResult {
+  bool healthy = 1;
+  string reason = 2;
+}
+
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;
@@ -940,6 +945,7 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+  HealthCheckResult health_check_result = 10;
 }
 
 enum TxnAction {

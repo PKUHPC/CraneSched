@@ -354,6 +354,11 @@ CtldClient::CtldClient() {
         return success;
       });
 
+  if (!HealthCheck_(g_config.HealthCheck))
+    m_health_check_result_ = false;
+
+  // TODO: health check handle, update result
+
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PingCtldThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -369,6 +374,7 @@ CtldClient::CtldClient() {
                 std::chrono::seconds(g_config.CranedConf.PingIntervalSec),
                 std::chrono::seconds(g_config.CranedConf.PingIntervalSec));
           }
+          // Any状态
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
     if (idle_handle->start() != 0) {
@@ -807,6 +813,11 @@ bool CtldClient::CranedRegister_(
                                                     step_ids.end());
   }
 
+  auto* grpc_health_check_result = grpc_meta->mutable_health_check_result();
+  grpc_health_check_result->set_healthy(m_health_check_result_.load());
+  if (!grpc_health_check_result->healthy())
+    grpc_health_check_result->set_reason("Node failed health check");
+
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
   }
@@ -965,6 +976,107 @@ bool CtldClient::SendStatusChanges_(
       changes.pop_front();
     }
   }
+  return true;
+}
+
+bool CtldClient::HealthCheck_(
+    const Config::HealthCheckConfig& health_check_config) {
+  if (!health_check_config.Enable) return true;
+
+  CRANE_INFO("Health checking.....");
+
+  int pipefd[2];
+  if (pipe(pipefd) != 0) {
+    CRANE_ERROR("HealthCheck: pipe error for {}",
+                health_check_config.Program.c_str());
+    return false;
+  }
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    CRANE_ERROR("HealthCheck: fork failed for {}",
+                health_check_config.Program.c_str());
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return false;
+  }
+
+  if (pid == 0) {
+    close(pipefd[0]);
+    dup2(pipefd[1], STDOUT_FILENO);
+    dup2(pipefd[1], STDERR_FILENO);
+    close(pipefd[1]);
+    execl(health_check_config.Program.c_str(),
+          health_check_config.Program.c_str(), (char*)nullptr);
+    perror("execl failed");
+    _exit(127);
+  }
+
+  close(pipefd[1]);
+  int flags = fcntl(pipefd[0], F_GETFL, 0);
+  fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+  std::string output;
+  char buf[256];
+  int elapsed = 0;
+  int status = 0;
+  const int interval = 100;  // ms
+  uint64_t max_wait_ms = 60000;
+  bool child_exited = false;
+
+  while (elapsed < (int)max_wait_ms) {
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+      buf[n] = '\0';
+      output += buf;
+    }
+    pid_t result = waitpid(pid, &status, WNOHANG);
+    if (result == pid) {
+      child_exited = true;
+      break;
+    }
+    usleep(interval * 1000);
+    elapsed += interval;
+  }
+
+  ssize_t n;
+  while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+    buf[n] = '\0';
+    output += buf;
+  }
+  close(pipefd[0]);
+
+  if (!child_exited) {
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    output += "\nHealth check timed out.";
+    CRANE_WARN("HealthCheck: Timeout for {}. Output: {}",
+               health_check_config.Program.c_str(), output.c_str());
+    return false;
+  }
+
+  if (WIFEXITED(status)) {
+    int exit_code = WEXITSTATUS(status);
+    if (exit_code != 0) {
+      CRANE_WARN("HealthCheck: Failed (exit code:{}) for {}. Output: {}",
+                 exit_code, health_check_config.Program.c_str(),
+                 output.c_str());
+      return false;
+    }
+  } else if (WIFSIGNALED(status)) {
+    CRANE_WARN("HealthCheck: Killed by signal {} for {}. Output: {}",
+               WTERMSIG(status), health_check_config.Program.c_str(),
+               output.c_str());
+    return false;
+  } else {
+    CRANE_WARN("HealthCheck: Unknown exit status {} for {}. Output: {}", status,
+               health_check_config.Program.c_str(), output.c_str());
+    return false;
+  }
+
+  CRANE_INFO("Health check success for {}",
+              health_check_config.Program.c_str());
+
   return true;
 }
 
