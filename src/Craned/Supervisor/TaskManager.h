@@ -110,10 +110,6 @@ class StepInstance {
     return m_task_map_.at(task_id).get();
   }
 
-  // OOM monitoring methods
-  void InitOomBaseline();
-  bool EvaluateOomOnExit();
-
   void AddTaskInstance(task_id_t task_id,
                        std::unique_ptr<ITaskInstance>&& task);
   std::unique_ptr<ITaskInstance> RemoveTaskInstance(task_id_t task_id);
@@ -121,6 +117,10 @@ class StepInstance {
   bool AllTaskFinished() const;
 
   EnvMap GetStepProcessEnv() const;
+
+  // OOM monitoring methods
+  void InitOomBaseline();
+  bool EvaluateOomOnExit();
 
   job_id_t job_id;
   step_id_t step_id;
