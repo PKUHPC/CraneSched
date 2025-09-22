@@ -215,7 +215,8 @@ class MongodbClient {
   void QueryAccountUserSummary(
       const std::string& account, const std::string& username,
       std::time_t start, std::time_t end,
-      grpc::ServerWriter<crane::grpc::AccountUserSummaryItem>* stream);
+      ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
+          stream);
   bool AggregateAccountUserDayorMonth(
       mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
       const std::string& src_time_field, const std::string& dst_time_field,

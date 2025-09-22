@@ -2058,7 +2058,8 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
 grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
     ::grpc::ServerContext *context,
     const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::AccountUserSummaryItem> *writer) {
+    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>
+        *writer) {
   std::string user_name = request->username();
   std::string account = request->account();
   auto start_time = request->start_time().seconds();
