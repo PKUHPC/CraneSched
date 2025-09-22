@@ -26,13 +26,13 @@ login_vault() {
 }
 
 init_vault() {
-    output=$(vault operator init --format=json) # 该命令会得到5个Unseal Key以及1个root token，需要秘密保存后续使用
+    output=$(vault operator init --format=json) # This command will generate 5 Unseal Keys and 1 root token. Keep them safe for future use.
     if [ $? -ne 0 ]; then
         exit 1
     fi
-    # 5个Unseal Key必须保存！！丢失可能导致后续无法使用
+    # The 5 Unseal Keys must be saved! Losing them may result in Vault being unusable.
 
-    #vault使用前需要unseal解密，解析需要用到上述unseal key中的三个
+    # Vault needs to be unsealed before use. Use any 3 of the above unseal keys.
     key=$(echo "$output" | jq -r '.unseal_keys_b64[0]')
     vault operator unseal $key
     key=$(echo "$output" | jq -r '.unseal_keys_b64[1]')
@@ -41,13 +41,13 @@ init_vault() {
     vault operator unseal $key
 
     token=$(echo "$output" | jq -r '.root_token')
-    vault login $token #采用root token登录即可使用CLI命令进行操作
+    vault login $token # Use root token to log in and perform CLI operations
     if [ $? -ne 0 ]; then
-        echo "登录失败"
+        echo "Login failed"
         exit 1
     fi
 
-    mkdir /etc/vault.d
+    mkdir -p /etc/vault.d
     keys=$(echo "$output" | jq '.unseal_keys_b64')
     echo $keys > /etc/vault.d/vault_keys.txt
     chmod 600 /etc/vault.d/vault_keys.txt
@@ -55,7 +55,7 @@ init_vault() {
     echo -n $token > /etc/vault.d/vault_token.txt
     chmod 600 /etc/vault.d/vault_token.txt
 
-    # 创建 admin-policy 策略文件
+    # Create admin-policy file
     echo "Creating admin-policy file..."
     cat <<EOF > /etc/vault.d/admin-policy.hcl
 path "*" {
@@ -63,7 +63,7 @@ path "*" {
 }
 EOF
 
-    # 写入 admin-policy 策略
+    # Write admin-policy to Vault
     echo "Writing admin-policy to Vault..."
     vault policy write admin-policy /etc/vault.d/admin-policy.hcl || {
       echo "Failed to write admin-policy."
@@ -72,21 +72,21 @@ EOF
 
     vault auth enable userpass
 
-    # 创建 admin 用户并分配策略
+    # Create admin user and assign policy
     echo "Creating admin user with admin-policy..."
     vault write auth/userpass/users/admin password="123456" policies="admin-policy" || {
       echo "Failed to create admin user."
       exit 1
     }
 
-    # 使用 admin 用户登录
+    # Log in as admin user
     echo "Logging in as admin user..."
     vault login -method=userpass username=admin password=123456 || {
       echo "Failed to log in as admin user."
       exit 1
     }
 
-   vault status
+    vault status
 }
 
 init_cert() {
@@ -100,7 +100,7 @@ init_cert() {
 
     mkdir -p /etc/crane/tls
 
-    # 生成CA文件
+    # Generate CA certificate
     vault write -field=certificate pki/root/generate/internal \
     common_name="*.$domainSuffix"  issuer_name="CraneSched_root_CA" not_after="9999-12-31T23:59:59Z" > /etc/crane/CA_cert.crt
     if [ $? -ne 0 ]; then
@@ -139,14 +139,14 @@ init_cert() {
 }
 
 issue_internal (){
-    # 检查是否传递了 domainSuffix 参数
+    # Check if domainSuffix is provided
     if [ -z "$1" ]; then
         echo "Error: Please provide a domain suffix!"
-        echo "Usage: issure_internal <domainSuffix>"
+        echo "Usage: issue_internal <domainSuffix>"
         return 1
     fi
 
-    local domainSuffix="$1"  # 接收传递的 domainSuffix 参数
+    local domainSuffix="$1"  # Receive domainSuffix parameter
 
     output=$(vault write -format=json pki/issue/CraneSched common_name="*.$domainSuffix" alt_names="localhost,*.$domainSuffix" not_after="9999-12-31T23:59:59Z" exclude_cn_from_sans=true)
     certificate=$(echo "$output" | jq -r '.data.certificate')
@@ -161,16 +161,16 @@ issue_internal (){
 }
 
 issue_external() {
-    # 检查是否传递了 domainSuffix 参数
+    # Check if domainSuffix is provided
     if [ -z "$1" ]; then
         echo "Error: Please provide a domain suffix!"
-        echo "Usage: issure_internal <domainSuffix>"
+        echo "Usage: issue_external <domainSuffix>"
         return 1
     fi
 
     mkdir -p /etc/crane/tls
 
-    local domainSuffix="$1"  # 接收传递的 domainSuffix 参数
+    local domainSuffix="$1"  # Receive domainSuffix parameter
 
     output=$(vault write -format=json pki/issue/CraneSched common_name="external.$domainSuffix" alt_names="localhost, *.$domainSuffix" not_after="9999-12-31T23:59:59Z"  exclude_cn_from_sans=true)
     certificate=$(echo "$output" | jq -r '.data.certificate')
@@ -196,7 +196,7 @@ init() {
 
     init_vault
     init_cert "$domainSuffix"
-    echo "init 完成"
+    echo "Initialization completed"
 }
 
 clean_vault(){
@@ -204,17 +204,17 @@ clean_vault(){
   rm -rf /etc/vault/data/
   mkdir -p /etc/vault/data/
   systemctl start vault
-  echo "clean vault 完成"
+  echo "Vault cleanup completed"
 }
 
-# 主逻辑：根据输入参数调用对应的函数
+# Main logic: call the corresponding function according to the input parameter
 if [ "$#" -lt 1 ]; then
     echo "Usage: \$0 <function_name> [init, init_vault, init_cert, issue_internal, issue_external, login_vault, unseal_vault, clean_vault]"
     exit 1
 fi
 
 function_name="$1"
-shift # 移除第一个参数，保留剩余参数
+shift # Remove the first argument, keep the rest
 
 case "$function_name" in
     init)
