@@ -217,6 +217,12 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
         }
+
+        CRANE_INFO("CA:\n{}", g_tls_config.CaContent);
+        CRANE_INFO("internalCert:\n{}", g_tls_config.InternalCerts.CertContent);
+        CRANE_INFO("internalKey\n{}", g_tls_config.InternalCerts.KeyContent);
+        CRANE_INFO("externalCert\n{}", g_tls_config.ExternalCerts.CertContent);
+        CRANE_INFO("externalKey:\n{}", g_tls_config.ExternalCerts.KeyContent);
       }
 
       if (config["CraneCtldForeground"]) {
