@@ -2055,17 +2055,17 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   return std::nullopt;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItem(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryAccountUserSummaryItemRequest *request,
-    crane::grpc::QueryAccountUserSummaryItemReply *response) {
+grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::AccountUserSummaryItem> *writer) {
   std::string user_name = request->username();
   std::string account = request->account();
   auto start_time = request->start_time().seconds();
   auto end_time = request->end_time().seconds();
-  response->set_cluster(g_config.CraneClusterName);
+
   g_db_client->QueryAccountUserSummary(account, user_name, start_time, end_time,
-                                       response);
+                                       writer);
   return grpc::Status::OK;
 }
 

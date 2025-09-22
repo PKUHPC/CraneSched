@@ -381,20 +381,17 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ExecInContainerTaskRequest *request,
       crane::grpc::ExecInContainerTaskReply *response) override;
 
+  ::grpc::Status QueryAccountUserSummaryItemStream(
+      ::grpc::ServerContext *context,
+      const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
+      ::grpc::ServerWriter<::crane::grpc::AccountUserSummaryItem> *writer)
+      override;
+
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(
       const grpc::ServerContext *context, uint32_t uid);
 
-grpc::Status QueryAccountUserSummaryItem(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryAccountUserSummaryItemRequest *request,
-    crane::grpc::QueryAccountUserSummaryItemReply *response) override;
-
-private:
-static std::optional<std::string> CheckCertAndUIDAllowed_(
-    const grpc::ServerContext *context, uint32_t uid);
-
-CtldServer *m_ctld_server_;
+  CtldServer *m_ctld_server_;
 };
 
 /***

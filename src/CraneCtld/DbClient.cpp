@@ -3282,7 +3282,8 @@ void MongodbClient::QueryAndAgg(
 
 void MongodbClient::QueryAccountUserSummary(
     const std::string& account, const std::string& username, std::time_t start,
-    std::time_t end, crane::grpc::QueryAccountUserSummaryItemReply* response) {
+    std::time_t end,
+    grpc::ServerWriter<crane::grpc::AccountUserSummaryItem>* stream) {
   bool print_debug_log = true;
   std::unordered_map<Key, AggResult, KeyHash> agg_map;
   auto ranges = util::EfficientSplitTimeRange(start, end);
@@ -3316,12 +3317,14 @@ void MongodbClient::QueryAccountUserSummary(
   }
 
   for (const auto& kv : agg_map) {
-    auto item = response->add_items();
-    item->set_account(kv.first.account);
-    item->set_username(kv.first.username);
-    item->set_total_cpu_time(kv.second.total_cpu_time);
-    item->set_total_cpu_alloc(kv.second.total_cpu_alloc);
-    item->set_total_count(kv.second.total_count);
+    crane::grpc::AccountUserSummaryItem item;
+    item.set_cluster(g_config.CraneClusterName);
+    item.set_account(kv.first.account);
+    item.set_username(kv.first.username);
+    item.set_total_cpu_time(kv.second.total_cpu_time);
+    item.set_total_cpu_alloc(kv.second.total_cpu_alloc);
+    item.set_total_count(kv.second.total_count);
+    stream->Write(item);
   }
 }
 
