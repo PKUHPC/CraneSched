@@ -605,7 +605,7 @@ std::string ContainerInstance::ParseOCICmdPattern_(
   std::string parsed_cmd(cmd);
   // NOTE: Using m_temp_path_ as the bundle is modified and stored here
   absl::StrReplaceAll({{"%b", m_temp_path_.string()},
-                       {"%j", std::to_string(task_id)},
+                       {"%j", std::to_string(g_config.JobId)},
                        {"%x", m_parent_step_inst_->GetStep().name()},
                        {"%u", pwd.Username()},
                        {"%U", std::to_string(pwd.Uid())}},

@@ -2832,6 +2832,7 @@ void TaskScheduler::TerminateOrphanedSteps(
         StepInCtld* step{nullptr};
         if (step_id == kDaemonStepId) {
           step = job->DaemonStep();
+
         } else if (step_id == job->PrimaryStep()->StepId()) {
           step = job->PrimaryStep();
         } else {

@@ -239,7 +239,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
             "[Task #{}] Failed to init poll_handle for output fd {}: {}",
             task_id, stdout_read, uv_strerror(err));
         elem.promise.set_value(false);
-        continue;
+        return;
       }
 
       if (retry_cnt++ > 3) {
@@ -248,7 +248,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
             "3 times.",
             task_id, stdout_read, uv_strerror(err));
         elem.promise.set_value(false);
-        break;
+        return;
       }
 
       CRANE_DEBUG(
@@ -268,7 +268,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       if (poll_handle) poll_handle->close();
       close(stdout_read);
       elem.promise.set_value(false);
-      continue;
+      return;
       // TODO: handle failed status
     }
     {
