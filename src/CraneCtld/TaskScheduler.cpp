@@ -780,7 +780,6 @@ void TaskScheduler::ScheduleThread_() {
                                }),
                     ","),
                 craned_id);
-            failed_craned_set.emplace(craned_id);
             for (const auto& job_to_d : jobs)
               failed_task_id_set.emplace(job_to_d.job_id());
             bl.DecrementCount();
