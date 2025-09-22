@@ -161,7 +161,7 @@ message CancelTaskRequest {
   uint32 operator_uid = 1;
 
   // Filters
-  repeated uint32 filter_task_ids = 2;
+  map<uint32, JobStepIds> filter_task_ids = 2;
   string filter_partition = 3;
   string filter_account = 4;
   TaskStatus filter_state = 5;
@@ -171,7 +171,7 @@ message CancelTaskRequest {
 }
 
 message CancelTaskReply {
-  repeated uint32 cancelled_tasks = 2;
+  map<uint32, JobStepIds> cancelled_tasks = 2;
   repeated uint32 not_cancelled_tasks = 3;
   repeated string not_cancelled_reasons = 4;
 }
@@ -501,6 +501,25 @@ message QueryTasksInfoRequest {
 message QueryTasksInfoReply {
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
+}
+
+message QueryStepInfoRequest {
+  map<uint32, JobStepIds> filter_steps = 1;
+  repeated string filter_partitions = 2;
+  uint32 num_limit = 3;
+  repeated string filter_step_names = 4;
+
+  repeated TaskStatus filter_step_states = 6;
+  TimeInterval filter_submit_time_interval = 9;
+  TimeInterval filter_start_time_interval = 10;
+  TimeInterval filter_end_time_interval = 11;
+
+  bool option_include_completed_steps = 15;
+}
+
+message QueryStepInfoReply {
+  bool ok = 1;
+  repeated StepInfo step_info_list = 2;
 }
 
 message CreateReservationRequest {
@@ -966,6 +985,7 @@ service CraneCtld {
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+  rpc QueryStepInfo(QueryStepInfoRequest) returns (QueryStepInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
 

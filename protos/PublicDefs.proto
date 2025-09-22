@@ -420,6 +420,54 @@ message TaskInfo {
   ResourceView allocated_res_view = 40;
 }
 
+message StepInfo{
+  // Static step information
+  TaskType type = 1;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string name = 4;
+
+  uint32 uid = 5;
+  repeated uint32 gid = 6;
+
+  google.protobuf.Duration time_limit = 7;
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+  google.protobuf.Timestamp submit_time = 10;
+
+  uint32 node_num = 12;
+  string cmd_line = 13;
+  string cwd = 14;
+  ResourceView req_res_view = 17;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
+
+  string extra_attr = 21;
+
+  string container = 23;
+  /* 24-29 Reserved */
+
+  // Dynamic step information
+  bool held = 30;
+  TaskStatus status = 31;
+
+  uint32 exit_code = 33;
+  uint32 priority = 34;
+  oneof pending_reason_or_craned_list {
+    string pending_reason = 35;
+    string craned_list = 36;
+  }
+
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
+  google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
+  ResourceView allocated_res_view = 40;
+}
+
+
 message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;

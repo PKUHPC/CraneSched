@@ -521,7 +521,7 @@ class TaskScheduler {
                                      crane::grpc::ConfigureCranedRequest* req);
 
   void TerminateOrphanedSteps(
-      const std::unordered_map<job_id_t, std::set<job_id_t>>& steps,
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
 
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(

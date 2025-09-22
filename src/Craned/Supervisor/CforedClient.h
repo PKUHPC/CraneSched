@@ -84,6 +84,7 @@ class CforedClient {
   void CleanStdoutFwdHandlerQueueCb_();
 
   struct CreateX11FwdQueueElem {
+    task_id_t task_id;
     std::promise<uint16_t> promise;
   };
   ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_handler_queue_;
