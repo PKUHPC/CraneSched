@@ -1750,7 +1750,7 @@ void TaskManager::EvTaskTimerCb_() {
 
   DelTerminationTimer_();
 
-  if (m_step_.IsBatch() || m_step_.IsCrun()) {
+  if (m_step_.IsBatch() || m_step_.IsCrun() || m_step_.IsContainer()) {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
@@ -1786,14 +1786,15 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     }
 
     const auto& exit_info = task->GetExitInfo();
-    if (m_step_.IsBatch() || m_step_.IsCrun()) {
-      bool considered_signal = exit_info.is_terminated_by_signal;
+    if (m_step_.IsBatch() || m_step_.IsCrun() || m_step_.IsContainer()) {
+      bool signalled = exit_info.is_terminated_by_signal;
       if (task->terminated_by == TerminatedBy::NONE) {
         if (m_step_.EvaluateOomOnExit()) {
           task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
         }
       }
-      if (considered_signal) {
+
+      if (signalled) {
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER:
           ActivateTaskStatusChange_(
@@ -1809,7 +1810,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::OutOfMemory,
               exit_info.value + ExitCode::kTerminationSignalBase,
-              std::optional<std::string>("Detected by oom_kill counter delta"));
+              "Detected by oom_kill counter delta");
           break;
         default:
           ActivateTaskStatusChange_(
@@ -1823,8 +1824,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::OutOfMemory, exit_info.value,
-              std::optional<std::string>(
-                  "Detected by oom_kill counter delta (no signal)"));
+              "Detected by oom_kill counter delta (no signal)");
         } else {
           ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                     exit_info.value, std::nullopt);
@@ -1860,7 +1860,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    int sig = m_step_.IsBatch() ? SIGTERM : SIGHUP;
+    int sig = (m_step_.IsBatch() || m_step_.IsContainer()) ? SIGTERM : SIGHUP;
 
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
