@@ -964,7 +964,7 @@ service CraneCtld {
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
-  rpc QueryAccountUserSummaryItemStream(QueryAccountUserSummaryItemRequest) returns (stream AccountUserSummaryItem);
+  rpc QueryAccountUserSummaryItemStream(QueryAccountUserSummaryItemRequest) returns (stream QueryAccountUserSummaryItemReply);
 
 }
 
