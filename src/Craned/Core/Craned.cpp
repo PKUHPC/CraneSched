@@ -655,6 +655,7 @@ void ParseConfig(int argc, char** argv) {
             CRANE_ERROR("HealthCheckProgram is not configured");
             std::exit(1);
           }
+          g_config.HealthCheck.Enable = true;
           g_config.HealthCheck.Interval = YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
           g_config.HealthCheck.NodeState = absl::StripAsciiWhitespace(
             absl::AsciiStrToLower(YamlValueOr(health_check_config["NodeState"], "any")));
