@@ -510,7 +510,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
     tls_certs->set_cert_content(
         g_config.ListenConf.TlsConfig.TlsCerts.CertContent);
-    tls_certs->set_ca_content(g_config.ListenConf.TlsConfig.TlsCerts.CaContent);
+    tls_certs->set_ca_content(g_config.ListenConf.TlsConfig.CaContent);
     tls_certs->set_key_content(
         g_config.ListenConf.TlsConfig.TlsCerts.KeyContent);
 

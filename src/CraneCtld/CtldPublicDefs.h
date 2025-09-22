@@ -101,6 +101,8 @@ struct Config {
       TlsCertificates InternalCerts;
       TlsCertificates ExternalCerts;
       std::unordered_set<std::string> AllowedNodes;
+      std::string CaFilePath;
+      std::string CaContent;
       std::string DomainSuffix;
     };
     TlsCertsConfig TlsConfig;
