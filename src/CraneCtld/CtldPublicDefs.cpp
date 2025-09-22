@@ -356,9 +356,12 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   // Only pass container meta if it's a container task
   // This is because ccon command requires more info than cqueue/cacct.
   if (IsContainer()) {
-    auto* meta_info = task_info->mutable_container_meta();
-    meta_info->mutable_image()->set_image(
-        std::get<ContainerMetaInTask>(meta).image_info.image);
+    task_info->mutable_container_meta()->CopyFrom(
+        static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
+            std::get<ContainerMetaInTask>(meta)));
+    // Remove sensitive info
+    task_info->mutable_container_meta()->mutable_image()->clear_username();
+    task_info->mutable_container_meta()->mutable_image()->clear_password();
   }
 
   // Dynamic fields
