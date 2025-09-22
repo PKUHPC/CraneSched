@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CtldPublicDefs.h"
+#include "protos/Crane.grpc.pb.h"
 // Precompiled header comes first!
 
 #include <spdlog/fmt/fmt.h>
@@ -214,7 +215,7 @@ class MongodbClient {
   void QueryAccountUserSummary(
       const std::string& account, const std::string& username,
       std::time_t start, std::time_t end,
-      crane::grpc::QueryAccountUserSummaryItemReply* response);
+      grpc::ServerWriter<crane::grpc::AccountUserSummaryItem>* stream);
   bool AggregateAccountUserDayorMonth(
       mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
       const std::string& src_time_field, const std::string& dst_time_field,
