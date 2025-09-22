@@ -420,7 +420,7 @@ message TaskInfo {
   ResourceView allocated_res_view = 40;
 }
 
-message StepInfo{
+message StepInfo {
   // Static step information
   TaskType type = 1;
   uint32 job_id = 2;
@@ -466,7 +466,6 @@ message StepInfo{
   repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
 }
-
 
 message PartitionInfo {
   string hostlist = 1;
