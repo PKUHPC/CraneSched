@@ -103,10 +103,10 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
 
 bool VaultClient::RevokeCert(const std::string& serial_number) {
   try {
-    std::optional<std::string> resp = Post_(
-        *m_root_client_,
-        GetPkiUrl_(Vault::SecretMount{"pki"}, Vault::Path{"revoke"}),
-        Vault::Parameters{{"serial_number", serial_number}});
+    std::optional<std::string> resp =
+        Post_(*m_root_client_,
+              GetPkiUrl_(Vault::SecretMount{"pki"}, Vault::Path{"revoke"}),
+              Vault::Parameters{{"serial_number", serial_number}});
 
     if (!resp) return false;
 

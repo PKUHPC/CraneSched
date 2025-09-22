@@ -1932,9 +1932,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   if (listen_conf.TlsConfig.Enabled) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
-                                        listen_conf.CraneCtldListenPort,
-                                        listen_conf.TlsConfig.ExternalCerts, listen_conf.TlsConfig.CaContent);
+    ServerBuilderAddTcpTlsListeningPort(
+        &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
+        listen_conf.TlsConfig.ExternalCerts, listen_conf.TlsConfig.CaContent);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);

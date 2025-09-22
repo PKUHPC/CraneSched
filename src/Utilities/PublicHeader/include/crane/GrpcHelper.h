@@ -64,12 +64,14 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 
 void ServerBuilderAddTcpTlsListeningPortForInternal(
     grpc::ServerBuilder* builder, const std::string& address,
-    const std::string& port, const TlsCertificates& certs, const std::string& ca_content);
+    const std::string& port, const TlsCertificates& certs,
+    const std::string& ca_content);
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs, const std::string& ca_content);
+                                         const TlsCertificates& certs,
+                                         const std::string& ca_content);
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
