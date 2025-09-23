@@ -51,6 +51,9 @@ ContainerMetaInTask::ContainerMetaInTask(
       workdir(rhs.workdir()),
       env(rhs.env().begin(), rhs.env().end()),
       detached(rhs.detached()),
+      tty(rhs.tty()),
+      stdin(rhs.stdin()),
+      stdin_once(rhs.stdin_once()),
       userns(rhs.userns()),
       run_as_user(rhs.run_as_user()),
       run_as_group(rhs.run_as_group()),
@@ -90,6 +93,10 @@ ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
   }
 
   result.set_detached(this->detached);
+  result.set_tty(this->tty);
+  result.set_stdin(this->stdin);
+  result.set_stdin_once(this->stdin_once);
+
   result.set_userns(this->userns);
   result.set_run_as_user(this->run_as_user);
   result.set_run_as_group(this->run_as_group);

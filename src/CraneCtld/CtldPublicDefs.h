@@ -385,6 +385,9 @@ struct ContainerMetaInTask {
   std::unordered_map<std::string, std::string> env;
 
   bool detached{true};
+  bool tty{false};
+  bool stdin{false};
+  bool stdin_once{false};
 
   bool userns{true};
   uid_t run_as_user{0};
