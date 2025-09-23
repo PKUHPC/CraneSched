@@ -226,12 +226,16 @@ class MongodbClient {
       const std::string& src_time_field, const std::string& dst_time_field,
       std::time_t cur_start, std::time_t cur_end, bool print_debug_log);
 
-  bool HandleHourAccountUserResult(const bsoncxx::array::view& arr,
-                                   mongocxx::collection& dst_collection,
-                                   bool print_debug_log);
-  bool HandleHourAccountUserWckeyResult(const bsoncxx::array::view& arr,
-                                        mongocxx::collection& dst_collection,
-                                        bool print_debug_log);
+  void HandleProduceAccountUserAggArray(
+      const std::string& src_coll_str,
+      ThreadSafeQueue<bsoncxx::array::value>& queue,
+      const std::string& src_time_field, const std::string& period_field,
+      std::time_t start, std::time_t end);
+  void HandleProduceAccountUserWckeyAggArray(
+      const std::string src_coll_str,
+      ThreadSafeQueue<bsoncxx::array::value>& queue,
+      const std::string& src_time_field, const std::string& period_field,
+      std::time_t start, std::time_t end);
   bool HandleAccountUserAggArray(const bsoncxx::array::view& arr,
                                  mongocxx::collection& dst_coll,
                                  const std::string& dst_time_field,
@@ -424,9 +428,6 @@ class MongodbClient {
       "month_account_user_summary_table"};
   const std::string m_month_account_user_wckey_collection_name_{
       "month_account_user_wckey_summary_table"};
-  const std::string m_hour_summary_collection_name_{"hour_summary_table"};
-  const std::string m_day_summary_collection_name_{"day_summary_able"};
-  const std::string m_month_summary_collection_name_{"month_summary_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
