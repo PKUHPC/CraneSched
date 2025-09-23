@@ -30,6 +30,20 @@ using crane::grpc::StreamTaskIORequest;
 CforedClient::CforedClient() {
   m_loop_ = uvw::loop::create();
 
+  m_clean_stdout_fwd_handler_queue_async_handle_ =
+      m_loop_->resource<uvw::async_handle>();
+  m_clean_stdout_fwd_handler_queue_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanStdoutFwdHandlerQueueCb_();
+      });
+
+  m_clean_x11_fwd_handler_queue_async_handle_ =
+      m_loop_->resource<uvw::async_handle>();
+  m_clean_x11_fwd_handler_queue_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanX11FwdHandlerQueueCb_();
+      });
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       m_loop_->resource<uvw::idle_handle>();
 
@@ -44,6 +58,10 @@ CforedClient::CforedClient() {
   if (idle_handle->start() != 0) {
     CRANE_ERROR("Failed to start the idle event in CforedManager EvLoop.");
   }
+  m_ev_thread_ = std::thread([this] {
+    util::SetCurrentThreadName("CforedClient");
+    m_loop_->run();
+  });
 }
 
 CforedClient::~CforedClient() {
@@ -59,147 +77,34 @@ CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
+                                                    int stdin_write,
                                                     int stdout_read, bool pty) {
-  CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
-              pid, stdin_write, stdout_read, pty);
+  CRANE_DEBUG(
+      "[Task #{}] Setting up task fwd forinput_fd:{} output_fd:{} pty:{}",
+      task_id, stdin_write, stdout_read, pty);
 
   util::os::SetFdNonBlocking(stdout_read);
 
-  TaskFwdMeta meta = {.pid = pid,
+  TaskFwdMeta meta = {.task_id = task_id,
                       .pty = pty,
                       .stdin_write = stdin_write,
                       .stdout_read = stdout_read};
-
-  auto poll_handle =
-      m_loop_->uninitialized_resource<uvw::poll_handle>(stdout_read);
-
-  int err = 0, retry_cnt = 0;
-  while (true) {
-    err = poll_handle->init();
-    if (err == 0) break;
-    if (err != UV_EINTR && err != UV_EAGAIN) {
-      CRANE_ERROR("[Proc #{}] Failed to init poll_handle for output fd {}: {}",
-                  pid, stdout_read, uv_strerror(err));
-      return false;
-    }
-
-    if (retry_cnt++ > 3) {
-      CRANE_ERROR(
-          "[Proc #{}] Failed to init poll_handle for output fd {}: {} after "
-          "3 times.",
-          pid, stdout_read, uv_strerror(err));
-      return false;
-    }
-
-    CRANE_DEBUG(
-        "[Proc #{}] Recoverable error {} when initializing poll_handle "
-        "for output fd {}, retrying...",
-        pid, uv_strerror(err), stdout_read);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-
-  if (err != 0) {
-    CRANE_ERROR(
-        "[Proc #{}] failed to init poll_handle for output fd {}. "
-        "Close poll handle and fd.",
-        pid, stdout_read);
-
-    if (poll_handle) poll_handle->close();
-    close(stdout_read);
-    return false;
-    // TODO: handle failed status
-  }
-  auto poll_cb = [this, meta](const uvw::poll_event&, uvw::poll_handle& h) {
-    CRANE_TRACE("Detect task #{} output.", g_config.JobId);
-
-    constexpr int MAX_BUF_SIZE = 4096;
-    char buf[MAX_BUF_SIZE];
-
-    auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
-    bool read_finished{false};
-
-    if (ret == 0) {
-      if (!meta.pty) {
-        read_finished = true;
-      } else {
-        // For pty,do nothing, process exit on return -1 and error set to
-        // EIO
-        CRANE_TRACE("Read EOF from pty task #{} on cfored {}", g_config.JobId,
-                    m_cfored_name_);
-      }
-    }
-
-    if (ret == -1) {
-      if (!meta.pty) {
-        CRANE_ERROR("Error when reading task #{} output, error {}",
-                    g_config.JobId, std::strerror(errno));
-        return;
-      }
-
-      if (errno == EIO) {
-        // For pty output, the read() will return -1 with errno set to EIO
-        // when process exit.
-        // ref: https://unix.stackexchange.com/questions/538198
-        read_finished = true;
-      } else if (errno == EAGAIN) {
-        // Read before the process begin.
-        return;
-      } else {
-        CRANE_ERROR("Error when reading task #{} output, error {}",
-                    g_config.JobId, std::strerror(errno));
-        return;
-      }
-    }
-
-    if (read_finished) {
-      CRANE_TRACE("Task #{} to cfored {} finished its output.", g_config.JobId,
-                  m_cfored_name_);
-      h.close();
-      close(meta.stdout_read);
-
-      bool ok_to_free = this->TaskOutputFinish(meta.pid);
-      if (ok_to_free) {
-        CRANE_TRACE("It's ok to begin unregister task #{} on {}",
-                    g_config.JobId, m_cfored_name_);
-        TaskEnd(meta.pid);
-      }
-      return;
-    }
-
-    std::string output(buf, ret);
-    CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
-    this->TaskOutPutForward(output);
-  };
-  poll_handle->on<uvw::poll_event>(poll_cb);
-  int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-  if (ret < 0) {
-    CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-    if (poll_handle) poll_handle->close();
-    return false;
-  } else {
-    // Doing one-time triggering in case of missing EOF of fast-ending task.
-    auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
-    immediate->init();
-    immediate->on<uvw::check_event>(
-        [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
-                                         uvw::check_handle& h) {
-          uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
-          poll_cb(fake_event, *poll_handle);
-          h.close();
-        });
-    immediate->start();
-  }
-
-  absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid] = std::move(meta);
-  return true;
+  CreateStdoutFwdQueueElem elem;
+  elem.meta = std::move(meta);
+  auto ok_future = elem.promise.get_future();
+  m_create_stdout_fwd_handler_queue_.enqueue(std::move(elem));
+  m_clean_stdout_fwd_handler_queue_async_handle_->send();
+  return ok_future.get();
 }
 
-uint16_t CforedClient::InitUvX11FwdHandler(pid_t pid) {
-  CRANE_TRACE("Registering X11 forwarding for pid {}.", pid);
-  return SetupX11forwarding_();
+uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
+  CreateX11FwdQueueElem elem;
+  elem.task_id = task_id;
+  auto port_future = elem.promise.get_future();
+  m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));
+  m_clean_x11_fwd_handler_queue_async_handle_->send();
+  return port_future.get();
 }
 
 uint16_t CforedClient::SetupX11forwarding_() {
@@ -301,13 +206,6 @@ uint16_t CforedClient::SetupX11forwarding_() {
   return port;
 }
 
-void CforedClient::StartUvLoopThread() {
-  m_ev_thread_ = std::thread([this] {
-    util::SetCurrentThreadName("CforedClient");
-    m_loop_->run();
-  });
-}
-
 bool CforedClient::WriteStringToFd_(const std::string& msg, int fd,
                                     bool close_fd) {
   ssize_t sz_sent = 0, sz_written;
@@ -322,6 +220,154 @@ bool CforedClient::WriteStringToFd_(const std::string& msg, int fd,
   }
   if (close_fd) close(fd);
   return true;
+}
+
+void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
+  CreateStdoutFwdQueueElem elem;
+  while (m_create_stdout_fwd_handler_queue_.try_dequeue(elem)) {
+    auto& meta = elem.meta;
+    auto stdout_read = meta.stdout_read;
+    auto task_id = meta.task_id;
+    auto poll_handle =
+        m_loop_->uninitialized_resource<uvw::poll_handle>(stdout_read);
+
+    int err = 0, retry_cnt = 0;
+    while (true) {
+      err = poll_handle->init();
+      if (err == 0) break;
+      if (err != UV_EINTR && err != UV_EAGAIN) {
+        CRANE_ERROR(
+            "[Task #{}] Failed to init poll_handle for output fd {}: {}",
+            task_id, stdout_read, uv_strerror(err));
+        elem.promise.set_value(false);
+        break;
+      }
+
+      if (retry_cnt++ > 3) {
+        CRANE_ERROR(
+            "[Task #{}] Failed to init poll_handle for output fd {}: {} after "
+            "3 times.",
+            task_id, stdout_read, uv_strerror(err));
+        elem.promise.set_value(false);
+        break;
+      }
+
+      CRANE_DEBUG(
+          "[Task #{}] Recoverable error {} when initializing poll_handle "
+          "for output fd {}, retrying...",
+          task_id, uv_strerror(err), stdout_read);
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    if (err != 0) {
+      CRANE_ERROR(
+          "[Task #{}] failed to init poll_handle for output fd {}. "
+          "Close poll handle and fd.",
+          task_id, stdout_read);
+
+      if (poll_handle) poll_handle->close();
+      close(stdout_read);
+      elem.promise.set_value(false);
+      break;
+      // TODO: handle failed status
+    }
+    {
+      absl::MutexLock lock(&m_mtx_);
+      m_fwd_meta_map[task_id] = meta;
+    }
+    auto poll_cb = [this, task_id, meta](const uvw::poll_event&,
+                                         uvw::poll_handle& h) {
+      CRANE_TRACE("[Task #{}] Detect output.", task_id);
+
+      constexpr int MAX_BUF_SIZE = 4096;
+      char buf[MAX_BUF_SIZE];
+
+      auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
+      bool read_finished{false};
+
+      if (ret == 0) {
+        if (!meta.pty) {
+          read_finished = true;
+        } else {
+          // For pty,do nothing, process exit on return -1 and error set to
+          // EIO
+          CRANE_TRACE("[Task #{}] Read EOF from pty on cfored {}", task_id,
+                      m_cfored_name_);
+        }
+      }
+
+      if (ret == -1) {
+        if (!meta.pty) {
+          CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
+                      std::strerror(errno));
+          return;
+        }
+
+        if (errno == EIO) {
+          // For pty output, the read() will return -1 with errno set to EIO
+          // when process exit.
+          // ref: https://unix.stackexchange.com/questions/538198
+          read_finished = true;
+        } else if (errno == EAGAIN) {
+          // Read before the process begin.
+          return;
+        } else {
+          CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
+                      std::strerror(errno));
+          return;
+        }
+      }
+
+      if (read_finished) {
+        CRANE_TRACE("[Task #{}] to cfored {} finished its output.", task_id,
+                    m_cfored_name_);
+        h.close();
+        close(meta.stdout_read);
+
+        bool ok_to_free = this->TaskOutputFinish(meta.task_id);
+        if (ok_to_free) {
+          CRANE_TRACE("It's ok to begin unregister task #{} on {}",
+                      g_config.JobId, m_cfored_name_);
+          TaskEnd(meta.task_id);
+        }
+        return;
+      }
+
+      std::string output(buf, ret);
+      CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
+      this->TaskOutPutForward(output);
+    };
+    poll_handle->on<uvw::poll_event>(poll_cb);
+    int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
+    if (ret < 0) {
+      CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
+      if (poll_handle) poll_handle->close();
+      elem.promise.set_value(false);
+      continue;
+    }
+    // Doing one-time triggering in case of missing EOF of fast-ending task.
+    auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
+    immediate->init();
+    immediate->on<uvw::check_event>(
+        [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
+                                         uvw::check_handle& h) {
+          uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
+          poll_cb(fake_event, *poll_handle);
+          h.close();
+        });
+    immediate->start();
+
+    elem.promise.set_value(true);
+  }
+}
+
+void CforedClient::CleanX11FwdHandlerQueueCb_() {
+  CreateX11FwdQueueElem elem;
+  while (m_create_x11_fwd_handler_queue_.try_dequeue(elem)) {
+    CRANE_INFO("Setup X11 forwarding");
+    elem.promise.set_value(SetupX11forwarding_());
+  }
 }
 
 void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
@@ -469,10 +515,6 @@ void CforedClient::AsyncSendRecvThread_() {
 
         request.Clear();
         request.set_type(StreamTaskIORequest::SUPERVISOR_UNREGISTER);
-        request.mutable_payload_unregister_req()->set_craned_id(
-            g_config.CranedIdOfThisNode);
-        request.mutable_payload_unregister_req()->set_task_id(g_config.JobId);
-        request.mutable_payload_unregister_req()->set_step_id(g_config.StepId);
 
         stream->WriteLast(request, grpc::WriteOptions(), (void*)Tag::Write);
 
@@ -505,7 +547,7 @@ void CforedClient::AsyncSendRecvThread_() {
       request.set_type(StreamTaskIORequest::SUPERVISOR_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
-      request.mutable_payload_register_req()->set_task_id(g_config.JobId);
+      request.mutable_payload_register_req()->set_job_id(g_config.JobId);
       request.mutable_payload_register_req()->set_step_id(g_config.StepId);
 
       write_pending.store(true, std::memory_order::release);
@@ -637,20 +679,20 @@ void CforedClient::AsyncSendRecvThread_() {
   }
 }
 
-bool CforedClient::TaskOutputFinish(pid_t pid) {
+bool CforedClient::TaskOutputFinish(task_id_t task_id) {
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid].output_stopped = true;
-  return m_fwd_meta_map[pid].proc_stopped;
+  m_fwd_meta_map[task_id].output_stopped = true;
+  return m_fwd_meta_map[task_id].proc_stopped;
 };
 
-bool CforedClient::TaskProcessStop(pid_t pid) {
+bool CforedClient::TaskProcessStop(task_id_t task_id) {
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid].proc_stopped = true;
-  return m_fwd_meta_map[pid].output_stopped;
+  m_fwd_meta_map[task_id].proc_stopped = true;
+  return m_fwd_meta_map[task_id].output_stopped;
 }
 
-void CforedClient::TaskEnd(pid_t pid) {
-  g_task_mgr->TaskStopAndDoStatusChange(g_config.JobId);
+void CforedClient::TaskEnd(task_id_t task_id) {
+  g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {

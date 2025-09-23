@@ -46,17 +46,20 @@ StepInstance::~StepInstance() {
   }
 }
 
-bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
+bool StepInstance::IsBatch() const noexcept {
+  return !interactive_type.has_value();
+}
 
-bool StepInstance::IsCrun() const {
+bool StepInstance::IsCrun() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Crun;
 }
 
-bool StepInstance::IsCalloc() const {
+bool StepInstance::IsCalloc() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Calloc;
 }
+
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
