@@ -110,6 +110,8 @@ class JobManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
 
+  Config::HealthCheckConfig::NodeStateEnum GetNodeState();
+
   // Wait internal libuv base loop to exit...
   void Wait();
   bool IsEnding() { return m_is_ending_now_; }
