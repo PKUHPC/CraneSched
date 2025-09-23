@@ -60,8 +60,6 @@ void CranedMetaContainer::CranedUp(
 
   node_meta->alive = true;
 
-  node_meta->drain = !remote_meta.health_check_result().healthy();
-
   node_meta->remote_meta = CranedRemoteMeta(remote_meta);
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -761,7 +759,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   return reply;
 }
 
-// TODO: health check faild, ChangeNodeState to drain
+
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
@@ -831,6 +829,12 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     g_plugin_client->NodeEventHookAsync(std::move(event_list));
   }
   return reply;
+}
+
+void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health) {
+  if (!craned_meta_map_.Contains(craned_id)) return ;
+  auto craned_meta = craned_meta_map_[craned_id];
+  craned_meta->drain = !is_health;
 }
 
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(

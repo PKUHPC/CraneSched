@@ -192,6 +192,11 @@ class CtldForInternalServiceImpl final
                           const crane::grpc::CranedPingRequest *request,
                           crane::grpc::CranedPingReply *response) override;
 
+  grpc::Status HealthCheckResponse(
+      grpc::ServerContext *context,
+      const crane::grpc::HealthCheckResponseRequest *request,
+      google::protobuf::Empty *response) override;
+
   grpc::Status CforedStream(
       grpc::ServerContext *context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,

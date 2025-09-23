@@ -650,22 +650,37 @@ void ParseConfig(int argc, char** argv) {
 
         if (config["HealthCheck"]) {
           const auto& health_check_config = config["HealthCheck"];
-          g_config.HealthCheck.Program = YamlValueOr(health_check_config["Program"], "");
+          g_config.HealthCheck.Program =
+              YamlValueOr(health_check_config["Program"], "");
           if (g_config.HealthCheck.Program.empty()) {
             CRANE_ERROR("HealthCheckProgram is not configured");
             std::exit(1);
           }
-          g_config.HealthCheck.Enable = true;
-          g_config.HealthCheck.Interval = YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
-          g_config.HealthCheck.NodeState = absl::StripAsciiWhitespace(
-            absl::AsciiStrToLower(YamlValueOr(health_check_config["NodeState"], "any")));
-          if (g_config.HealthCheck.NodeState != "any" &&
-              g_config.HealthCheck.NodeState != "idle" &&
-              g_config.HealthCheck.NodeState != "mixed" && g_config.HealthCheck.NodeState != "alloc") {
+          g_config.HealthCheck.Interval =
+              YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
+          std::string node_state;
+          node_state = absl::StripAsciiWhitespace(absl::AsciiStrToLower(
+              YamlValueOr(health_check_config["NodeState"], "any")));
+          if (node_state != "any" && node_state != "idle" &&
+              node_state != "mixed" && node_state != "alloc") {
             CRANE_WARN("HealthCheckNodeState is not valid, reset to any");
-            g_config.HealthCheck.NodeState = "any";
+            node_state = "any";
           }
-          g_config.HealthCheck.Cycle = YamlValueOr<bool>(health_check_config["Cycle"], false);
+          if (node_state == "any") {
+            g_config.HealthCheck.NodeState =
+                Craned::Config::HealthCheckConfig::ANY;
+          } else if (node_state == "idle") {
+            g_config.HealthCheck.NodeState =
+                Craned::Config::HealthCheckConfig::IDLE;
+          } else if (node_state == "mixed") {
+            g_config.HealthCheck.NodeState =
+                Craned::Config::HealthCheckConfig::MIXED;
+          } else if (node_state == "alloc") {
+            g_config.HealthCheck.NodeState =
+                Craned::Config::HealthCheckConfig::ALLOC;
+          }
+          g_config.HealthCheck.Cycle =
+              YamlValueOr<bool>(health_check_config["Cycle"], false);
         }
 
         if (config["Plugin"]) {
