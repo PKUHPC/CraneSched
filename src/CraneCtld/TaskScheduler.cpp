@@ -25,6 +25,7 @@
 #include "EmbeddedDbClient.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
+#include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -1400,6 +1401,81 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   }
 
   return reply;
+}
+
+crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
+    const crane::grpc::AttachContainerTaskRequest& request) {
+  crane::grpc::AttachContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      response.set_ok(false);
+      response.set_reason("Task is still pending.");
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      response.set_ok(false);
+      response.set_reason("Task not found.");
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      response.set_ok(false);
+      response.set_reason("Task is not a container task.");
+      return response;
+    }
+
+    // If tty is requested, tty must be enabled when creating the container
+    if (request.tty() && !std::get<ContainerMetaInTask>(task->meta).tty) {
+      response.set_ok(false);
+      response.set_reason("TTY not enabled when creating this container task.");
+      return response;
+    }
+
+    // If stdin is requested, stdin must be enabled when creating the container
+    if (request.stdin() && !std::get<ContainerMetaInTask>(task->meta).stdin) {
+      response.set_ok(false);
+      response.set_reason(
+          "STDIN not enabled when creating this container task.");
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      response.set_ok(false);
+      response.set_reason("Insufficient permission to attach.");
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      response.set_ok(false);
+      response.set_reason(
+          "Container task is executing on multiple nodes, cannot attach.");
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    response.set_ok(false);
+    response.set_reason("Craned not available.");
+    return response;
+  }
+
+  return stub->AttachContainerTask(request);
 }
 
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(

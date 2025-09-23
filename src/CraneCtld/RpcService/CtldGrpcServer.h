@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <grpcpp/server_context.h>
+
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -355,6 +357,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::SignUserCertificateRequest *request,
       crane::grpc::SignUserCertificateResponse *response) override;
+
+  grpc::Status AttachContainerTask(
+      grpc::ServerContext *context,
+      const crane::grpc::AttachContainerTaskRequest *request,
+      crane::grpc::AttachContainerTaskReply *response) override;
 
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(

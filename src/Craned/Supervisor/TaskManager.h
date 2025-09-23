@@ -309,10 +309,6 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
-  static constexpr std::string_view kCriLabelJobIdKey = "job_id";
-  static constexpr std::string_view kCriLabelJobNameKey = "name";
-  static constexpr std::string_view kCriLabelUidKey = "uid";
-
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";
   static constexpr std::string_view kContainerLogFile = "container.log";
 

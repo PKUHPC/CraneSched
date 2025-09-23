@@ -939,6 +939,22 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
+message AttachContainerTaskRequest {
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  bool stdin = 6;
+  bool tty = 7;
+  bool stdout = 8;
+  bool stderr = 9;
+}
+
+message AttachContainerTaskReply {
+  bool ok = 1;
+  string reason = 2;
+  string url = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -996,6 +1012,9 @@ service CraneCtld {
 
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
+
+  /* RPCS called from ccon */
+  rpc AttachContainerTask(AttachContainerTaskRequest) returns (AttachContainerTaskReply);
 }
 
 service CeffQueryService {
@@ -1031,6 +1050,11 @@ service Craned {
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
   rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
   rpc ChangeJobTimeLimit(ChangeJobTimeLimitRequest) returns (ChangeJobTimeLimitReply);
+
+  /*
+  Craned will proxy the following container-related RPCs to CRI Service.
+  */
+  rpc AttachContainerTask(AttachContainerTaskRequest) returns (AttachContainerTaskReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);

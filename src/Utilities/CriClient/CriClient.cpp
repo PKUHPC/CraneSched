@@ -328,6 +328,34 @@ CraneExpected<void> CriClient::RemoveContainer(
   return ret;
 }
 
+CraneExpected<std::string> CriClient::Attach(const std::string& container_id,
+                                             bool tty, bool stdin, bool stdout,
+                                             bool stderr) const {
+  using api::AttachRequest;
+  using api::AttachResponse;
+
+  AttachRequest request;
+  AttachResponse response;
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kCriDefaultReqTimeout);
+
+  request.set_container_id(container_id);
+  request.set_tty(tty);
+  request.set_stdin(stdin);
+  request.set_stdout(stdout);
+  request.set_stderr(stderr);
+
+  auto status = m_rs_stub_->Attach(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to attach to container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return response.url();
+}
+
 // ===== Container Event Monitoring Implementation =====
 
 void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
@@ -472,7 +500,7 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
 }
 
 CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
-    const std::map<std::string, std::string>& label_selector) const {
+    const std::unordered_map<std::string, std::string>& label_selector) const {
   using api::ContainerFilter;
   using api::ListContainersRequest;
   using api::ListContainersResponse;
@@ -508,4 +536,24 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
   return containers;
 }
 
+CraneExpected<std::string> CriClient::SelectContainerId(
+    const std::unordered_map<std::string, std::string>& label_selector) const {
+  auto containers_expt = ListContainers(label_selector);
+  if (!containers_expt) {
+    return std::unexpected(containers_expt.error());
+  }
+
+  const auto& containers = containers_expt.value();
+  if (containers.size() == 0) {
+    CRANE_ERROR("No container found matching labels");
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  if (containers.size() > 1) {
+    CRANE_ERROR("Multiple containers found matching labels");
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return containers.front().id();
+}
 }  // namespace cri

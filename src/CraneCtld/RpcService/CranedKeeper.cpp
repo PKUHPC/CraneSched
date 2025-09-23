@@ -19,6 +19,7 @@
 #include "CranedKeeper.h"
 
 #include "TaskScheduler.h"
+#include "protos/Crane.pb.h"
 
 namespace Ctld {
 
@@ -259,10 +260,37 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
     return CraneErrCode::ERR_RPC_FAILURE;
   }
   UpdateLastActiveTime();
-  if (reply.ok())
-    return CraneErrCode::SUCCESS;
-  else
-    return CraneErrCode::ERR_GENERIC_FAILURE;
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+crane::grpc::AttachContainerTaskReply CranedStub::AttachContainerTask(
+    const crane::grpc::AttachContainerTaskRequest &request) {
+  using crane::grpc::AttachContainerTaskReply;
+  using crane::grpc::AttachContainerTaskRequest;
+
+  // TODO: Move this into CriClient or somewhere else?
+  static constexpr int64_t kProxiedCriReqTimeout = 180;
+
+  AttachContainerTaskReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeout));
+
+  auto status = m_stub_->AttachContainerTask(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "AttachContainerTask RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    reply.set_ok(false);
+    reply.set_reason(std::format("RPC failure: {}", status.error_message()));
+    return reply;
+  }
+
+  UpdateLastActiveTime();
+  return reply;
 }
 
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {

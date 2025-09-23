@@ -40,6 +40,7 @@
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -848,6 +849,13 @@ void GlobalVariableInit() {
        !CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
+  }
+
+  // If Container is enabled, connect to CRI runtime.
+  if (g_config.Container.Enabled) {
+    g_cri_client = std::make_unique<cri::CriClient>();
+    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                     g_config.Container.ImageEndpoint);
   }
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);

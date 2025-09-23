@@ -93,6 +93,9 @@ class CranedStub {
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
+  crane::grpc::AttachContainerTaskReply AttachContainerTask(
+      const crane::grpc::AttachContainerTaskRequest &request);
+
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
   }

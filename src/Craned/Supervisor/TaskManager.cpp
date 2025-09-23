@@ -706,6 +706,8 @@ CraneErrCode ContainerInstance::Prepare() {
 }
 
 CraneErrCode ContainerInstance::Spawn() {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelUidKey;
   auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   // Subscribe to container event stream
@@ -830,6 +832,10 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
 }
 
 CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelUidKey;
+
   job_id_t job_id = GetParentStep().task_id();
   const auto& ca_meta = GetParentStep().container_meta();
 
@@ -931,7 +937,12 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
 }
 
 CraneErrCode ContainerInstance::SetContainerConfig_() {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelUidKey;
+
   job_id_t job_id = GetParentStep().task_id();
+  const auto& ca_meta = GetParentStep().container_meta();
   const std::string& job_name = GetParentStep().name();
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
@@ -955,11 +966,16 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
   // image already checked and pulled.
   m_container_config_.mutable_image()->set_image(m_image_id_);
 
+  // interactive options
+  m_container_config_.set_stdin(ca_meta.stdin());
+  m_container_config_.set_stdin_once(ca_meta.stdin_once());
+  m_container_config_.set_tty(ca_meta.tty());
+
   // mount the generated script with uid/gid mapping.
-  const auto& ca_meta = GetParentStep().container_meta();
   for (const auto& mount : ca_meta.mounts()) {
     auto* m = m_container_config_.add_mounts();
 
+    // If relative path is given, handle it with cwd.
     std::filesystem::path host_path(mount.first);
     if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
 
