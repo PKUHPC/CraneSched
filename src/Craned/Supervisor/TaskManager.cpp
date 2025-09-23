@@ -1801,7 +1801,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+              ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
           ActivateTaskStatusChange_(
