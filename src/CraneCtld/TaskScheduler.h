@@ -60,7 +60,7 @@ class BasicPriority : public IPrioritySorter {
         continue;
       }
       if (task->begin_time > now) {
-        it->second->pending_reason = "(BeginTime)";
+        it->second->pending_reason = "BeginTime";
         continue;
       }
       it->second->pending_reason = "";
