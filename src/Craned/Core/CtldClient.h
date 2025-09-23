@@ -221,7 +221,11 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
-  bool HealthCheck_(const Config::HealthCheckConfig& health_check_config);
+  void HealthCheckResultResponse_(bool is_health, const std::string& reason);
+
+  void HealthCheck_(const Config::HealthCheckConfig& health_check_config);
+
+  bool CheckNodeState_(const Config::HealthCheckConfig& health_check_config);
 
   absl::Mutex m_step_status_change_mtx_;
 
@@ -252,6 +256,7 @@ class CtldClient {
   std::atomic_bool m_ping_ctld_{false};
   std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
 
+  std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
   std::atomic<bool> m_health_check_result_{true};
 };
 

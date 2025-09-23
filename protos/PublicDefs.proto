@@ -945,7 +945,6 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
-  HealthCheckResult health_check_result = 10;
 }
 
 enum TxnAction {

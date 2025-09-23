@@ -193,6 +193,16 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::HealthCheckResponse(
+    grpc::ServerContext *context,
+    const crane::grpc::HealthCheckResponseRequest *request,
+    google::protobuf::Empty *response) {
+
+  g_meta_container->UpdateNodeState(request->craned_id(), request->health_check_result().healthy());
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CforedStream(
     grpc::ServerContext* context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,

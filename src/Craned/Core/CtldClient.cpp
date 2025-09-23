@@ -354,10 +354,20 @@ CtldClient::CtldClient() {
         return success;
       });
 
-  if (!HealthCheck_(g_config.HealthCheck))
-    m_health_check_result_ = false;
+  if (g_config.HealthCheck.Interval > 0L) {
+    m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+    if (g_config.HealthCheck.Cycle) {
+      // TODO: start cycle
+    } else {
+      m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
+        if (!CheckNodeState_(g_config.HealthCheck)) return;
+        HealthCheck_(g_config.HealthCheck);
 
-  // TODO: health check handle, update result
+      });
+      m_health_check_handle_->start(std::chrono::seconds(g_config.HealthCheck.Interval),
+        std::chrono::seconds(g_config.HealthCheck.Interval));
+    }
+  }
 
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PingCtldThr");
@@ -374,7 +384,6 @@ CtldClient::CtldClient() {
                 std::chrono::seconds(g_config.CranedConf.PingIntervalSec),
                 std::chrono::seconds(g_config.CranedConf.PingIntervalSec));
           }
-          // Any状态
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
     if (idle_handle->start() != 0) {
@@ -653,6 +662,10 @@ void CtldClient::Init() {
       [this](CtldClientStateMachine::RegisterArg const& arg) {
         CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
+
+  if (g_config.HealthCheck.Interval > 0L) {
+    HealthCheck_(g_config.HealthCheck);
+  }
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address) {
@@ -812,11 +825,6 @@ bool CtldClient::CranedRegister_(
     grpc_lost_steps[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                     step_ids.end());
   }
-
-  auto* grpc_health_check_result = grpc_meta->mutable_health_check_result();
-  grpc_health_check_result->set_healthy(m_health_check_result_.load());
-  if (!grpc_health_check_result->healthy())
-    grpc_health_check_result->set_reason("Node failed health check");
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
@@ -979,26 +987,40 @@ bool CtldClient::SendStatusChanges_(
   return true;
 }
 
-bool CtldClient::HealthCheck_(
-    const Config::HealthCheckConfig& health_check_config) {
-  if (!health_check_config.Enable) return true;
+void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& reason) {
+  if (m_stopping_ || !m_stub_) return ;
 
+  grpc::ClientContext context;
+  crane::grpc::HealthCheckResponseRequest request;
+  google::protobuf::Empty reply;
+
+  request.set_craned_id(g_config.CranedIdOfThisNode);
+  auto* health_check_result = request.mutable_health_check_result();
+  health_check_result->set_healthy(is_health);
+  health_check_result->set_reason(reason);
+
+
+  m_stub_->HealthCheckResponse(&context, request, &reply);
+}
+
+void CtldClient::HealthCheck_(
+    const Config::HealthCheckConfig& health_check_config) {
   CRANE_INFO("Health checking.....");
 
   int pipefd[2];
   if (pipe(pipefd) != 0) {
-    CRANE_ERROR("HealthCheck: pipe error for {}",
-                health_check_config.Program.c_str());
-    return false;
+    CRANE_ERROR("HealthCheck: pipe error");
+    HealthCheckResultResponse_(false, "system error");
+    return;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    CRANE_ERROR("HealthCheck: fork failed for {}",
-                health_check_config.Program.c_str());
+    CRANE_ERROR("HealthCheck: fork failed");
     close(pipefd[0]);
     close(pipefd[1]);
-    return false;
+    HealthCheckResultResponse_(false, "system error");
+    return;
   }
 
   if (pid == 0) {
@@ -1007,7 +1029,7 @@ bool CtldClient::HealthCheck_(
     dup2(pipefd[1], STDERR_FILENO);
     close(pipefd[1]);
     execl(health_check_config.Program.c_str(),
-          health_check_config.Program.c_str(), (char*)nullptr);
+          health_check_config.Program.c_str(), static_cast<char*>(nullptr));
     perror("execl failed");
     _exit(127);
   }
@@ -1050,34 +1072,45 @@ bool CtldClient::HealthCheck_(
     kill(pid, SIGKILL);
     waitpid(pid, &status, 0);
     output += "\nHealth check timed out.";
-    CRANE_WARN("HealthCheck: Timeout for {}. Output: {}",
-               health_check_config.Program.c_str(), output.c_str());
-    return false;
+    CRANE_WARN("HealthCheck: Timeout. Output: {}", output.c_str());
+    HealthCheckResultResponse_(false, "system error");
+    return;
   }
 
   if (WIFEXITED(status)) {
     int exit_code = WEXITSTATUS(status);
     if (exit_code != 0) {
-      CRANE_WARN("HealthCheck: Failed (exit code:{}) for {}. Output: {}",
-                 exit_code, health_check_config.Program.c_str(),
-                 output.c_str());
-      return false;
+      CRANE_WARN("HealthCheck: Failed (exit code:{}). Output: {}",
+                 exit_code, output.c_str());
+      HealthCheckResultResponse_(false, "system error");
+      return;
     }
   } else if (WIFSIGNALED(status)) {
-    CRANE_WARN("HealthCheck: Killed by signal {} for {}. Output: {}",
-               WTERMSIG(status), health_check_config.Program.c_str(),
-               output.c_str());
-    return false;
+    CRANE_WARN("HealthCheck: Killed by signal {}. Output: {}",
+               WTERMSIG(status), output.c_str());
+    HealthCheckResultResponse_(false, "system error");
+    return;
   } else {
-    CRANE_WARN("HealthCheck: Unknown exit status {} for {}. Output: {}", status,
-               health_check_config.Program.c_str(), output.c_str());
-    return false;
+    CRANE_WARN("HealthCheck: Unknown exit status {}. Output: {}", status, output.c_str());
+    HealthCheckResultResponse_(false, "system error");
+    return;
   }
 
-  CRANE_INFO("Health check success for {}",
-              health_check_config.Program.c_str());
+  HealthCheckResultResponse_(true, "");
 
-  return true;
+  CRANE_DEBUG("Health check success");
+}
+
+bool CtldClient::CheckNodeState_(
+    const Config::HealthCheckConfig& health_check_config) {
+  if (health_check_config.NodeState == Config::HealthCheckConfig::ANY) return true;
+
+  auto task_set = g_job_mgr->GetAllocatedJobs();
+  if (task_set.empty() && health_check_config.NodeState == Config::HealthCheckConfig::IDLE) return true;
+
+  // TODO: alloc and mixd
+
+  return false;
 }
 
 bool CtldClient::Ping_() {
