@@ -221,11 +221,13 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
-  void HealthCheckResultResponse_(bool is_health, const std::string& reason);
+  void HealthCheckResultResponse_(bool is_health, const std::string& reason) const;
 
-  void HealthCheck_(const Config::HealthCheckConfig& health_check_config);
+  void HealthCheck_();
 
-  bool CheckNodeState_(const Config::HealthCheckConfig& health_check_config);
+  void StartRandomHealthCheck_();
+
+  static bool CheckNodeState_();
 
   absl::Mutex m_step_status_change_mtx_;
 

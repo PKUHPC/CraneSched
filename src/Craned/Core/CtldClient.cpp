@@ -357,12 +357,11 @@ CtldClient::CtldClient() {
   if (g_config.HealthCheck.Interval > 0L) {
     m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
     if (g_config.HealthCheck.Cycle) {
-      // TODO: start cycle
+      StartRandomHealthCheck_();
     } else {
       m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
-        if (!CheckNodeState_(g_config.HealthCheck)) return;
-        HealthCheck_(g_config.HealthCheck);
-
+        if (!CheckNodeState_()) return;
+        HealthCheck_();
       });
       m_health_check_handle_->start(std::chrono::seconds(g_config.HealthCheck.Interval),
         std::chrono::seconds(g_config.HealthCheck.Interval));
@@ -664,7 +663,7 @@ void CtldClient::Init() {
       });
 
   if (g_config.HealthCheck.Interval > 0L) {
-    HealthCheck_(g_config.HealthCheck);
+    HealthCheck_();
   }
 }
 
@@ -987,7 +986,7 @@ bool CtldClient::SendStatusChanges_(
   return true;
 }
 
-void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& reason) {
+void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& reason) const {
   if (m_stopping_ || !m_stub_) return ;
 
   grpc::ClientContext context;
@@ -1003,8 +1002,7 @@ void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& r
   m_stub_->HealthCheckResponse(&context, request, &reply);
 }
 
-void CtldClient::HealthCheck_(
-    const Config::HealthCheckConfig& health_check_config) {
+void CtldClient::HealthCheck_() {
   CRANE_INFO("Health checking.....");
 
   int pipefd[2];
@@ -1028,8 +1026,8 @@ void CtldClient::HealthCheck_(
     dup2(pipefd[1], STDOUT_FILENO);
     dup2(pipefd[1], STDERR_FILENO);
     close(pipefd[1]);
-    execl(health_check_config.Program.c_str(),
-          health_check_config.Program.c_str(), static_cast<char*>(nullptr));
+    execl(g_config.HealthCheck.Program.c_str(),
+          g_config.HealthCheck.Program.c_str(), static_cast<char*>(nullptr));
     perror("execl failed");
     _exit(127);
   }
@@ -1101,12 +1099,25 @@ void CtldClient::HealthCheck_(
   CRANE_DEBUG("Health check success");
 }
 
-bool CtldClient::CheckNodeState_(
-    const Config::HealthCheckConfig& health_check_config) {
-  if (health_check_config.NodeState == Config::HealthCheckConfig::ANY) return true;
+void CtldClient::StartRandomHealthCheck_() {
+  int interval = g_config.HealthCheck.Interval;
+  std::mt19937 rng{std::random_device{}()};
+  std::uniform_int_distribution<int> dist(1, interval);
+  int random_delay = dist(rng);
+  m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
+        if (CheckNodeState_())
+          HealthCheck_();
+        this->StartRandomHealthCheck_();
+  });
+  m_health_check_handle_->start(std::chrono::seconds(random_delay),
+        std::chrono::seconds(0));
+}
+
+bool CtldClient::CheckNodeState_() {
+  if (g_config.HealthCheck.NodeState == Config::HealthCheckConfig::ANY) return true;
 
   auto task_set = g_job_mgr->GetAllocatedJobs();
-  if (task_set.empty() && health_check_config.NodeState == Config::HealthCheckConfig::IDLE) return true;
+  if (task_set.empty() && g_config.HealthCheck.NodeState == Config::HealthCheckConfig::IDLE) return true;
 
   // TODO: alloc and mixd
 
