@@ -59,6 +59,10 @@ class BasicPriority : public IPrioritySorter {
         it->second->pending_reason = "Held";
         continue;
       }
+      if (task->begin_time > now) {
+        it->second->pending_reason = "BeginTime";
+        continue;
+      }
       it->second->pending_reason = "";
       task_id_vec.emplace_back(it->first);
     }

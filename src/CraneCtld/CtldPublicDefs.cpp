@@ -201,7 +201,9 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
-
+  if (val.has_begin_time()) {
+    begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
+  }
   SetHeld(val.hold());
 }
 

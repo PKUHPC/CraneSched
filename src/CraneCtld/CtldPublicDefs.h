@@ -401,6 +401,7 @@ struct TaskInCtld {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   std::string reservation;
+  absl::Time begin_time{absl::InfinitePast()};
 
  private:
   /* ------------- [2] -------------
