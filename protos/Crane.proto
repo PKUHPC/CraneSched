@@ -815,8 +815,7 @@ message StreamTaskIORequest {
     bytes msg = 2;
   }
 
-  message SupervisorUnRegisterReq {
-  }
+  message SupervisorUnRegisterReq {}
 
   message TaskX11OutputReq {
     uint32 task_id = 1;
