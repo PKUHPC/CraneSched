@@ -661,10 +661,6 @@ void CtldClient::Init() {
       [this](CtldClientStateMachine::RegisterArg const& arg) {
         CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
-
-  if (g_config.HealthCheck.Interval > 0L) {
-    HealthCheck_();
-  }
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address) {
@@ -687,6 +683,10 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
+
+  if (g_config.HealthCheck.Interval > 0L) {
+    HealthCheck_();
+  }
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
@@ -1116,10 +1116,7 @@ void CtldClient::StartRandomHealthCheck_() {
 bool CtldClient::CheckNodeState_() {
   if (g_config.HealthCheck.NodeState == Config::HealthCheckConfig::ANY) return true;
 
-  auto task_set = g_job_mgr->GetAllocatedJobs();
-  if (task_set.empty() && g_config.HealthCheck.NodeState == Config::HealthCheckConfig::IDLE) return true;
-
-  // TODO: alloc and mixd
+  if (g_job_mgr->GetNodeState() == g_config.HealthCheck.NodeState) return true;
 
   return false;
 }

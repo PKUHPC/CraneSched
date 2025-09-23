@@ -161,6 +161,8 @@ class JobManager {
                              std::optional<std::string> reason,
                              const google::protobuf::Timestamp& timestamp);
 
+  Config::HealthCheckConfig::NodeStateEnum GetNodeState();
+
   // Wait internal libuv base loop to exit...
   void Wait();
   bool IsEnding() { return m_is_ending_now_; }

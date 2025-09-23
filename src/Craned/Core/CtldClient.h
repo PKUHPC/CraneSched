@@ -259,7 +259,6 @@ class CtldClient {
   std::atomic<std::chrono::steady_clock::time_point> m_last_active_time_;
 
   std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
-  std::atomic<bool> m_health_check_result_{true};
 };
 
 }  // namespace Craned
