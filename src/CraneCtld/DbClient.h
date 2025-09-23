@@ -189,15 +189,8 @@ class MongodbClient {
   bool InsertQos(const Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
-  // int64_t GetLastTime(mongocxx::collection& collection, std::string
-  // time_type,
-  //                     int64_t default_start_sec);
   bool AggregateHourTable(std::time_t start, std::time_t end);
   bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
-  bool AggregatePeriodFromLower(std::time_t period_start,
-                                std::time_t period_end,
-                                bool is_day_flag  // true=小时->天，false=天->月
-  );
   bool UpdateSummaryLastSuccessTimeSec(const std::string& type,
                                        int64_t last_success_sec);
   bool GetSummaryLastSuccessTimeTm(const std::string& type, std::tm& tm_last);
@@ -217,15 +210,6 @@ class MongodbClient {
       std::time_t start, std::time_t end,
       ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
           stream);
-  bool AggregateAccountUserDayorMonth(
-      mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
-      const std::string& src_time_field, const std::string& dst_time_field,
-      std::time_t cur_start, std::time_t cur_end, bool print_debug_log);
-  bool AggregateAccountUserWckeyDayorMonth(
-      mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
-      const std::string& src_time_field, const std::string& dst_time_field,
-      std::time_t cur_start, std::time_t cur_end, bool print_debug_log);
-
   void HandleProduceAccountUserAggArray(
       const std::string& src_coll_str,
       ThreadSafeQueue<bsoncxx::array::value>& queue,
@@ -236,12 +220,18 @@ class MongodbClient {
       ThreadSafeQueue<bsoncxx::array::value>& queue,
       const std::string& src_time_field, const std::string& period_field,
       std::time_t start, std::time_t end);
+  void ProduceHourAccountUser(ThreadSafeQueue<bsoncxx::array::value>& queue,
+                              std::time_t start, std::time_t end,
+                              const std::string& task_collection_name);
+  void ProduceHourAccountUserWckey(
+      ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
+      std::time_t end, const std::string& task_collection_name);
   bool HandleAccountUserAggArray(const bsoncxx::array::view& arr,
-                                 mongocxx::collection& dst_coll,
+                                 const std::string& dst_coll_str,
                                  const std::string& dst_time_field,
                                  bool print_debug_log);
   bool HandleAccountUserWckeyAggArray(const bsoncxx::array::view& arr,
-                                      mongocxx::collection& dst_coll,
+                                      const std::string& dst_coll_str,
                                       const std::string& dst_time_field,
                                       bool print_debug_log);
   bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end,

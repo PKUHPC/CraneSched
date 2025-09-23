@@ -2037,7 +2037,7 @@ bool MongodbClient::RollupHourToDay() {
   // Aggregate data from hour to day
   bool ok = AggregateDayFromHour(last_sec, now_sec, false);
   if (!ok) {
-    CRANE_ERROR("AggregatePeriodFromLower (Hour->Day) failed! Window: {} -> {}",
+    CRANE_ERROR("AggregateDayFromHour (Hour->Day) failed! Window: {} -> {}",
                 util::FormatTime(last_sec), util::FormatTime(now_sec));
   }
   return ok;
@@ -2099,190 +2099,6 @@ void MongodbClient::ClusterRollupUsage() {
   auto end_total = steady_clock::now();
   auto total = duration_cast<milliseconds>(end_total - start_total).count();
   CRANE_INFO("ClusterRollupUsage total used {} ms", total);
-}
-
-// Aggregate account_user table
-bool MongodbClient::AggregateAccountUserDayorMonth(
-    mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
-    const std::string& src_time_field, const std::string& dst_time_field,
-    std::time_t cur_start, std::time_t cur_end, bool print_debug_log) {
-  mongocxx::pipeline pipeline;
-  pipeline.match(bsoncxx::builder::stream::document{}
-                 << src_time_field << bsoncxx::builder::stream::open_document
-                 << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
-                 << static_cast<int64_t>(cur_end)
-                 << bsoncxx::builder::stream::close_document
-                 << bsoncxx::builder::stream::finalize);
-
-  pipeline.group(
-      bsoncxx::builder::stream::document{}
-      << "_id" << bsoncxx::builder::stream::open_document << "account"
-      << "$account"
-      << "username" << "$username" << bsoncxx::builder::stream::close_document
-      << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-      << "total_cpu_alloc" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_cpu_alloc" << bsoncxx::builder::stream::close_document
-      << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_count" << bsoncxx::builder::stream::close_document
-      << bsoncxx::builder::stream::finalize);
-
-  auto cursor = src_coll.aggregate(pipeline);
-
-  bool has_data = false;
-  constexpr size_t kBatchSize = 1000;  // Batch size for bulk_write
-  std::vector<mongocxx::model::update_one> bulk_ops;
-  std::vector<bsoncxx::document::value> filter_docs;
-  std::vector<bsoncxx::document::value> update_docs;
-
-  for (auto&& doc : cursor) {
-    auto id = doc["_id"].get_document().view();
-    int64_t period = cur_start;
-    std::string account = std::string(id["account"].get_string().value);
-    std::string username = std::string(id["username"].get_string().value);
-    double cpu_time = doc["total_cpu_time"].get_double().value;
-    double cpu_alloc = doc["total_cpu_alloc"].get_double().value;
-    int count = doc["total_count"].get_int32().value;
-
-    // Create filter and update documents as bsoncxx::document::value to ensure
-    // buffer lifetime
-    bsoncxx::document::value filter_doc =
-        bsoncxx::builder::stream::document{}
-        << dst_time_field << period << "account" << account << "username"
-        << username << bsoncxx::builder::stream::finalize;
-    bsoncxx::document::value update_doc =
-        bsoncxx::builder::stream::document{}
-        << "$set" << bsoncxx::builder::stream::open_document << dst_time_field
-        << period << "account" << account << "username" << username
-        << "total_cpu_time" << cpu_time << "total_cpu_alloc" << cpu_alloc
-        << "total_count" << count << bsoncxx::builder::stream::close_document
-        << bsoncxx::builder::stream::finalize;
-
-    filter_docs.push_back(std::move(filter_doc));
-    update_docs.push_back(std::move(update_doc));
-
-    mongocxx::model::update_one update_op{filter_docs.back().view(),
-                                          update_docs.back().view()};
-    update_op.upsert(true);
-    bulk_ops.push_back(std::move(update_op));
-
-    if (print_debug_log) {
-      CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(doc));
-    }
-    has_data = true;
-
-    // When batch size is reached, perform bulk write and clear buffers
-    if (bulk_ops.size() == kBatchSize) {
-      mongocxx::options::bulk_write bw_opts;
-      bw_opts.ordered(false);
-      bw_opts.bypass_document_validation(true);
-      dst_coll.bulk_write(bulk_ops, bw_opts);
-      bulk_ops.clear();
-      filter_docs.clear();
-      update_docs.clear();
-    }
-  }
-
-  // Write remaining operations in the last batch
-  if (!bulk_ops.empty()) {
-    mongocxx::options::bulk_write bw_opts;
-    bw_opts.ordered(false);
-    bw_opts.bypass_document_validation(true);
-    dst_coll.bulk_write(bulk_ops, bw_opts);
-  }
-
-  return has_data;
-}
-
-// Aggregate account_user_wckey table
-bool MongodbClient::AggregateAccountUserWckeyDayorMonth(
-    mongocxx::collection& src_coll, mongocxx::collection& dst_coll,
-    const std::string& src_time_field, const std::string& dst_time_field,
-    std::time_t cur_start, std::time_t cur_end, bool print_debug_log) {
-  mongocxx::pipeline pipeline;
-  pipeline.match(bsoncxx::builder::stream::document{}
-                 << src_time_field << bsoncxx::builder::stream::open_document
-                 << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
-                 << static_cast<int64_t>(cur_end)
-                 << bsoncxx::builder::stream::close_document
-                 << bsoncxx::builder::stream::finalize);
-
-  pipeline.group(
-      bsoncxx::builder::stream::document{}
-      << "_id" << bsoncxx::builder::stream::open_document << "account"
-      << "$account"
-      << "username" << "$username"
-      << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
-      << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-      << "total_cpu_alloc" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_cpu_alloc" << bsoncxx::builder::stream::close_document
-      << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_count" << bsoncxx::builder::stream::close_document
-      << bsoncxx::builder::stream::finalize);
-
-  mongocxx::options::aggregate opts;
-  opts.allow_disk_use(true);
-  auto cursor = src_coll.aggregate(pipeline, opts);
-
-  bool has_data = false;
-  constexpr size_t kBatchSize = 1000;  // Batch size for bulk_write
-  std::vector<mongocxx::model::update_one> bulk_ops;
-  std::vector<bsoncxx::document::value> filter_docs;
-  std::vector<bsoncxx::document::value> update_docs;
-  for (auto&& doc : cursor) {
-    auto id = doc["_id"].get_document().view();
-    int64_t period = cur_start;
-    std::string account = std::string(id["account"].get_string().value);
-    std::string username = std::string(id["username"].get_string().value);
-    std::string wckey = std::string(id["wckey"].get_string().value);
-    double cpu_time = doc["total_cpu_time"].get_double().value;
-    double cpu_alloc = doc["total_cpu_alloc"].get_double().value;
-    int count = doc["total_count"].get_int32().value;
-
-    auto filter_doc = bsoncxx::builder::stream::document{}
-                      << dst_time_field << period << "account" << account
-                      << "username" << username << "wckey" << wckey
-                      << bsoncxx::builder::stream::finalize;
-    auto update_doc = bsoncxx::builder::stream::document{}
-                      << "$set" << bsoncxx::builder::stream::open_document
-                      << dst_time_field << period << "account" << account
-                      << "username" << username << "wckey" << wckey
-                      << "total_cpu_time" << cpu_time << "total_cpu_alloc"
-                      << cpu_alloc << "total_count" << count
-                      << bsoncxx::builder::stream::close_document
-                      << bsoncxx::builder::stream::finalize;
-    filter_docs.push_back(std::move(filter_doc));
-    update_docs.push_back(std::move(update_doc));
-
-    mongocxx::model::update_one update_op{filter_docs.back().view(),
-                                          update_docs.back().view()};
-    update_op.upsert(true);
-    bulk_ops.push_back(std::move(update_op));
-
-    if (print_debug_log) {
-      CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(doc));
-    }
-    has_data = true;
-    if (bulk_ops.size() == kBatchSize) {
-      mongocxx::options::bulk_write bw_opts;
-      bw_opts.ordered(false);
-      bw_opts.bypass_document_validation(true);
-      dst_coll.bulk_write(bulk_ops, bw_opts);
-      bulk_ops.clear();
-      filter_docs.clear();
-      update_docs.clear();
-    }
-  }
-
-  // Write remaining operations in the last batch
-  if (!bulk_ops.empty()) {
-    mongocxx::options::bulk_write bw_opts;
-    bw_opts.ordered(false);
-    bw_opts.bypass_document_validation(true);
-    dst_coll.bulk_write(bulk_ops, bw_opts);
-  }
-  return has_data;
 }
 
 void MongodbClient::HandleProduceAccountUserAggArray(
@@ -2473,12 +2289,14 @@ void MongodbClient::HandleProduceAccountUserWckeyAggArray(
 }
 
 bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
-                                              mongocxx::collection& dst_coll,
+                                              const std::string& dst_coll_str,
                                               const std::string& period_field,
                                               bool print_debug_log) {
   bool has_data = false;
   constexpr size_t kBatchSize = 1000;
   std::vector<bsoncxx::document::value> insert_docs;
+
+  auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
 
   for (auto&& elem : arr) {
     auto view = elem.get_document().view();
@@ -2570,11 +2388,13 @@ bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
 }
 
 bool MongodbClient::HandleAccountUserWckeyAggArray(
-    const bsoncxx::array::view& arr, mongocxx::collection& dst_coll,
+    const bsoncxx::array::view& arr, const std::string& dst_coll_str,
     const std::string& period_field, bool print_debug_log) {
   bool has_data = false;
   constexpr size_t kBatchSize = 1000;
   std::vector<bsoncxx::document::value> insert_docs;
+
+  auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
 
   for (auto&& elem : arr) {
     auto view = elem.get_document().view();
@@ -2695,45 +2515,48 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
 
-  std::thread account_user_producer_thread([&]() {
+  auto producer_future1 = g_thread_pool->submit_task([&]() {
     HandleProduceAccountUserAggArray(src_account_user_table, account_user_queue,
                                      "hour", "day", start, end);
   });
-  std::thread account_user_wckey_producer_thread([&]() {
+  auto producer_future2 = g_thread_pool->submit_task([&]() {
     HandleProduceAccountUserWckeyAggArray(src_account_user_wckey_table,
                                           account_user_wckey_queue, "hour",
                                           "day", start, end);
   });
 
   auto account_user_consumer = [&](int idx) {
-    auto dst_coll = (*GetClient_())[m_db_name_][dst_account_user_table];
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserAggArray(arr.view(), dst_coll, "day", print_debug_log);
+        HandleAccountUserAggArray(arr.view(), dst_account_user_table, "day",
+                                  print_debug_log);
     }
   };
   auto account_user_wckey_consumer = [&](int idx) {
-    auto dst_coll = (*GetClient_())[m_db_name_][dst_account_user_wckey_table];
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserWckeyAggArray(arr.view(), dst_coll, "day",
-                                       print_debug_log);
+        HandleAccountUserWckeyAggArray(arr.view(), dst_account_user_wckey_table,
+                                       "day", print_debug_log);
     }
   };
 
-  std::vector<std::thread> account_user_consumer_threads;
-  std::vector<std::thread> account_user_wckey_consumer_threads;
+  std::vector<std::future<void>> account_user_consumer_futures;
+  std::vector<std::future<void>> account_user_wckey_consumer_futures;
   for (int i = 0; i < kConsumerThreadNum; ++i) {
-    account_user_consumer_threads.emplace_back(account_user_consumer, i);
-    account_user_wckey_consumer_threads.emplace_back(
-        account_user_wckey_consumer, i);
+    account_user_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
+    account_user_wckey_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { account_user_wckey_consumer(i); }));
   }
-  account_user_producer_thread.join();
-  account_user_wckey_producer_thread.join();
-  for (auto& th : account_user_consumer_threads) th.join();
-  for (auto& th : account_user_wckey_consumer_threads) th.join();
+
+  producer_future1.get();
+  producer_future2.get();
+
+  for (auto& fut : account_user_consumer_futures) fut.get();
+  for (auto& fut : account_user_wckey_consumer_futures) fut.get();
+
   return true;
 }
 
@@ -2764,50 +2587,207 @@ bool MongodbClient::AggregateMonthFromDay(std::time_t start, std::time_t end,
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
 
-  std::thread account_user_producer_thread([&]() {
+  auto producer_future1 = g_thread_pool->submit_task([&]() {
     HandleProduceAccountUserAggArray(src_account_user_table, account_user_queue,
                                      "day", "month", start, end);
   });
-  std::thread account_user_wckey_producer_thread([&]() {
+  auto producer_future2 = g_thread_pool->submit_task([&]() {
     HandleProduceAccountUserWckeyAggArray(src_account_user_wckey_table,
                                           account_user_wckey_queue, "day",
                                           "month", start, end);
   });
 
   auto account_user_consumer = [&](int idx) {
-    auto dst_coll = (*GetClient_())[m_db_name_][dst_account_user_table];
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserAggArray(arr.view(), dst_coll, "month",
+        HandleAccountUserAggArray(arr.view(), dst_account_user_table, "month",
                                   print_debug_log);
     }
   };
   auto account_user_wckey_consumer = [&](int idx) {
-    auto dst_coll = (*GetClient_())[m_db_name_][dst_account_user_wckey_table];
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserWckeyAggArray(arr.view(), dst_coll, "month",
-                                       print_debug_log);
+        HandleAccountUserWckeyAggArray(arr.view(), dst_account_user_wckey_table,
+                                       "month", print_debug_log);
     }
   };
 
-  //
-  std::vector<std::thread> account_user_consumer_threads;
-  std::vector<std::thread> account_user_wckey_consumer_threads;
+  std::vector<std::future<void>> account_user_consumer_futures;
+  std::vector<std::future<void>> account_user_wckey_consumer_futures;
   for (int i = 0; i < kConsumerThreadNum; ++i) {
-    account_user_consumer_threads.emplace_back(account_user_consumer, i);
-    account_user_wckey_consumer_threads.emplace_back(
-        account_user_wckey_consumer, i);
+    account_user_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
+    account_user_wckey_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { account_user_wckey_consumer(i); }));
   }
 
-  account_user_producer_thread.join();
-  account_user_wckey_producer_thread.join();
-  for (auto& th : account_user_consumer_threads) th.join();
-  for (auto& th : account_user_wckey_consumer_threads) th.join();
+  producer_future1.get();
+  producer_future2.get();
+
+  for (auto& fut : account_user_consumer_futures) fut.get();
+  for (auto& fut : account_user_wckey_consumer_futures) fut.get();
 
   return true;
+}
+
+void MongodbClient::ProduceHourAccountUser(
+    ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
+    std::time_t end, const std::string& task_collection_name) {
+  std::tm tm_start = *std::localtime(&start);
+  tm_start.tm_min = 0;
+  tm_start.tm_sec = 0;
+  std::time_t cur_start = std::mktime(&tm_start);
+  std::time_t cur_end = cur_start + 3600;
+
+  std::tm tm_end = *std::localtime(&end);
+  tm_end.tm_min = 0;
+  tm_end.tm_sec = 0;
+  std::time_t last_end = std::mktime(&tm_end);
+
+  try {
+    auto jobs = (*GetClient_())[m_db_name_][task_collection_name];
+    while (cur_start < last_end) {
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << "time_end" << bsoncxx::builder::stream::open_document
+                     << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "hour" << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc" << "$cpus_alloc"
+          << bsoncxx::builder::stream::open_document << "$subtract"
+          << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "cpu_alloc"
+          << bsoncxx::builder::stream::open_document << "$multiply"
+          << bsoncxx::builder::stream::open_array << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.group(
+          bsoncxx::builder::stream::document{}
+          << "_id" << bsoncxx::builder::stream::open_document << "hour"
+          << "$hour"
+          << "account" << "$account"
+          << "username" << "$username"
+          << bsoncxx::builder::stream::close_document << "total_cpu_time"
+          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_time"
+          << bsoncxx::builder::stream::close_document << "total_cpu_alloc"
+          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_alloc"
+          << bsoncxx::builder::stream::close_document << "total_count"
+          << bsoncxx::builder::stream::open_document << "$sum" << 1
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      mongocxx::options::aggregate opts;
+      opts.allow_disk_use(true);
+      auto cursor = jobs.aggregate(pipeline, opts);
+
+      for (auto&& doc : cursor) {
+        bsoncxx::builder::basic::array arr_builder;
+        arr_builder.append(doc);
+        queue.Push(bsoncxx::array::value(arr_builder.view()));
+      }
+      cur_start = cur_end;
+      cur_end += 3600;
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "AccountUserProducer error: " << e.what() << std::endl;
+  }
+  queue.SetFinished();
+}
+
+void MongodbClient::ProduceHourAccountUserWckey(
+    ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
+    std::time_t end, const std::string& task_collection_name) {
+  std::time_t cur_start = start;
+  std::time_t cur_end = cur_start + 3600;
+
+  try {
+    auto jobs = (*GetClient_())[m_db_name_][task_collection_name];
+    while (cur_end <= end) {
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << "time_end" << bsoncxx::builder::stream::open_document
+                     << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "hour" << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "wckey" << bsoncxx::builder::stream::open_document
+                          << "$ifNull" << bsoncxx::builder::stream::open_array
+                          << "$wckey" << "_default_"
+                          << bsoncxx::builder::stream::close_array
+                          << bsoncxx::builder::stream::close_document
+                          << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc" << "$cpus_alloc"
+          << bsoncxx::builder::stream::open_document << "$subtract"
+          << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "cpu_alloc"
+          << bsoncxx::builder::stream::open_document << "$multiply"
+          << bsoncxx::builder::stream::open_array << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.group(
+          bsoncxx::builder::stream::document{}
+          << "_id" << bsoncxx::builder::stream::open_document << "hour"
+          << "$hour"
+          << "account" << "$account"
+          << "username" << "$username"
+          << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
+          << "total_cpu_time" << bsoncxx::builder::stream::open_document
+          << "$sum" << "$cpu_time" << bsoncxx::builder::stream::close_document
+          << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
+          << "$sum" << "$cpu_alloc" << bsoncxx::builder::stream::close_document
+          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+          << 1 << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      mongocxx::options::aggregate opts;
+      opts.allow_disk_use(true);
+      auto cursor = jobs.aggregate(pipeline, opts);
+
+      for (auto&& doc : cursor) {
+        bsoncxx::builder::basic::array arr_builder;
+        arr_builder.append(doc);
+        queue.Push(bsoncxx::array::value(arr_builder.view()));
+      }
+      cur_start = cur_end;
+      cur_end += 3600;
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "WckeyProducer error: " << e.what() << std::endl;
+  }
+  queue.SetFinished();
 }
 
 bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
@@ -2828,213 +2808,62 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
                               << 1 << bsoncxx::builder::stream::finalize);
     auto account_user_wckey =
         (*GetClient_())[m_db_name_][m_hour_account_user_wckey_collection_name_];
-    account_user.create_index(bsoncxx::builder::stream::document{}
-                              << "hour" << 1 << "account" << 1 << "username"
-                              << 1 << "wckey" << 1
-                              << bsoncxx::builder::stream::finalize);
+    account_user_wckey.create_index(bsoncxx::builder::stream::document{}
+                                    << "hour" << 1 << "account" << 1
+                                    << "username" << 1 << "wckey" << 1
+                                    << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
-  // account_user
-  auto account_user_producer = [&]() {
-    std::tm tm_start = *std::localtime(&start);
-    tm_start.tm_min = 0;
-    tm_start.tm_sec = 0;
-    std::time_t cur_start = std::mktime(&tm_start);
-    std::time_t cur_end = cur_start + 3600;
 
-    std::tm tm_end = *std::localtime(&end);
-    tm_end.tm_min = 0;
-    tm_end.tm_sec = 0;
-    std::time_t last_end = std::mktime(&tm_end);
-    try {
-      auto jobs = (*GetClient_())[m_db_name_][m_task_collection_name_];
-      while (cur_start < last_end) {
-        mongocxx::pipeline pipeline;
-        pipeline.match(bsoncxx::builder::stream::document{}
-                       << "time_end" << bsoncxx::builder::stream::open_document
-                       << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
-                       << static_cast<int64_t>(cur_end)
-                       << bsoncxx::builder::stream::close_document
-                       << bsoncxx::builder::stream::finalize);
-
-        pipeline.add_fields(bsoncxx::builder::stream::document{}
-                            << "hour" << static_cast<int64_t>(cur_start)
-                            << bsoncxx::builder::stream::finalize);
-
-        pipeline.add_fields(
-            bsoncxx::builder::stream::document{}
-            << "cpu_time" << bsoncxx::builder::stream::open_document
-            << "$multiply" << bsoncxx::builder::stream::open_array
-            << "$nodes_alloc" << "$cpus_alloc"
-            << bsoncxx::builder::stream::open_document << "$subtract"
-            << bsoncxx::builder::stream::open_array << "$time_end"
-            << "$time_start" << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document << "cpu_alloc"
-            << bsoncxx::builder::stream::open_document << "$multiply"
-            << bsoncxx::builder::stream::open_array << "$nodes_alloc"
-            << "$cpus_alloc" << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::finalize);
-
-        pipeline.group(
-            bsoncxx::builder::stream::document{}
-            << "_id" << bsoncxx::builder::stream::open_document << "hour"
-            << "$hour"
-            << "account" << "$account"
-            << "username" << "$username"
-            << bsoncxx::builder::stream::close_document << "total_cpu_time"
-            << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_time"
-            << bsoncxx::builder::stream::close_document << "total_cpu_alloc"
-            << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_alloc"
-            << bsoncxx::builder::stream::close_document << "total_count"
-            << bsoncxx::builder::stream::open_document << "$sum" << 1
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::finalize);
-
-        mongocxx::options::aggregate opts;
-        opts.allow_disk_use(true);
-        auto cursor = jobs.aggregate(pipeline, opts);
-
-        for (auto&& doc : cursor) {
-          bsoncxx::builder::basic::array arr_builder;
-          arr_builder.append(doc);
-          account_user_queue.Push(bsoncxx::array::value(arr_builder.view()));
-        }
-        cur_start = cur_end;
-        cur_end += 3600;
-      }
-    } catch (const std::exception& e) {
-      std::cerr << "AccountUserProducer error: " << e.what() << std::endl;
-    }
-    account_user_queue.SetFinished();
-  };
-
-  // account_user_wckey
-  auto wckey_producer = [&]() {
-    std::time_t cur_start = start;
-    std::time_t cur_end = cur_start + 3600;
-    try {
-      auto jobs = (*GetClient_())[m_db_name_][m_task_collection_name_];
-      while (cur_end <= end) {
-        mongocxx::pipeline pipeline;
-        pipeline.match(bsoncxx::builder::stream::document{}
-                       << "time_end" << bsoncxx::builder::stream::open_document
-                       << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
-                       << static_cast<int64_t>(cur_end)
-                       << bsoncxx::builder::stream::close_document
-                       << bsoncxx::builder::stream::finalize);
-
-        pipeline.add_fields(bsoncxx::builder::stream::document{}
-                            << "hour" << static_cast<int64_t>(cur_start)
-                            << bsoncxx::builder::stream::finalize);
-        pipeline.add_fields(
-            bsoncxx::builder::stream::document{}
-            << "wckey" << bsoncxx::builder::stream::open_document << "$ifNull"
-            << bsoncxx::builder::stream::open_array << "$wckey" << "_default_"
-            << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::finalize);
-        // pipeline.match(bsoncxx::builder::stream::document{}
-        //                << "wckey" << bsoncxx::builder::stream::open_document
-        //                << "$exists" << true << "$ne" <<
-        //                bsoncxx::types::b_null{}
-        //                << bsoncxx::builder::stream::close_document
-        //                << bsoncxx::builder::stream::finalize);
-        pipeline.add_fields(
-            bsoncxx::builder::stream::document{}
-            << "cpu_time" << bsoncxx::builder::stream::open_document
-            << "$multiply" << bsoncxx::builder::stream::open_array
-            << "$nodes_alloc" << "$cpus_alloc"
-            << bsoncxx::builder::stream::open_document << "$subtract"
-            << bsoncxx::builder::stream::open_array << "$time_end"
-            << "$time_start" << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document << "cpu_alloc"
-            << bsoncxx::builder::stream::open_document << "$multiply"
-            << bsoncxx::builder::stream::open_array << "$nodes_alloc"
-            << "$cpus_alloc" << bsoncxx::builder::stream::close_array
-            << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::finalize);
-        pipeline.group(
-            bsoncxx::builder::stream::document{}
-            << "_id" << bsoncxx::builder::stream::open_document << "hour"
-            << "$hour"
-            << "account" << "$account"
-            << "username" << "$username"
-            << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
-            << "total_cpu_time" << bsoncxx::builder::stream::open_document
-            << "$sum"
-            << "$cpu_time" << bsoncxx::builder::stream::close_document
-            << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
-            << "$sum"
-            << "$cpu_alloc" << bsoncxx::builder::stream::close_document
-            << "total_count" << bsoncxx::builder::stream::open_document
-            << "$sum" << 1 << bsoncxx::builder::stream::close_document
-            << bsoncxx::builder::stream::finalize);
-        mongocxx::options::aggregate opts;
-        opts.allow_disk_use(true);
-        auto cursor = jobs.aggregate(pipeline, opts);
-
-        for (auto&& doc : cursor) {
-          bsoncxx::builder::basic::array arr_builder;
-          arr_builder.append(doc);
-          account_user_wckey_queue.Push(
-              bsoncxx::array::value(arr_builder.view()));
-        }
-        cur_start = cur_end;
-        cur_end += 3600;
-      }
-    } catch (const std::exception& e) {
-      std::cerr << "WckeyProducer error: " << e.what() << std::endl;
-    }
-    account_user_wckey_queue.SetFinished();
-  };
+  auto producer_future1 = g_thread_pool->submit_task([&]() {
+    this->ProduceHourAccountUser(account_user_queue, start, end,
+                                 m_task_collection_name_);
+  });
+  auto producer_future2 = g_thread_pool->submit_task([&]() {
+    this->ProduceHourAccountUserWckey(account_user_wckey_queue, start, end,
+                                      m_task_collection_name_);
+  });
 
   // account_user
   auto account_user_consumer = [&](int idx) {
     auto consumer_start = std::chrono::steady_clock::now();
-    auto user_coll =
-        (*GetClient_())[m_db_name_][m_hour_account_user_collection_name_];
     bsoncxx::array::value arr(bsoncxx::array::view{});
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserAggArray(arr.view(), user_coll, "hour",
+        HandleAccountUserAggArray(arr.view(),
+                                  m_hour_account_user_collection_name_, "hour",
                                   print_debug_log);
     }
   };
 
-  //account_user_wckey
+  // account_user_wckey
   auto wckey_consumer = [&](int idx) {
-    auto wckey_coll =
-        (*GetClient_())[m_db_name_][m_hour_account_user_wckey_collection_name_];
     bsoncxx::array::value arr(bsoncxx::array::view{});
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserWckeyAggArray(arr.view(), wckey_coll, "hour",
-                                       print_debug_log);
+        HandleAccountUserWckeyAggArray(
+            arr.view(), m_hour_account_user_wckey_collection_name_, "hour",
+            print_debug_log);
     }
     static std::mutex mtx;
     std::lock_guard<std::mutex> lock(mtx);
   };
 
-  std::thread account_user_producer_thread(account_user_producer);
-  std::thread wckey_producer_thread(wckey_producer);
-
-  std::vector<std::thread> account_user_consumer_threads;
-  std::vector<std::thread> wckey_consumer_threads;
+  std::vector<std::future<void>> account_user_consumer_futures;
+  std::vector<std::future<void>> wckey_consumer_futures;
   for (int i = 0; i < kConsumerThreadNum; ++i) {
-    account_user_consumer_threads.emplace_back(account_user_consumer, i);
-    wckey_consumer_threads.emplace_back(wckey_consumer, i);
+    account_user_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
+    wckey_consumer_futures.push_back(
+        g_thread_pool->submit_task([&, i] { wckey_consumer(i); }));
   }
 
-  account_user_producer_thread.join();
-  wckey_producer_thread.join();
-  for (auto& th : account_user_consumer_threads) th.join();
-  for (auto& th : wckey_consumer_threads) th.join();
+  producer_future1.get();
+  producer_future2.get();
+
+  for (auto& fut : account_user_consumer_futures) fut.get();
+  for (auto& fut : wckey_consumer_futures) fut.get();
 
   return true;
 }
