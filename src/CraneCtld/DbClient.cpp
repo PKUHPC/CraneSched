@@ -806,7 +806,12 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
     container_doc.append(kvp("name", v.name));
     container_doc.append(kvp("command", v.command));
     container_doc.append(kvp("workdir", v.workdir));
+
     container_doc.append(kvp("detached", v.detached));
+    container_doc.append(kvp("tty", v.tty));
+    container_doc.append(kvp("stdin", v.stdin));
+    container_doc.append(kvp("stdin_once", v.stdin_once));
+
     container_doc.append(kvp("userns", v.userns));
     container_doc.append(
         kvp("run_as_user", static_cast<int32_t>(v.run_as_user)));
@@ -1195,9 +1200,20 @@ ContainerMetaInTask MongodbClient::BsonToContainerMeta(
     if (auto workdir_elem = container_doc["workdir"]) {
       result.workdir = workdir_elem.get_string().value;
     }
+
     if (auto detached_elem = container_doc["detached"]) {
       result.detached = detached_elem.get_bool().value;
     }
+    if (auto tty_elem = container_doc["tty"]) {
+      result.tty = tty_elem.get_bool().value;
+    }
+    if (auto stdin_elem = container_doc["stdin"]) {
+      result.stdin = stdin_elem.get_bool().value;
+    }
+    if (auto stdin_once_elem = container_doc["stdin_once"]) {
+      result.stdin_once = stdin_once_elem.get_bool().value;
+    }
+
     if (auto userns_elem = container_doc["userns"]) {
       result.userns = userns_elem.get_bool().value;
     }

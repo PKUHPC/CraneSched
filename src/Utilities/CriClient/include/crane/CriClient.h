@@ -29,8 +29,11 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 
 #include "crane/Lock.h"
 #include "crane/PublicHeader.h"
@@ -39,8 +42,14 @@ namespace cri {
 
 namespace api = runtime::v1;
 
-inline constexpr std::string kCriDefaultPodNamespace = "cranesched";
-inline constexpr std::string kCriDefaultLabel = kCriDefaultPodNamespace;
+inline constexpr std::string_view kCriDefaultPodNamespace = "cranesched";
+inline constexpr std::string_view kCriDefaultLabel = kCriDefaultPodNamespace;
+
+// Use for selecting containers created by CraneSched
+static constexpr std::string_view kCriLabelJobIdKey = "job_id";
+static constexpr std::string_view kCriLabelJobNameKey = "name";
+static constexpr std::string_view kCriLabelUidKey = "uid";
+
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
 inline constexpr std::chrono::seconds kCriDefaultImagePullingTimeout =
@@ -67,6 +76,8 @@ class CriClient {
   void Version() const;
   void RuntimeConfig() const;
 
+  // TODO: CraneExpected should be replaced here for richer error info from CRI
+
   // Pod
   CraneExpected<std::string> RunPodSandbox(api::PodSandboxConfig* config) const;
 
@@ -86,6 +97,9 @@ class CriClient {
 
   CraneExpected<void> RemoveContainer(const std::string& container_id) const;
 
+  CraneExpected<std::string> Attach(const std::string& container_id, bool tty,
+                                    bool stdin, bool stdout, bool stderr) const;
+
   // Container Event Streaming
 
   // Start event streaming thread
@@ -99,7 +113,11 @@ class CriClient {
   CraneExpected<std::vector<api::Container>> ListContainers() const;
 
   CraneExpected<std::vector<api::Container>> ListContainers(
-      const std::map<std::string, std::string>& label_selector) const;
+      const std::unordered_map<std::string, std::string>& label_selector) const;
+
+  // Select exactly one container id by label selector
+  CraneExpected<std::string> SelectContainerId(
+      const std::unordered_map<std::string, std::string>& label_selector) const;
 
   // ==== Image Service ====
   // TODO: Async image pulling?
@@ -144,3 +162,6 @@ class CriClient {
 };
 
 }  // namespace cri
+
+// NOTE: This ptr is currently only used in Craned.
+inline std::unique_ptr<cri::CriClient> g_cri_client;

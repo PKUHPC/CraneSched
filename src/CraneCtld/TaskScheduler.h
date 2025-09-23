@@ -524,6 +524,9 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
+  crane::grpc::AttachContainerTaskReply AttachContainerTask(
+      const crane::grpc::AttachContainerTaskRequest& request);
+
   CraneErrCode TerminatePendingOrRunningIaTask(uint32_t task_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
@@ -585,7 +588,6 @@ class TaskScheduler {
       CranedMetaContainer::ResvMetaMapPtr& resv_meta_map,
       const ResvId& resv_id);
 
- private:
   template <class... Ts>
   struct VariantVisitor : Ts... {
     using Ts::operator()...;
