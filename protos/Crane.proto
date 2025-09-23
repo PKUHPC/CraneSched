@@ -1086,6 +1086,11 @@ message ExecInContainerStepReply {
   string url = 3;
 }
 
+message HealthCheckResponseRequest {
+  string craned_id = 1;
+  HealthCheckResult health_check_result = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1166,6 +1171,8 @@ service CraneCtldForInternal {
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
+
+  rpc HealthCheckResponse(HealthCheckResponseRequest) returns (google.protobuf.Empty);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
