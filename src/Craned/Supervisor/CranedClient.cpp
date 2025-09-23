@@ -49,6 +49,7 @@ void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
   StepStatusChangeQueueElem elem{.new_status = new_status,
                                  .exit_code = exit_code,
                                  .reason = std::move(reason)};
+  absl::MutexLock lock(&m_mutex_);
   m_task_status_change_queue_.push_back(std::move(elem));
 }
 
