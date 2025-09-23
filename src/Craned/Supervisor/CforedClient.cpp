@@ -269,7 +269,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       if (poll_handle) poll_handle->close();
       close(stdout_read);
       elem.promise.set_value(false);
-      break;
+      continue;
       // TODO: handle failed status
     }
     {
@@ -327,15 +327,15 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
 
         bool ok_to_free = this->TaskOutputFinish(meta.task_id);
         if (ok_to_free) {
-          CRANE_TRACE("It's ok to begin unregister task #{} on {}",
-                      g_config.JobId, m_cfored_name_);
+          CRANE_TRACE("It's ok to begin unregister task #{} on {}", task_id,
+                      m_cfored_name_);
           TaskEnd(meta.task_id);
         }
         return;
       }
 
       std::string output(buf, ret);
-      CRANE_TRACE("Fwd to task #{}: len[{}]", g_config.JobId, ret);
+      CRANE_TRACE("Fwd to task #{}: len[{}]", task_id, ret);
       this->TaskOutPutForward(output);
     };
     poll_handle->on<uvw::poll_event>(poll_cb);
@@ -547,7 +547,7 @@ void CforedClient::AsyncSendRecvThread_() {
       request.set_type(StreamTaskIORequest::SUPERVISOR_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
-      request.mutable_payload_register_req()->set_job_id(g_config.JobId);
+      request.mutable_payload_register_req()->set_task_id(g_config.JobId);
       request.mutable_payload_register_req()->set_step_id(g_config.StepId);
 
       write_pending.store(true, std::memory_order::release);
