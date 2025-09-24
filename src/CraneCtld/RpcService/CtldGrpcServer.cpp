@@ -18,6 +18,8 @@
 
 #include "CtldGrpcServer.h"
 
+#include <grpcpp/support/status.h>
+
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
@@ -1860,6 +1862,48 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
     response->set_ok(true);
     response->set_certificate(result.value());
   }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::AttachContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::AttachContainerTaskRequest *request,
+    crane::grpc::AttachContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot attach both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be attached");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->AttachContainerTask(*request);
 
   return grpc::Status::OK;
 }

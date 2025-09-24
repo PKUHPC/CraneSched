@@ -20,11 +20,15 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <unordered_map>
+
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
+#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/CriClient.h"
 
 namespace Craned {
 
@@ -318,6 +322,71 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
   bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::AttachContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::AttachContainerTaskRequest *request,
+    crane::grpc::AttachContainerTaskReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("CranedServer is not ready.");
+    response->set_ok(false);
+    return {grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  if (!g_config.Container.Enabled || g_cri_client == nullptr) {
+    // Should never happen.
+    CRANE_ERROR(
+        "AttachContainerTask request received but Container is not enabled.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+    err->set_description("Container feature is not enabled.");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  // TODO: After we move CriEventStreaming to Craned, we can get container_id
+  // directly.
+  std::unordered_map<std::string, std::string> label_selector{
+      {std::string(cri::kCriDefaultLabel), "true"},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
+      {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
+  };
+  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  if (!container_expt) {
+    CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
+                CraneErrStr(container_expt.error()));
+
+    // NOTE: This could because the container is creating/starting.
+    // The caller should retry later. Fix this after we add CONFIGURING state.
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_ATTACH_NOT_READY);
+    err->set_description("Container is not found. Possibly initializing?");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  const auto &container_id = container_expt.value();
+  auto url_expt =
+      g_cri_client->Attach(container_id, request->tty(), request->stdin(),
+                           request->stdout(), request->stderr());
+
+  // TODO: Add more error info in CriClient to optimize here.
+  if (!url_expt) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_GENERIC);
+    err->set_description("CRI returned an error.");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  response->set_ok(true);
+  response->set_url(url_expt.value());
 
   return Status::OK;
 }
