@@ -284,8 +284,11 @@ crane::grpc::AttachContainerTaskReply CranedStub::AttachContainerTask(
         "AttachContainerTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
+
+    auto *err = reply.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description(status.error_message());
     reply.set_ok(false);
-    reply.set_reason(std::format("RPC failure: {}", status.error_message()));
     return reply;
   }
 
