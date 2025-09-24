@@ -417,4 +417,107 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
+  int pipefd[2];
+    RunCommandResult result{127, "", false, 0};
+
+    if (pipe(pipefd) != 0)
+        return result;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return result;
+    }
+
+    if (pid == 0) {
+        close(pipefd[0]);
+        setsid();
+        if (run_command_args.run_gid >= 0) {
+            if (setgid(run_command_args.run_gid) != 0) _exit(127);
+        }
+        if (run_command_args.run_uid >= 0) {
+            struct passwd *pw = getpwuid(run_command_args.run_uid);
+            if (pw) initgroups(pw->pw_name, run_command_args.run_gid >= 0 ? run_command_args.run_gid : pw->pw_gid);
+            if (setuid(run_command_args.run_uid) != 0) _exit(127);
+        }
+
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>(run_command_args.program.c_str()));
+        for (const auto& arg : run_command_args.args)
+            argv.push_back(const_cast<char*>(arg.c_str()));
+        argv.push_back(nullptr);
+
+        std::vector<char*> envp;
+        if (!run_command_args.envs.empty()) {
+            for (const auto& env : run_command_args.envs)
+                envp.push_back(const_cast<char*>(env.c_str()));
+            envp.push_back(nullptr);
+        }
+
+        if (!run_command_args.envs.empty())
+            execve(run_command_args.program.c_str(), argv.data(), envp.data());
+        else
+            execv(run_command_args.program.c_str(), argv.data());
+        _exit(127);
+    }
+
+    close(pipefd[1]);
+    int flags = fcntl(pipefd[0], F_GETFL, 0);
+    fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+    char buf[256];
+    int elapsed = 0;
+    const int interval = 100;  // ms
+    int status = 0;
+    bool child_exited = false;
+    uint32_t timeout_ms = run_command_args.timeout_sec > 0 ? run_command_args.timeout_sec * 1000 : 0;
+
+    while (timeout_ms <= 0 || elapsed < timeout_ms) {
+        ssize_t n;
+        while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+            buf[n] = '\0';
+            result.output += buf;
+        }
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) {
+            child_exited = true;
+            break;
+        }
+        usleep(interval * 1000);
+        elapsed += interval;
+    }
+
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+        buf[n] = '\0';
+        result.output += buf;
+    }
+    close(pipefd[0]);
+
+    if (!child_exited) {
+        kill(-pid, SIGKILL); // kill进程组
+        waitpid(pid, &status, 0);
+        result.time_out = true;
+        result.output += "\nCommand timed out.";
+    }
+
+    if (WIFEXITED(status)) {
+        result.exit_code = WEXITSTATUS(status);
+        result.term_signal = 0;
+    } else if (WIFSIGNALED(status)) {
+        result.exit_code = 127;
+        result.term_signal = WTERMSIG(status);
+    } else {
+        result.exit_code = 127;
+        result.term_signal = 0;
+    }
+    return result;
+}
+
 }  // namespace util::os

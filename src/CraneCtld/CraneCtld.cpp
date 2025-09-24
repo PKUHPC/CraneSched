@@ -181,12 +181,14 @@ void ParseConfig(int argc, char** argv) {
         for (auto& pro_log : g_config.ProLogs) {
           absl::StripAsciiWhitespace(&pro_log);
         }
+        std::ranges::sort(g_config.ProLogs, std::greater());
       }
       if (config["EpilogCranectld"]) {
         g_config.EpiLogs = absl::StrSplit(config["EpilogCranectld"].as<std::string>(), ",");
         for (auto& epi_log : g_config.EpiLogs) {
           absl::StripAsciiWhitespace(&epi_log);
         }
+        std::ranges::sort(g_config.EpiLogs, std::greater());
       }
       if (config["PrologTimeout"]) {
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
