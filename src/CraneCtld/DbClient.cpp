@@ -2010,7 +2010,7 @@ bool MongodbClient::RollupHourTable() {
   auto t1 = std::chrono::steady_clock::now();
   long long agg_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-  CRANE_ERROR("AggregateHourTable cost ms: {}", agg_ms);
+  CRANE_INFO("AggregateHourTable cost ms: {}", agg_ms);
 
   return success;
 }
@@ -2168,12 +2168,11 @@ void MongodbClient::HandleProduceAccountUserAggArray(
         << "_id" << bsoncxx::builder::stream::open_document << period_field
         << bsoncxx::types::b_string{group_period_field_ref} << "account"
         << "$account"
-        << "username" << "$username" << bsoncxx::builder::stream::close_document
-        << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
+        << "username" << "$username"
+        << "cpu_alloc_level" << "$cpu_alloc_level"
+        << bsoncxx::builder::stream::close_document << "total_cpu_time"
+        << bsoncxx::builder::stream::open_document << "$sum"
         << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-        << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
-        << "$sum"
-        << "$total_cpu_alloc" << bsoncxx::builder::stream::close_document
         << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
         << "$total_count" << bsoncxx::builder::stream::close_document
         << bsoncxx::builder::stream::finalize);
@@ -2262,12 +2261,11 @@ void MongodbClient::HandleProduceAccountUserWckeyAggArray(
         << bsoncxx::types::b_string{group_period_field_ref} << "account"
         << "$account"
         << "username" << "$username"
-        << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
-        << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
+        << "wckey" << "$wckey"
+        << "cpu_alloc_level" << "$cpu_alloc_level"
+        << bsoncxx::builder::stream::close_document << "total_cpu_time"
+        << bsoncxx::builder::stream::open_document << "$sum"
         << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-        << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
-        << "$sum"
-        << "$total_cpu_alloc" << bsoncxx::builder::stream::close_document
         << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
         << "$total_count" << bsoncxx::builder::stream::close_document
         << bsoncxx::builder::stream::finalize);
@@ -2306,6 +2304,17 @@ bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
     std::string account = std::string(id["account"].get_string().value);
     std::string username = std::string(id["username"].get_string().value);
 
+    // add cpu_alloc_level
+    int cpu_alloc_level = 0;
+    auto cpu_alloc_level_elem = id["cpu_alloc_level"];
+    if (cpu_alloc_level_elem) {
+      if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
+        cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
+      else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
+        cpu_alloc_level =
+            static_cast<int>(cpu_alloc_level_elem.get_int64().value);
+    }
+
     double cpu_time = 0.0;
     auto cpu_time_elem = view["total_cpu_time"];
     if (cpu_time_elem) {
@@ -2323,23 +2332,6 @@ bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
         break;
       }
     }
-    double cpu_alloc = 0.0;
-    auto cpu_alloc_elem = view["total_cpu_alloc"];
-    if (cpu_alloc_elem) {
-      switch (cpu_alloc_elem.type()) {
-      case bsoncxx::type::k_double:
-        cpu_alloc = cpu_alloc_elem.get_double().value;
-        break;
-      case bsoncxx::type::k_int32:
-        cpu_alloc = static_cast<double>(cpu_alloc_elem.get_int32().value);
-        break;
-      case bsoncxx::type::k_int64:
-        cpu_alloc = static_cast<double>(cpu_alloc_elem.get_int64().value);
-        break;
-      default:
-        break;
-      }
-    }
     int count = 0;
     auto count_elem = view["total_count"];
     if (count_elem) {
@@ -2352,8 +2344,8 @@ bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
     bsoncxx::document::value insert_doc =
         bsoncxx::builder::stream::document{}
         << period_field << period << "account" << account << "username"
-        << username << "total_cpu_time" << cpu_time << "total_cpu_alloc"
-        << cpu_alloc << "total_count" << count
+        << username << "cpu_alloc_level" << cpu_alloc_level << "total_cpu_time"
+        << cpu_time << "total_count" << count
         << bsoncxx::builder::stream::finalize;
 
     insert_docs.push_back(std::move(insert_doc));
@@ -2405,6 +2397,16 @@ bool MongodbClient::HandleAccountUserWckeyAggArray(
     std::string username = std::string(id["username"].get_string().value);
     std::string wckey = std::string(id["wckey"].get_string().value);
 
+    int cpu_alloc_level = 0;
+    auto cpu_alloc_level_elem = id["cpu_alloc_level"];
+    if (cpu_alloc_level_elem) {
+      if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
+        cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
+      else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
+        cpu_alloc_level =
+            static_cast<int>(cpu_alloc_level_elem.get_int64().value);
+    }
+
     double cpu_time = 0.0;
     auto cpu_time_elem = view["total_cpu_time"];
     if (cpu_time_elem) {
@@ -2422,23 +2424,6 @@ bool MongodbClient::HandleAccountUserWckeyAggArray(
         break;
       }
     }
-    double cpu_alloc = 0.0;
-    auto cpu_alloc_elem = view["total_cpu_alloc"];
-    if (cpu_alloc_elem) {
-      switch (cpu_alloc_elem.type()) {
-      case bsoncxx::type::k_double:
-        cpu_alloc = cpu_alloc_elem.get_double().value;
-        break;
-      case bsoncxx::type::k_int32:
-        cpu_alloc = static_cast<double>(cpu_alloc_elem.get_int32().value);
-        break;
-      case bsoncxx::type::k_int64:
-        cpu_alloc = static_cast<double>(cpu_alloc_elem.get_int64().value);
-        break;
-      default:
-        break;
-      }
-    }
     int count = 0;
     auto count_elem = view["total_count"];
     if (count_elem) {
@@ -2451,8 +2436,8 @@ bool MongodbClient::HandleAccountUserWckeyAggArray(
     bsoncxx::document::value insert_doc =
         bsoncxx::builder::stream::document{}
         << period_field << period << "account" << account << "username"
-        << username << "wckey" << wckey << "total_cpu_time" << cpu_time
-        << "total_cpu_alloc" << cpu_alloc << "total_count" << count
+        << username << "wckey" << wckey << "cpu_alloc_level" << cpu_alloc_level
+        << "total_cpu_time" << cpu_time << "total_count" << count
         << bsoncxx::builder::stream::finalize;
 
     insert_docs.push_back(std::move(insert_doc));
@@ -2504,13 +2489,14 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
         (*GetClient_())[m_db_name_][m_day_account_user_collection_name_];
     account_user.create_index(bsoncxx::builder::stream::document{}
                               << "day" << 1 << "account" << 1 << "username" << 1
+                              << "cpu_alloc_level" << 1
                               << bsoncxx::builder::stream::finalize);
     auto account_user_wckey =
         (*GetClient_())[m_db_name_][m_day_account_user_wckey_collection_name_];
-    account_user_wckey.create_index(bsoncxx::builder::stream::document{}
-                                    << "day" << 1 << "account" << 1
-                                    << "username" << 1 << "wckey" << 1
-                                    << bsoncxx::builder::stream::finalize);
+    account_user_wckey.create_index(
+        bsoncxx::builder::stream::document{}
+        << "day" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
+        << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
@@ -2576,13 +2562,14 @@ bool MongodbClient::AggregateMonthFromDay(std::time_t start, std::time_t end,
     auto account_user = (*GetClient_())[m_db_name_][dst_account_user_table];
     account_user.create_index(bsoncxx::builder::stream::document{}
                               << "month" << 1 << "account" << 1 << "username"
-                              << 1 << bsoncxx::builder::stream::finalize);
+                              << 1 << "cpu_alloc_level" << 1
+                              << bsoncxx::builder::stream::finalize);
     auto account_user_wckey =
         (*GetClient_())[m_db_name_][dst_account_user_wckey_table];
-    account_user_wckey.create_index(bsoncxx::builder::stream::document{}
-                                    << "month" << 1 << "account" << 1
-                                    << "username" << 1 << "wckey" << 1
-                                    << bsoncxx::builder::stream::finalize);
+    account_user_wckey.create_index(
+        bsoncxx::builder::stream::document{}
+        << "month" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
+        << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
@@ -2663,35 +2650,105 @@ void MongodbClient::ProduceHourAccountUser(
 
       pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "cpu_alloc" << bsoncxx::builder::stream::open_document
           << "$multiply" << bsoncxx::builder::stream::open_array
-          << "$nodes_alloc" << "$cpus_alloc"
-          << bsoncxx::builder::stream::open_document << "$subtract"
-          << bsoncxx::builder::stream::open_array << "$time_end"
-          << "$time_start" << bsoncxx::builder::stream::close_array
-          << bsoncxx::builder::stream::close_document
-          << bsoncxx::builder::stream::close_array
-          << bsoncxx::builder::stream::close_document << "cpu_alloc"
-          << bsoncxx::builder::stream::open_document << "$multiply"
-          << bsoncxx::builder::stream::open_array << "$nodes_alloc"
+          << "$nodes_alloc"
           << "$cpus_alloc" << bsoncxx::builder::stream::close_array
           << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::finalize);
 
-      pipeline.group(
+      pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "_id" << bsoncxx::builder::stream::open_document << "hour"
-          << "$hour"
-          << "account" << "$account"
-          << "username" << "$username"
-          << bsoncxx::builder::stream::close_document << "total_cpu_time"
-          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_time"
-          << bsoncxx::builder::stream::close_document << "total_cpu_alloc"
-          << bsoncxx::builder::stream::open_document << "$sum" << "$cpu_alloc"
-          << bsoncxx::builder::stream::close_document << "total_count"
-          << bsoncxx::builder::stream::open_document << "$sum" << 1
+          << "cpu_alloc_level" << bsoncxx::builder::stream::open_document
+          << "$switch" << bsoncxx::builder::stream::open_document << "branches"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 0
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 50
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 1
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 50
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 250
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 2
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 250
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 500
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 3
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 500
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 1000
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 4
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array << "default" << 5
+          << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::open_document
+          << "$subtract" << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.group(bsoncxx::builder::stream::document{}
+                     << "_id" << bsoncxx::builder::stream::open_document
+                     << "hour" << "$hour"
+                     << "account" << "$account"
+                     << "username" << "$username"
+                     << "cpu_alloc_level" << "$cpu_alloc_level"
+                     << bsoncxx::builder::stream::close_document
+                     << "total_cpu_time"
+                     << bsoncxx::builder::stream::open_document << "$sum"
+                     << "$cpu_time" << bsoncxx::builder::stream::close_document
+                     << "total_count" << bsoncxx::builder::stream::open_document
+                     << "$sum" << 1 << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
 
       mongocxx::options::aggregate opts;
       opts.allow_disk_use(true);
@@ -2742,35 +2799,106 @@ void MongodbClient::ProduceHourAccountUserWckey(
 
       pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "cpu_alloc" << bsoncxx::builder::stream::open_document
           << "$multiply" << bsoncxx::builder::stream::open_array
-          << "$nodes_alloc" << "$cpus_alloc"
-          << bsoncxx::builder::stream::open_document << "$subtract"
-          << bsoncxx::builder::stream::open_array << "$time_end"
-          << "$time_start" << bsoncxx::builder::stream::close_array
-          << bsoncxx::builder::stream::close_document
-          << bsoncxx::builder::stream::close_array
-          << bsoncxx::builder::stream::close_document << "cpu_alloc"
-          << bsoncxx::builder::stream::open_document << "$multiply"
-          << bsoncxx::builder::stream::open_array << "$nodes_alloc"
+          << "$nodes_alloc"
           << "$cpus_alloc" << bsoncxx::builder::stream::close_array
           << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::finalize);
 
-      pipeline.group(
+      pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "_id" << bsoncxx::builder::stream::open_document << "hour"
-          << "$hour"
-          << "account" << "$account"
-          << "username" << "$username"
-          << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
-          << "total_cpu_time" << bsoncxx::builder::stream::open_document
-          << "$sum" << "$cpu_time" << bsoncxx::builder::stream::close_document
-          << "total_cpu_alloc" << bsoncxx::builder::stream::open_document
-          << "$sum" << "$cpu_alloc" << bsoncxx::builder::stream::close_document
-          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
-          << 1 << bsoncxx::builder::stream::close_document
+          << "cpu_alloc_level" << bsoncxx::builder::stream::open_document
+          << "$switch" << bsoncxx::builder::stream::open_document << "branches"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 0
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 50
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 1
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 50
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 250
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 2
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 250
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 500
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 3
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "case"
+          << bsoncxx::builder::stream::open_document << "$and"
+          << bsoncxx::builder::stream::open_array
+          << bsoncxx::builder::stream::open_document << "$gte"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 500
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::open_document << "$lt"
+          << bsoncxx::builder::stream::open_array << "$cpu_alloc" << 1000
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document << "then" << 4
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array << "default" << 5
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::open_document
+          << "$subtract" << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.group(bsoncxx::builder::stream::document{}
+                     << "_id" << bsoncxx::builder::stream::open_document
+                     << "hour" << "$hour"
+                     << "account" << "$account"
+                     << "username" << "$username"
+                     << "wckey" << "$wckey"
+                     << "cpu_alloc_level" << "$cpu_alloc_level"
+                     << bsoncxx::builder::stream::close_document
+                     << "total_cpu_time"
+                     << bsoncxx::builder::stream::open_document << "$sum"
+                     << "$cpu_time" << bsoncxx::builder::stream::close_document
+                     << "total_count" << bsoncxx::builder::stream::open_document
+                     << "$sum" << 1 << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
 
       mongocxx::options::aggregate opts;
       opts.allow_disk_use(true);
@@ -2805,13 +2933,14 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
         (*GetClient_())[m_db_name_][m_hour_account_user_collection_name_];
     account_user.create_index(bsoncxx::builder::stream::document{}
                               << "hour" << 1 << "account" << 1 << "username"
-                              << 1 << bsoncxx::builder::stream::finalize);
+                              << 1 << "cpu_alloc_level" << 1
+                              << bsoncxx::builder::stream::finalize);
     auto account_user_wckey =
         (*GetClient_())[m_db_name_][m_hour_account_user_wckey_collection_name_];
-    account_user_wckey.create_index(bsoncxx::builder::stream::document{}
-                                    << "hour" << 1 << "account" << 1
-                                    << "username" << 1 << "wckey" << 1
-                                    << bsoncxx::builder::stream::finalize);
+    account_user_wckey.create_index(
+        bsoncxx::builder::stream::document{}
+        << "hour" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
+        << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
     std::cerr << "Create index error: " << e.what() << std::endl;
   }
@@ -2868,11 +2997,11 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
   return true;
 }
 
-void MongodbClient::QueryAndAgg(
+void MongodbClient::QueryAndAggAccountUser(
     const std::string& table, const std::string& time_field,
     std::time_t range_start, std::time_t range_end, const std::string& account,
     const std::string& username,
-    std::unordered_map<Key, AggResult, KeyHash>& agg_map) {
+    std::unordered_map<Key, UserAccountAggResult, KeyHash>& agg_map) {
   bool print_debug_log = false;  // Set to false to disable debug logs
 
   if (print_debug_log) {
@@ -2909,8 +3038,6 @@ void MongodbClient::QueryAndAgg(
       << "username" << "$username" << bsoncxx::builder::stream::close_document
       << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
       << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-      << "total_cpu_alloc" << bsoncxx::builder::stream::open_document << "$sum"
-      << "$total_cpu_alloc" << bsoncxx::builder::stream::close_document
       << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
       << "$total_count" << bsoncxx::builder::stream::close_document
       << bsoncxx::builder::stream::finalize);
@@ -2926,19 +3053,16 @@ void MongodbClient::QueryAndAgg(
 
     agg_map[{acc, user}].total_cpu_time +=
         doc["total_cpu_time"].get_double().value;
-    agg_map[{acc, user}].total_cpu_alloc +=
-        doc["total_cpu_alloc"].get_double().value;
     agg_map[{acc, user}].total_count += doc["total_count"].get_int32().value;
   }
 
   if (print_debug_log) {
-    CRANE_INFO("AggResult:");
+    CRANE_INFO("UserAccountAggResult:");
     for (const auto& [key, result] : agg_map) {
       CRANE_INFO(
-          "  Account: {}, Username: {}, Total CPU Time: {}, Total CPU Alloc: "
-          "{}, Total Count: {}",
-          key.account, key.username, result.total_cpu_time,
-          result.total_cpu_alloc, result.total_count);
+          "Account: {}, Username: {}, Total CPU Time: {}, "
+          " Total Count: {}",
+          key.account, key.username, result.total_cpu_time, result.total_count);
     }
   }
 }
@@ -2949,7 +3073,7 @@ void MongodbClient::QueryAccountUserSummary(
     ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
         stream) {
   bool print_debug_log = true;
-  std::unordered_map<Key, AggResult, KeyHash> agg_map;
+  std::unordered_map<Key, UserAccountAggResult, KeyHash> agg_map;
   auto ranges = util::EfficientSplitTimeRange(start, end);
 
   // Query and aggregate for each interval type
@@ -2977,7 +3101,8 @@ void MongodbClient::QueryAccountUserSummary(
           util::FormatTime(r.end), account, username);
     }
 
-    QueryAndAgg(table, time_field, r.start, r.end, account, username, agg_map);
+    QueryAndAggAccountUser(table, time_field, r.start, r.end, account, username,
+                           agg_map);
   }
 
   crane::grpc::QueryAccountUserSummaryItemReply reply;
@@ -2987,7 +3112,6 @@ void MongodbClient::QueryAccountUserSummary(
     item.set_account(kv.first.account);
     item.set_username(kv.first.username);
     item.set_total_cpu_time(kv.second.total_cpu_time);
-    item.set_total_cpu_alloc(kv.second.total_cpu_alloc);
     item.set_total_count(kv.second.total_count);
     reply.add_items()->CopyFrom(item);
     if (reply.items_size() >= 5000) {

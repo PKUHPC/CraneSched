@@ -134,14 +134,11 @@ class MongodbClient {
   };
 
   enum class RollupType { Hour, HourToDay, DayToMonth };
-
-  struct AggResult {
+  struct UserAccountAggResult {
     int64_t total_cpu_time = 0;
-    int64_t total_cpu_alloc = 0;
     int32_t total_count = 0;
   };
 
-  // 定义 struct
   struct Key {
     std::string account;
     std::string username;
@@ -201,10 +198,11 @@ class MongodbClient {
   bool RollupHourToDay();
   bool RollupDayToMonth();
   void ClusterRollupUsage();
-  void QueryAndAgg(const std::string& table, const std::string& time_field,
-                   std::time_t range_start, std::time_t range_end,
-                   const std::string& account, const std::string& username,
-                   std::unordered_map<Key, AggResult, KeyHash>& agg_map);
+  void QueryAndAggAccountUser(
+      const std::string& table, const std::string& time_field,
+      std::time_t range_start, std::time_t range_end,
+      const std::string& account, const std::string& username,
+      std::unordered_map<Key, UserAccountAggResult, KeyHash>& agg_map);
   void QueryAccountUserSummary(
       const std::string& account, const std::string& username,
       std::time_t start, std::time_t end,

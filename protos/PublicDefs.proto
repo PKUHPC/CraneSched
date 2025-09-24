@@ -833,6 +833,5 @@ message AccountUserSummaryItem {
   string account = 2;
   string username = 3;
   int64 total_cpu_time = 4;
-  int64 total_cpu_alloc = 5;
-  int32 total_count = 6;
+  int64 total_count = 5;
 }
