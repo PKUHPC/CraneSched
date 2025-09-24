@@ -826,10 +826,16 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health) {
+void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health, const std::string& reason) {
   if (!craned_meta_map_.Contains(craned_id)) return ;
   auto craned_meta = craned_meta_map_[craned_id];
-  craned_meta->drain = !is_health;
+  if (craned_meta->drain && craned_meta->state_reason == reason) {
+    craned_meta->drain = !is_health;
+    craned_meta->state_reason = reason;
+  } else if (!craned_meta->drain) {
+    craned_meta->drain = !is_health;
+    craned_meta->state_reason = reason;
+  }
 }
 
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
