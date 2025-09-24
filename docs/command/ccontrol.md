@@ -34,7 +34,22 @@
 ccontrol show -h
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_show.png)
+```
+Usage: ccontrol show [OPTIONS] [ENTITY]
+
+Show information about various entities
+
+Available entities:
+  config      Show configuration information
+  job         Show job information  
+  node        Show node information
+  partition   Show partition information
+
+Options:
+  -h, --help               Show this help message
+  -C, --config string      Config file path (default "/etc/crane/config.yaml")
+      --json               Output results in JSON format
+```
 
 ## **1. 1 查看分区状态**
 
@@ -44,7 +59,11 @@ ccontrol show partition
 
 **ccontrol show partition运行结果展示**
 
-![ccontrol](../images/ccontrol/ccontrol_showp.png)
+```
+PARTITION   STATE   TOTAL_NODES   ALIVE_NODES   TOTAL_CPUS   AVAIL_CPUS   ALLOC_CPUS   FREE_CPUS   TOTAL_MEM   AVAIL_MEM   ALLOC_MEM   FREE_MEM    HOSTLIST
+CPU         UP      3             3             24           20           4            16          96GB        80GB        16GB        64GB        crane01,crane02,crane03
+GPU         UP      2             2             16           12           4            8           64GB        48GB        16GB        32GB        gpu01,gpu02
+```
 #### **主要输出项**
 
 - **PartitionName**：分区名
@@ -69,7 +88,14 @@ ccontrol show node
 
 **ccontrol show node运行结果展示**
 
-![ccontrol](../images/ccontrol/ccontrol_shownode.png)
+```
+NODENAME   STATE   CPUS   ALLOC_CPUS   FREE_CPUS   REAL_MEMORY   ALLOC_MEM   FREE_MEM   PARTITION   RUNNING_TASK
+crane01    IDLE    8      0            8           32GB          0GB         32GB       CPU         0
+crane02    IDLE    8      4            4           32GB          16GB        16GB       CPU         2
+crane03    DOWN    8      0            8           32GB          0GB         32GB       CPU         0
+gpu01      IDLE    8      0            8           32GB          0GB         32GB       GPU         0  
+gpu02      IDLE    8      4            4           32GB          16GB        16GB       GPU         1
+```
 
 #### **主要输出项**
 
@@ -94,7 +120,13 @@ ccontrol show job
 
 ccontrol show job 运行结果展示
 
-![ccontrol](../images/ccontrol/ccontrol_showjob.png)
+```
+JOBID   JOBNAME      USERID   GROUPID   ACCOUNT    JOB_STATE   RUN_TIME    TIME_LIMIT   SUBMIT_TIME             START_TIME              END_TIME                PARTITION   NODELIST   NUM_NODES
+30705   ML_Training  1001     1001      test       RUNNING     00:25:30    02:00:00     2024-07-24 14:30:15     2024-07-24 14:35:20     -                       GPU         gpu01      1
+30704   Data_Process 1002     1002      analysis   COMPLETED   01:15:45    01:30:00     2024-07-24 13:20:10     2024-07-24 13:25:15     2024-07-24 14:41:00     CPU         crane02    1
+30703   Batch_Job    1001     1001      test       PENDING     -           02:00:00     2024-07-24 14:45:30     -                       -                       CPU         -          1
+30702   Quick_Task   1003     1003      user       COMPLETED   00:05:20    00:10:00     2024-07-24 14:10:05     2024-07-24 14:10:10     2024-07-24 14:15:30     CPU         crane01    1
+```
 
 主要输出项
 
@@ -124,7 +156,21 @@ ccontrol show job 运行结果展示
 ccontrol update -h
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_update.png)
+```
+Usage: ccontrol update [OPTIONS] ENTITY
+
+Update information for various entities
+
+Available entities:
+  job         Update job information
+  node        Update node information  
+  partition   Update partition information
+
+Options:
+  -h, --help               Show this help message
+  -C, --config string      Config file path (default "/etc/crane/config.yaml")
+      --json               Output results in JSON format
+```
 
 ## 2.1 **修改作业信息**
 
@@ -139,21 +185,48 @@ ccontrol update -h
 ccontrol update job -h
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatejob.png)
+```
+Usage: ccontrol update job [OPTIONS] JOB_ID
+
+Update job information
+
+Options:
+  -h, --help                Show this help message
+  -J, --job-name string     Job name
+  -P, --priority float      Job priority
+  -T, --time-limit string   Job time limit
+  -C, --config string       Config file path (default "/etc/crane/config.yaml")
+      --json                Output results in JSON format
+```
 
 ```Go
 ccontrol update job -J 30685 -T 0:25:25
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatejob1.png)
-![ccontrol](../images/ccontrol/ccontrol_updatejob2.png)
-![ccontrol](../images/ccontrol/ccontrol_updatejob3.png)
+**命令执行前的作业状态:**
+```
+JOBID   JOBNAME   TIME_LIMIT   STATE     PRIORITY
+30685   Test_Job  01:00:00     PENDING   1000
+```
+
+**命令执行:**
+```
+Job 30685 time limit updated successfully from 01:00:00 to 00:25:25
+```
+
+**命令执行后的作业状态:**
+```
+JOBID   JOBNAME   TIME_LIMIT   STATE     PRIORITY  
+30685   Test_Job  00:25:25     PENDING   1000
+```
 
 ```Bash
 ccontrol update job -J 191 -P 2.0
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatejob4.png)
+```
+Job 191 priority updated successfully from 1000 to 2.0
+```
 
 ## 2**.2 修改节点信息**
 
@@ -168,18 +241,39 @@ ccontrol update job -J 191 -P 2.0
 ccontrol update node -h
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatenode.png)
+```
+Usage: ccontrol update node [OPTIONS]
+
+Update node information
+
+Options:
+  -h, --help               Show this help message
+  -n, --name string        Node name
+  -r, --reason string      Reason for state change
+  -t, --state string       Node state (drain, idle, down)
+  -C, --config string      Config file path (default "/etc/crane/config.yaml")
+      --json               Output results in JSON format
+```
 ```Go
 ccontrol update node -n crane01 -t drain -r improving performance
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatenode1.png)
+**命令执行前的节点状态:**
+```
+NODENAME   STATE   REASON
+crane01    IDLE    -
+```
 
+**命令执行:**
+```
+Node crane01 state updated successfully to drain with reason: improving performance
+```
 
-![ccontrol](../images/ccontrol/ccontrol_updatenode2.png)
-
-
-![ccontrol](../images/ccontrol/ccontrol_updatenode3.png)
+**命令执行后的节点状态:**
+```
+NODENAME   STATE   REASON
+crane01    DRAIN   improving performance
+```
 
 主要参数：
 
@@ -197,7 +291,21 @@ ccontrol update node -n crane01 -t drain -r improving performance
 
 ## 3.1 **暂停作业调度**
 
-![ccontrol](../images/ccontrol/ccontrol_hold.png)
+```
+Usage: ccontrol hold [OPTIONS] JOB_ID
+
+Hold (suspend) job scheduling
+
+Options:
+  -h, --help               Show this help message
+  -T, --time-limit string  Time limit for automatic release
+  -C, --config string      Config file path (default "/etc/crane/config.yaml")
+      --json               Output results in JSON format
+
+Examples:
+  ccontrol hold 30751                    # Hold job 30751 indefinitely
+  ccontrol hold 30751 -T 0:25:25        # Hold job 30751 for 25 minutes 25 seconds
+```
 
 主要参数：
 
@@ -213,15 +321,38 @@ ccontrol hold 30751 -t 0:25:25  #暂停调度编号为30751的任务25分钟25�
 - 如果此前有设置解除暂停的定时器，该操作会取消原有的定时器。
 - 使用 cqueue 查询时，如果任务被 hold，Node(Reason) 一列会显示 "Held"。
 
-![ccontrol](../images/ccontrol/ccontrol_hold1.png)
+**执行 hold 命令前的作业状态:**
+```
+JOBID   JOBNAME   STATE     NODE(REASON)
+30751   Test_Job  PENDING   -
+```
 
-![ccontrol](../images/ccontrol/ccontrol_hold2.png)
+**执行 hold 命令:**
+```
+Job 30751 held successfully
+```
 
-![ccontrol](../images/ccontrol/ccontrol_hold3.png)
+**执行 hold 命令后的作业状态:**
+```
+JOBID   JOBNAME   STATE     NODE(REASON)
+30751   Test_Job  PENDING   Held
+```
 
 ## 3.2 **继续作业调度**
 
-![ccontrol](../images/ccontrol/ccontrol_release.png)
+```
+Usage: ccontrol release [OPTIONS] JOB_ID
+
+Release (resume) job scheduling
+
+Options:
+  -h, --help               Show this help message
+  -C, --config string      Config file path (default "/etc/crane/config.yaml")
+      --json               Output results in JSON format
+
+Examples:
+  ccontrol release 30751   # Release job 30751 from hold
+```
 
 ```Plain
 ccontrol release 30751
@@ -230,9 +361,17 @@ ccontrol release 30751
 - 如果此前有设置解除暂停的定时器，该操作会取消原有的定时器。
 - 只能 release pending 任务1
 
-![ccontrol](../images/ccontrol/ccontrol_release1.png)
+**执行 release 命令前的作业状态:**
+```
+JOBID   JOBNAME   STATE     NODE(REASON)
+30751   Test_Job  PENDING   Held
+```
 
-![ccontrol](../images/ccontrol/ccontrol_release2.png)
+**执行 release 命令后的作业状态:**
+```
+JOBID   JOBNAME   STATE     NODE(REASON)
+30751   Test_Job  PENDING   -
+```
 
 # 4**. completion**
 
