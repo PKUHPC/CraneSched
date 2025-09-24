@@ -10,7 +10,27 @@ cacct
 
 **cacct运行结果展示**
 
-![cacctmgr](../images/cacct/cacct.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE STARTTIME
+30680 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:48:27 +0800 CST
+30679 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:47:51 +0800 CST
+30678 Interactive  CPU       yanyan  2.00      Completed        0:0      2024-07-24 09:45:23 +0800 CST
+30677 Interactive  CPU       yanyan  2.00      Completed        0:64     2024-07-24 09:44:03 +0800 CST
+30674 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:30 +0800 CST
+30673 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:29 +0800 CST
+30672 Test_Job     CPU       yanyan  2.00      Failed           0:66     2024-07-24 09:38:29 +0800 CST
+30671 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:56 +0800 CST
+30670 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:54 +0800 CST
+30669 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:43:20 +0800 CST
+30668 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:43:12 +0800 CST
+30667 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:26 +0800 CST
+30666 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:22 +0800 CST
+30665 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:14 +0800 CST
+30664 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:42:06 +0800 CST
+30663 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:48 +0800 CST
+30662 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:27 +0800 CST
+30661 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:19 +0800 CST
+```
 
 **主要输出项**
 
@@ -73,99 +93,298 @@ cacct
 cacct
 ```
 
-![cacctmgr](../images/cacct/cacct.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE STARTTIME
+30680 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:48:27 +0800 CST
+30679 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:47:51 +0800 CST
+30678 Interactive  CPU       yanyan  2.00      Completed        0:0      2024-07-24 09:45:23 +0800 CST
+30677 Interactive  CPU       yanyan  2.00      Completed        0:64     2024-07-24 09:44:03 +0800 CST
+30674 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:30 +0800 CST
+30673 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:29 +0800 CST
+30672 Test_Job     CPU       yanyan  2.00      Failed           0:66     2024-07-24 09:38:29 +0800 CST
+30671 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:56 +0800 CST
+30670 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:54 +0800 CST
+30669 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:43:20 +0800 CST
+30668 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:43:12 +0800 CST
+30667 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:26 +0800 CST
+30666 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:22 +0800 CST
+30665 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:14 +0800 CST
+30664 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:42:06 +0800 CST
+30663 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:48 +0800 CST
+30662 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:27 +0800 CST
+30661 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:19 +0800 CST
+```
 
+```SQL
 ```SQL
 cacct -h
 ```
 
-![cacctmgr](../images/cacct/h.png)
+```
+Usage: cacct [OPTION]... [JOB_IDS]...
 
+Display accounting data for the jobs
+
+Options:
+  -A, --account string        Account name(s) to search for
+  -C, --config string         Config file path (default "/etc/crane/config.yaml")
+  -E, --end-time string       Query jobs ended before specified time
+  -o, --format string         Output format specification
+  -F, --full                  Show full information
+  -h, --help                  Show this help message
+  -j, --job string            Job ID(s) to search for
+      --json                  Output results in JSON format
+  -m, --max-lines uint32      Maximum number of lines to display
+  -n, --name string           Job name(s) to search for  
+  -N, --no-header             Suppress header output
+  -p, --partition string      Partition name(s) to search for
+  -q, --qos string            QOS name(s) to search for
+  -S, --start-time string     Query jobs started in specified time range
+  -t, --state string          Job state(s) to search for
+  -s, --submit-time string    Query jobs submitted in specified time range
+  -u, --user string           User name(s) to search for
+  -v, --version               Show version information
+```
+
+```SQL
 ```SQL
 cacct -N
 ```
 
-![cacctmgr](../images/cacct/N.png)
+```
+30689 Interactive CPU       CraneTest  2.00      Completed        0:0
+30688 Interactive CPU       CraneTest  2.00      Completed        0:64
+30687 Test_Job    CPU       CraneTest  0.00      Cancelled        0:0
+30686 Test_Job    CPU       CraneTest  2.00      Cancelled        0:15
+30685 Test_Job    CPU       CraneTest  2.00      ExceedTimeLimit  0:15
+30684 Test_Job    CPU       CraneTest  2.00      Cancelled        0:15
+30683 Test_Job    CPU       CraneTest  2.00      Cancelled        0:15
+30682 Test_Job    CPU       ROOT       2.00      Failed           0:66
+30681 Test_Job    CPU       ROOT       2.00      Cancelled        0:15
+30680 Interactive CPU       ROOT       1.00      Completed        0:0
+```
 
+```SQL
 ```SQL
 cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
 
-![cacctmgr](../images/cacct/S.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE STARTTIME
+30680 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:48:27 +0800 CST
+30679 Test_Job     CPU       yanyan  2.00      ExceedTimeLimit  0:15     2024-07-24 09:47:51 +0800 CST
+30678 Interactive  CPU       yanyan  2.00      Completed        0:0      2024-07-24 09:45:23 +0800 CST
+30677 Interactive  CPU       yanyan  2.00      Completed        0:64     2024-07-24 09:44:03 +0800 CST
+30674 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:30 +0800 CST
+30673 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:29 +0800 CST
+30672 Test_Job     CPU       yanyan  2.00      Failed           0:66     2024-07-24 09:38:29 +0800 CST
+30671 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:56 +0800 CST
+30670 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:24:54 +0800 CST
+30669 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:43:20 +0800 CST
+30668 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:43:12 +0800 CST
+30667 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:26 +0800 CST
+30666 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:22 +0800 CST
+30665 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:14 +0800 CST
+30664 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 14:42:06 +0800 CST
+30663 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:48 +0800 CST
+30662 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:27 +0800 CST
+30661 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:41:19 +0800 CST
+```
 
+```SQL
 ```SQL
 cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
 
-![cacctmgr](../images/cacct/E.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE ENDTIME
+30678 Interactive  CPU       yanyan  2.00      Completed        0:0      2024-07-24 09:45:42 +0800 CST
+30677 Interactive  CPU       yanyan  2.00      Completed        0:64     2024-07-24 09:44:10 +0800 CST
+30676 Interactive  CPU       yanyan  0.00      Cancelled        0:0      2024-07-24 09:27:25 +0800 CST
+30675 Test_Job     CPU       yanyan  0.00      Cancelled        0:0      2024-07-24 09:38:38 +0800 CST
+30674 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:48:11 +0800 CST
+30673 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:39:57 +0800 CST
+30672 Test_Job     CPU       yanyan  2.00      Failed           0:66     2024-07-24 09:38:29 +0800 CST
+30671 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:28 +0800 CST
+30670 Test_Job     CPU       yanyan  2.00      Cancelled        0:15     2024-07-24 09:38:28 +0800 CST
+30669 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:43:21 +0800 CST
+30668 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-23 16:54:40 +0800 CST
+30667 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:27 +0800 CST
+30666 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:23 +0800 CST
+30665 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-23 14:42:15 +0800 CST
+```
 
+```SQL
 ```SQL
 cacct -j=30618,30619,30620
 ```
 
-![cacctmgr](../images/cacct/j.png)
+```
+JOBID JOBNAME  PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE
+30620 Test_Job CPU       ROOT    0.00      Cancelled        0:0
+30619 Test_Job CPU       ROOT    2.00      ExceedTimeLimit  0:15
+30618 Test_Job CPU       ROOT    2.00      Cancelled        0:15
+```
 
+```SQL
 ```SQL
 cacct -u=cranetest
 ```
 
-![cacctmgr](../images/cacct/u.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT    ALLOCCPUS STATE            EXITCODE
+30689 Interactive  CPU       CraneTest  2.00      Completed        0:0
+30688 Interactive  CPU       CraneTest  2.00      Completed        0:64
+30687 Test_Job     CPU       CraneTest  0.00      Cancelled        0:0
+30686 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+30685 Test_Job     CPU       CraneTest  2.00      ExceedTimeLimit  0:15
+30684 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+30683 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+```
 
+```SQL
 ```SQL
 cacct -A=CraneTest
 ```
 
-![cacctmgr](../images/cacct/A.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT    ALLOCCPUS STATE            EXITCODE
+30689 Interactive  CPU       CraneTest  2.00      Completed        0:0
+30688 Interactive  CPU       CraneTest  2.00      Completed        0:64
+30687 Test_Job     CPU       CraneTest  0.00      Cancelled        0:0
+30686 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+30685 Test_Job     CPU       CraneTest  2.00      ExceedTimeLimit  0:15
+30684 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+30683 Test_Job     CPU       CraneTest  2.00      Cancelled        0:15
+```
 
+```SQL
 ```SQL
 cacct -m=10
 ```
 
-![cacctmgr](../images/cacct/m.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE STARTTIME
+30689 Interactive  CPU       ROOT    2.00      Completed        0:0      2024-07-24 10:48:27 +0800 CST
+30688 Interactive  CPU       ROOT    2.00      Completed        0:64     2024-07-24 10:47:51 +0800 CST
+30687 Test_Job     CPU       ROOT    0.00      Cancelled        0:0      2024-07-24 10:45:23 +0800 CST
+30686 Test_Job     CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:44:03 +0800 CST
+30685 Test_Job     CPU       ROOT    2.00      ExceedTimeLimit  0:15     2024-07-24 10:38:30 +0800 CST
+30684 Test_Job     CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:38:29 +0800 CST
+30683 Test_Job     CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:38:29 +0800 CST
+30682 Test_Job     CPU       ROOT    2.00      Failed           0:66     2024-07-24 10:24:56 +0800 CST
+30681 Test_Job     CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:24:54 +0800 CST
+30680 Interactive  CPU       ROOT    1.00      Completed        0:0      2024-07-24 10:43:20 +0800 CST
+```
 
+```C
 ```C
 cacct -p GPU
 ```
 
-![cacctmgr](../images/cacct/p.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE      EXITCODE STARTTIME
+30690 GPU_Job      GPU       test    4.00      Running    0:0      2024-07-24 11:20:15 +0800 CST
+30689 ML_Training  GPU       test    8.00      Completed  0:0      2024-07-24 10:45:30 +0800 CST
+30688 Deep_Learn   GPU       test    2.00      Completed  0:0      2024-07-24 09:30:22 +0800 CST
+```
 
+```C
 ```C
 cacct -n=Test_Job
 ```
 
-![cacctmgr](../images/cacct/nt.png)
+```
+JOBID JOBNAME  PARTITION ACCOUNT ALLOCCPUS STATE            EXITCODE STARTTIME
+30685 Test_Job CPU       ROOT    2.00      ExceedTimeLimit  0:15     2024-07-24 10:38:30 +0800 CST
+30684 Test_Job CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:38:29 +0800 CST
+30683 Test_Job CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:38:29 +0800 CST
+30682 Test_Job CPU       ROOT    2.00      Failed           0:66     2024-07-24 10:24:56 +0800 CST
+30681 Test_Job CPU       ROOT    2.00      Cancelled        0:15     2024-07-24 10:24:54 +0800 CST
+```
 
+```SQL
 ```SQL
 cacct -o="%j %.10n %P %a %t"
 ```
 
-![cacctmgr](../images/cacct/o.png)
+```
+JOBID NAME       PARTITION ACCOUNT    STATE
+30689 Interactive CPU      CraneTest   Completed
+30688 Interactive CPU      CraneTest   Completed
+30687 Test_Job    CPU      CraneTest   Cancelled
+30686 Test_Job    CPU      CraneTest   Cancelled
+30685 Test_Job    CPU      CraneTest   ExceedTimeLimit
+```
+```Bash
 ```Bash
 cacct -A ROOT -m 10
 ```
 
-![cacctmgr](../images/cacct/am.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE      EXITCODE STARTTIME
+30695 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:43:20 +0800 CST
+30694 Interactive  CPU       ROOT    2.00      Completed  0:64     2024-07-24 12:43:12 +0800 CST
+30693 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:42:26 +0800 CST
+30692 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:42:22 +0800 CST
+30691 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:42:14 +0800 CST
+30690 Interactive  CPU       ROOT    2.00      Completed  0:64     2024-07-24 12:42:06 +0800 CST
+30689 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:41:48 +0800 CST
+30688 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:41:27 +0800 CST
+30687 Interactive  CPU       ROOT    1.00      Completed  0:0      2024-07-24 12:41:19 +0800 CST
+30686 Test_Job     CPU       ROOT    2.00      Cancelled  0:15     2024-07-24 12:38:30 +0800 CST
+```
 
+```Bash
 ```Bash
 cacct -m 10 -j 783925,783889 -t=c -F
 ```
 
-![cacctmgr](../images/cacct/mj.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE SUBMITTIME              STARTTIME               ENDTIME                 NODELIST  PRIORITY QOS
+783925 Test_Job     CPU       test    2.00      Completed 0:0      2024-07-20 09:30:15    2024-07-20 09:30:20    2024-07-20 09:35:45    crane01   1000     normal
+783889 Batch_Job    CPU       test    4.00      Completed 0:0      2024-07-20 08:15:30    2024-07-20 08:15:35    2024-07-20 08:45:22    crane02   1000     normal
+```
 
+```Bash
 ```Bash
 cacct -n test
 ```
 
-![cacctmgr](../images/cacct/ntest.png)
+```
+JOBID JOBNAME PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE STARTTIME
+30700 test    CPU       user1   1.00      Completed 0:0      2024-07-24 13:15:30 +0800 CST
+30699 test    CPU       user1   2.00      Running   0:0      2024-07-24 13:10:15 +0800 CST
+30698 test    CPU       user2   1.00      Completed 0:0      2024-07-24 12:55:45 +0800 CST
+```
 
 
+```Bash
 ```Bash
 cacct -q test_qos
 ```
 
-![cacctmgr](../images/cacct/qt.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE STARTTIME                QOS
+30702 ML_Job       GPU       test    4.00      Running   0:0      2024-07-24 13:30:15     test_qos
+30701 Data_Process CPU       test    2.00      Completed 0:0      2024-07-24 13:25:30     test_qos
+30700 Analysis     CPU       test    1.00      Completed 0:0      2024-07-24 13:20:45     test_qos
+```
+```Bash
 ```Bash
 cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T110:00:00 -p CPU -t c
 ```
 
-![cacctmgr](../images/cacct/me.png)
+```
+JOBID JOBNAME      PARTITION ACCOUNT ALLOCCPUS STATE     EXITCODE ENDTIME
+30705 Process_Job  CPU       test    2.00      Completed 0:0      2024-10-09 14:30:25 +0800 CST
+30704 Analysis     CPU       test    1.00      Completed 0:0      2024-10-09 13:45:10 +0800 CST
+30703 Batch_Work   CPU       test    4.00      Completed 0:0      2024-10-09 12:15:30 +0800 CST
+30702 Data_Clean   CPU       test    1.00      Completed 0:0      2024-10-09 11:30:45 +0800 CST
+30701 Test_Run     CPU       test    2.00      Completed 0:0      2024-10-09 10:45:15 +0800 CST
+30700 Simple_Job   CPU       test    1.00      Completed 0:0      2024-10-08 15:20:30 +0800 CST
+30699 Quick_Task   CPU       test    1.00      Completed 0:0      2024-10-08 14:15:45 +0800 CST
+30698 Basic_Work   CPU       test    2.00      Completed 0:0      2024-10-08 13:30:20 +0800 CST
+30697 Standard_Job CPU       test    1.00      Completed 0:0      2024-10-08 12:45:10 +0800 CST
+30696 Regular_Task CPU       test    2.00      Completed 0:0      2024-10-08 11:15:30 +0800 CST
+```
