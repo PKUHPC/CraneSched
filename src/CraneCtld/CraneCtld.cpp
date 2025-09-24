@@ -139,6 +139,28 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
+      if (config["PrologCranectld"]) {
+        g_config.ProLogs = absl::StrSplit(config["PrologCranectld"].as<std::string>(), ",");
+        for (auto& pro_log : g_config.ProLogs) {
+          absl::StripAsciiWhitespace(&pro_log);
+        }
+      }
+      if (config["EpilogCranectld"]) {
+        g_config.EpiLogs = absl::StrSplit(config["EpilogCranectld"].as<std::string>(), ",");
+        for (auto& epi_log : g_config.EpiLogs) {
+          absl::StripAsciiWhitespace(&epi_log);
+        }
+      }
+      if (config["PrologTimeout"]) {
+        g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
+      }
+      if (config["EpilogTimeout"]) {
+        g_config.EpilogTimeout = config["EpilogTimeout"].as<uint32_t>();
+      }
+      if (config["PrologEpilogTimeout"]) {
+        g_config.PrologEpilogTimeout = config["PrologEpilogTimeout"].as<uint32_t>();
+      }
+
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
