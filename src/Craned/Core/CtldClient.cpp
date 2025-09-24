@@ -1003,12 +1003,12 @@ void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& r
 }
 
 void CtldClient::HealthCheck_() {
-  CRANE_INFO("Health checking.....");
+  CRANE_DEBUG("Health checking.....");
 
   int pipefd[2];
   if (pipe(pipefd) != 0) {
     CRANE_ERROR("HealthCheck: pipe error");
-    HealthCheckResultResponse_(false, "system error");
+    HealthCheckResultResponse_(false, "Node failed health check");
     return;
   }
 
@@ -1017,7 +1017,7 @@ void CtldClient::HealthCheck_() {
     CRANE_ERROR("HealthCheck: fork failed");
     close(pipefd[0]);
     close(pipefd[1]);
-    HealthCheckResultResponse_(false, "system error");
+    HealthCheckResultResponse_(false, "Node failed health check");
     return;
   }
 
@@ -1071,7 +1071,7 @@ void CtldClient::HealthCheck_() {
     waitpid(pid, &status, 0);
     output += "\nHealth check timed out.";
     CRANE_WARN("HealthCheck: Timeout. Output: {}", output.c_str());
-    HealthCheckResultResponse_(false, "system error");
+    HealthCheckResultResponse_(false, "Node failed health check");
     return;
   }
 
@@ -1080,23 +1080,23 @@ void CtldClient::HealthCheck_() {
     if (exit_code != 0) {
       CRANE_WARN("HealthCheck: Failed (exit code:{}). Output: {}",
                  exit_code, output.c_str());
-      HealthCheckResultResponse_(false, "system error");
+      HealthCheckResultResponse_(false, "Node failed health check");
       return;
     }
   } else if (WIFSIGNALED(status)) {
     CRANE_WARN("HealthCheck: Killed by signal {}. Output: {}",
                WTERMSIG(status), output.c_str());
-    HealthCheckResultResponse_(false, "system error");
+    HealthCheckResultResponse_(false, "Node failed health check");
     return;
   } else {
     CRANE_WARN("HealthCheck: Unknown exit status {}. Output: {}", status, output.c_str());
-    HealthCheckResultResponse_(false, "system error");
+    HealthCheckResultResponse_(false, "Node failed health check");
     return;
   }
 
   HealthCheckResultResponse_(true, "");
 
-  CRANE_DEBUG("Health check success");
+  CRANE_DEBUG("Health check success, Output: {}", output);
 }
 
 void CtldClient::StartRandomHealthCheck_() {

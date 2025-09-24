@@ -856,9 +856,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
-                                               bool is_drain,
-                                               const std::string& reason) {
+void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health, const std::string& reason) {
   if (is_drain) LockResReduceEvents();
 
   CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain,
@@ -899,7 +897,13 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
 void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_health) {
   if (!craned_meta_map_.Contains(craned_id)) return ;
   auto craned_meta = craned_meta_map_[craned_id];
-  craned_meta->drain = !is_health;
+  if (craned_meta->drain && craned_meta->state_reason == reason) {
+    craned_meta->drain = !is_health;
+    craned_meta->state_reason = reason;
+  } else if (!craned_meta->drain) {
+    craned_meta->drain = !is_health;
+    craned_meta->state_reason = reason;
+  }
 }
 
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
