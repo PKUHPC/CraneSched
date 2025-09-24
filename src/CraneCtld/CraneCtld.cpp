@@ -460,45 +460,17 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          std::list<std::string> name_list;
-          auto act_nodes_str = absl::StripAsciiWhitespace(nodes);
-          if (act_nodes_str == "ALL") {
-            std::list<std::string> host_list =
-                g_config.Nodes | ranges::views::keys |
-                ranges::to<std::list<std::string>>();
-            part.nodelist_str = util::HostNameListToStr(host_list);
-            for (auto&& node : host_list) {
-              part.nodes.emplace(node);
-              nodes_without_part.erase(node);
-              CRANE_TRACE("Set the partition of node {} to {}", node, name);
-            }
-          } else {
-            part.nodelist_str = nodes;
-            if (!util::ParseHostList(std::string(act_nodes_str), &name_list)) {
-              CRANE_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
+          std::list<std::string> host_list =
+              g_config.Nodes | ranges::views::keys |
+              ranges::to<std::list<std::string>>();
+          part.nodelist_str = util::HostNameListToStr(host_list);
+          if (!util::PartitionNodesProcess(nodes, host_list, name, true,
+                                           part.nodes)) {
+            std::exit(1);
+          }
 
-            if (name_list.empty()) {
-              CRANE_WARN("No nodes in partition '{}'.", name);
-            } else {
-              for (auto&& node : name_list) {
-                auto node_it = g_config.Nodes.find(node);
-                if (node_it != g_config.Nodes.end()) {
-                  part.nodes.emplace(node_it->first);
-                  nodes_without_part.erase(node_it->first);
-                  CRANE_TRACE("Set the partition of node {} to {}",
-                              node_it->first, name);
-                } else {
-                  CRANE_ERROR(
-                      "Unknown node '{}' found in partition '{}'. It is "
-                      "ignored "
-                      "and should be contained in the configuration file.",
-                      node, name);
-                  std::exit(1);
-                }
-              }
-            }
+          for (const auto& node_name : part.nodes) {
+            nodes_without_part.erase(node_name);
           }
 
           if (partition["AllowedAccounts"] &&
