@@ -1952,25 +1952,25 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       return;
     }
 
+    auto* task_ptr = task.get();
+    m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
     // TODO: Replace following job_id with task_id.
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-      m_pid_task_id_map_[task->GetPid()] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+      m_pid_task_id_map_[task_ptr->GetPid()] = task_id;
       return;
     }
 
-    LaunchExecution_(task.get());
-    pid_t spawned_pid = task->GetPid();
+    LaunchExecution_(task_ptr);
+    pid_t spawned_pid = task_ptr->GetPid();
     if (!spawned_pid) {
       CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
     } else {
       CRANE_INFO("[task #{}] Launched process {}.", m_step_.job_id,
                  spawned_pid);
-      m_pid_task_id_map_[spawned_pid] = task->task_id;
-      m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+      m_pid_task_id_map_[spawned_pid] = task_id;
       m_step_.InitOomBaseline();
 
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
