@@ -162,6 +162,21 @@ Container:
   RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
   RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
 
+
+Prolog: prolog1.sh,prolog1.sh
+PrologTimeout: 60
+PrologFlags: Alloc
+Epilog: epilog1.sh,epilog2.sh
+EpilogTimeout: 60
+PrologEpilogTimeout: 120
+PrologCranectld: prologctld.sh
+EpilogCranectld: epilogctld.sh
+SrunProlog: srun_prolog.sh
+SrunEpilog: srun_epilog.sh
+TaskProlog: task_prolog.sh
+TaskEpilog: task_epilog.sh
+
+
 Plugin:
   # Toggle the plugin module in CraneSched
   Enabled: false

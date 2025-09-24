@@ -144,6 +144,12 @@ struct Config {
     std::string PlugindSockPath;
   };
 
+  std::vector<std::string> ProLogs;
+  std::vector<std::string> EpiLogs;
+  uint32_t PrologTimeout{0};
+  uint32_t EpilogTimeout{0};
+  uint32_t PrologEpilogTimeout{0};
+
   bool CompressedRpc{};
 
   std::string CraneClusterName;
