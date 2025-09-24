@@ -199,3 +199,16 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
+
+Prolog: prolog1.sh,prolog1.sh
+PrologTimeout: 60
+PrologFlags: Alloc
+Epilog: epilog1.sh,epilog2.sh
+EpilogTimeout: 60
+PrologEpilogTimeout: 120
+PrologCranectld: prologctld.sh
+EpilogCranectld: epilogctld.sh
+SrunProlog: srun_prolog.sh
+SrunEpilog: srun_epilog.sh
+TaskProlog: task_prolog.sh
+TaskEpilog: task_epilog.sh
