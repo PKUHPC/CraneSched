@@ -2151,6 +2151,30 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     CRANE_TRACE("Move task#{} to the Completed Queue", task_id);
     m_running_task_map_.erase(iter);
+    for (const auto& epilog : g_config.EpiLogs) {
+      // TODO: add envs
+      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = {}, .run_uid = 0};
+      if (g_config.EpilogTimeout) {
+        run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
+      } else {
+        run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
+      }
+      CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s",
+        epilog, run_epilog_ctld_args.run_uid, run_epilog_ctld_args.timeout_sec);
+      auto result = util::os::RunCommand(run_epilog_ctld_args);
+      if (result.time_out) {
+        CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}",
+                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+      } else if (result.term_signal != 0) {
+        CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}",
+                    epilog, result.term_signal, result.output.c_str());
+      } else if (result.exit_code != 0) {
+        CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}",
+                    epilog, result.exit_code, result.output.c_str());
+      } else
+        CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}",
+                   epilog, result.output.c_str());
+    }
   }
 
   for (auto& [craned_id, cgroups] : craned_cgroups_map) {
@@ -2915,6 +2939,49 @@ void MinLoadFirst::NodeSelect(
     }
 
     if (expected_start_time == now) {
+      // run prolog script
+      bool run_prolog_result = true;
+      // TODO: update node state =  POWER_UP/CONFIGURING
+      for (const auto& prolog : g_config.ProLogs) {
+        // TODO: add envs
+        RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
+        CRANE_TRACE("Running PrologCtld: {} as UID {} ",
+          prolog, run_prolog_ctld_args.run_uid);
+        auto result = util::os::RunCommand(run_prolog_ctld_args);
+        if (result.time_out) {
+          CRANE_INFO("PrologCtld'{}' timed out after {}s. Output: {}",
+                      prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
+          run_prolog_result = false;
+          break;
+        }
+        if (result.term_signal != 0) {
+          CRANE_INFO("PrologCtld '{}' killed by signal {}. Output: {}",
+                      prolog, result.term_signal, result.output.c_str());
+          run_prolog_result = false;
+          break;
+        }
+        if (result.exit_code != 0) {
+          CRANE_INFO("PrologCtld '{}' failed (exit code {}). Output: {}",
+                      prolog, result.exit_code, result.output.c_str());
+          run_prolog_result = false;
+          break;
+        }
+
+        CRANE_INFO("PrologCtld '{}' finished successfully. Output: {}",
+                     prolog, result.output.c_str());
+      }
+
+      if (!run_prolog_result) {
+        if (task->IsBatch()) {
+          task->pending_reason = "PrologCranectld failed";
+          continue;
+        } else {
+          // TODO: srun will be cancelled.
+          continue;
+        }
+      }
+      // TODO: update node state to ready
+
       // The task can be started now.
 
       // We leave the change in running_tasks to the scheduling thread
