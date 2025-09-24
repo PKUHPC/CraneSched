@@ -1936,12 +1936,12 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   struct ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    // m_step_ is the only owner of tasks.
-    // No matter Task is spawned or not, adding to m_step_.
-    task_id_t task_id = elem.instance->task_id;
-    m_step_.AddTaskInstance(task_id, std::move(elem.instance));
-    auto* task = m_step_.GetTaskInstance(task_id);
-
+    auto task = std::move(elem.instance);
+    if (!task) {
+      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
+      continue;
+    }
+    task_id_t task_id = task->task_id;
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
@@ -1964,6 +1964,10 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       return;
     }
 
+    auto* task_ptr = task.get();
+    m_step_.AddTaskInstance(m_step_.job_id, std::move(task));
+
+    // TODO: Replace following job_id with task_id.
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
@@ -1971,15 +1975,15 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     }
 
     // TODO: Use thread pool
-    auto err = LaunchExecution_(task);
+    auto err = LaunchExecution_(task_ptr);
     if (err != CraneErrCode::SUCCESS) {
       CRANE_WARN("[task #{}] Failed to launch process.", m_step_.job_id);
     } else {
-      auto exec_id = *task->GetExecId();
+      auto exec_id = *task_ptr->GetExecId();
       CRANE_INFO("[task #{}] Launched exection, id: {}.", m_step_.job_id,
                  std::visit([](auto&& arg) { return std::format("{}", arg); },
                             exec_id));
-      m_exec_id_task_id_map_[exec_id] = task->task_id;
+      m_exec_id_task_id_map_[exec_id] = task_ptr->task_id;
       m_step_.InitOomBaseline();
     }
 
