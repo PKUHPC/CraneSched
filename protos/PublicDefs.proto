@@ -542,8 +542,8 @@ enum ErrCode {
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
 
-  ERR_CRI_GENERIC = 80;          // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.  
-  ERR_CRI_ATTACH_NOT_READY = 81; // Task is pending or container is not ready.
+  ERR_CRI_GENERIC = 80;           // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_ATTACH_NOT_READY = 81;  // Task is pending or container is not ready.
 }
 
 enum EntityType {
