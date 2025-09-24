@@ -1415,53 +1415,67 @@ crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
     task_id_t task_id = request.task_id();
     auto pd_it = m_pending_task_map_.find(task_id);
     if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_ATTACH_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
       response.set_ok(false);
-      response.set_reason("Task is still pending.");
       return response;
     }
 
     auto rn_it = m_running_task_map_.find(task_id);
     if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
       response.set_ok(false);
-      response.set_reason("Task not found.");
       return response;
     }
 
     TaskInCtld* task = rn_it->second.get();
     if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
       response.set_ok(false);
-      response.set_reason("Task is not a container task.");
       return response;
     }
 
     // If tty is requested, tty must be enabled when creating the container
     if (request.tty() && !std::get<ContainerMetaInTask>(task->meta).tty) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "TTY not enabled when creating this container task.");
       response.set_ok(false);
-      response.set_reason("TTY not enabled when creating this container task.");
       return response;
     }
 
     // If stdin is requested, stdin must be enabled when creating the container
     if (request.stdin() && !std::get<ContainerMetaInTask>(task->meta).stdin) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "STDIN not opened when creating this container task.");
       response.set_ok(false);
-      response.set_reason(
-          "STDIN not enabled when creating this container task.");
       return response;
     }
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
         request.uid(), task->Username(), false);
     if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to attach.");
       response.set_ok(false);
-      response.set_reason("Insufficient permission to attach.");
       return response;
     }
 
     // TODO: Handle multiple nodes after step/task is implemented.
     if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
       response.set_ok(false);
-      response.set_reason(
-          "Container task is executing on multiple nodes, cannot attach.");
       return response;
     }
 
@@ -1470,8 +1484,10 @@ crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
 
   auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
   if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
     response.set_ok(false);
-    response.set_reason("Craned not available.");
     return response;
   }
 

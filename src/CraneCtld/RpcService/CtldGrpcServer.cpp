@@ -1903,24 +1903,27 @@ grpc::Status CraneCtldServiceImpl::AttachContainerTask(
 
   // Validate request
   if (request->task_id() <= 0) {
-    CRANE_ERROR("Invalid task ID: {}", request->task_id());
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
     response->set_ok(false);
-    response->set_reason("Invalid task ID");
     return grpc::Status::OK;
   }
 
   if (request->tty() && request->stderr()) {
-    CRANE_ERROR("Cannot attach both tty and stderr");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot attach both tty and stderr");
     response->set_ok(false);
-    response->set_reason("Cannot attach both tty and stderr");
     return grpc::Status::OK;
   }
 
   if (!(request->stdout() || request->stderr() || request->stdin())) {
-    CRANE_ERROR("At least one of stdout, stderr, or stdin must be attached");
-    response->set_ok(false);
-    response->set_reason(
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
         "At least one of stdout, stderr, or stdin must be attached");
+    response->set_ok(false);
     return grpc::Status::OK;
   }
 

@@ -951,7 +951,7 @@ message AttachContainerTaskRequest {
 
 message AttachContainerTaskReply {
   bool ok = 1;
-  string reason = 2;
+  RichError status = 2;
   string url = 3;
 }
 

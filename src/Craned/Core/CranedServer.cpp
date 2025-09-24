@@ -332,8 +332,10 @@ grpc::Status CranedServiceImpl::AttachContainerTask(
     crane::grpc::AttachContainerTaskReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("CranedServer is not ready.");
     response->set_ok(false);
-    response->set_reason("CranedServer is not ready.");
     return {grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
@@ -341,8 +343,10 @@ grpc::Status CranedServiceImpl::AttachContainerTask(
     // Should never happen.
     CRANE_ERROR(
         "AttachContainerTask request received but Container is not enabled.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+    err->set_description("Container feature is not enabled.");
     response->set_ok(false);
-    response->set_reason("Container feature is not enabled on requested node.");
     return Status::OK;
   }
 
@@ -357,9 +361,13 @@ grpc::Status CranedServiceImpl::AttachContainerTask(
   if (!container_expt) {
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
                 CraneErrStr(container_expt.error()));
+
+    // NOTE: This could because the container is creating/starting.
+    // The caller should retry later. Fix this after we add CONFIGURING state.
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_ATTACH_NOT_READY);
+    err->set_description("Container is not found. Possibly initializing?");
     response->set_ok(false);
-    response->set_reason(fmt::format("Failed to find container: {}",
-                                     CraneErrStr(container_expt.error())));
     return Status::OK;
   }
 
@@ -368,9 +376,12 @@ grpc::Status CranedServiceImpl::AttachContainerTask(
       g_cri_client->Attach(container_id, request->tty(), request->stdin(),
                            request->stdout(), request->stderr());
 
+  // TODO: Add more error info in CriClient to optimize here.
   if (!url_expt) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_GENERIC);
+    err->set_description("CRI returned an error.");
     response->set_ok(false);
-    response->set_reason(CraneErrStr(url_expt.error()));
     return Status::OK;
   }
 
