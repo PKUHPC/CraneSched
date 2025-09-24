@@ -25,8 +25,11 @@
 #include <algorithm>
 #include <filesystem>
 
+#include <grp.h>
+#include <pwd.h>
+#include <sys/wait.h>
+
 #include "crane/Logger.h"
-#include "crane/OS.h"
 
 struct SystemRelInfo {
   std::string name;
@@ -40,10 +43,25 @@ struct NodeSpecInfo {
   double memory_gb;
 };
 
+struct RunCommandArgs {
+  std::string program;
+  std::vector<std::string> args;
+  std::vector<std::string> envs;
+  uint32_t timeout_sec;
+  int run_uid;
+  int run_gid;
+};
+
+struct RunCommandResult {
+  int exit_code;
+  std::string output;
+  bool time_out;
+  int term_signal;
+};
+
 namespace util {
 
 namespace os {
-
 bool GetNodeInfo(NodeSpecInfo* info);
 
 bool DeleteFile(std::string const& p);
@@ -80,6 +98,8 @@ bool GetSystemReleaseInfo(SystemRelInfo* info);
 bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
+
+RunCommandResult RunCommand(const RunCommandArgs& args);
 
 }  // namespace os
 
