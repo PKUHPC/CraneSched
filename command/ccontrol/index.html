@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>ccontrol 查看分区和节点状态 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "ccontrol \u67e5\u770b\u5206\u533a\u548c\u8282\u70b9\u72b6\u6001";
+        var mkdocs_page_input_path = "command/ccontrol.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel 取消作业</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">ccontrol 查看分区和节点状态</a>
+    <ul class="current">
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">ccontrol 查看分区和节点状态</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="ccontrol">ccontrol 查看分区和节点状态</h1>
+<p><strong>ccontrol可以查看分区和节点的状态。</strong></p>
+<p><strong>主要命令</strong></p>
+<ul>
+<li><strong>help</strong>：显示帮助</li>
+<li><strong>show</strong>：显示实体的状态，默认为所有记录</li>
+<li><strong>update</strong>：修改作业/分区/节点信息</li>
+<li><strong>hold</strong>：暂停作业调度</li>
+<li><strong>release</strong>：继续作业调度</li>
+<li><strong>completion</strong>：为指定的shell生成自动补全脚本</li>
+<li><strong>create：</strong>创建一个新实体</li>
+<li><strong>delete：</strong>删除指定的实体</li>
+</ul>
+<p><strong>支持的命令行选项：</strong></p>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>--json</strong>：json格式输出命令执行结果</li>
+<li><strong>-v/--version：</strong>查询版本号</li>
+<li><strong>-C/--config string</strong>：配置文件路径(默认 "/etc/crane/config.yaml")</li>
+</ul>
+<h1 id="1"><strong>1. 查看</strong></h1>
+<p>支持的命令行选项：</p>
+<ul>
+<li><strong>config:</strong> 查询配置信息</li>
+<li><strong>job：</strong>查询作业信息</li>
+<li><strong>node：</strong>查询节点信息</li>
+<li><strong>partition</strong>：查看集群分区情况</li>
+</ul>
+<pre><code class="language-Bash">ccontrol show -h
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_show.png" /></p>
+<h2 id="1-1"><strong>1. 1 查看分区状态</strong></h2>
+<pre><code class="language-Plaintext">ccontrol show partition
+</code></pre>
+<p><strong>ccontrol show partition运行结果展示</strong></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_showp.png" /></p>
+<h4 id="_1"><strong>主要输出项</strong></h4>
+<ul>
+<li><strong>PartitionName</strong>：分区名</li>
+<li><strong>State</strong>：分区状态</li>
+<li><strong>TotalNodes</strong>：分区节点数目</li>
+<li><strong>AliveNodes</strong>：分区中可运行的节点数目</li>
+<li><strong>TotalCpus</strong>：分区中所有节点总CPU数目</li>
+<li><strong>AvailCpus</strong>：分区中所有可以使用的CPU数目</li>
+<li><strong>AllocCpus</strong>：分区中已经被分配的CPU数目</li>
+<li><strong>FreeCpus</strong>：分区中空闲的CPU数目</li>
+<li><strong>TotalMem</strong>：分区节点的总内存</li>
+<li><strong>AvailMem</strong>：分区中当前可以使用的内存大小</li>
+<li><strong>AllocMem</strong>：分区中已分配的内存大小</li>
+<li><strong>FreeMem</strong>：分区中空闲的内存大小</li>
+<li><strong>HostList</strong>：分区中所有节点的节点名列表</li>
+</ul>
+<h2 id="12"><strong>1.2 查看节点状态</strong></h2>
+<pre><code class="language-Plaintext">ccontrol show node
+</code></pre>
+<p><strong>ccontrol show node运行结果展示</strong></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_shownode.png" /></p>
+<h4 id="_2"><strong>主要输出项</strong></h4>
+<ul>
+<li><strong>NodeName</strong>：节点名</li>
+<li><strong>State</strong>：节点状态</li>
+<li><strong>IDLE</strong>： 节点空闲，可使用</li>
+<li><strong>DOWN</strong>： 节点宕机，不可用</li>
+<li><strong>CPUs</strong>：节点CPU数目</li>
+<li><strong>AllocCpus</strong>：节点已分配的CPU数目</li>
+<li><strong>FreeCpus</strong>：节点空闲的CPU数目</li>
+<li><strong>RealMemory</strong>：节点的实际内存大小</li>
+<li><strong>AllocMem</strong>：节点已经分配的内存大小</li>
+<li><strong>FreeMem</strong>：节点空闲的内存大小</li>
+<li><strong>Patition</strong>：节点所属分区</li>
+<li><strong>RunningTask</strong>：节点上正在运行的作业数量</li>
+</ul>
+<h2 id="13"><strong>1.3 查看作业状态</strong></h2>
+<pre><code class="language-Plain">ccontrol show job
+</code></pre>
+<p>ccontrol show job 运行结果展示</p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_showjob.png" /></p>
+<p>主要输出项</p>
+<ul>
+<li><strong>JobId：</strong>作业号</li>
+<li><strong>JobName：</strong>作业名</li>
+<li><strong>UserId：</strong>作业所属用户</li>
+<li><strong>GroupId：</strong>分组id</li>
+<li><strong>Account：</strong>作业所属账户</li>
+<li><strong>JobState：</strong>作业状态</li>
+<li><strong>RunTime：</strong>作业运行时间</li>
+<li><strong>TimeLimit：</strong>作业运行时间限制</li>
+<li><strong>SubmitTime：</strong>作业提交时间</li>
+<li><strong>StartTime：</strong>作业开始时间</li>
+<li><strong>EndTime：</strong>作业结束时间</li>
+<li><strong>Partition：</strong>作业所属分区</li>
+<li><strong>Nodelist：</strong>作业运行的节点</li>
+<li><strong>NumNodes：</strong>节点数量</li>
+</ul>
+<h1 id="2">2. 修改</h1>
+<p>支持的命令行选项：</p>
+<ul>
+<li><strong>job：</strong>查询作业信息</li>
+<li><strong>node：</strong>查询节点信息</li>
+</ul>
+<pre><code class="language-Bash">ccontrol update -h
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_update.png" /></p>
+<h2 id="21">2.1 <strong>修改作业信息</strong></h2>
+<p>支持的命令行选项：</p>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-J/--job-name string：</strong>作业名</li>
+<li><strong>-P/--priority float</strong>： 作业优先级</li>
+<li><strong>-T/--time-limit string：</strong>作业超时时长</li>
+</ul>
+<pre><code class="language-Bash">ccontrol update job -h
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatejob.png" /></p>
+<pre><code class="language-Go">ccontrol update job -J 30685 -T 0:25:25
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatejob1.png" />
+<img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatejob2.png" />
+<img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatejob3.png" /></p>
+<pre><code class="language-Bash">ccontrol update job -J 191 -P 2.0
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatejob4.png" /></p>
+<h2 id="22">2<strong>.2 修改节点信息</strong></h2>
+<p>支持的命令行选项：</p>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-n/--name string：</strong>节点名</li>
+<li><strong>-r/--reason string</strong>： 设置修改原因</li>
+<li><strong>-t/--state string：</strong>修改节点状态</li>
+</ul>
+<pre><code class="language-Bash">ccontrol update node -h
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatenode.png" /></p>
+<pre><code class="language-Go">ccontrol update node -n crane01 -t drain -r improving performance
+</code></pre>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatenode1.png" /></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatenode2.png" /></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_updatenode3.png" /></p>
+<p>主要参数：</p>
+<ul>
+<li><strong>-c/--cpu</strong>：节点的核心数<strong>（-h列表无该参数）</strong></li>
+<li><strong>-M/--memory</strong>：节点的内存大小，默认是MB<strong>（-h列表无该参数）</strong></li>
+<li><strong>-n/--name</strong>：节点名称</li>
+<li><strong>-P/--partition</strong>：节点所属的分区<strong>（-h列表无该参数）</strong></li>
+</ul>
+<p>以下参数和上面参数不能一起设置，下面参数用于修改节点状态</p>
+<ul>
+<li><strong>-r/--reason</strong>：设置状态改变原因</li>
+<li><strong>-t/--state</strong>：设置节点状态</li>
+</ul>
+<h1 id="3">3. 暂停/恢复</h1>
+<h2 id="31">3.1 <strong>暂停作业调度</strong></h2>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_hold.png" /></p>
+<p>主要参数：</p>
+<ul>
+<li><strong>--time-limit/-T：</strong>修改时间限制</li>
+</ul>
+<pre><code class="language-Plain">ccontrol hold 30751           #暂停调度编号为30751的任务
+ccontrol hold 30751 -t 0:25:25  #暂停调度编号为30751的任务25分钟25秒钟（随后解除暂停）
+</code></pre>
+<ul>
+<li>hold 接受 job_id 的方式与 ccancel 相同，要求为逗号分隔的任务编号。</li>
+<li>只能 hold pending 任务</li>
+<li>如果此前有设置解除暂停的定时器，该操作会取消原有的定时器。</li>
+<li>使用 cqueue 查询时，如果任务被 hold，Node(Reason) 一列会显示 "Held"。</li>
+</ul>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_hold1.png" /></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_hold2.png" /></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_hold3.png" /></p>
+<h2 id="32">3.2 <strong>继续作业调度</strong></h2>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_release.png" /></p>
+<pre><code class="language-Plain">ccontrol release 30751
+</code></pre>
+<ul>
+<li>如果此前有设置解除暂停的定时器，该操作会取消原有的定时器。</li>
+<li>只能 release pending 任务1</li>
+</ul>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_release1.png" /></p>
+<p><img alt="ccontrol" src="../../images/ccontrol/ccontrol_release2.png" /></p>
+<h1 id="4-completion">4<strong>. completion</strong></h1>
+<p><strong>主要命令</strong>：</p>
+<ul>
+<li><strong>bash</strong>：为bash生成自动补全脚本</li>
+<li><strong>fish</strong>：为fish生成自动补全脚本</li>
+<li><strong>powershell</strong>：为powershell生成自动补全脚本</li>
+<li><strong>zsh</strong>：为zsh生成自动补全脚本</li>
+</ul>
+<p><strong>支持的命令行选项：</strong></p>
+<ul>
+<li><strong>-h/--help:</strong> 显示帮助</li>
+<li><strong>-C/--config string：</strong>配置文件路径(默认 "/etc/crane/config.yaml")</li>
+<li><strong>--json：</strong>json格式输出命令执行结果</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../ccancel/" class="btn btn-neutral float-left" title="ccancel 取消作业"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../ccontrol_yufa/" class="btn btn-neutral float-right" title="ccontrol语法">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../ccancel/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../ccontrol_yufa/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

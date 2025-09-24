@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>ccancel 取消作业 - CraneSched</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "ccancel \u53d6\u6d88\u4f5c\u4e1a";
+        var mkdocs_page_input_path = "command/ccancel.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">欢迎使用 CraneSched 文档</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Command</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct 查看作业信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr 管理用户/账户信息</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc 提交交互式任务</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch 提交批处理作业</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">ccancel 取消作业</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">主要参数</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol 查看分区和节点状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol_yufa/">ccontrol语法</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff 查看作业运行实况</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo 查看节点与分区状态</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue 查看作业队列</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun 提交交互式任务</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Config</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../config/Centos7Configuration/">centos7 Crane环境配置</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Command</li>
+      <li class="breadcrumb-item active">ccancel 取消作业</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="ccancel">ccancel 取消作业</h1>
+<p><strong>ccancel可以终止正在运行或者在排队中的作业。</strong></p>
+<h4 id="_1"><strong>主要参数</strong></h4>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-A/--account string</strong>：取消账户下的任务</li>
+<li><strong>-C/--config string</strong>：配置文件路径(默认 "/etc/crane/config.yaml")</li>
+<li><strong>-n/--name string</strong>：取消指定任务名的任务</li>
+<li><strong>-w/--nodes strings</strong>：取消指定节点上运行的任务</li>
+<li><strong>-p/--partition string</strong>：取消指定分区上运行的任务</li>
+<li><strong>-t/--state string</strong>：取消某状态的任务。有效的任务状态是 PENDING(PD)、RUNNING(R)。任务状态不区分大小写</li>
+<li><strong>-u/--user string</strong>：取消特定用户提交的任务</li>
+<li><strong>-v/--version：</strong>查询版本号</li>
+</ul>
+<p>例：
+<img alt="ccancel" src="../../images/ccancel/ccancel.png" /></p>
+<pre><code class="language-SQL">ccancel -w crane02
+</code></pre>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_w.png" /></p>
+<pre><code class="language-SQL">ccancel -t Pending
+</code></pre>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_t.png" /></p>
+<ul>
+<li>取消作业号为30686的作业：</li>
+</ul>
+<pre><code class="language-Plaintext">ccancel 30686
+</code></pre>
+<p><strong>ccancel运行结果展示</strong>
+<img alt="ccancel" src="../../images/ccancel/ccancel_1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_3.png" /></p>
+<ul>
+<li>取消作业名为test1的作业：</li>
+</ul>
+<pre><code class="language-C">ccancel -n test1
+</code></pre>
+<p><strong>ccancel运行结果展示</strong></p>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_n1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_n2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_n3.png" /></p>
+<ul>
+<li>取消CPU分区上的作业</li>
+</ul>
+<pre><code class="language-C">ccancel -p GPU
+</code></pre>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_p1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_p2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_p3.png" /></p>
+<pre><code class="language-Bash">ccancel -A PKU
+</code></pre>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_A.png" /></p>
+<pre><code class="language-Bash">ccancel -u ROOT
+</code></pre>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_u.png" /></p>
+<p>取消作业之后，如果被分配节点上没有用户的其他作业，作业调度系统会终止用户在所分配节点的所有进程，并取消用户在所分配节点上的ssh权限。</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../cbatch/" class="btn btn-neutral float-left" title="cbatch 提交批处理作业"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../ccontrol/" class="btn btn-neutral float-right" title="ccontrol 查看分区和节点状态">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../cbatch/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../ccontrol/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
