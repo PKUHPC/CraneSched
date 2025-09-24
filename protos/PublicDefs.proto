@@ -537,8 +537,8 @@ enum ErrCode {
 
   ERR_IDENTITY_MISMATCH = 75;
 
-  ERR_CRI_GENERIC = 80;          // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.  
-  ERR_CRI_ATTACH_NOT_READY = 81; // Task is pending or container is not ready.
+  ERR_CRI_GENERIC = 80;           // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_ATTACH_NOT_READY = 81;  // Task is pending or container is not ready.
 }
 
 enum EntityType {
