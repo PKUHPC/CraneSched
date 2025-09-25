@@ -271,22 +271,28 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_task_ids_constraint = !request->filter_task_ids().empty();
+  bool has_task_ids_constraint{false};
+  for (const auto& steps : request->filter_ids() | std::views::values) {
+    if (!steps.steps().empty()) {
+      has_task_ids_constraint = true;
+      break;
+    }
+  }
   if (has_task_ids_constraint) {
     filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
       array task_id_array;
-      for (const auto& task_id : request->filter_task_ids()) {
+      for (const auto& task_id : request->filter_ids() | std::views::keys) {
         task_id_array.append(static_cast<std::int32_t>(task_id));
       }
       task_id_doc.append(kvp("$in", task_id_array));
     }));
   }
 
-  bool has_task_status_constraint = !request->filter_task_states().empty();
+  bool has_task_status_constraint = !request->filter_states().empty();
   if (has_task_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
       array state_array;
-      for (const auto& state : request->filter_task_states()) {
+      for (const auto& state : request->filter_states()) {
         state_array.append(state);
       }
       state_doc.append(kvp("$in", state_array));
@@ -1242,7 +1248,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string script;
   if (task->type == crane::grpc::Batch)
-    script = std::get<BatchMetaInTask>(task->meta).sh_script;
+    script = task->TaskToCtld().batch_meta().sh_script();
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task->env) {

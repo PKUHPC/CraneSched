@@ -431,6 +431,7 @@ class ResourceV2 {
 
   bool IsZero() const;
   void SetToZero();
+  ResourceView View() const noexcept;
 
   std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
     return each_node_res_map;

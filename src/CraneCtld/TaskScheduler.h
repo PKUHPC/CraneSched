@@ -527,17 +527,18 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  CraneErrCode TerminatePendingOrRunningIaTask(uint32_t task_id) {
+  CraneErrCode TerminatePendingOrRunningIaStep(job_id_t job_id,
+                                               step_id_t step_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 
-    auto pd_it = m_pending_task_map_.find(task_id);
+    auto pd_it = m_pending_task_map_.find(job_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto& task = pd_it->second;
-      if (task->type == crane::grpc::TaskType::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        meta.has_been_cancelled_on_front_end = true;
-      }
+      CRANE_ERROR("[Job #{}] Pending job is not an interactive task.", job_id);
+      auto& meta = task->ia_meta.value();
+      meta.has_been_cancelled_on_front_end = true;
+
       m_cancel_task_queue_.enqueue(
           CancelPendingTaskQueueElem{.task = std::move(task)});
       m_cancel_task_async_handle_->send();
@@ -545,28 +546,58 @@ class TaskScheduler {
       return CraneErrCode::SUCCESS;
     }
 
-    auto rn_it = m_running_task_map_.find(task_id);
+    auto rn_it = m_running_task_map_.find(job_id);
     if (rn_it == m_running_task_map_.end())
       return CraneErrCode::ERR_NON_EXISTENT;
-    else {
-      auto& task = rn_it->second;
-      if (task->type == crane::grpc::TaskType::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        meta.has_been_cancelled_on_front_end = true;
+
+    CommonStepInCtld* step;
+    auto& task = rn_it->second;
+    if (task->type == crane::grpc::TaskType::Interactive) {
+      step = task->GetStep(step_id);
+      if (step) {
+        if (step->type == crane::grpc::Interactive) {
+          auto& meta = step->ia_meta.value();
+          meta.has_been_cancelled_on_front_end = true;
+        } else {
+          CRANE_ERROR("[Step #{}.{}] Step is not an interactive step.", job_id,
+                      step_id);
+          return CraneErrCode::ERR_INVALID_PARAM;
+        }
+      } else {
+        CRANE_ERROR("[Step #{}.{}] Step does not exist.", job_id, step_id);
+
+        return CraneErrCode::ERR_NON_EXISTENT;
+      }
+    } else {
+      CRANE_ERROR("[Job #{}] Running job is not an interactive task.", job_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+
+    return TerminateRunningStepNoLock_(step);
+  }
+
+  CraneErrCode TerminateRunningStep(
+      std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps) {
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    std::vector<CommonStepInCtld*> steps;
+    for (auto& [job_id, step_ids] : job_steps) {
+      auto iter = m_running_task_map_.find(job_id);
+      if (iter == m_running_task_map_.end())
+        return CraneErrCode::ERR_NON_EXISTENT;
+      auto* job = iter->second.get();
+      for (auto step_id : step_ids) {
+        auto* step = job->GetStep(step_id);
+        if (!step) return CraneErrCode::ERR_NON_EXISTENT;
+        steps.push_back(step);
       }
     }
 
-    return TerminateRunningTaskNoLock_(rn_it->second.get());
-  }
-
-  CraneErrCode TerminateRunningTask(uint32_t task_id) {
-    LockGuard running_guard(&m_running_task_map_mtx_);
-
-    auto iter = m_running_task_map_.find(task_id);
-    if (iter == m_running_task_map_.end())
-      return CraneErrCode::ERR_NON_EXISTENT;
-
-    return TerminateRunningTaskNoLock_(iter->second.get());
+    for (auto* step : steps) {
+      auto err = TerminateRunningStepNoLock_(step);
+      if (err != CraneErrCode::SUCCESS) return err;
+    }
+    return CraneErrCode::SUCCESS;
   }
 
   static CraneExpected<void> HandleUnsetOptionalInTaskToCtld(TaskInCtld* task);
@@ -619,7 +650,7 @@ class TaskScheduler {
   static void PersistAndTransferTasksToMongodb_(
       std::unordered_set<TaskInCtld*> const& tasks);
 
-  CraneErrCode TerminateRunningTaskNoLock_(TaskInCtld* task);
+  CraneErrCode TerminateRunningStepNoLock_(StepInCtld* step);
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 
@@ -661,9 +692,6 @@ class TaskScheduler {
 
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
-
-  std::thread m_step_exec_thread_;
-  void StepExecThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
