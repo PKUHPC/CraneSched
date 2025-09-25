@@ -113,9 +113,10 @@ class MongodbClient {
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::unordered_set<TaskInCtld*>& tasks);
 
-  bool FetchJobRecords(const crane::grpc::QueryTasksInfoRequest* request,
-                       crane::grpc::QueryTasksInfoReply* response,
-                       size_t limit);
+  bool FetchJobRecords(
+      const crane::grpc::QueryTasksInfoRequest* request,
+      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map,
+      size_t limit);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
@@ -290,8 +291,14 @@ class MongodbClient {
   document StepInCtldToDocument_(StepInCtld* step);
   document StepInEmbeddedDbToDocument_(
       crane::grpc::StepInEmbeddedDb const& step);
+  void ViewToStepInfo_(const bsoncxx::document::view& view,
+                       crane::grpc::StepInfo* step_info);
 
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
+  DedicatedResourceInNode BsonToDedicatedResourceInNode(
+      const bsoncxx::document::view& doc);
+  ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
+  ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
   ContainerMetaInTask BsonToContainerMeta(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
