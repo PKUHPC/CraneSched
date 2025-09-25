@@ -1321,6 +1321,7 @@ void TaskScheduler::StepScheduleThread_() {
             CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
           }
         }
+
         for (auto job_id : jobs_to_remove) {
           m_job_pending_step_num_map_.erase(job_id);
         }
