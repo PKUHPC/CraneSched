@@ -609,6 +609,14 @@ bool ResourceV2::IsZero() const { return each_node_res_map.empty(); }
 
 void ResourceV2::SetToZero() { each_node_res_map.clear(); }
 
+ResourceView ResourceV2::View() const noexcept {
+  if (each_node_res_map.empty()) return {};
+  auto node_res = each_node_res_map.begin()->second;
+  ResourceView view;
+  view += node_res;
+  return view;
+}
+
 bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
   for (const auto& [lhs_node_id, lhs_res_in_node] : lhs.each_node_res_map) {
     auto rhs_it = rhs.each_node_res_map.find(lhs_node_id);

@@ -239,59 +239,72 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto task = std::make_unique<TaskInCtld>();
           task->SetFieldsByTaskToCtld(payload.task());
 
-          auto &meta = std::get<InteractiveMetaInTask>(task->meta);
+          {
+            InteractiveMeta meta;
 
-          meta.cb_task_res_allocated =
-              [writer_weak_ptr](task_id_t task_id,
-                                std::string const &allocated_craned_regex,
-                                std::list<std::string> const &craned_ids) {
-                if (auto writer = writer_weak_ptr.lock(); writer)
-                  writer->WriteTaskResAllocReply(
-                      task_id,
-                      {std::make_pair(allocated_craned_regex, craned_ids)});
-              };
+            meta.cb_task_res_allocated =
+                [writer_weak_ptr](
+                    const StepInteractiveMeta::StepResAllocArgs &arg) {
+                  if (auto writer = writer_weak_ptr.lock(); writer)
+                    writer->WriteTaskResAllocReply(arg);
+                };
 
-          meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
-              writer->WriteTaskCancelRequest(task_id);
-          };
+            meta.cb_task_cancel =
+                [writer_weak_ptr](
+                    StepInteractiveMeta::StepCancelArgs const &args) {
+                  auto &[job_id, step_id] = args;
+                  CRANE_TRACE("Sending TaskCancelRequest in task_cancel",
+                              job_id);
+                  if (auto writer = writer_weak_ptr.lock(); writer)
+                    writer->WriteTaskCancelRequest(job_id, step_id);
+                };
 
-          meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
-                                       task_id_t task_id,
-                                       bool send_completion_ack) {
-            CRANE_TRACE("The completion callback of task #{} has been called.",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer) {
-              if (send_completion_ack)
-                writer->WriteTaskCompletionAckReply(task_id);
-            } else {
-              CRANE_ERROR(
-                  "Stream writer of ia task #{} has been destroyed. "
-                  "TaskCompletionAckReply will not be sent.",
-                  task_id);
-            }
+            meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
+                                         StepInteractiveMeta::
+                                             StepCompeteArgs const &args) {
+              auto &[job_id, step_id, send_completion_ack] = args;
+              CRANE_TRACE(
+                  "[Step #{}.{}] The completion callback of has been called.",
+                  job_id, step_id);
+              if (auto writer = writer_weak_ptr.lock(); writer) {
+                if (send_completion_ack)
+                  writer->WriteTaskCompletionAckReply(job_id, step_id);
+              } else {
+                CRANE_ERROR(
+                    "[Step #{}.{}] Stream writer of has been destroyed. "
+                    "TaskCompletionAckReply will not be sent.",
+                    job_id, step_id);
+              }
 
-            m_ctld_server_->m_mtx_.Lock();
+              m_ctld_server_->m_mtx_.Lock();
 
-            // If cfored disconnected, the cfored_name should have be
-            // removed from the map and the task completion callback is
-            // generated from cleaning the remaining tasks by calling
-            // g_task_scheduler->TerminateTask(), we should ignore this
-            // callback since the task id has already been cleaned.
-            auto iter =
-                m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
-            if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
-              iter->second.erase(task_id);
-            m_ctld_server_->m_mtx_.Unlock();
-          };
+              // If cfored disconnected, the cfored_name should have be
+              // removed from the map and the task completion callback is
+              // generated from cleaning the remaining tasks by calling
+              // g_task_scheduler->TerminateTask(), we should ignore this
+              // callback since the task id has already been cleaned.
+              auto iter =
+                  m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
+              if (iter != m_ctld_server_->m_cfored_running_tasks_.end()) {
+                auto step_iter = iter->second.find(step_id);
+                if (step_iter != iter->second.end()) {
+                  step_iter->second.erase(job_id);
+                }
+                if (step_iter->second.empty()) iter->second.erase(step_iter);
+              }
+              m_ctld_server_->m_mtx_.Unlock();
+            };
 
+            task->ia_meta = std::move(meta);
+          }
           auto submit_result =
               g_task_scheduler->SubmitTaskToScheduler(std::move(task));
-          std::expected<task_id_t, std::string> result;
+          std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
           if (submit_result.has_value()) {
-            result = std::expected<task_id_t, std::string>{
-                submit_result.value().get()};
+            // FIXME:use primary step id
+            job_id_t job_id = submit_result.value().get();
+            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                std::pair(job_id, kPrimaryStepId)};
           } else {
             result = std::unexpected(CraneErrStr(submit_result.error()));
           }
@@ -305,9 +318,10 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             state = StreamState::kCleanData;
           } else {
             if (result.has_value()) {
+              auto [job_id, step_id] = result.value();
               m_ctld_server_->m_mtx_.Lock();
-              m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
-                  result.value());
+              m_ctld_server_->m_cfored_running_tasks_[cfored_name][job_id]
+                  .insert(step_id);
               m_ctld_server_->m_mtx_.Unlock();
             }
           }
@@ -315,15 +329,17 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
-          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.job_id());
-          if (g_task_scheduler->TerminatePendingOrRunningIaTask(
-                  payload.job_id()) != CraneErrCode::SUCCESS)
-            stream_writer->WriteTaskCompletionAckReply(payload.job_id());
+          CRANE_TRACE("[Step #{}.{}] Recv StepCompletionReq.", payload.job_id(),
+                      payload.step_id());
+          if (g_task_scheduler->TerminatePendingOrRunningIaStep(
+                  payload.job_id(), payload.step_id()) != CraneErrCode::SUCCESS)
+            stream_writer->WriteTaskCompletionAckReply(payload.job_id(),
+                                                       payload.step_id());
           else {
             CRANE_TRACE(
-                "Termination of task #{} succeeded. "
+                "[Step #{}.{}] Termination succeeded. "
                 "Leave TaskCompletionAck to TaskStatusChange.",
-                payload.job_id());
+                payload.job_id(), payload.step_id());
           }
         } break;
 
@@ -349,16 +365,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
       stream_writer->Invalidate();
       m_ctld_server_->m_mtx_.Lock();
 
-      auto const &running_task_set =
-          m_ctld_server_->m_cfored_running_tasks_[cfored_name];
-      std::vector<task_id_t> running_tasks(running_task_set.begin(),
-                                           running_task_set.end());
+      auto running_steps =
+          m_ctld_server_->m_cfored_running_tasks_[cfored_name] |
+          std::ranges::to<std::unordered_map>();
       m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
       m_ctld_server_->m_mtx_.Unlock();
 
-      for (task_id_t task_id : running_tasks) {
-        g_task_scheduler->TerminateRunningTask(task_id);
-      }
+      g_task_scheduler->TerminateRunningStep(running_steps);
 
       return Status::OK;
     }
@@ -812,6 +825,17 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
                                     num_limit - task_list->size())) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
+  }
+
+  {
+    std::unordered_set<job_id_t> jobs;
+    for (auto &job_info : response->task_info_list()) {
+      jobs.insert(job_info.task_id());
+    }
+    if (!g_db_client->FetchStepRecords(jobs, response)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchStepRecords");
+      return grpc::Status::OK;
+    }
   }
 
   sort_and_truncate(task_list, num_limit);
