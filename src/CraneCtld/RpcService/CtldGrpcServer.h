@@ -46,8 +46,9 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(pid_t calloc_pid,
-                        std::expected<task_id_t, std::string> res) {
+  bool WriteTaskIdReply(
+      pid_t calloc_pid,
+      std::expected<std::pair<job_id_t, step_id_t>, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -57,9 +58,9 @@ class CforedStreamWriter {
     if (res.has_value()) {
       task_id_reply->set_ok(true);
       task_id_reply->set_pid(calloc_pid);
-      task_id_reply->set_job_id(res.value());
-      // FIXME: Use step id from scheduler
-      task_id_reply->set_step_id(1);
+      auto [job_id, step_id] = res.value();
+      task_id_reply->set_job_id(job_id);
+      task_id_reply->set_step_id(step_id);
     } else {
       task_id_reply->set_ok(false);
       task_id_reply->set_pid(calloc_pid);
@@ -70,51 +71,49 @@ class CforedStreamWriter {
   }
 
   bool WriteTaskResAllocReply(
-      task_id_t task_id,
-      std::expected<std::pair<std::string, std::vector<CranedId>>, std::string>
-          res) {
+      const StepInteractiveMeta::StepResAllocArgs &args) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
+    auto &[job_id, step_id, allocated_craned_expt] = args;
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
-    task_res_alloc_reply->set_job_id(task_id);
-    // FIXME: Use step id from scheduler
-    task_res_alloc_reply->set_step_id(1);
+    task_res_alloc_reply->set_job_id(job_id);
+    task_res_alloc_reply->set_step_id(step_id);
 
-    if (res.has_value()) {
+    if (allocated_craned_expt.has_value()) {
       task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(res.value().first);
-      std::ranges::for_each(res.value().second,
-                            [&task_res_alloc_reply](const auto &craned_id) {
-                              task_res_alloc_reply->add_craned_ids(craned_id);
-                            });
+      task_res_alloc_reply->set_allocated_craned_regex(
+          allocated_craned_expt.value().first);
+      auto &craned_list = allocated_craned_expt.value().second;
+      task_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
+                                                         craned_list.end());
     } else {
       task_res_alloc_reply->set_ok(false);
-      task_res_alloc_reply->set_failure_reason(std::move(res.error()));
+      task_res_alloc_reply->set_failure_reason(
+          std::move(allocated_craned_expt.error()));
     }
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskCompletionAckReply(task_id_t task_id) {
+  bool WriteTaskCompletionAckReply(job_id_t job_id, step_id_t step_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
     CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",
-                task_id);
+                job_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 
     auto *task_completion_ack = reply.mutable_payload_task_completion_ack();
-    task_completion_ack->set_job_id(task_id);
-    // FIXME: Use step id from scheduler
-    task_completion_ack->set_step_id(1);
+    task_completion_ack->set_job_id(job_id);
+    task_completion_ack->set_step_id(step_id);
 
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskCancelRequest(task_id_t task_id) {
+  bool WriteTaskCancelRequest(job_id_t job_id, step_id_t step_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -122,9 +121,8 @@ class CforedStreamWriter {
     reply.set_type(StreamCtldReply::TASK_CANCEL_REQUEST);
 
     auto *task_cancel_req = reply.mutable_payload_task_cancel_request();
-    task_cancel_req->set_job_id(task_id);
-    // FIXME: Use step id from scheduler
-    task_cancel_req->set_step_id(1);
+    task_cancel_req->set_job_id(job_id);
+    task_cancel_req->set_step_id(step_id);
 
     return m_stream_->Write(reply);
   }
@@ -395,7 +393,6 @@ class CtldServer {
  public:
   /***
    * User must make sure that this constructor is called only once!
-   * @param listen_address The "[Address]:[Port]" of CraneCtld.
    */
   explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
 
@@ -414,7 +411,8 @@ class CtldServer {
 
   // internal
   Mutex m_mtx_;
-  HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
+  HashMap<std::string /* cfored_name */,
+          HashMap<job_id_t, std::unordered_set<step_id_t>>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;

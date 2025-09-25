@@ -252,9 +252,9 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
         "Invalid username",
-        "Reserved for future use",
-        "Reserved for future use",
-  
+        "Legal licenses",
+        "Invalid job id",
+
         // 80 - 84
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
@@ -461,6 +461,7 @@ class ResourceV2 {
 
   bool IsZero() const;
   void SetToZero();
+  ResourceView View() const noexcept;
 
   std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
     return each_node_res_map;
@@ -521,6 +522,7 @@ class ResourceView {
     return allocatable_res;
   }
 
+  DeviceMap& GetDeviceMap() { return device_map; }
   const DeviceMap& GetDeviceMap() const { return device_map; }
 
  private:

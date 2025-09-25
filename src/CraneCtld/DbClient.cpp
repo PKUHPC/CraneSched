@@ -220,9 +220,8 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
 
 bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryTasksInfoRequest* request,
-    crane::grpc::QueryTasksInfoReply* response, size_t limit) {
-  auto* task_list = response->mutable_task_info_list();
-
+    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map,
+    size_t limit) {
   document filter;
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
@@ -319,22 +318,22 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_task_ids_constraint = !request->filter_task_ids().empty();
+  bool has_task_ids_constraint = !request->filter_ids().empty();
   if (has_task_ids_constraint) {
     filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
       array task_id_array;
-      for (const auto& task_id : request->filter_task_ids()) {
+      for (const auto& task_id : request->filter_ids() | std::views::keys) {
         task_id_array.append(static_cast<std::int32_t>(task_id));
       }
       task_id_doc.append(kvp("$in", task_id_array));
     }));
   }
 
-  bool has_task_status_constraint = !request->filter_task_states().empty();
+  bool has_task_status_constraint = !request->filter_states().empty();
   if (has_task_status_constraint) {
     filter.append(kvp("state", [&request](sub_document state_doc) {
       array state_array;
-      for (const auto& state : request->filter_task_states()) {
+      for (const auto& state : request->filter_states()) {
         state_array.append(state);
       }
       state_doc.append(kvp("$in", state_array));
@@ -381,88 +380,288 @@ bool MongodbClient::FetchJobRecords(
 
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
-  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
-  // 15 priority      time_eligible  time_start    time_end    time_suspended
-  // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container  has_job_info nodename_list
+  // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
+  // 15 priority      time_eligible  time_start     time_end      time_suspended
+  // 20 script        state          timelimit      time_submit   work_dir
+  // 25 submit_line   exit_code      username       qos           get_user_env
+  // 30 type          extra_attr     reservation    exclusive     cpus_alloc
+  // 35 mem_alloc     device_map     meta_container has_job_info  nodename_list
 
   try {
     for (auto view : cursor) {
-      auto* task = task_list->Add();
+      job_id_t job_id = view["task_id"].get_int32().value;
+      crane::grpc::TaskInfo* job_info_ptr = nullptr;
+      auto in_mem_job_it = job_info_map->find(job_id);
+      bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
+      bool has_db_job_info = ViewValueOr_(view["has_job_info"], false);
+      if (!has_in_mem_job_info) {
+        // Only got step info in db, no such jobinfo in db or memory, this is an
+        // incomplete record, skip.
+        if (!has_db_job_info) continue;
+        crane::grpc::TaskInfo job_info;
+        job_info.set_type(
+            static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
+        job_info.set_task_id(job_id);
 
-      task->set_type(
-          static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
-      task->set_task_id(view["task_id"].get_int32().value);
+        job_info.set_node_num(view["nodes_alloc"].get_int32().value);
 
-      task->set_node_num(view["nodes_alloc"].get_int32().value);
+        job_info.set_account(view["account"].get_string().value.data());
+        job_info.set_username(view["username"].get_string().value.data());
 
-      task->set_account(view["account"].get_string().value.data());
-      task->set_username(view["username"].get_string().value.data());
+        auto* mutable_req_res_view = job_info.mutable_req_res_view();
+        auto* mutable_req_alloc_res =
+            mutable_req_res_view->mutable_allocatable_res();
+        mutable_req_alloc_res->set_cpu_core_limit(
+            view["cpus_req"].get_double().value);
+        mutable_req_alloc_res->set_memory_limit_bytes(
+            view["mem_req"].get_int64().value);
+        mutable_req_alloc_res->set_memory_sw_limit_bytes(
+            view["mem_req"].get_int64().value);
 
-      auto* mutable_req_res_view = task->mutable_req_res_view();
-      auto* mutable_req_alloc_res =
-          mutable_req_res_view->mutable_allocatable_res();
-      mutable_req_alloc_res->set_cpu_core_limit(
-          view["cpus_req"].get_double().value);
-      mutable_req_alloc_res->set_memory_limit_bytes(
-          view["mem_req"].get_int64().value);
-      mutable_req_alloc_res->set_memory_sw_limit_bytes(
-          view["mem_req"].get_int64().value);
+        auto* mutable_allocated_res_view =
+            job_info.mutable_allocated_res_view();
+        auto* mutable_allocated_alloc_res =
+            mutable_allocated_res_view->mutable_allocatable_res();
+        mutable_allocated_alloc_res->set_cpu_core_limit(
+            view["cpus_alloc"].get_double().value);
+        mutable_allocated_alloc_res->set_memory_limit_bytes(
+            view["mem_alloc"].get_int64().value);
+        mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
+            view["mem_alloc"].get_int64().value);
+        auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
+        *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
+        job_info.set_name(std::string(view["task_name"].get_string().value));
+        job_info.set_qos(std::string(view["qos"].get_string().value));
+        job_info.set_uid(view["id_user"].get_int32().value);
+        job_info.set_gid(view["id_group"].get_int32().value);
+        job_info.set_craned_list(view["nodelist"].get_string().value.data());
+        job_info.set_partition(
+            std::string(view["partition_name"].get_string().value));
 
-      auto* mutable_allocated_res_view = task->mutable_allocated_res_view();
-      auto* mutable_allocated_alloc_res =
-          mutable_allocated_res_view->mutable_allocatable_res();
-      mutable_allocated_alloc_res->set_cpu_core_limit(
-          view["cpus_alloc"].get_double().value);
-      mutable_allocated_alloc_res->set_memory_limit_bytes(
-          view["mem_alloc"].get_int64().value);
-      mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
-          view["mem_alloc"].get_int64().value);
-      auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
-      *device_map_ptr = ToGrpcDeviceMap(BsonToDeviceMap(view));
-      task->set_name(std::string(view["task_name"].get_string().value));
-      task->set_qos(std::string(view["qos"].get_string().value));
-      task->set_uid(view["id_user"].get_int32().value);
-      task->set_gid(view["id_group"].get_int32().value);
-      task->set_craned_list(view["nodelist"].get_string().value.data());
-      task->set_partition(
-          std::string(view["partition_name"].get_string().value));
+        job_info.mutable_start_time()->set_seconds(
+            view["time_start"].get_int64().value);
+        job_info.mutable_end_time()->set_seconds(
+            view["time_end"].get_int64().value);
 
-      task->mutable_start_time()->set_seconds(
-          view["time_start"].get_int64().value);
-      task->mutable_end_time()->set_seconds(view["time_end"].get_int64().value);
+        job_info.set_status(static_cast<crane::grpc::TaskStatus>(
+            view["state"].get_int32().value));
+        job_info.mutable_time_limit()->set_seconds(
+            view["timelimit"].get_int64().value);
+        job_info.mutable_submit_time()->set_seconds(
+            view["time_submit"].get_int64().value);
+        job_info.set_cwd(std::string(view["work_dir"].get_string().value));
+        if (view["submit_line"])
+          job_info.set_cmd_line(
+              std::string(view["submit_line"].get_string().value));
+        job_info.set_exit_code(view["exit_code"].get_int32().value);
 
-      task->set_status(static_cast<crane::grpc::TaskStatus>(
-          view["state"].get_int32().value));
-      task->mutable_time_limit()->set_seconds(
-          view["timelimit"].get_int64().value);
-      task->mutable_submit_time()->set_seconds(
-          view["time_submit"].get_int64().value);
-      task->set_cwd(std::string(view["work_dir"].get_string().value));
-      if (view["submit_line"])
-        task->set_cmd_line(std::string(view["submit_line"].get_string().value));
-      task->set_exit_code(view["exit_code"].get_int32().value);
+        job_info.set_extra_attr(view["extra_attr"].get_string().value.data());
 
-      task->set_extra_attr(view["extra_attr"].get_string().value.data());
+        job_info.set_priority(view["priority"].get_int64().value);
 
-      task->set_priority(view["priority"].get_int64().value);
-
-      if (view.find("reservation") != view.end()) {
-        task->set_reservation(view["reservation"].get_string().value.data());
+        if (view.find("reservation") != view.end()) {
+          job_info.set_reservation(
+              view["reservation"].get_string().value.data());
+        }
+        job_info.set_exclusive(view["exclusive"].get_bool().value);
+        if (job_info.type() == crane::grpc::Container) {
+          auto* meta_info = job_info.mutable_container_meta();
+          auto container_meta = BsonToContainerMeta(view);
+          *meta_info =
+              std::move(static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
+                  container_meta));
+        }
+        auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
+        job_info_ptr = &it->second;
+      } else {
+        job_info_ptr = &in_mem_job_it->second;
       }
-      task->set_exclusive(view["exclusive"].get_bool().value);
+      auto steps_elem = view["steps"];
+      if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      for (const auto& elem : steps_elem.get_array().value) {
+        auto* step_info = job_info_ptr->add_step_info_list();
+        ViewToStepInfo_(elem.get_document().value, step_info);
+        step_info->set_job_id(job_id);
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
 
-      if (task->type() == crane::grpc::Container) {
-        auto* meta_info = task->mutable_container_meta();
-        auto container_meta = BsonToContainerMeta(view);
-        meta_info->CopyFrom(
-            static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
-                container_meta));
+  return true;
+}
+
+bool MongodbClient::FetchJobStepRecords(
+    const crane::grpc::QueryTasksInfoRequest* request,
+    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
+  if (job_info_map->empty()) return true;
+  document filter;
+
+  bool has_submit_time_interval = request->has_filter_submit_time_interval();
+  if (has_submit_time_interval) {
+    const auto& interval = request->filter_submit_time_interval();
+    filter.append(kvp("time_submit", [&interval](sub_document time_submit_doc) {
+      if (interval.has_lower_bound()) {
+        time_submit_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_submit_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_start_time_interval = request->has_filter_start_time_interval();
+  if (has_start_time_interval) {
+    const auto& interval = request->filter_start_time_interval();
+    filter.append(kvp("time_start", [&interval](sub_document time_start_doc) {
+      if (interval.has_lower_bound()) {
+        time_start_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_start_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_end_time_interval = request->has_filter_end_time_interval();
+  if (has_end_time_interval) {
+    const auto& interval = request->filter_end_time_interval();
+    filter.append(kvp("time_end", [&interval](sub_document time_end_doc) {
+      if (interval.has_lower_bound()) {
+        time_end_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_end_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_accounts_constraint = !request->filter_accounts().empty();
+  if (has_accounts_constraint) {
+    filter.append(kvp("account", [&request](sub_document account_doc) {
+      array account_array;
+      for (const auto& account : request->filter_accounts()) {
+        account_array.append(account);
+      }
+      account_doc.append(kvp("$in", account_array));
+    }));
+  }
+
+  bool has_users_constraint = !request->filter_users().empty();
+  if (has_users_constraint) {
+    filter.append(kvp("username", [&request](sub_document user_doc) {
+      array user_array;
+      for (const auto& user : request->filter_users()) {
+        user_array.append(user);
+      }
+      user_doc.append(kvp("$in", user_array));
+    }));
+  }
+
+  bool has_task_names_constraint = !request->filter_task_names().empty();
+  if (has_task_names_constraint) {
+    filter.append(kvp("task_name", [&request](sub_document task_name_doc) {
+      array task_name_array;
+      for (const auto& task_name : request->filter_task_names()) {
+        task_name_array.append(task_name);
+      }
+      task_name_doc.append(kvp("$in", task_name_array));
+    }));
+  }
+
+  bool has_qos_constraint = !request->filter_qos().empty();
+  if (has_qos_constraint) {
+    filter.append(kvp("qos", [&request](sub_document qos_doc) {
+      array qos_array;
+      for (const auto& qos : request->filter_qos()) {
+        qos_array.append(qos);
+      }
+      qos_doc.append(kvp("$in", qos_array));
+    }));
+  }
+
+  bool has_partitions_constraint = !request->filter_partitions().empty();
+  if (has_partitions_constraint) {
+    filter.append(kvp("partition_name", [&request](sub_document partition_doc) {
+      array partition_array;
+      for (const auto& partition : request->filter_partitions()) {
+        partition_array.append(partition);
+      }
+      partition_doc.append(kvp("$in", partition_array));
+    }));
+  }
+
+  filter.append(kvp("task_id", [&job_info_map](sub_document task_id_doc) {
+    array task_id_array;
+    for (const auto job_id : *job_info_map | std::views::keys) {
+      task_id_array.append(static_cast<std::int32_t>(job_id));
+    }
+    task_id_doc.append(kvp("$in", task_id_array));
+  }));
+
+  bool has_task_status_constraint = !request->filter_states().empty();
+  if (has_task_status_constraint) {
+    filter.append(kvp("state", [&request](sub_document state_doc) {
+      array state_array;
+      for (const auto& state : request->filter_states()) {
+        state_array.append(state);
+      }
+      state_doc.append(kvp("$in", state_array));
+    }));
+  }
+
+  bool has_task_types_constraint = !request->filter_task_types().empty();
+  if (has_task_types_constraint) {
+    filter.append(kvp("type", [&request](sub_document type_doc) {
+      array type_array;
+      for (const auto& type : request->filter_task_types()) {
+        type_array.append(static_cast<std::int32_t>(type));
+      }
+      type_doc.append(kvp("$in", type_array));
+    }));
+  }
+
+  mongocxx::options::find option;
+
+  document sort_doc;
+  sort_doc.append(kvp("task_db_id", -1));
+  option = option.sort(sort_doc.view());
+
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
+                                                                option);
+
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
+  // 15 priority      time_eligible  time_start     time_end      time_suspended
+  // 20 script        state          timelimit      time_submit   work_dir
+  // 25 submit_line   exit_code      username       qos           get_user_env
+  // 30 type          extra_attr     reservation    exclusive     cpus_alloc
+  // 35 mem_alloc     device_map     meta_container has_job_info
+
+  try {
+    for (auto view : cursor) {
+      job_id_t job_id = view["task_id"].get_int32().value;
+      auto in_mem_job_it = job_info_map->find(job_id);
+      bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
+      if (!has_in_mem_job_info) {
+        CRANE_ERROR(
+            "Trying to fetch step records for non-existing job #{} in mem.",
+            job_id);
+        continue;
+      }
+      auto* job_info_ptr = &in_mem_job_it->second;
+
+      auto steps_elem = view["steps"];
+      if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      for (const auto& elem : steps_elem.get_array().value) {
+        auto* step_info = job_info_ptr->add_step_info_list();
+        ViewToStepInfo_(elem.get_document().value, step_info);
+        step_info->set_job_id(job_id);
       }
 
-      auto* mutable_licenses = task->mutable_licenses_count();
+      auto* mutable_licenses = job_info_ptr->mutable_licenses_count();
       for (auto&& elem :
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {
@@ -982,19 +1181,17 @@ template <>
 void MongodbClient::DocumentAppendItem_<DedicatedResourceInNode>(
     document& doc, const std::string& key,
     const DedicatedResourceInNode& value) {
-  document sub_doc{};
-  for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
-    document type_doc{};
-    for (const auto& [type, slots] : type_slots_map.type_slots_map) {
-      array gpu_array{};
-      for (const auto& dev_id : slots) {
-        gpu_array.append(dev_id);
-      }
-      type_doc.append(kvp(type, gpu_array));
+  doc.append(kvp(key, [&value](sub_document subDoc) {
+    for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
+      subDoc.append(kvp(name, [&type_slots_map](sub_document typeDoc) {
+        for (const auto& [type, slots] : type_slots_map.type_slots_map) {
+          typeDoc.append(kvp(type, [&slots](sub_array arr) {
+            for (auto dev_id : slots) arr.append(dev_id);
+          }));
+        }
+      }));
     }
-    sub_doc.append(kvp(name, type_doc));
-  }
-  doc.append(kvp(key, sub_doc.view()));
+  }));
 }
 
 template <>
@@ -1416,6 +1613,61 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
 
   return device_map;
 }
+DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
+    const bsoncxx::document::view& doc) {
+  DedicatedResourceInNode res;
+  try {
+    for (auto&& name_elem : doc) {
+      std::string name = std::string(name_elem.key());
+      auto type_doc = name_elem.get_document().view();
+      TypeSlotsMap type_slots_map;
+      for (auto&& type_elem : type_doc) {
+        std::string type = std::string(type_elem.key());
+        auto slots_array = type_elem.get_array().value;
+        std::set<SlotId> slots;
+        for (auto&& slot_elem : slots_array)
+          slots.emplace(std::string(slot_elem.get_string().value));
+        type_slots_map.type_slots_map[type] = std::move(slots);
+      }
+      res.name_type_slots_map[name] = std::move(type_slots_map);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
+ResourceInNode MongodbClient::BsonToResourceInNode(
+    const bsoncxx::document::view& doc) {
+  ResourceInNode res;
+  try {
+    res.allocatable_res.cpu_count =
+        static_cast<cpu_t>(doc["cpu"].get_double().value);
+    res.allocatable_res.memory_bytes = doc["memory"].get_int64().value;
+    res.allocatable_res.memory_sw_bytes = doc["memory"].get_int64().value;
+    if (doc["gres"]) {
+      res.dedicated_res =
+          BsonToDedicatedResourceInNode(doc["gres"].get_document().view());
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
+
+ResourceV2 MongodbClient::BsonToResourceV2(const bsoncxx::document::view& doc) {
+  ResourceV2 res;
+  try {
+    for (auto&& node_elem : doc) {
+      std::string node_name = std::string(node_elem.key());
+      res.AddResourceInNode(
+          node_name,
+          BsonToResourceInNode(node_elem.get_value().get_document().value));
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
 
 ContainerMetaInTask MongodbClient::BsonToContainerMeta(
     const bsoncxx::document::view& doc) {
@@ -1661,7 +1913,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
 
   if (task->type == crane::grpc::Batch)
-    script = std::get<BatchMetaInTask>(task->meta).sh_script;
+    script = task->TaskToCtld().batch_meta().sh_script();
   else if (task->type == crane::grpc::Container)
     container_meta = std::get<ContainerMetaInTask>(task->meta);
 
@@ -1773,14 +2025,14 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
   // 10 nodes_alloc     node_inx      time_eligible   time_start    time_end
   // 15 time_suspended  script        state           timelimit     time_submit
   // 20 work_dir        submit_line   exit_code       get_user_env  type
-  // 25 extra_attr      res_alloc     step_type       container
+  // 25 extra_attr         res_alloc     step_type       container
 
   // clang-format off
   std::array<std::string, 29> fields{
       // 0 - 4
       "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
-      "task_name",   "env",      "id_user","id_group", "nodelist",
+      "step_name",   "env",      "id_user","id_group", "nodelist",
       // 10 - 14
         "nodes_alloc", "node_inx",  "time_eligible","time_start", "time_end",
       // 15 - 19
@@ -1858,7 +2110,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       // 0 - 4
       "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
-         "task_name",   "env",      "id_user","id_group", "nodelist",
+         "step_name",   "env",      "id_user","id_group", "nodelist",
       // 10 - 14
        "nodes_alloc", "node_inx",  "time_eligible","time_start", "time_end",
       // 15 - 19
@@ -1883,8 +2135,11 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
           absl::ToUnixSeconds(absl::Now()), false,
-          step_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-          static_cast<int64_t>(step_to_ctld.req_resources()
+          step_to_ctld.req_resources_per_task()
+                  .allocatable_res()
+                  .cpu_core_limit() *
+              step_to_ctld.ntasks_per_node(),
+          static_cast<int64_t>(step_to_ctld.req_resources_per_task()
                                    .allocatable_res()
                                    .memory_limit_bytes()),
           // 5-9
@@ -1907,6 +2162,77 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           runtime_attr.step_type(), container_meta};
 
   return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
+                                    crane::grpc::StepInfo* step_info) {
+  // 0  step_id         mod_time      deleted       cpus_req      mem_req
+  // 5  step_name       env           id_user       id_group      nodelist
+  // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
+  // 15 time_suspended  script        state         timelimit     time_submit
+  // 20 work_dir        submit_line   exit_code     get_user_env  type
+  // 25 extra_attr      res_alloc     step_type     meta_container
+  step_id_t step_id = view["step_id"].get_int32().value;
+  step_info->set_step_id(step_id);
+  auto* mutable_req_res_view = step_info->mutable_req_res_view();
+  auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+  mutable_req_alloc_res->set_cpu_core_limit(
+      view["cpus_req"].get_double().value);
+  mutable_req_alloc_res->set_memory_limit_bytes(
+      view["mem_req"].get_int64().value);
+  mutable_req_alloc_res->set_memory_sw_limit_bytes(
+      view["mem_req"].get_int64().value);
+
+  step_info->set_name(view["step_name"].get_string().value);
+
+  step_info->set_uid(view["id_user"].get_int32().value);
+  auto* proto_gid = step_info->mutable_gid();
+  for (auto&& gid : view["id_group"].get_array().value) {
+    if (gid.type() == bsoncxx::type::k_int32)
+      proto_gid->Add(gid.get_int32());
+    else if (gid.type() == bsoncxx::type::k_int64)
+      proto_gid->Add(gid.get_int64());
+    else {
+      CRANE_LOGGER_ERROR(m_logger_, "gid type error");
+    }
+  }
+
+  step_info->set_craned_list(view["nodelist"].get_string().value.data());
+  step_info->set_node_num(view["nodes_alloc"].get_int32().value);
+
+  step_info->mutable_start_time()->set_seconds(
+      view["time_start"].get_int64().value);
+  step_info->mutable_end_time()->set_seconds(
+      view["time_end"].get_int64().value);
+
+  step_info->set_status(
+      static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value));
+  step_info->mutable_time_limit()->set_seconds(
+      view["timelimit"].get_int64().value);
+  step_info->mutable_submit_time()->set_seconds(
+      view["time_submit"].get_int64().value);
+  step_info->set_cwd(std::string(view["work_dir"].get_string().value));
+  if (view["submit_line"])
+    step_info->set_cmd_line(
+        std::string(view["submit_line"].get_string().value));
+  step_info->set_exit_code(view["exit_code"].get_int32().value);
+
+  step_info->set_type(
+      static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
+
+  step_info->set_extra_attr(view["extra_attr"].get_string().value.data());
+  *step_info->mutable_allocated_res_view() =
+      static_cast<crane::grpc::ResourceView>(
+          BsonToResourceV2(view["res_alloc"].get_document().value).View());
+  step_info->set_step_type(
+      static_cast<crane::grpc::StepType>(view["step_type"].get_int32().value));
+
+  if (step_info->type() == crane::grpc::Container) {
+    auto* meta_info = step_info->mutable_container_meta();
+    auto container_meta = BsonToContainerMeta(view);
+    *meta_info = std::move(
+        static_cast<crane::grpc::ContainerTaskAdditionalMeta>(container_meta));
+  }
 }
 
 void MongodbClient::CreateCollectionIndex(

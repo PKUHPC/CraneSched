@@ -20,8 +20,6 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <unordered_map>
-
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
 #include "CranedPublicDefs.h"
@@ -330,21 +328,24 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
+  job_id_t job_id = request->task_id();
+  step_id_t step_id = kDaemonStepId;
+  CRANE_INFO("[Step #{}.{}] Change step time limit to {} seconds.", job_id,
+             step_id, request->time_limit_seconds());
+  auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
   if (!stub) {
-    CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
+    CRANE_ERROR("[Step #{}.{}] Failed to get stub, no such step.", job_id,
+                step_id);
     return Status::OK;
   }
-
   auto err =
       stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
   if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
-                request->task_id(), kPrimaryStepId);
-    return Status::OK;
+    CRANE_ERROR("[Step #{}.{}] Failed to change time limit: {}.", job_id,
+                step_id, CraneErrStr(err));
+  } else {
+    response->set_ok(true);
   }
-  response->set_ok(true);
-
   return Status::OK;
 }
 
