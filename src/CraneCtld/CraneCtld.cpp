@@ -176,20 +176,12 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
-      if (config["PrologCranectld"]) {
-        g_config.ProLogs = absl::StrSplit(config["PrologCranectld"].as<std::string>(), ",");
-        for (auto& pro_log : g_config.ProLogs) {
-          absl::StripAsciiWhitespace(&pro_log);
-        }
-        std::ranges::sort(g_config.ProLogs, std::greater());
-      }
-      if (config["EpilogCranectld"]) {
-        g_config.EpiLogs = absl::StrSplit(config["EpilogCranectld"].as<std::string>(), ",");
-        for (auto& epi_log : g_config.EpiLogs) {
-          absl::StripAsciiWhitespace(&epi_log);
-        }
-        std::ranges::sort(g_config.EpiLogs, std::greater());
-      }
+      if (config["PrologCranectld"])
+        util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(), config_path, &g_config.ProLogs);
+
+      if (config["EpilogCranectld"])
+        util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(), config_path, &g_config.ProLogs);
+
       if (config["PrologTimeout"]) {
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
       }
