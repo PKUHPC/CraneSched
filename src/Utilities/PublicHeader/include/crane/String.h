@@ -26,6 +26,7 @@
 #include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
 #include <zlib.h>
+#include <glob.h>
 
 #include <charconv>
 #include <expected>
@@ -122,5 +123,7 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name,
   }
   return std::nullopt;
 }
+
+void ParseLogHookPaths(const std::string& log_hook_config, const std::string& config_file_path, std::vector<std::string>* result);
 
 }  // namespace util
