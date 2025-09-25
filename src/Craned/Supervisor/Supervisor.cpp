@@ -161,6 +161,15 @@ int InitFromStdin(int argc, char** argv) {
       std::filesystem::path(kDefaultSupervisorUnixSockDir) /
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
+  g_config.TaskPrologs.reserve(msg.task_prologs_size());
+  for (const auto& task_prolog : msg.task_prologs()) {
+    g_config.TaskPrologs.emplace_back(task_prolog);
+  }
+  g_config.TaskEpilogs.reserve(msg.task_epilogs_size());
+  for (const auto& task_epilog : msg.task_epilogs()) {
+    g_config.TaskEpilogs.emplace_back(task_epilog);
+  }
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,

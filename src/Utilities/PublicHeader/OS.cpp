@@ -455,8 +455,8 @@ RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
 
         std::vector<char*> envp;
         if (!run_command_args.envs.empty()) {
-            for (const auto& env : run_command_args.envs)
-                envp.push_back(const_cast<char*>(env.c_str()));
+            for (const auto& [k, v] : run_command_args.envs)
+                envp.push_back(fmt::format("{}={}", k, v).data());
             envp.push_back(nullptr);
         }
 

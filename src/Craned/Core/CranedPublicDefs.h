@@ -175,6 +175,9 @@ struct Config {
   uint32_t EpilogTimeout{0};
   uint32_t PrologEpilogTimeout{0};
   std::unordered_set<std::string> PrologFlags;
+
+  std::vector<std::string> TaskPrologs;
+  std::vector<std::string> TaskEpilogs;
 };
 
 inline Config g_config{};
