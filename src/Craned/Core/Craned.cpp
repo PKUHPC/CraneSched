@@ -696,6 +696,22 @@ void ParseConfig(int argc, char** argv) {
           }
         }
       }
+
+      if (config["Prolog"])
+        util::ParseLogHookPaths(config["Prolog"].as<std::string>(), kDefaultConfigPath, &g_config.ProLogs);
+
+      if (config["Epilog"])
+        util::ParseLogHookPaths(config["Epilog"].as<std::string>(), kDefaultConfigPath, &g_config.EpiLogs);
+
+      if (config["PrologTimeout"])
+        g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
+
+      if (config["EpilogTimeout"])
+        g_config.EpilogTimeout = config["EpilogTimeout"].as<uint32_t>();
+
+      if (config["PrologEpilogTimeout"])
+        g_config.PrologEpilogTimeout = config["PrologEpilogTimeout"].as<uint32_t>();
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());

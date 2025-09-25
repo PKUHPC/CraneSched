@@ -1023,6 +1023,30 @@ void JobManager::ActivateTaskStatusChangeAsync_(
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
   m_task_status_change_async_handle_->send();
+  // TODO: fixme
+  auto env_map = m_job_map_.GetValueExclusivePtr(task_id)->GetJobEnvMap();
+  for (const auto& prolog : g_config.EpiLogs) {
+    RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = env_map, .run_uid = 0};
+    CRANE_TRACE("Running Epilog: {} as UID {} ",
+      prolog, run_prolog_ctld_args.run_uid);
+    auto result = util::os::RunCommand(run_prolog_ctld_args);
+    if (result.time_out) {
+      CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
+                  prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
+    }
+    if (result.term_signal != 0) {
+      CRANE_INFO("Epilog '{}' killed by signal {}. Output: {}",
+                  prolog, result.term_signal, result.output.c_str());
+    }
+    if (result.exit_code != 0) {
+      CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
+                  prolog, result.exit_code, result.output.c_str());
+    }
+
+    CRANE_INFO("Epilog '{}' finished successfully. Output: {}",
+                 prolog, result.output.c_str());
+  }
+
 }
 
 /**

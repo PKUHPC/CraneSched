@@ -48,7 +48,7 @@ struct NodeSpecInfo {
 struct RunCommandArgs {
   std::string program;
   std::vector<std::string> args;
-  std::vector<std::string> envs;
+  std::unordered_map<std::string, std::string> envs;
   uint32_t timeout_sec;
   int run_uid;
   int run_gid;
