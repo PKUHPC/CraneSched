@@ -116,6 +116,14 @@ void InitFromStdin(int argc, char** argv) {
 
   g_config.SupervisorLogFile = std::filesystem::path(msg.log_dir()) /
                                fmt::format("{}.log", g_config.JobId);
+  g_config.TaskPrologs.reserve(msg.task_prologs_size());
+  for (const auto& task_prolog : msg.task_prologs()) {
+    g_config.TaskPrologs.emplace_back(task_prolog);
+  }
+  g_config.TaskEpilogs.reserve(msg.task_epilogs_size());
+  for (const auto& task_epilog : msg.task_epilogs()) {
+    g_config.TaskEpilogs.emplace_back(task_epilog);
+  }
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
