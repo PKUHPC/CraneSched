@@ -162,7 +162,7 @@ message CancelTaskRequest {
   uint32 operator_uid = 1;
 
   // Filters
-  repeated uint32 filter_task_ids = 2;
+  map<uint32, JobStepIds> filter_ids = 2;
   string filter_partition = 3;
   string filter_account = 4;
   TaskStatus filter_state = 5;
@@ -172,9 +172,13 @@ message CancelTaskRequest {
 }
 
 message CancelTaskReply {
-  repeated uint32 cancelled_tasks = 2;
-  repeated uint32 not_cancelled_tasks = 3;
-  repeated string not_cancelled_reasons = 4;
+  map<uint32, JobStepIds> cancelled_steps = 1;
+  message NotCancelledJobSteps {
+    string reason = 1;
+    repeated uint32 step_ids = 2;
+    repeated string step_reasons = 3;
+  }
+  map<uint32, NotCancelledJobSteps> not_cancelled_job_steps = 2;
 }
 
 message QueryStepFromPortRequest {
@@ -484,13 +488,13 @@ message QueryClusterInfoReply {
 }
 
 message QueryTasksInfoRequest {
-  repeated uint32 filter_task_ids = 1;
+  map<uint32 /*JobId*/, JobStepIds> filter_ids = 1;
   repeated string filter_partitions = 2;
   uint32 num_limit = 3;
   repeated string filter_task_names = 4;
   repeated string filter_qos = 5;
 
-  repeated TaskStatus filter_task_states = 6;
+  repeated TaskStatus filter_states = 6;
   repeated string filter_users = 7;
   repeated string filter_accounts = 8;
   TimeInterval filter_submit_time_interval = 9;
@@ -622,6 +626,7 @@ message StreamCforedRequest {
   enum CforedRequestType {
     CFORED_REGISTRATION = 0;
     TASK_REQUEST = 1;
+    STEP_REQUEST = 4;
     TASK_COMPLETION_REQUEST = 2;
     CFORED_GRACEFUL_EXIT = 3;
   }
@@ -635,6 +640,12 @@ message StreamCforedRequest {
     string cfored_name = 1;
     int32 pid = 2;
     TaskToCtld task = 3;
+  }
+
+  message StepReq {
+    string cfored_name = 1;
+    int32 pid = 2;
+    StepToCtld step = 3;
   }
 
   message TaskCompleteReq {
@@ -652,6 +663,7 @@ message StreamCforedRequest {
   oneof payload {
     CforedReg payload_cfored_reg = 2;
     TaskReq payload_task_req = 3;
+    StepReq payload_step_req = 6;
     TaskCompleteReq payload_task_complete_req = 4;
     GracefulExitReq payload_graceful_exit_req = 5;
   }
@@ -718,6 +730,7 @@ message StreamCtldReply {
 message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
+    STEP_REQUEST = 4;
     TASK_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
     TASK_X11_FORWARD = 3;
@@ -726,6 +739,11 @@ message StreamCrunRequest {
   message TaskReq {
     int32 crun_pid = 1;
     TaskToCtld task = 2;
+  }
+
+  message StepReq {
+    int32 crun_pid = 1;
+    StepToCtld step = 2;
   }
 
   message TaskCompleteReq {
@@ -745,6 +763,7 @@ message StreamCrunRequest {
 
   oneof payload {
     TaskReq payload_task_req = 2;
+    StepReq payload_step_req = 6;
     TaskCompleteReq payload_task_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
     TaskX11ForwardReq payload_task_x11_forward_req = 5;

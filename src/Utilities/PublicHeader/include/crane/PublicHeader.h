@@ -241,7 +241,8 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 75 - 79
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
-        "Invalid username"
+        "Invalid username",
+        "Invalid job id"
     };
 // clang-format on
 }  // namespace Internal
@@ -442,6 +443,7 @@ class ResourceV2 {
 
   bool IsZero() const;
   void SetToZero();
+  ResourceView View() const noexcept;
 
   std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
     return each_node_res_map;
