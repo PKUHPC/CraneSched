@@ -401,7 +401,8 @@ message TaskInfo {
   string reservation = 22;
 
   string container = 23;
-  /* 24-29 Reserved */
+  map<uint32, StepInfo> step_info = 24;
+  /* 25-29 Reserved */
 
   // Dynamic task information
   bool held = 30;
@@ -427,17 +428,18 @@ message TaskInfo {
 message StepInfo {
   // Static step information
   TaskType type = 1;
-  uint32 job_id = 2;
-  uint32 step_id = 3;
-  string name = 4;
+  StepType step_type = 2;
+  uint32 job_id = 3;
+  uint32 step_id = 4;
+  string name = 5;
 
-  uint32 uid = 5;
-  repeated uint32 gid = 6;
+  uint32 uid = 6;
+  repeated uint32 gid = 7;
 
-  google.protobuf.Duration time_limit = 7;
-  google.protobuf.Timestamp start_time = 8;
-  google.protobuf.Timestamp end_time = 9;
-  google.protobuf.Timestamp submit_time = 10;
+  google.protobuf.Duration time_limit = 8;
+  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp end_time = 10;
+  google.protobuf.Timestamp submit_time = 11;
 
   uint32 node_num = 12;
   string cmd_line = 13;
@@ -456,7 +458,6 @@ message StepInfo {
   TaskStatus status = 31;
 
   uint32 exit_code = 33;
-  uint32 priority = 34;
   oneof pending_reason_or_craned_list {
     string pending_reason = 35;
     string craned_list = 36;

@@ -32,6 +32,8 @@ using step_db_id_t = int64_t;
 // *****************************************************
 // TaskScheduler Constants
 
+constexpr step_id_t kPrimaryStepId = 1;
+
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
 
 // Clean TaskHoldTimerQueue when timeout or exceeding batch num
@@ -295,9 +297,9 @@ struct PartitionMeta {
   std::unordered_set<CranedId> craned_ids;
 };
 
-struct InteractiveMetaInTask {
-  InteractiveMetaInTask() = default;
-  InteractiveMetaInTask& operator=(const InteractiveMetaInTask& other) {
+struct InteractiveMeta {
+  InteractiveMeta() = default;
+  InteractiveMeta& operator=(const InteractiveMeta& other) {
     interactive_type = other.interactive_type;
     cb_task_res_allocated = other.cb_task_res_allocated;
     cb_task_completed = other.cb_task_completed;
@@ -308,7 +310,7 @@ struct InteractiveMetaInTask {
     return *this;
   }
 
-  InteractiveMetaInTask(const InteractiveMetaInTask& other) {
+  InteractiveMeta(const InteractiveMeta& other) {
     interactive_type = other.interactive_type;
     cb_task_res_allocated = other.cb_task_res_allocated;
     cb_task_completed = other.cb_task_completed;
@@ -319,14 +321,28 @@ struct InteractiveMetaInTask {
   }
   crane::grpc::InteractiveTaskType interactive_type;
 
-  std::function<void(task_id_t, std::string const&,
-                     std::vector<std::string> const&)>
-      cb_task_res_allocated;
+  struct StepResAllocArgs {
+    job_id_t job_id;
+    step_id_t step_id;
+    std::expected<std::pair<std::string, std::unordered_set<CranedId>>,
+                  std::string>
+        allocated_nodes;
+  };
+  std::function<void(StepResAllocArgs const&)> cb_task_res_allocated;
 
-  std::function<void(task_id_t, bool)> cb_task_completed;
+  struct StepCompeteArgs {
+    job_id_t job_id;
+    step_id_t step_id;
+    bool send_completion_ack;
+  };
+  std::function<void(StepCompeteArgs)> cb_task_completed;
 
+  struct StepCancelArgs {
+    job_id_t job_id;
+    step_id_t step_id;
+  };
   // This will ask front end like crun/calloc to exit
-  std::function<void(task_id_t)> cb_task_cancel;
+  std::function<void(StepCancelArgs)> cb_task_cancel;
 
   // ccancel for an interactive CALLOC task should call the front end to kill
   // the user's shell, let Cfored to inform CraneCtld of task completion rather
@@ -351,15 +367,9 @@ struct InteractiveMetaInTask {
   std::atomic<bool> has_been_terminated_on_craned{false};
 };
 
-struct BatchMetaInTask {
-  std::string sh_script;
-  std::string interpreter;
-  std::string output_file_pattern;
-  std::string error_file_pattern;
-};
 struct TaskInCtld;
 
-using StepInteractiveMeta = InteractiveMetaInTask;
+using StepInteractiveMeta = InteractiveMeta;
 
 struct StepInCtld {
   /**
@@ -367,6 +377,7 @@ struct StepInCtld {
    * cancel.
    */
   crane::grpc::TaskType type;
+  TaskInCtld* job;
 
   job_id_t job_id;
 
@@ -380,6 +391,7 @@ struct StepInCtld {
   bool requeue_if_failed{false};
   bool get_user_env{false};
   std::unordered_map<std::string, std::string> env;
+  std::string extra_attr;
   std::string container;
 
   absl::Duration time_limit;
@@ -500,6 +512,12 @@ struct StepInCtld {
                              crane::grpc::StepInEmbeddedDb const& step_in_db);
   [[nodiscard]] virtual crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const = 0;
+
+  // Helper function to set the fields of StepInfo using info in
+  // StepInCtld. Note that mutable_elapsed_time() is not set here for
+  // performance reason. The caller should set it manually.
+  virtual void SetFieldsOfStepInfo(
+      crane::grpc::StepInfo* step_info) const noexcept;
 };
 
 struct DaemonStepInCtld : StepInCtld {
@@ -516,6 +534,8 @@ struct DaemonStepInCtld : StepInCtld {
 
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
+  void SetFieldsOfStepInfo(
+      crane::grpc::StepInfo* step_info) const noexcept override;
 };
 
 struct CommonStepInCtld : StepInCtld {
@@ -524,9 +544,6 @@ struct CommonStepInCtld : StepInCtld {
   std::string cmd_line;
   std::string cwd;
 
-  std::string extra_attr;
-
-  // TODO: fill this field
   std::optional<StepInteractiveMeta> ia_meta;
 
   /* -----------
@@ -544,6 +561,8 @@ struct CommonStepInCtld : StepInCtld {
       const CranedId& craned_id) const override;
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
+  void SetFieldsOfStepInfo(
+      crane::grpc::StepInfo* step_info) const noexcept override;
 };
 
 struct TaskInCtld {
@@ -580,7 +599,7 @@ struct TaskInCtld {
 
   std::string extra_attr;
 
-  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+  std::optional<InteractiveMeta> ia_meta;
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
@@ -749,6 +768,9 @@ struct TaskInCtld {
   }
 
   CommonStepInCtld* GetStep(step_id_t step) const {
+    if (m_primary_step_ && m_primary_step_->StepId() == step) {
+      return m_primary_step_.get();
+    }
     if (m_steps_.contains(step)) {
       return m_steps_.at(step).get();
     }

@@ -657,28 +657,6 @@ void TaskScheduler::TaskStatusChangeThread_(
   uvw_loop->run();
 }
 
-void TaskScheduler::StepExecThread_(
-    const std::shared_ptr<uvw::loop>& uvw_loop) {
-  util::SetCurrentThreadName("StepExecThr");
-
-  std::shared_ptr<uvw::idle_handle> idle_handle =
-      uvw_loop->resource<uvw::idle_handle>();
-  idle_handle->on<uvw::idle_event>(
-      [this](const uvw::idle_event&, uvw::idle_handle& h) {
-        if (m_thread_stop_) {
-          h.parent().walk([](auto&& h) { h.close(); });
-          h.parent().stop();
-        }
-        std::this_thread::sleep_for(50ms);
-      });
-
-  if (idle_handle->start() != 0) {
-    CRANE_ERROR("Failed to start the idle event in StepExec loop.");
-  }
-
-  uvw_loop->run();
-}
-
 void TaskScheduler::CleanResvThread_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
   util::SetCurrentThreadName("CleanResvThr");
@@ -1057,7 +1035,7 @@ void TaskScheduler::ScheduleThread_() {
           }
           CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
                       util::StepToDRangeIdString(steps), craned_id,
-                      CraneErrStr(err), craned_id);
+                      CraneErrStr(err));
 
           thread_pool_mtx.Lock();
           for (const auto& step_to_d : steps)
@@ -1125,11 +1103,6 @@ void TaskScheduler::ScheduleThread_() {
 
       // Set succeed tasks status and do callbacks.
       for (auto& job : jobs_created) {
-        if (job->type == crane::grpc::Interactive) {
-          const auto& meta = std::get<InteractiveMetaInTask>(job->meta);
-          std::get<InteractiveMetaInTask>(job->meta).cb_task_res_allocated(
-              job->TaskId(), job->allocated_craneds_regex, job->CranedIds());
-        }
 
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_mtx_.Lock();
@@ -1449,12 +1422,11 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
-  task_id_t task_id = task->TaskId();
-
+CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
+  auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
-  if (task->type == crane::grpc::Interactive) {
-    auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+  if (step->type == crane::grpc::Interactive) {
+    auto& meta = common_step->ia_meta.value();
     if (!meta.has_been_terminated_on_craned) {
       meta.has_been_terminated_on_craned = true;
       need_to_be_terminated = true;
@@ -1464,10 +1436,10 @@ CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   }
 
   if (need_to_be_terminated) {
-    for (CranedId const& craned_id : task->executing_craned_ids) {
+    for (CranedId const& craned_id : step->ExecutionNodes()) {
       m_cancel_task_queue_.enqueue(
-          CancelRunningTaskQueueElem{.job_id = task_id,
-                                     .step_id = kDaemonStepId,
+          CancelRunningTaskQueueElem{.job_id = step->job_id,
+                                     .step_id = step->StepId(),
                                      .craned_id = craned_id});
       m_cancel_task_async_handle_->send();
     }
@@ -1492,52 +1464,63 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   }
 
   auto rng_filter_state = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     return request.filter_state() == crane::grpc::Invalid ||
            task->Status() == request.filter_state();
   };
 
   auto rng_filter_partition = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     return request.filter_partition().empty() ||
            task->partition_id == request.filter_partition();
   };
 
   auto rng_filter_account = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     return request.filter_account().empty() ||
            task->account == request.filter_account();
   };
 
   auto rng_filter_task_name = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     return request.filter_task_name().empty() ||
            task->name == request.filter_task_name();
   };
 
   auto rng_filter_user_name = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     return filter_uname.empty() || task->Username() == filter_uname;
   };
 
-  std::unordered_set<uint32_t> filter_task_ids_set(
-      request.filter_task_ids().begin(), request.filter_task_ids().end());
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> filter_ids;
+  for (auto& [job_id, step_ids] : request.filter_ids()) {
+    filter_ids[job_id].insert(step_ids.steps().begin(), step_ids.steps().end());
+  }
   auto rng_filer_task_ids = [&](auto& it) {
-    if (request.filter_task_ids().empty()) return true;
+    auto* task = it.second.get();
+    if (request.filter_ids().empty()) return true;
 
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto iter = filter_ids.find(task->TaskId());
+    if (iter == filter_ids.end()) {
+      auto& not_found_jobs = *reply.mutable_not_cancelled_job_steps();
+      not_found_jobs[task->TaskId()];
+      return false;
+    } else if (task->Status() == crane::grpc::TaskStatus::Pending)
+      for (auto step_id : iter->second) {
+        auto& not_cancelled_job_steps =
+            (*reply.mutable_not_cancelled_job_steps())[task->TaskId()];
+        not_cancelled_job_steps.mutable_step_ids()->Add(step_id);
+        not_cancelled_job_steps.mutable_step_reasons()->Add(
+            "Invalid Step For Pending Job");
+      }
 
-    auto iter = filter_task_ids_set.find(task->TaskId());
-    if (iter == filter_task_ids_set.end()) return false;
-
-    filter_task_ids_set.erase(iter);
     return true;
   };
 
   std::unordered_set<std::string> filter_nodes_set(
       std::begin(request.filter_nodes()), std::end(request.filter_nodes()));
   auto rng_filter_nodes = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    auto* task = it.second.get();
     if (request.filter_nodes().empty()) return true;
 
     for (const auto& node : task->CranedIds())
@@ -1546,22 +1529,26 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     return false;
   };
 
-  auto rng_transformer_id = [](auto& it) { return it.first; };
+  auto rng_get_job_id = [&](auto& it) {
+    auto* task = it.second.get();
+    return task->TaskId();
+  };
 
-  auto fn_cancel_pending_task = [&](task_id_t task_id) {
+  auto fn_cancel_pending_task = [&](auto task_id) {
     CRANE_TRACE("Cancelling pending task #{}", task_id);
 
     auto it = m_pending_task_map_.find(task_id);
     CRANE_ASSERT(it != m_pending_task_map_.end());
-    TaskInCtld* task = it->second.get();
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
-        operator_uid, task->Username(), false);
+        operator_uid, it->second->Username(), false);
     if (!result) {
-      reply.add_not_cancelled_tasks(task_id);
-      reply.add_not_cancelled_reasons("Permission Denied");
+      auto& not_cancelled_job =
+          (*reply.mutable_not_cancelled_job_steps())[task_id];
+      not_cancelled_job.set_reason("Permission Denied");
     } else {
-      reply.add_cancelled_tasks(task_id);
+      auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+      cancelled_job_steps[task_id];
 
       m_cancel_task_queue_.enqueue(
           CancelPendingTaskQueueElem{std::move(it->second)});
@@ -1572,36 +1559,53 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   };
 
   auto fn_cancel_running_task = [&](auto& it) {
-    task_id_t task_id = it.first;
     TaskInCtld* task = it.second.get();
+    task_id_t task_id = task->TaskId();
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, task->Username(), false);
     if (!result) {
-      reply.add_not_cancelled_tasks(task_id);
-      reply.add_not_cancelled_reasons("Permission Denied");
+      auto& not_cancelled_job =
+          (*reply.mutable_not_cancelled_job_steps())[task_id];
+      not_cancelled_job.set_reason("Permission Denied");
     } else {
-      if (task->type == crane::grpc::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        if (!meta.has_been_cancelled_on_front_end) {
-          meta.has_been_cancelled_on_front_end = true;
-          meta.cb_task_cancel(task_id);
+      std::vector<CommonStepInCtld*> cancel_steps;
+      if (filter_ids.contains(task_id) && !filter_ids[task_id].empty()) {
+        // cancel step
+        for (step_id_t step_id : filter_ids[task_id]) {
+          StepInCtld* step = task->GetStep(step_id);
+          if (!step) {
+            auto& not_found_jobs = *reply.mutable_not_cancelled_job_steps();
+            not_found_jobs[task_id].mutable_step_ids()->Add(step_id);
+            not_found_jobs[task_id].mutable_step_reasons()->Add("Invalid Step");
+          } else {
+            cancel_steps.push_back(static_cast<CommonStepInCtld*>(step));
+          }
         }
-        reply.add_cancelled_tasks(task_id);
+
       } else {
-        CraneErrCode err = TerminateRunningTaskNoLock_(task);
-        if (err == CraneErrCode::SUCCESS) {
-          reply.add_cancelled_tasks(task_id);
+        // cancel job
+        cancel_steps.push_back(task->PrimaryStep());
+      }
+      for (CommonStepInCtld* step : cancel_steps) {
+        if (step->type == crane::grpc::Interactive) {
+          auto& meta = step->ia_meta.value();
+          if (!meta.has_been_cancelled_on_front_end) {
+            meta.has_been_cancelled_on_front_end = true;
+            meta.cb_task_cancel({step->job_id, step->StepId()});
+          }
         } else {
-          reply.add_not_cancelled_tasks(task_id);
-          reply.add_not_cancelled_reasons(CraneErrStr(err).data());
+          TerminateRunningStepNoLock_(step);
         }
+        auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+        auto& job_steps = cancelled_job_steps[task_id];
+        if (step->StepType() != crane::grpc::StepType::PRIMARY)
+          job_steps.add_steps(step->StepId());
       }
     }
   };
-
   auto joined_filters = ranges::views::filter(rng_filter_state) |
                         ranges::views::filter(rng_filter_partition) |
                         ranges::views::filter(rng_filter_account) |
@@ -1610,28 +1614,19 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
                         ranges::views::filter(rng_filer_task_ids) |
                         ranges::views::filter(rng_filter_nodes);
 
-  std::vector<task_id_t> to_cancel_pd_task_ids;
+  auto pending_task_id_rng = m_pending_task_map_ | joined_filters |
+                             ranges::views::transform(rng_get_job_id);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
-  auto pending_task_id_rng = m_pending_task_map_ | joined_filters |
-                             ranges::views::transform(rng_transformer_id);
-
   // Evaluate immediately. fn_cancel_pending_task will change the contents
-  // of m_pending_task_map_ and invalidate the end() of pending_task_id_rng.
-  to_cancel_pd_task_ids =
-      pending_task_id_rng | ranges::to<std::vector<task_id_t>>;
-  ranges::for_each(to_cancel_pd_task_ids, fn_cancel_pending_task);
+  // of m_pending_task_map_ and invalidate the end() of
+  // pending_task_rng.
+  ranges::for_each(pending_task_id_rng, fn_cancel_pending_task);
 
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
-
-  // We want to show error message for non-existent task ids.
-  for (const auto& id : filter_task_ids_set) {
-    reply.add_not_cancelled_tasks(id);
-    reply.add_not_cancelled_reasons("Not Found");
-  }
 
   return reply;
 }
@@ -2152,19 +2147,19 @@ void TaskScheduler::CleanCancelQueueCb_() {
     g_account_meta_container->FreeQosResource(*task);
 
     if (task->type == crane::grpc::Interactive) {
-      auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      auto& meta = task->ia_meta.value();
       // Cancel request may not come from crun/calloc but from ccancel,
       // ask them to exit
       if (!meta.has_been_cancelled_on_front_end) {
         meta.has_been_cancelled_on_front_end = true;
-        g_thread_pool->detach_task([cb = meta.cb_task_cancel,
-                                    task_id = task->TaskId()] { cb(task_id); });
+        g_thread_pool->detach_task(
+            [cb = meta.cb_task_cancel, job_id = task->TaskId(),
+             step_id = kPrimaryStepId] { cb({job_id, step_id}); });
       } else {
         // Cancel request from crun/calloc, reply CompletionAck
         g_thread_pool->detach_task(
-            [cb = meta.cb_task_completed, task_id = task->TaskId()] {
-              cb(task_id, true);
-            });
+            [cb = meta.cb_task_completed, job_id = task->TaskId(),
+             step_id = kPrimaryStepId] { cb({job_id, step_id, true}); });
       }
     }
   }
@@ -2332,6 +2327,16 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
           context->rn_step_raw_ptrs.erase(step);
           break;
         }
+        g_embedded_db_client->AppendSteps({primary_step.get()});
+        if (primary_step->type == crane::grpc::Interactive) {
+          const auto& meta = primary_step->ia_meta.value();
+          meta.cb_task_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+              .job_id = step->job_id,
+              .step_id = step->StepId(),
+              .allocated_nodes{std::make_pair(
+                  job->allocated_craneds_regex,
+                  job->CranedIds() | std::ranges::to<std::unordered_set>())}});
+        }
         job->SetPrimaryStep(std::move(primary_step));
         for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
           context->craned_step_alloc_map[node_id].emplace_back(
@@ -2474,6 +2479,23 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
 
   // Step finish: configure failed or execution status change
   if (step_finished || step_configure_failed) {
+    if (step->ia_meta.has_value()) {
+      auto meta = step->ia_meta.value();
+      if (!meta.has_been_cancelled_on_front_end) {
+        meta.has_been_cancelled_on_front_end = true;
+        meta.cb_task_cancel({.job_id = job->TaskId(), .step_id = step_id});
+        // Completion ack will send in grpc server triggered by task complete
+        // req
+        meta.cb_task_completed({.job_id = job->TaskId(),
+                                .step_id = step_id,
+                                .send_completion_ack = false});
+      } else {
+        // Send Completion Ack to frontend now.
+        meta.cb_task_completed({.job_id = job->TaskId(),
+                                .step_id = step_id,
+                                .send_completion_ack = true});
+      }
+    }
     if (step->ConfigureFailed()) {
       CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
                  step->StepId());
@@ -2581,8 +2603,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
     if (step_id == kDaemonStepId) {
-      // job finish if all daemon step sent complete status or some daemon step
-      // failed to configure.
+      // job finish if all daemon step sent complete status or some daemon
+      // step failed to configure.
       job_finished_status = DaemonStepStatusChangeHandler_(
           new_status, task.get(), craned_index, &context);
     } else {
@@ -2592,36 +2614,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     if (job_finished_status.has_value()) {
       // Job status set CommonStepStatusChangeHandler_
-      if (task->type == crane::grpc::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        // if (meta.interactive_type == crane::grpc::Crun) {  // Crun
-        //   if (++meta.status_change_cnt < task->executing_craned_ids.size()) {
-        //     CRANE_TRACE(
-        //         "{}/{} TaskStatusChanges of Crun task #{} were received. "
-        //         "Keep waiting...",
-        //         meta.status_change_cnt, task->executing_craned_ids.size(),
-        //         task->TaskId());
-        //     continue;
-        //   }
-        // }
-
-        // TaskStatusChange may indicate the time limit has been reached and
-        // the task has been terminated. No more TerminateTask RPC should be
-        // sent to the craned node if any further CancelTask or
-        // TaskCompletionRequest RPC is received.
-
-        // Task end triggered by craned.
-        if (!meta.has_been_cancelled_on_front_end) {
-          meta.has_been_cancelled_on_front_end = true;
-          meta.cb_task_cancel(task->TaskId());
-          // Completion ack will send in grpc server triggered by task complete
-          // req
-          meta.cb_task_completed(task->TaskId(), false);
-        } else {
-          // Send Completion Ack to frontend now.
-          meta.cb_task_completed(task->TaskId(), true);
-        }
-      }
 
       task->SetStatus(job_finished_status.value());
       task->SetExitCode(task->PrimaryStepExitCode());
@@ -2895,16 +2887,9 @@ void TaskScheduler::QueryTasksInRam(
   auto now = absl::Now();
 
   auto* task_list = response->mutable_task_info_list();
-  auto append_fn = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    auto* task_it = task_list->Add();
-    task.SetFieldsOfTaskInfo(task_it);
-    task_it->mutable_elapsed_time()->set_seconds(
-        ToInt64Seconds(now - task.StartTime()));
-  };
 
-  auto task_rng_filter_time = [&](auto& it) {
-    TaskInCtld& task = *it.second;
+  auto task_rng_filter_time = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
     bool has_submit_time_interval = request->has_filter_submit_time_interval();
     bool has_start_time_interval = request->has_filter_start_time_interval();
     bool has_end_time_interval = request->has_filter_end_time_interval();
@@ -2913,25 +2898,25 @@ void TaskScheduler::QueryTasksInRam(
     if (has_submit_time_interval) {
       const auto& interval = request->filter_submit_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.RuntimeAttr().submit_time() >= interval.lower_bound();
+               job.RuntimeAttr().submit_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.RuntimeAttr().submit_time() <= interval.upper_bound();
+               job.RuntimeAttr().submit_time() <= interval.upper_bound();
     }
 
     if (has_start_time_interval) {
       const auto& interval = request->filter_start_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.RuntimeAttr().start_time() >= interval.lower_bound();
+               job.RuntimeAttr().start_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.RuntimeAttr().start_time() <= interval.upper_bound();
+               job.RuntimeAttr().start_time() <= interval.upper_bound();
     }
 
     if (has_end_time_interval) {
       const auto& interval = request->filter_end_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.RuntimeAttr().end_time() >= interval.lower_bound();
+               job.RuntimeAttr().end_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.RuntimeAttr().end_time() <= interval.upper_bound();
+               job.RuntimeAttr().end_time() <= interval.upper_bound();
     }
 
     return valid;
@@ -2940,84 +2925,140 @@ void TaskScheduler::QueryTasksInRam(
   bool no_accounts_constraint = request->filter_accounts().empty();
   std::unordered_set<std::string> req_accounts(
       request->filter_accounts().begin(), request->filter_accounts().end());
-  auto task_rng_filter_account = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_accounts_constraint || req_accounts.contains(task.account);
+  auto task_rng_filter_account = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
+    return no_accounts_constraint || req_accounts.contains(job.account);
   };
 
   bool no_username_constraint = request->filter_users().empty();
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
-  auto task_rng_filter_username = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_username_constraint || req_users.contains(task.Username());
+  auto task_rng_filter_username = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
+    return no_username_constraint || req_users.contains(job.Username());
   };
 
   bool no_qos_constraint = request->filter_qos().empty();
   std::unordered_set<std::string> req_qos(request->filter_qos().begin(),
                                           request->filter_qos().end());
-  auto task_rng_filter_qos = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_qos_constraint || req_qos.contains(task.qos);
+  auto task_rng_filter_qos = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
+    return no_qos_constraint || req_qos.contains(job.qos);
   };
 
   bool no_task_names_constraint = request->filter_task_names().empty();
   std::unordered_set<std::string> req_task_names(
       request->filter_task_names().begin(), request->filter_task_names().end());
-  auto task_rng_filter_name = [&](auto& it) {
-    TaskInCtld& task = *it.second;
+  auto task_rng_filter_name = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
     return no_task_names_constraint ||
-           req_task_names.contains(task.TaskToCtld().name());
+           req_task_names.contains(job.TaskToCtld().name());
   };
 
   bool no_partitions_constraint = request->filter_partitions().empty();
   std::unordered_set<std::string> req_partitions(
       request->filter_partitions().begin(), request->filter_partitions().end());
-  auto task_rng_filter_partition = [&](auto& it) {
-    TaskInCtld& task = *it.second;
+  auto task_rng_filter_partition = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
     return no_partitions_constraint ||
-           req_partitions.contains(task.partition_id);
+           req_partitions.contains(job.partition_id);
   };
 
-  bool no_task_ids_constraint = request->filter_task_ids().empty();
-  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
-                                            request->filter_task_ids().end());
-  auto task_rng_filter_id = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
-  };
+  bool no_ids_constraint = request->filter_ids().empty();
 
-  bool no_task_states_constraint = request->filter_task_states().empty();
-  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
-                                          request->filter_task_states().end());
-  auto task_rng_filter_state = [&](auto& it) {
-    TaskInCtld& task = *it.second;
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> req_steps;
+  for (auto& [job_id, step_ids] : request->filter_ids()) {
+    req_steps[job_id] = std::unordered_set<step_id_t>(step_ids.steps().begin(),
+                                                      step_ids.steps().end());
+  }
+
+  bool no_task_states_constraint = request->filter_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_states().begin(),
+                                          request->filter_states().end());
+  auto task_rng_filter_state = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
     return no_task_states_constraint ||
-           req_task_states.contains(task.RuntimeAttr().status());
+           req_task_states.contains(job.RuntimeAttr().status());
+  };
+
+  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
+                                               : request->num_limit();
+
+  auto append_step_fn = [&](auto* step_info_map, StepInCtld* step) {
+    if (!step) return;
+    if (step->Status() == crane::grpc::TaskStatus::Pending) return;
+    if (no_ids_constraint || req_steps[step->job_id].empty() ||
+        req_steps[step->job_id].contains(step->StepId())) {
+      crane::grpc::StepInfo step_info;
+      step->SetFieldsOfStepInfo(&step_info);
+      step_info.mutable_elapsed_time()->set_seconds(
+          ToInt64Seconds(now - step->StartTime()));
+      step_info_map->emplace(step->StepId(), std::move(step_info));
+    }
+  };
+
+  auto append_fn = [&](auto* job_ptr) {
+    TaskInCtld& job = *job_ptr;
+    auto* task_it = task_list->Add();
+    job.SetFieldsOfTaskInfo(task_it);
+    task_it->mutable_elapsed_time()->set_seconds(
+        ToInt64Seconds(now - job.StartTime()));
+
+    auto* proto_steps = task_it->mutable_step_info();
+    append_step_fn(proto_steps, job.DaemonStep());
+    append_step_fn(proto_steps, job.PrimaryStep());
+
+    for (auto& step : job.Steps() | std::views::values) {
+      append_step_fn(proto_steps, step.get());
+    }
+  };
+
+  auto joined_filters = ranges::views::filter(task_rng_filter_account) |
+                        ranges::views::filter(task_rng_filter_name) |
+                        ranges::views::filter(task_rng_filter_partition) |
+                        ranges::views::filter(task_rng_filter_state) |
+                        ranges::views::filter(task_rng_filter_username) |
+                        ranges::views::filter(task_rng_filter_time) |
+                        ranges::views::filter(task_rng_filter_qos) |
+                        ranges::views::take(num_limit);
+
+  auto get_job_ptr_by_id = [&](auto& job_id) -> TaskInCtld* {
+    {
+      auto job_it = m_pending_task_map_.find(job_id);
+      if (job_it != m_pending_task_map_.end()) {
+        return job_it->second.get();
+      }
+    }
+
+    {
+      auto job_it = m_running_task_map_.find(job_id);
+      if (job_it != m_running_task_map_.end()) {
+        return job_it->second.get();
+      }
+    }
+    return nullptr;
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
-                                               : request->num_limit();
+  ranges::any_view<TaskInCtld*, ranges::category::forward> filtered_job_rng =
+      req_steps | ranges::views::keys | ranges::views::common |
+      ranges::views::transform(get_job_ptr_by_id) |
+      ranges::views::filter([](auto* job_ptr) { return job_ptr != nullptr; });
 
-  auto filtered_rng = pd_r_rng |
-                      ranges::views::filter(task_rng_filter_account) |
-                      ranges::views::filter(task_rng_filter_name) |
-                      ranges::views::filter(task_rng_filter_partition) |
-                      ranges::views::filter(task_rng_filter_id) |
-                      ranges::views::filter(task_rng_filter_state) |
-                      ranges::views::filter(task_rng_filter_username) |
-                      ranges::views::filter(task_rng_filter_time) |
-                      ranges::views::filter(task_rng_filter_qos) |
-                      ranges::views::take(num_limit);
+  ranges::any_view<TaskInCtld*, ranges::category::forward> all_job_rng =
+      pd_r_rng |
+      ranges::views::transform([](auto& it) { return it.second.get(); }) |
+      joined_filters;
 
+  ranges::any_view<TaskInCtld*, ranges::category::forward> id_filtered_job_rng =
+      no_ids_constraint ? all_job_rng : filtered_job_rng;
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
-  ranges::for_each(filtered_rng, append_fn);
+  ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
 void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
@@ -3541,8 +3582,6 @@ void TaskScheduler::PersistAndTransferStepsToMongodb_(
   }
 
   g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
-
-  // TODO: Step finish before job, persist step into mongodb
 
   // Now tasks are in MongoDB.
   if (!g_db_client->InsertSteps(steps)) {

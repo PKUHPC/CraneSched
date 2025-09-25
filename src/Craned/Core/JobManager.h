@@ -37,7 +37,7 @@ using StepStatus = crane::grpc::TaskStatus;
 struct StepInstance {
   job_id_t job_id;
   step_id_t step_id;
-  pid_t supv_pid;
+  pid_t supv_pid{-1};
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
@@ -52,9 +52,9 @@ struct StepInstance {
 struct JobInD {
   JobInD() = default;
   JobInD(crane::grpc::JobToD const& job_to_d)
-      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {
-    step_map_mtx = std::make_unique<absl::Mutex>();
-  }
+      : job_id(job_to_d.job_id()),
+        job_to_d(job_to_d),
+        step_map_mtx(std::make_unique<absl::Mutex>()) {}
 
   ~JobInD() = default;
 
@@ -69,7 +69,7 @@ struct JobInD {
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
 
-  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;

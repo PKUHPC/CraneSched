@@ -123,6 +123,8 @@ class MongodbClient {
   bool InsertRecoveredStep(
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
+  bool FetchStepRecords(const std::unordered_set<job_id_t>& jobs,
+                        crane::grpc::QueryTasksInfoReply* response);
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   /* ----- Method of operating the account table ----------- */
@@ -292,6 +294,10 @@ class MongodbClient {
       crane::grpc::StepInEmbeddedDb const& step);
 
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
+  DedicatedResourceInNode BsonToDedicatedResourceInNode(
+      const bsoncxx::document::view& doc);
+  ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
+  ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
