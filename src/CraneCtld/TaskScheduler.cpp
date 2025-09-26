@@ -111,7 +111,8 @@ bool TaskScheduler::Init() {
                 task->TaskId());
           }
 
-          ok = g_embedded_db_client->PurgeEndedTasks({task_db_id});
+          ok = g_embedded_db_client->PurgeEndedTasks(
+              {{task->TaskId(), task_db_id}});
           if (!ok) {
             CRANE_ERROR(
                 "PurgeEndedTasks failed for task #{} when recovering "
@@ -189,8 +190,8 @@ bool TaskScheduler::Init() {
               task->TaskId());
         }
 
-        std::vector<task_db_id_t> db_ids{task_db_id};
-        ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+        ok = g_embedded_db_client->PurgeEndedTasks(
+            {{task->TaskId(), task->TaskDbId()}});
         if (!ok) {
           CRANE_ERROR(
               "PurgeEndedTasks failed for task #{} when recovering "
@@ -205,7 +206,7 @@ bool TaskScheduler::Init() {
     CRANE_INFO("{} final task(s) might not have been put to mongodb.",
                snapshot.final_queue.size());
 
-    std::vector<task_db_id_t> db_ids;
+    std::unordered_map<job_id_t, task_db_id_t> db_ids;
     for (auto& [db_id, task_in_embedded_db] : snapshot.final_queue) {
       task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
       ok = g_db_client->CheckTaskDbIdExisted(db_id);
@@ -218,7 +219,7 @@ bool TaskScheduler::Init() {
         }
       }
 
-      db_ids.emplace_back(db_id);
+      db_ids[task_id] = db_id;
     }
 
     ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
@@ -3638,7 +3639,7 @@ void TaskScheduler::PersistAndTransferStepsToMongodb_(
 
   if (!g_embedded_db_client->PurgeEndedSteps(db_ids)) {
     CRANE_ERROR(
-        "Failed to call g_embedded_db_client->PurgeEndedTasks() "
+        "Failed to call g_embedded_db_client->PurgeEndedSteps() "
         "for final tasks");
   }
 }
@@ -3684,8 +3685,8 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 
   // Remove tasks in final queue.
-  std::vector<task_db_id_t> db_ids;
-  for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
+  std::unordered_map<job_id_t, task_db_id_t> db_ids;
+  for (TaskInCtld* task : tasks) db_ids[task->TaskId()] = task->TaskDbId();
 
   if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(
