@@ -93,30 +93,80 @@ struct BsonFieldTrait<bsoncxx::document::view> {
 template <typename T>
 class ThreadSafeQueue {
  public:
-  void Push(T&& value) {
-    std::lock_guard<std::mutex> lock(m_);
-    q_.push(std::move(value));
-    cv_.notify_one();
+  ThreadSafeQueue() = default;
+  explicit ThreadSafeQueue(size_t max_size) : max_size_(max_size) {}
+
+  void Push(const T& value) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    not_full_cv_.wait(lock, [&] {
+      return max_size_ == 0 || queue_.size() < max_size_ || finished_;
+    });
+    if (finished_) return;
+    queue_.push(value);
+    not_empty_cv_.notify_one();
   }
+
+  void Push(T&& value) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    not_full_cv_.wait(lock, [&] {
+      return max_size_ == 0 || queue_.size() < max_size_ || finished_;
+    });
+    if (finished_) return;
+    queue_.push(std::move(value));
+    not_empty_cv_.notify_one();
+  }
+
   bool Pop(T& value) {
-    std::unique_lock<std::mutex> lock(m_);
-    cv_.wait(lock, [&] { return !q_.empty() || finished_; });
-    if (q_.empty()) return false;
-    value = std::move(q_.front());
-    q_.pop();
+    std::unique_lock<std::mutex> lock(mutex_);
+    not_empty_cv_.wait(lock, [&] { return !queue_.empty() || finished_; });
+    if (queue_.empty()) return false;
+    value = std::move(queue_.front());
+    queue_.pop();
+    not_full_cv_.notify_one();
     return true;
   }
+
+  template <typename Rep, typename Period>
+  bool Pop(T& value, const std::chrono::duration<Rep, Period>& timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!not_empty_cv_.wait_for(lock, timeout,
+                                [&] { return !queue_.empty() || finished_; })) {
+      return false;
+    }
+    if (queue_.empty()) return false;
+    value = std::move(queue_.front());
+    queue_.pop();
+    not_full_cv_.notify_one();
+    return true;
+  }
+
   void SetFinished() {
-    std::lock_guard<std::mutex> lock(m_);
+    std::lock_guard<std::mutex> lock(mutex_);
     finished_ = true;
-    cv_.notify_all();
+    not_empty_cv_.notify_all();
+    not_full_cv_.notify_all();
+  }
+
+  size_t Size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.size();
+  }
+  bool Empty() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.empty();
+  }
+  void Clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    while (!queue_.empty()) queue_.pop();
   }
 
  private:
-  std::queue<T> q_;
-  std::mutex m_;
-  std::condition_variable cv_;
+  std::queue<T> queue_;
+  mutable std::mutex mutex_;
+  std::condition_variable not_empty_cv_;
+  std::condition_variable not_full_cv_;
   bool finished_{false};
+  size_t max_size_{0};  // 0 means unlimited
 };
 
 class MongodbClient {
@@ -135,7 +185,7 @@ class MongodbClient {
 
   enum class RollupType { Hour, HourToDay, DayToMonth };
   struct UserAccountAggResult {
-    int64_t total_cpu_time = 0;
+    double total_cpu_time = 0;
     int32_t total_count = 0;
   };
 
@@ -151,7 +201,6 @@ class MongodbClient {
       return account == other.account && username == other.username;
     }
   };
-
   struct KeyHash {
     std::size_t operator()(const Key& key) const {
       return absl::Hash<Key>{}(key);
@@ -186,8 +235,6 @@ class MongodbClient {
   bool InsertQos(const Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
-  bool AggregateHourTable(std::time_t start, std::time_t end);
-  bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
   bool UpdateSummaryLastSuccessTimeSec(const std::string& type,
                                        int64_t last_success_sec);
   bool GetSummaryLastSuccessTimeTm(const std::string& type, std::tm& tm_last);
@@ -198,6 +245,9 @@ class MongodbClient {
   bool RollupHourToDay();
   bool RollupDayToMonth();
   void ClusterRollupUsage();
+  bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end);
+  bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
+  bool AggregateHourTable(std::time_t start, std::time_t end);
   void QueryAndAggAccountUser(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
@@ -212,12 +262,12 @@ class MongodbClient {
       const std::string& src_coll_str,
       ThreadSafeQueue<bsoncxx::array::value>& queue,
       const std::string& src_time_field, const std::string& period_field,
-      std::time_t start, std::time_t end);
+      std::time_t period_start, std::time_t period_end);
   void HandleProduceAccountUserWckeyAggArray(
-      const std::string src_coll_str,
+      const std::string& src_coll_str,
       ThreadSafeQueue<bsoncxx::array::value>& queue,
       const std::string& src_time_field, const std::string& period_field,
-      std::time_t start, std::time_t end);
+      std::time_t period_start, std::time_t period_end);
   void ProduceHourAccountUser(ThreadSafeQueue<bsoncxx::array::value>& queue,
                               std::time_t start, std::time_t end,
                               const std::string& task_collection_name);
@@ -226,16 +276,11 @@ class MongodbClient {
       std::time_t end, const std::string& task_collection_name);
   bool HandleAccountUserAggArray(const bsoncxx::array::view& arr,
                                  const std::string& dst_coll_str,
-                                 const std::string& dst_time_field,
-                                 bool print_debug_log);
+                                 const std::string& period_field);
   bool HandleAccountUserWckeyAggArray(const bsoncxx::array::view& arr,
                                       const std::string& dst_coll_str,
-                                      const std::string& dst_time_field,
-                                      bool print_debug_log);
-  bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end,
-                             bool print_debug_log);
-  bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end,
-                            bool print_debug_log);
+                                      const std::string& period_field);
+
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>

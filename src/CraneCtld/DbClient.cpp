@@ -1882,26 +1882,33 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
   try {
     auto summary_coll =
         (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto update_sec = static_cast<int64_t>(std::time(nullptr));
+
     auto filter = bsoncxx::builder::stream::document{}
                   << "_id" << type << bsoncxx::builder::stream::finalize;
-    auto update_sec = static_cast<int64_t>(std::time(nullptr));
+
     auto update = bsoncxx::builder::stream::document{}
-                  << "$set" << bsoncxx::builder::stream::open_document
-                  << "last_success_time" << last_success_sec << "update_time"
+                  << "$max" << bsoncxx::builder::stream::open_document
+                  << "last_success_time" << last_success_sec
+                  << bsoncxx::builder::stream::close_document << "$set"
+                  << bsoncxx::builder::stream::open_document << "update_time"
                   << update_sec << bsoncxx::builder::stream::close_document
                   << bsoncxx::builder::stream::finalize;
-    summary_coll.update_one(filter.view(), update.view(),
-                            mongocxx::options::update{}.upsert(true));
+
+    auto result = summary_coll.update_one(
+        filter.view(), update.view(), mongocxx::options::update{}.upsert(true));
     return true;
   } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "UpdateSummaryLastSuccessTimeSec failed: {}, type={}",
+                       e.what(), type);
     return false;
   }
 }
 
 bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
                                                 std::tm& tm_last) {
-  // Default time: 2025-07-01 00:00:00
+  // Default time
   std::tm default_time = {};
   default_time.tm_year = 2024 - 1900;
   default_time.tm_mon = 9 - 1;
@@ -1918,34 +1925,21 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
       auto it = doc.find("last_success_time");
       if (it != doc.end() && it->type() == bsoncxx::type::k_int64) {
         int64_t last_sec = it->get_int64().value;
-        std::time_t tt = static_cast<std::time_t>(last_sec);
+        auto tt = static_cast<std::time_t>(last_sec);
         std::tm tm_tmp = {};
-        localtime_r(&tt, &tm_tmp);
-
-        // Adjust time fields based on type
-        if (type == "hour") {
-          tm_tmp.tm_hour += 1;
-        } else if (type == "hour_to_day") {
-          tm_tmp.tm_mday += 1;
-        } else if (type == "day_to_month") {
-          tm_tmp.tm_mon += 1;
-          tm_tmp.tm_mday = 1;
-        }
-        tm_tmp.tm_min = 0;
-        tm_tmp.tm_sec = 0;
-        std::mktime(&tm_tmp);
-
-        tm_last = tm_tmp;
-        return true;
+        localtime_r(&tt, &tm_last);
       }
+    } else {
+      tm_last = default_time;
     }
+    return true;
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(
         m_logger_,
         fmt::format("GetSummaryLastSuccessTimeTm failed: {}, type={}, coll={}",
                     e.what(), type, m_summary_time_collection_name_));
   }
-  tm_last = default_time;
+
   return false;
 }
 
@@ -1982,16 +1976,19 @@ bool MongodbClient::NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
 }
 
 bool MongodbClient::RollupHourTable() {
-  std::tm tm_last;
-  GetSummaryLastSuccessTimeTm("hour", tm_last);
+  std::tm tm_last{};
+  if (!GetSummaryLastSuccessTimeTm("hour", tm_last)) {
+    CRANE_ERROR("Get summary lastSuccess time type hour err");
+    return false;
+  }
 
   std::tm tm_now = GetRoundHourNowTm();
 
   if (!NeedRollup(tm_last, tm_now, RollupType::Hour)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-    CRANE_ERROR("Less than 1 hour since last aggregation, skip. {} -> {}",
-                util::FormatTime(last_sec), util::FormatTime(now_sec));
+    CRANE_INFO("Less than 1 hour since last aggregation, skip. {} -> {}",
+               util::FormatTime(last_sec), util::FormatTime(now_sec));
     return false;
   }
 
@@ -2008,7 +2005,7 @@ bool MongodbClient::RollupHourTable() {
                 util::FormatTime(last_sec), util::FormatTime(now_sec));
   }
   auto t1 = std::chrono::steady_clock::now();
-  long long agg_ms =
+  int64_t agg_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
   CRANE_INFO("AggregateHourTable cost ms: {}", agg_ms);
 
@@ -2016,16 +2013,18 @@ bool MongodbClient::RollupHourTable() {
 }
 
 bool MongodbClient::RollupHourToDay() {
-  std::tm tm_last;
-  GetSummaryLastSuccessTimeTm("hour_to_day", tm_last);
-
+  std::tm tm_last{};
+  if (!GetSummaryLastSuccessTimeTm("hour_to_day", tm_last)) {
+    CRANE_ERROR("Get summary lastSuccess time type hour_to_day err");
+    return false;
+  }
   std::tm tm_now = GetRoundHourNowTm();
 
   if (!NeedRollup(tm_last, tm_now, RollupType::HourToDay)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-    CRANE_ERROR("Less than 1 day since last aggregation, skip. {} -> {}",
-                util::FormatTime(last_sec), util::FormatTime(now_sec));
+    CRANE_INFO("Less than 1 day since last aggregation, skip. {} -> {}",
+               util::FormatTime(last_sec), util::FormatTime(now_sec));
     return false;
   }
 
@@ -2035,7 +2034,7 @@ bool MongodbClient::RollupHourToDay() {
              util::FormatTime(now_sec));
 
   // Aggregate data from hour to day
-  bool ok = AggregateDayFromHour(last_sec, now_sec, false);
+  bool ok = AggregateDayFromHour(last_sec, now_sec);
   if (!ok) {
     CRANE_ERROR("AggregateDayFromHour (Hour->Day) failed! Window: {} -> {}",
                 util::FormatTime(last_sec), util::FormatTime(now_sec));
@@ -2044,16 +2043,18 @@ bool MongodbClient::RollupHourToDay() {
 }
 
 bool MongodbClient::RollupDayToMonth() {
-  std::tm tm_last;
-  GetSummaryLastSuccessTimeTm("day_to_month", tm_last);
-
+  std::tm tm_last{};
+  if (!GetSummaryLastSuccessTimeTm("day_to_month", tm_last)) {
+    CRANE_ERROR("Get summary lastSuccess time type hour_to_day err");
+    return false;
+  }
   std::tm tm_now = GetRoundHourNowTm();
 
   if (!NeedRollup(tm_last, tm_now, RollupType::DayToMonth)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-    CRANE_ERROR("Less than 1 month since last aggregation, skip. {} -> {}",
-                util::FormatTime(last_sec), util::FormatTime(now_sec));
+    CRANE_INFO("Less than 1 month since last aggregation, skip. {} -> {}",
+               util::FormatTime(last_sec), util::FormatTime(now_sec));
     return false;
   }
 
@@ -2063,7 +2064,7 @@ bool MongodbClient::RollupDayToMonth() {
              util::FormatTime(now_sec));
 
   // Aggregate data from day to month
-  bool success = AggregateMonthFromDay(last_sec, now_sec, false);
+  bool success = AggregateMonthFromDay(last_sec, now_sec);
   if (!success) {
     CRANE_ERROR("AggregateMonthFromDay (Day->Month) failed! Window: {} -> {}",
                 util::FormatTime(last_sec), util::FormatTime(now_sec));
@@ -2105,376 +2106,373 @@ void MongodbClient::HandleProduceAccountUserAggArray(
     const std::string& src_coll_str,
     ThreadSafeQueue<bsoncxx::array::value>& queue,
     const std::string& src_time_field, const std::string& period_field,
-    std::time_t start, std::time_t end) {
-  std::time_t cur, last;
-  if (period_field == "day") {
-    std::tm tm_start = *std::localtime(&start);
-    tm_start.tm_hour = 0;
-    tm_start.tm_min = 0;
-    tm_start.tm_sec = 0;
-    cur = std::mktime(&tm_start);
-
-    std::tm tm_end = *std::localtime(&end);
-    tm_end.tm_hour = 0;
-    tm_end.tm_min = 0;
-    tm_end.tm_sec = 0;
-    last = std::mktime(&tm_end);
-  } else if (period_field == "month") {
-    std::tm tm_start = *std::localtime(&start);
-    tm_start.tm_mday = 1;
-    tm_start.tm_hour = 0;
-    tm_start.tm_min = 0;
-    tm_start.tm_sec = 0;
-    cur = std::mktime(&tm_start);
-
-    std::tm tm_end = *std::localtime(&end);
-    tm_end.tm_mday = 1;
-    tm_end.tm_hour = 0;
-    tm_end.tm_min = 0;
-    tm_end.tm_sec = 0;
-    last = std::mktime(&tm_end);
-  } else {
-    throw std::runtime_error("period_field must be 'day' or 'month'");
-  }
-  auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
-  while (cur < last) {
-    std::time_t next;
+    std::time_t period_start, std::time_t period_end) {
+  try {
+    std::time_t cur_start;
+    std::tm tm_end = {};
+    std::tm tm_start = {};
+    std::time_t cur_end;
     if (period_field == "day") {
-      std::tm tm = *std::localtime(&cur);
-      tm.tm_mday += 1;
-      next = std::mktime(&tm);
-    } else {  // month
-      std::tm tm = *std::localtime(&cur);
-      tm.tm_mon += 1;
-      tm.tm_mday = 1;
-      next = std::mktime(&tm);
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday++;
+      cur_end = std::mktime(&tm_end);
+    } else if (period_field == "month") {
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_mday = 1;
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday = 1;
+      tm_end.tm_mon++;
+      cur_end = std::mktime(&tm_end);
     }
-    if (next > last) break;
+    auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
+    while (cur_end <= period_end) {
+      std::string group_period_field_ref = "$" + period_field;
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << src_time_field
+                     << bsoncxx::builder::stream::open_document << "$gte"
+                     << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << period_field << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+      pipeline.group(
+          bsoncxx::builder::stream::document{}
+          << "_id" << bsoncxx::builder::stream::open_document << period_field
+          << bsoncxx::types::b_string{group_period_field_ref} << "account"
+          << "$account"
+          << "username" << "$username"
+          << "cpu_alloc_level" << "$cpu_alloc_level"
+          << bsoncxx::builder::stream::close_document << "total_cpu_time"
+          << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_cpu_time" << bsoncxx::builder::stream::close_document
+          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_count" << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
 
-    std::string group_period_field_ref = "$" + period_field;
-
-    mongocxx::pipeline pipeline;
-    pipeline.match(bsoncxx::builder::stream::document{}
-                   << src_time_field << bsoncxx::builder::stream::open_document
-                   << "$gte" << static_cast<int64_t>(cur) << "$lt"
-                   << static_cast<int64_t>(next)
-                   << bsoncxx::builder::stream::close_document
-                   << bsoncxx::builder::stream::finalize);
-    pipeline.add_fields(bsoncxx::builder::stream::document{}
-                        << period_field << static_cast<int64_t>(cur)
-                        << bsoncxx::builder::stream::finalize);
-    pipeline.group(
-        bsoncxx::builder::stream::document{}
-        << "_id" << bsoncxx::builder::stream::open_document << period_field
-        << bsoncxx::types::b_string{group_period_field_ref} << "account"
-        << "$account"
-        << "username" << "$username"
-        << "cpu_alloc_level" << "$cpu_alloc_level"
-        << bsoncxx::builder::stream::close_document << "total_cpu_time"
-        << bsoncxx::builder::stream::open_document << "$sum"
-        << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-        << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
-        << "$total_count" << bsoncxx::builder::stream::close_document
-        << bsoncxx::builder::stream::finalize);
-
-    auto cursor = src_coll.aggregate(pipeline);
-    bsoncxx::builder::basic::array arr_builder;
-    for (auto&& doc : cursor) arr_builder.append(doc);
-    size_t count = 0;
-    for (auto&& elem : arr_builder.view()) {
-      if (++count > 0) break;
+      auto cursor = src_coll.aggregate(pipeline);
+      bsoncxx::builder::basic::array arr_builder;
+      bool has_result = false;
+      for (auto&& doc : cursor) {
+        arr_builder.append(doc);
+        has_result = true;
+      }
+      if (has_result) {
+        queue.Push(arr_builder.extract());
+      }
+      // Advance window
+      if (period_field == "day") {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday++;
+        cur_end = std::mktime(&tm_end);
+      } else if (period_field == "month") {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday = 1;
+        tm_end.tm_mon++;
+        cur_end = std::mktime(&tm_end);
+      }
     }
-    if (count > 0) {
-      queue.Push(arr_builder.extract());
-    }
-
-    cur = next;
+    queue.SetFinished();
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_, "[mongodb] HandleProduceAccountUserAggArray exception: {}",
+        e.what());
+    queue.SetFinished();
   }
-  queue.SetFinished();
 }
 
 void MongodbClient::HandleProduceAccountUserWckeyAggArray(
-    const std::string src_coll_str,
+    const std::string& src_coll_str,
     ThreadSafeQueue<bsoncxx::array::value>& queue,
     const std::string& src_time_field, const std::string& period_field,
-    std::time_t start, std::time_t end) {
-  std::time_t cur, last;
-  if (period_field == "day") {
-    std::tm tm_start = *std::localtime(&start);
-    tm_start.tm_hour = 0;
-    tm_start.tm_min = 0;
-    tm_start.tm_sec = 0;
-    cur = std::mktime(&tm_start);
-
-    std::tm tm_end = *std::localtime(&end);
-    tm_end.tm_hour = 0;
-    tm_end.tm_min = 0;
-    tm_end.tm_sec = 0;
-    last = std::mktime(&tm_end);
-  } else if (period_field == "month") {
-    std::tm tm_start = *std::localtime(&start);
-    tm_start.tm_mday = 1;
-    tm_start.tm_hour = 0;
-    tm_start.tm_min = 0;
-    tm_start.tm_sec = 0;
-    cur = std::mktime(&tm_start);
-
-    std::tm tm_end = *std::localtime(&end);
-    tm_end.tm_mday = 1;
-    tm_end.tm_hour = 0;
-    tm_end.tm_min = 0;
-    tm_end.tm_sec = 0;
-    last = std::mktime(&tm_end);
-  } else {
-    throw std::runtime_error("period_field must be 'day' or 'month'");
-  }
-  auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
-  while (cur < last) {
-    std::time_t next;
+    std::time_t period_start, std::time_t period_end) {
+  try {
+    std::time_t cur_start;
+    std::tm tm_end = {};
+    std::tm tm_start = {};
+    std::time_t cur_end;
     if (period_field == "day") {
-      std::tm tm = *std::localtime(&cur);
-      tm.tm_mday += 1;
-      next = std::mktime(&tm);
-    } else {  // month
-      std::tm tm = *std::localtime(&cur);
-      tm.tm_mon += 1;
-      tm.tm_mday = 1;
-      next = std::mktime(&tm);
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday++;
+      cur_end = std::mktime(&tm_end);
+    } else if (period_field == "month") {
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_mday = 1;
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday = 1;
+      tm_end.tm_mon++;
+      cur_end = std::mktime(&tm_end);
     }
-    if (next > last) break;
+    auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
+    while (cur_end <= period_end) {
+      std::string group_period_field_ref = "$" + period_field;
 
-    std::string group_period_field_ref = "$" + period_field;
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << src_time_field
+                     << bsoncxx::builder::stream::open_document << "$gte"
+                     << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << period_field << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+      pipeline.group(
+          bsoncxx::builder::stream::document{}
+          << "_id" << bsoncxx::builder::stream::open_document << period_field
+          << bsoncxx::types::b_string{group_period_field_ref} << "account"
+          << "$account"
+          << "username" << "$username"
+          << "wckey" << "$wckey"
+          << "cpu_alloc_level" << "$cpu_alloc_level"
+          << bsoncxx::builder::stream::close_document << "total_cpu_time"
+          << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_cpu_time" << bsoncxx::builder::stream::close_document
+          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_count" << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
 
-    mongocxx::pipeline pipeline;
-    pipeline.match(bsoncxx::builder::stream::document{}
-                   << src_time_field << bsoncxx::builder::stream::open_document
-                   << "$gte" << static_cast<int64_t>(cur) << "$lt"
-                   << static_cast<int64_t>(next)
-                   << bsoncxx::builder::stream::close_document
-                   << bsoncxx::builder::stream::finalize);
-    pipeline.add_fields(bsoncxx::builder::stream::document{}
-                        << period_field << static_cast<int64_t>(cur)
-                        << bsoncxx::builder::stream::finalize);
-    pipeline.group(
-        bsoncxx::builder::stream::document{}
-        << "_id" << bsoncxx::builder::stream::open_document << period_field
-        << bsoncxx::types::b_string{group_period_field_ref} << "account"
-        << "$account"
-        << "username" << "$username"
-        << "wckey" << "$wckey"
-        << "cpu_alloc_level" << "$cpu_alloc_level"
-        << bsoncxx::builder::stream::close_document << "total_cpu_time"
-        << bsoncxx::builder::stream::open_document << "$sum"
-        << "$total_cpu_time" << bsoncxx::builder::stream::close_document
-        << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
-        << "$total_count" << bsoncxx::builder::stream::close_document
-        << bsoncxx::builder::stream::finalize);
-
-    auto cursor = src_coll.aggregate(pipeline);
-    bsoncxx::builder::basic::array arr_builder;
-    for (auto&& doc : cursor) arr_builder.append(doc);
-    size_t count = 0;
-    for (auto&& elem : arr_builder.view()) {
-      if (++count > 0) break;
+      auto cursor = src_coll.aggregate(pipeline);
+      bsoncxx::builder::basic::array arr_builder;
+      bool has_result = false;
+      for (auto&& doc : cursor) {
+        arr_builder.append(doc);
+        has_result = true;
+      }
+      if (has_result) {
+        queue.Push(arr_builder.extract());
+      }
+      // Advance window
+      if (period_field == "day") {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday++;
+        cur_end = std::mktime(&tm_end);
+      } else if (period_field == "month") {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday = 1;
+        tm_end.tm_mon++;
+        cur_end = std::mktime(&tm_end);
+      }
     }
-    if (count > 0) {
-      queue.Push(arr_builder.extract());
-    }
-
-    cur = next;
+    queue.SetFinished();
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        "[mongodb] HandleProduceAccountUserWckeyAggArray exception: {}",
+        e.what());
+    queue.SetFinished();
   }
-  queue.SetFinished();
 }
 
 bool MongodbClient::HandleAccountUserAggArray(const bsoncxx::array::view& arr,
                                               const std::string& dst_coll_str,
-                                              const std::string& period_field,
-                                              bool print_debug_log) {
+                                              const std::string& period_field) {
   bool has_data = false;
-  constexpr size_t kBatchSize = 1000;
+  bool print_debug_log = false;
+  constexpr int data_batch_size = 1000;
   std::vector<bsoncxx::document::value> insert_docs;
 
-  auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
+  try {
+    auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
 
-  for (auto&& elem : arr) {
-    auto view = elem.get_document().view();
-    auto id = view["_id"].get_document().view();
+    for (auto&& elem : arr) {
+      auto view = elem.get_document().view();
+      auto id = view["_id"].get_document().view();
 
-    int64_t period = id[period_field].get_int64();
-    std::string account = std::string(id["account"].get_string().value);
-    std::string username = std::string(id["username"].get_string().value);
+      int64_t period = id[period_field].get_int64();
+      std::string account = std::string(id["account"].get_string().value);
+      std::string username = std::string(id["username"].get_string().value);
 
-    // add cpu_alloc_level
-    int cpu_alloc_level = 0;
-    auto cpu_alloc_level_elem = id["cpu_alloc_level"];
-    if (cpu_alloc_level_elem) {
-      if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
-        cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
-      else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
-        cpu_alloc_level =
-            static_cast<int>(cpu_alloc_level_elem.get_int64().value);
-    }
+      // add cpu_alloc_level
+      int cpu_alloc_level = 0;
+      auto cpu_alloc_level_elem = id["cpu_alloc_level"];
+      if (cpu_alloc_level_elem) {
+        if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
+          cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
+        else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
+          cpu_alloc_level =
+              static_cast<int>(cpu_alloc_level_elem.get_int64().value);
+      }
 
-    double cpu_time = 0.0;
-    auto cpu_time_elem = view["total_cpu_time"];
-    if (cpu_time_elem) {
-      switch (cpu_time_elem.type()) {
-      case bsoncxx::type::k_double:
-        cpu_time = cpu_time_elem.get_double().value;
-        break;
-      case bsoncxx::type::k_int32:
-        cpu_time = static_cast<double>(cpu_time_elem.get_int32().value);
-        break;
-      case bsoncxx::type::k_int64:
-        cpu_time = static_cast<double>(cpu_time_elem.get_int64().value);
-        break;
-      default:
-        break;
+      auto cpu_time = view["total_cpu_time"].get_double().value;
+      int count = 0;
+      auto count_elem = view["total_count"];
+      if (count_elem) {
+        if (count_elem.type() == bsoncxx::type::k_int32)
+          count = count_elem.get_int32().value;
+        else if (count_elem.type() == bsoncxx::type::k_int64)
+          count = static_cast<int>(count_elem.get_int64().value);
+      }
+
+      bsoncxx::document::value insert_doc =
+          bsoncxx::builder::stream::document{}
+          << period_field << period << "account" << account << "username"
+          << username << "cpu_alloc_level" << cpu_alloc_level
+          << "total_cpu_time" << cpu_time << "total_count" << count
+          << bsoncxx::builder::stream::finalize;
+
+      insert_docs.push_back(std::move(insert_doc));
+
+      if (print_debug_log) {
+        CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(view));
+      }
+      has_data = true;
+
+      if (insert_docs.size() == data_batch_size) {
+        mongocxx::options::insert insert_opts;
+        insert_opts.ordered(false);
+        dst_coll.insert_many(insert_docs, insert_opts);
+        insert_docs.clear();
       }
     }
-    int count = 0;
-    auto count_elem = view["total_count"];
-    if (count_elem) {
-      if (count_elem.type() == bsoncxx::type::k_int32)
-        count = count_elem.get_int32().value;
-      else if (count_elem.type() == bsoncxx::type::k_int64)
-        count = static_cast<int>(count_elem.get_int64().value);
-    }
 
-    bsoncxx::document::value insert_doc =
-        bsoncxx::builder::stream::document{}
-        << period_field << period << "account" << account << "username"
-        << username << "cpu_alloc_level" << cpu_alloc_level << "total_cpu_time"
-        << cpu_time << "total_count" << count
-        << bsoncxx::builder::stream::finalize;
-
-    insert_docs.push_back(std::move(insert_doc));
-
-    if (print_debug_log) {
-      CRANE_INFO("Aggregated account_user: {}", bsoncxx::to_json(view));
-    }
-    has_data = true;
-
-    if (insert_docs.size() == kBatchSize) {
+    if (!insert_docs.empty()) {
       mongocxx::options::insert insert_opts;
       insert_opts.ordered(false);
-      try {
-        dst_coll.insert_many(insert_docs, insert_opts);
-      } catch (const std::exception& e) {
-        std::cerr << "[MongoDB insert_many error] " << e.what() << std::endl;
-      }
-      insert_docs.clear();
-    }
-  }
-
-  if (!insert_docs.empty()) {
-    mongocxx::options::insert insert_opts;
-    insert_opts.ordered(false);
-    try {
       dst_coll.insert_many(insert_docs, insert_opts);
-    } catch (const std::exception& e) {
-      std::cerr << "[MongoDB insert_many error] " << e.what() << std::endl;
     }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "[mongodb] HandleAccountUserAggArray exception: {}",
+                       e.what());
+    return false;
   }
   return has_data;
 }
 
 bool MongodbClient::HandleAccountUserWckeyAggArray(
     const bsoncxx::array::view& arr, const std::string& dst_coll_str,
-    const std::string& period_field, bool print_debug_log) {
+    const std::string& period_field) {
   bool has_data = false;
-  constexpr size_t kBatchSize = 1000;
+  bool print_debug_log = false;
+  constexpr int data_batch_size = 1000;
   std::vector<bsoncxx::document::value> insert_docs;
 
-  auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
+  try {
+    auto dst_coll = (*GetClient_())[m_db_name_][dst_coll_str];
 
-  for (auto&& elem : arr) {
-    auto view = elem.get_document().view();
-    auto id = view["_id"].get_document().view();
+    for (auto&& elem : arr) {
+      auto view = elem.get_document().view();
+      auto id = view["_id"].get_document().view();
 
-    int64_t period = id[period_field].get_int64();
-    std::string account = std::string(id["account"].get_string().value);
-    std::string username = std::string(id["username"].get_string().value);
-    std::string wckey = std::string(id["wckey"].get_string().value);
+      int64_t period = id[period_field].get_int64();
+      std::string account = std::string(id["account"].get_string().value);
+      std::string username = std::string(id["username"].get_string().value);
+      std::string wckey = std::string(id["wckey"].get_string().value);
 
-    int cpu_alloc_level = 0;
-    auto cpu_alloc_level_elem = id["cpu_alloc_level"];
-    if (cpu_alloc_level_elem) {
-      if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
-        cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
-      else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
-        cpu_alloc_level =
-            static_cast<int>(cpu_alloc_level_elem.get_int64().value);
-    }
-
-    double cpu_time = 0.0;
-    auto cpu_time_elem = view["total_cpu_time"];
-    if (cpu_time_elem) {
-      switch (cpu_time_elem.type()) {
-      case bsoncxx::type::k_double:
-        cpu_time = cpu_time_elem.get_double().value;
-        break;
-      case bsoncxx::type::k_int32:
-        cpu_time = static_cast<double>(cpu_time_elem.get_int32().value);
-        break;
-      case bsoncxx::type::k_int64:
-        cpu_time = static_cast<double>(cpu_time_elem.get_int64().value);
-        break;
-      default:
-        break;
+      int cpu_alloc_level = 0;
+      auto cpu_alloc_level_elem = id["cpu_alloc_level"];
+      if (cpu_alloc_level_elem) {
+        if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int32)
+          cpu_alloc_level = cpu_alloc_level_elem.get_int32().value;
+        else if (cpu_alloc_level_elem.type() == bsoncxx::type::k_int64)
+          cpu_alloc_level =
+              static_cast<int>(cpu_alloc_level_elem.get_int64().value);
       }
-    }
-    int count = 0;
-    auto count_elem = view["total_count"];
-    if (count_elem) {
-      if (count_elem.type() == bsoncxx::type::k_int32)
-        count = count_elem.get_int32().value;
-      else if (count_elem.type() == bsoncxx::type::k_int64)
-        count = static_cast<int>(count_elem.get_int64().value);
-    }
 
-    bsoncxx::document::value insert_doc =
-        bsoncxx::builder::stream::document{}
-        << period_field << period << "account" << account << "username"
-        << username << "wckey" << wckey << "cpu_alloc_level" << cpu_alloc_level
-        << "total_cpu_time" << cpu_time << "total_count" << count
-        << bsoncxx::builder::stream::finalize;
+      double cpu_time = view["total_cpu_time"].get_double().value;
 
-    insert_docs.push_back(std::move(insert_doc));
+      int count = 0;
+      auto count_elem = view["total_count"];
+      if (count_elem) {
+        if (count_elem.type() == bsoncxx::type::k_int32)
+          count = count_elem.get_int32().value;
+        else if (count_elem.type() == bsoncxx::type::k_int64)
+          count = static_cast<int>(count_elem.get_int64().value);
+      }
 
-    if (print_debug_log) {
-      CRANE_INFO("Aggregated account_user_wckey: {}", bsoncxx::to_json(view));
-    }
-    has_data = true;
+      bsoncxx::document::value insert_doc =
+          bsoncxx::builder::stream::document{}
+          << period_field << period << "account" << account << "username"
+          << username << "wckey" << wckey << "cpu_alloc_level"
+          << cpu_alloc_level << "total_cpu_time" << cpu_time << "total_count"
+          << count << bsoncxx::builder::stream::finalize;
 
-    if (insert_docs.size() == kBatchSize) {
-      mongocxx::options::insert insert_opts;
-      insert_opts.ordered(false);  // unordered模式
-      try {
+      insert_docs.push_back(std::move(insert_doc));
+
+      if (print_debug_log) {
+        CRANE_INFO("Aggregated account_user_wckey: {}", bsoncxx::to_json(view));
+      }
+      has_data = true;
+
+      if (insert_docs.size() == data_batch_size) {
+        mongocxx::options::insert insert_opts;
+        insert_opts.ordered(false);
         dst_coll.insert_many(insert_docs, insert_opts);
-      } catch (const std::exception& e) {
-        std::cerr << "[MongoDB insert_many error] " << e.what() << std::endl;
+        insert_docs.clear();
       }
-      insert_docs.clear();
     }
-  }
 
-  if (!insert_docs.empty()) {
-    mongocxx::options::insert insert_opts;
-    insert_opts.ordered(false);
-    try {
+    if (!insert_docs.empty()) {
+      mongocxx::options::insert insert_opts;
+      insert_opts.ordered(false);
       dst_coll.insert_many(insert_docs, insert_opts);
-    } catch (const std::exception& e) {
-      std::cerr << "[MongoDB insert_many error] " << e.what() << std::endl;
     }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "[mongodb] HandleAccountUserWckeyAggArray exception: {}",
+                       e.what());
+    return false;
   }
   return has_data;
 }
 
 // Main period aggregation driver
-bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
-                                         bool print_debug_log) {
-  constexpr int kConsumerThreadNum = 4;
+bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end) {
+  constexpr int consumer_thread_num = 4;
   auto src_account_user_table = m_hour_account_user_collection_name_;
   auto src_account_user_wckey_table =
       m_hour_account_user_wckey_collection_name_;
@@ -2498,9 +2496,16 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
         << "day" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
         << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
-    std::cerr << "Create index error: " << e.what() << std::endl;
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
   }
+  std::tm tm_end = {};
+  localtime_r(&end, &tm_end);
+  tm_end.tm_sec = 0;
+  tm_end.tm_min = 0;
+  tm_end.tm_hour = 0;
+  std::time_t cur_end = std::mktime(&tm_end);
 
+  UpdateSummaryLastSuccessTimeSec("hour_to_day", cur_end);
   auto producer_future1 = g_thread_pool->submit_task([&]() {
     HandleProduceAccountUserAggArray(src_account_user_table, account_user_queue,
                                      "hour", "day", start, end);
@@ -2515,8 +2520,7 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserAggArray(arr.view(), dst_account_user_table, "day",
-                                  print_debug_log);
+        HandleAccountUserAggArray(arr.view(), dst_account_user_table, "day");
     }
   };
   auto account_user_wckey_consumer = [&](int idx) {
@@ -2524,17 +2528,17 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
         HandleAccountUserWckeyAggArray(arr.view(), dst_account_user_wckey_table,
-                                       "day", print_debug_log);
+                                       "day");
     }
   };
 
   std::vector<std::future<void>> account_user_consumer_futures;
   std::vector<std::future<void>> account_user_wckey_consumer_futures;
-  for (int i = 0; i < kConsumerThreadNum; ++i) {
+  for (int idx = 0; idx < consumer_thread_num; ++idx) {
     account_user_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
-    account_user_wckey_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { account_user_wckey_consumer(i); }));
+        g_thread_pool->submit_task([&, idx] { account_user_consumer(idx); }));
+    account_user_wckey_consumer_futures.push_back(g_thread_pool->submit_task(
+        [&, idx] { account_user_wckey_consumer(idx); }));
   }
 
   producer_future1.get();
@@ -2546,68 +2550,74 @@ bool MongodbClient::AggregateDayFromHour(std::time_t start, std::time_t end,
   return true;
 }
 
-bool MongodbClient::AggregateMonthFromDay(std::time_t start, std::time_t end,
-                                          bool print_debug_log) {
-  constexpr int kConsumerThreadNum = 4;
-  auto src_account_user_table = m_day_account_user_collection_name_;
-  auto src_account_user_wckey_table = m_day_account_user_wckey_collection_name_;
-  auto dst_account_user_table = m_month_account_user_collection_name_;
-  auto dst_account_user_wckey_table =
-      m_month_account_user_wckey_collection_name_;
-
+bool MongodbClient::AggregateMonthFromDay(std::time_t start, std::time_t end) {
+  constexpr int consumer_thread_num = 4;
   ThreadSafeQueue<bsoncxx::array::value> account_user_queue;
   ThreadSafeQueue<bsoncxx::array::value> account_user_wckey_queue;
 
   try {
-    auto account_user = (*GetClient_())[m_db_name_][dst_account_user_table];
+    auto account_user =
+        (*GetClient_())[m_db_name_][m_month_account_user_collection_name_];
     account_user.create_index(bsoncxx::builder::stream::document{}
                               << "month" << 1 << "account" << 1 << "username"
                               << 1 << "cpu_alloc_level" << 1
                               << bsoncxx::builder::stream::finalize);
     auto account_user_wckey =
-        (*GetClient_())[m_db_name_][dst_account_user_wckey_table];
+        (*GetClient_())[m_db_name_]
+                       [m_month_account_user_wckey_collection_name_];
     account_user_wckey.create_index(
         bsoncxx::builder::stream::document{}
         << "month" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
         << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
-    std::cerr << "Create index error: " << e.what() << std::endl;
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
   }
 
+  std::tm tm_end = {};
+  localtime_r(&end, &tm_end);
+  tm_end.tm_sec = 0;
+  tm_end.tm_min = 0;
+  tm_end.tm_hour = 0;
+  tm_end.tm_mday = 1;
+  std::time_t cur_end = std::mktime(&tm_end);
+
+  UpdateSummaryLastSuccessTimeSec("day_to_month", cur_end);
+
   auto producer_future1 = g_thread_pool->submit_task([&]() {
-    HandleProduceAccountUserAggArray(src_account_user_table, account_user_queue,
-                                     "day", "month", start, end);
+    HandleProduceAccountUserAggArray(m_day_account_user_collection_name_,
+                                     account_user_queue, "day", "month", start,
+                                     end);
   });
   auto producer_future2 = g_thread_pool->submit_task([&]() {
-    HandleProduceAccountUserWckeyAggArray(src_account_user_wckey_table,
-                                          account_user_wckey_queue, "day",
-                                          "month", start, end);
+    HandleProduceAccountUserWckeyAggArray(
+        m_day_account_user_wckey_collection_name_, account_user_wckey_queue,
+        "day", "month", start, end);
   });
 
   auto account_user_consumer = [&](int idx) {
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserAggArray(arr.view(), dst_account_user_table, "month",
-                                  print_debug_log);
+        HandleAccountUserAggArray(
+            arr.view(), m_month_account_user_collection_name_, "month");
     }
   };
   auto account_user_wckey_consumer = [&](int idx) {
     bsoncxx::array::value arr{bsoncxx::array::view{}};
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
-        HandleAccountUserWckeyAggArray(arr.view(), dst_account_user_wckey_table,
-                                       "month", print_debug_log);
+        HandleAccountUserWckeyAggArray(
+            arr.view(), m_month_account_user_wckey_collection_name_, "month");
     }
   };
 
   std::vector<std::future<void>> account_user_consumer_futures;
   std::vector<std::future<void>> account_user_wckey_consumer_futures;
-  for (int i = 0; i < kConsumerThreadNum; ++i) {
+  for (int idx = 0; idx < consumer_thread_num; ++idx) {
     account_user_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
-    account_user_wckey_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { account_user_wckey_consumer(i); }));
+        g_thread_pool->submit_task([&, idx] { account_user_consumer(idx); }));
+    account_user_wckey_consumer_futures.push_back(g_thread_pool->submit_task(
+        [&, idx] { account_user_wckey_consumer(idx); }));
   }
 
   producer_future1.get();
@@ -2763,8 +2773,9 @@ void MongodbClient::ProduceHourAccountUser(
       cur_end += 3600;
     }
   } catch (const std::exception& e) {
-    std::cerr << "AccountUserProducer error: " << e.what() << std::endl;
+    CRANE_LOGGER_ERROR(m_logger_, "AccountUserProducer error: {}", e.what());
   }
+
   queue.SetFinished();
 }
 
@@ -2913,13 +2924,13 @@ void MongodbClient::ProduceHourAccountUserWckey(
       cur_end += 3600;
     }
   } catch (const std::exception& e) {
-    std::cerr << "WckeyProducer error: " << e.what() << std::endl;
+    CRANE_LOGGER_ERROR(m_logger_, "WckeyProducer error: {}", e.what());
   }
   queue.SetFinished();
 }
 
 bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
-  constexpr int kConsumerThreadNum = 4;
+  constexpr int consumer_thread_num = 4;
   ThreadSafeQueue<bsoncxx::array::value> account_user_queue;
   ThreadSafeQueue<bsoncxx::array::value> account_user_wckey_queue;
 
@@ -2942,9 +2953,15 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
         << "hour" << 1 << "account" << 1 << "username" << 1 << "wckey" << 1
         << "cpu_alloc_level" << 1 << bsoncxx::builder::stream::finalize);
   } catch (const std::exception& e) {
-    std::cerr << "Create index error: " << e.what() << std::endl;
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
   }
+  std::tm tm_end = {};
+  localtime_r(&end, &tm_end);
+  tm_end.tm_sec = 0;
+  tm_end.tm_min = 0;
+  std::time_t cur_end = std::mktime(&tm_end);
 
+  UpdateSummaryLastSuccessTimeSec("hour", cur_end);
   auto producer_future1 = g_thread_pool->submit_task([&]() {
     this->ProduceHourAccountUser(account_user_queue, start, end,
                                  m_task_collection_name_);
@@ -2961,8 +2978,7 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
     while (account_user_queue.Pop(arr)) {
       if (arr.view().length() > 0)
         HandleAccountUserAggArray(arr.view(),
-                                  m_hour_account_user_collection_name_, "hour",
-                                  print_debug_log);
+                                  m_hour_account_user_collection_name_, "hour");
     }
   };
 
@@ -2972,8 +2988,7 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
     while (account_user_wckey_queue.Pop(arr)) {
       if (arr.view().length() > 0)
         HandleAccountUserWckeyAggArray(
-            arr.view(), m_hour_account_user_wckey_collection_name_, "hour",
-            print_debug_log);
+            arr.view(), m_hour_account_user_wckey_collection_name_, "hour");
     }
     static std::mutex mtx;
     std::lock_guard<std::mutex> lock(mtx);
@@ -2981,11 +2996,11 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
 
   std::vector<std::future<void>> account_user_consumer_futures;
   std::vector<std::future<void>> wckey_consumer_futures;
-  for (int i = 0; i < kConsumerThreadNum; ++i) {
+  for (int idx = 0; idx < consumer_thread_num; ++idx) {
     account_user_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { account_user_consumer(i); }));
+        g_thread_pool->submit_task([&, idx] { account_user_consumer(idx); }));
     wckey_consumer_futures.push_back(
-        g_thread_pool->submit_task([&, i] { wckey_consumer(i); }));
+        g_thread_pool->submit_task([&, idx] { wckey_consumer(idx); }));
   }
 
   producer_future1.get();
@@ -3073,20 +3088,21 @@ void MongodbClient::QueryAccountUserSummary(
     ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
         stream) {
   bool print_debug_log = true;
+  int max_data_size = 5000;
   std::unordered_map<Key, UserAccountAggResult, KeyHash> agg_map;
   auto ranges = util::EfficientSplitTimeRange(start, end);
 
   // Query and aggregate for each interval type
-  for (const auto& r : ranges) {
+  for (const auto& data : ranges) {
     std::string table;
     std::string time_field;
-    if (r.type == "month") {
+    if (data.type == "month") {
       table = m_month_account_user_collection_name_;
       time_field = "month";
-    } else if (r.type == "day") {
+    } else if (data.type == "day") {
       table = m_day_account_user_collection_name_;
       time_field = "day";
-    } else if (r.type == "hour") {
+    } else if (data.type == "hour") {
       table = m_hour_account_user_collection_name_;
       time_field = "hour";
     } else {
@@ -3097,12 +3113,12 @@ void MongodbClient::QueryAccountUserSummary(
       CRANE_INFO(
           "AggregateAccountUserSummaryToMap call: table={}, time_field={}, "
           "start={} ({}), end={} ({}), account={}, username={}",
-          table, time_field, r.start, util::FormatTime(r.start), r.end,
-          util::FormatTime(r.end), account, username);
+          table, time_field, data.start, util::FormatTime(data.start), data.end,
+          util::FormatTime(data.end), account, username);
     }
 
-    QueryAndAggAccountUser(table, time_field, r.start, r.end, account, username,
-                           agg_map);
+    QueryAndAggAccountUser(table, time_field, data.start, data.end, account,
+                           username, agg_map);
   }
 
   crane::grpc::QueryAccountUserSummaryItemReply reply;
@@ -3114,7 +3130,7 @@ void MongodbClient::QueryAccountUserSummary(
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_items()->CopyFrom(item);
-    if (reply.items_size() >= 5000) {
+    if (reply.items_size() >= max_data_size) {
       stream->Write(reply);
       reply.clear_items();
     }
