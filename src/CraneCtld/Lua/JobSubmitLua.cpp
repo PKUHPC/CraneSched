@@ -40,8 +40,12 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld &task) {
   //
   // _push_job_desc(job_desc);
   // _push_partition_list(job_desc->user_id, submit_uid);
+  // TODO:
+  lua_pushstring(m_lua_state_, task.name.c_str());
+  lua_pushstring(m_lua_state_, task.name.c_str());
   lua_pushnumber(m_lua_state_, task.uid);
   int rc = CraneErrCode::SUCCESS;
+  // 3 为 3个参数
   if (lua_pcall(m_lua_state_, 3, 1, 0) != 0) {
     CRANE_ERROR("{}: {}", m_lua_script_, lua_tostring(m_lua_state_, -1));
   } else {
@@ -52,13 +56,22 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld &task) {
     }
     lua_pop(m_lua_state_, 1);
   }
+  std::string user_msg;
   if (!m_user_msg_.empty()) {
-    auto user_msg = m_user_msg_;
+    CRANE_TRACE("#{}: user_msg: {}", task.TaskId(), m_user_msg_);
+    user_msg = m_user_msg_;
     m_user_msg_.clear();
-    return std::unexpected(FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
   }
 
+  if (rc != 0)
+    std::unexpected(FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
+
   return result;
+}
+
+CraneExpectedRich<void> JobSubmitLua::JobModify(
+    const TaskInCtld &task_in_ctld) {
+
 }
 
 void JobSubmitLua::RegisterOutputFunctions_() {
@@ -136,7 +149,7 @@ void JobSubmitLua::RegisterLuaCraneStructFunctions_(lua_State* lua_state) {
   lua_setglobal(lua_state, "_get_part_rec_field");
 }
 
-bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name) {
+bool JobSubmitLua::CheckLuaScriptFunction_(lua_State *lua_state, const char *name) {
   bool result = true;
   lua_getglobal(lua_state, name);
   if (!lua_isfunction(lua_state, -1))
@@ -145,7 +158,7 @@ bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name) {
   return result;
 }
 
-bool CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns) {
+bool JobSubmitLua::CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns) {
   bool result = true;
   const char **ptr = NULL;
   for (ptr = req_fxns; ptr && *ptr; ptr++) {
@@ -238,6 +251,10 @@ int JobSubmitLua::LogLuaUserMsg_(lua_State *lua_state) {
 
   return (0);
 }
+void JobSubmitLua::UpdateJobGloable_() {}
+void JobSubmitLua::UpdateJobResvGloable_() {}
+void JobSubmitLua::PushJobInfo_() {}
+void JobSubmitLua::PushPartitionList_() {}
 
 void JobSubmitLua::LuaTableRegister_(const luaL_Reg* l) {
 #if LUA_VERSION_NUM == 501
@@ -288,6 +305,12 @@ bool JobSubmitLua::LoadLuaScript_() {
 
   return true;
 }
+
+int JobSubmitLua::GetJobEnvFieldName_(lua_State *lua_state) {}
+int JobSubmitLua::GetJobReqFieldName_(lua_State *lua_state) {}
+int JobSubmitLua::SetJobEnvField_(lua_State *lua_state) {}
+int JobSubmitLua::SetJobReqField_(lua_State *lua_state) {}
+int JobSubmitLua::GetPartRecField_(lua_State *lua_state) {}
 
 } // namespace Ctld
 
