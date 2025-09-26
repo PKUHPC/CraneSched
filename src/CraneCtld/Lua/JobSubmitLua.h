@@ -59,11 +59,13 @@ public:
 
   CraneExpectedRich<void> JobSubmit(const TaskInCtld& task_in_ctld);
 
+  CraneExpectedRich<void> JobModify(const TaskInCtld& task_in_ctld);
+
 private:
 
   void RegisterOutputFunctions_();
   static void RegisterLuaCraneStructFunctions_(lua_State *lua_state);
-  static bool CheckLuaScriptFunction_(lua_State *lua_state, const std::string& name);
+  static bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name);
   static bool CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns);
 
   void LuaTableRegister_(const luaL_Reg* l);
@@ -115,7 +117,7 @@ public:
     JobSubmitLua* get() const { return m_lua_.get(); }
 
     ~Handle() {
-      if (m_pool_ && m_lua_) m_pool_->release(std::move(m_lua_));
+      if (m_pool_ && m_lua_) m_pool_->Release_(std::move(m_lua_));
     }
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
@@ -129,20 +131,24 @@ public:
       m_pool_.push(std::make_unique<JobSubmitLua>(lua_script));
   }
 
-  Handle acquire() {
-    util::lock_guard lock(m_mutex_);
-    if (m_pool_.empty()) return Handle(nullptr, nullptr);
+  Handle Acquire() {
+    std::unique_lock<std::mutex> lock(m_mutex_);
+    m_cv_.wait(lock, [this] { return !m_pool_.empty(); });
     auto obj = std::move(m_pool_.front());
     m_pool_.pop();
     return Handle(this, std::move(obj));
   }
 private:
-  void release(std::unique_ptr<JobSubmitLua> obj) {
-    util::lock_guard lock(m_mutex_);
-    m_pool_.push(std::move(obj));
+  void Release_(std::unique_ptr<JobSubmitLua> obj) {
+    {
+      std::unique_lock<std::mutex> lock(m_mutex_);
+      m_pool_.push(std::move(obj));
+    }
+    m_cv_.notify_one();
   }
-  util::mutex m_mutex_;
+  std::mutex m_mutex_;
   std::queue<std::unique_ptr<JobSubmitLua>> m_pool_;
+  std::condition_variable m_cv_;
 };
 
 } // namespace Ctld
