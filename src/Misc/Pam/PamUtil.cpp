@@ -355,8 +355,8 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   if (reply.ok()) {
     pam_syslog(pamh, LOG_ERR,
                "ssh client with remote port %u belongs to task #%u",
-               port_to_query, reply.task_id());
-    *task_id = reply.task_id();
+               port_to_query, reply.job_id());
+    *task_id = reply.job_id();
     return true;
   } else {
     pam_syslog(pamh, LOG_ERR,
