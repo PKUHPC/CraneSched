@@ -237,7 +237,8 @@ class EmbeddedDbClient {
   bool AppendTasksToPendingAndAdvanceTaskIds(
       const std::vector<TaskInCtld*>& tasks);
 
-  bool PurgeEndedTasks(const std::vector<db_id_t>& db_ids);
+  bool PurgeEndedTasks(
+      const std::unordered_map<job_id_t, task_db_id_t>& job_ids);
 
   bool UpdateRuntimeAttrOfTask(
       txn_id_t txn_id, db_id_t db_id,
@@ -277,7 +278,7 @@ class EmbeddedDbClient {
 
   bool AppendSteps(const std::vector<StepInCtld*>& steps);
 
-  bool PurgeEndedSteps(const std::vector<db_id_t>& db_ids);
+  bool PurgeEndedSteps(const std::vector<step_db_id_t>& db_ids);
 
   bool UpdateRuntimeAttrOfStep(
       txn_id_t txn_id, db_id_t db_id,

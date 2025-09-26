@@ -806,7 +806,8 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
+bool EmbeddedDbClient::PurgeEndedTasks(
+    const std::unordered_map<job_id_t, task_db_id_t>& job_ids) {
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
   // 1. when inserting task data, fixed data db is written before variable db;
@@ -816,7 +817,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   std::expected<void, DbErrorCode> res;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids) {
+  for (const auto& id : job_ids | std::views::values) {
     res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
     if (!res) {
       CRANE_ERROR(
@@ -828,7 +829,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids) {
+  for (const auto& id : job_ids | std::views::values) {
     res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
     if (!res) {
       CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
@@ -837,6 +838,20 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
     }
   }
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
+  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+  for (const auto& job_id : job_ids | std::views::keys) {
+    next_step_id_map.erase(job_id);
+  }
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
+  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
+  res = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                         &db_next_step_id_map);
+  if (!res) {
+    CRANE_ERROR("Failed to store next_step_id_map.");
+    return false;
+  }
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
 
   return true;
 }
@@ -915,7 +930,8 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedSteps(const std::vector<db_id_t>& db_ids) {
+bool EmbeddedDbClient::PurgeEndedSteps(
+    const std::vector<step_db_id_t>& db_ids) {
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
   // 1. when inserting step data, fixed data db is written before variable db;
