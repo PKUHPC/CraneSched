@@ -20,27 +20,12 @@
 
 namespace Ctld {
 
-bool JobSubmitLua::Init(const std::string& lua_script) {
-  if (!(m_lua_state_ = luaL_newstate())) {
-    CRANE_ERROR("luaL_newstate() failed to allocate");
-    return false;
-  }
-  luaL_openlibs(m_lua_state_);
+CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld &task) {
 
-  if (luaL_loadfile(m_lua_state_, lua_script.data())) {
-    CRANE_ERROR("luaL_loadfile failed.");
-    lua_close(m_lua_state_);
-    return false;
-  }
+  CraneExpectedRich<void> result{};
 
-  RegisterOutputFunctions_();
-  RegisterLuaCraneStructFunctions_(m_lua_state_);
-
-  return true;
-}
-
-std::optional<std::string> JobSubmitLua::JobSubmit(
-    const TaskInCtld &task_in_ctld) {
+  if (!LoadLuaScript_())
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
   /*
    *  All lua script functions should have been verified during
@@ -48,35 +33,32 @@ std::optional<std::string> JobSubmitLua::JobSubmit(
   */
   lua_getglobal(m_lua_state_, "crane_job_submit");
   if (lua_isnil(m_lua_state_, -1))
-    return "";
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
   // _update_jobs_global(m_lua_state_);
   // _update_resvs_global(m_lua_state_);
   //
   // _push_job_desc(job_desc);
   // _push_partition_list(job_desc->user_id, submit_uid);
-  // lua_pushnumber(m_lua_state_, submit_uid);
-  // slurm_lua_stack_dump(
-  //         "job_submit/lua", "job_submit, before lua_pcall", L);
-  // if (lua_pcall(L, 3, 1, 0) != 0) {
-  //   error("%s/lua: %s: %s",
-  //         __func__, lua_script_path, lua_tostring(L, -1));
-  // } else {
-  //   if (lua_isnumber(L, -1)) {
-  //     rc = lua_tonumber(L, -1);
-  //   } else {
-  //     info("%s/lua: %s: non-numeric return code",
-  //          __func__, lua_script_path);
-  //     rc = SLURM_SUCCESS;
-  //   }
-  //   lua_pop(L, 1);
-  // }
-  // slurm_lua_stack_dump(
-  //         "job_submit/lua", "job_submit, after lua_pcall", L);
-  // if (user_msg) {
-  //   *err_msg = user_msg;
-  //   user_msg = NULL;
-  // }
+  lua_pushnumber(m_lua_state_, task.uid);
+  int rc = CraneErrCode::SUCCESS;
+  if (lua_pcall(m_lua_state_, 3, 1, 0) != 0) {
+    CRANE_ERROR("{}: {}", m_lua_script_, lua_tostring(m_lua_state_, -1));
+  } else {
+    if (lua_isnumber(m_lua_state_, -1)) {
+      rc = lua_tonumber(m_lua_state_, -1);
+    } else {
+      CRANE_INFO("{}/lua: {}: non-numeric return code", __func__, m_lua_script_);
+    }
+    lua_pop(m_lua_state_, 1);
+  }
+  if (!m_user_msg_.empty()) {
+    auto user_msg = m_user_msg_;
+    m_user_msg_.clear();
+    return std::unexpected(FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
+  }
+
+  return result;
 }
 
 void JobSubmitLua::RegisterOutputFunctions_() {
@@ -119,11 +101,11 @@ void JobSubmitLua::RegisterOutputFunctions_() {
   }
 
   /*
- * TODO: Error codes: true, false, CraneErrCode etc.
+ * TODO: Error codes: CraneErrCode etc.
  */
-  lua_pushnumber(m_lua_state_, false);
+  lua_pushnumber(m_lua_state_, CraneErrCode::ERR_SYSTEM_ERR);
   lua_setfield(m_lua_state_, -2, "ERROR");
-  lua_pushnumber(m_lua_state_, true);
+  lua_pushnumber(m_lua_state_, CraneErrCode::SUCCESS);
   lua_setfield(m_lua_state_, -2, "SUCCESS");
   RegisterOutputErrTab_();
 
@@ -152,6 +134,27 @@ void JobSubmitLua::RegisterLuaCraneStructFunctions_(lua_State* lua_state) {
   lua_setglobal(lua_state, "_set_job_req_field");
   lua_pushcfunction(lua_state, GetPartRecField_);
   lua_setglobal(lua_state, "_get_part_rec_field");
+}
+
+bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name) {
+  bool result = true;
+  lua_getglobal(lua_state, name);
+  if (!lua_isfunction(lua_state, -1))
+    result = false;
+  lua_pop(lua_state, -1);
+  return result;
+}
+
+bool CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns) {
+  bool result = true;
+  const char **ptr = NULL;
+  for (ptr = req_fxns; ptr && *ptr; ptr++) {
+    if (!CheckLuaScriptFunction_(lua_state, *ptr)) {
+      CRANE_ERROR("{}: missing required function {}", script_pash, *ptr);
+      result = false;
+    }
+  }
+  return result;
 }
 
 int LogLuaMsg(lua_State *lua_state) {
@@ -252,7 +255,22 @@ void JobSubmitLua::RegisterOutputErrTab_() {
   // }
 }
 
-bool JobSubmitLua::RunScript_() {
+bool JobSubmitLua::LoadLuaScript_() {
+  if (!(m_lua_state_ = luaL_newstate())) {
+    CRANE_ERROR("luaL_newstate() failed to allocate");
+    return false;
+  }
+  luaL_openlibs(m_lua_state_);
+
+  if (luaL_loadfile(m_lua_state_, m_lua_script_.data())) {
+    CRANE_ERROR("luaL_loadfile failed.");
+    lua_close(m_lua_state_);
+    return false;
+  }
+
+  RegisterOutputFunctions_();
+  RegisterLuaCraneStructFunctions_(m_lua_state_);
+
   if (lua_pcall(m_lua_state_, 0, 1, 0)) {
     CRANE_ERROR("{}:{}", m_lua_script_, lua_tostring(m_lua_state_, -1));
     return false;
@@ -263,12 +281,11 @@ bool JobSubmitLua::RunScript_() {
     return false;
   }
 
-  // rc = _check_lua_script_functions(new, plugin, script_path, req_fxns);
-  // if (rc != SLURM_SUCCESS) {
-  //   err_str = xstrdup_printf("%s: required function(s) not present",
-  //                            script_path);
-  //   goto fini_error;
-  // }
+  if (!CheckLuaScriptFunctions_(m_lua_state_, m_lua_script_, ReqFxns)) {
+    CRANE_ERROR("{}: required function(s) not present", m_lua_script_);
+    return false;
+  }
+
   return true;
 }
 
