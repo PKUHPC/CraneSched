@@ -25,6 +25,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "Lua/JobSubmitLua.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"
@@ -462,6 +463,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
+
+  auto lua_result = g_task_scheduler->LuaCheck(*task);
+  if (!lua_result) {
+    response->set_ok(false);
+    response->set_code(lua_result.error().code());
+    // TODO: add user msg
+    return grpc::Status::OK;
+  }
 
   auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {

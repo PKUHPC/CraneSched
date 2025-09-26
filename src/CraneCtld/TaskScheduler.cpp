@@ -26,6 +26,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "Lua/JobSubmitLua.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/Crane.pb.h"
@@ -1557,6 +1558,18 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
                                                  task->TaskToCtld());
   return CraneErrCode::SUCCESS;
+}
+
+CraneExpectedRich<void> TaskScheduler::LuaCheck(const TaskInCtld& task) {
+  if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
+  
+  auto handle = g_lua_pool->Acquire();
+  if (handle.get() == nullptr)
+    return std::unexpected(
+      FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
+        "Failed to acquire Lua interpreter handle."));
+
+  return handle->JobSubmit(task);
 }
 
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
