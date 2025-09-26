@@ -21,10 +21,9 @@
 // Precompiled header comes first!
 
 #include "AccountManager.h"
+#include "crane/Lock.h"
 
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
+#include <lua.hpp>
 
 namespace Ctld {
 
@@ -33,17 +32,24 @@ int LogLuaError(lua_State *lua_state);
 int TimeStr2Mins(lua_State *lua_state);
 int GetQosPriority(lua_State *lua_state);
 
-static const struct luaL_Reg crane_functions [] = {
-  { "log", LogLuaMsg},
+static const luaL_Reg crane_functions[] = {
+  { "log", LogLuaMsg },
   { "error", LogLuaError },
-  { "time_str2mins", TimeStr2Mins},
+  { "time_str2mins", TimeStr2Mins },
   { "get_qos_priority", GetQosPriority },
-  { NULL, NULL }
+  { nullptr, nullptr }
+};
+
+static const char* ReqFxns[] = {
+  "crane_job_submit",
+  "crane_job_modify",
+  nullptr
 };
 
 class JobSubmitLua {
 public:
-  JobSubmitLua() = default;
+  JobSubmitLua(const std::string& lua_script)
+      : m_lua_script_(lua_script) {}
 
   ~JobSubmitLua() {
     if (m_lua_state_) {
@@ -51,21 +57,20 @@ public:
     }
   }
 
-  bool Init(const std::string& lua_script);
-
-  std::optional<std::string> JobSubmit(const TaskInCtld& task_in_ctld);
+  CraneExpectedRich<void> JobSubmit(const TaskInCtld& task_in_ctld);
 
 private:
 
   void RegisterOutputFunctions_();
-
   static void RegisterLuaCraneStructFunctions_(lua_State *lua_state);
+  static bool CheckLuaScriptFunction_(lua_State *lua_state, const std::string& name);
+  static bool CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns);
 
   void LuaTableRegister_(const luaL_Reg* l);
 
   void RegisterOutputErrTab_();
 
-  bool RunScript_();
+  bool LoadLuaScript_();
 
   static int GetJobEnvFieldName_(lua_State* lua_state);
   static int GetJobReqFieldName_(lua_State* lua_state);
@@ -86,4 +91,60 @@ private:
   std::string m_user_msg_;
 };
 
+class LuaPool {
+public:
+  class Handle {
+  public:
+    Handle(LuaPool* pool, std::unique_ptr<JobSubmitLua> obj)
+        : m_pool_(pool), m_lua_(std::move(obj)) {}
+
+    Handle(Handle&& other) noexcept
+        : m_pool_(other.m_pool_), m_lua_(std::move(other.m_lua_)) { other.m_pool_ = nullptr; }
+
+    Handle& operator=(Handle&& other) noexcept {
+      if (this != &other) {
+        m_pool_ = other.m_pool_;
+        m_lua_ = std::move(other.m_lua_);
+        other.m_pool_ = nullptr;
+      }
+      return *this;
+    }
+
+    JobSubmitLua* operator->() const { return m_lua_.get(); }
+    JobSubmitLua& operator*() const { return *m_lua_; }
+    JobSubmitLua* get() const { return m_lua_.get(); }
+
+    ~Handle() {
+      if (m_pool_ && m_lua_) m_pool_->release(std::move(m_lua_));
+    }
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+  private:
+    LuaPool* m_pool_;
+    std::unique_ptr<JobSubmitLua> m_lua_;
+  };
+
+  LuaPool(size_t pool_size, const std::string& lua_script) {
+    for (size_t i = 0; i < pool_size; ++i)
+      m_pool_.push(std::make_unique<JobSubmitLua>(lua_script));
+  }
+
+  Handle acquire() {
+    util::lock_guard lock(m_mutex_);
+    if (m_pool_.empty()) return Handle(nullptr, nullptr);
+    auto obj = std::move(m_pool_.front());
+    m_pool_.pop();
+    return Handle(this, std::move(obj));
+  }
+private:
+  void release(std::unique_ptr<JobSubmitLua> obj) {
+    util::lock_guard lock(m_mutex_);
+    m_pool_.push(std::move(obj));
+  }
+  util::mutex m_mutex_;
+  std::queue<std::unique_ptr<JobSubmitLua>> m_pool_;
+};
+
 } // namespace Ctld
+
+inline std::unique_ptr<Ctld::LuaPool> g_lua_pool;
