@@ -32,6 +32,7 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "Lua/JobSubmitLua.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
@@ -226,6 +227,8 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
+
+      g_config.JobSubmitLuaScript = YamlValueOr(config["JobSubmitLuaScript"], "");
 
       g_config.CranedListenConf.CranedListenPort =
           YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
@@ -880,6 +883,9 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+
+  if (!g_config.JobSubmitLuaScript.empty())
+    g_lua_pool = std::make_unique<Ctld::LuaPool>(5, g_config.JobSubmitLuaScript);
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
 }
