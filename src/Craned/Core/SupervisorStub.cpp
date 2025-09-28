@@ -162,16 +162,25 @@ CraneErrCode SupervisorStub::TerminateStep(bool mark_as_orphaned,
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ChangeStepTimeLimit(absl::Duration time_limit) {
+CraneErrCode SupervisorStub::ChangeStepTimeConstraint(
+    std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
   ClientContext context;
-  crane::grpc::supervisor::ChangeStepTimeLimitRequest request;
-  crane::grpc::supervisor::ChangeStepTimeLimitReply reply;
+  crane::grpc::supervisor::ChangeStepTimeConstraintRequest request;
+  crane::grpc::supervisor::ChangeStepTimeConstraintReply reply;
 
-  request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit));
-  auto ok = m_stub_->ChangeStepTimeLimit(&context, request, &reply);
+  if (time_limit_seconds) {
+    request.set_time_limit_seconds(time_limit_seconds.value());
+  }
+
+  if (deadline_time) {
+    request.set_deadline_time(deadline_time.value());
+  }
+
+  auto ok = m_stub_->ChangeStepTimeConstraint(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_WARN("ChangeStepTimeLimit failed: reply {},{}", reply.ok(),
+  CRANE_WARN("ChangeStepTimeConstraint failed: reply {},{}", reply.ok(),
              ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }

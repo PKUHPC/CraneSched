@@ -118,6 +118,7 @@ enum JobStatus {
   Starting = 8;
   Completing = 9;
 
+  Deadline = 10;
   Invalid = 15;
 }
 
@@ -239,6 +240,7 @@ message JobToCtld {
   string task_prolog = 46;
   string task_epilog = 47;
   repeated Signal signals = 48;
+  google.protobuf.Timestamp deadline_time = 49;
   optional double cpus_per_task = 50;
   optional uint64 mem_per_node = 51;
   optional DeviceMap gres_per_node = 52;
@@ -321,6 +323,7 @@ message StepToCtld {
   optional double cpus_per_task = 37;
   optional uint64 mem_per_node = 38;
   optional DeviceMap gres_per_node = 39;
+  google.protobuf.Timestamp deadline_time = 40;
 }
 
 message RuntimeAttrOfStep {
@@ -425,6 +428,7 @@ message StepToD {
   string task_prolog = 30;
   string task_epilog = 31;
   repeated Signal signals = 32;
+  google.protobuf.Timestamp deadline_time = 33;
 
   // task_node_list[task_id] = index of the node in nodelist that owns this task.
   // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
@@ -624,6 +628,7 @@ message JobInfo {
   map<string, string> env = 42;
   string submit_hostname = 43;
   uint32 ntasks = 44;
+  google.protobuf.Timestamp deadline_time = 45;
 }
 
 message StepInfo {
@@ -669,6 +674,7 @@ message StepInfo {
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
+  google.protobuf.Timestamp deadline_time = 41;
 }
 
 message PartitionInfo {
@@ -877,6 +883,7 @@ enum ErrCode {
   ERR_MAX_TRES_PER_USER_BEYOND = 102;
   ERR_MAX_TRES_PER_ACCOUNT_BEYOND = 103;
   ERR_TRES_PER_JOB_BEYOND = 104;
+  ERR_INVALID_DEADLINE = 105;
 }
 
 enum EntityType {

@@ -63,6 +63,13 @@ JOBID PARTITION NAME     USER     ACCOUNT   STATUS TYPE TIME    TIMELIMIT NODES 
 - **-p, --partition string**: Requested partition
 - **-q, --qos string**: Quality of Service (QoS) used for the job
 - **-t, --time string**: Time limit, format: `[day-]hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days and 1 second, or `10:1:2` for 10 hours, 1 minute, 2 seconds)
+- **--deadline string**: Deadline, format:
+    - `now + <count> <units>(无时默认为秒数)`
+    - `HH:MM[:SS]`
+    - `MM/DD[/YY]`
+    - `MMDD[YY]`
+    - `YYYY-MM-DD[THH:MM[:SS]]`
+    - `midnight/noon/teatime/elevenses/fika`
 - **--comment string**: Comment for the job
 
 ### Node Selection

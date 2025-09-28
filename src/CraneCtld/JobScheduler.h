@@ -785,7 +785,9 @@ class JobScheduler {
 
   std::future<CraneErrCode> HoldReleaseJobAsync(job_id_t job_id, int64_t secs);
 
-  CraneErrCode ChangeJobTimeLimit(job_id_t job_id, int64_t secs);
+  CraneErrCode ChangeJobTimeConstraint(
+      job_id_t job_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
 
   CraneErrCode ChangeJobPriority(job_id_t job_id, double priority);
 
@@ -1033,6 +1035,10 @@ class JobScheduler {
   std::thread m_job_status_change_thread_;
   void JobStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::shared_ptr<uvw::loop> uvw_deadline_loop;
+  std::thread m_job_deadline_timer_thread_;
+  void DeadlineTimerThread_();
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_job_timer_handle_;
   void CleanJobTimerCb_();
@@ -1056,6 +1062,8 @@ class JobScheduler {
 
   struct CancelPendingJobQueueElem {
     std::unique_ptr<JobInCtld> job;
+    std::string reason;
+    crane::grpc::JobStatus finish_status;
   };
 
   struct CancelPendingStepQueueElem {
@@ -1144,6 +1152,21 @@ class JobScheduler {
   };
 
   ConcurrentQueue<DependencyEvent> m_dependency_event_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_queue_;
+
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
+  ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
+
+  TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
+
+  void CancelDeadlineJobCb_();
+
+  void CreateDeadlineTimerCb_();
+
+  void DelDeadlineTimer_(job_id_t job_id);
 };
 
 }  // namespace Ctld

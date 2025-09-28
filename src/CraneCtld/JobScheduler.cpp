@@ -63,6 +63,8 @@ JobScheduler::~JobScheduler() {
   if (m_job_status_change_thread_.joinable())
     m_job_status_change_thread_.join();
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
+  if (m_job_deadline_timer_thread_.joinable())
+    m_job_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
   m_rpc_worker_pool_.reset();
 }
@@ -72,6 +74,10 @@ bool JobScheduler::Init() {
 
   bool ok;
   CraneErrCode err;
+
+  uvw_deadline_loop = uvw::loop::create();
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
 
   EmbeddedDbClient::DbSnapshot snapshot;
   ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
@@ -141,9 +147,9 @@ bool JobScheduler::Init() {
       recovered_running_jobs.emplace(job_id, std::move(job));
     }
   }
-
-  // Process the pending jobs in the embedded pending queue.
+  //  Process the pending jobs in the embedded pending queue.
   auto& pending_queue = snapshot.pending_queue;
+  absl::Time infiniteFuture = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   if (!pending_queue.empty()) {
     CRANE_INFO("{} pending job(s) recovered.", pending_queue.size());
 
@@ -186,6 +192,11 @@ bool JobScheduler::Init() {
           mark_job_as_failed = true;
         } else
           g_account_meta_container->UserAddJob(job->Username());
+      }
+
+      if (!mark_job_as_failed && job->deadline_time != infiniteFuture) {
+        deadline_timer_vec.emplace_back(
+            job_id, absl::ToUnixSeconds(job->deadline_time));
       }
 
       if (!mark_job_as_failed) {
@@ -699,6 +710,28 @@ bool JobScheduler::Init() {
     }
   }
 
+  m_job_deadline_timer_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelDeadlineJobCb_();
+      });
+  m_job_deadline_timer_thread_ =
+      std::thread([this]() { DeadlineTimerThread_(); });
+
+  m_job_deadline_timer_create_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_create_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CreateDeadlineTimerCb_();
+      });
+
+  if (!deadline_timer_vec.empty()) {
+    m_job_deadline_timer_create_queue_.enqueue_bulk(deadline_timer_vec.data(),
+                                                    deadline_timer_vec.size());
+    m_job_deadline_timer_create_async_handle_->send();
+  }
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
   m_step_schedule_thread_ = std::thread([this] { StepScheduleThread_(); });
@@ -852,6 +885,27 @@ void JobScheduler::JobStatusChangeThread_(
   }
 
   uvw_loop->run();
+}
+
+void JobScheduler::DeadlineTimerThread_() {
+  util::SetCurrentThreadName("JobDeadlineThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_deadline_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in JobDeadlineTimer loop.");
+  }
+
+  uvw_deadline_loop->run();
 }
 
 void JobScheduler::CleanResvThread_(
@@ -1578,6 +1632,80 @@ std::future<CraneExpected<step_id_t>> JobScheduler::SubmitStepAsync(
   return std::move(future);
 }
 
+void JobScheduler::CreateDeadlineTimerCb_() {
+  absl::Time now = absl::Now();
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  DeadlineTimerQueueElem elem;
+  while (m_job_deadline_timer_create_queue_.try_dequeue(elem)) {
+    job_id_t job_id = elem.first;
+    int64_t deadline_time = elem.second;
+
+    auto it = m_deadline_timer_map_.find(job_id);
+    if (it != m_deadline_timer_map_.end()) {
+      it->second->close();
+      it->second.reset();
+      m_deadline_timer_map_.erase(it);
+    }
+
+    if (deadline_time <= absl::ToUnixSeconds(now)) {
+      CRANE_ERROR("Job #{}'s deadline is earlier than now", job_id);
+      {
+        LockGuard pending_guard(&m_pending_job_map_mtx_);
+        auto pd_it = m_pending_job_map_.find(job_id);
+        if (pd_it != m_pending_job_map_.end()) {
+          auto& job = pd_it->second;
+          m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+              .job = std::move(job),
+              .finish_status = crane::grpc::JobStatus::Deadline});
+          m_pending_job_map_.erase(pd_it);
+        }
+      }
+      return;
+    }
+
+    auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
+    deadline_timer->on<uvw::timer_event>(
+        [this, job_id](const uvw::timer_event&, uvw::timer_handle& h) {
+          CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
+          DelDeadlineTimer_(job_id);
+          m_job_deadline_timer_queue_.enqueue(job_id);
+          m_job_deadline_timer_async_handle_->send();
+        });
+
+    deadline_timer->start(
+        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
+        std::chrono::seconds(0));
+
+    m_deadline_timer_map_.emplace(job_id, deadline_timer);
+  }
+}
+
+void JobScheduler::DelDeadlineTimer_(job_id_t job_id) {
+  auto it = m_deadline_timer_map_.find(job_id);
+  if (it != m_deadline_timer_map_.end()) {
+    it->second->close();
+    it->second.reset();
+    m_deadline_timer_map_.erase(it);
+  }
+}
+
+void JobScheduler::CancelDeadlineJobCb_() {
+  job_id_t job_id;
+  m_pending_job_map_mtx_.Lock();
+  while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
+    auto pd_it = m_pending_job_map_.find(job_id);
+    if (pd_it != m_pending_job_map_.end()) {
+      auto& job = pd_it->second;
+      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+          .job = std::move(job),
+          .finish_status = crane::grpc::JobStatus::Deadline});
+      m_pending_job_map_.erase(pd_it);
+    }
+  }
+  m_pending_job_map_mtx_.Unlock();
+  m_cancel_job_async_handle_->send();
+}
+
 std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
                                                             int64_t secs) {
   std::promise<CraneErrCode> promise;
@@ -1590,8 +1718,20 @@ std::future<CraneErrCode> JobScheduler::HoldReleaseJobAsync(job_id_t job_id,
   return std::move(future);
 }
 
-CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
-  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
+CraneErrCode JobScheduler::ChangeJobTimeConstraint(
+    job_id_t job_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  absl::Time now = absl::Now();
+  bool is_pending = false;
+  std::optional<absl::Time> absl_deadline_time =
+      deadline_time.transform(absl::FromUnixSeconds);
+
+  if (absl_deadline_time && absl_deadline_time <= now) {
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+  if (time_limit_seconds &&
+      !CheckIfTimeLimitSecIsValid(time_limit_seconds.value()))
+    return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
 
@@ -1604,13 +1744,20 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
 
     auto pd_iter = m_pending_job_map_.find(job_id);
     if (pd_iter != m_pending_job_map_.end()) {
-      found = true, job = pd_iter->second.get();
+      found = true, is_pending = true, job = pd_iter->second.get();
 
       if (job->reservation != "") {
         auto resv_end_time =
             g_meta_container->GetResvMetaPtr(job->reservation)->end_time;
-        if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
+        if (time_limit_seconds &&
+            resv_end_time <=
+                absl::Now() + absl::Seconds(time_limit_seconds.value())) {
           CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
+                      job_id);
+          return CraneErrCode::ERR_INVALID_PARAM;
+        }
+        if (absl_deadline_time && resv_end_time <= absl_deadline_time.value()) {
+          CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
                       job_id);
           return CraneErrCode::ERR_INVALID_PARAM;
         }
@@ -1626,10 +1773,33 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(job->reservation);
           auto resv_end_time = reservation_meta->end_time;
-          if (resv_end_time <= job->StartTime() + absl::Seconds(secs)) {
+
+          if (time_limit_seconds &&
+              resv_end_time <= job->StartTime() +
+                                   absl::Seconds(time_limit_seconds.value())) {
             CRANE_DEBUG("Job #{}'s time limit exceeds reservation end time",
                         job_id);
             return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (absl_deadline_time &&
+              resv_end_time <= absl_deadline_time.value()) {
+            CRANE_DEBUG("Job #{}'s deadline time exceeds reservation end time",
+                        job_id);
+            return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (time_limit_seconds) {
+            g_meta_container->GetResvMetaPtr(job->reservation)->end_time =
+                std::min(job->StartTime() +
+                             absl::Seconds(time_limit_seconds.value()),
+                         job->deadline_time);
+          }
+
+          if (absl_deadline_time) {
+            g_meta_container->GetResvMetaPtr(job->reservation)->end_time =
+                std::min(job->StartTime() + job->time_limit,
+                         absl_deadline_time.value());
           }
         }
       }
@@ -1640,21 +1810,40 @@ CraneErrCode JobScheduler::ChangeJobTimeLimit(job_id_t job_id, int64_t secs) {
       return CraneErrCode::ERR_NON_EXISTENT;
     }
 
-    job->time_limit = absl::Seconds(secs);
-    job->MutableJobToCtld()->mutable_time_limit()->set_seconds(secs);
+    if (time_limit_seconds) {
+      job->time_limit = absl::Seconds(time_limit_seconds.value());
+      job->MutableJobToCtld()->mutable_time_limit()->set_seconds(
+          time_limit_seconds.value());
+    }
+
+    if (absl_deadline_time) {
+      job->deadline_time = absl_deadline_time.value();
+      job->MutableJobToCtld()->mutable_deadline_time()->set_seconds(
+          absl::ToUnixSeconds(absl_deadline_time.value()));
+      if (is_pending && job->deadline_time != absl::FromUnixSeconds(kJobMaxTimeStampSec)) {
+        m_job_deadline_timer_create_queue_.enqueue(
+            {job_id, deadline_time.value()});
+        m_job_deadline_timer_create_async_handle_->send();
+      }
+    }
+
     g_embedded_db_client->UpdateJobToCtldIfExists(0, job->JobDbId(),
                                                   job->JobToCtld());
   }
 
   // Only send request to the executing node
-  for (const CranedId& craned_id : craned_ids) {
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeJobTimeLimit(job_id, secs);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change time limit of job #{} on Node {}", job_id,
-                    craned_id);
-        return err;
+  if (!is_pending) {
+    for (const CranedId& craned_id : craned_ids) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        CraneErrCode err = stub->ChangeJobTimeConstraint(
+            job_id, time_limit_seconds, deadline_time);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "Failed to change time limit or deadline of job #{} on Node {}",
+              job_id, craned_id);
+          return err;
+        }
       }
     }
   }
@@ -2008,8 +2197,9 @@ crane::grpc::CancelJobReply JobScheduler::CancelPendingOrRunningJob(
       auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
       cancelled_job_steps[job_id] = crane::grpc::JobStepIds{};
 
-      m_cancel_job_queue_.enqueue(
-          CancelPendingJobQueueElem{std::move(it->second)});
+      m_cancel_job_queue_.enqueue(CancelPendingJobQueueElem{
+          .job = std::move(it->second),
+          .finish_status = crane::grpc::JobStatus::Cancelled});
       m_cancel_job_async_handle_->send();
 
       m_pending_job_map_.erase(it);
@@ -2910,6 +3100,7 @@ void JobScheduler::CleanCancelJobQueueCb_() {
     std::visit(  //
         VariantVisitor{
             [&](CancelPendingJobQueueElem& pd_elem) {
+              pd_elem.job->SetStatus(pd_elem.finish_status);
               pending_job_ptr_vec.emplace_back(std::move(pd_elem.job));
             },
             [&](CancelRunningJobQueueElem& rn_elem) {
@@ -2976,7 +3167,6 @@ void JobScheduler::CleanCancelJobQueueCb_() {
 
   if (!pending_job_ptr_vec.empty()) {
     for (auto& job : pending_job_ptr_vec) {
-      job->SetStatus(crane::grpc::Cancelled);
       job->SetStartTime(cancel_time);
       job->SetEndTime(cancel_time);
       g_account_meta_container->FreeQosSubmitResource(*job);
@@ -3065,14 +3255,14 @@ void JobScheduler::SubmitJobAsyncCb_() {
 void JobScheduler::CleanSubmitJobQueueCb_() {
   using SubmitQueueElem = std::pair<std::unique_ptr<JobInCtld>,
                                     std::promise<CraneExpected<job_id_t>>>;
-
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_job_queue_.size_approx();
 
   std::vector<SubmitQueueElem> accepted_jobs;
   std::vector<JobInCtld*> accepted_job_ptrs;
   std::vector<SubmitQueueElem> rejected_jobs;
-
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
   size_t accepted_size;
   size_t rejected_size;
@@ -3088,7 +3278,7 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
 
   size_t accepted_actual_size;
   size_t rejected_actual_size;
-
+  absl::Time infiniteFuture = absl::FromUnixSeconds(kJobMaxTimeStampSec);
   // Accept jobs within queue capacity.
   do {
     if (accepted_size == 0) break;
@@ -3163,6 +3353,10 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
           continue;
         }
       }
+      absl::Time deadline_time = accepted_jobs[pos].first->deadline_time;
+      if (deadline_time != infiniteFuture) {
+        deadline_timer_vec.emplace_back(id, absl::ToUnixSeconds(deadline_time));
+      }
 
       m_pending_job_map_.emplace(id, std::move(accepted_jobs[pos].first));
       job_id_promise.set_value(id);
@@ -3180,8 +3374,13 @@ void JobScheduler::CleanSubmitJobQueueCb_() {
             jobs_to_purge.size());
       }
     }
-  } while (false);
 
+    if (!deadline_timer_vec.empty()) {
+      m_job_deadline_timer_create_queue_.enqueue_bulk(
+          deadline_timer_vec.data(), deadline_timer_vec.size());
+      m_job_deadline_timer_create_async_handle_->send();
+    }
+  } while (false);
   // Reject jobs beyond queue capacity
   do {
     if (rejected_size == 0) break;
@@ -4934,6 +5133,9 @@ CraneExpected<void> JobScheduler::CheckJobValidity(JobInCtld* job) {
     CRANE_DEBUG("Job #{} has zero cpu request.", job->JobId());
     return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
+
+  if (job->deadline_time <= job->SubmitTime())
+    return std::unexpected(CraneErrCode::ERR_INVALID_DEADLINE);
 
   // Check whether the selected partition is able to run this job.
   std::unordered_set<std::string> avail_nodes;

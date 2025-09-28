@@ -356,6 +356,7 @@ void StepInCtld::RecoverFromDb(
 
   req_total_res_view =
       req_node_res_view * node_num + req_task_res_view * ntasks;
+  deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
 
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
@@ -851,6 +852,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
+  deadline_time = job.deadline_time;
 
   if (job.IsContainer()) {
     // NOTE: job is Container doesn't necessarily mean the step has
@@ -979,6 +981,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(JobInCtld& job) {
   step.set_task_prolog(job.JobToCtld().task_prolog());
   step.set_task_epilog(job.JobToCtld().task_epilog());
 
+  step.mutable_deadline_time()->set_seconds(absl::ToUnixSeconds(deadline_time));
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -1137,6 +1140,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+  step_to_d.mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(this->deadline_time));
+      
   switch (this->type) {
   case crane::grpc::Batch:
     step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
@@ -1676,6 +1682,7 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
+
   if (val.has_begin_time()) {
     begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
   }
@@ -1683,6 +1690,10 @@ void JobInCtld::SetFieldsByJobToCtld(crane::grpc::JobToCtld const& val) {
   exclusive = val.exclusive();
 
   submit_hostname = val.submit_hostname();
+
+  if (val.has_deadline_time()) {
+    deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());
+  }
 
   SetHeld(val.hold());
 
@@ -1942,6 +1953,7 @@ int JobInCtld::SchedulePendingSteps(
                   .craned_task_map = step->craned_task_map,
                   .ntasks_total = step->ntasks}}});
     }
+    step->deadline_time = deadline_time;
     pending_step_ids_.pop();
     ++popped_count;
     scheduled_steps->push_back(step);

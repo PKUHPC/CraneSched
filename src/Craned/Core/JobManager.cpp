@@ -540,9 +540,10 @@ CraneErrCode JobManager::ExecuteStepAsync(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
-                                                    step_id_t step_id,
-                                                    int64_t new_timelimit_sec) {
+CraneExpected<void> JobManager::ChangeStepTimeConstraint(
+    job_id_t job_id, step_id_t step_id,
+    std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
   auto job = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job) {
     CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
@@ -557,20 +558,22 @@ CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
   }
   auto& stub = step_it->second->supervisor_stub;
   if (!stub) {
-    CRANE_ERROR("[Step #{}.{}] Supervisor stub is null when changing timelimit",
-                job_id, step_id);
-    StepStatusChangeAsync(job_id, step_id, StepStatus::Failed,
-                          ExitCode::EC_RPC_ERR,
-                          "Supervisor stub is null when changing timelimit",
-                          google::protobuf::util::TimeUtil::GetCurrentTime());
+    CRANE_ERROR(
+        "[Step #{}.{}] Supervisor stub is null when changing time constraint",
+        job_id, step_id);
+    StepStatusChangeAsync(
+        job_id, step_id, StepStatus::Failed, ExitCode::EC_RPC_ERR,
+        "Supervisor stub is null when changing time constraint",
+        google::protobuf::util::TimeUtil::GetCurrentTime());
     return std::unexpected{CraneErrCode::ERR_RPC_FAILURE};
   }
-  auto err = stub->ChangeStepTimeLimit(absl::Seconds(new_timelimit_sec));
+  auto err = stub->ChangeStepTimeConstraint(time_limit_seconds, deadline_time);
+  int64_t sec = time_limit_seconds.value_or(deadline_time.value());
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR(
-        "[Step #{}.{}] Failed to change step timelimit to {} seconds via "
+        "[Step #{}.{}] Failed to change step time constraint to {} seconds via "
         "supervisor RPC",
-        job_id, step_id, new_timelimit_sec);
+        job_id, step_id, sec);
     return std::unexpected{err};
   }
   return {};

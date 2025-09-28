@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <bsoncxx/exception/exception.hpp>
+#include <cstdint>
 #include <mongocxx/exception/exception.hpp>
 
 namespace Ctld {
@@ -746,7 +747,7 @@ bool MongodbClient::FetchJobRecords(
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
   // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
-  // 40 nodename_list wckey          submit_hostname
+  // 40 nodename_list wckey          submit_hostname deadline
   try {
     for (auto view : cursor) {
       job_id_t job_id = view["job_id"].get_int32().value;
@@ -853,6 +854,9 @@ bool MongodbClient::FetchJobRecords(
                         job_id);
           }
         }
+
+        job_info.mutable_deadline_time()->set_seconds(ViewValueOr_(
+            view["deadline"], std::numeric_limits<int64_t>::max()));
 
         std::string wckey_info;
         bool using_default_wckey =
@@ -4267,9 +4271,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey        using_default_wckey cluster
-  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
   // clang-format off
-  std::array<std::string, 49> fields{
+  std::array<std::string, 50> fields{
     // 0 - 4
     "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -4289,7 +4293,7 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
     // 40 - 44
     "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
     // 45 - 49
-    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes"
+    "submit_hostname","req_nodes","exclude_nodes", "execution_nodes", "deadline"
   };
   // clang-format on
 
@@ -4304,8 +4308,8 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
              std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              bsoncxx::array::value, std::string, bool, std::string, /*41-44*/
-             std::string, std::list<CranedId>, std::list<CranedId>, /*45-46*/
-             std::vector<CranedId>>                                 /*45-49*/
+             std::string, std::list<CranedId>, std::list<CranedId>, /*45-47*/
+             std::vector<CranedId>, int64_t>                        /*48-49*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.job_id()), runtime_attr.job_db_id(),
@@ -4343,9 +4347,9 @@ MongodbClient::document MongodbClient::JobInEmbeddedDbToDocument_(
               runtime_attr.actual_licenses().end()},
           bsoncxx::array::value{nodename_list_array.view()},
           job_to_ctld.wckey(), using_default_wckey, g_config.CraneClusterName,
-          // 45-48
+          // 45-49
           job_to_ctld.submit_hostname(), req_node_list, exclude_node_list,
-          execution_nodes};
+          execution_nodes, job_to_ctld.deadline_time().seconds()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -4414,10 +4418,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_pod     meta_container has_job_info
   // 40 licenses_alloc nodename_list wckey  using_default_wckey cluster
-  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes
+  // 45 submit_hostname req_nodes    exclude_nodes execution_nodes deadline
 
   // clang-format off
-  std::array<std::string, 49> fields{
+  std::array<std::string, 50> fields{
       // 0 - 4
       "job_id",  "job_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -4437,7 +4441,7 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
       // 40 - 44
       "licenses_alloc", "nodename_list", "wckey", "using_default_wckey","cluster",
       // 45 - 49
-      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes"
+      "submit_hostname", "req_nodes","exclude_nodes","execution_nodes", "deadline"
   };
   // clang-format on
 
@@ -4452,9 +4456,10 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              std::optional<ContainerMetaInJob>, bool,               /*38-39*/
              std::unordered_map<std::string, uint32_t>,             /*40*/
              std::vector<CranedId>, std::string, bool, std::string, /*41-44*/
-             std::string, std::unordered_set<CranedId>,             /*45-49*/
-             std::unordered_set<CranedId>, std::vector<CranedId>>   /*45-49*/
-      values{                                                       // 0-4
+             std::string, std::unordered_set<CranedId>,             /*45-46*/
+             std::unordered_set<CranedId>, std::vector<CranedId>,
+             int64_t> /*47-49*/
+      values{         // 0-4
              static_cast<int32_t>(job->JobId()), job->JobDbId(),
              absl::ToUnixSeconds(absl::Now()), false, job->account,
              // 5-9
@@ -4485,7 +4490,8 @@ MongodbClient::document MongodbClient::JobInCtldToDocument_(JobInCtld* job) {
              job->using_default_wckey, g_config.CraneClusterName,
              // 45-49
              job->submit_hostname, job->included_nodes, job->excluded_nodes,
-             job->executing_craned_ids};
+             job->executing_craned_ids,
+             absl::ToUnixSeconds(job->deadline_time)};
 
   return DocumentConstructor_(fields, values);
 }

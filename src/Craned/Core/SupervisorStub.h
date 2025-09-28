@@ -49,7 +49,9 @@ class SupervisorStub {
   CheckStatus();
 
   CraneErrCode TerminateStep(bool mark_as_orphaned, bool terminated_by_user);
-  CraneErrCode ChangeStepTimeLimit(absl::Duration time_limit);
+  CraneErrCode ChangeStepTimeConstraint(
+      std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
   CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
 
