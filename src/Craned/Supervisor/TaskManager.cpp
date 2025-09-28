@@ -40,6 +40,15 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
+StepInstance::~StepInstance() {
+  if (termination_timer) {
+    termination_timer->close();
+  }
+  if (deadline_timer) {
+    deadline_timer->close();
+  }
+}
+
 bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
 }
@@ -1760,6 +1769,23 @@ void TaskManager::EvTaskTimerCb_() {
   }
 }
 
+void TaskManager::EvDeadlineTaskTimerCb_() {
+  CRANE_TRACE("task #{} reached its deadline. Terminating it...",
+              g_config.JobId);
+
+  DelDeadlineTerminationTimer_();
+
+  if (m_step_.IsBatch()) {
+    m_task_terminate_queue_.enqueue(
+        TaskTerminateQueueElem{.terminated_by_timeout = true});
+    m_terminate_task_async_handle_->send();
+  } else {
+    ActivateTaskStatusChange_(m_step_.job_id, crane::grpc::TaskStatus::Deadline,
+                              ExitCode::kExitCodeReachedDeadline,
+                              std::optional("Deadline"));
+  }
+}
+
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stop_queue_.try_dequeue(task_id)) {
@@ -1930,6 +1956,13 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     int64_t sec = m_step_.GetStep().time_limit().seconds();
     AddTerminationTimer_(sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
+
+    if (m_step_.GetStep().has_deadline_time()) {
+      int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
+                             absl::ToUnixSeconds(absl::Now());
+      AddDeadlineTerminationTimer_(deadline_sec);
+      CRANE_TRACE("Add a deadline timer of {} seconds", deadline_sec);
+    }
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {

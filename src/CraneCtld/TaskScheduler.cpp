@@ -3371,7 +3371,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       task->pending_reason = "Held";
       continue;
     }
-    if (task->begin_time > now) {
+    if (task->deadline_time < now) {
+      task->pending_reason = "Deadline";
+      continue;
+    } else if (task->begin_time > now) {
       task->pending_reason = "BeginTime";
       continue;
     }

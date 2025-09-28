@@ -325,6 +325,11 @@ crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
 
+    if (task->deadline_time != absl::InfiniteFuture()) {
+      mutable_task->mutable_deadline_time()->set_seconds(
+          ToUnixSeconds(task->deadline_time));
+    }
+
     if (task->type == crane::grpc::Batch) {
       auto *mutable_meta = mutable_task->mutable_batch_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
