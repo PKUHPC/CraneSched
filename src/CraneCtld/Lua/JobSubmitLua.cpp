@@ -44,7 +44,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld &task) {
   lua_pushstring(m_lua_state_, task.name.c_str());
   lua_pushstring(m_lua_state_, task.name.c_str());
   lua_pushnumber(m_lua_state_, task.uid);
-  int rc = CraneErrCode::SUCCESS;
+  int rc = CraneErrCode::ERR_LUA_FAILED;
   // 3 为 3个参数
   if (lua_pcall(m_lua_state_, 3, 1, 0) != 0) {
     CRANE_ERROR("{}: {}", m_lua_script_, lua_tostring(m_lua_state_, -1));
@@ -58,13 +58,13 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld &task) {
   }
   std::string user_msg;
   if (!m_user_msg_.empty()) {
-    CRANE_TRACE("#{}: user_msg: {}", task.TaskId(), m_user_msg_);
+    CRANE_TRACE("lua user_msg: {}", m_user_msg_);
     user_msg = m_user_msg_;
     m_user_msg_.clear();
   }
 
   if (rc != 0)
-    std::unexpected(FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
+    return std::unexpected(FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
 
   return result;
 }
@@ -94,19 +94,20 @@ void JobSubmitLua::RegisterOutputFunctions_() {
    *  Create more user-friendly lua versions of Crane log functions.
    */
   std::pair<std::string, std::string> log_funcs[] = {
-    {"log_error",   "crane.error (string.format(%s({...})))"},
-    {"log_info",    "crane.log (0, string.format(%s({...})))"},
-    {"log_verbose", "crane.log (1, string.format(%s({...})))"},
-    {"log_debug",   "crane.log (2, string.format(%s({...})))"},
-    {"log_debug2",  "crane.log (3, string.format(%s({...})))"},
-    {"log_debug3",  "crane.log (4, string.format(%s({...})))"},
-    {"log_debug4",  "crane.log (5, string.format(%s({...})))"},
-    {"log_user",    "crane.user_msg (string.format(%s({...})))"}
+    {"log_error",   "crane.error (string.format({}({{...}})))"},
+    {"log_info",    "crane.log (0, string.format({}({{...}})))"},
+    {"log_verbose", "crane.log (1, string.format({}({{...}})))"},
+    {"log_debug",   "crane.log (2, string.format({}({{...}})))"},
+    {"log_debug2",  "crane.log (3, string.format({}({{...}})))"},
+    {"log_debug3",  "crane.log (4, string.format({}({{...}})))"},
+    {"log_debug4",  "crane.log (5, string.format({}({{...}})))"},
+    {"log_user",    "crane.user_msg (string.format({}({{...}})))"}
   };
 
   for (const auto& lf : log_funcs) {
-    std::string lua_code = fmt::format("{}{}", lf.second, unpack_str);
+    std::string lua_code = fmt::format(fmt::runtime(lf.second), unpack_str);
     if (luaL_loadstring(m_lua_state_, lua_code.data()) != LUA_OK) {
+      CRANE_ERROR("{} load failed", lf.first);
       lua_pop(m_lua_state_, 1);
       continue;
     }
@@ -116,11 +117,11 @@ void JobSubmitLua::RegisterOutputFunctions_() {
   /*
  * TODO: Error codes: CraneErrCode etc.
  */
-  lua_pushnumber(m_lua_state_, CraneErrCode::ERR_SYSTEM_ERR);
+  RegisterOutputErrTab_();
+  lua_pushnumber(m_lua_state_, CraneErrCode::ERR_LUA_FAILED);
   lua_setfield(m_lua_state_, -2, "ERROR");
   lua_pushnumber(m_lua_state_, CraneErrCode::SUCCESS);
   lua_setfield(m_lua_state_, -2, "SUCCESS");
-  RegisterOutputErrTab_();
 
   // TODO: all used flags
   /*
@@ -265,28 +266,27 @@ void JobSubmitLua::LuaTableRegister_(const luaL_Reg* l) {
 }
 
 void JobSubmitLua::RegisterOutputErrTab_() {
-  // TODO: 注册所有错误码
-  // for (int i = 0; i<crane::grpc::ErrCode_ARRAYSIZE; i++) {
-  //   lua_pushnumber(m_lua_state_, slurm_errtab[i].xe_number);
-  //   lua_setfield(L, -2, slurm_errtab[i].xe_name);
-  // }
+  const google::protobuf::EnumDescriptor* desc =
+    crane::grpc::ErrCode_descriptor();
+  for (int i = 0; i < desc->value_count(); ++i) {
+    const google::protobuf::EnumValueDescriptor* vdesc = desc->value(i);
+    lua_pushnumber(m_lua_state_, vdesc->number());
+    lua_setfield(m_lua_state_, -2, vdesc->name().c_str());
+  }
 }
 
 bool JobSubmitLua::LoadLuaScript_() {
-  if (!(m_lua_state_ = luaL_newstate())) {
-    CRANE_ERROR("luaL_newstate() failed to allocate");
+  if (!m_lua_state_) {
+    CRANE_ERROR("Lua state (m_lua_state_) is null when loading script '{}'. "
+                "This usually indicates Lua VM initialization failed.", m_lua_script_);
     return false;
   }
-  luaL_openlibs(m_lua_state_);
 
   if (luaL_loadfile(m_lua_state_, m_lua_script_.data())) {
     CRANE_ERROR("luaL_loadfile failed.");
     lua_close(m_lua_state_);
     return false;
   }
-
-  RegisterOutputFunctions_();
-  RegisterLuaCraneStructFunctions_(m_lua_state_);
 
   if (lua_pcall(m_lua_state_, 0, 1, 0)) {
     CRANE_ERROR("{}:{}", m_lua_script_, lua_tostring(m_lua_state_, -1));

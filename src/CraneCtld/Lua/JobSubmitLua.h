@@ -49,7 +49,16 @@ static const char* ReqFxns[] = {
 class JobSubmitLua {
 public:
   JobSubmitLua(const std::string& lua_script)
-      : m_lua_script_(lua_script) {}
+      : m_lua_script_(lua_script) {
+    if (!(m_lua_state_ = luaL_newstate())) {
+      CRANE_ERROR("luaL_newstate() failed to allocate");
+    }
+
+    luaL_openlibs(m_lua_state_);
+
+    RegisterOutputFunctions_();
+    RegisterLuaCraneStructFunctions_(m_lua_state_);
+  }
 
   ~JobSubmitLua() {
     if (m_lua_state_) {
