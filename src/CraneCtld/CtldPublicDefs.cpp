@@ -1010,11 +1010,17 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
+
   if (val.has_begin_time()) {
     begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
   }
 
   exclusive = val.exclusive();
+
+
+  if (val.has_deadline_time()) {
+    deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());
+  }
 
   SetHeld(val.hold());
 }
@@ -1130,5 +1136,6 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
 }
+
 
 }  // namespace Ctld

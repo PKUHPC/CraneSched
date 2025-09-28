@@ -118,6 +118,7 @@ enum TaskStatus {
   Configured = 8;
   Completing = 9;
 
+  Deadline = 7;
   Invalid = 15;
 }
 
@@ -174,6 +175,8 @@ message TaskToCtld {
 
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
+  google.protobuf.Timestamp deadline_time = 40;
+
 }
 
 message TaskInEmbeddedDb {
@@ -316,6 +319,7 @@ message StepToD {
   google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
   google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
+  
 
   map<string, string> env = 17;
   string cwd = 18;
@@ -328,9 +332,11 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  google.protobuf.Timestamp deadline_time = 30;
 
   // Not used now.
   string extra_attr = 29;
+  
 }
 
 message JobStepsToD {

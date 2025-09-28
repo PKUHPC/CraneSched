@@ -44,6 +44,7 @@ class ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> deadline_timer{nullptr};
   PasswordEntry pwd;
 
   bool orphaned{false};
@@ -414,6 +415,17 @@ class TaskManager {
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
     m_step_.termination_timer = termination_handle;
+  }
+
+  void AddDeadlineTerminationTimer_(int64_t secs) {
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handel->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvDeadlineTaskTimerCb_();
+        });
+    termination_handel->start(std::chrono::seconds(secs),
+                              std::chrono::seconds(0));
+    m_step_.deadline_timer = termination_handel;
   }
 
   void DelTerminationTimer_() {

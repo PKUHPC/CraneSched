@@ -122,6 +122,7 @@ enum ExitCodeEnum : uint16_t {
   EC_CRANED_DOWN,
   EC_EXEC_ERR,
   EC_RPC_ERR,
+  EC_REACHED_DEADLINE,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };
