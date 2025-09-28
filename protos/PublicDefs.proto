@@ -176,7 +176,6 @@ message TaskToCtld {
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
   google.protobuf.Timestamp deadline_time = 40;
-
 }
 
 message TaskInEmbeddedDb {
