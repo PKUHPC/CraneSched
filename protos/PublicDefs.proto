@@ -115,6 +115,7 @@ enum TaskStatus {
   Cancelled = 5;
   OutOfMemory = 6;
 
+  Deadline = 7;
   Invalid = 15;
 }
 
@@ -170,6 +171,8 @@ message TaskToCtld {
 
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
+  google.protobuf.Timestamp deadline_time = 40;
+
 }
 
 message TaskInEmbeddedDb {
@@ -216,6 +219,7 @@ message TaskToD {
   // If this task is RUNNING, start_time is the actual starting time.
   google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
+  google.protobuf.Timestamp deadline_time = 7;
 
   string partition = 8;
   uint32 uid = 9;
