@@ -171,7 +171,7 @@ Plugin:
   PlugindDebugLevel: "trace"
   # the address of  Plugind to listen
   PlugindListenAddress: 127.0.0.1
-  PlugindListenPort: "10018"  
+  PlugindListenPort: 10018  
   # Plugins to be loaded in Plugind
   Plugins:
     - Name: "dummy"
