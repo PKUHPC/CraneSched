@@ -692,6 +692,8 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+
+  ERR_LUA_FAILED = 85;
 }
 
 enum EntityType {
