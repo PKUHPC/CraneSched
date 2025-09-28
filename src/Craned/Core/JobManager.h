@@ -37,7 +37,7 @@ using StepStatus = crane::grpc::TaskStatus;
 struct StepInstance {
   job_id_t job_id;
   step_id_t step_id;
-  pid_t supv_pid;
+  pid_t supv_pid{-1};
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
@@ -52,9 +52,9 @@ struct StepInstance {
 struct JobInD {
   JobInD() = default;
   JobInD(crane::grpc::JobToD const& job_to_d)
-      : job_id(job_to_d.job_id()), job_to_d(job_to_d) {
-    step_map_mtx = std::make_unique<absl::Mutex>();
-  }
+      : job_id(job_to_d.job_id()),
+        job_to_d(job_to_d),
+        step_map_mtx(std::make_unique<absl::Mutex>()) {}
 
   ~JobInD() = default;
 
@@ -69,7 +69,7 @@ struct JobInD {
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
 
-  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
@@ -126,8 +126,6 @@ class JobManager {
 
   void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
-  bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
-
   /**
    *
    * @param jobs completing jobs to clean up
@@ -179,13 +177,6 @@ class JobManager {
   struct EvQueueQueryTaskIdFromPid {
     std::promise<CraneExpected<task_id_t>> task_id_prom;
     pid_t pid;
-  };
-
-  struct ChangeTaskTimeLimitQueueElem {
-    task_id_t job_id;
-    step_id_t step_id;
-    absl::Duration time_limit;
-    std::promise<bool> ok_prom;
   };
 
   struct StepTerminateQueueElem {
@@ -261,8 +252,6 @@ class JobManager {
 
   void EvCleanTerminateTaskQueueCb_();
 
-  void EvCleanChangeTaskTimeLimitQueueCb_();
-
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -289,10 +278,6 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<StepStatusChangeQueueElem> m_task_status_change_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;

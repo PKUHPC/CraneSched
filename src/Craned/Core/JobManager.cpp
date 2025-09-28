@@ -141,22 +141,6 @@ JobManager::JobManager() {
         EvCleanTaskStatusChangeQueueCb_();
       });
 
-  m_change_task_time_limit_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_change_task_time_limit_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanChangeTaskTimeLimitQueueCb_();
-      });
-  m_change_task_time_limit_timer_handle_ =
-      m_uvw_loop_->resource<uvw::timer_handle>();
-  m_change_task_time_limit_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle& handle) {
-        m_change_task_time_limit_async_handle_->send();
-      });
-  m_change_task_time_limit_timer_handle_->start(
-      std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
-      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
-
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
@@ -1196,19 +1180,6 @@ void JobManager::MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id,
   m_terminate_step_async_handle_->send();
 }
 
-bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
-                                         absl::Duration time_limit) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return false;
-  }
-  ChangeTaskTimeLimitQueueElem elem{.job_id = job_id, .time_limit = time_limit};
-
-  std::future<bool> ok_fut = elem.ok_prom.get_future();
-  m_task_time_limit_change_queue_.enqueue(std::move(elem));
-  m_change_task_time_limit_async_handle_->send();
-  return ok_fut.get();
-}
-
 void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
   std::latch shutdown_step_latch{static_cast<std::ptrdiff_t>(steps.size())};
@@ -1261,48 +1232,6 @@ void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
              step_id, util::StepStatusToString(new_status));
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,
                                  std::move(reason));
-}
-
-void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
-  ChangeTaskTimeLimitQueueElem elem;
-  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
-  while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id); job_ptr) {
-      absl::MutexLock lk(job_ptr->step_map_mtx.get());
-      if (!job_ptr->step_map.contains(elem.step_id)) {
-        CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
-                    elem.job_id, elem.step_id);
-        continue;
-      }
-      auto* step = job_ptr->step_map.at(elem.step_id).get();
-      if (step->CanOperate()) {
-        CRANE_DEBUG(
-            "[Step #{}.{}] Terminating a non-running step, will do it later.",
-            elem.job_id, elem.step_id);
-        not_ready_elems.emplace_back(std::move(elem));
-        continue;
-      }
-      auto stub = g_supervisor_keeper->GetStub(elem.job_id, elem.step_id);
-      if (!stub) {
-        CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
-        continue;
-      }
-      auto err = stub->ChangeTaskTimeLimit(elem.time_limit);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change task time limit for task #{}",
-                    elem.job_id);
-        continue;
-      }
-      elem.ok_prom.set_value(true);
-    } else {
-      CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
-                  elem.job_id);
-      elem.ok_prom.set_value(false);
-    }
-  }
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
-  }
 }
 
 }  // namespace Craned

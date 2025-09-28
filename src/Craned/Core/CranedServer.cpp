@@ -325,9 +325,26 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
-      request->task_id(), absl::Seconds(request->time_limit_seconds()));
-  response->set_ok(ok);
+  job_id_t job_id = request->task_id();
+  step_id_t step_id = 0;
+  CRANE_INFO("[Step #{}.{}] Change step time limit to {} seconds.", job_id,
+             step_id, request->time_limit_seconds());
+  auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
+  if (!stub) {
+    CRANE_ERROR("[Step #{}.{}] Failed to get stub, no such step.", job_id,
+                step_id);
+    response->set_ok(false);
+  } else {
+    auto err =
+        stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("[Step #{}.{}] Failed to change time limit: {}.", job_id,
+                  step_id, CraneErrStr(err));
+      response->set_ok(false);
+    } else {
+      response->set_ok(true);
+    }
+  }
 
   return Status::OK;
 }

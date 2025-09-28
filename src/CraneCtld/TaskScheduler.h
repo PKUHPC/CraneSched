@@ -752,7 +752,7 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
 
   struct TaskStatusChangeArg {
-    uint32_t job_id;
+    job_id_t job_id;
     step_id_t step_id;
     uint32_t exit_code;
     crane::grpc::TaskStatus new_status;

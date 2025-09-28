@@ -823,7 +823,7 @@ void TaskScheduler::ScheduleThread_() {
           }
           CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
                       util::StepToDRangeIdString(steps), craned_id,
-                      CraneErrStr(err), craned_id);
+                      CraneErrStr(err));
 
           thread_pool_mtx.Lock();
           for (const auto& step_to_d : steps)
