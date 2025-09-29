@@ -1122,7 +1122,7 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpectedRich<void> TaskScheduler::LuaCheck(const TaskInCtld& task) {
+CraneExpectedRich<void> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
   if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
   
   auto handle = g_lua_pool->Acquire();
