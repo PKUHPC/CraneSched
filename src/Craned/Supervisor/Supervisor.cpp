@@ -246,7 +246,9 @@ void StartServer() {
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
     ::Craned::Supervisor::g_runtime_status.Status =
         Craned::Supervisor::StepStatus::Running;
-    Craned::Supervisor::g_runtime_status.Started = true;
+  } else {
+    ::Craned::Supervisor::g_runtime_status.Status =
+        Craned::Supervisor::StepStatus::Configured;
   }
   g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Running, 0,
                                          std::nullopt);

@@ -94,7 +94,6 @@ inline Config g_config;
 
 struct RuntimeStatus {
   std::atomic<StepStatus> Status{StepStatus::Configuring};
-  std::atomic_bool Started{false};
   [[nodiscard]] bool CanStepOperate() const noexcept {
     return Status == StepStatus::Running;
   }

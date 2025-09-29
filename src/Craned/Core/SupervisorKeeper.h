@@ -31,7 +31,8 @@ class SupervisorStub {
  public:
   CraneErrCode ExecuteStep();
   CraneExpected<EnvMap> QueryStepEnv();
-  CraneExpected<std::tuple<job_id_t, step_id_t, pid_t>> CheckStatus();
+  CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
+  CheckStatus();
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
@@ -62,7 +63,8 @@ class SupervisorKeeper {
    * scanning fails, supervisors are unreachable, or task status queries fail
    * with specific error codes.
    */
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t>>
+  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                                    std::pair<pid_t, StepStatus>>>
   InitAndGetRecoveredMap();
 
   void AddSupervisor(job_id_t job_id, step_id_t step_id);

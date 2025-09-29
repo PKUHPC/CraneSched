@@ -42,7 +42,8 @@ struct StepInstance {
   StepStatus status{StepStatus::Invalid};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
-  StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid);
+  StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
+               StepStatus status);
   [[nodiscard]] bool IsDaemon() const;
   [[nodiscard]] bool CanOperate() const;
   [[nodiscard]] std::string StepIdString() const;
@@ -126,8 +127,6 @@ class JobManager {
 
   void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
-  bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
-
   /**
    *
    * @param jobs completing jobs to clean up
@@ -181,13 +180,6 @@ class JobManager {
     pid_t pid;
   };
 
-  struct ChangeTaskTimeLimitQueueElem {
-    task_id_t job_id;
-    step_id_t step_id;
-    absl::Duration time_limit;
-    std::promise<bool> ok_prom;
-  };
-
   struct StepTerminateQueueElem {
     job_id_t job_id;
     step_id_t step_id;
@@ -195,11 +187,6 @@ class JobManager {
                                      // task->status=Cancelled
     bool mark_as_orphaned{false};
     std::promise<void> terminate_prom;
-  };
-
-  struct CheckTaskStatusQueueElem {
-    task_id_t task_id;
-    std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
   std::optional<JobInD> FreeJobInfo_(job_id_t job_id);
@@ -261,8 +248,6 @@ class JobManager {
 
   void EvCleanTerminateTaskQueueCb_();
 
-  void EvCleanChangeTaskTimeLimitQueueCb_();
-
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -289,10 +274,6 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<StepStatusChangeQueueElem> m_task_status_change_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_terminate_step_timer_handle_;

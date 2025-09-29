@@ -49,7 +49,7 @@ using Craned::g_config;
 using namespace Craned::Common;
 using Craned::JobInD;
 
-CraneErrCode TryToRecoverCgForJobs(
+CraneErrCode RecoverCgForJobs(
     std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
   using namespace Craned;
   using namespace Common::CgConstant;
@@ -795,16 +795,19 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
               util::JobStepsToString(ctld_step_ids));
 
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t>>
+  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                                    std::pair<pid_t, Craned::StepStatus>>>
       steps = g_supervisor_keeper->InitAndGetRecoveredMap();
 
   // JobId,supervisor pid
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>, pid_t> step_supv_pid_map;
-  if (steps.has_value()) step_supv_pid_map = steps.value();
+  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                      std::pair<pid_t, Craned::StepStatus>>
+      step_supv_map;
+  if (steps.has_value()) step_supv_map = steps.value();
 
   // All job ids from supervisor
   std::map<job_id_t, std::set<step_id_t>> supv_step_ids;
-  for (const auto& [job_id, step_id] : step_supv_pid_map | std::views::keys) {
+  for (const auto& [job_id, step_id] : step_supv_map | std::views::keys) {
     supv_step_ids[job_id].emplace(step_id);
   }
 
@@ -813,6 +816,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                 util::JobStepsToString(supv_step_ids));
   }
 
+  /* Filter valid job/steps (Intersection of job/steps form ctld/supervisor) */
   auto supv_jobs =
       supv_step_ids | std::views::keys | std::ranges::to<std::set<job_id_t>>();
   auto ctld_joss =
@@ -845,6 +849,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
              util::JobStepsToString(lost_steps),
              util::JobStepsToString(valid_steps));
 
+  /******************* Recover all JobInD and StepInstance *******************/
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
                       std::unique_ptr<StepInstance>>
       step_map;
@@ -853,8 +858,9 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   for (const auto& [job_id, job_steps] : valid_steps) {
     auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
     for (const auto& step_id : job_steps) {
-      auto step_inst =
-          std::make_unique<StepInstance>(proto_job_steps.steps().at(step_id));
+      auto [pid, status] = step_supv_map.at(std::make_pair(job_id, step_id));
+      auto step_inst = std::make_unique<StepInstance>(
+          proto_job_steps.steps().at(step_id), pid, status);
       step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
   }
@@ -865,18 +871,25 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                     JobInD{config_from_ctld.job_steps().at(job_id).job()});
   }
 
-  using Craned::StepStatus;
+  /******************* Recover job cgroup info *******************/
+  RecoverCgForJobs(job_map);
 
+  /******************* Handle step status inconsistency *******************/
+  using Craned::StepStatus;
   std::set<job_id_t> completing_jobs{};
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
       completing_steps{};
   for (auto [job_id, step_id] : step_map | std::views::keys) {
-    auto status =
+    auto ctld_status =
         config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
-    CRANE_TRACE("[Step #{}.{}] is {}", job_id, step_id,
-                util::StepStatusToString(status));
-    if (status == StepStatus::Completing) {
+    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).second;
+    CRANE_TRACE("[Step #{}.{}] Ctld status: {}, supervisor reported: {}",
+                job_id, step_id, util::StepStatusToString(ctld_status),
+                util::StepStatusToString(supv_status));
+
+    if (ctld_status == StepStatus::Completing) {
       if (step_id == kDaemonStepId) {
+        // Maybe lost a FreeJobs RPC, so we should free this job.
         CRANE_TRACE("[Job #{}] is completing", job_id);
         completing_jobs.insert(job_id);
       } else {
@@ -886,7 +899,6 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     }
   }
 
-  TryToRecoverCgForJobs(job_map);
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
   for (const auto& [job_id, step_ids] : invalid_steps)
     for (auto step_id : step_ids)
@@ -896,13 +908,9 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
                util::JobStepsToString(invalid_steps));
   }
-
+  g_job_mgr->FreeJobs(std::move(completing_jobs));
+  g_job_mgr->FreeSteps(std::move(completing_steps));
   g_server->MarkSupervisorAsRecovered();
-  g_thread_pool->detach_task([jobs = std::move(completing_jobs),
-                              steps = std::move(completing_steps)] mutable {
-    g_job_mgr->FreeJobs(std::move(jobs));
-    g_job_mgr->FreeSteps(std::move(steps));
-  });
 }
 
 void GlobalVariableInit() {

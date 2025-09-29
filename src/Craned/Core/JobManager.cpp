@@ -40,12 +40,12 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
       status(StepStatus::Configuring) {}
 
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
-                           pid_t supv_pid)
+                           pid_t supv_pid, StepStatus status)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
       step_to_d(step_to_d),
       supv_pid(supv_pid),
-      status(StepStatus::Running) {}
+      status(status) {}
 
 bool StepInstance::IsDaemon() const {
   return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
@@ -140,22 +140,6 @@ JobManager::JobManager() {
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanTaskStatusChangeQueueCb_();
       });
-
-  m_change_task_time_limit_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_change_task_time_limit_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanChangeTaskTimeLimitQueueCb_();
-      });
-  m_change_task_time_limit_timer_handle_ =
-      m_uvw_loop_->resource<uvw::timer_handle>();
-  m_change_task_time_limit_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle& handle) {
-        m_change_task_time_limit_async_handle_->send();
-      });
-  m_change_task_time_limit_timer_handle_->start(
-      std::chrono::milliseconds{kStepRequestCheckIntervalMs * 3},
-      std::chrono::milliseconds{kStepRequestCheckIntervalMs});
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_step_async_handle_->on<uvw::async_event>(
@@ -1050,7 +1034,6 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
   StepTerminateQueueElem elem;
-  std::vector<StepTerminateQueueElem> not_ready_elems;
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
 
@@ -1069,10 +1052,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent job.",
                     elem.job_id, elem.step_id);
 
-        // if (!elem.mark_as_orphaned)
-        //   StepStopAndDoStatusChangeAsync(
-        //       elem.job_id, elem.step_id, crane::grpc::TaskStatus::Cancelled,
-        //       ExitCode::kExitCodeTerminated, "Step not found.");
         continue;
       }
       auto job_instance = map_ptr->at(elem.job_id).RawPtr();
@@ -1082,13 +1061,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
                     elem.job_id, elem.step_id);
 
-        // if (!elem.mark_as_orphaned)
-        //   g_ctld_client->StepStatusChangeAsync(
-        //       {.job_id = elem.job_id,
-        //        .step_id = elem.step_id,
-        //        .new_status = crane::grpc::TaskStatus::Cancelled,
-        //        .exit_code = ExitCode::kExitCodeTerminated,
-        //        .reason = "Step not found."});
         continue;
       }
 
@@ -1099,20 +1071,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       } else {
         terminate_step_ids = {elem.step_id};
       }
-      bool can_terminate_now = true;
-
-      for (auto step_id : terminate_step_ids) {
-        auto* step = job_instance->step_map.at(step_id).get();
-        if (step->CanOperate()) {
-          CRANE_DEBUG(
-              "[Step #{}.{}] Terminating a non-running step, will do it later.",
-              elem.job_id, elem.step_id);
-          not_ready_elems.emplace_back(std::move(elem));
-          can_terminate_now = false;
-          break;
-        }
-      }
-      if (!can_terminate_now) continue;
 
       for (auto step_id : terminate_step_ids) {
         auto stub = g_supervisor_keeper->GetStub(elem.job_id, step_id);
@@ -1174,9 +1132,6 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     }
     CleanUpJobAndStepsAsync(std::move(job_to_clean), std::move(steps_to_clean));
   }
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_step_terminate_queue_.enqueue(std::move(not_ready_elem));
-  }
 }
 
 void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
@@ -1196,23 +1151,14 @@ void JobManager::MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id,
   m_terminate_step_async_handle_->send();
 }
 
-bool JobManager::ChangeJobTimeLimitAsync(job_id_t job_id,
-                                         absl::Duration time_limit) {
-  if (m_is_ending_now_.load(std::memory_order_acquire)) {
-    return false;
-  }
-  ChangeTaskTimeLimitQueueElem elem{.job_id = job_id, .time_limit = time_limit};
-
-  std::future<bool> ok_fut = elem.ok_prom.get_future();
-  m_task_time_limit_change_queue_.enqueue(std::move(elem));
-  m_change_task_time_limit_async_handle_->send();
-  return ok_fut.get();
-}
-
 void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
   std::latch shutdown_step_latch{static_cast<std::ptrdiff_t>(steps.size())};
   for (auto* step : steps) {
+    if (!step->IsDaemon()) {
+      shutdown_step_latch.count_down();
+      continue;
+    }
     g_thread_pool->detach_task([&shutdown_step_latch, step] {
       auto stub = g_supervisor_keeper->GetStub(step->job_id, step->step_id);
       if (!stub) {
@@ -1261,48 +1207,6 @@ void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
              step_id, util::StepStatusToString(new_status));
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,
                                  std::move(reason));
-}
-
-void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
-  ChangeTaskTimeLimitQueueElem elem;
-  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
-  while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id); job_ptr) {
-      absl::MutexLock lk(job_ptr->step_map_mtx.get());
-      if (!job_ptr->step_map.contains(elem.step_id)) {
-        CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
-                    elem.job_id, elem.step_id);
-        continue;
-      }
-      auto* step = job_ptr->step_map.at(elem.step_id).get();
-      if (step->CanOperate()) {
-        CRANE_DEBUG(
-            "[Step #{}.{}] Terminating a non-running step, will do it later.",
-            elem.job_id, elem.step_id);
-        not_ready_elems.emplace_back(std::move(elem));
-        continue;
-      }
-      auto stub = g_supervisor_keeper->GetStub(elem.job_id, elem.step_id);
-      if (!stub) {
-        CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
-        continue;
-      }
-      auto err = stub->ChangeTaskTimeLimit(elem.time_limit);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change task time limit for task #{}",
-                    elem.job_id);
-        continue;
-      }
-      elem.ok_prom.set_value(true);
-    } else {
-      CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
-                  elem.job_id);
-      elem.ok_prom.set_value(false);
-    }
-  }
-  for (auto& not_ready_elem : not_ready_elems) {
-    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
-  }
 }
 
 }  // namespace Craned

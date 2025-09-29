@@ -293,15 +293,14 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
     crane::grpc::QuerySshStepEnvVariablesReply *response) {
+  response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
   auto stub = g_supervisor_keeper->GetStub(request->task_id(), kDaemonStepId);
   if (!stub) {
     CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
-    response->set_ok(false);
     return Status::OK;
   }
 
@@ -310,8 +309,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
     response->set_ok(true);
-  } else
-    response->set_ok(false);
+  }
 
   return Status::OK;
 }
@@ -320,14 +318,24 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     grpc::ServerContext *context,
     const crane::grpc::ChangeJobTimeLimitRequest *request,
     crane::grpc::ChangeJobTimeLimitReply *response) {
+  response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
-      request->task_id(), absl::Seconds(request->time_limit_seconds()));
-  response->set_ok(ok);
+  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
+    return Status::OK;
+  }
+  auto err =
+      stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
+                request->task_id(), kPrimaryStepId);
+    return Status::OK;
+  }
+  response->set_ok(true);
 
   return Status::OK;
 }

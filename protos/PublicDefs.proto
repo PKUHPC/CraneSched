@@ -115,7 +115,8 @@ enum TaskStatus {
   Cancelled = 5;
   OutOfMemory = 6;
   Configuring = 7;
-  Completing = 8;
+  Configured = 8;
+  Completing = 9;
 
   Invalid = 15;
 }

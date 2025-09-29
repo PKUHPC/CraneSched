@@ -100,7 +100,8 @@ message CheckStatusReply {
   uint32 job_id = 1;
   uint32 step_id = 2;
   int32 supervisor_pid = 3;
-  bool ok = 4;
+  TaskStatus status = 4;
+  bool ok = 5;
 }
 
 message ChangeTaskTimeLimitRequest {

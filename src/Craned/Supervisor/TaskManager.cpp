@@ -1548,6 +1548,7 @@ void TaskManager::ShutdownSupervisor() {
     CRANE_DEBUG("Sending a completed status as daemon step.");
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
                                            0, "");
+    g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
   }
   g_craned_client->Shutdown();
   g_server->Shutdown();
@@ -1559,10 +1560,11 @@ void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
   m_task_stop_async_handle_->send();
 }
 
-void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
-                                            crane::grpc::TaskStatus new_status,
-                                            uint32_t exit_code,
-                                            std::optional<std::string> reason) {
+void TaskManager::TaskFinish_(task_id_t task_id,
+                              crane::grpc::TaskStatus new_status,
+                              uint32_t exit_code,
+                              std::optional<std::string> reason) {
+  g_runtime_status.Status = crane::grpc::Completing;
   // One-shot model: nothing to stop, just proceed to cleanup.
   m_step_.oom_baseline_inited = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
@@ -1570,12 +1572,11 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
     m_step_.StopCforedClient();
-    if (!orphaned)
+    if (!orphaned) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
-    else {
-      ShutdownSupervisor();
     }
+    ShutdownSupervisor();
   }
 }
 
@@ -1606,9 +1607,9 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     CRANE_DEBUG("[Task #{}] Failed to prepare task", task->task_id);
-    ActivateTaskStatusChange_(task->task_id, crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeFileNotFound,
-                              fmt::format("Failed to prepare task"));
+    TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::kExitCodeFileNotFound,
+                fmt::format("Failed to prepare task"));
     return;
   }
 
@@ -1622,10 +1623,9 @@ void TaskManager::LaunchExecution_(ITaskInstance* task) {
 
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
-    ActivateTaskStatusChange_(
-        task->task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format("Cannot spawn child process in task"));
+    TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::kExitCodeSpawnProcessFail,
+                fmt::format("Cannot spawn child process in task"));
   }
 }
 
@@ -1744,9 +1744,8 @@ void TaskManager::EvTaskTimerCb_() {
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
   } else {
-    ActivateTaskStatusChange_(m_step_.job_id,
-                              crane::grpc::TaskStatus::ExceedTimeLimit,
-                              ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
 }
 
@@ -1758,14 +1757,13 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
-      ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
-                                ExitCode::kExitCodeSpawnProcessFail,
-                                std::nullopt);
+      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                  ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
       return;
 
     case CraneErrCode::ERR_CGROUP:
-      ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
-                                ExitCode::kExitCodeCgroupError, std::nullopt);
+      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                  ExitCode::kExitCodeCgroupError, std::nullopt);
       return;
 
     default:
@@ -1783,53 +1781,52 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
       if (considered_signal) {
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER:
-          ActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Cancelled,
-              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Cancelled,
+                      exit_info.value + ExitCode::kTerminationSignalBase,
+                      std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
-          ActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-              ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+          TaskFinish_(task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                      ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
-          ActivateTaskStatusChange_(
+          TaskFinish_(
               task_id, crane::grpc::TaskStatus::OutOfMemory,
               exit_info.value + ExitCode::kTerminationSignalBase,
               std::optional<std::string>("Detected by oom_kill counter delta"));
           break;
         default:
-          ActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                      exit_info.value + ExitCode::kTerminationSignalBase,
+                      std::nullopt);
         }
       } else if (exit_info.value == 0) {
-        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
-                                  0, std::nullopt);
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed, 0,
+                    std::nullopt);
       } else {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
-          ActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::OutOfMemory, exit_info.value,
-              std::optional<std::string>(
-                  "Detected by oom_kill counter delta (no signal)"));
+          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
+                      exit_info.value,
+                      std::optional<std::string>(
+                          "Detected by oom_kill counter delta (no signal)"));
         } else {
-          ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
-                                    exit_info.value, std::nullopt);
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
+                      std::nullopt);
         }
       }
     } else /* Calloc */ {
       // For a COMPLETING Calloc task with a process running,
       // the end of this process means that this task is done.
       if (exit_info.is_terminated_by_signal)
-        ActivateTaskStatusChange_(
-            task_id, crane::grpc::TaskStatus::Completed,
-            exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
+                    exit_info.value + ExitCode::kTerminationSignalBase,
+                    std::nullopt);
       else if (exit_info.value == 0)
-        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
-                                  0, std::nullopt);
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed, 0,
+                    std::nullopt);
       else
-        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
-                                  exit_info.value, std::nullopt);
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
+                    std::nullopt);
     }
   }
 }
@@ -1876,8 +1873,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         task->Kill(sig);
       } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
-        ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
-                                  ExitCode::kExitCodeTerminated, std::nullopt);
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
+                    ExitCode::kExitCodeTerminated, std::nullopt);
       } else {
         CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
       }
@@ -1937,7 +1934,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
-    g_runtime_status.Started = true;
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
@@ -1952,11 +1948,10 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      ActivateTaskStatusChange_(
-          task->task_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodePermissionDenied,
-          fmt::format("Failed to look up password entry for uid {}",
-                      m_step_.uid));
+      TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+                  ExitCode::kExitCodePermissionDenied,
+                  fmt::format("Failed to look up password entry for uid {}",
+                              m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
     }

@@ -341,10 +341,8 @@ class TaskManager {
     }
   }
 
-  void ActivateTaskStatusChange_(task_id_t task_id,
-                                 crane::grpc::TaskStatus new_status,
-                                 uint32_t exit_code,
-                                 std::optional<std::string> reason);
+  void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
+                   uint32_t exit_code, std::optional<std::string> reason);
   void LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
