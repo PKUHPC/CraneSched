@@ -1551,6 +1551,11 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());
+
+  auto* mutable_env = task_info->mutable_env();
+  for (auto const& [k, v] : env) {
+    (*mutable_env)[k] = v;
+  }
 }
 
 }  // namespace Ctld

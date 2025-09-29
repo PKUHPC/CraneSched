@@ -562,6 +562,7 @@ message TaskInfo {
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
   string wckey = 41;
+  map<string, string> env = 42;
 }
 
 message StepInfo {

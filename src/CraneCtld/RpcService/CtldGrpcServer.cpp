@@ -469,7 +469,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  auto lua_result = g_task_scheduler->LuaCheck(*task);
+  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
   if (!lua_result) {
     response->set_ok(false);
     response->set_code(lua_result.error().code());

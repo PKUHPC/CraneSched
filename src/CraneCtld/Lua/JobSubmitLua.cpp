@@ -68,6 +68,7 @@ int LogLuaError(lua_State* lua_state) {
 int TimeStr2Mins(lua_State* lua_state) {
   std::string time = lua_tostring(lua_state, -1);
   int minutes = 0;
+  // TODO:
   // int minutes = crane::TimeStr2Mins(time);
   lua_pushnumber(lua_state, minutes);
   return 1;
@@ -86,8 +87,11 @@ int GetQosPriority(lua_State* lua_state) {
   return 1;
 }
 
-CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld& task) {
+CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
+
+  crane::grpc::TaskInfo task_info;
+  task.SetFieldsOfTaskInfo(&task_info);
 
   if (!LoadLuaScript_())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
@@ -102,14 +106,11 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld& task) {
 
   UpdateJobGloable_();
   UpdateJobResvGloable_();
-  PushJobInfo_();
-  PushPartitionList_();
-  // TODO:
-  lua_pushstring(m_lua_state_, task.name.c_str());
-  lua_pushstring(m_lua_state_, task.name.c_str());
+  PushJobInfo_(&task_info);
+  PushPartitionList_(task.Username(), task.account);
   lua_pushnumber(m_lua_state_, task.uid);
+
   int rc = CraneErrCode::ERR_LUA_FAILED;
-  // 3 为 3个参数
   if (lua_pcall(m_lua_state_, 3, 1, 0) != 0) {
     CRANE_ERROR("{}: {}", m_lua_script_, lua_tostring(m_lua_state_, -1));
   } else {
@@ -135,9 +136,53 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(const TaskInCtld& task) {
   return result;
 }
 
-CraneExpectedRich<void> JobSubmitLua::JobModify(
-    const TaskInCtld& task_in_ctld) {
+CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   CraneExpectedRich<void> result;
+
+  crane::grpc::TaskInfo task_info;
+  task_in_ctld.SetFieldsOfTaskInfo(&task_info);
+
+  if (!LoadLuaScript_())
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
+
+  /*
+   *  All lua script functions should have been verified during
+   *   initialization:
+   */
+  lua_getglobal(m_lua_state_, "slurm_job_modify");
+  if (lua_isnil(m_lua_state_, -1))
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
+
+  UpdateJobGloable_();
+  UpdateJobResvGloable_();
+
+  PushJobInfo_(&task_info);
+  // PushJobRec(&task_info);
+  PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account);
+  lua_pushnumber(m_lua_state_, task_in_ctld.uid);
+
+  int rc = CraneErrCode::ERR_LUA_FAILED;
+  if (lua_pcall(m_lua_state_, 4, 1, 0) != 0 != 0) {
+    CRANE_ERROR("{}: {}", m_lua_script_, lua_tostring(m_lua_state_, -1));
+  } else {
+    if (lua_isnumber(m_lua_state_, -1)) {
+      rc = lua_tonumber(m_lua_state_, -1);
+    } else {
+      CRANE_INFO("{}/lua: {}: non-numeric return code", __func__,
+                 m_lua_script_);
+    }
+    lua_pop(m_lua_state_, 1);
+  }
+  std::string user_msg;
+  if (!m_user_msg_.empty()) {
+    CRANE_TRACE("lua user_msg: {}", m_user_msg_);
+    user_msg = m_user_msg_;
+    m_user_msg_.clear();
+  }
+
+  if (rc != 0)
+    return std::unexpected(
+        FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
 
   return result;
 }
@@ -152,7 +197,7 @@ void JobSubmitLua::RegisterOutputFunctions_() {
 #endif
 
   lua_newtable(m_lua_state_);
-  LuaTableRegister_(crane_functions);
+  LuaTableRegister_(kCraneFunctions);
 
   lua_pushlightuserdata(m_lua_state_, this);
   lua_pushcclosure(m_lua_state_, LogLuaUserMsgStatic_, 1);
@@ -241,7 +286,7 @@ void JobSubmitLua::RegisterLuaCraneStructFunctions_(lua_State* lua_state) {
 
 int JobSubmitLua::GetJobEnvFieldName_(lua_State* lua_state) {
   const auto* job_desc =
-      static_cast<const TaskInCtld*>(lua_touserdata(lua_state, 1));
+      static_cast<const crane::grpc::TaskInfo*>(lua_touserdata(lua_state, 1));
   if (job_desc == nullptr) {
     CRANE_ERROR("job_desc is nullptr");
     lua_pushnil(lua_state);
@@ -253,7 +298,7 @@ int JobSubmitLua::GetJobEnvFieldName_(lua_State* lua_state) {
 
 int JobSubmitLua::GetJobReqFieldName_(lua_State* lua_state) {
   const auto* job_desc =
-      static_cast<const TaskInCtld*>(lua_touserdata(lua_state, 1));
+      static_cast<const crane::grpc::TaskInfo*>(lua_touserdata(lua_state, 1));
   if (job_desc == nullptr) {
     CRANE_ERROR("job_desc is nullptr");
     lua_pushnil(lua_state);
@@ -317,18 +362,18 @@ int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
   return GetPratRecField_(*partition_meta, name, lua_state);
 }
 
-int JobSubmitLua::GetJobEnvField_(const TaskInCtld& job_desc, const char* name,
+int JobSubmitLua::GetJobEnvField_(const crane::grpc::TaskInfo& job_desc, const char* name,
                                   lua_State* lua_state) {
-  if (job_desc.env.empty()) {
-    if (job_desc.IsBatch()) {
+  if (job_desc.env().empty()) {
+    if (job_desc.type() == crane::grpc::TaskType::Batch) {
       CRANE_ERROR("job_desc->environment is nullptr.");
     } else {
       CRANE_INFO("job_desc->environment only accessible for batch jobs.");
     }
     lua_pushnil(lua_state);
   } else {
-    auto iter = job_desc.env.find(name);
-    if (iter != job_desc.env.end()) {
+    auto iter = job_desc.env().find(name);
+    if (iter != job_desc.env().end()) {
       lua_pushstring(lua_state, iter->second.data());
     } else {
       lua_pushnil(lua_state);
@@ -338,234 +383,19 @@ int JobSubmitLua::GetJobEnvField_(const TaskInCtld& job_desc, const char* name,
   return 1;
 }
 
-int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
+int JobSubmitLua::GetJobReqField_(const crane::grpc::TaskInfo& job_desc, const char* name,
                                   lua_State* lua_state) {
-  using Handler = std::function<void(lua_State*, const TaskInCtld&)>;
+  using Handler = std::function<void(lua_State*, const crane::grpc::TaskInfo&)>;
 
   static const std::unordered_map<std::string, Handler> handlers = {
       // ----------- [1] Fields set at submission time ----------
       {"time_limit",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, absl::ToInt64Seconds(t.time_limit));
+       [](lua_State* L, const crane::grpc::TaskInfo& t) {
+         // lua_pushnumber(L, absl::ToInt64Seconds(t.time_limit()));
        }},
       {"partition_id",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.partition_id.data());
-       }},
-      {"requested_node_res_view",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, "ResourceView");
-       }},
-      {"type",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, static_cast<int>(t.type));
-       }},
-      {"uid",
-       [](lua_State* L, const TaskInCtld& t) { lua_pushnumber(L, t.uid); }},
-      {"gid",
-       [](lua_State* L, const TaskInCtld& t) { lua_pushnumber(L, t.gid); }},
-      {"account",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.account.c_str());
-       }},
-      {"name", [](lua_State* L,
-                  const TaskInCtld& t) { lua_pushstring(L, t.name.c_str()); }},
-      {"qos", [](lua_State* L,
-                 const TaskInCtld& t) { lua_pushstring(L, t.qos.c_str()); }},
-      {"node_num", [](lua_State* L,
-                      const TaskInCtld& t) { lua_pushnumber(L, t.node_num); }},
-      {"ntasks_per_node",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.ntasks_per_node);
-       }},
-      {"cpus_per_task",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, static_cast<uint64_t>(t.cpus_per_task));
-       }},
-      {"included_nodes",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_newtable(L);
-         int idx = 1;
-         for (const auto& n : t.included_nodes) {
-           lua_pushinteger(L, idx++);
-           lua_pushstring(L, n.c_str());
-           lua_settable(L, -3);
-         }
-       }},
-      {"excluded_nodes",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_newtable(L);
-         int idx = 1;
-         for (const auto& n : t.excluded_nodes) {
-           lua_pushinteger(L, idx++);
-           lua_pushstring(L, n.c_str());
-           lua_settable(L, -3);
-         }
-       }},
-      {"requeue_if_failed",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushboolean(L, t.requeue_if_failed);
-       }},
-      {"get_user_env",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushboolean(L, t.get_user_env);
-       }},
-      {"cmd_line",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.cmd_line.c_str());
-       }},
-      {"env",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_newtable(L);
-         for (const auto& kv : t.env) {
-           lua_pushstring(L, kv.first.c_str());
-           lua_pushstring(L, kv.second.c_str());
-           lua_settable(L, -3);
-         }
-       }},
-      {"cwd", [](lua_State* L,
-                 const TaskInCtld& t) { lua_pushstring(L, t.cwd.c_str()); }},
-      {"container",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.container.c_str());
-       }},
-      {"extra_attr",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.extra_attr.c_str());
-       }},
-      {"meta",
-       [](lua_State* L, const TaskInCtld& t) {
-         if (std::holds_alternative<InteractiveMetaInTask>(t.meta)) {
-           lua_pushstring(L, "InteractiveMetaInTask");
-         } else if (std::holds_alternative<BatchMetaInTask>(t.meta)) {
-           lua_pushstring(L, "BatchMetaInTask");
-         } else {
-           lua_pushnil(L);
-         }
-       }},
-      {"reservation",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.reservation.c_str());
-       }},
-      {"begin_time",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, absl::ToUnixSeconds(t.begin_time));
-       }},
-
-      // ----------- [2] Persisted fields (won't change after accepted)
-      // ----------
-      {"task_id", [](lua_State* L,
-                     const TaskInCtld& t) { lua_pushnumber(L, t.TaskId()); }},
-      {"task_db_id",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.TaskDbId());
-       }},
-      {"username",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.Username().c_str());
-       }},
-
-      // ----------- [3] Persisted fields (may change at run time) ----------
-      {"requeue_count",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.requeue_count);
-       }},
-      {"craned_ids",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_newtable(L);
-         int idx = 1;
-         for (const auto& id : t.craned_ids) {
-           lua_pushinteger(L, idx++);
-           lua_pushstring(L, id.c_str());
-           lua_settable(L, -3);
-         }
-       }},
-      {"status",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, static_cast<int>(t.Status()));
-       }},
-      {"exit_code",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.ExitCode());
-       }},
-      {"held",
-       [](lua_State* L, const TaskInCtld& t) { lua_pushboolean(L, t.Held()); }},
-      {"submit_time",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, absl::ToUnixSeconds(t.submit_time));
-       }},
-      {"start_time",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, absl::ToUnixSeconds(t.start_time));
-       }},
-      {"end_time",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, absl::ToUnixSeconds(t.end_time));
-       }},
-      {"cached_priority",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.CachedPriority());
-       }},
-      {"allocated_res",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, "ResourceV2");
-       }},
-      {"task_to_ctld",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, "TaskToCtld");
-       }},
-      {"runtime_attr",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, "RuntimeAttrOfTask");
-       }},
-
-      // ----------- [Public] Not persisted, cached for performance ----------
-      {"password_entry",
-       [](lua_State* L, const TaskInCtld& t) {
-         if (t.password_entry)
-           lua_pushstring(L, "PasswordEntry");
-         else
-           lua_pushnil(L);
-       }},
-      {"partition_priority",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.partition_priority);
-       }},
-      {"qos_priority",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.qos_priority);
-       }},
-
-      // ----------- [Public] May change at run time, not persisted ----------
-      {"allocated_res_view",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, "ResourceView");
-       }},
-      {"nodes_alloc",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.nodes_alloc);
-       }},
-      {"executing_craned_ids",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_newtable(L);
-         int idx = 1;
-         for (const auto& id : t.executing_craned_ids) {
-           lua_pushinteger(L, idx++);
-           lua_pushstring(L, id.c_str());
-           lua_settable(L, -3);
-         }
-       }},
-      {"allocated_craneds_regex",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.allocated_craneds_regex.c_str());
-       }},
-      {"pending_reason",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.pending_reason.c_str());
-       }},
-      {"mandated_priority",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.mandated_priority);
+       [](lua_State* L, const crane::grpc::TaskInfo& t) {
+         lua_pushstring(L, t.partition().data());
        }},
   };
 
@@ -610,7 +440,7 @@ bool JobSubmitLua::LoadLuaScript_() {
     return false;
   }
 
-  if (!CheckLuaScriptFunctions_(m_lua_state_, m_lua_script_, ReqFxns)) {
+  if (!CheckLuaScriptFunctions_(m_lua_state_, m_lua_script_, g_req_fxns)) {
     CRANE_ERROR("{}: required function(s) not present", m_lua_script_);
     return false;
   }
@@ -646,11 +476,14 @@ void JobSubmitLua::UpdateJobGloable_() {
   lua_getglobal(m_lua_state_, "crane");
   lua_newtable(m_lua_state_);
 
-  // TODO: use TaskInfo struct?
   crane::grpc::QueryTasksInfoRequest request;
   crane::grpc::QueryTasksInfoReply response;
   g_task_scheduler->QueryTasksInRam(&request, &response);
+  m_job_info_list_.clear();
+  m_job_info_list_.reserve(response.task_info_list_size());
   for (const auto& task : response.task_info_list()) {
+    auto task_ptr = std::make_shared<crane::grpc::TaskInfo>(task);
+    m_job_info_list_.emplace_back(task_ptr);
     /*
      * Create an empty table, with a metatable that looks up the
      * data for the individual job.
@@ -664,8 +497,7 @@ void JobSubmitLua::UpdateJobGloable_() {
      * Store the job_record in the metatable, so the index
      * function knows which job it's getting data for.
      */
-    lua_pushlightuserdata(m_lua_state_,
-                          const_cast<crane::grpc::TaskInfo*>(&task));
+    lua_pushlightuserdata(m_lua_state_, task_ptr.get());
     lua_setfield(m_lua_state_, -2, "_job_rec_ptr");
     lua_setmetatable(m_lua_state_, -2);
 
@@ -677,9 +509,86 @@ void JobSubmitLua::UpdateJobGloable_() {
   lua_pop(m_lua_state_, 1);
 }
 
-void JobSubmitLua::UpdateJobResvGloable_() {}
-void JobSubmitLua::PushJobInfo_() {}
-void JobSubmitLua::PushPartitionList_() {}
+void JobSubmitLua::UpdateJobResvGloable_() {
+  lua_getglobal(m_lua_state_, "crane");
+  lua_newtable(m_lua_state_);
+
+  // TODO: push all reservation info
+
+  lua_setfield(m_lua_state_, -2, "reservations");
+  lua_pop(m_lua_state_, 1);
+}
+void JobSubmitLua::PushJobInfo_(crane::grpc::TaskInfo* task) {
+  lua_newtable(m_lua_state_);
+
+  lua_newtable(m_lua_state_);
+  lua_pushcfunction(m_lua_state_, GetJobReqFieldIndex_);
+  lua_setfield(m_lua_state_, -2, "__index");
+  lua_pushcfunction(m_lua_state_, SetJobReqField_);
+  lua_setfield(m_lua_state_, -2, "__newindex");
+  /* Store the job descriptor in the metatable, so the index
+   * function knows which struct it's getting data for.
+   */
+  lua_pushlightuserdata(m_lua_state_, task);
+  lua_setfield(m_lua_state_, -2, "_job_desc");
+  lua_setmetatable(m_lua_state_, -2);
+}
+
+void JobSubmitLua::PushPartitionList_(const std::string& user_name, const std::string& account) {
+  lua_newtable(m_lua_state_);
+
+  std::string actual_account = account;
+  if (actual_account.empty()) {
+    auto user = g_account_manager->GetExistedUserInfo(user_name);
+    actual_account = user->default_account;
+  }
+
+  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
+  for (const auto& [partition_name, partition_meta] : *partition_map) {
+    auto partition = partition_meta.GetExclusivePtr();
+    if (!partition->partition_global_meta.allowed_accounts.empty() &&
+      !partition->partition_global_meta.allowed_accounts.contains(actual_account))
+      continue;
+    lua_newtable(m_lua_state_);
+
+    lua_newtable(m_lua_state_);
+
+    lua_pushcfunction(m_lua_state_, PartitionRecFieldIndex_);
+    lua_setfield(m_lua_state_, -2, "__index");
+    /*
+     * Store the part_record in the metatable, so the index
+     * function knows which job it's getting data for.
+     */
+    lua_pushlightuserdata(m_lua_state_, const_cast<PartitionMeta*>(partition.get()));
+    lua_setfield(m_lua_state_, -2, "_part_rec_ptr");
+    lua_setmetatable(m_lua_state_, -2);
+
+    lua_setfield(m_lua_state_, -2, partition_name.data());
+  }
+}
+
+void JobSubmitLua::PushJobRec(crane::grpc::TaskInfo* task) {
+  lua_newtable(m_lua_state_);
+
+  lua_newtable(m_lua_state_);
+  lua_pushcfunction(m_lua_state_, JobRecFieldIndex_);
+  lua_setfield(m_lua_state_, -2, "__index");
+  /* Store the job_ptr in the metatable, so the index
+   * function knows which struct it's getting data for.
+   */
+  lua_pushlightuserdata(m_lua_state_, task);
+  lua_setfield(m_lua_state_, -2, "_job_rec_ptr");
+  lua_setmetatable(m_lua_state_, -2);
+}
+
+int JobSubmitLua::GetJobReqFieldIndex_(lua_State* lua_state) {
+  const char* name = luaL_checkstring(lua_state, 2);
+  lua_getmetatable(lua_state, -2);
+  lua_getfield(lua_state, -1, "_job_desc");
+  crane::grpc::TaskInfo *job_desc = static_cast<crane::grpc::TaskInfo*>(lua_touserdata(lua_state, -1));
+
+  return luaJobRecordField_(lua_state, job_desc, name);
+}
 
 int JobSubmitLua::JobRecFieldIndex_(lua_State* lua_state) {
   const char* name = luaL_checkstring(lua_state, 2);
@@ -691,6 +600,23 @@ int JobSubmitLua::JobRecFieldIndex_(lua_State* lua_state) {
 
   return luaJobRecordField_(lua_state, job_ptr, name);
 }
+
+int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
+  const char *name = luaL_checkstring(lua_state, 2);
+  PartitionMeta *part_ptr;
+
+  lua_getmetatable(lua_state, -2);
+  lua_getfield(lua_state, -1, "_part_rec_ptr");
+  part_ptr = static_cast<PartitionMeta*>(lua_touserdata(lua_state, -1));
+  if (!part_ptr) {
+    CRANE_ERROR("part_ptr is NULL");
+    lua_pushnil(lua_state);
+    return 1;
+  }
+
+  return PartitionRecField_(lua_state, *part_ptr, name);
+}
+
 int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
                                      crane::grpc::TaskInfo* job_ptr,
                                      const char* name) {
@@ -918,6 +844,12 @@ int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
     lua_pushnil(lua_state);
   }
   return 1;
+}
+
+int JobSubmitLua::PartitionRecField_(lua_State* lua_state,
+                                     const PartitionMeta& partition_meta,
+                                     const char* name) {
+
 }
 
 }  // namespace Ctld
