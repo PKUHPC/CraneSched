@@ -271,13 +271,7 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_task_ids_constraint{false};
-  for (const auto& steps : request->filter_ids() | std::views::values) {
-    if (!steps.steps().empty()) {
-      has_task_ids_constraint = true;
-      break;
-    }
-  }
+  bool has_task_ids_constraint = !request->filter_ids().empty();
   if (has_task_ids_constraint) {
     filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
       array task_id_array;
@@ -435,6 +429,117 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
 
   CRANE_LOGGER_ERROR(m_logger_, "Failed to insert in-memory StepInCtld.");
   return false;
+}
+
+bool MongodbClient::FetchStepRecords(
+    const std::unordered_set<job_id_t>& jobs,
+    crane::grpc::QueryTasksInfoReply* response) {
+  document filter;
+
+  if (!jobs.empty()) {
+    filter.append(kvp("job_id", [&jobs](sub_document job_id_doc) {
+      array job_id_array;
+      for (const auto& job_id : jobs) {
+        job_id_array.append(static_cast<std::int32_t>(job_id));
+      }
+      job_id_doc.append(kvp("$in", job_id_array));
+    }));
+  }
+  mongocxx::options::find option;
+  document sort_doc;
+  sort_doc.append(kvp("step_db_id", -1));
+  option = option.sort(sort_doc.view());
+
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_step_collection_name_].find(filter.view(),
+                                                                option);
+
+  // 0  job_id        step_db_id    step_id         mod_time      deleted
+  // 5  cpus_req      mem_req       step_name       env           id_user
+  // 10 id_group      nodelist      nodes_alloc     node_inx      time_eligible
+  // 15 time_start    time_end      time_suspended  script        state
+  // 20 timelimit     time_submit   work_dir        submit_line   exit_code
+  // 25 get_user_env  type          extra_attr      res_alloc     step_type
+  // 30 container
+
+  std::unordered_map<job_id_t, std::vector<crane::grpc::StepInfo>>
+      job_step_info;
+  try {
+    for (auto view : cursor) {
+      job_id_t job_id = view["job_id"].get_int32().value;
+      step_id_t step_id = view["step_id"].get_int32().value;
+      crane::grpc::StepInfo step_info;
+
+      step_info.set_job_id(job_id);
+      step_info.set_step_id(step_id);
+      auto* mutable_req_res_view = step_info.mutable_req_res_view();
+      auto* mutable_req_alloc_res =
+          mutable_req_res_view->mutable_allocatable_res();
+      mutable_req_alloc_res->set_cpu_core_limit(
+          view["cpus_req"].get_double().value);
+      mutable_req_alloc_res->set_memory_limit_bytes(
+          view["mem_req"].get_int64().value);
+      mutable_req_alloc_res->set_memory_sw_limit_bytes(
+          view["mem_req"].get_int64().value);
+
+      step_info.set_name(view["step_name"].get_string().value);
+
+      step_info.set_uid(view["id_user"].get_int32().value);
+      auto* proto_gid = step_info.mutable_gid();
+      for (auto&& gid : view["id_group"].get_array().value) {
+        if (gid.type() == bsoncxx::type::k_int32)
+          proto_gid->Add(gid.get_int32());
+        else if (gid.type() == bsoncxx::type::k_int64)
+          proto_gid->Add(gid.get_int64());
+        else {
+          CRANE_LOGGER_ERROR(m_logger_, "gid type error");
+        }
+      }
+
+      step_info.set_craned_list(view["nodelist"].get_string().value.data());
+      step_info.set_node_num(view["nodes_alloc"].get_int32().value);
+
+      step_info.mutable_start_time()->set_seconds(
+          view["time_start"].get_int64().value);
+      step_info.mutable_end_time()->set_seconds(
+          view["time_end"].get_int64().value);
+
+      step_info.set_status(static_cast<crane::grpc::TaskStatus>(
+          view["state"].get_int32().value));
+      step_info.mutable_time_limit()->set_seconds(
+          view["timelimit"].get_int64().value);
+      step_info.mutable_submit_time()->set_seconds(
+          view["time_submit"].get_int64().value);
+      step_info.set_cwd(std::string(view["work_dir"].get_string().value));
+      if (view["submit_line"])
+        step_info.set_cmd_line(
+            std::string(view["submit_line"].get_string().value));
+      step_info.set_exit_code(view["exit_code"].get_int32().value);
+
+      step_info.set_type(
+          static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
+
+      step_info.set_extra_attr(view["extra_attr"].get_string().value.data());
+      *step_info.mutable_allocated_res_view() =
+          static_cast<crane::grpc::ResourceView>(
+              BsonToResourceV2(view["res_alloc"].get_document().value).View());
+      step_info.set_step_type(static_cast<crane::grpc::StepType>(
+          view["step_type"].get_int32().value));
+
+      step_info.set_container(view["container"].get_string().value);
+      job_step_info[job_id].emplace_back(std::move(step_info));
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  for (auto& job_info : *response->mutable_task_info_list()) {
+    for (auto&& step_info : job_step_info[job_info.task_id()]) {
+      (*job_info.mutable_step_info())[step_info.step_id()] =
+          std::move(step_info);
+    }
+  }
+
+  return true;
 }
 
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
@@ -810,19 +915,17 @@ template <>
 void MongodbClient::DocumentAppendItem_<DedicatedResourceInNode>(
     document& doc, const std::string& key,
     const DedicatedResourceInNode& value) {
-  document sub_doc{};
-  for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
-    document type_doc{};
-    for (const auto& [type, slots] : type_slots_map.type_slots_map) {
-      array gpu_array{};
-      for (const auto& dev_id : slots) {
-        gpu_array.append(dev_id);
-      }
-      type_doc.append(kvp(type, gpu_array));
+  doc.append(kvp(key, [&value](sub_document subDoc) {
+    for (const auto& [name, type_slots_map] : value.name_type_slots_map) {
+      subDoc.append(kvp(name, [&type_slots_map](sub_document typeDoc) {
+        for (const auto& [type, slots] : type_slots_map.type_slots_map) {
+          typeDoc.append(kvp(type, [&slots](sub_array arr) {
+            for (auto dev_id : slots) arr.append(dev_id);
+          }));
+        }
+      }));
     }
-    sub_doc.append(kvp(name, type_doc));
-  }
-  doc.append(kvp(key, sub_doc.view()));
+  }));
 }
 
 template <>
@@ -839,17 +942,13 @@ void MongodbClient::DocumentAppendItem_<ResourceInNode>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
-                                                    const std::string& key,
-                                                    const ResourceV2& value) {
-  using bsoncxx::builder::basic::array;
-  array arr_builder;
+void MongodbClient::DocumentAppendItem_<>(document& doc, const std::string& key,
+                                          const ResourceV2& value) {
+  document node_res_doc{};
   for (const auto& [node, res] : value.EachNodeResMap()) {
-    document node_doc{};
-    DocumentAppendItem_(node_doc, node, res);
-    arr_builder.append(node_doc);
+    DocumentAppendItem_(node_res_doc, node, res);
   }
-  doc.append(kvp(key, arr_builder));
+  doc.append(kvp(key, node_res_doc));
 }
 
 template <typename... Ts, std::size_t... Is>
@@ -1151,6 +1250,60 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
 
   return device_map;
 }
+DedicatedResourceInNode MongodbClient::BsonToDedicatedResourceInNode(
+    const bsoncxx::document::view& doc) {
+  DedicatedResourceInNode res;
+  try {
+    for (auto&& name_elem : doc) {
+      std::string name = std::string(name_elem.key());
+      auto type_doc = name_elem.get_document().view();
+      TypeSlotsMap type_slots_map;
+      for (auto&& type_elem : type_doc) {
+        std::string type = std::string(type_elem.key());
+        auto slots_array = type_elem.get_array().value;
+        std::set<SlotId> slots;
+        for (auto&& slot_elem : slots_array)
+          slots.emplace(std::string(slot_elem.get_string().value));
+        type_slots_map.type_slots_map[type] = std::move(slots);
+      }
+      res.name_type_slots_map[name] = std::move(type_slots_map);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
+ResourceInNode MongodbClient::BsonToResourceInNode(
+    const bsoncxx::document::view& doc) {
+  ResourceInNode res;
+  try {
+    res.allocatable_res.cpu_count =
+        static_cast<cpu_t>(doc["cpu"].get_double().value);
+    res.allocatable_res.memory_bytes = doc["memory"].get_int64().value;
+    if (doc["gres"]) {
+      res.dedicated_res =
+          BsonToDedicatedResourceInNode(doc["gres"].get_document().view());
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
+
+ResourceV2 MongodbClient::BsonToResourceV2(const bsoncxx::document::view& doc) {
+  ResourceV2 res;
+  try {
+    for (auto&& node_elem : doc) {
+      std::string node_name = std::string(node_elem.key());
+      res.AddResourceInNode(
+          node_name,
+          BsonToResourceInNode(node_elem.get_value().get_document().value));
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return res;
+}
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     const crane::grpc::TaskInEmbeddedDb& task) {
@@ -1349,7 +1502,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       // 0 - 4
       "job_id",  "step_db_id", "step_id", "mod_time",    "deleted",
       // 5 - 9
-      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+      "cpus_req", "mem_req",    "step_name",   "env",      "id_user",
       // 10 - 14
       "id_group", "nodelist",   "nodes_alloc", "node_inx",  "time_eligible",
       // 15 - 19

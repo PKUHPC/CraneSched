@@ -298,6 +298,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.set_job_id(job.TaskId());
   *step.mutable_req_resources() =
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
+  step.set_type(job.type);
   step.set_uid(uid);
   step.set_name(name);
   step.set_node_num(node_num);
@@ -446,6 +447,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.set_job_id(job.TaskId());
   *step.mutable_req_resources() =
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
+  step.set_type(job.type);
   step.set_uid(uid);
   step.set_name(name);
   step.set_node_num(node_num);
@@ -686,7 +688,7 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   type = val.type();
 
-  ia_meta = InteractiveMeta{};
+  ia_meta = std::nullopt;
 
   node_num = val.node_num();
   ntasks_per_node = val.ntasks_per_node();

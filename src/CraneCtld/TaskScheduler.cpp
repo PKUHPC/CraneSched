@@ -1393,7 +1393,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         }
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
         auto& job_steps = cancelled_job_steps[task_id];
-        if (step->StepType() == crane::grpc::StepType::PRIMARY)
+        if (step->StepType() != crane::grpc::StepType::PRIMARY)
           job_steps.add_steps(step->StepId());
       }
     }
@@ -2715,13 +2715,8 @@ void TaskScheduler::QueryTasksInRam(
            req_partitions.contains(job.partition_id);
   };
 
-  bool no_ids_constraint{true};
-  for (const auto& steps : request->filter_ids() | std::views::values) {
-    if (!steps.steps().empty()) {
-      no_ids_constraint = true;
-      break;
-    }
-  }
+  bool no_ids_constraint = request->filter_ids().empty();
+
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> req_steps;
   for (auto& [job_id, step_ids] : request->filter_ids()) {
     req_steps[job_id] = std::unordered_set<step_id_t>(step_ids.steps().begin(),
@@ -2740,6 +2735,17 @@ void TaskScheduler::QueryTasksInRam(
   size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
                                                : request->num_limit();
 
+  auto append_step_fn = [&](auto* step_info_map, StepInCtld* step) {
+    if (!step) return;
+    if (step->Status() == crane::grpc::TaskStatus::Pending) return;
+    if (no_ids_constraint || req_steps[step->job_id].empty() ||
+        req_steps[step->job_id].contains(step->StepId())) {
+      crane::grpc::StepInfo step_info;
+      step->SetFieldsOfStepInfo(&step_info);
+      step_info_map->emplace(step->StepId(), std::move(step_info));
+    }
+  };
+
   auto append_fn = [&](auto* job_ptr) {
     TaskInCtld& job = *job_ptr;
     auto* task_it = task_list->Add();
@@ -2747,15 +2753,12 @@ void TaskScheduler::QueryTasksInRam(
     task_it->mutable_elapsed_time()->set_seconds(
         ToInt64Seconds(now - job.StartTime()));
 
-    auto& proto_steps = *task_it->mutable_step_info();
-    for (auto& [step_id, step] : job.Steps()) {
-      if (no_ids_constraint || !req_steps.contains(job.TaskId()) ||
-          req_steps[job.TaskId()].contains(step_id)) {
-        if (step->Status() == crane::grpc::TaskStatus::Pending) continue;
-        crane::grpc::StepInfo step_info;
-        step->SetFieldsOfStepInfo(&step_info);
-        proto_steps.emplace(step_id, std::move(step_info));
-      }
+    auto* proto_steps = task_it->mutable_step_info();
+    append_step_fn(proto_steps, job.DaemonStep());
+    append_step_fn(proto_steps, job.PrimaryStep());
+
+    for (auto& step : job.Steps() | std::views::values) {
+      append_step_fn(proto_steps, step.get());
     }
   };
 

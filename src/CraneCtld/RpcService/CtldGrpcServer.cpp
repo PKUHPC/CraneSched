@@ -238,60 +238,64 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           auto task = std::make_unique<TaskInCtld>();
           task->SetFieldsByTaskToCtld(payload.task());
 
-          auto &meta = task->ia_meta.value();
+          {
+            InteractiveMeta meta;
 
-          meta.cb_task_res_allocated =
-              [writer_weak_ptr](
-                  const StepInteractiveMeta::StepResAllocArgs &arg) {
-                if (auto writer = writer_weak_ptr.lock(); writer)
-                  writer->WriteTaskResAllocReply(arg);
-              };
+            meta.cb_task_res_allocated =
+                [writer_weak_ptr](
+                    const StepInteractiveMeta::StepResAllocArgs &arg) {
+                  if (auto writer = writer_weak_ptr.lock(); writer)
+                    writer->WriteTaskResAllocReply(arg);
+                };
 
-          meta.cb_task_cancel =
-              [writer_weak_ptr](
-                  StepInteractiveMeta::StepCancelArgs const &args) {
-                auto &[job_id, step_id] = args;
-                CRANE_TRACE("Sending TaskCancelRequest in task_cancel", job_id);
-                if (auto writer = writer_weak_ptr.lock(); writer)
-                  writer->WriteTaskCancelRequest(job_id, step_id);
-              };
+            meta.cb_task_cancel =
+                [writer_weak_ptr](
+                    StepInteractiveMeta::StepCancelArgs const &args) {
+                  auto &[job_id, step_id] = args;
+                  CRANE_TRACE("Sending TaskCancelRequest in task_cancel",
+                              job_id);
+                  if (auto writer = writer_weak_ptr.lock(); writer)
+                    writer->WriteTaskCancelRequest(job_id, step_id);
+                };
 
-          meta.cb_task_completed =
-              [this, cfored_name, writer_weak_ptr](
-                  StepInteractiveMeta::StepCompeteArgs const &args) {
-                auto &[job_id, step_id, send_completion_ack] = args;
-                CRANE_TRACE(
-                    "[Step #{}.{}] The completion callback of has been called.",
+            meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
+                                         StepInteractiveMeta::
+                                             StepCompeteArgs const &args) {
+              auto &[job_id, step_id, send_completion_ack] = args;
+              CRANE_TRACE(
+                  "[Step #{}.{}] The completion callback of has been called.",
+                  job_id, step_id);
+              if (auto writer = writer_weak_ptr.lock(); writer) {
+                if (send_completion_ack)
+                  writer->WriteTaskCompletionAckReply(job_id, step_id);
+              } else {
+                CRANE_ERROR(
+                    "[Step #{}.{}] Stream writer of has been destroyed. "
+                    "TaskCompletionAckReply will not be sent.",
                     job_id, step_id);
-                if (auto writer = writer_weak_ptr.lock(); writer) {
-                  if (send_completion_ack)
-                    writer->WriteTaskCompletionAckReply(job_id, step_id);
-                } else {
-                  CRANE_ERROR(
-                      "[Step #{}.{}] Stream writer of has been destroyed. "
-                      "TaskCompletionAckReply will not be sent.",
-                      job_id, step_id);
+              }
+
+              m_ctld_server_->m_mtx_.Lock();
+
+              // If cfored disconnected, the cfored_name should have be
+              // removed from the map and the task completion callback is
+              // generated from cleaning the remaining tasks by calling
+              // g_task_scheduler->TerminateTask(), we should ignore this
+              // callback since the task id has already been cleaned.
+              auto iter =
+                  m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
+              if (iter != m_ctld_server_->m_cfored_running_tasks_.end()) {
+                auto step_iter = iter->second.find(step_id);
+                if (step_iter != iter->second.end()) {
+                  step_iter->second.erase(job_id);
                 }
+                if (step_iter->second.empty()) iter->second.erase(step_iter);
+              }
+              m_ctld_server_->m_mtx_.Unlock();
+            };
 
-                m_ctld_server_->m_mtx_.Lock();
-
-                // If cfored disconnected, the cfored_name should have be
-                // removed from the map and the task completion callback is
-                // generated from cleaning the remaining tasks by calling
-                // g_task_scheduler->TerminateTask(), we should ignore this
-                // callback since the task id has already been cleaned.
-                auto iter =
-                    m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
-                if (iter != m_ctld_server_->m_cfored_running_tasks_.end()) {
-                  auto step_iter = iter->second.find(step_id);
-                  if (step_iter != iter->second.end()) {
-                    step_iter->second.erase(job_id);
-                  }
-                  if (step_iter->second.empty()) iter->second.erase(step_iter);
-                }
-                m_ctld_server_->m_mtx_.Unlock();
-              };
-
+            task->ia_meta = std::move(meta);
+          }
           auto submit_result =
               g_task_scheduler->SubmitTaskToScheduler(std::move(task));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
@@ -820,6 +824,17 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
                                     num_limit - task_list->size())) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
+  }
+
+  {
+    std::unordered_set<job_id_t> jobs;
+    for (auto &job_info : response->task_info_list()) {
+      jobs.insert(job_info.task_id());
+    }
+    if (!g_db_client->FetchStepRecords(jobs, response)) {
+      CRANE_ERROR("Failed to call g_db_client->FetchStepRecords");
+      return grpc::Status::OK;
+    }
   }
 
   sort_and_truncate(task_list, num_limit);
