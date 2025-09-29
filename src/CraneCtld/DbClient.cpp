@@ -2073,32 +2073,34 @@ bool MongodbClient::RollupDayToMonth() {
 }
 
 void MongodbClient::ClusterRollupUsage() {
-  using std::chrono::duration_cast;
-  using std::chrono::milliseconds;
-  using std::chrono::steady_clock;
+  std::lock_guard<std::mutex> lock(rollup_mutex_);
 
-  auto start_total = steady_clock::now();
-
-  auto start = steady_clock::now();
+  auto start_total = std::chrono::steady_clock::now();
+  auto start = std::chrono::steady_clock::now();
   RollupHourTable();
-  auto end = steady_clock::now();
-  auto dur1 = duration_cast<milliseconds>(end - start).count();
+  auto end = std::chrono::steady_clock::now();
+  auto dur1 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count();
   CRANE_INFO("RollupHourTable used {} ms", dur1);
 
-  start = steady_clock::now();
+  start = std::chrono::steady_clock::now();
   RollupHourToDay();
-  end = steady_clock::now();
-  auto dur2 = duration_cast<milliseconds>(end - start).count();
+  end = std::chrono::steady_clock::now();
+  auto dur2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count();
   CRANE_INFO("RollupHourToDay used {} ms", dur2);
 
-  start = steady_clock::now();
+  start = std::chrono::steady_clock::now();
   RollupDayToMonth();
-  end = steady_clock::now();
-  auto dur3 = duration_cast<milliseconds>(end - start).count();
+  end = std::chrono::steady_clock::now();
+  auto dur3 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count();
   CRANE_INFO("RollupDayToMonth used {} ms", dur3);
 
-  auto end_total = steady_clock::now();
-  auto total = duration_cast<milliseconds>(end_total - start_total).count();
+  auto end_total = std::chrono::steady_clock::now();
+  auto total = std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end_total - start_total)
+                   .count();
   CRANE_INFO("ClusterRollupUsage total used {} ms", total);
 }
 

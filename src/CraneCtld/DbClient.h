@@ -470,6 +470,7 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
+  std::mutex rollup_mutex_;
 };
 
 template <>

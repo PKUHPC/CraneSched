@@ -531,6 +531,26 @@ bool TaskScheduler::Init() {
   m_resv_clean_thread_ = std::thread(
       [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
 
+  std::shared_ptr<uvw::loop> mongodb_sum_loop = uvw::loop::create();
+  auto mongodb_task_timer_handle =
+      mongodb_sum_loop->resource<uvw::timer_handle>();
+
+  mongodb_task_timer_handle->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        g_db_client->ClusterRollupUsage();
+      });
+
+  uint64_t first_delay = MillisecondsToNextHour();
+  uint64_t repeat = 3600 * 1000;
+
+  mongodb_task_timer_handle->start(std::chrono::milliseconds(first_delay),
+                                   std::chrono::milliseconds(repeat));
+
+  m_mongodb_sum_thread_ =
+      std::thread([this, loop = std::move(mongodb_sum_loop)]() {
+        MongoDbSummaryThread_(loop);
+      });
+
   // TODO: Move this to Reservation Mini-Scheduler.
   // Reservation should be recovered after creating m_resv_clean_thread_ thread.
   std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
@@ -567,6 +587,47 @@ bool TaskScheduler::Init() {
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
   return true;
+}
+
+void TaskScheduler::MongoDbSummaryThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("MongoDbSumTh");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in reservation loop.");
+  }
+
+  uvw_loop->run();
+}
+
+uint64_t TaskScheduler::MillisecondsToNextHour() {
+  auto now = std::chrono::system_clock::now();
+  time_t now_time_t = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_now{};
+  localtime_r(&now_time_t, &tm_now);
+
+  tm_now.tm_min = 0;
+  tm_now.tm_sec = 0;
+  tm_now.tm_hour += 1;
+  time_t next_hour_time_t = mktime(&tm_now);
+
+  auto next_hour = std::chrono::system_clock::from_time_t(next_hour_time_t);
+  auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(next_hour - now)
+          .count();
+  return static_cast<uint64_t>(ms);
 }
 
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(

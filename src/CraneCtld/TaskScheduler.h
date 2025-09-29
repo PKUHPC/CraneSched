@@ -809,6 +809,8 @@ class TaskScheduler {
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
 
+  uint64_t MillisecondsToNextHour();
+
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
@@ -971,6 +973,9 @@ class TaskScheduler {
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
+
+  std::thread m_mongodb_sum_thread_;
+  void MongoDbSummaryThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
       m_task_timer_handles_;
