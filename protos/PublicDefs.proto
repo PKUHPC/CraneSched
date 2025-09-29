@@ -170,6 +170,8 @@ message TaskToCtld {
 
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
+
+  map<string, uint32> licenses_count = 40;
 }
 
 message TaskInEmbeddedDb {
@@ -299,6 +301,7 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
   ResourceView req_res_view = 17;
+  map<string, uint32> licenses_count = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 
@@ -620,4 +623,10 @@ enum TxnAction {
   AddQos = 6;
   ModifyQos = 7;
   DeleteQos = 8;
+}
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 free = 4;
 }
