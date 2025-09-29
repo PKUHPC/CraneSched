@@ -836,14 +836,11 @@ template <>
 void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
                                                     const std::string& key,
                                                     const ResourceV2& value) {
-  using bsoncxx::builder::basic::array;
-  array arr_builder;
+  document node_res_doc{};
   for (const auto& [node, res] : value.EachNodeResMap()) {
-    document node_doc{};
-    DocumentAppendItem_(node_doc, node, res);
-    arr_builder.append(node_doc);
+    DocumentAppendItem_(node_res_doc, node, res);
   }
-  doc.append(kvp(key, arr_builder));
+  doc.append(kvp(key, node_res_doc));
 }
 
 template <typename... Ts, std::size_t... Is>
