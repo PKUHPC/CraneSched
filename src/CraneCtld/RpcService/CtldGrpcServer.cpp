@@ -376,16 +376,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  CRANE_DEBUG("partition: {}", request->task().partition_name());
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
-
-  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
-  if (!lua_result) {
-    response->set_ok(false);
-    response->set_code(lua_result.error().code());
-    // TODO: add user msg
-    return grpc::Status::OK;
-  }
 
   auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
