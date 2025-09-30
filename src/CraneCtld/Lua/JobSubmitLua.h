@@ -48,9 +48,9 @@ static const char* g_req_fxns[] = {
 
 class JobSubmitLua {
 public:
-  JobSubmitLua(const std::string& lua_script)
+  explicit JobSubmitLua(const std::string& lua_script)
       : m_lua_script_(lua_script) {
-    if (!(m_lua_state_ = luaL_newstate())) {
+    if ((m_lua_state_ = luaL_newstate()) == nullptr) {
       CRANE_ERROR("luaL_newstate() failed to allocate");
     }
 
@@ -60,8 +60,13 @@ public:
     RegisterLuaCraneStructFunctions_(m_lua_state_);
   }
 
+  JobSubmitLua(const JobSubmitLua&) = delete;
+  JobSubmitLua& operator=(const JobSubmitLua&) = delete;
+  JobSubmitLua(JobSubmitLua&&) = delete;
+  JobSubmitLua& operator=(JobSubmitLua&&) = delete;
+
   ~JobSubmitLua() {
-    if (m_lua_state_) {
+    if (m_lua_state_ != nullptr) {
       lua_close(m_lua_state_);
     }
   }
@@ -138,7 +143,7 @@ public:
     JobSubmitLua* get() const { return m_lua_.get(); }
 
     ~Handle() {
-      if (m_pool_ && m_lua_) m_pool_->Release_(std::move(m_lua_));
+      if ((m_pool_ != nullptr) && m_lua_) m_pool_->Release_(std::move(m_lua_));
     }
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
