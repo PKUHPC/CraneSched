@@ -103,6 +103,7 @@ Nodes:
 # partition information list
 Partitions:
   - name: CPU
+    # Nodes in this partition. Use "ALL" for all nodes.
     nodes: "cn[15-16]"
     priority: 5
   - name: GPU
