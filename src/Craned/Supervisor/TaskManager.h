@@ -39,6 +39,7 @@ struct ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> deadline_timer{nullptr};
   PasswordEntry pwd;
   bool orphaned{false};
   job_id_t job_id;
@@ -330,6 +331,17 @@ class TaskManager {
     m_step_.termination_timer = termination_handel;
   }
 
+  void AddDeadlineTerminationTimer_(int64_t secs) {
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handel->on<uvw::timer_event>(
+        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvDeadlineTaskTimerCb_();
+        });
+    termination_handel->start(std::chrono::seconds(secs),
+                              std::chrono::seconds(0));
+    m_step_.deadline_timer = termination_handel;
+  }
+
   void DelTerminationTimer_() {
     // Close handle before free
     if (m_step_.termination_timer) {
@@ -338,6 +350,12 @@ class TaskManager {
     }
   }
 
+  void DelDeadlineTerminationTimer_() {
+    if (m_step_.deadline_timer) {
+      m_step_.deadline_timer->close();
+      m_step_.deadline_timer.reset();
+    }
+  }
   void ActivateTaskStatusChange_(task_id_t task_id,
                                  crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
@@ -380,6 +398,7 @@ class TaskManager {
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
   void EvTaskTimerCb_();
+  void EvDeadlineTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
