@@ -1748,6 +1748,12 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
+    auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
+    if (!lua_result) {
+      // TODO: add user msg
+      return std::unexpected(lua_result.error().code());
+    }
+
     auto res = g_account_meta_container->TryMallocQosResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
