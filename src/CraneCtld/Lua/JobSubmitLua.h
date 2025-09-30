@@ -84,8 +84,9 @@ private:
   static int SetJobReqField_(lua_State* lua_state);
   static int GetPartRecFieldName_(lua_State* lua_state);
   static int GetJobEnvField_(const crane::grpc::TaskInfo& job_desc, const char *name, lua_State *lua_state);
-  static int GetJobReqField_(const crane::grpc::TaskInfo& job_desc, const char *name, lua_State *lua_state);
-  static int GetPratRecField_(const PartitionMeta& partition_meta, const char *name, lua_State *lua_state);
+  static int GetJobReqField_(const crane::grpc::TaskToCtld& job_desc,
+                             const char* name, lua_State* lua_state);
+  static int GetPartRecField_(const PartitionMeta& partition_meta, const char *name, lua_State *lua_state);
 
   bool LoadLuaScript_();
   static bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name);
@@ -93,7 +94,7 @@ private:
 
   void UpdateJobGloable_();
   void UpdateJobResvGloable_();
-  void PushJobInfo_(crane::grpc::TaskInfo* task);
+  void PushJobDesc_(crane::grpc::TaskToCtld* task);
   void PushPartitionList_(const std::string& user_name,
                           const std::string& account);
   void PushJobRec(crane::grpc::TaskInfo* task);
