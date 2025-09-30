@@ -238,13 +238,12 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
 void CranedMetaContainer::MallocResourceFromResv(
     ResvId resv_id, task_id_t task_id, const LogicalPartition::RnTaskRes& res) {
-  if (!resv_meta_map_.Contains(resv_id)) {
+  auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
+  if (!resv_meta) {
     CRANE_ERROR("Try to malloc resource from an unknown reservation {}",
                 resv_id);
     return;
   }
-
-  const auto& resv_meta = resv_meta_map_[resv_id];
 
   resv_meta->logical_part.res_avail -= res.resources;
   resv_meta->logical_part.res_in_use += res.resources;
@@ -252,21 +251,19 @@ void CranedMetaContainer::MallocResourceFromResv(
   resv_meta->logical_part.rn_task_res_map.emplace(task_id, res);
 }
 
-void CranedMetaContainer::FreeResourceFromResv(ResvId reservation_id,
+void CranedMetaContainer::FreeResourceFromResv(ResvId resv_id,
                                                task_id_t task_id) {
-  if (!resv_meta_map_.Contains(reservation_id)) {
-    CRANE_ERROR("Try to free resource from an unknown reservation {}",
-                reservation_id);
+  auto resv_meta = resv_meta_map_.GetValueExclusivePtr(resv_id);
+  if (!resv_meta) {
+    CRANE_ERROR("Try to free resource from an unknown reservation {}", resv_id);
     return;
   }
-
-  const auto& resv_meta = resv_meta_map_[reservation_id];
 
   auto resource_iter = resv_meta->logical_part.rn_task_res_map.find(task_id);
   if (resource_iter == resv_meta->logical_part.rn_task_res_map.end()) {
     CRANE_ERROR(
         "Try to free resource from an unknown task {} on reservation {}",
-        task_id, reservation_id);
+        task_id, resv_id);
     return;
   }
 
@@ -549,11 +546,9 @@ crane::grpc::QueryReservationInfoReply CranedMetaContainer::QueryResvInfo(
   crane::grpc::QueryReservationInfoReply reply;
   auto* list = reply.mutable_reservation_info_list();
 
-  if (!resv_meta_map_.Contains(resv_name)) {
-    return reply;
-  }
+  auto reservation_meta = resv_meta_map_.GetValueExclusivePtr(resv_name);
 
-  const auto& reservation_meta = resv_meta_map_.GetValueExclusivePtr(resv_name);
+  if (!reservation_meta) return reply;
 
   auto* reservation_info = list->Add();
 
