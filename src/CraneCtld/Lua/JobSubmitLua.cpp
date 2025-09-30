@@ -87,11 +87,11 @@ int GetQosPriority(lua_State* lua_state) {
   return 1;
 }
 
+// TODO: job req use tasktoctld, job recored use taskinfo
 CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
 
-  crane::grpc::TaskInfo task_info;
-  task.SetFieldsOfTaskInfo(&task_info);
+  crane::grpc::TaskToCtld task_to_ctld = task.TaskToCtld();
 
   if (!LoadLuaScript_())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
@@ -106,7 +106,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
 
   UpdateJobGloable_();
   UpdateJobResvGloable_();
-  PushJobInfo_(&task_info);
+  PushJobDesc_(&task_to_ctld);
   PushPartitionList_(task.Username(), task.account);
   lua_pushnumber(m_lua_state_, task.uid);
 
@@ -139,6 +139,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
 CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   CraneExpectedRich<void> result;
 
+  crane::grpc::TaskToCtld task_to_ctld = task_in_ctld.TaskToCtld();
   crane::grpc::TaskInfo task_info;
   task_in_ctld.SetFieldsOfTaskInfo(&task_info);
 
@@ -156,8 +157,8 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   UpdateJobGloable_();
   UpdateJobResvGloable_();
 
-  PushJobInfo_(&task_info);
-  // PushJobRec(&task_info);
+  PushJobDesc_(&task_to_ctld);
+  PushJobRec(&task_info);
   PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account);
   lua_pushnumber(m_lua_state_, task_in_ctld.uid);
 
@@ -316,7 +317,7 @@ int JobSubmitLua::GetJobEnvFieldName_(lua_State* lua_state) {
 
 int JobSubmitLua::GetJobReqFieldName_(lua_State* lua_state) {
   const auto* job_desc =
-      static_cast<const crane::grpc::TaskInfo*>(lua_touserdata(lua_state, 1));
+      static_cast<const crane::grpc::TaskToCtld*>(lua_touserdata(lua_state, 1));
   if (job_desc == nullptr) {
     CRANE_ERROR("job_desc is nullptr");
     lua_pushnil(lua_state);
@@ -377,7 +378,7 @@ int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
     return 1;
   }
 
-  return GetPratRecField_(*partition_meta, name, lua_state);
+  return GetPartRecField_(*partition_meta, name, lua_state);
 }
 
 int JobSubmitLua::GetJobEnvField_(const crane::grpc::TaskInfo& job_desc,
@@ -401,19 +402,19 @@ int JobSubmitLua::GetJobEnvField_(const crane::grpc::TaskInfo& job_desc,
   return 1;
 }
 
-int JobSubmitLua::GetJobReqField_(const crane::grpc::TaskInfo& job_desc,
+int JobSubmitLua::GetJobReqField_(const crane::grpc::TaskToCtld& job_desc,
                                   const char* name, lua_State* lua_state) {
-  using Handler = std::function<void(lua_State*, const crane::grpc::TaskInfo&)>;
+  using Handler = std::function<void(lua_State*, const crane::grpc::TaskToCtld&)>;
 
   static const std::unordered_map<std::string, Handler> handlers = {
       // ----------- [1] Fields set at submission time ----------
       {"time_limit",
-       [](lua_State* L, const crane::grpc::TaskInfo& t) {
+       [](lua_State* L, const crane::grpc::TaskToCtld& t) {
          // lua_pushnumber(L, absl::ToInt64Seconds(t.time_limit()));
        }},
       {"partition_id",
-       [](lua_State* L, const crane::grpc::TaskInfo& t) {
-         lua_pushstring(L, t.partition().data());
+       [](lua_State* L, const crane::grpc::TaskToCtld& t) {
+         lua_pushstring(L, t.partition_name().data());
        }},
   };
 
@@ -426,7 +427,7 @@ int JobSubmitLua::GetJobReqField_(const crane::grpc::TaskInfo& job_desc,
   return 1;
 }
 
-int JobSubmitLua::GetPratRecField_(const PartitionMeta& partition_meta,
+int JobSubmitLua::GetPartRecField_(const PartitionMeta& partition_meta,
                                    const char* name, lua_State* lua_state) {
   // TODO: lua_pushstring partition_meta field
 
@@ -535,7 +536,7 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_setfield(m_lua_state_, -2, "reservations");
   lua_pop(m_lua_state_, 1);
 }
-void JobSubmitLua::PushJobInfo_(crane::grpc::TaskInfo* task) {
+void JobSubmitLua::PushJobDesc_(crane::grpc::TaskToCtld* task) {
   lua_newtable(m_lua_state_);
 
   lua_newtable(m_lua_state_);
@@ -605,10 +606,15 @@ int JobSubmitLua::GetJobReqFieldIndex_(lua_State* lua_state) {
   const char* name = luaL_checkstring(lua_state, 2);
   lua_getmetatable(lua_state, -2);
   lua_getfield(lua_state, -1, "_job_desc");
-  crane::grpc::TaskInfo* job_desc =
-      static_cast<crane::grpc::TaskInfo*>(lua_touserdata(lua_state, -1));
+  auto* job_desc =
+      static_cast<crane::grpc::TaskToCtld*>(lua_touserdata(lua_state, -1));
+  if (job_desc == nullptr) {
+    CRANE_ERROR("job_desc is nullptr");
+    lua_pushnil(lua_state);
+    return 1;
+  }
 
-  return luaJobRecordField_(lua_state, job_desc, name);
+  return GetJobReqField_(*job_desc, name, lua_state);
 }
 
 int JobSubmitLua::JobRecFieldIndex_(lua_State* lua_state) {
