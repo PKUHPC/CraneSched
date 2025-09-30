@@ -99,7 +99,7 @@ private:
 
   void UpdateJobGloable_();
   void UpdateJobResvGloable_();
-  void PushJobDesc_(crane::grpc::TaskToCtld* task);
+  void PushJobDesc_(TaskInCtld* task);
   void PushPartitionList_(const std::string& user_name,
                           const std::string& account);
   void PushJobRec(crane::grpc::TaskInfo* task);
