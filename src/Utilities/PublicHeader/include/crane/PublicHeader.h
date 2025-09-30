@@ -51,6 +51,9 @@ constexpr const char* kLogPattern =
 
 inline const char* const kDefaultHost = "0.0.0.0";
 
+constexpr step_id_t kDaemonStepId = 0;
+constexpr step_id_t kPrimaryStepId = 1;
+
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";

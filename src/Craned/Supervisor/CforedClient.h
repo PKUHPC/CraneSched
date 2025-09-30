@@ -35,7 +35,7 @@ class CforedClient {
   };
 
   struct TaskFwdMeta {
-    pid_t pid{-1};
+    task_id_t task_id{0};
     bool pty{false};
 
     int stdin_write{-1};
@@ -59,16 +59,14 @@ class CforedClient {
 
   void InitChannelAndStub(const std::string& cfored_name);
 
-  bool InitFwdMetaAndUvStdoutFwdHandler(pid_t pid, int stdin_write,
+  bool InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id, int stdin_write,
                                         int stdout_read, bool pty);
 
-  uint16_t InitUvX11FwdHandler(pid_t pid);
+  uint16_t InitUvX11FwdHandler(task_id_t task_id);
 
-  void StartUvLoopThread();
-
-  bool TaskOutputFinish(pid_t pid);
-  bool TaskProcessStop(pid_t pid);
-  void TaskEnd(pid_t pid);
+  bool TaskOutputFinish(task_id_t task_id);
+  bool TaskProcessStop(task_id_t task_id);
+  void TaskEnd(task_id_t task_id);
 
   const std::string& CforedName() const { return m_cfored_name_; }
 
@@ -76,6 +74,23 @@ class CforedClient {
   uint16_t SetupX11forwarding_();
 
   static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
+  struct CreateStdoutFwdQueueElem {
+    TaskFwdMeta meta;
+    std::promise<bool> promise;
+  };
+  ConcurrentQueue<CreateStdoutFwdQueueElem> m_create_stdout_fwd_handler_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_clean_stdout_fwd_handler_queue_async_handle_;
+  void CleanStdoutFwdHandlerQueueCb_();
+
+  struct CreateX11FwdQueueElem {
+    task_id_t task_id;
+    std::promise<uint16_t> promise;
+  };
+  ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_handler_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_clean_x11_fwd_handler_queue_async_handle_;
+  void CleanX11FwdHandlerQueueCb_();
 
   void AsyncSendRecvThread_();
 
@@ -103,7 +118,7 @@ class CforedClient {
   std::thread m_ev_thread_;
 
   std::string m_cfored_name_;
-  std::unordered_map<pid_t, TaskFwdMeta> m_fwd_meta_map;
+  std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map;
 
   std::shared_ptr<grpc::Channel> m_cfored_channel_;
   std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;
