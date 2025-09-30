@@ -87,11 +87,9 @@ int GetQosPriority(lua_State* lua_state) {
   return 1;
 }
 
-// TODO: job req use tasktoctld, job recored use taskinfo
+// TODO: job req use taskInCtld, job recored use taskinfo
 CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
-
-  crane::grpc::TaskToCtld task_to_ctld = task.TaskToCtld();
 
   if (!LoadLuaScript_())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
@@ -106,7 +104,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
 
   UpdateJobGloable_();
   UpdateJobResvGloable_();
-  PushJobDesc_(&task_to_ctld);
+  PushJobDesc_(&task);
   PushPartitionList_(task.Username(), task.account);
   lua_pushnumber(m_lua_state_, task.uid);
 
@@ -139,7 +137,6 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
 CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   CraneExpectedRich<void> result;
 
-  crane::grpc::TaskToCtld task_to_ctld = task_in_ctld.TaskToCtld();
   crane::grpc::TaskInfo task_info;
   task_in_ctld.SetFieldsOfTaskInfo(&task_info);
 
@@ -157,7 +154,7 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   UpdateJobGloable_();
   UpdateJobResvGloable_();
 
-  PushJobDesc_(&task_to_ctld);
+  PushJobDesc_(&task_in_ctld);
   PushJobRec(&task_info);
   PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account);
   lua_pushnumber(m_lua_state_, task_in_ctld.uid);
@@ -252,6 +249,9 @@ void JobSubmitLua::RegisterOutputFunctions_() {
   lua_setfield(m_lua_state_, -2, "Interactive");
 
   // TODO: all used flags
+
+
+  lua_setglobal(m_lua_state_, "crane");
 }
 
 void JobSubmitLua::LuaTableRegister_(const luaL_Reg* l) {
@@ -416,6 +416,7 @@ int JobSubmitLua::GetJobReqField_(const crane::grpc::TaskToCtld& job_desc,
                }},
               {"partition_name",
                [](lua_State* L, const crane::grpc::TaskToCtld& t) {
+                 CRANE_INFO("partition: {}", t.partition_name().data());
          lua_pushstring(L, t.partition_name().data());
                }},
               {"req_resources",
@@ -752,7 +753,9 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_setfield(m_lua_state_, -2, "reservations");
   lua_pop(m_lua_state_, 1);
 }
-void JobSubmitLua::PushJobDesc_(crane::grpc::TaskToCtld* task) {
+
+// TODO: use task_in_ctld
+void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_newtable(m_lua_state_);
 
   lua_newtable(m_lua_state_);
