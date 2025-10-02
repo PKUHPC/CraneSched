@@ -37,6 +37,7 @@ using StepToD = crane::grpc::TaskToD;
 struct StepInstance {
   StepToD step_to_d;
   pid_t supv_pid;
+  bool suspended{false};
 };
 
 // Job allocation info, where allocation = job spec + execution info
@@ -102,6 +103,10 @@ class JobManager {
   void TerminateStepAsync(task_id_t task_id);
 
   void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
+
+  CraneErrCode SuspendStep(task_id_t task_id);
+
+  CraneErrCode ResumeStep(task_id_t task_id);
 
   bool ChangeJobTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 

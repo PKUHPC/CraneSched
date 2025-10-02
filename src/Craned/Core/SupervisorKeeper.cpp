@@ -19,6 +19,8 @@
 
 #include <protos/Supervisor.grpc.pb.h>
 
+#include "crane/PublicHeader.h"
+
 namespace Craned {
 using grpc::ClientContext;
 
@@ -79,6 +81,38 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
   }
 
   return CraneErrCode::ERR_RPC_FAILURE;
+}
+
+CraneErrCode SupervisorStub::SuspendTask() {
+  ClientContext context;
+  crane::grpc::supervisor::SuspendTaskRequest request;
+  crane::grpc::supervisor::SuspendTaskReply reply;
+
+  auto ok = m_stub_->SuspendTask(&context, request, &reply);
+  if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_ERROR("SuspendTask failed: {}, {}", reply.reason(), ok.error_message());
+  if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
+    return CraneErrCode::ERR_INVALID_PARAM;
+  if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))
+    return CraneErrCode::ERR_NON_EXISTENT;
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+CraneErrCode SupervisorStub::ResumeTask() {
+  ClientContext context;
+  crane::grpc::supervisor::ResumeTaskRequest request;
+  crane::grpc::supervisor::ResumeTaskReply reply;
+
+  auto ok = m_stub_->ResumeTask(&context, request, &reply);
+  if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_ERROR("ResumeTask failed: {}, {}", reply.reason(), ok.error_message());
+  if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
+    return CraneErrCode::ERR_INVALID_PARAM;
+  if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))
+    return CraneErrCode::ERR_NON_EXISTENT;
+  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {

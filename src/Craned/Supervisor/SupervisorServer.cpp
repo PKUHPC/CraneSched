@@ -19,6 +19,7 @@
 #include "SupervisorServer.h"
 
 #include "TaskManager.h"
+#include "crane/PublicHeader.h"
 
 namespace Craned::Supervisor {
 
@@ -82,6 +83,38 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
   g_task_mgr->TerminateTaskAsync(request->mark_orphaned(),
                                  request->terminated_by_user());
   response->set_ok(true);
+  return Status::OK;
+}
+
+grpc::Status SupervisorServiceImpl::SuspendTask(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::SuspendTaskRequest* request,
+    crane::grpc::supervisor::SuspendTaskReply* response) {
+  auto future = g_task_mgr->SuspendTaskAsync();
+  future.wait();
+  CraneErrCode err = future.get();
+  if (err == CraneErrCode::SUCCESS) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(std::string(CraneErrStr(err)));
+  }
+  return Status::OK;
+}
+
+grpc::Status SupervisorServiceImpl::ResumeTask(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::ResumeTaskRequest* request,
+    crane::grpc::supervisor::ResumeTaskReply* response) {
+  auto future = g_task_mgr->ResumeTaskAsync();
+  future.wait();
+  CraneErrCode err = future.get();
+  if (err == CraneErrCode::SUCCESS) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(std::string(CraneErrStr(err)));
+  }
   return Status::OK;
 }
 
