@@ -574,6 +574,10 @@ class TaskManager {
 
   void SetActivelyShutdown() { m_active_shutdown_ = true; }
 
+  std::future<CraneErrCode> SuspendTaskAsync();
+
+  std::future<CraneErrCode> ResumeTaskAsync();
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -612,9 +616,13 @@ class TaskManager {
   void EvTaskTimerCb_();
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanTaskSignalQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+
+  CraneErrCode SuspendRunningTasks_();
+  CraneErrCode ResumeSuspendedTasks_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
   ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
@@ -643,6 +651,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_task_signal_async_handle_;
+  ConcurrentQueue<TaskSignalQueueElem> m_task_signal_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

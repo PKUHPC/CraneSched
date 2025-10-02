@@ -1974,6 +1974,12 @@ TaskManager::TaskManager()
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
+  m_task_signal_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_signal_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTaskSignalQueueCb_();
+      });
+
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
@@ -2079,6 +2085,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   }
 
   // One-shot model: nothing to stop, just proceed to cleanup.
+  m_step_.suspended = false;
   m_step_.oom_baseline_inited = false;
 
   auto err = task->Cleanup();
@@ -2608,6 +2615,69 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   for (auto& not_ready_elem : not_ready_elems) {
     m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
   }
+}
+
+void TaskManager::EvCleanTaskSignalQueueCb_() {
+  TaskSignalQueueElem elem;
+  while (m_task_signal_queue_.try_dequeue(elem)) {
+    CraneErrCode result = CraneErrCode::SUCCESS;
+    switch (elem.action) {
+    case TaskSignalQueueElem::Action::Suspend: {
+      if (m_step_.suspended) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      result = SuspendRunningTasks_();
+      if (result == CraneErrCode::SUCCESS) m_step_.suspended = true;
+      break;
+    }
+    case TaskSignalQueueElem::Action::Resume: {
+      if (!m_step_.suspended) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      result = ResumeSuspendedTasks_();
+      if (result == CraneErrCode::SUCCESS) m_step_.suspended = false;
+      break;
+    }
+    }
+
+    elem.prom.set_value(result);
+  }
+}
+
+CraneErrCode TaskManager::SuspendRunningTasks_() {
+  if (m_step_.AllTaskFinished()) return CraneErrCode::ERR_NON_EXISTENT;
+
+  bool any_signal_sent = false;
+  for (const auto& [pid, task_id] : m_pid_task_id_map_) {
+    auto task = m_step_.GetTaskInstance(task_id);
+    if (!task) continue;
+    if (task->GetPid() == 0) continue;
+    any_signal_sent = true;
+    CraneErrCode err = task->Kill(SIGSTOP);
+    if (err != CraneErrCode::SUCCESS) return err;
+  }
+
+  if (!any_signal_sent) return CraneErrCode::ERR_INVALID_PARAM;
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode TaskManager::ResumeSuspendedTasks_() {
+  if (m_step_.AllTaskFinished()) return CraneErrCode::ERR_NON_EXISTENT;
+
+  bool any_signal_sent = false;
+  for (const auto& [pid, task_id] : m_pid_task_id_map_) {
+    auto task = m_step_.GetTaskInstance(task_id);
+    if (!task) continue;
+    if (task->GetPid() == 0) continue;
+    any_signal_sent = true;
+    CraneErrCode err = task->Kill(SIGCONT);
+    if (err != CraneErrCode::SUCCESS) return err;
+  }
+
+  if (!any_signal_sent) return CraneErrCode::ERR_INVALID_PARAM;
+  return CraneErrCode::SUCCESS;
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {
