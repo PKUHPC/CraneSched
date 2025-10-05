@@ -1021,6 +1021,17 @@ CraneErrCode ContainerInstance::Spawn() {
 CraneErrCode ContainerInstance::Kill(int signum) {
   using json = nlohmann::json;
   if (m_pid_ != 0) {
+    if (signum == SIGSTOP || signum == SIGCONT) {
+      int rc = kill(-m_pid_, signum);
+      if ((rc != 0) && (errno != ESRCH)) {
+        CRANE_TRACE(
+            "[Subprocess] Failed to send signal {} to pid {}: {}", signum,
+            m_pid_, strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      return CraneErrCode::SUCCESS;
+    }
+
     // If m_pid_ not exists, no further operation.
     int rc = 0;
     std::array<char, 256> buffer{};

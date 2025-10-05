@@ -1027,19 +1027,49 @@ CraneErrCode TaskScheduler::SuspendRunningTask(task_id_t task_id) {
   }
 
   std::vector<task_id_t> job_ids{task_id};
+  std::vector<CranedId> suspended_nodes;
+  CraneErrCode failure_code = CraneErrCode::SUCCESS;
+  bool has_failure = false;
   for (const auto& craned_id : executing_nodes) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (!stub || stub->Invalid()) {
       CRANE_WARN("SuspendSteps stub for {} unavailable", craned_id);
-      return CraneErrCode::ERR_RPC_FAILURE;
+      if (failure_code == CraneErrCode::SUCCESS)
+        failure_code = CraneErrCode::ERR_RPC_FAILURE;
+      has_failure = true;
+      continue;
     }
 
     CraneErrCode err = stub->SuspendSteps(job_ids);
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to suspend task #{} on craned {}: {}", task_id,
                   craned_id, CraneErrStr(err));
-      return err;
+      if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+      has_failure = true;
+      continue;
     }
+
+    suspended_nodes.push_back(craned_id);
+  }
+
+  if (has_failure) {
+    for (const auto& craned_id : suspended_nodes) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) {
+        CRANE_ERROR("Failed to rollback suspended state on craned {}: stub unavailable",
+                    craned_id);
+        continue;
+      }
+
+      CraneErrCode err = stub->ResumeSteps(job_ids);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR(
+            "Rollback ResumeSteps for task #{} on craned {} failed: {}",
+            task_id, craned_id, CraneErrStr(err));
+      }
+    }
+
+    return failure_code;
   }
 
   {
@@ -1088,19 +1118,50 @@ CraneErrCode TaskScheduler::ResumeSuspendedTask(task_id_t task_id) {
   }
 
   std::vector<task_id_t> job_ids{task_id};
+  std::vector<CranedId> resumed_nodes;
+  CraneErrCode failure_code = CraneErrCode::SUCCESS;
+  bool has_failure = false;
   for (const auto& craned_id : executing_nodes) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (!stub || stub->Invalid()) {
       CRANE_WARN("ResumeSteps stub for {} unavailable", craned_id);
-      return CraneErrCode::ERR_RPC_FAILURE;
+      if (failure_code == CraneErrCode::SUCCESS)
+        failure_code = CraneErrCode::ERR_RPC_FAILURE;
+      has_failure = true;
+      continue;
     }
 
     CraneErrCode err = stub->ResumeSteps(job_ids);
     if (err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to resume task #{} on craned {}: {}", task_id,
                   craned_id, CraneErrStr(err));
-      return err;
+      if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+      has_failure = true;
+      continue;
     }
+
+    resumed_nodes.push_back(craned_id);
+  }
+
+  if (has_failure) {
+    for (const auto& craned_id : resumed_nodes) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (!stub || stub->Invalid()) {
+        CRANE_ERROR(
+            "Failed to rollback resumed state on craned {}: stub unavailable",
+            craned_id);
+        continue;
+      }
+
+      CraneErrCode err = stub->SuspendSteps(job_ids);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR(
+            "Rollback SuspendSteps for task #{} on craned {} failed: {}",
+            task_id, craned_id, CraneErrStr(err));
+      }
+    }
+
+    return failure_code;
   }
 
   {

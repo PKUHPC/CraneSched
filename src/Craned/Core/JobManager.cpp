@@ -858,7 +858,12 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
 
     bool orphaned = job_ptr->orphaned;
     for (auto& [step_id, step_inst] : job_ptr->step_map) {
-      if (step_inst) step_inst->suspended = false;
+      if (!step_inst) continue;
+      if (status_change.new_status == crane::grpc::TaskStatus::Suspended) {
+        step_inst->suspended = true;
+      } else {
+        step_inst->suspended = false;
+      }
     }
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
