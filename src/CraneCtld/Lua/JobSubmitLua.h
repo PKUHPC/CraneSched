@@ -89,7 +89,7 @@ private:
   static int SetJobReqField_(lua_State* lua_state);
   static int GetPartRecFieldName_(lua_State* lua_state);
   static int GetJobEnvField_(const crane::grpc::TaskInfo& job_desc, const char *name, lua_State *lua_state);
-  static int GetJobReqField_(const crane::grpc::TaskToCtld& job_desc,
+  static int GetJobReqField_(const TaskInCtld& job_desc,
                              const char* name, lua_State* lua_state);
   static int GetPartRecField_(const PartitionMeta& partition_meta, const char *name, lua_State *lua_state);
 
