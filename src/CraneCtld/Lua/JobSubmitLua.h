@@ -88,7 +88,7 @@ private:
   static int SetJobEnvField_(lua_State* lua_state);
   static int SetJobReqField_(lua_State* lua_state);
   static int GetPartRecFieldName_(lua_State* lua_state);
-  static int GetJobEnvField_(const crane::grpc::TaskInfo& job_desc, const char *name, lua_State *lua_state);
+  static int GetJobEnvField_(const TaskInCtld& job_desc, const char *name, lua_State *lua_state);
   static int GetJobReqField_(const TaskInCtld& job_desc,
                              const char* name, lua_State* lua_state);
   static int GetPartRecField_(const PartitionMeta& partition_meta, const char *name, lua_State *lua_state);
@@ -109,9 +109,8 @@ private:
   static int luaJobRecordField_(lua_State *lua_state,
     crane::grpc::TaskInfo* job_ptr,
     const char *name);
-  static int PartitionRecField_(lua_State *lua_state,
-    const PartitionMeta& partition_meta,
-    const char *name);
+
+  static void PushResourceView_(lua_State* L, const ResourceView& res);
 
   std::string m_lua_script_;
   lua_State* m_lua_state_;
