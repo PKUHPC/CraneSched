@@ -3016,9 +3016,11 @@ bool MongodbClient::AggregateHourTable(std::time_t start, std::time_t end) {
 
 void MongodbClient::QueryAndAggAccountUser(
     const std::string& table, const std::string& time_field,
-    std::time_t range_start, std::time_t range_end, const std::string& account,
-    const std::string& username,
-    std::unordered_map<Key, UserAccountAggResult, KeyHash>& agg_map) {
+    std::time_t range_start, std::time_t range_end,
+    const std::unordered_set<std::string>& accounts,
+    const std::unordered_set<std::string>& users,
+    std::unordered_map<AccountUserKey, AccountUserAggResult, KeyHash>&
+        agg_map) {
   bool print_debug_log = false;  // Set to false to disable debug logs
 
   if (print_debug_log) {
@@ -3036,8 +3038,22 @@ void MongodbClient::QueryAndAggAccountUser(
                 << "$gte" << static_cast<int64_t>(range_start) << "$lt"
                 << static_cast<int64_t>(range_end)
                 << bsoncxx::builder::stream::close_document;
-  if (!account.empty()) match_builder << "account" << account;
-  if (!username.empty()) match_builder << "username" << username;
+
+  if (!accounts.empty()) {
+    bsoncxx::builder::basic::array arr_builder;
+    for (const auto& acc : accounts) arr_builder.append(acc);
+    match_builder << "account" << bsoncxx::builder::stream::open_document
+                  << "$in" << arr_builder.view()
+                  << bsoncxx::builder::stream::close_document;
+  }
+
+  if (!users.empty()) {
+    bsoncxx::builder::basic::array arr_builder;
+    for (const auto& user : users) arr_builder.append(user);
+    match_builder << "username" << bsoncxx::builder::stream::open_document
+                  << "$in" << arr_builder.view()
+                  << bsoncxx::builder::stream::close_document;
+  }
 
   // Build aggregation pipeline
   mongocxx::pipeline pipeline;
@@ -3074,7 +3090,7 @@ void MongodbClient::QueryAndAggAccountUser(
   }
 
   if (print_debug_log) {
-    CRANE_INFO("UserAccountAggResult:");
+    CRANE_INFO("AccountUserAggResult:");
     for (const auto& [key, result] : agg_map) {
       CRANE_INFO(
           "Account: {}, Username: {}, Total CPU Time: {}, "
@@ -3084,14 +3100,112 @@ void MongodbClient::QueryAndAggAccountUser(
   }
 }
 
+void MongodbClient::QueryAndAggAccountUserWckey(
+    const std::string& table, const std::string& time_field,
+    std::time_t range_start, std::time_t range_end,
+    const std::unordered_set<std::string>& accounts,
+    const std::unordered_set<std::string>& users,
+    const std::unordered_set<std::string>& wckeys,
+    std::unordered_map<AccountUserWckeyKey, AccountUserWckeyAggResult,
+                       AccountUserWckeyKeyHash>& agg_map) {
+  bool print_debug_log = true;
+
+  if (print_debug_log) {
+    CRANE_INFO("[DEBUG] Dumping all documents in collection: {}", table);
+    size_t doc_count = 0;
+    for (auto&& doc : (*GetClient_())[m_db_name_][table].find({})) {
+      CRANE_INFO("  {}", bsoncxx::to_json(doc));
+      ++doc_count;
+    }
+    CRANE_INFO("[DEBUG] Total documents in {}: {}", table, doc_count);
+  }
+
+  bsoncxx::builder::stream::document match_builder;
+  match_builder << time_field << bsoncxx::builder::stream::open_document
+                << "$gte" << static_cast<int64_t>(range_start) << "$lt"
+                << static_cast<int64_t>(range_end)
+                << bsoncxx::builder::stream::close_document;
+
+  if (!accounts.empty()) {
+    bsoncxx::builder::basic::array arr_builder;
+    for (const auto& acc : accounts) arr_builder.append(acc);
+    match_builder << "account" << bsoncxx::builder::stream::open_document
+                  << "$in" << arr_builder.view()
+                  << bsoncxx::builder::stream::close_document;
+  }
+
+  if (!users.empty()) {
+    bsoncxx::builder::basic::array arr_builder;
+    for (const auto& user : users) arr_builder.append(user);
+    match_builder << "username" << bsoncxx::builder::stream::open_document
+                  << "$in" << arr_builder.view()
+                  << bsoncxx::builder::stream::close_document;
+  }
+
+  if (!wckeys.empty()) {
+    bsoncxx::builder::basic::array arr_builder;
+    for (const auto& wk : wckeys) arr_builder.append(wk);
+    match_builder << "wckey" << bsoncxx::builder::stream::open_document << "$in"
+                  << arr_builder.view()
+                  << bsoncxx::builder::stream::close_document;
+  }
+
+  mongocxx::pipeline pipeline;
+  pipeline.match(match_builder << bsoncxx::builder::stream::finalize);
+
+  if (print_debug_log) {
+    CRANE_INFO("[DEBUG] MongoDB match: {}",
+               bsoncxx::to_json(match_builder.view()));
+  }
+
+  pipeline.group(
+      bsoncxx::builder::stream::document{}
+      << "_id" << bsoncxx::builder::stream::open_document << "account"
+      << "$account"
+      << "username" << "$username"
+      << "wckey" << "$wckey" << bsoncxx::builder::stream::close_document
+      << "total_cpu_time" << bsoncxx::builder::stream::open_document << "$sum"
+      << "$total_cpu_time" << bsoncxx::builder::stream::close_document
+      << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+      << "$total_count" << bsoncxx::builder::stream::close_document
+      << bsoncxx::builder::stream::finalize);
+
+  auto coll = (*GetClient_())[m_db_name_][table];
+  auto cursor = coll.aggregate(pipeline);
+
+  for (auto&& doc : cursor) {
+    auto id = doc["_id"].get_document().view();
+    std::string acc = std::string(id["account"].get_string().value);
+    std::string user = std::string(id["username"].get_string().value);
+    std::string wk = std::string(id["wckey"].get_string().value);
+
+    agg_map[{acc, user, wk}].total_cpu_time +=
+        doc["total_cpu_time"].get_double().value;
+    agg_map[{acc, user, wk}].total_count +=
+        doc["total_count"].get_int32().value;
+  }
+
+  if (print_debug_log) {
+    CRANE_INFO("AccountUserWckeyAggResult:");
+    for (const auto& [key, result] : agg_map) {
+      CRANE_INFO(
+          "Account: {}, Username: {}, Wckey: {}, Total CPU Time: {}, Total "
+          "Count: {}",
+          key.account, key.username, key.wckey, result.total_cpu_time,
+          result.total_count);
+    }
+  }
+}
+
 void MongodbClient::QueryAccountUserSummary(
-    const std::string& account, const std::string& username, std::time_t start,
+    const std::unordered_set<std::string>& accounts,
+    const std::unordered_set<std::string>& users, std::time_t start,
     std::time_t end,
     ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
         stream) {
-  bool print_debug_log = true;
+  bool print_debug_log = false;
   int max_data_size = 5000;
-  std::unordered_map<Key, UserAccountAggResult, KeyHash> agg_map;
+  std::unordered_map<AccountUserKey, AccountUserAggResult, KeyHash> agg_map;
   auto ranges = util::EfficientSplitTimeRange(start, end);
 
   // Query and aggregate for each interval type
@@ -3114,13 +3228,13 @@ void MongodbClient::QueryAccountUserSummary(
     if (print_debug_log) {
       CRANE_INFO(
           "AggregateAccountUserSummaryToMap call: table={}, time_field={}, "
-          "start={} ({}), end={} ({}), account={}, username={}",
+          "start={} ({}), end={} ({}), accounts={}, users={}",
           table, time_field, data.start, util::FormatTime(data.start), data.end,
-          util::FormatTime(data.end), account, username);
+          util::FormatTime(data.end), accounts, users);
     }
 
-    QueryAndAggAccountUser(table, time_field, data.start, data.end, account,
-                           username, agg_map);
+    QueryAndAggAccountUser(table, time_field, data.start, data.end, accounts,
+                           users, agg_map);
   }
 
   crane::grpc::QueryAccountUserSummaryItemReply reply;
@@ -3129,6 +3243,69 @@ void MongodbClient::QueryAccountUserSummary(
     item.set_cluster(g_config.CraneClusterName);
     item.set_account(kv.first.account);
     item.set_username(kv.first.username);
+    item.set_total_cpu_time(kv.second.total_cpu_time);
+    item.set_total_count(kv.second.total_count);
+    reply.add_items()->CopyFrom(item);
+    if (reply.items_size() >= max_data_size) {
+      stream->Write(reply);
+      reply.clear_items();
+    }
+  }
+  if (reply.items_size() > 0) {
+    stream->Write(reply);
+  }
+}
+
+void MongodbClient::QueryAccountUserWckeySummary(
+    const std::unordered_set<std::string>& accounts,
+    std::unordered_set<std::string>& users,
+    const std::unordered_set<std::string>& wckeys, std::time_t start,
+    std::time_t end,
+    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserWckeySummaryItemReply>*
+        stream) {
+  bool print_debug_log = false;
+  int max_data_size = 5000;
+  std::unordered_map<AccountUserWckeyKey, AccountUserWckeyAggResult,
+                     AccountUserWckeyKeyHash>
+      agg_map;
+  auto ranges = util::EfficientSplitTimeRange(start, end);
+
+  // Query and aggregate for each interval type
+  for (const auto& data : ranges) {
+    std::string table;
+    std::string time_field;
+    if (data.type == "month") {
+      table = m_month_account_user_wckey_collection_name_;
+      time_field = "month";
+    } else if (data.type == "day") {
+      table = m_day_account_user_wckey_collection_name_;
+      time_field = "day";
+    } else if (data.type == "hour") {
+      table = m_hour_account_user_wckey_collection_name_;
+      time_field = "hour";
+    } else {
+      continue;
+    }
+
+    if (print_debug_log) {
+      CRANE_INFO(
+          "AggregateAccountUserSummaryToMap call: table={}, time_field={}, "
+          "start={} ({}), end={} ({}), accounts={}, users={}",
+          table, time_field, data.start, util::FormatTime(data.start), data.end,
+          util::FormatTime(data.end), accounts, users, wckeys);
+    }
+
+    QueryAndAggAccountUserWckey(table, time_field, data.start, data.end,
+                                accounts, users, wckeys, agg_map);
+  }
+
+  crane::grpc::QueryAccountUserWckeySummaryItemReply reply;
+  for (const auto& kv : agg_map) {
+    crane::grpc::AccountUserWckeySummaryItem item;
+    item.set_cluster(g_config.CraneClusterName);
+    item.set_account(kv.first.account);
+    item.set_username(kv.first.username);
+    item.set_wckey(kv.first.wckey);
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_items()->CopyFrom(item);

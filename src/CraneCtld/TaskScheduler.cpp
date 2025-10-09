@@ -537,7 +537,7 @@ bool TaskScheduler::Init() {
 
   mongodb_task_timer_handle->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        g_db_client->ClusterRollupUsage();
+        //g_db_client->ClusterRollupUsage();
       });
 
   uint64_t first_delay = MillisecondsToNextHour();

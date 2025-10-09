@@ -386,6 +386,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
       ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>
           *writer) override;
+  ::grpc::Status QueryAccountUserWckeySummaryItemStream(
+      ::grpc::ServerContext *context,
+      const ::crane::grpc::QueryAccountUserWckeySummaryItemRequest *request,
+      ::grpc::ServerWriter<::crane::grpc::QueryAccountUserWckeySummaryItemReply>
+          *writer) override;
 
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(

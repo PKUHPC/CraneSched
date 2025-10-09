@@ -184,26 +184,51 @@ class MongodbClient {
   };
 
   enum class RollupType { Hour, HourToDay, DayToMonth };
-  struct UserAccountAggResult {
+  struct AccountUserAggResult {
     double total_cpu_time = 0;
     int32_t total_count = 0;
   };
-
-  struct Key {
+  struct AccountUserKey {
     std::string account;
     std::string username;
 
     template <typename H>
-    friend H AbslHashValue(H h, const Key& key) {
+    friend H AbslHashValue(H h, const AccountUserKey& key) {
       return H::combine(std::move(h), key.account, key.username);
     }
-    bool operator==(const Key& other) const {
+    bool operator==(const AccountUserKey& other) const {
       return account == other.account && username == other.username;
     }
   };
   struct KeyHash {
-    std::size_t operator()(const Key& key) const {
-      return absl::Hash<Key>{}(key);
+    std::size_t operator()(const AccountUserKey& key) const {
+      return absl::Hash<AccountUserKey>{}(key);
+    }
+  };
+
+  struct AccountUserWckeyAggResult {
+    double total_cpu_time = 0;
+    int32_t total_count = 0;
+  };
+  struct AccountUserWckeyKey {
+    std::string account;
+    std::string username;
+    std::string wckey;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const AccountUserWckeyKey& key) {
+      return H::combine(std::move(h), key.account, key.username, key.wckey);
+    }
+
+    bool operator==(const AccountUserWckeyKey& other) const {
+      return account == other.account && username == other.username &&
+             wckey == other.wckey;
+    }
+  };
+
+  struct AccountUserWckeyKeyHash {
+    std::size_t operator()(const AccountUserWckeyKey& key) const {
+      return absl::Hash<AccountUserWckeyKey>{}(key);
     }
   };
 
@@ -251,13 +276,31 @@ class MongodbClient {
   void QueryAndAggAccountUser(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
-      const std::string& account, const std::string& username,
-      std::unordered_map<Key, UserAccountAggResult, KeyHash>& agg_map);
+      const std::unordered_set<std::string>& accounts,
+      const std::unordered_set<std::string>& users,
+      std::unordered_map<AccountUserKey, AccountUserAggResult, KeyHash>&
+          agg_map);
   void QueryAccountUserSummary(
-      const std::string& account, const std::string& username,
-      std::time_t start, std::time_t end,
+      const std::unordered_set<std::string>& accounts,
+      const std::unordered_set<std::string>& users, std::time_t start,
+      std::time_t end,
       ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
           stream);
+  void QueryAccountUserWckeySummary(
+      const std::unordered_set<std::string>& accounts,
+      std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& wckeys, std::time_t start,
+      std::time_t end,
+      ::grpc::ServerWriter<
+          ::crane::grpc::QueryAccountUserWckeySummaryItemReply>* stream);
+  void QueryAndAggAccountUserWckey(
+      const std::string& table, const std::string& time_field,
+      std::time_t range_start, std::time_t range_end,
+      const std::unordered_set<std::string>& accounts,
+      const std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& wckeys,
+      std::unordered_map<AccountUserWckeyKey, AccountUserWckeyAggResult,
+                         AccountUserWckeyKeyHash>& agg_map);
   void HandleProduceAccountUserAggArray(
       const std::string& src_coll_str,
       ThreadSafeQueue<bsoncxx::array::value>& queue,

@@ -832,6 +832,15 @@ message AccountUserSummaryItem {
   string cluster = 1;
   string account = 2;
   string username = 3;
-  int64 total_cpu_time = 4;
+  double total_cpu_time = 4;
   int64 total_count = 5;
+}
+
+message AccountUserWckeySummaryItem {
+  string cluster = 1;
+  string account = 2;
+  string username = 3;
+  string wckey = 4;
+  double total_cpu_time = 5;
+  int64 total_count = 6;
 }

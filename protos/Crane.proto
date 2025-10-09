@@ -950,16 +950,17 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 message QueryAccountUserSummaryItemRequest {
-  string account = 1;
-  string username = 2;
-  google.protobuf.Timestamp start_time = 3;
-  google.protobuf.Timestamp end_time = 4;
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  google.protobuf.Timestamp filter_start_time = 3;
+  google.protobuf.Timestamp filter_end_time = 4;
 }
 
 message QueryAccountUserSummaryItemReply {
   repeated AccountUserSummaryItem items = 1;
 }
 
+<<<<<<< HEAD
 message AttachInContainerTaskRequest {
   uint32 uid = 1;
   uint32 task_id = 2;
@@ -994,6 +995,19 @@ message ExecInContainerTaskReply {
   string url = 3;
 }
 
+=======
+message QueryAccountUserWckeySummaryItemRequest {
+  repeated string filter_accounts = 1;
+  repeated string filter_users = 2;
+  repeated string filter_wckeys = 3;
+  google.protobuf.Timestamp filter_start_time = 4;
+  google.protobuf.Timestamp filter_end_time = 5;
+}
+
+message QueryAccountUserWckeySummaryItemReply {
+    repeated AccountUserWckeySummaryItem items = 1;
+}
+>>>>>>> 55043e3e (add wckeyprocess)
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1056,7 +1070,8 @@ service CraneCtld {
   /* RPCS called from ccon */
   rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
   rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
-  rpc QueryAccountUserSummaryItem(QueryAccountUserSummaryItemRequest) returns (QueryAccountUserSummaryItemReply);
+  rpc QueryAccountUserSummaryItemStream(QueryAccountUserSummaryItemRequest) returns (stream QueryAccountUserSummaryItemReply);
+  rpc QueryAccountUserWckeySummaryItemStream(QueryAccountUserWckeySummaryItemRequest) returns (stream QueryAccountUserWckeySummaryItemReply);
 }
 
 service CeffQueryService {

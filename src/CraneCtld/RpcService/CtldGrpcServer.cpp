@@ -2060,13 +2060,35 @@ grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
     const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>
         *writer) {
-  std::string user_name = request->username();
-  std::string account = request->account();
-  auto start_time = request->start_time().seconds();
-  auto end_time = request->end_time().seconds();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
 
-  g_db_client->QueryAccountUserSummary(account, user_name, start_time, end_time,
-                                       writer);
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+
+  g_db_client->QueryAccountUserSummary(req_accounts, req_users, start_time,
+                                       end_time, writer);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryAccountUserWckeySummaryItemStream(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::QueryAccountUserWckeySummaryItemRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserWckeySummaryItemReply>
+        *writer) {
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  std::unordered_set<std::string> req_wckeys(request->filter_wckeys().begin(),
+                                            request->filter_wckeys().end());
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+
+  g_db_client->QueryAccountUserWckeySummary(req_accounts, req_users, req_wckeys,
+                                            start_time, end_time, writer);
   return grpc::Status::OK;
 }
 
