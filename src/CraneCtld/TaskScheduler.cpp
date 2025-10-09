@@ -549,6 +549,8 @@ void TaskScheduler::ScheduleThread_() {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
+  absl::Time absl_begin;
+  std::vector<task_id_t> cancel_tasks;
   while (!m_thread_stop_) {
     // Note: In other parts of code, we must avoid the happening of the
     // situation where m_running_task_map_mtx is acquired and then
@@ -566,6 +568,25 @@ void TaskScheduler::ScheduleThread_() {
                                            m_pending_task_map_.size());
 
       begin = std::chrono::steady_clock::now();
+      absl_begin = absl::Now();
+      for (const auto& [task_id, task] : m_pending_task_map_) {
+        if (task->deadline_time < absl_begin) {
+          CRANE_DEBUG("Task #{} was added to cancel_tasks", task_id);
+          cancel_tasks.push_back(task_id);
+        }
+      }
+      for (const auto task_id : cancel_tasks) {
+        auto pd_it = m_pending_task_map_.find(task_id);
+        if (pd_it != m_pending_task_map_.end()) {
+          auto& task = pd_it->second;
+          m_cancel_task_queue_.enqueue(
+              CancelPendingTaskQueueElem{.task = std::move(task)});
+          m_cancel_task_async_handle_->send();
+          m_pending_task_map_.erase(pd_it);
+          CRANE_DEBUG("Terminate task #{} due to deadline", task_id);
+        }
+      }
+      cancel_tasks.clear();
 
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
       m_node_selection_algo_->NodeSelect(
@@ -3371,10 +3392,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
       task->pending_reason = "Held";
       continue;
     }
-    if (task->deadline_time < now) {
-      task->pending_reason = "Deadline";
-      continue;
-    } else if (task->begin_time > now) {
+    if (task->begin_time > now) {
       task->pending_reason = "BeginTime";
       continue;
     }
@@ -3387,7 +3405,6 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     task->pending_reason = "";
     task_priority_vec.emplace_back(task.get(), priority);
   }
-
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
             [](const std::pair<TaskInCtld*, double>& a,
                const std::pair<TaskInCtld*, double>& b) {
