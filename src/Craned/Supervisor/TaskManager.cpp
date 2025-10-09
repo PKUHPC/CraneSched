@@ -48,9 +48,6 @@ StepInstance::~StepInstance() {
   if (termination_timer) {
     termination_timer->close();
   }
-  if (deadline_timer) {
-    deadline_timer->close();
-  }
 }
 
 bool StepInstance::IsBatch() const noexcept {
@@ -1672,7 +1669,10 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
   ChangeTaskTimeLimitQueueElem elem;
   elem.time_limit = time_limit;
   elem.ok_prom = std::move(ok_promise);
-
+  if (m_step_.GetStep().has_deadline_time()) {
+    elem.deadline_sec =
+        std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
+  }
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
   m_change_task_time_limit_async_handle_->send();
   return ok_future;
@@ -1796,7 +1796,7 @@ void TaskManager::EvDeadlineTaskTimerCb_() {
   CRANE_TRACE("task #{} reached its deadline. Terminating it...",
               g_config.JobId);
 
-  DelDeadlineTerminationTimer_();
+  DelTerminationTimer_();
 
   if (m_step_.IsBatch()) {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
@@ -1857,6 +1857,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
                       exit_info.value + ExitCode::kTerminationSignalBase,
                       "Detected by oom_kill counter delta");
           break;
+        case TerminatedBy::TERMINATION_BY_DEADLINE:
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Deadline,
+                      exit_info.value + ExitCode::kTerminationSignalBase,
+                      "Reached task's deadline");
+          break;
         default:
           TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
                       exit_info.value + ExitCode::kTerminationSignalBase,
@@ -1869,7 +1874,14 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
           TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
                       exit_info.value,
-                      "Detected by oom_kill counter delta (no signal)");
+                      std::optional<std::string>(
+                          "Detected by oom_kill counter delta (no signal)"));
+        } else if (task->terminated_by ==
+                   TerminatedBy::TERMINATION_BY_DEADLINE) {
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Deadline,
+                      exit_info.value,
+                      std::optional<std::string>(
+                          "Reached task's deadline (no signal)"));
         } else {
           TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
                       std::nullopt);
@@ -2009,6 +2021,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
+
     int64_t sec = m_step_.GetStep().time_limit().seconds();
     AddTerminationTimer_(sec);
     CRANE_INFO("Add a timer of {} seconds", sec);
@@ -2016,8 +2029,16 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (m_step_.GetStep().has_deadline_time()) {
       int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
                              absl::ToUnixSeconds(absl::Now());
-      AddDeadlineTerminationTimer_(deadline_sec);
-      CRANE_TRACE("Add a deadline timer of {} seconds", deadline_sec);
+      if (deadline_sec <= sec) {
+        AddDeadlineTerminationTimer_(deadline_sec);
+        CRANE_TRACE("Add a deadline timer of {} seconds", deadline_sec);
+      } else {
+        AddTerminationTimer_(sec);
+        CRANE_TRACE("Add a timer of {} seconds", sec);
+      }
+    } else {
+      AddTerminationTimer_(sec);
+      CRANE_TRACE("Add a timer of {} seconds", sec);
     }
 
     m_step_.pwd.Init(m_step_.uid);
