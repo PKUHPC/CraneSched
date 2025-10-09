@@ -1562,7 +1562,6 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
 
 CraneExpectedRich<void> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
   if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
-  CRANE_INFO("partition2: {}", task.partition_id);
   auto handle = g_lua_pool->Acquire();
   if (handle.get() == nullptr)
     return std::unexpected(
@@ -1628,12 +1627,6 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
   if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
-    auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
-    if (!lua_result) {
-      // TODO: add user msg
-      return std::unexpected(lua_result.error().code());
-    }
-
     auto res = g_account_meta_container->TryMallocQosResource(*task);
     if (res != CraneErrCode::SUCCESS) {
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
