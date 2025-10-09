@@ -413,7 +413,7 @@ jobs:
       - name: Run AutoTest
         continue-on-error: true
         run: |
-          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]' || echo "")
+          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]' || echo "testnetwork")
           if [ -z "$NETWORK_ID" ]; then
             echo "WARN: mongodb container network not found; falling back to default podman network"
           fi
@@ -424,6 +424,7 @@ jobs:
             -v ./script:/CraneSched-AutoTest/script \
             -v ./output:/CraneSched-AutoTest/output \
             -v ./log:/CraneSched-AutoTest/log \
+            -v /tmp/crane/tls:/etc/crane/tls:Z \
             $( [ -n "$NETWORK_ID" ] && echo "--network $NETWORK_ID" ) \
             localhost/autotest
           podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
