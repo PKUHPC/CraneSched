@@ -1056,16 +1056,16 @@ CraneErrCode TaskScheduler::SuspendRunningTask(task_id_t task_id) {
     for (const auto& craned_id : suspended_nodes) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
       if (!stub || stub->Invalid()) {
-        CRANE_ERROR("Failed to rollback suspended state on craned {}: stub unavailable",
-                    craned_id);
+        CRANE_ERROR(
+            "Failed to rollback suspended state on craned {}: stub unavailable",
+            craned_id);
         continue;
       }
 
       CraneErrCode err = stub->ResumeSteps(job_ids);
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR(
-            "Rollback ResumeSteps for task #{} on craned {} failed: {}",
-            task_id, craned_id, CraneErrStr(err));
+        CRANE_ERROR("Rollback ResumeSteps for task #{} on craned {} failed: {}",
+                    task_id, craned_id, CraneErrStr(err));
       }
     }
 
