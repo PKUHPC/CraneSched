@@ -82,11 +82,10 @@ If `libcgroup-devel` installation fails:
 wget https://github.com/libcgroup/libcgroup/releases/download/v3.1.0/libcgroup-3.1.0.tar.gz
 tar -zxvf libcgroup-3.1.0.tar.gz
 cd libcgroup-3.1.0
-dnf install tar bison flex systemd-devel -y
+yum install -y tar bison flex systemd-devel
 sudo ./configure
 make -j
 sudo make install
-```
 
 ---
 
