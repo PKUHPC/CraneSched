@@ -70,8 +70,8 @@ alias scancel='cwrapper scancel'
 alias scontrol='cwrapper scontrol'
 alias sinfo='cwrapper sinfo'
 alias squeue='cwrapper squeue'
-alias squeue='cwrapper srun'
-alias squeue='cwrapper salloc'
+alias srun='cwrapper srun'
+alias salloc='cwrapper salloc'
 EOF
 
 chmod 644 /etc/profile.d/cwrapper.sh
