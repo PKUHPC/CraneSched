@@ -40,7 +40,6 @@ class ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  std::shared_ptr<uvw::timer_handle> deadline_timer{nullptr};
   PasswordEntry pwd;
   bool orphaned{false};
   job_id_t job_id;
@@ -339,7 +338,7 @@ class TaskManager {
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
-    m_step_.deadline_timer = termination_handel;
+    m_step_.termination_timer = termination_handel;
   }
 
   void DelTerminationTimer_() {
@@ -350,12 +349,6 @@ class TaskManager {
     }
   }
 
-  void DelDeadlineTerminationTimer_() {
-    if (m_step_.deadline_timer) {
-      m_step_.deadline_timer->close();
-      m_step_.deadline_timer.reset();
-    }
-  }
   void ActivateTaskStatusChange_(task_id_t task_id,
                                  crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
@@ -392,6 +385,7 @@ class TaskManager {
   struct ChangeTaskTimeLimitQueueElem {
     absl::Duration time_limit;
     std::promise<CraneErrCode> ok_prom;
+    std::optional<int64_t> deadline_sec{std::nullopt};
   };
 
   void EvSigchldCb_();
