@@ -1418,7 +1418,8 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   std::unordered_set<std::string> user_list;
-  if (request->user_list().empty() && request->force()) {
+  bool contains_all = std::ranges::find(request->user_list(), "ALL") != request->user_list().end();
+  if (contains_all && request->force()) {
     auto account_ptr =
         g_account_manager->GetExistedAccountInfo(request->account());
     if (!account_ptr) {
@@ -1430,13 +1431,13 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     }
 
     user_list.insert(account_ptr->users.begin(), account_ptr->users.end());
-  } else if (request->user_list().empty() && !request->force()) {
+  } else if (contains_all && !request->force()) {
     response->set_ok(false);
     auto *new_err_record = response->mutable_rich_error_list()->Add();
     new_err_record->set_description("all");
     new_err_record->set_code(CraneErrCode::ERR_NOT_FORCE);
     return grpc::Status::OK;
-  } else if (!request->user_list().empty()) {
+  } else if (!contains_all) {
     user_list.insert(request->user_list().begin(), request->user_list().end());
   }
 
