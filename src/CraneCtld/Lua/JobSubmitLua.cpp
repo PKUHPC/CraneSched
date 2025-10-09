@@ -37,7 +37,7 @@ int LogLuaMsg(lua_State* lua_state) {
   lua_pop(lua_state, 1);
 
   /* Pop level off stack: */
-  level = (int)lua_tonumber(lua_state, -1);
+  level = static_cast<int>(lua_tonumber(lua_state, -1));
   lua_pop(lua_state, 1);
 
   /* Call appropriate slurm log function based on log-level argument */
@@ -68,7 +68,7 @@ int LogLuaError(lua_State* lua_state) {
 int TimeStr2Mins(lua_State* lua_state) {
   std::string time = lua_tostring(lua_state, -1);
   int minutes = 0;
-  // TODO:
+  // TODO: TimeStr2Mins
   // int minutes = crane::TimeStr2Mins(time);
   lua_pushnumber(lua_state, minutes);
   return 1;
@@ -87,7 +87,6 @@ int GetQosPriority(lua_State* lua_state) {
   return 1;
 }
 
-// TODO: job req use taskInCtld, job recored use taskinfo
 CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
 
@@ -304,7 +303,7 @@ void JobSubmitLua::RegisterLuaCraneStructFunctions_(lua_State* lua_state) {
 
 int JobSubmitLua::GetJobEnvFieldName_(lua_State* lua_state) {
   const auto* job_desc =
-      static_cast<const crane::grpc::TaskInfo*>(lua_touserdata(lua_state, 1));
+      static_cast<const TaskInCtld*>(lua_touserdata(lua_state, 1));
   if (job_desc == nullptr) {
     CRANE_ERROR("job_desc is nullptr");
     lua_pushnil(lua_state);
@@ -362,16 +361,89 @@ int JobSubmitLua::SetJobReqField_(lua_State* lua_state) {
     return 0;
   }
 
-  // TODO: set task map job field
-  auto value_str = luaL_checkstring(lua_state, 3);
-  job_desc->partition_id = value_str;
+  if (name == "partition") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->partition_id = value_str;
+  }
+  if (name == "name") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->name = value_str;
+  }
+  if (name == "account") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->account = value_str;
+  }
+  if (name == "qos") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->qos = value_str;
+  }
+  if (name == "cmd_line") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->cmd_line = value_str;
+  }
+  if (name == "cwd") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->cwd = value_str;
+  }
+  if (name == "container") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->container = value_str;
+  }
+  if (name == "reservation") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->reservation = value_str;
+  }
+  if (name == "extra_attr") {
+    const char* value_str = luaL_checkstring(lua_state, 3);
+    job_desc->extra_attr = value_str;
+  }
+  if (name == "type") {
+    job_desc->type =
+        static_cast<crane::grpc::TaskType>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "uid") {
+    job_desc->uid = static_cast<uid_t>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "gid") {
+    job_desc->gid = static_cast<gid_t>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "node_num") {
+    job_desc->node_num = static_cast<int>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "ntasks_per_node") {
+    job_desc->ntasks_per_node =
+        static_cast<int>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "cpus_per_task") {
+    job_desc->cpus_per_task =
+        static_cast<cpu_t>(luaL_checknumber(lua_state, 3));
+  }
+  if (name == "requeue_if_failed") {
+    job_desc->requeue_if_failed = lua_toboolean(lua_state, 3);
+  }
+  if (name == "get_user_env") {
+    job_desc->get_user_env = lua_toboolean(lua_state, 3);
+  }
+
+  // if (name == "env") {
+  //   if (lua_istable(lua_state, 3)) {
+  //     lua_pushnil(lua_state);
+  //     while (lua_next(lua_state, 3) != 0) {
+  //       const char* key = luaL_checkstring(lua_state, -2);
+  //       const char* value = luaL_checkstring(lua_state, -1);
+  //       job_desc->env[key] = value;
+  //       lua_pop(lua_state, 1);
+  //     }
+  //   }
+  // }
 
   return 0;
 }
 
+// partition_record
 int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
   const auto* partition_meta =
-      static_cast<PartitionMeta*>(lua_touserdata(lua_state, 1));
+      static_cast<const PartitionMeta*>(lua_touserdata(lua_state, 1));
   const char* name = luaL_checkstring(lua_state, 2);
   if (partition_meta == nullptr) {
     CRANE_ERROR("partition_meta is nill");
@@ -382,18 +454,18 @@ int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
   return GetPartRecField_(*partition_meta, name, lua_state);
 }
 
-int JobSubmitLua::GetJobEnvField_(const crane::grpc::TaskInfo& job_desc,
-                                  const char* name, lua_State* lua_state) {
-  if (job_desc.env().empty()) {
-    if (job_desc.type() == crane::grpc::TaskType::Batch) {
+int JobSubmitLua::GetJobEnvField_(const TaskInCtld& job_desc, const char* name,
+                                  lua_State* lua_state) {
+  if (job_desc.env.empty()) {
+    if (job_desc.type == crane::grpc::TaskType::Batch) {
       CRANE_ERROR("job_desc->environment is nullptr.");
     } else {
       CRANE_INFO("job_desc->environment only accessible for batch jobs.");
     }
     lua_pushnil(lua_state);
   } else {
-    auto iter = job_desc.env().find(name);
-    if (iter != job_desc.env().end()) {
+    auto iter = job_desc.env.find(name);
+    if (iter != job_desc.env.end()) {
       lua_pushstring(lua_state, iter->second.data());
     } else {
       lua_pushnil(lua_state);
@@ -412,56 +484,13 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
        [](lua_State* L, const TaskInCtld& t) {
          lua_pushnumber(L, absl::ToDoubleSeconds(t.time_limit));
        }},
-      {"partition_name",
+      {"partition",
        [](lua_State* L, const TaskInCtld& t) {
          lua_pushstring(L, t.partition_id.data());
        }},
       {"requested_node_res_view",
        [](lua_State* L, const TaskInCtld& t) {
-         const auto& res = t.requested_node_res_view;
-         lua_newtable(L);  // ResourceView table
-
-         // allocatable_res
-         lua_newtable(L);
-         const auto& ar = res.GetAllocatableRes();
-         lua_pushnumber(L, ar.CpuCount());
-         lua_setfield(L, -2, "cpu_core_limit");
-         lua_pushnumber(L, ar.memory_bytes);
-         lua_setfield(L, -2, "memory_limit_bytes");
-         lua_pushnumber(L, ar.memory_sw_bytes);
-         lua_setfield(L, -2, "memory_sw_limit_bytes");
-         lua_setfield(L, -2, "allocatable_res");
-
-         // device_map
-         lua_newtable(L);
-         const auto& dm = ToGrpcDeviceMap(res.GetDeviceMap());
-
-         // name_type_map
-         lua_newtable(L);
-         const auto& name_type_map = dm.name_type_map();
-         for (const auto& dev_pair : name_type_map) {
-           const std::string& device_name = dev_pair.first;
-           const auto& type_count_map = dev_pair.second;
-
-           lua_pushstring(L, device_name.c_str());
-           lua_newtable(L);  // TypeCountMap table
-
-           // type_count_map: map<string, uint64>
-           const auto& tcm = type_count_map.type_count_map();
-           for (const auto& type_pair : tcm) {
-             lua_pushstring(L, type_pair.first.c_str());  // type
-             lua_pushnumber(
-                 L, static_cast<lua_Number>(type_pair.second));  // count
-             lua_settable(L, -3);
-           }
-           // total
-           lua_pushnumber(L, static_cast<lua_Number>(type_count_map.total()));
-           lua_setfield(L, -2, "total");
-
-           lua_settable(L, -3);  // name_type_map[device_name] = TypeCountMap table
-         }
-         lua_setfield(L, -2, "name_type_map");
-         lua_setfield(L, -2, "device_map");
+         PushResourceView_(L, t.requested_node_res_view);
        }},
       {"type",
        [](lua_State* L, const TaskInCtld& t) { lua_pushnumber(L, t.type); }},
@@ -475,10 +504,8 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
                   const TaskInCtld& t) { lua_pushstring(L, t.name.data()); }},
       {"qos", [](lua_State* L,
                  const TaskInCtld& t) { lua_pushstring(L, t.qos.data()); }},
-      {"node_num",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushnumber(L, t.node_num);
-       }},
+      {"node_num", [](lua_State* L,
+                      const TaskInCtld& t) { lua_pushnumber(L, t.node_num); }},
       {"ntasks_per_node",
        [](lua_State* L, const TaskInCtld& t) {
          lua_pushnumber(L, t.ntasks_per_node);
@@ -532,7 +559,7 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
       {"meta",
        [](lua_State* L, const TaskInCtld& t) {
          if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
-            const auto& meta = ptr;
+           const auto& meta = ptr;
            lua_newtable(L);
 
            lua_pushstring(L, ptr->sh_script.c_str());
@@ -546,44 +573,12 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
 
            lua_pushstring(L, ptr->interpreter.c_str());
            lua_setfield(L, -2, "interpreter");
-         // } else if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
-         //   lua_newtable(L);
-         //
-         //   lua_pushnumber(L, ptr->interactive_type);
-         //   lua_setfield(L, -2, "interactive_type");
-         //
-         //   lua_pushstring(L, meta.sh_script().c_str());
-         //   lua_setfield(L, -2, "sh_script");
-         //
-         //   lua_pushstring(L, meta.term_env().c_str());
-         //   lua_setfield(L, -2, "term_env");
-         //
-         //   lua_pushnumber(L, static_cast<int>(meta.interactive_type()));
-         //   lua_setfield(L, -2, "interactive_type");
-         //
-         //   lua_pushboolean(L, meta.pty());
-         //   lua_setfield(L, -2, "pty");
-         //
-         //   lua_pushboolean(L, meta.x11());
-         //   lua_setfield(L, -2, "x11");
-         //
-         //   // x11_meta table
-         //   lua_newtable(L);
-         //   const auto& x11 = meta.x11_meta();
-         //
-         //   lua_pushstring(L, x11.target().c_str());
-         //   lua_setfield(L, -2, "target");
-         //
-         //   lua_pushnumber(L, x11.port());
-         //   lua_setfield(L, -2, "port");
-         //
-         //   lua_pushstring(L, x11.cookie().c_str());
-         //   lua_setfield(L, -2, "cookie");
-         //
-         //   lua_pushboolean(L, x11.enable_forwarding());
-         //   lua_setfield(L, -2, "enable_forwarding");
-         //
-         //   lua_setfield(L, -2, "x11_meta");
+         } else if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
+           lua_newtable(L);
+
+           lua_pushnumber(L, ptr->interactive_type);
+           lua_setfield(L, -2, "interactive_type");
+
          } else {
            lua_pushnil(L);
          }
@@ -601,8 +596,75 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
 
 int JobSubmitLua::GetPartRecField_(const PartitionMeta& partition_meta,
                                    const char* name, lua_State* lua_state) {
-  // TODO: lua_pushstring partition_meta field
+  using Handler = std::function<void(lua_State*, const PartitionMeta&)>;
+  static const std::unordered_map<std::string, Handler> handlers = {
+      {"name",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_pushstring(L, p.partition_global_meta.name.c_str());
+       }},
+      {"nodelist_str",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_pushstring(L, p.partition_global_meta.nodelist_str.c_str());
+       }},
+      {"node_cnt",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_pushinteger(L, p.partition_global_meta.node_cnt);
+       }},
+      {"alive_craned_cnt",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_pushinteger(L, p.partition_global_meta.alive_craned_cnt);
+       }},
+      {"allowed_accounts",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& acc : p.partition_global_meta.allowed_accounts) {
+           lua_pushstring(L, acc.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      {"denied_accounts",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& acc : p.partition_global_meta.denied_accounts) {
+           lua_pushstring(L, acc.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      {"craned_ids",
+       [](lua_State* L, const PartitionMeta& p) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& id : p.craned_ids) {
+           lua_pushstring(L, id.c_str());  // 假设 CranedId 可转为 string
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      {"res_total",
+       [](lua_State* L, const PartitionMeta& p) {
+         PushResourceView_(L, p.partition_global_meta.res_total);
+       }},
+      {"res_avail",
+       [](lua_State* L, const PartitionMeta& p) {
+         PushResourceView_(L, p.partition_global_meta.res_avail);
+       }},
+      {"res_in_use",
+       [](lua_State* L, const PartitionMeta& p) {
+         PushResourceView_(L, p.partition_global_meta.res_in_use);
+       }},
+      {"res_total_inc_dead",
+       [](lua_State* L, const PartitionMeta& p) {
+         PushResourceView_(L, p.partition_global_meta.res_total_inc_dead);
+       }},
+  };
 
+  auto it = handlers.find(name);
+  if (it != handlers.end()) {
+    it->second(lua_state, partition_meta);
+  } else {
+    lua_pushnil(lua_state);
+  }
   return 1;
 }
 
@@ -709,7 +771,6 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_pop(m_lua_state_, 1);
 }
 
-// TODO: use task_in_ctld
 void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_newtable(m_lua_state_);
 
@@ -726,6 +787,7 @@ void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_setmetatable(m_lua_state_, -2);
 }
 
+// TODO: all is lock ?
 void JobSubmitLua::PushPartitionList_(const std::string& user_name,
                                       const std::string& account) {
   lua_newtable(m_lua_state_);
@@ -735,7 +797,7 @@ void JobSubmitLua::PushPartitionList_(const std::string& user_name,
     auto user = g_account_manager->GetExistedUserInfo(user_name);
     if (!user) {
       CRANE_ERROR("username is null");
-      return ;
+      return;
     }
     actual_account = user->default_account;
   }
@@ -819,7 +881,7 @@ int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
     return 1;
   }
 
-  return PartitionRecField_(lua_state, *part_ptr, name);
+  return GetPartRecField_(*part_ptr, name, lua_state);
 }
 
 int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
@@ -1000,8 +1062,50 @@ int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
   return 1;
 }
 
-int JobSubmitLua::PartitionRecField_(lua_State* lua_state,
-                                     const PartitionMeta& partition_meta,
-                                     const char* name) {}
+void JobSubmitLua::PushResourceView_(lua_State* L, const ResourceView& res) {
+  lua_newtable(L);  // 创建 ResourceView table
+
+  // allocatable_res 字段
+  lua_newtable(L);
+  const auto& ar = res.GetAllocatableRes();
+  lua_pushnumber(L, ar.CpuCount());
+  lua_setfield(L, -2, "cpu_core_limit");
+  lua_pushnumber(L, ar.memory_bytes);
+  lua_setfield(L, -2, "memory_limit_bytes");
+  lua_pushnumber(L, ar.memory_sw_bytes);
+  lua_setfield(L, -2, "memory_sw_limit_bytes");
+  lua_setfield(L, -2,
+               "allocatable_res");  // ResourceView.allocatable_res = table
+
+  // device_map 字段
+  lua_newtable(L);
+  const auto& dm = ToGrpcDeviceMap(res.GetDeviceMap());
+
+  // name_type_map 字段
+  lua_newtable(L);
+  const auto& name_type_map = dm.name_type_map();
+  for (const auto& dev_pair : name_type_map) {
+    const std::string& device_name = dev_pair.first;
+    const auto& type_count_map = dev_pair.second;
+
+    lua_pushstring(L, device_name.c_str());
+    lua_newtable(L);  // TypeCountMap table
+
+    // type_count_map: map<string, uint64>
+    const auto& tcm = type_count_map.type_count_map();
+    for (const auto& type_pair : tcm) {
+      lua_pushstring(L, type_pair.first.c_str());                    // type
+      lua_pushnumber(L, static_cast<lua_Number>(type_pair.second));  // count
+      lua_settable(L, -3);
+    }
+    // total
+    lua_pushnumber(L, static_cast<lua_Number>(type_count_map.total()));
+    lua_setfield(L, -2, "total");
+
+    lua_settable(L, -3);  // name_type_map[device_name] = TypeCountMap table
+  }
+  lua_setfield(L, -2, "name_type_map");
+  lua_setfield(L, -2, "device_map");  // ResourceView.device_map = table
+}
 
 }  // namespace Ctld
