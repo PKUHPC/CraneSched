@@ -31,7 +31,8 @@ enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
   TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM
+  TERMINATION_BY_OOM,
+  TERMINATION_BY_DEADLINE
 };
 
 class ITaskInstance;
