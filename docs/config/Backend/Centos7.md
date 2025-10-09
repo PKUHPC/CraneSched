@@ -114,10 +114,9 @@ yum install -y bzip2
 cd gcc-14.1.0
 ./contrib/download_prerequisites
 mkdir build && cd build
-../configure -enable-checking=release -enable-languages=c,c++ -disable-multilib
+../configure --enable-checking=release --enable-languages=c,c++ --disable-multilib
 make -j
 sudo make install
-```
 
 ---
 
