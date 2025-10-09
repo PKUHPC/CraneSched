@@ -1799,8 +1799,8 @@ void TaskManager::EvDeadlineTaskTimerCb_() {
   DelDeadlineTerminationTimer_();
 
   if (m_step_.IsBatch()) {
-    m_task_terminate_queue_.enqueue(
-        TaskTerminateQueueElem{.terminated_by_timeout = true});
+    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+        .termination_reason = TerminatedBy::TERMINATION_BY_DEADLINE});
     m_terminate_task_async_handle_->send();
   } else {
     ActivateTaskStatusChange_(m_step_.job_id, crane::grpc::TaskStatus::Deadline,
