@@ -100,11 +100,10 @@ sudo make install
 ### 4.1 Common Setup
 
 ```bash
-sudo dnf install -y wget tar
+sudo yum install -y wget tar
 wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.sh
 bash cmake-3.26.4-linux-x86_64.sh --prefix=/usr/local --skip-license
 cmake --version
-```
 
 #### 4.2.1 Build GCC 14 Manually
 
