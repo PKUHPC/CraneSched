@@ -20,10 +20,11 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "AccountManager.h"
-#include "crane/Lock.h"
-
 #include <lua.hpp>
+
+#include "AccountManager.h"
+#include "CranedMetaContainer.h"
+#include "crane/Lock.h"
 
 namespace Ctld {
 
@@ -101,7 +102,7 @@ private:
   void UpdateJobResvGloable_();
   void PushJobDesc_(TaskInCtld* task);
   void PushPartitionList_(const std::string& user_name,
-                          const std::string& account);
+                          const std::string& account, const CranedMetaContainer::AllPartitionsMetaMapConstPtr& partition_map);
   void PushJobRec(crane::grpc::TaskInfo* task);
   static int GetJobReqFieldIndex_(lua_State *lua_state);
   static int JobRecFieldIndex_(lua_State *lua_state);
