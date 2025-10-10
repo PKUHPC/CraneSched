@@ -19,12 +19,13 @@ The CraneSched typically includes the following services:
 - craned: the worker node daemon (runs on every compute/worker node).
 
 ### Frontend Service
-- cfored: daemon service for crun and calloc
+- cfored: daemon service for crun and calloc.
+- cplugind: daemon service for plugin.
 - command line tools: cbatch, ccontrol, cacct, cacctmgr, cqueue, cinfo, crun, etc.
 
 Common accompaniments:
 
-- Configuration files: global config is typically at `/etc/config.yaml`; database settings at `/etc/database.yaml`.
+- Configuration files: global config is typically at `/etc/crane/config.yaml`; database settings at `/etc/crane/database.yaml`.
 
 ## OS and topic-specific guides
 
