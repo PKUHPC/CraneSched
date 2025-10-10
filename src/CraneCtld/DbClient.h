@@ -188,21 +188,23 @@ class MongodbClient {
     double total_cpu_time = 0;
     int32_t total_count = 0;
   };
-  struct AccountUserKey {
+  struct AccountUserQosKey {
     std::string account;
     std::string username;
+    std::string qos;
 
     template <typename H>
-    friend H AbslHashValue(H h, const AccountUserKey& key) {
-      return H::combine(std::move(h), key.account, key.username);
+    friend H AbslHashValue(H h, const AccountUserQosKey& key) {
+      return H::combine(std::move(h), key.account, key.username, key.qos);
     }
-    bool operator==(const AccountUserKey& other) const {
-      return account == other.account && username == other.username;
+    bool operator==(const AccountUserQosKey& other) const {
+      return account == other.account && username == other.username &&
+             qos == other.qos;
     }
   };
   struct KeyHash {
-    std::size_t operator()(const AccountUserKey& key) const {
-      return absl::Hash<AccountUserKey>{}(key);
+    std::size_t operator()(const AccountUserQosKey& key) const {
+      return absl::Hash<AccountUserQosKey>{}(key);
     }
   };
 
@@ -214,15 +216,17 @@ class MongodbClient {
     std::string account;
     std::string username;
     std::string wckey;
+    int32_t cpu_level;
 
     template <typename H>
     friend H AbslHashValue(H h, const AccountUserWckeyKey& key) {
-      return H::combine(std::move(h), key.account, key.username, key.wckey);
+      return H::combine(std::move(h), key.account, key.username, key.wckey,
+                        key.cpu_level);
     }
 
     bool operator==(const AccountUserWckeyKey& other) const {
       return account == other.account && username == other.username &&
-             wckey == other.wckey;
+             wckey == other.wckey && cpu_level == other.cpu_level;
     }
   };
 
@@ -278,11 +282,13 @@ class MongodbClient {
       std::time_t range_start, std::time_t range_end,
       const std::unordered_set<std::string>& accounts,
       const std::unordered_set<std::string>& users,
-      std::unordered_map<AccountUserKey, AccountUserAggResult, KeyHash>&
+      const std::unordered_set<std::string>& qoss,
+      std::unordered_map<AccountUserQosKey, AccountUserAggResult, KeyHash>&
           agg_map);
   void QueryAccountUserSummary(
       const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users, std::time_t start,
+      const std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& qoss, std::time_t start,
       std::time_t end,
       ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>*
           stream);
