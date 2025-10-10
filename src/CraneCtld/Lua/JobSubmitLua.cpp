@@ -23,7 +23,7 @@
 namespace Ctld {
 
 int LogLuaMsg(lua_State* lua_state) {
-  std::string prefix = "lua";
+  std::string prefix = "[lua]";
   int level = 0;
   std::string msg;
 
@@ -58,7 +58,7 @@ int LogLuaMsg(lua_State* lua_state) {
 }
 
 int LogLuaError(lua_State* lua_state) {
-  std::string prefix = "lua";
+  std::string prefix = "[lua]";
   std::string msg = lua_tostring(lua_state, -1);
   CRANE_ERROR("{}: {}", prefix, msg);
 
@@ -104,7 +104,8 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   UpdateJobGloable_();
   UpdateJobResvGloable_();
   PushJobDesc_(&task);
-  PushPartitionList_(task.Username(), task.account);
+  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
+  PushPartitionList_(task.Username(), task.account, partition_map);
   lua_pushnumber(m_lua_state_, task.uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
@@ -155,7 +156,8 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
 
   PushJobDesc_(&task_in_ctld);
   PushJobRec(&task_info);
-  PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account);
+  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
+  PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account, partition_map);
   lua_pushnumber(m_lua_state_, task_in_ctld.uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
@@ -351,7 +353,7 @@ int JobSubmitLua::SetJobEnvField_(lua_State* lua_state) {
 }
 
 int JobSubmitLua::SetJobReqField_(lua_State* lua_state) {
-  const auto* name = luaL_checkstring(lua_state, 2);
+  const std::string name = luaL_checkstring(lua_state, 2);
   lua_getmetatable(lua_state, -3);
   lua_getfield(lua_state, -1, "_job_desc");
   auto* job_desc = static_cast<TaskInCtld*>(lua_touserdata(lua_state, -1));
@@ -787,9 +789,8 @@ void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_setmetatable(m_lua_state_, -2);
 }
 
-// TODO: all is lock ?
 void JobSubmitLua::PushPartitionList_(const std::string& user_name,
-                                      const std::string& account) {
+                                      const std::string& account, const CranedMetaContainer::AllPartitionsMetaMapConstPtr& partition_map) {
   lua_newtable(m_lua_state_);
 
   std::string actual_account = account;
@@ -802,7 +803,6 @@ void JobSubmitLua::PushPartitionList_(const std::string& user_name,
     actual_account = user->default_account;
   }
 
-  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
   for (const auto& [partition_name, partition_meta] : *partition_map) {
     auto partition = partition_meta.GetExclusivePtr();
     if (!partition->partition_global_meta.allowed_accounts.empty() &&
@@ -875,8 +875,8 @@ int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
   lua_getmetatable(lua_state, -2);
   lua_getfield(lua_state, -1, "_part_rec_ptr");
   part_ptr = static_cast<PartitionMeta*>(lua_touserdata(lua_state, -1));
-  if (!part_ptr) {
-    CRANE_ERROR("part_ptr is NULL");
+  if (part_ptr == nullptr) {
+    CRANE_ERROR("part_ptr is nullptr");
     lua_pushnil(lua_state);
     return 1;
   }
