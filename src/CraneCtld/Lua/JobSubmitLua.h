@@ -107,9 +107,11 @@ private:
   static int GetJobReqFieldIndex_(lua_State *lua_state);
   static int JobRecFieldIndex_(lua_State *lua_state);
   static int PartitionRecFieldIndex_(lua_State* lua_state);
-  static int luaJobRecordField_(lua_State *lua_state,
+  static int ResvFieldIndex_(lua_State *lua_state);
+  static int LuaJobRecordField_(lua_State *lua_state,
     crane::grpc::TaskInfo* job_ptr,
     const char *name);
+  static int ResvField_(lua_State *lua_state, crane::grpc::ReservationInfo* resv_ptr, const char *name);
 
   static void PushResourceView_(lua_State* L, const ResourceView& res);
 
