@@ -1,5 +1,7 @@
-CraneSched supports using CGroup v2, but eBPF must be configured.
-eBPF is compiled with clang; please ensure the system has clang 17 or newer.
+Purpose: When using cgroup v2 with GRES (Generic RESources), CraneSched relies on an eBPF program to enforce device-level GRES limits. Therefore, eBPF must be configured and loaded on systems where GRES is managed under cgroup v2.
+
+CraneSched supports cgroup v2; if you need GRES enforcement, eBPF must be configured.
+The eBPF program is compiled with clang; please ensure the system has clang 17 or newer (clang 19 instructions below).
 ## 1. Clang 19 Installation Guide
 
 Install prerequisites:

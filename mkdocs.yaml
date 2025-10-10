@@ -1,2 +1,5 @@
 site_name: CraneSched
-theme: readthedocs
+theme: material
+  locale: en
+plugins:
+  - search

@@ -173,7 +173,7 @@ dnf install -y \
 
 ### 4.1 Install MongoDB
 
-4.1.1 **Add MongoDB YUM repository:**
+#### 4.1.1 **Add MongoDB YUM repository:**
 
 ```bash
 cat > /etc/yum.repos.d/mongodb-org-7.0.repo << 'EOF'
@@ -188,7 +188,7 @@ EOF
 dnf makecache
 ```
 
-4.1.2 **Install MongoDB and enable on boot:**
+#### 4.1.2 **Install MongoDB and enable on boot:**
 
 ```bash
 dnf install -y mongodb-org
@@ -196,7 +196,7 @@ systemctl enable mongod
 systemctl start mongod
 ```
 
-4.1.3 **Generate key file:**
+#### 4.1.3 **Generate key file:**
 
 ```bash
 openssl rand -base64 756 | sudo -u mongod tee /var/lib/mongo/mongo.key
@@ -207,7 +207,7 @@ sudo -u mongod chmod 400 /var/lib/mongo/mongo.key
 
 ### 4.2 Configure MongoDB
 
-4.2.1 **Create an admin user:**
+#### 4.2.1 **Create an admin user:**
 
 ```bash
 mongosh
@@ -219,7 +219,7 @@ db.shutdownServer()
 quit
 ```
 
-4.2.2 **Enable authentication and replication:**
+#### 4.2.2 **Enable authentication and replication:**
 
 Edit `/etc/mongod.conf` and modify:
 
@@ -237,7 +237,7 @@ Restart MongoDB:
 systemctl restart mongod
 ```
 
-4.2.3 **Initialize replica set:**
+#### 4.2.3 **Initialize replica set:**
 
 ```bash
 mongosh
@@ -290,13 +290,13 @@ ninja install
 > ⚠️ Only configure PAM **after the cluster is fully deployed and running**.
 > Misconfiguration may prevent SSH login.
 
-5.2.1 **Copy PAM module:**
+#### 5.2.1 **Copy PAM module:**
 
 ```bash
 cp build/src/Misc/Pam/pam_crane.so /usr/lib64/security/
 ```
 
-5.2.2 **Edit `/etc/pam.d/sshd`:**
+#### 5.2.2 **Edit `/etc/pam.d/sshd`:**
 
 * Add `account required pam_crane.so` **before** `account include password-auth`.
 * Add `session required pam_crane.so` **after** `session include password-auth`.
@@ -334,7 +334,7 @@ session    include      postlogin
 
 ### 5.3 Configure CraneSched
 
-5.3.1 **Copy example configuration files:**
+#### 5.3.1 **Copy example configuration files:**
 
 ```bash
 mkdir -p /etc/crane
@@ -345,7 +345,7 @@ cp etc/database.yaml /etc/crane/database.yaml
 cp build/src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
 ```
 
-5.3.2 **Edit `/etc/crane/config.yaml` to define cluster and partitions.**
+#### 5.3.2 **Edit `/etc/crane/config.yaml` to define cluster and partitions.**
 Example:
 
 ```yaml
@@ -369,7 +369,7 @@ Partitions:
 DefaultPartition: CPU
 ```
 
-5.3.3 **Configure MongoDB connection in `/etc/crane/database.yaml`:**
+#### 5.3.3 **Configure MongoDB connection in `/etc/crane/database.yaml`:**
 > ⚠️ Only need to configure on Control Node. It is recommended to set it as accessible only by the `root` or `crane` user.
 
 ```yaml
