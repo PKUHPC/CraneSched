@@ -1,4 +1,4 @@
-# CraneSched Installation Guide (Centos 7)
+# Centos 7
 
 > **Note**  
 > This tutorial is **for CentOS 7 only**.  

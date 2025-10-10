@@ -1,4 +1,4 @@
-# CraneSched Installation Guide (Rocky Linux 9)
+# Rocky Linux 9
 
 > This tutorial is based on **Rocky Linux 9**, but it is also applicable to **Rocky Linux 8** and **Fedora**.  
 > The software used in this guide targets the **x86-64** architecture.  

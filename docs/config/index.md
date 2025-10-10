@@ -1,4 +1,4 @@
-# Backend Deployment and Configuration
+# Deployment and Configuration
 
 This section provides step-by-step guides to deploy and configure CraneSched backend components on different operating systems.
 
