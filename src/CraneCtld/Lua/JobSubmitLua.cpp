@@ -101,7 +101,6 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   if (lua_isnil(m_lua_state_, -1))
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
-  // TODO: CranedMetaContainer::ResvMetaMapConstPtr lock ?
   UpdateJobGloable_();
   UpdateJobResvGloable_();
   PushJobDesc_(&task);
@@ -443,8 +442,8 @@ int JobSubmitLua::SetJobReqField_(lua_State* lua_state) {
 
 // partition_record
 int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
-  const auto* partition_meta =
-      static_cast<const crane::grpc::PartitionInfo*>(lua_touserdata(lua_state, 1));
+  const auto* partition_meta = static_cast<const crane::grpc::PartitionInfo*>(
+      lua_touserdata(lua_state, 1));
   const char* name = luaL_checkstring(lua_state, 2);
   if (partition_meta == nullptr) {
     CRANE_ERROR("partition_meta is nill");
@@ -622,10 +621,6 @@ int JobSubmitLua::GetPartRecField_(
        [](lua_State* L, const crane::grpc::PartitionInfo& p) {
          lua_pushinteger(L, p.alive_nodes());
        }},
-      {"alive_nodes",
-       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
-         lua_pushinteger(L, p.alive_nodes());
-       }},
       {"state",
        [](lua_State* L, const crane::grpc::PartitionInfo& p) {
          lua_pushinteger(L, p.state());
@@ -776,7 +771,32 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_getglobal(m_lua_state_, "crane");
   lua_newtable(m_lua_state_);
 
-  // TODO: push all reservation info  use QueryAllResvInfo?
+  const auto& resv_list = g_meta_container->QueryAllResvInfo();
+  m_resv_info_list_.clear();
+  m_resv_info_list_.reserve(resv_list.reservation_info_list_size());
+  for (const auto& resv : resv_list.reservation_info_list()) {
+    auto resv_ptr = std::make_shared<crane::grpc::ReservationInfo>(resv);
+    m_resv_info_list_.emplace_back(resv_ptr);
+
+    /*
+     * Create an empty table, with a metatable that looks up the
+     * data for the individual reservation.
+     */
+    lua_newtable(m_lua_state_);
+
+    lua_newtable(m_lua_state_);
+    lua_pushcfunction(m_lua_state_, ResvFieldIndex_);
+    lua_setfield(m_lua_state_, -2, "__index");
+    /*
+     * Store the slurmctld_resv_t in the metatable, so the index
+     * function knows which reservation it's getting data for.
+     */
+    lua_pushlightuserdata(m_lua_state_, resv_ptr.get());
+    lua_setfield(m_lua_state_, -2, "_resv_ptr");
+    lua_setmetatable(m_lua_state_, -2);
+
+    lua_setfield(m_lua_state_, -2, resv_ptr->reservation_name().data());
+  }
 
   lua_setfield(m_lua_state_, -2, "reservations");
   lua_pop(m_lua_state_, 1);
@@ -798,8 +818,8 @@ void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_setmetatable(m_lua_state_, -2);
 }
 
-void JobSubmitLua::PushPartitionList_(
-    const std::string& user_name, const std::string& account) {
+void JobSubmitLua::PushPartitionList_(const std::string& user_name,
+                                      const std::string& account) {
   lua_newtable(m_lua_state_);
 
   auto user = g_account_manager->GetExistedUserInfo(user_name);
@@ -811,7 +831,7 @@ void JobSubmitLua::PushPartitionList_(
   if (actual_account.empty()) actual_account = user->default_account;
 
   const auto& partition_list = g_meta_container->QueryAllPartitionInfo();
-
+  m_partition_info_list_.clear();
   for (const auto& partition : partition_list.partition_info_list()) {
     if (!user->account_to_attrs_map.at(actual_account)
              .allowed_partition_qos_map.contains(partition.name()))
@@ -842,30 +862,6 @@ void JobSubmitLua::PushPartitionList_(
     lua_setmetatable(m_lua_state_, -2);
 
     lua_setfield(m_lua_state_, -2, partition_ptr->name().data());
-  }
-
-  for (const auto& [partition_name, partition_meta] : *partition_map) {
-    auto partition = partition_meta.GetExclusivePtr();
-    if (!partition->partition_global_meta.allowed_accounts.empty() &&
-        !partition->partition_global_meta.allowed_accounts.contains(
-            actual_account))
-      continue;
-    lua_newtable(m_lua_state_);
-
-    lua_newtable(m_lua_state_);
-
-    lua_pushcfunction(m_lua_state_, PartitionRecFieldIndex_);
-    lua_setfield(m_lua_state_, -2, "__index");
-    /*
-     * Store the part_record in the metatable, so the index
-     * function knows which job it's getting data for.
-     */
-    lua_pushlightuserdata(m_lua_state_,
-                          const_cast<PartitionMeta*>(partition.get()));
-    lua_setfield(m_lua_state_, -2, "_part_rec_ptr");
-    lua_setmetatable(m_lua_state_, -2);
-
-    lua_setfield(m_lua_state_, -2, partition_name.data());
   }
 }
 
@@ -906,7 +902,7 @@ int JobSubmitLua::JobRecFieldIndex_(lua_State* lua_state) {
   lua_getfield(lua_state, -1, "_job_rec_ptr");
   job_ptr = static_cast<crane::grpc::TaskInfo*>(lua_touserdata(lua_state, -1));
 
-  return luaJobRecordField_(lua_state, job_ptr, name);
+  return LuaJobRecordField_(lua_state, job_ptr, name);
 }
 
 int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
@@ -925,8 +921,19 @@ int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
 
   return GetPartRecField_(*part_ptr, name, lua_state);
 }
+int JobSubmitLua::ResvFieldIndex_(lua_State* lua_state) {
+  const std::string name = luaL_checkstring(lua_state, 2);
+  crane::grpc::ReservationInfo* resv_ptr;
 
-int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
+  lua_getmetatable(lua_state, -2);
+  lua_getfield(lua_state, -1, "_resv_ptr");
+  resv_ptr =
+      static_cast<crane::grpc::ReservationInfo*>(lua_touserdata(lua_state, -1));
+
+  return ResvField_(lua_state, resv_ptr, name.data());
+}
+
+int JobSubmitLua::LuaJobRecordField_(lua_State* lua_state,
                                      crane::grpc::TaskInfo* job_ptr,
                                      const char* name) {
   if (!job_ptr) {
@@ -1098,6 +1105,109 @@ int JobSubmitLua::luaJobRecordField_(lua_State* lua_state,
   auto it = handlers.find(name);
   if (it != handlers.end()) {
     it->second(lua_state, job_ptr);
+  } else {
+    lua_pushnil(lua_state);
+  }
+  return 1;
+}
+
+int JobSubmitLua::ResvField_(lua_State* lua_state,
+                             crane::grpc::ReservationInfo* resv_ptr,
+                             const char* name) {
+  if (!resv_ptr) {
+    CRANE_ERROR("_resv_rec_field: resv_ptr is NULL");
+    lua_pushnil(lua_state);
+    return 1;
+  }
+
+  using Handler =
+      std::function<void(lua_State*, const crane::grpc::ReservationInfo*)>;
+  static const std::unordered_map<std::string, Handler> handlers = {
+      // reservation_name
+      {"reservation_name",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_pushstring(L, r->reservation_name().c_str());
+       }},
+      // start_time (protobuf Timestamp)
+      {"start_time",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_pushnumber(L, r->start_time().seconds());
+       }},
+      // duration (protobuf Duration)
+      {"duration",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_pushnumber(L, r->duration().seconds());
+       }},
+      // partition
+      {"partition",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_pushstring(L, r->partition().c_str());
+       }},
+      // craned_regex
+      {"craned_regex",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_pushstring(L, r->craned_regex().c_str());
+       }},
+      // res_total (ResourceView)
+      {"res_total",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         PushResourceView_(L, static_cast<ResourceView>(r->res_total()));
+       }},
+      // res_avail (ResourceView)
+      {"res_avail",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         PushResourceView_(L, static_cast<ResourceView>(r->res_avail()));
+       }},
+      // res_alloc (ResourceView)
+      {"res_alloc",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         PushResourceView_(L, static_cast<ResourceView>(r->res_alloc()));
+       }},
+      // allowed_accounts
+      {"allowed_accounts",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& acc : r->allowed_accounts()) {
+           lua_pushstring(L, acc.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      // denied_accounts
+      {"denied_accounts",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& acc : r->denied_accounts()) {
+           lua_pushstring(L, acc.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      // allowed_users
+      {"allowed_users",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& user : r->allowed_users()) {
+           lua_pushstring(L, user.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+      // denied_users
+      {"denied_users",
+       [](lua_State* L, const crane::grpc::ReservationInfo* r) {
+         lua_newtable(L);
+         int idx = 1;
+         for (const auto& user : r->denied_users()) {
+           lua_pushstring(L, user.c_str());
+           lua_seti(L, -2, idx++);
+         }
+       }},
+  };
+
+  auto it = handlers.find(name);
+  if (it != handlers.end()) {
+    it->second(lua_state, resv_ptr);
   } else {
     lua_pushnil(lua_state);
   }
