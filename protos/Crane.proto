@@ -952,8 +952,9 @@ message QueryTxnLogReply {
 message QueryAccountUserSummaryItemRequest {
   repeated string filter_accounts = 1;
   repeated string filter_users = 2;
-  google.protobuf.Timestamp filter_start_time = 3;
-  google.protobuf.Timestamp filter_end_time = 4;
+  repeated string filter_qoss = 3;
+  google.protobuf.Timestamp filter_start_time = 4;
+  google.protobuf.Timestamp filter_end_time = 5;
 }
 
 message QueryAccountUserSummaryItemReply {

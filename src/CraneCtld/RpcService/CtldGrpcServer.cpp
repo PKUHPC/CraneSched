@@ -2064,11 +2064,13 @@ grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
       request->filter_accounts().begin(), request->filter_accounts().end());
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
+  std::unordered_set<std::string> req_qoss(request->filter_qoss().begin(),
+                                            request->filter_qoss().end());
 
   auto start_time = request->filter_start_time().seconds();
   auto end_time = request->filter_end_time().seconds();
 
-  g_db_client->QueryAccountUserSummary(req_accounts, req_users, start_time,
+  g_db_client->QueryAccountUserSummary(req_accounts, req_users, req_qoss, start_time,
                                        end_time, writer);
   return grpc::Status::OK;
 }

@@ -832,8 +832,17 @@ message AccountUserSummaryItem {
   string cluster = 1;
   string account = 2;
   string username = 3;
-  double total_cpu_time = 4;
-  int64 total_count = 5;
+  string qos = 4;
+  double total_cpu_time = 5;
+  int64 total_count = 6;
+}
+
+enum CpuLevel {
+    CPU_LEVEL_0_49      = 0;
+    CPU_LEVEL_50_249    = 1;
+    CPU_LEVEL_250_499   = 2;
+    CPU_LEVEL_500_999   = 3;
+    CPU_LEVEL_1000_PLUS = 4;
 }
 
 message AccountUserWckeySummaryItem {
@@ -841,6 +850,7 @@ message AccountUserWckeySummaryItem {
   string account = 2;
   string username = 3;
   string wckey = 4;
-  double total_cpu_time = 5;
-  int64 total_count = 6;
+  CpuLevel cpu_level = 5;
+  double total_cpu_time = 6;
+  int64 total_count = 7;
 }
