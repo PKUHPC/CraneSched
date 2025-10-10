@@ -101,6 +101,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   if (lua_isnil(m_lua_state_, -1))
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
+  // TODO: CranedMetaContainer::ResvMetaMapConstPtr lock ?
   UpdateJobGloable_();
   UpdateJobResvGloable_();
   PushJobDesc_(&task);
@@ -147,7 +148,7 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
    *  All lua script functions should have been verified during
    *   initialization:
    */
-  lua_getglobal(m_lua_state_, "slurm_job_modify");
+  lua_getglobal(m_lua_state_, "crane_job_modify");
   if (lua_isnil(m_lua_state_, -1))
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
@@ -558,29 +559,33 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
       //  [](lua_State* L, const TaskInCtld& t) {
       //    lua_pushnumber(L, absl::ToDoubleSeconds(t.begin_time));
       //  }},
-      {"meta",
+      {"bash_meta",[](lua_State* L, const TaskInCtld& t) {
+        if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
+          const auto& meta = ptr;
+          lua_newtable(L);
+
+          lua_pushstring(L, ptr->sh_script.c_str());
+          lua_setfield(L, -2, "sh_script");
+
+          lua_pushstring(L, ptr->output_file_pattern.c_str());
+          lua_setfield(L, -2, "output_file_pattern");
+
+          lua_pushstring(L, ptr->error_file_pattern.c_str());
+          lua_setfield(L, -2, "error_file_pattern");
+
+          lua_pushstring(L, ptr->interpreter.c_str());
+          lua_setfield(L, -2, "interpreter");
+        } else {
+          lua_pushnil(L);
+        }
+      }},
+      {"interactive_meta",
        [](lua_State* L, const TaskInCtld& t) {
-         if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
-           const auto& meta = ptr;
+         if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
            lua_newtable(L);
-
-           lua_pushstring(L, ptr->sh_script.c_str());
-           lua_setfield(L, -2, "sh_script");
-
-           lua_pushstring(L, ptr->output_file_pattern.c_str());
-           lua_setfield(L, -2, "output_file_pattern");
-
-           lua_pushstring(L, ptr->error_file_pattern.c_str());
-           lua_setfield(L, -2, "error_file_pattern");
-
-           lua_pushstring(L, ptr->interpreter.c_str());
-           lua_setfield(L, -2, "interpreter");
-         } else if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
-           lua_newtable(L);
-
            lua_pushnumber(L, ptr->interactive_type);
            lua_setfield(L, -2, "interactive_type");
-
+           // TODO: Add more fields.
          } else {
            lua_pushnil(L);
          }
@@ -604,7 +609,7 @@ int JobSubmitLua::GetPartRecField_(const PartitionMeta& partition_meta,
        [](lua_State* L, const PartitionMeta& p) {
          lua_pushstring(L, p.partition_global_meta.name.c_str());
        }},
-      {"nodelist_str",
+      {"nodelist",
        [](lua_State* L, const PartitionMeta& p) {
          lua_pushstring(L, p.partition_global_meta.nodelist_str.c_str());
        }},
@@ -1079,6 +1084,7 @@ void JobSubmitLua::PushResourceView_(lua_State* L, const ResourceView& res) {
 
   // device_map 字段
   lua_newtable(L);
+  // TODO: use c++ device map
   const auto& dm = ToGrpcDeviceMap(res.GetDeviceMap());
 
   // name_type_map 字段
