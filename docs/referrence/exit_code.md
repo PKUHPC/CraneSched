@@ -1,4 +1,4 @@
-# Job Exit Code Reference
+# Job Exit Code
 
 The `EXITCODE` column in the `cacct` command records the reason for a user's job termination.  
 For example, in `0:15`, the **first code** (`0`) is the **primary code**, and the **second code** (`15`) is the **secondary code**.
@@ -9,7 +9,6 @@ For example, in `0:15`, the **first code** (`0`) is the **primary code**, and th
 
 Value of 0-255 for Program `exit` return value
 
----
 
 ## Secondary Code
 
