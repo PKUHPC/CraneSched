@@ -1,7 +1,12 @@
-This tutorial has been tested on Rocky Linux 9. In theory, it should work on any system that uses systemd (e.g., Debian/Ubuntu/AlmaLinux/Fedora, etc.).
-The software involved in this tutorial targets x86-64. If you use architectures such as ARM64, adjust the download links accordingly.
-Run all commands as the root user throughout. It is recommended to complete the backend environment installation first.
+# Frontend Deployment
+>This tutorial has been tested on Rocky Linux 9. In theory, it should work on any system that uses systemd (e.g., Debian/Ubuntu/AlmaLinux/Fedora, etc.).
+>The software involved in this tutorial targets x86-64. If you use architectures such as ARM64, adjust the download links accordingly.
+>Run all commands as the root user throughout. It is recommended to complete the backend environment installation first.
 
+For a demo cluster with nodes:
+- login01: where user login and submit job
+- cranectld: control node
+- craned[1-4]: compute nodes
 ## 1. Install Golang
 ```bash
 GOLANG_TARBALL=go1.22.0.linux-amd64.tar.gz
@@ -37,6 +42,7 @@ git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
 ```
 
 ## 4. Build the project and deploy the frontend
+
 The working directory is CraneSched-FrontEnd. In this directory, compile all Golang components and install.
 ```bash
 cd CraneSched-FrontEnd
@@ -44,22 +50,21 @@ make
 make install
 ```
 
-## 5. Start Cfored and Cplugind (optional)
-If you need to submit interactive tasks (crun, calloc), enable Cfored:
+## 5. Deploy frontend to all node
+
 ```bash
-# Enable at boot
-systemctl enable cfored
-systemctl start cfored
+pdcp login01,cranectld,craned[1-4] build/bin/* /usr/local/bin/
+pdcp login01,cranectld,craned[1-4] etc/* /usr/lib/systemd/system/
+
+# If you need to submit interactive jobs (crun, calloc), enable Cfored:
+pdsh login01,craned[1-4] systemctl enable cfored
+pdsh login01,craned[1-4] systemctl start cfored
+# If you configured with plugin, enable cplugind
+pdsh login01,cranectld,craned[1-4] systemctl enable cplugind
+pdsh login01,cranectld,craned[1-4] systemctl start cplugind
 ```
 
-If the plugin system is enabled in the configuration file, enable Cplugind:
-```bash
-# Enable at boot
-systemctl enable cplugind
-systemctl start cplugind
-```
-
-## 6. Install Cwrapper aliases (optional)
+## 5. Install Cwrapper aliases (optional)
 You can install Slurm-style aliases for Crane using the following commands, allowing you to use Crane with Slurm command forms:
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOF'
@@ -73,6 +78,6 @@ alias squeue='cwrapper squeue'
 alias srun='cwrapper srun'
 alias salloc='cwrapper salloc'
 EOF
-
-chmod 644 /etc/profile.d/cwrapper.sh
+pdcp login01,craned[1-4] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
+pdsh login01,craned[1-4] chmod 644 /etc/profile.d/cwrapper.sh
 ```

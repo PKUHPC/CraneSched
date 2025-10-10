@@ -275,7 +275,15 @@ cmake --build . --target cranectld craned pam_crane csupervisor
 cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true
 cmake --build . --target cranectld craned pam_crane csupervisor
 
-ninja install
+```
+
+### 5.2 Build RPM Package
+
+```bash
+
+cpack -G RPM
+
+
 ```
 
 > **Notes:**
@@ -289,6 +297,7 @@ ninja install
 
 > ⚠️ Only configure PAM **after the cluster is fully deployed and running**.
 > Misconfiguration may prevent SSH login.
+> PAM prevent user without job on the node from logging in. Usually deploy on all compute nodes.
 
 #### 5.2.1 **Copy PAM module:**
 
@@ -388,9 +397,8 @@ DbName: crane_db
 * Run manually (foreground):
 
 ```bash
-cd build/src
-CraneCtld/cranectld
-Craned/craned
+cranectld
+craned
 ```
 
 * Or use systemd:
@@ -416,11 +424,9 @@ systemctl enable craned --now
 
 ```bash
 ssh crane02 "mkdir -p /etc/crane"
-scp /usr/local/bin/craned crane02:/usr/local/bin/
-scp /usr/libexec/csupervisor crane02:/usr/libexec/csupervisor
-scp /etc/systemd/system/craned.service crane02:/etc/systemd/system/
+scp CraneSched-1.1.2-Linux-x86_64-craned.rpm crane02:/tmp
+ssh craned02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
 scp /etc/crane/config.yaml crane02:/etc/crane/
-scp build/src/Misc/BPF/cgroup_dev_bpf.o crane02:/usr/local/lib64/bpf/
 ```
 
 > Compute nodes must still install `libcgroup` as described in dependencies.
@@ -430,20 +436,18 @@ scp build/src/Misc/BPF/cgroup_dev_bpf.o crane02:/usr/local/lib64/bpf/
 ### Using PDSH
 
 ```bash
-pdsh -w cranectl systemctl stop cranectld
-pdcp -w cranectl src/CraneCtld/cranectld /usr/local/bin
+pdcp -w cranectl CraneSched-1.1.2-Linux-x86_64-cranectld.rpm /tmp
+pdsh -w cranectl rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm
 pdsh -w cranectl systemctl start cranectld
 
-pdsh -w crane[01-04] systemctl stop craned
-pdcp -w crane[01-04] Craned/Core/craned /usr/local/bin
-pdcp -w crane[01-04] Craned/Supervisor/csupervisor /usr/libexec/csupervisor
-pdcp -w crane[01-04] build/src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
+pdcp -w crane[01-04] CraneSched-1.1.2-Linux-x86_64-craned.rpm /tmp
+pdsh -w crane[01-04] rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm
 pdsh -w crane[01-04] systemctl start craned
 ```
 
 ---
 
-## Appendix 3: Automated Installation Script
+## Appendix 3: Automated Build Script
 
 This script automates the **Rocky 9** setup — including toolchain, dependencies, and CraneSched build.
 
