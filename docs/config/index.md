@@ -1,6 +1,6 @@
 # Deployment and Configuration
 
->This section provides step-by-step guides to deploy and configure CraneSched backend >components on different operating systems.
+>This section provides step-by-step guides to deploy and configure CraneSched backend components on different operating systems.
 
 ⚠️ Important: We strongly recommend using **Rocky Linux 9** for production backend environments. It offers better stability, long-term support, and compatibility with modern kernels and system components.
 
