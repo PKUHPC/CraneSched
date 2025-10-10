@@ -244,7 +244,7 @@ session    include      postlogin
 -session   optional     pam_reauthorize.so prepare
 ```
 
-> ⚠️ `session optional pam_crane.so` must be placed **after** `session include password-auth` 
+> ⚠️ `session required pam_crane.so` must be placed **after** `session include password-auth`
 
 ---
 
