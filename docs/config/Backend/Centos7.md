@@ -286,10 +286,9 @@ scp /etc/crane/config.yaml crane02:/etc/crane/
 ```bash
 yum install -y pdsh
 pdsh -w cranectl systemctl stop cranectld
-pdcp -w cranectl src/CraneCtld/cranectld /usr/local/bin
+pdcp -w cranectl /usr/local/bin/cranectld /usr/local/bin
 pdsh -w cranectl systemctl start cranectld
 pdsh -w crane0[1-4] systemctl stop craned
-pdcp -w crane0[1-4] Craned/craned /usr/local/bin
+pdcp -w crane0[1-4] /usr/local/bin/craned /usr/local/bin
 pdsh -w crane0[1-4] systemctl start craned
-```
 
