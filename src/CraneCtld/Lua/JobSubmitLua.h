@@ -92,7 +92,7 @@ private:
   static int GetJobEnvField_(const TaskInCtld& job_desc, const char *name, lua_State *lua_state);
   static int GetJobReqField_(const TaskInCtld& job_desc,
                              const char* name, lua_State* lua_state);
-  static int GetPartRecField_(const PartitionMeta& partition_meta, const char *name, lua_State *lua_state);
+  static int GetPartRecField_(const crane::grpc::PartitionInfo& partition_meta, const char *name, lua_State *lua_state);
 
   bool LoadLuaScript_();
   static bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name);
@@ -102,7 +102,7 @@ private:
   void UpdateJobResvGloable_();
   void PushJobDesc_(TaskInCtld* task);
   void PushPartitionList_(const std::string& user_name,
-                          const std::string& account, const CranedMetaContainer::AllPartitionsMetaMapConstPtr& partition_map);
+                          const std::string& account);
   void PushJobRec(crane::grpc::TaskInfo* task);
   static int GetJobReqFieldIndex_(lua_State *lua_state);
   static int JobRecFieldIndex_(lua_State *lua_state);
@@ -117,6 +117,8 @@ private:
   lua_State* m_lua_state_;
   std::string m_user_msg_;
   std::vector<std::shared_ptr<crane::grpc::TaskInfo>> m_job_info_list_;
+  std::vector<std::shared_ptr<crane::grpc::PartitionInfo>> m_partition_info_list_;
+  std::vector<std::shared_ptr<crane::grpc::ReservationInfo>> m_resv_info_list_;
 };
 
 class LuaPool {
