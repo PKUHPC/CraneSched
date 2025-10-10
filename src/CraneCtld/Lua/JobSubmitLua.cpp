@@ -105,8 +105,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   UpdateJobGloable_();
   UpdateJobResvGloable_();
   PushJobDesc_(&task);
-  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
-  PushPartitionList_(task.Username(), task.account, partition_map);
+  PushPartitionList_(task.Username(), task.account);
   lua_pushnumber(m_lua_state_, task.uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
@@ -157,8 +156,7 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
 
   PushJobDesc_(&task_in_ctld);
   PushJobRec(&task_info);
-  auto partition_map = g_meta_container->GetAllPartitionsMetaMapConstPtr();
-  PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account, partition_map);
+  PushPartitionList_(task_in_ctld.Username(), task_in_ctld.account);
   lua_pushnumber(m_lua_state_, task_in_ctld.uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
@@ -446,7 +444,7 @@ int JobSubmitLua::SetJobReqField_(lua_State* lua_state) {
 // partition_record
 int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
   const auto* partition_meta =
-      static_cast<const PartitionMeta*>(lua_touserdata(lua_state, 1));
+      static_cast<const crane::grpc::PartitionInfo*>(lua_touserdata(lua_state, 1));
   const char* name = luaL_checkstring(lua_state, 2);
   if (partition_meta == nullptr) {
     CRANE_ERROR("partition_meta is nill");
@@ -559,26 +557,27 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
       //  [](lua_State* L, const TaskInCtld& t) {
       //    lua_pushnumber(L, absl::ToDoubleSeconds(t.begin_time));
       //  }},
-      {"bash_meta",[](lua_State* L, const TaskInCtld& t) {
-        if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
-          const auto& meta = ptr;
-          lua_newtable(L);
+      {"bash_meta",
+       [](lua_State* L, const TaskInCtld& t) {
+         if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
+           const auto& meta = ptr;
+           lua_newtable(L);
 
-          lua_pushstring(L, ptr->sh_script.c_str());
-          lua_setfield(L, -2, "sh_script");
+           lua_pushstring(L, ptr->sh_script.c_str());
+           lua_setfield(L, -2, "sh_script");
 
-          lua_pushstring(L, ptr->output_file_pattern.c_str());
-          lua_setfield(L, -2, "output_file_pattern");
+           lua_pushstring(L, ptr->output_file_pattern.c_str());
+           lua_setfield(L, -2, "output_file_pattern");
 
-          lua_pushstring(L, ptr->error_file_pattern.c_str());
-          lua_setfield(L, -2, "error_file_pattern");
+           lua_pushstring(L, ptr->error_file_pattern.c_str());
+           lua_setfield(L, -2, "error_file_pattern");
 
-          lua_pushstring(L, ptr->interpreter.c_str());
-          lua_setfield(L, -2, "interpreter");
-        } else {
-          lua_pushnil(L);
-        }
-      }},
+           lua_pushstring(L, ptr->interpreter.c_str());
+           lua_setfield(L, -2, "interpreter");
+         } else {
+           lua_pushnil(L);
+         }
+       }},
       {"interactive_meta",
        [](lua_State* L, const TaskInCtld& t) {
          if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
@@ -601,68 +600,73 @@ int JobSubmitLua::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
   return 1;
 }
 
-int JobSubmitLua::GetPartRecField_(const PartitionMeta& partition_meta,
-                                   const char* name, lua_State* lua_state) {
-  using Handler = std::function<void(lua_State*, const PartitionMeta&)>;
+int JobSubmitLua::GetPartRecField_(
+    const crane::grpc::PartitionInfo& partition_meta, const char* name,
+    lua_State* lua_state) {
+  using Handler =
+      std::function<void(lua_State*, const crane::grpc::PartitionInfo&)>;
   static const std::unordered_map<std::string, Handler> handlers = {
       {"name",
-       [](lua_State* L, const PartitionMeta& p) {
-         lua_pushstring(L, p.partition_global_meta.name.c_str());
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushstring(L, p.name().c_str());
        }},
       {"nodelist",
-       [](lua_State* L, const PartitionMeta& p) {
-         lua_pushstring(L, p.partition_global_meta.nodelist_str.c_str());
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushstring(L, p.hostlist().data());
        }},
-      {"node_cnt",
-       [](lua_State* L, const PartitionMeta& p) {
-         lua_pushinteger(L, p.partition_global_meta.node_cnt);
+      {"total_nodes",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.total_nodes());
        }},
-      {"alive_craned_cnt",
-       [](lua_State* L, const PartitionMeta& p) {
-         lua_pushinteger(L, p.partition_global_meta.alive_craned_cnt);
+      {"alive_nodes",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.alive_nodes());
+       }},
+      {"alive_nodes",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.alive_nodes());
+       }},
+      {"state",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.state());
+       }},
+      {"default_mem_per_cpu",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.default_mem_per_cpu());
+       }},
+      {"max_mem_per_cpu",
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         lua_pushinteger(L, p.max_mem_per_cpu());
        }},
       {"allowed_accounts",
-       [](lua_State* L, const PartitionMeta& p) {
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
          lua_newtable(L);
          int idx = 1;
-         for (const auto& acc : p.partition_global_meta.allowed_accounts) {
+         for (const auto& acc : p.allowed_accounts()) {
            lua_pushstring(L, acc.c_str());
            lua_seti(L, -2, idx++);
          }
        }},
       {"denied_accounts",
-       [](lua_State* L, const PartitionMeta& p) {
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
          lua_newtable(L);
          int idx = 1;
-         for (const auto& acc : p.partition_global_meta.denied_accounts) {
+         for (const auto& acc : p.denied_accounts()) {
            lua_pushstring(L, acc.c_str());
            lua_seti(L, -2, idx++);
          }
        }},
-      {"craned_ids",
-       [](lua_State* L, const PartitionMeta& p) {
-         lua_newtable(L);
-         int idx = 1;
-         for (const auto& id : p.craned_ids) {
-           lua_pushstring(L, id.c_str());  // 假设 CranedId 可转为 string
-           lua_seti(L, -2, idx++);
-         }
-       }},
       {"res_total",
-       [](lua_State* L, const PartitionMeta& p) {
-         PushResourceView_(L, p.partition_global_meta.res_total);
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         PushResourceView_(L, static_cast<ResourceView>(p.res_total()));
        }},
       {"res_avail",
-       [](lua_State* L, const PartitionMeta& p) {
-         PushResourceView_(L, p.partition_global_meta.res_avail);
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         PushResourceView_(L, static_cast<ResourceView>(p.res_avail()));
        }},
       {"res_in_use",
-       [](lua_State* L, const PartitionMeta& p) {
-         PushResourceView_(L, p.partition_global_meta.res_in_use);
-       }},
-      {"res_total_inc_dead",
-       [](lua_State* L, const PartitionMeta& p) {
-         PushResourceView_(L, p.partition_global_meta.res_total_inc_dead);
+       [](lua_State* L, const crane::grpc::PartitionInfo& p) {
+         PushResourceView_(L, static_cast<ResourceView>(p.res_alloc()));
        }},
   };
 
@@ -772,7 +776,7 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_getglobal(m_lua_state_, "crane");
   lua_newtable(m_lua_state_);
 
-  // TODO: push all reservation info
+  // TODO: push all reservation info  use QueryAllResvInfo?
 
   lua_setfield(m_lua_state_, -2, "reservations");
   lua_pop(m_lua_state_, 1);
@@ -794,18 +798,50 @@ void JobSubmitLua::PushJobDesc_(TaskInCtld* task) {
   lua_setmetatable(m_lua_state_, -2);
 }
 
-void JobSubmitLua::PushPartitionList_(const std::string& user_name,
-                                      const std::string& account, const CranedMetaContainer::AllPartitionsMetaMapConstPtr& partition_map) {
+void JobSubmitLua::PushPartitionList_(
+    const std::string& user_name, const std::string& account) {
   lua_newtable(m_lua_state_);
 
+  auto user = g_account_manager->GetExistedUserInfo(user_name);
+  if (!user) {
+    CRANE_ERROR("username is null");
+    return;
+  }
   std::string actual_account = account;
-  if (actual_account.empty()) {
-    auto user = g_account_manager->GetExistedUserInfo(user_name);
-    if (!user) {
-      CRANE_ERROR("username is null");
-      return;
-    }
-    actual_account = user->default_account;
+  if (actual_account.empty()) actual_account = user->default_account;
+
+  const auto& partition_list = g_meta_container->QueryAllPartitionInfo();
+
+  for (const auto& partition : partition_list.partition_info_list()) {
+    if (!user->account_to_attrs_map.at(actual_account)
+             .allowed_partition_qos_map.contains(partition.name()))
+      continue;
+    if (partition.allowed_accounts_size() > 0 &&
+        !std::ranges::contains(partition.allowed_accounts(), actual_account))
+      continue;
+    auto partition_ptr =
+        std::make_shared<crane::grpc::PartitionInfo>(partition);
+    m_partition_info_list_.emplace_back(partition_ptr);
+
+    /*
+     * Create an empty table, with a metatable that looks up the
+     * data for the partition.
+     */
+    lua_newtable(m_lua_state_);
+
+    lua_newtable(m_lua_state_);
+
+    lua_pushcfunction(m_lua_state_, PartitionRecFieldIndex_);
+    lua_setfield(m_lua_state_, -2, "__index");
+    /*
+     * Store the part_record in the metatable, so the index
+     * function knows which job it's getting data for.
+     */
+    lua_pushlightuserdata(m_lua_state_, partition_ptr.get());
+    lua_setfield(m_lua_state_, -2, "_part_rec_ptr");
+    lua_setmetatable(m_lua_state_, -2);
+
+    lua_setfield(m_lua_state_, -2, partition_ptr->name().data());
   }
 
   for (const auto& [partition_name, partition_meta] : *partition_map) {
@@ -875,11 +911,12 @@ int JobSubmitLua::JobRecFieldIndex_(lua_State* lua_state) {
 
 int JobSubmitLua::PartitionRecFieldIndex_(lua_State* lua_state) {
   const char* name = luaL_checkstring(lua_state, 2);
-  PartitionMeta* part_ptr;
+  crane::grpc::PartitionInfo* part_ptr;
 
   lua_getmetatable(lua_state, -2);
   lua_getfield(lua_state, -1, "_part_rec_ptr");
-  part_ptr = static_cast<PartitionMeta*>(lua_touserdata(lua_state, -1));
+  part_ptr =
+      static_cast<crane::grpc::PartitionInfo*>(lua_touserdata(lua_state, -1));
   if (part_ptr == nullptr) {
     CRANE_ERROR("part_ptr is nullptr");
     lua_pushnil(lua_state);
