@@ -927,11 +927,6 @@ message NetworkInterface {
   repeated string ipv6_addresses = 4;
 }
 
-message HealthCheckResult {
-  bool healthy = 1;
-  string reason = 2;
-}
-
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;

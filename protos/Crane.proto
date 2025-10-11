@@ -1143,7 +1143,7 @@ message UpdateNodeDrainStateReply {
 
 message HealthCheckResponseRequest {
   string craned_id = 1;
-  HealthCheckResult health_check_result = 2;
+  bool healthy = 2;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun

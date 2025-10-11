@@ -198,8 +198,8 @@ grpc::Status CtldForInternalServiceImpl::HealthCheckResponse(
     const crane::grpc::HealthCheckResponseRequest *request,
     google::protobuf::Empty *response) {
 
-  g_meta_container->UpdateNodeState(
-      request->craned_id(), request->health_check_result().healthy(), request->health_check_result().reason());
+  g_meta_container->UpdateNodeStateWithHealthCheck_(
+      request->craned_id(), request->healthy());
 
   return grpc::Status::OK;
 }

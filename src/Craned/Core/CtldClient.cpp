@@ -357,7 +357,21 @@ CtldClient::CtldClient() {
   if (g_config.HealthCheck.Interval > 0L) {
     m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
     if (g_config.HealthCheck.Cycle) {
-      StartRandomHealthCheck_();
+      m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
+        if (CheckNodeState_())
+          HealthCheck_();
+        int interval = g_config.HealthCheck.Interval;
+        std::mt19937 rng{std::random_device{}()};
+        std::uniform_int_distribution<int> dist(1, interval);
+        int random_delay = dist(rng);
+        h.stop();
+        h.start(std::chrono::seconds(random_delay), std::chrono::seconds(0));
+      });
+      int interval = g_config.HealthCheck.Interval;
+      std::mt19937 rng{std::random_device{}()};
+      std::uniform_int_distribution<int> dist(1, interval);
+      int random_delay = dist(rng);
+      m_health_check_handle_->start(std::chrono::seconds(random_delay), std::chrono::seconds(0));
     } else {
       m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (!CheckNodeState_()) return;
@@ -986,7 +1000,7 @@ bool CtldClient::SendStatusChanges_(
   return true;
 }
 
-void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& reason) const {
+void CtldClient::HealthCheckResultResponse_(bool is_health) const {
   if (m_stopping_ || !m_stub_) return ;
 
   grpc::ClientContext context;
@@ -994,10 +1008,7 @@ void CtldClient::HealthCheckResultResponse_(bool is_health, const std::string& r
   google::protobuf::Empty reply;
 
   request.set_craned_id(g_config.CranedIdOfThisNode);
-  auto* health_check_result = request.mutable_health_check_result();
-  health_check_result->set_healthy(is_health);
-  health_check_result->set_reason(reason);
-
+  request.set_healthy(is_health);
 
   m_stub_->HealthCheckResponse(&context, request, &reply);
 }
@@ -1008,7 +1019,7 @@ void CtldClient::HealthCheck_() {
   int pipefd[2];
   if (pipe(pipefd) != 0) {
     CRANE_ERROR("HealthCheck: pipe error");
-    HealthCheckResultResponse_(false, "Node failed health check");
+    HealthCheckResultResponse_(false);
     return;
   }
 
@@ -1017,7 +1028,7 @@ void CtldClient::HealthCheck_() {
     CRANE_ERROR("HealthCheck: fork failed");
     close(pipefd[0]);
     close(pipefd[1]);
-    HealthCheckResultResponse_(false, "Node failed health check");
+    HealthCheckResultResponse_(false);
     return;
   }
 
@@ -1071,7 +1082,7 @@ void CtldClient::HealthCheck_() {
     waitpid(pid, &status, 0);
     output += "\nHealth check timed out.";
     CRANE_WARN("HealthCheck: Timeout. Output: {}", output.c_str());
-    HealthCheckResultResponse_(false, "Node failed health check");
+    HealthCheckResultResponse_(false);
     return;
   }
 
@@ -1080,37 +1091,23 @@ void CtldClient::HealthCheck_() {
     if (exit_code != 0) {
       CRANE_WARN("HealthCheck: Failed (exit code:{}). Output: {}",
                  exit_code, output.c_str());
-      HealthCheckResultResponse_(false, "Node failed health check");
+      HealthCheckResultResponse_(false);
       return;
     }
   } else if (WIFSIGNALED(status)) {
     CRANE_WARN("HealthCheck: Killed by signal {}. Output: {}",
                WTERMSIG(status), output.c_str());
-    HealthCheckResultResponse_(false, "Node failed health check");
+    HealthCheckResultResponse_(false);
     return;
   } else {
     CRANE_WARN("HealthCheck: Unknown exit status {}. Output: {}", status, output.c_str());
-    HealthCheckResultResponse_(false, "Node failed health check");
+    HealthCheckResultResponse_(false);
     return;
   }
 
-  HealthCheckResultResponse_(true, "");
+  HealthCheckResultResponse_(true);
 
   CRANE_DEBUG("Health check success, Output: {}", output);
-}
-
-void CtldClient::StartRandomHealthCheck_() {
-  int interval = g_config.HealthCheck.Interval;
-  std::mt19937 rng{std::random_device{}()};
-  std::uniform_int_distribution<int> dist(1, interval);
-  int random_delay = dist(rng);
-  m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
-        if (CheckNodeState_())
-          HealthCheck_();
-        this->StartRandomHealthCheck_();
-  });
-  m_health_check_handle_->start(std::chrono::seconds(random_delay),
-        std::chrono::seconds(0));
 }
 
 bool CtldClient::CheckNodeState_() {
