@@ -735,13 +735,9 @@ void JobSubmitLua::UpdateJobGloable_() {
   lua_newtable(m_lua_state_);
 
   crane::grpc::QueryTasksInfoRequest request;
-  crane::grpc::QueryTasksInfoReply response;
-  g_task_scheduler->QueryTasksInRam(&request, &response);
-  m_job_info_list_.clear();
-  m_job_info_list_.reserve(response.task_info_list_size());
-  for (const auto& task : response.task_info_list()) {
-    auto task_ptr = std::make_shared<crane::grpc::TaskInfo>(task);
-    m_job_info_list_.emplace_back(task_ptr);
+  m_task_info_reply_.Clear();
+  g_task_scheduler->QueryTasksInRam(&request, &m_task_info_reply_);
+  for (const auto& task : m_task_info_reply_.task_info_list()) {
     /*
      * Create an empty table, with a metatable that looks up the
      * data for the individual job.
@@ -755,7 +751,7 @@ void JobSubmitLua::UpdateJobGloable_() {
      * Store the job_record in the metatable, so the index
      * function knows which job it's getting data for.
      */
-    lua_pushlightuserdata(m_lua_state_, task_ptr.get());
+    lua_pushlightuserdata(m_lua_state_, (void*)&task);
     lua_setfield(m_lua_state_, -2, "_job_rec_ptr");
     lua_setmetatable(m_lua_state_, -2);
 
@@ -771,13 +767,8 @@ void JobSubmitLua::UpdateJobResvGloable_() {
   lua_getglobal(m_lua_state_, "crane");
   lua_newtable(m_lua_state_);
 
-  const auto& resv_list = g_meta_container->QueryAllResvInfo();
-  m_resv_info_list_.clear();
-  m_resv_info_list_.reserve(resv_list.reservation_info_list_size());
-  for (const auto& resv : resv_list.reservation_info_list()) {
-    auto resv_ptr = std::make_shared<crane::grpc::ReservationInfo>(resv);
-    m_resv_info_list_.emplace_back(resv_ptr);
-
+  m_resv_info_reply_ = g_meta_container->QueryAllResvInfo();
+  for (const auto& resv : m_resv_info_reply_.reservation_info_list()) {
     /*
      * Create an empty table, with a metatable that looks up the
      * data for the individual reservation.
@@ -791,11 +782,11 @@ void JobSubmitLua::UpdateJobResvGloable_() {
      * Store the slurmctld_resv_t in the metatable, so the index
      * function knows which reservation it's getting data for.
      */
-    lua_pushlightuserdata(m_lua_state_, resv_ptr.get());
+    lua_pushlightuserdata(m_lua_state_, (void*)&resv);
     lua_setfield(m_lua_state_, -2, "_resv_ptr");
     lua_setmetatable(m_lua_state_, -2);
 
-    lua_setfield(m_lua_state_, -2, resv_ptr->reservation_name().data());
+    lua_setfield(m_lua_state_, -2, resv.reservation_name().data());
   }
 
   lua_setfield(m_lua_state_, -2, "reservations");
@@ -830,18 +821,14 @@ void JobSubmitLua::PushPartitionList_(const std::string& user_name,
   std::string actual_account = account;
   if (actual_account.empty()) actual_account = user->default_account;
 
-  const auto& partition_list = g_meta_container->QueryAllPartitionInfo();
-  m_partition_info_list_.clear();
-  for (const auto& partition : partition_list.partition_info_list()) {
+  m_partition_info_reply_ = g_meta_container->QueryAllPartitionInfo();
+  for (const auto& partition : m_partition_info_reply_.partition_info_list()) {
     if (!user->account_to_attrs_map.at(actual_account)
              .allowed_partition_qos_map.contains(partition.name()))
       continue;
     if (partition.allowed_accounts_size() > 0 &&
         !std::ranges::contains(partition.allowed_accounts(), actual_account))
       continue;
-    auto partition_ptr =
-        std::make_shared<crane::grpc::PartitionInfo>(partition);
-    m_partition_info_list_.emplace_back(partition_ptr);
 
     /*
      * Create an empty table, with a metatable that looks up the
@@ -857,11 +844,11 @@ void JobSubmitLua::PushPartitionList_(const std::string& user_name,
      * Store the part_record in the metatable, so the index
      * function knows which job it's getting data for.
      */
-    lua_pushlightuserdata(m_lua_state_, partition_ptr.get());
+    lua_pushlightuserdata(m_lua_state_, (void*)&partition);
     lua_setfield(m_lua_state_, -2, "_part_rec_ptr");
     lua_setmetatable(m_lua_state_, -2);
 
-    lua_setfield(m_lua_state_, -2, partition_ptr->name().data());
+    lua_setfield(m_lua_state_, -2, partition.name().data());
   }
 }
 
