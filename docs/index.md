@@ -4,7 +4,7 @@
 
 A distributed intelligent scheduler for HPC and AI workloads, designed for performance, scale, and simplicity.
 
-> Note: For production deployments we recommend Rocky Linux 9 for better stability and kernel compatibility.
+> Note: For production deployments we recommend **Rocky Linux 9** for better stability and kernel compatibility.
 
 ---
 
@@ -34,7 +34,7 @@ Key components:
 
 ## Quick start
 
-1) Choose your deployment guide
+1. Choose your deployment guide:
 
 	 - [Backend (recommended)](<./config/Backend Deployment/Rocky9.md>)
 
@@ -44,7 +44,7 @@ Key components:
 
 	 - [eBPF for GRES on cgroup v2](<./config/Backend Deployment/EBPF.md>)
 
-2) Install and start services
+2. Install and start services:
 
 	 - Start cranectld on control node(s)
 
@@ -52,7 +52,7 @@ Key components:
 
 	 - Deploy optional frontend services where needed (cfored, cplugind)
 
-3) Submit a job
+3. Submit a job
 
 	 - [Batch jobs](./command/cbatch.md)
 
