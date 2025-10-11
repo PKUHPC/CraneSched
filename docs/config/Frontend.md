@@ -4,9 +4,11 @@
 >Run all commands as the root user throughout. It is recommended to complete the backend environment installation first.
 
 For a demo cluster with nodes:
+
 - login01: where user login and submit job
 - cranectld: control node
 - craned[1-4]: compute nodes
+
 ## 1. Install Golang
 ```bash
 GOLANG_TARBALL=go1.22.0.linux-amd64.tar.gz
