@@ -287,15 +287,28 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             m_ctld_server_->m_mtx_.Unlock();
           };
 
-          auto submit_result =
-              g_task_scheduler->SubmitTaskToScheduler(std::move(task));
           std::expected<task_id_t, std::string> result;
-          if (submit_result.has_value()) {
-            result = std::expected<task_id_t, std::string>{
-                submit_result.value().get()};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_result.error()));
+          auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
+          if (!lua_result) {
+            if (lua_result.error().description().empty()) {
+              result = std::unexpected(CraneErrStr(lua_result.error().code()));
+            } else {
+              result = std::unexpected(lua_result.error().description());
+            }
           }
+
+          if (result) {
+            auto submit_result =
+              g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+
+            if (submit_result.has_value()) {
+              result = std::expected<task_id_t, std::string>{
+                submit_result.value().get()};
+            } else {
+              result = std::unexpected(CraneErrStr(submit_result.error()));
+            }
+          }
+
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -384,7 +397,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (!lua_result) {
     response->set_ok(false);
     response->set_code(lua_result.error().code());
-    // TODO: add user msg
+    response->set_reason(lua_result.error().description());
     return grpc::Status::OK;
   }
 
