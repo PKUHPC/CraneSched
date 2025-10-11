@@ -1,5 +1,6 @@
 site_name: CraneSched
 theme: 
+  logo: images/logo.png
   name: material
   locale: en
 plugins:

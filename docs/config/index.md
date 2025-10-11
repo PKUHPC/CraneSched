@@ -4,11 +4,11 @@
 
 ⚠️ Important: We strongly recommend using **Rocky Linux 9** for production environments. It offers better stability, long-term support, and compatibility with modern kernels and system components.
 
-• Preferred: Rocky Linux 9 — follow the recommended path for the best compatibility and experience.
+- Preferred: Rocky Linux 9 — follow the recommended path for the best compatibility and experience.
 
-• Compatible: CentOS 7 — for legacy environments only; lifecycle and ecosystem are outdated.
+- Compatible: CentOS 7 — for legacy environments only; lifecycle and ecosystem are outdated.
 
-• Optional/Required for GRES on cgroup v2: eBPF — used to enforce GRES device limits under cgroup v2; enable on supported kernels if you need GRES.
+- Optional/Required for GRES on cgroup v2: eBPF — used to enforce GRES device limits under cgroup v2; enable on supported kernels if you need GRES.
 
 ## What you will deploy
 
@@ -47,14 +47,18 @@ More general configuration and overview:
 
 ## Quick start
 
-1) Choose your OS guide:
+1) Choose your OS guide
+
     - Backend:
-        - [Preferred Rocky Linux 9](<>./Backend Deployment/Rocky9.md>)
-        - [Legacy environments](<./Backend Deployment/Centos7.md>)
+        - [Preferred Rocky Linux 9](<./Backend Deployment/Rocky9.md>)
+        - [Legacy Centos7](<./Backend Deployment/Centos7.md>)
     - Frontend:
         - [Frontend applications](./Frontend.md)
 
 2) Install and start services per the guide:
+
     - Configure and start cranectld (control node)
+
     - Deploy and start craned on all worker nodes
-    - Deploy frontend applications on all node(cranectld and craned).
+
+    - Deploy frontend applications on all node(cranectld, craned and login).
