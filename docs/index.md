@@ -37,19 +37,25 @@ Key components:
 1) Choose your deployment guide
 
 	 - [Backend (recommended)](<./config/Backend Deployment/Rocky9.md>)
+
 	 - [Backend (legacy)](<./config/Backend Deployment/Centos7.md>)
+
 	 - [Frontend apps](./config/Frontend.md)
+
 	 - [eBPF for GRES on cgroup v2](<./config/Backend Deployment/EBPF.md>)
 
 2) Install and start services
 
 	 - Start cranectld on control node(s)
+
 	 - Start craned on all compute nodes
+
 	 - Deploy optional frontend services where needed (cfored, cplugind)
 
 3) Submit a job
 
 	 - [Batch jobs](./command/cbatch.md)
+
 	 - Interactive jobs: [crun](./command/crun.md) and [calloc](./command/calloc.md)
 
 > Tip: Prefer to complete backend setup first, then deploy frontend tools to login/control/compute nodes as needed.
@@ -83,15 +89,16 @@ Key components:
 CraneSched introduces a Resources Manager abstraction to handle different workload types:
 
 - HPC jobs: Cgroup Manager allocates resources and provides cgroup-based isolation
+
 - AI jobs: Container Manager leverages Kubernetes for resource allocation and container lifecycle management
 
 ---
 
 ## Demo and repositories
 
-- Demo cluster (test account demo_admin / demo_admin): https://hpc.pku.edu.cn/demo/cranesched
-- Frontend repository: https://github.com/PKUHPC/CraneSched-FrontEnd
-- Backend repository: https://github.com/PKUHPC/CraneSched
+- [Demo cluster](https://hpc.pku.edu.cn/demo/cranesched)
+- [Frontend repository](https://github.com/PKUHPC/CraneSched-FrontEnd)
+- [Backend repository](https://github.com/PKUHPC/CraneSched)
 
 ---
 
@@ -112,5 +119,5 @@ CraneSched is dual-licensed under AGPLv3 and a commercial license. See `LICENSE`
 ## Need help?
 
 - Browse the docs via the sections above
-- Open an issue on GitHub: https://github.com/PKUHPC/CraneSched/issues
+- Open an issue on GitHub: <https://github.com/PKUHPC/CraneSched/issues>
 - Contributions are welcome—see the repositories for guidelines
