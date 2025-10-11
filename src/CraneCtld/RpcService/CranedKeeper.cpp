@@ -816,7 +816,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
   craned->m_craned_id_ = craned_id;
-  craned->m_clean_up_cb_ = CranedChannelConnectFail_;
+  craned->m_clean_up_cb_ = CranedChannelConnFailNoLock_;
 
   CqTag *tag = m_tag_sync_allocator_->new_object<CqTag>(
       CqTag{CqTag::kInitializingCraned, craned});
@@ -835,7 +835,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
       &m_cq_vec_[thread_id], tag);
 }
 
-void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
+void CranedKeeper::CranedChannelConnFailNoLock_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
   craned_keeper->m_connect_craned_mtx_.AssertHeld();
   craned_keeper->m_channel_count_.fetch_sub(1);

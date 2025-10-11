@@ -190,7 +190,7 @@ class CranedKeeper {
     CranedStub *craned;
   };
 
-  static void CranedChannelConnectFail_(CranedStub *stub);
+  static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
 

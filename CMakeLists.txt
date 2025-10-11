@@ -126,6 +126,8 @@ option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 
+option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" ON)
+
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
 
@@ -476,14 +478,14 @@ set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
 # Separate the debuginfo to avoid large RPM package and help debugging
-set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+set(CPACK_RPM_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/crane")
 
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
 # Separate the debuginfo to avoid large DEB package and help debugging
-set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 
 # Create post-installation script for creating crane user and directory
 file(WRITE ${CMAKE_BINARY_DIR}/post_install.sh 
