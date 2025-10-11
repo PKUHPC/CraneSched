@@ -150,7 +150,8 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   if (lua_isnil(m_lua_state_, -1))
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
-  UpdateJobGloable_();
+  // FIXME: dead lock
+  // UpdateJobGloable_();
   UpdateJobResvGloable_();
 
   PushJobDesc_(&task_in_ctld);
@@ -247,7 +248,7 @@ void JobSubmitLua::RegisterOutputFunctions_() {
   lua_pushnumber(m_lua_state_, crane::grpc::TaskType::Interactive);
   lua_setfield(m_lua_state_, -2, "Interactive");
 
-  // TODO: all used flags
+  // all used flags
 
   lua_setglobal(m_lua_state_, "crane");
 }
