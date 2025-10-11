@@ -86,6 +86,7 @@ message SubmitBatchTaskReply {
     uint32 task_id = 2;
     ErrCode code = 3;
   }
+  string reason = 4;
 }
 
 message SubmitBatchTasksRequest {

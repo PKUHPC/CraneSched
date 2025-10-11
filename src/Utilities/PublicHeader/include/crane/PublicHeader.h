@@ -232,6 +232,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 70 - 74
         "Supervisor error",
         "Service shutting down",
+        "ERR_SIGN_CERTIFICATE",
+        "ERR_DUPLICATE_CERTIFICATE",
+        "ERR_REVOKE_CERTIFICATE",
+
+        // 75 - 79
+        "ERR_IDENTITY_MISMATCH",
+        "Lua script validation failed"
     };
 // clang-format on
 }  // namespace Internal
