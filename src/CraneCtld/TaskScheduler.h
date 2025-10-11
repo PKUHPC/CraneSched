@@ -768,6 +768,8 @@ class TaskScheduler {
 
   CraneExpectedRich<void> JobSubmitLuaCheck(TaskInCtld& task);
 
+  CraneExpectedRich<void> JobModifyLuaCheck(task_id_t task_id);
+
   CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
