@@ -259,7 +259,9 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
-        "Invalid memory format"
+        "Invalid memory format",
+        // 85-89
+        "Lua script validation failed"
     };
 // clang-format on
 }  // namespace Internal
