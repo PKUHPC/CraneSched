@@ -1,4 +1,4 @@
-# Configure eBPF for GRES on cgroup v2
+# eBPF for GRES on cgroup v2
 Purpose: When using cgroup v2 with GRES (Generic RESources), CraneSched relies on an eBPF program to enforce device-level GRES limits. Therefore, eBPF must be configured and loaded on systems where GRES is managed under cgroup v2.
 
 CraneSched supports cgroup v2; if you need GRES enforcement, eBPF must be configured.
