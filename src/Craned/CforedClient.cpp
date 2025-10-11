@@ -491,153 +491,128 @@ void CforedManager::RegisterCb_() {
       result.x11_port = SetupX11forwarding_(elem.cfored, elem.task_id);
     }
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.task_out_fd,
-                elem.task_id);
-    std::shared_ptr<uvw::poll_handle> poll_handle =
-        m_loop_->uninitialized_resource<uvw::poll_handle>(elem.task_out_fd);
+    CRANE_TRACE("Registering fd {} for outputs of task #{}. pty: {}",
+                elem.task_out_fd, elem.task_id, elem.pty);
 
-    int err = 0, retry_cnt = 0;
-    while (true) {
-      err = poll_handle->init();
-      if (err == 0) break;
-      if (err != UV_EINTR && err != UV_EAGAIN) {
-        CRANE_ERROR("Failed to init poll_handle for task #{} output fd {}: {}",
-                    elem.task_id, elem.task_out_fd, uv_strerror(err));
-        result.ok = false;
-        break;
-      }
-
-      if (retry_cnt++ > 3) {
-        CRANE_ERROR(
-            "Failed to init poll_handle for task #{} output fd {}: {} after "
-            "3 times.",
-            elem.task_id, elem.task_out_fd, uv_strerror(err));
-        result.ok = false;
-        break;
-      }
-
-      CRANE_DEBUG(
-          "Recoverable error {} when initializing poll_handle "
-          "for task #{} output fd {}, retrying...",
-          uv_strerror(err), elem.task_id, elem.task_out_fd);
-
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    if (err != 0) {
-      CRANE_ERROR(
-          "Task #{} failed to init poll_handle for output fd {}. "
-          "Close poll handle and fd.",
-          elem.task_id, elem.task_out_fd);
-
-      if (poll_handle) poll_handle->close();
-      close(elem.task_out_fd);
-
-      result.ok = false;
-      p.second.set_value(result);
-
-      continue;
-    }
-
-    // Init poll_handle successfully. Register Cb for output events.
-    auto poll_cb = [this, elem = elem](const uvw::poll_event&,
-                                       uvw::poll_handle& h) {
-      CRANE_TRACE("Task #{} output event is triggered.", elem.task_id);
-
-      constexpr int MAX_BUF_SIZE = 4096;
-      char buf[MAX_BUF_SIZE];
-
-      auto bytes_read = read(elem.task_out_fd, buf, MAX_BUF_SIZE);
-      if (bytes_read > 0) {
-        std::string output(buf, bytes_read);
-        CRANE_TRACE("Task #{} forwarding content: {}", elem.task_id, output);
-        m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
-                                                             output);
-        return;
-      }
-
-      bool read_finished{false};
-      do {
-        if (bytes_read == 0 && !elem.pty) {
-          read_finished = true;
-          break;
-        }
-
-        if (bytes_read == 0 && elem.pty) {
-          // For pty, do nothing, process exit on return -1 and error set to EIO
-          CRANE_TRACE("Task #{} on cfored {} read EOF from pty ", elem.task_id,
-                      elem.cfored);
-          break;
-        }
-
-        if (bytes_read == -1) {
-          if (errno == EAGAIN) {
-            // Read before the process begin.
-            break;
-          }
-
-          if (!elem.pty) {
-            CRANE_WARN("Task #{} Error when reading non-pty output. Error: {}",
-                       elem.task_id, std::strerror(errno));
-            read_finished = true;
-            break;
-          }
-
-          // For pty:
-
-          if (errno == EIO) {
-            // For pty output, the read() will return -1 with errno set to EIO
-            // when process exit.
-            // ref: https://unix.stackexchange.com/questions/538198
-            read_finished = true;
-            break;
-          }
-
-          CRANE_WARN("task #{} error when reading pty output. Error: {}",
-                     elem.task_id, std::strerror(errno));
-          read_finished = true;
-          break;
-        }
-      } while (false);
-
-      if (read_finished) {
-        CRANE_DEBUG("Task #{} to cfored {} finished its output.", elem.task_id,
-                    elem.cfored);
-        h.close();
-        close(elem.task_out_fd);
-
-        bool ok_to_free =
-            m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
-        if (ok_to_free) {
-          CRANE_DEBUG("Task #{} It's ok to unregister on {}", elem.task_id,
-                      elem.cfored);
-          UnregisterIOForward_(elem.cfored, elem.task_id);
-        }
-      }
-    };
-
-    poll_handle->on<uvw::poll_event>(poll_cb);
-
-    int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-    if (ret < 0) {
-      CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-      if (poll_handle) poll_handle->close();
-      result.ok = false;
-    } else {
-      // Doing one-time triggering in case of missing EOF of fast-ending task.
-      auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
-      immediate->init();
-      immediate->on<uvw::check_event>(
-          [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
-                                           uvw::check_handle& h) {
-            uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
-            poll_cb(fake_event, *poll_handle);
-            h.close();
-          });
-      immediate->start();
-    }
-
+    SetupUvForRegisterElem_(elem, &result);
     p.second.set_value(result);
+  }
+}
+
+void CforedManager::SetupUvForRegisterElem_(const RegisterElem& elem,
+                                            RegisterResult* result) {
+  auto on_finish = [this, tid = elem.task_id, cf = elem.cfored,
+                    fd = elem.task_out_fd]() {
+    auto it = m_out_handles_.find(tid);
+    if (it != m_out_handles_.end()) {
+      if (!it->second.pty && it->second.pipe) it->second.pipe->close();
+      if (it->second.pty && it->second.tty) it->second.tty->close();
+      m_out_handles_.erase(it);
+    }
+
+    close(fd);
+
+    CRANE_DEBUG("Task #{} to cfored {} finished its output.", tid, cf);
+    bool ok_to_free = m_cfored_client_map_[cf]->TaskOutputFinish(tid);
+    if (ok_to_free) {
+      CRANE_DEBUG("Task #{} It's ok to unregister on {}", tid, cf);
+      UnregisterIOForward_(cf, tid);
+    }
+  };
+
+  int err = 0;
+
+  if (!elem.pty) {
+    // non pty: use pipe_handle
+    auto ph = m_loop_->uninitialized_resource<uvw::pipe_handle>(false);
+    err = ph->init();
+    if (err) {
+      CRANE_ERROR("Failed to init pipe_handle for task #{} fd {}: {}",
+                  elem.task_id, elem.task_out_fd, uv_strerror(err));
+      result->ok = false;
+      close(elem.task_out_fd);
+      return;
+    }
+
+    err = ph->open(elem.task_out_fd);
+    if (err) {
+      CRANE_ERROR("Failed to open pipe_handle for task #{} fd {}: {}",
+                  elem.task_id, elem.task_out_fd, uv_strerror(err));
+      result->ok = false;
+      close(elem.task_out_fd);
+      return;
+    }
+
+    m_out_handles_[elem.task_id] = OutHandle{false, ph, {}};
+
+    ph->on<uvw::data_event>([this, tid = elem.task_id, cf = elem.cfored](
+                                uvw::data_event& e, uvw::pipe_handle&) {
+      if (e.length > 0) {
+        std::string output(e.data.get(), e.length);
+        m_cfored_client_map_[cf]->TaskOutPutForward(tid, output);
+      }
+    });
+
+    ph->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::pipe_handle& h) {
+      // EOF Received
+      h.close();
+      on_finish();
+    });
+
+    ph->on<uvw::error_event>([tid = elem.task_id, on_finish](
+                                 uvw::error_event& e, uvw::pipe_handle& h) {
+      CRANE_WARN("Task #{} output pipe error: {}. Closing.", tid, e.what());
+      h.close();
+      on_finish();
+    });
+
+    ph->on<uvw::close_event>(
+        [tid = elem.task_id](uvw::close_event&, uvw::pipe_handle&) {
+          CRANE_TRACE("Output pipe of task #{} closed.", tid);
+        });
+
+    ph->read();
+  } else {
+    // pty: use tty_handle. The 2nd argument true means it's a readable tty.
+    auto th = m_loop_->uninitialized_resource<uvw::tty_handle>(elem.task_out_fd,
+                                                               true);
+    err = th->init();
+    if (err) {
+      CRANE_ERROR("Failed to init tty_handle for task #{} pty fd {}: {}",
+                  elem.task_id, elem.task_out_fd, uv_strerror(err));
+      result->ok = false;
+      return;
+    }
+
+    m_out_handles_[elem.task_id] = OutHandle{true, {}, th};
+
+    th->on<uvw::data_event>([this, tid = elem.task_id, cf = elem.cfored](
+                                uvw::data_event& e, uvw::tty_handle&) {
+      if (e.length > 0) {
+        std::string output(e.data.get(), e.length);
+        m_cfored_client_map_[cf]->TaskOutPutForward(tid, output);
+      }
+    });
+
+    th->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::tty_handle& h) {
+      // The remote end is closed, go to EOF process.
+      h.close();
+      on_finish();
+    });
+
+    th->on<uvw::error_event>([tid = elem.task_id, on_finish](
+                                 uvw::error_event& e, uvw::tty_handle& h) {
+      CRANE_WARN("Task #{} pty read error: {}. Closing.", tid, e.what());
+      h.close();
+      on_finish();
+    });
+
+    th->on<uvw::close_event>(
+        [tid = elem.task_id](uvw::close_event&, uvw::tty_handle&) {
+          CRANE_TRACE("Pty of task #{} closed.", tid);
+        });
+
+    th->read();
   }
 }
 

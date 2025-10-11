@@ -42,10 +42,10 @@ TaskInstance::~TaskInstance() {
   if (this->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
-    close(crun_meta->task_input_fd);
-    // For crun pty job, avoid close same fd twice
+    // For crun non pty job, close out fd in CforedClient
+    // For crun pty job, close tty fd in CforedClient
     if (crun_meta->task_output_fd != crun_meta->task_input_fd)
-      close(crun_meta->task_output_fd);
+      close(crun_meta->task_input_fd);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {

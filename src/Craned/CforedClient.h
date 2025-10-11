@@ -154,6 +154,8 @@ class CforedManager {
   ConcurrentQueue<std::pair<RegisterElem, std::promise<RegisterResult>>>
       m_register_queue_;
   void RegisterCb_();
+  void SetupUvForRegisterElem_(const RegisterElem& elem,
+                               RegisterResult* result);
 
   std::shared_ptr<uvw::async_handle> m_task_stop_handle_;
   ConcurrentQueue<TaskStopElem> m_task_stop_queue_;
@@ -171,6 +173,13 @@ class CforedManager {
 
   std::unordered_map<task_id_t, std::shared_ptr<X11FdInfo>>
       m_task_id_to_x11_map_;
+
+  struct OutHandle {
+    bool pty;
+    std::shared_ptr<uvw::pipe_handle> pipe;
+    std::shared_ptr<uvw::tty_handle> tty;
+  };
+  std::unordered_map<task_id_t, OutHandle> m_out_handles_;
 };
 }  // namespace Craned
 
