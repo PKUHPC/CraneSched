@@ -1418,7 +1418,8 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
   std::unordered_set<std::string> user_list;
-  bool contains_all = std::ranges::find(request->user_list(), "ALL") != request->user_list().end();
+  bool contains_all = std::ranges::find(request->user_list(), "ALL") !=
+                      request->user_list().end();
   if (contains_all && request->force()) {
     auto account_ptr =
         g_account_manager->GetExistedAccountInfo(request->account());
