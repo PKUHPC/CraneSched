@@ -728,9 +728,24 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     return grpc::Status::OK;
   }
 
+  std::list<task_id_t> task_ids;
+
+  for (const auto task_id : request->task_ids()) {
+    auto lua_result = g_task_scheduler->JobModifyLuaCheck(task_id);
+    if (!lua_result) {
+      response->add_not_modified_tasks(task_id);
+      if (lua_result.error().description().empty())
+        response->add_not_modified_reasons(CraneErrStr(lua_result.error().code()));
+      else
+        response->add_not_modified_reasons(lua_result.error().description());
+      continue;
+    }
+    task_ids.emplace_back(task_id);
+  }
+
   CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       err = g_task_scheduler->ChangeTaskTimeLimit(
           task_id, request->time_limit_seconds());
       if (err == CraneErrCode::SUCCESS) {
@@ -750,7 +765,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Priority) {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       err = g_task_scheduler->ChangeTaskPriority(task_id,
                                                  request->mandated_priority());
       if (err == CraneErrCode::SUCCESS) {
@@ -768,8 +783,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
     int64_t secs = request->hold_seconds();
     std::vector<std::pair<task_id_t, std::future<CraneErrCode>>> results;
-    results.reserve(request->task_ids().size());
-    for (auto task_id : request->task_ids()) {
+    results.reserve(task_ids.size());
+    for (auto task_id : task_ids) {
       results.emplace_back(
           task_id, g_task_scheduler->HoldReleaseTaskAsync(task_id, secs));
     }
@@ -788,7 +803,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else {
-    for (auto task_id : request->task_ids()) {
+    for (auto task_id : task_ids) {
       response->add_not_modified_tasks(task_id);
       response->add_not_modified_reasons("Invalid function.");
     }
