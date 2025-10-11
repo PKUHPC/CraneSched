@@ -1,4 +1,4 @@
-# Deployment and Configuration
+# Overview
 
 >This section provides step-by-step guides to deploy and configure CraneSched components on different operating systems.
 

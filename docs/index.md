@@ -36,13 +36,13 @@ Key components:
 
 1. Choose your deployment guide:
 
-	 - [Backend (recommended)](<./config/Backend Deployment/Rocky9.md>)
+	 - [Backend (recommended)](<./deployment/Backend Deployment/Rocky9.md>)
 
-	 - [Backend (legacy)](<./config/Backend Deployment/Centos7.md>)
+	 - [Backend (legacy)](<./deployment/Backend Deployment/Centos7.md>)
 
-	 - [Frontend apps](./config/Frontend.md)
+	 - [Frontend apps](./deployment/Frontend.md)
 
-	 - [eBPF for GRES on cgroup v2](<./config/Backend Deployment/EBPF.md>)
+	 - [eBPF for GRES on cgroup v2](<./deployment/Backend Deployment/EBPF.md>)
 
 2. Install and start services:
 
@@ -65,11 +65,11 @@ Key components:
 ## Documentation map
 
 - Deployment & Configuration
-	- [Overview](./config/index.md)
-	- [Backend (Rocky 9)](<./config/Backend Deployment/Rocky9.md>)
-	- [Backend (CentOS 7)](<./config/Backend Deployment/Centos7.md>)
-	- [eBPF for GRES (cgroup v2)](<./config/Backend Deployment/EBPF.md>)
-	- [Frontend deployment](./config/Frontend.md)
+	- [Overview](./deployment/index.md)
+	- [Backend (Rocky 9)](<./deployment/Backend Deployment/Rocky9.md>)
+	- [Backend (CentOS 7)](<./deployment/Backend Deployment/Centos7.md>)
+	- [eBPF for GRES (cgroup v2)](<./deployment/Backend Deployment/EBPF.md>)
+	- [Frontend deployment](./deployment/Frontend.md)
 
 - User & Admin Commands
 	- Jobs: [cbatch](./command/cbatch.md) · [cqueue](./command/cqueue.md) · [ccancel](./command/ccancel.md)
