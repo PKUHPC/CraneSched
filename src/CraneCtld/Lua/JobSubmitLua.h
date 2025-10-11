@@ -118,9 +118,9 @@ private:
   std::string m_lua_script_;
   lua_State* m_lua_state_;
   std::string m_user_msg_;
-  std::vector<std::shared_ptr<crane::grpc::TaskInfo>> m_job_info_list_;
-  std::vector<std::shared_ptr<crane::grpc::PartitionInfo>> m_partition_info_list_;
-  std::vector<std::shared_ptr<crane::grpc::ReservationInfo>> m_resv_info_list_;
+  crane::grpc::QueryTasksInfoReply m_task_info_reply_;
+  crane::grpc::QueryReservationInfoReply m_resv_info_reply_;
+  crane::grpc::QueryPartitionInfoReply m_partition_info_reply_;
 };
 
 class LuaPool {
