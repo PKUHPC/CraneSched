@@ -209,11 +209,9 @@ class CtldClient {
 
   void SendStatusChanges_();
 
-  void HealthCheckResultResponse_(bool is_health, const std::string& reason) const;
+  void HealthCheckResultResponse_(bool is_health) const;
 
   void HealthCheck_();
-
-  void StartRandomHealthCheck_();
 
   static bool CheckNodeState_();
 
