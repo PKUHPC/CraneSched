@@ -1034,6 +1034,21 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       continue;
     }
 
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id))
+        offline_nodes.push_back(craned_id);
+    }
+
+    if (!offline_nodes.empty()) {
+      // Ensure suspension only proceeds when every craned involved is online.
+      CRANE_WARN("Task #{} suspend skipped because craned(s) {} are offline.",
+                 task_id, absl::StrJoin(offline_nodes, ","));
+      results.emplace_back(CraneErrCode::ERR_NO_AVAIL_NODE);
+      continue;
+    }
+
     std::vector<job_id_t> job_ids{static_cast<job_id_t>(task_id)};
     std::vector<CranedId> suspended_nodes;
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
@@ -1156,6 +1171,20 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
     if (executing_nodes.empty()) {
       CRANE_WARN("Task #{} has no executing craned when resuming", task_id);
       results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id))
+        offline_nodes.push_back(craned_id);
+    }
+
+    if (!offline_nodes.empty()) {
+      CRANE_WARN("Task #{} resume skipped because craned(s) {} are offline.",
+                 task_id, absl::StrJoin(offline_nodes, ","));
+      results.emplace_back(CraneErrCode::ERR_NO_AVAIL_NODE);
       continue;
     }
 

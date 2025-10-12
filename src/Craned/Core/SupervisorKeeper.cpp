@@ -99,7 +99,7 @@ CraneErrCode SupervisorStub::SuspendJob() {
   return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ResumeTask() {
+CraneErrCode SupervisorStub::ResumeJob() {
   ClientContext context;
   crane::grpc::supervisor::ResumeTaskRequest request;
   crane::grpc::supervisor::ResumeTaskReply reply;
@@ -107,7 +107,7 @@ CraneErrCode SupervisorStub::ResumeTask() {
   auto ok = m_stub_->ResumeTask(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_ERROR("ResumeTask failed: {}, {}", reply.reason(), ok.error_message());
+  CRANE_ERROR("ResumeJob failed: {}, {}", reply.reason(), ok.error_message());
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
     return CraneErrCode::ERR_INVALID_PARAM;
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))

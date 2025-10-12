@@ -53,7 +53,7 @@ class StepInstance {
   bool pty;
   bool x11;
   bool x11_fwd;
-  bool suspended{false};
+  crane::grpc::TaskStatus status{crane::grpc::TaskStatus::Running};
 
   std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
@@ -356,9 +356,9 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
-  std::future<CraneErrCode> SuspendTaskAsync();
+  std::future<CraneErrCode> SuspendJobAsync();
 
-  std::future<CraneErrCode> ResumeTaskAsync();
+  std::future<CraneErrCode> ResumeJobAsync();
 
   void Shutdown() { m_supervisor_exit_ = true; }
 

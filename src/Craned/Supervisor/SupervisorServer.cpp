@@ -90,7 +90,7 @@ grpc::Status SupervisorServiceImpl::SuspendJob(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::SuspendJobRequest* request,
     crane::grpc::supervisor::SuspendJobReply* response) {
-  auto future = g_task_mgr->SuspendTaskAsync();
+  auto future = g_task_mgr->SuspendJobAsync();
   future.wait();
   CraneErrCode err = future.get();
   if (err == CraneErrCode::SUCCESS) {
@@ -106,7 +106,7 @@ grpc::Status SupervisorServiceImpl::ResumeTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ResumeTaskRequest* request,
     crane::grpc::supervisor::ResumeTaskReply* response) {
-  auto future = g_task_mgr->ResumeTaskAsync();
+  auto future = g_task_mgr->ResumeJobAsync();
   future.wait();
   CraneErrCode err = future.get();
   if (err == CraneErrCode::SUCCESS) {

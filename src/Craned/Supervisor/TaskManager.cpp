@@ -1024,9 +1024,8 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     if (signum == SIGSTOP || signum == SIGCONT) {
       int rc = kill(-m_pid_, signum);
       if ((rc != 0) && (errno != ESRCH)) {
-        CRANE_TRACE(
-            "[Subprocess] Failed to send signal {} to pid {}: {}", signum,
-            m_pid_, strerror(errno));
+        CRANE_TRACE("[Subprocess] Failed to send signal {} to pid {}: {}",
+                    signum, m_pid_, strerror(errno));
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
       return CraneErrCode::SUCCESS;
@@ -1605,7 +1604,7 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
   // One-shot model: nothing to stop, just proceed to cleanup.
-  m_step_.suspended = false;
+  m_step_.status = new_status;
   m_step_.oom_baseline_inited = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
@@ -1702,7 +1701,7 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   m_terminate_task_async_handle_->send();
 }
 
-std::future<CraneErrCode> TaskManager::SuspendTaskAsync() {
+std::future<CraneErrCode> TaskManager::SuspendJobAsync() {
   TaskSignalQueueElem elem;
   elem.action = TaskSignalQueueElem::Action::Suspend;
   auto fut = elem.prom.get_future();
@@ -1711,7 +1710,7 @@ std::future<CraneErrCode> TaskManager::SuspendTaskAsync() {
   return fut;
 }
 
-std::future<CraneErrCode> TaskManager::ResumeTaskAsync() {
+std::future<CraneErrCode> TaskManager::ResumeJobAsync() {
   TaskSignalQueueElem elem;
   elem.action = TaskSignalQueueElem::Action::Resume;
   auto fut = elem.prom.get_future();
@@ -1905,7 +1904,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     int sig = SIGTERM;  // For BatchTask
     if (m_step_.IsCrun()) sig = SIGHUP;
 
-    m_step_.suspended = false;
+    m_step_.status = crane::grpc::TaskStatus::Running;
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
@@ -1965,21 +1964,23 @@ void TaskManager::EvCleanTaskSignalQueueCb_() {
     CraneErrCode result = CraneErrCode::SUCCESS;
     switch (elem.action) {
     case TaskSignalQueueElem::Action::Suspend: {
-      if (m_step_.suspended) {
+      if (m_step_.status == crane::grpc::TaskStatus::Suspended) {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
       }
       result = SuspendRunningTasks_();
-      if (result == CraneErrCode::SUCCESS) m_step_.suspended = true;
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Suspended;
       break;
     }
     case TaskSignalQueueElem::Action::Resume: {
-      if (!m_step_.suspended) {
+      if (m_step_.status != crane::grpc::TaskStatus::Suspended) {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
       }
       result = ResumeSuspendedTasks_();
-      if (result == CraneErrCode::SUCCESS) m_step_.suspended = false;
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Running;
       break;
     }
     }

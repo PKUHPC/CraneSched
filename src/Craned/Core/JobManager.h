@@ -37,7 +37,7 @@ using StepToD = crane::grpc::TaskToD;
 struct StepInstance {
   StepToD step_to_d;
   pid_t supv_pid;
-  bool suspended{false};
+  crane::grpc::TaskStatus status{crane::grpc::TaskStatus::Running};
 };
 
 // Job allocation info, where allocation = job spec + execution info

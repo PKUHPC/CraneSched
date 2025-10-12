@@ -859,11 +859,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
     bool orphaned = job_ptr->orphaned;
     for (auto& [step_id, step_inst] : job_ptr->step_map) {
       if (!step_inst) continue;
-      if (status_change.new_status == crane::grpc::TaskStatus::Suspended) {
-        step_inst->suspended = true;
-      } else {
-        step_inst->suspended = false;
-      }
+      step_inst->status = status_change.new_status;
     }
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
@@ -970,7 +966,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     auto* instance = job_instance.get();
     instance->orphaned = elem.mark_as_orphaned;
     for (auto& [step_id, step_inst] : instance->step_map) {
-      if (step_inst) step_inst->suspended = false;
+      if (step_inst) step_inst->status = crane::grpc::TaskStatus::Running;
     }
 
     auto stub = g_supervisor_keeper->GetStub(elem.step_id);
@@ -999,7 +995,7 @@ CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
   }
 
   auto* step_inst = job_instance->step_map.begin()->second.get();
-  if (step_inst->suspended) {
+  if (step_inst->status == crane::grpc::TaskStatus::Suspended) {
     CRANE_TRACE("Task #{} already suspended", step_id);
     return CraneErrCode::ERR_INVALID_PARAM;
   }
@@ -1011,7 +1007,8 @@ CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
   }
 
   CraneErrCode err = stub->SuspendJob();
-  if (err == CraneErrCode::SUCCESS) step_inst->suspended = true;
+  if (err == CraneErrCode::SUCCESS)
+    step_inst->status = crane::grpc::TaskStatus::Suspended;
   return err;
 }
 
@@ -1023,7 +1020,7 @@ CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
   }
 
   auto* step_inst = job_instance->step_map.begin()->second.get();
-  if (!step_inst->suspended) {
+  if (step_inst->status != crane::grpc::TaskStatus::Suspended) {
     CRANE_TRACE("Task #{} is not suspended", step_id);
     return CraneErrCode::ERR_INVALID_PARAM;
   }
@@ -1034,8 +1031,9 @@ CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
-  CraneErrCode err = stub->ResumeTask();
-  if (err == CraneErrCode::SUCCESS) step_inst->suspended = false;
+  CraneErrCode err = stub->ResumeJob();
+  if (err == CraneErrCode::SUCCESS)
+    step_inst->status = crane::grpc::TaskStatus::Running;
   return err;
 }
 
