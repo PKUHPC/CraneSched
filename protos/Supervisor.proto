@@ -119,9 +119,9 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
-message SuspendTaskRequest {}
+message SuspendJobRequest {}
 
-message SuspendTaskReply {
+message SuspendJobReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -143,7 +143,7 @@ service Supervisor {
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
-  rpc SuspendTask(SuspendTaskRequest) returns (SuspendTaskReply);
+  rpc SuspendJob(SuspendJobRequest) returns (SuspendJobReply);
   rpc ResumeTask(ResumeTaskRequest) returns (ResumeTaskReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }

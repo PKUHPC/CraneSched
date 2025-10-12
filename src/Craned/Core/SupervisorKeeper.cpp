@@ -83,15 +83,15 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::SuspendTask() {
+CraneErrCode SupervisorStub::SuspendJob() {
   ClientContext context;
-  crane::grpc::supervisor::SuspendTaskRequest request;
-  crane::grpc::supervisor::SuspendTaskReply reply;
+  crane::grpc::supervisor::SuspendJobRequest request;
+  crane::grpc::supervisor::SuspendJobReply reply;
 
-  auto ok = m_stub_->SuspendTask(&context, request, &reply);
+  auto ok = m_stub_->SuspendJob(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_ERROR("SuspendTask failed: {}, {}", reply.reason(), ok.error_message());
+  CRANE_ERROR("SuspendJob failed: {}, {}", reply.reason(), ok.error_message());
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
     return CraneErrCode::ERR_INVALID_PARAM;
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))

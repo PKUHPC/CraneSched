@@ -485,8 +485,10 @@ class TaskScheduler {
   std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
                                                  int64_t secs);
 
-  CraneErrCode SuspendRunningTask(task_id_t task_id);
-  CraneErrCode ResumeSuspendedTask(task_id_t task_id);
+  std::vector<CraneErrCode> SuspendRunningTasks(
+      const std::vector<task_id_t>& task_ids);
+  std::vector<CraneErrCode> ResumeSuspendedTasks(
+      const std::vector<task_id_t>& task_ids);
 
   CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 

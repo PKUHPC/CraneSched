@@ -586,8 +586,12 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Suspend) {
-    for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->SuspendRunningTask(task_id);
+    std::vector<task_id_t> task_ids(request->task_ids().begin(),
+                                    request->task_ids().end());
+    auto results = g_task_scheduler->SuspendRunningTasks(task_ids);
+    for (size_t i = 0; i < task_ids.size(); ++i) {
+      task_id_t task_id = task_ids[i];
+      err = results[i];
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else {
@@ -605,8 +609,12 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Resume) {
-    for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->ResumeSuspendedTask(task_id);
+    std::vector<task_id_t> task_ids(request->task_ids().begin(),
+                                    request->task_ids().end());
+    auto results = g_task_scheduler->ResumeSuspendedTasks(task_ids);
+    for (size_t i = 0; i < task_ids.size(); ++i) {
+      task_id_t task_id = task_ids[i];
+      err = results[i];
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else {

@@ -1010,7 +1010,7 @@ CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
-  CraneErrCode err = stub->SuspendTask();
+  CraneErrCode err = stub->SuspendJob();
   if (err == CraneErrCode::SUCCESS) step_inst->suspended = true;
   return err;
 }

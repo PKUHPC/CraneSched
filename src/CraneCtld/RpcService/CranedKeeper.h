@@ -86,9 +86,9 @@ class CranedStub {
   CraneErrCode ReleaseCgroupForJobs(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
-  CraneErrCode SuspendSteps(const std::vector<task_id_t> &task_ids);
+  CraneErrCode SuspendSteps(const std::vector<job_id_t> &job_ids);
 
-  CraneErrCode ResumeSteps(const std::vector<task_id_t> &task_ids);
+  CraneErrCode ResumeSteps(const std::vector<job_id_t> &job_ids);
 
   CraneErrCode TerminateSteps(const std::vector<task_id_t> &task_ids);
 

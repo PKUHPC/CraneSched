@@ -238,7 +238,7 @@ CraneErrCode CranedStub::ReleaseCgroupForJobs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::SuspendSteps(const std::vector<task_id_t> &task_ids) {
+CraneErrCode CranedStub::SuspendSteps(const std::vector<job_id_t> &job_ids) {
   using crane::grpc::SuspendStepsReply;
   using crane::grpc::SuspendStepsRequest;
 
@@ -249,7 +249,7 @@ CraneErrCode CranedStub::SuspendSteps(const std::vector<task_id_t> &task_ids) {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
+  request.mutable_task_id_list()->Assign(job_ids.begin(), job_ids.end());
 
   status = m_stub_->SuspendSteps(&context, request, &reply);
   if (!status.ok()) {
@@ -267,7 +267,7 @@ CraneErrCode CranedStub::SuspendSteps(const std::vector<task_id_t> &task_ids) {
   return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::ResumeSteps(const std::vector<task_id_t> &task_ids) {
+CraneErrCode CranedStub::ResumeSteps(const std::vector<job_id_t> &job_ids) {
   using crane::grpc::ResumeStepsReply;
   using crane::grpc::ResumeStepsRequest;
 
@@ -278,7 +278,7 @@ CraneErrCode CranedStub::ResumeSteps(const std::vector<task_id_t> &task_ids) {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  request.mutable_task_id_list()->Assign(task_ids.begin(), task_ids.end());
+  request.mutable_task_id_list()->Assign(job_ids.begin(), job_ids.end());
 
   status = m_stub_->ResumeSteps(&context, request, &reply);
   if (!status.ok()) {
