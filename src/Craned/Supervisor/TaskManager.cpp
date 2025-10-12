@@ -2085,7 +2085,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   }
 
   // One-shot model: nothing to stop, just proceed to cleanup.
-  m_step_.suspended = false;
+  m_step_.status = new_status;
   m_step_.oom_baseline_inited = false;
 
   auto err = task->Cleanup();
@@ -2623,21 +2623,23 @@ void TaskManager::EvCleanTaskSignalQueueCb_() {
     CraneErrCode result = CraneErrCode::SUCCESS;
     switch (elem.action) {
     case TaskSignalQueueElem::Action::Suspend: {
-      if (m_step_.suspended) {
+      if (m_step_.status == crane::grpc::TaskStatus::Suspended) {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
       }
       result = SuspendRunningTasks_();
-      if (result == CraneErrCode::SUCCESS) m_step_.suspended = true;
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Suspended;
       break;
     }
     case TaskSignalQueueElem::Action::Resume: {
-      if (!m_step_.suspended) {
+      if (m_step_.status != crane::grpc::TaskStatus::Suspended) {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
       }
       result = ResumeSuspendedTasks_();
-      if (result == CraneErrCode::SUCCESS) m_step_.suspended = false;
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Running;
       break;
     }
     }

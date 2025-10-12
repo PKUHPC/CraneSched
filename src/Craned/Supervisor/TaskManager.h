@@ -574,9 +574,9 @@ class TaskManager {
 
   void SetActivelyShutdown() { m_active_shutdown_ = true; }
 
-  std::future<CraneErrCode> SuspendTaskAsync();
+  std::future<CraneErrCode> SuspendJobAsync();
 
-  std::future<CraneErrCode> ResumeTaskAsync();
+  std::future<CraneErrCode> ResumeJobAsync();
 
   void Shutdown() { m_supervisor_exit_ = true; }
 
