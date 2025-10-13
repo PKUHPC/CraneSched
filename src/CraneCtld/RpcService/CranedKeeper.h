@@ -73,9 +73,6 @@ class CranedStub {
     m_token_.reset();
   }
 
-  static crane::grpc::ExecuteStepsRequest NewExecuteTasksRequests(
-      const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
-
   CraneExpected<std::vector<task_id_t>> ExecuteSteps(
       const crane::grpc::ExecuteStepsRequest &request);
 
