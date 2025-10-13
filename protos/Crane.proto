@@ -957,8 +957,8 @@ message QueryAccountUserSummaryItemRequest {
   google.protobuf.Timestamp filter_end_time = 5;
 }
 
-message QueryAccountUserSummaryItemReply {
-  repeated AccountUserSummaryItem items = 1;
+message QueryAccountUserQosSummaryItemReply {
+  repeated AccountUserQosSummaryItem items = 1;
 }
 
 <<<<<<< HEAD
@@ -1071,7 +1071,7 @@ service CraneCtld {
   /* RPCS called from ccon */
   rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
   rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
-  rpc QueryAccountUserSummaryItemStream(QueryAccountUserSummaryItemRequest) returns (stream QueryAccountUserSummaryItemReply);
+  rpc QueryAccountUserQosSummaryItemStream(QueryAccountUserQosSummaryItemRequest) returns (stream QueryAccountUserQosSummaryItemReply);
   rpc QueryAccountUserWckeySummaryItemStream(QueryAccountUserWckeySummaryItemRequest) returns (stream QueryAccountUserWckeySummaryItemReply);
 }
 

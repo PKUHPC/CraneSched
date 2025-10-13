@@ -38,6 +38,14 @@ function batch_insert_collection() {
     --file "$json_file" --jsonArray
 }
 
+function batch_insert_collection_process() {
+  collection=$1
+  json_file=$2
+  mongoimport --username "$username" --password "$password" --host "$host" --port "$port" \
+    --authenticationDatabase admin --db "$dbname" --collection "$collection" \
+    --file "$json_file"
+}
+
 
 # Wipe data according to mode
 if [ "$mode" -eq 1 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
@@ -63,11 +71,11 @@ if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
 fi
 if [ "$mode" -eq 5 ] || [ "$mode" -eq 7 ] || [ "$mode" -eq 3 ]; then
-  wipe_collection hour_account_user_summary_table
+  wipe_collection hour_account_user_qos_summary_table
   wipe_collection hour_account_user_wckey_summary_table
-  wipe_collection day_account_user_summary_table
+  wipe_collection day_account_user_qos_summary_table
   wipe_collection day_account_user_wckey_summary_table
-  wipe_collection month_account_user_summary_table
+  wipe_collection month_account_user_qos_summary_table
   wipe_collection month_account_user_wckey_summary_table
 fi
 
@@ -76,6 +84,6 @@ if [ "$mode" -eq 5 ] || [ "$mode" -eq 8 ] || [ "$mode" -eq 3 ]; then
 fi
 
 if [ "$mode" -eq 10 ]; then
-  batch_insert_collection "task_table" "./tasks_bulk.json"
+  batch_insert_collection_process "task_table" "./tasks_bulk.json"
   exit 0
 fi

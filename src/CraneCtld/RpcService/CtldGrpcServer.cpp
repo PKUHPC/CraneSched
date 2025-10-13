@@ -2055,10 +2055,10 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   return std::nullopt;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
+grpc::Status CraneCtldServiceImpl::QueryAccountUserQosSummaryItemStream(
     ::grpc::ServerContext *context,
-    const ::crane::grpc::QueryAccountUserSummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserSummaryItemReply>
+    const ::crane::grpc::QueryAccountUserQosSummaryItemRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserQosSummaryItemReply>
         *writer) {
   std::unordered_set<std::string> req_accounts(
       request->filter_accounts().begin(), request->filter_accounts().end());
@@ -2070,8 +2070,8 @@ grpc::Status CraneCtldServiceImpl::QueryAccountUserSummaryItemStream(
   auto start_time = request->filter_start_time().seconds();
   auto end_time = request->filter_end_time().seconds();
 
-  g_db_client->QueryAccountUserSummary(req_accounts, req_users, req_qoss, start_time,
-                                       end_time, writer);
+  g_db_client->QueryAccountUserQosSummary(req_accounts, req_users, req_qoss,
+                                          start_time, end_time, writer);
   return grpc::Status::OK;
 }
 
