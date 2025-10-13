@@ -398,7 +398,7 @@ class TaskManager {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
-          EvTaskTimerCb_();
+          EvTaskTimerCb_(false);
         });
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -406,11 +406,11 @@ class TaskManager {
     m_step_.termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(int64_t secs) {
+  void AddTerminationTimer_(int64_t secs,bool is_deadline) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
-          EvTaskTimerCb_();
+        [this,is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvTaskTimerCb_(is_deadline);
         });
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -490,6 +490,8 @@ class TaskManager {
   void EvCleanCriEventQueueCb_();
 
   // Handle stopped tasks
+  void EvTaskTimerCb_(bool is_deadline);
+  void EvDeadlineTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
   // Handle task termination requests
