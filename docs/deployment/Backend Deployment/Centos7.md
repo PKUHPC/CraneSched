@@ -1,4 +1,4 @@
-# Centos 7
+# CentOS 7
 
 > **Note**  
 > This tutorial is **for CentOS 7 only**.  
@@ -291,4 +291,4 @@ pdsh -w cranectl systemctl start cranectld
 pdsh -w crane0[1-4] systemctl stop craned
 pdcp -w crane0[1-4] /usr/local/bin/craned /usr/local/bin
 pdsh -w crane0[1-4] systemctl start craned
-
+```

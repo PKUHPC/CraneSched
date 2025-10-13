@@ -337,7 +337,7 @@ session    include      postlogin
 -session   optional     pam_reauthorize.so prepare
 ```
 
-> `session optional pam_crane.so` must appear **after** `session include password-auth`
+> `session required pam_crane.so` must appear **after** `session include password-auth`
 
 ---
 
@@ -361,15 +361,15 @@ Example:
 ControlMachine: crane01
 
 Nodes:
-    - name: "crane[01-04]"
+  - name: "crane[01-04]"
     cpu: 2
     memory: 2G
 
 Partitions:
-    - name: CPU
+  - name: CPU
     nodes: "crane[01-02]"
     priority: 5
-    - name: GPU
+  - name: GPU
     nodes: "crane[03-04]"
     priority: 3
     DefaultMemPerCpu: 0
@@ -425,7 +425,7 @@ systemctl enable craned --now
 ```bash
 ssh crane02 "mkdir -p /etc/crane"
 scp CraneSched-1.1.2-Linux-x86_64-craned.rpm crane02:/tmp
-ssh craned02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
+ssh crane02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
 scp /etc/crane/config.yaml crane02:/etc/crane/
 ```
 
@@ -584,6 +584,3 @@ cmake --build . --clean-first || {
 popd
 popd
 ```
-
----
-

@@ -101,7 +101,8 @@ cat /sys/kernel/debug/tracing/trace_pipe
 ## 3. Mounting the BPF Filesystem
 
 If you see errors like the following:
-```
+
+```text
 libbpf: specified path /sys/fs/bpf/dev_map is not on BPF FS
 libbpf: map 'dev_map': failed to auto-pin at '/sys/fs/bpf/dev_map': -22
 libbpf: map 'dev_map': failed to create: Invalid argument(-22)

@@ -7,7 +7,7 @@ For a demo cluster with nodes:
 
 - login01: where user login and submit job
 - cranectld: control node
-- craned[1-4]: compute nodes
+- crane[1-4]: compute nodes
 
 ## 1. Install Golang
 ```bash
@@ -32,8 +32,8 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ## 2. Install Protoc
 ```bash
 PROTOC_ZIP=protoc-30.2-linux-x86_64.zip
+# aarch64: protoc-30.2-linux-aarch_64.zip
 curl -L https://github.com/protocolbuffers/protobuf/releases/download/v30.2/${PROTOC_ZIP} -o /tmp/protoc.zip
-# ARM architecture: curl -L https://github.com/protocolbuffers/protobuf/releases/download/v23.2/protoc-23.2-linux-aarch_64.zip -o /tmp/protoc.zip
 unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```
@@ -55,19 +55,23 @@ make install
 ## 5. Deploy frontend to all node
 
 ```bash
-pdcp login01,cranectld,craned[1-4] build/bin/* /usr/local/bin/
-pdcp login01,cranectld,craned[1-4] etc/* /usr/lib/systemd/system/
+pdcp -w login01,cranectld,crane[1-4] build/bin/* /usr/local/bin/
+pdcp -w login01,cranectld,crane[1-4] etc/* /usr/lib/systemd/system/
 
 # If you need to submit interactive jobs (crun, calloc), enable Cfored:
-pdsh login01,craned[1-4] systemctl enable cfored
-pdsh login01,craned[1-4] systemctl start cfored
+pdsh -w login01,crane[1-4] systemctl daemon-reload
+pdsh -w login01,crane[1-4] systemctl enable cfored
+pdsh -w login01,crane[1-4] systemctl start cfored
+
 # If you configured with plugin, enable cplugind
-pdsh login01,cranectld,craned[1-4] systemctl enable cplugind
-pdsh login01,cranectld,craned[1-4] systemctl start cplugind
+pdsh -w login01,crane[1-4] systemctl daemon-reload
+pdsh -w login01,cranectld,crane[1-4] systemctl enable cplugind
+pdsh -w login01,cranectld,crane[1-4] systemctl start cplugind
 ```
 
 ## 5. Install Cwrapper aliases (optional)
 You can install Slurm-style aliases for Crane using the following commands, allowing you to use Crane with Slurm command forms:
+
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOF'
 alias sbatch='cwrapper sbatch'
@@ -80,6 +84,7 @@ alias squeue='cwrapper squeue'
 alias srun='cwrapper srun'
 alias salloc='cwrapper salloc'
 EOF
-pdcp login01,craned[1-4] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
-pdsh login01,craned[1-4] chmod 644 /etc/profile.d/cwrapper.sh
+
+pdcp -w login01,crane[1-4] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
+pdsh -w login01,crane[1-4] chmod 644 /etc/profile.d/cwrapper.sh
 ```

@@ -30,7 +30,7 @@ Common accompaniments:
 ## OS and topic-specific guides
 
 - [Rocky Linux 9 guide (recommended)](<./Backend Deployment/Rocky9.md>)
-- [CentOS 7 legacy support](<./Backend Deployment/Centos7.md>)
+- [CentOS 7 guide (legacy)](<./Backend Deployment/Centos7.md>)
 - [eBPF for GRES on cgroup v2](<./Backend Deployment/EBPF.md>)
 
 More general configuration and overview:
@@ -50,15 +50,13 @@ More general configuration and overview:
 1) Choose your OS guide
 
     - Backend:
-        - [Preferred Rocky Linux 9](<./Backend Deployment/Rocky9.md>)
-        - [Legacy Centos7](<./Backend Deployment/Centos7.md>)
+        - [(Preferred) Rocky Linux 9](<./Backend Deployment/Rocky9.md>)
+        - [(Legacy) CentOS 7](<./Backend Deployment/Centos7.md>)
     - Frontend:
         - [Frontend applications](./Frontend.md)
 
 2) Install and start services per the guide:
 
     - Configure and start cranectld (control node)
-
     - Deploy and start craned on all worker nodes
-
     - Deploy frontend applications on all node(cranectld, craned and login).
