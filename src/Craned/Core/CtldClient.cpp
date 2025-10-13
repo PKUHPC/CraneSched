@@ -994,10 +994,14 @@ void CtldClient::HealthCheck_() {
   CRANE_DEBUG("Health checking.....");
 
   subprocess_s subprocess{};
-  std::vector<const char*> argv = {g_config.HealthCheck.Program.c_str(), nullptr};
+  std::vector<const char*> argv = {g_config.HealthCheck.Program.c_str(),
+                                   nullptr};
 
   if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
-    fmt::print(stderr, "[Craned Subprocess] HealthCheck subprocess creation failed: {}.\n", strerror(errno));
+    fmt::print(
+        stderr,
+        "[Craned Subprocess] HealthCheck subprocess creation failed: {}.\n",
+        strerror(errno));
     HealthCheckResultResponse_(false);
     return;
   }
@@ -1006,12 +1010,12 @@ void CtldClient::HealthCheck_() {
   int result = 0;
   const int max_wait_ms = 60000;
 
-  auto fut = std::async(std::launch::async, [pid, &result]() {
-    return waitpid(pid, &result, 0);
-  });
+  auto fut = std::async(std::launch::async,
+                        [pid, &result]() { return waitpid(pid, &result, 0); });
 
   bool child_exited = false;
-  if (fut.wait_for(std::chrono::milliseconds(max_wait_ms)) == std::future_status::ready) {
+  if (fut.wait_for(std::chrono::milliseconds(max_wait_ms)) ==
+      std::future_status::ready) {
     if (fut.get() == pid) {
       child_exited = true;
     }
@@ -1030,7 +1034,8 @@ void CtldClient::HealthCheck_() {
   if (!child_exited) {
     kill(pid, SIGKILL);
     waitpid(pid, &result, 0);
-    CRANE_WARN("HealthCheck: Timeout. stdout: {}, stderr: {}", stdout_str, stderr_str);
+    CRANE_WARN("HealthCheck: Timeout. stdout: {}, stderr: {}", stdout_str,
+               stderr_str);
     HealthCheckResultResponse_(false);
     subprocess_destroy(&subprocess);
     return;
@@ -1040,7 +1045,8 @@ void CtldClient::HealthCheck_() {
     fmt::print(stderr, "[Craned Subprocess] HealthCheck destroy failed.\n");
 
   if (result != 0) {
-    CRANE_WARN("HealthCheck: Failed (exit code:{}). stdout: {}, stderr: {}", result, stdout_str, stderr_str);
+    CRANE_WARN("HealthCheck: Failed (exit code:{}). stdout: {}, stderr: {}",
+               result, stdout_str, stderr_str);
     HealthCheckResultResponse_(false);
     return;
   }
