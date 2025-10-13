@@ -120,9 +120,7 @@ struct Config {
   ContainerConfig Container;
 
   struct HealthCheckConfig {
-    enum NodeStateEnum {
-      IDLE, ALLOC, MIXED, ANY
-    };
+    enum NodeStateEnum { IDLE, ALLOC, MIXED, ANY };
     std::string Program;
     uint64_t Interval{0};
     NodeStateEnum NodeState;
