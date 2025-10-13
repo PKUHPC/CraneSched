@@ -37,6 +37,11 @@ class CforedClient {
   struct TaskFwdMeta {
     task_id_t task_id{0};
     bool pty{false};
+    struct OutHandle {
+      std::shared_ptr<uvw::pipe_handle> pipe;
+      std::shared_ptr<uvw::tty_handle> tty;
+    };
+    OutHandle out_handle{};
 
     int stdin_write{-1};
     int stdout_read{-1};

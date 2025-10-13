@@ -186,10 +186,9 @@ ITaskInstance::~ITaskInstance() {
   if (m_parent_step_inst_->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
-    close(crun_meta->stdin_read);
-    // For crun pty job, avoid close same fd twice
-    if (crun_meta->stdout_read != crun_meta->stdin_read)
-      close(crun_meta->stdout_read);
+    // For crun non pty job, close out fd in CforedClient
+    // For crun pty job, close tty fd in CforedClient
+    if (!crun_meta->pty) close(crun_meta->stdin_read);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {

@@ -100,7 +100,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
 
 uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
   CreateX11FwdQueueElem elem;
-  elem.task_id = task_id;
+  meta.task_id = task_id;
   auto port_future = elem.promise.get_future();
   m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));
   m_clean_x11_fwd_handler_queue_async_handle_->send();
@@ -228,135 +228,126 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
     auto& meta = elem.meta;
     auto stdout_read = meta.stdout_read;
     auto task_id = meta.task_id;
-    auto poll_handle =
-        m_loop_->uninitialized_resource<uvw::poll_handle>(stdout_read);
-
-    int err = 0, retry_cnt = 0;
-    while (true) {
-      err = poll_handle->init();
-      if (err == 0) break;
-      if (err != UV_EINTR && err != UV_EAGAIN) {
-        CRANE_ERROR(
-            "[Task #{}] Failed to init poll_handle for output fd {}: {}",
-            task_id, stdout_read, uv_strerror(err));
-        break;
+    auto on_finish = [this, task_id, fd = stdout_read] {
+      auto it = m_fwd_meta_map.find(task_id);
+      if (it != m_fwd_meta_map.end()) {
+        auto& output_handle = it->second.out_handle;
+        if (!it->second.pty && output_handle.pipe) output_handle.pipe->close();
+        if (it->second.pty && output_handle.tty) output_handle.tty->close();
+        output_handle.pipe.reset();
+        output_handle.tty.reset();
       }
 
-      if (retry_cnt++ > 3) {
-        CRANE_ERROR(
-            "[Task #{}] Failed to init poll_handle for output fd {}: {} after "
-            "3 times.",
-            task_id, stdout_read, uv_strerror(err));
-        break;
+      close(fd);
+
+      CRANE_DEBUG("[Task #{}] Finished its output.", task_id);
+
+      bool ok_to_free = this->TaskOutputFinish(task_id);
+      if (ok_to_free) {
+        CRANE_DEBUG("[Task #{}] It's ok to unregister.", task_id);
+        this->TaskEnd(task_id);
+      }
+    };
+    std::shared_ptr<uvw::pipe_handle> ph;
+    std::shared_ptr<uvw::tty_handle> th;
+    int err = 0;
+    if (!meta.pty) {
+      // non pty: use pipe_handle
+      ph = m_loop_->uninitialized_resource<uvw::pipe_handle>(false);
+      err = ph->init();
+      if (err) {
+        CRANE_ERROR("[Task #{}] Failed to init pipe_handle for fd {}: {}",
+                    meta.task_id, meta.stdout_read, uv_strerror(err));
+        elem.promise.set_value(false);
+        close(meta.stdout_read);
+        continue;
       }
 
-      CRANE_DEBUG(
-          "[Task #{}] Recoverable error {} when initializing poll_handle "
-          "for output fd {}, retrying...",
-          task_id, uv_strerror(err), stdout_read);
+      err = ph->open(meta.stdout_read);
+      if (err) {
+        CRANE_ERROR("[Task #{}] Failed to open pipe_handle for fd {}: {}",
+                    meta.task_id, meta.stdout_read, uv_strerror(err));
+        elem.promise.set_value(false);
+        close(meta.stdout_read);
+        continue;
+      }
+      meta.out_handle.pipe = ph;
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+      ph->on<uvw::data_event>([this](uvw::data_event& e, uvw::pipe_handle&) {
+        if (e.length > 0) {
+          std::string output(e.data.get(), e.length);
+          this->TaskOutPutForward(output);
+        }
+      });
 
-    if (err != 0) {
-      CRANE_ERROR(
-          "[Task #{}] failed to init poll_handle for output fd {}. "
-          "Close poll handle and fd.",
-          task_id, stdout_read);
+      ph->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::pipe_handle& h) {
+        // EOF Received
+        h.close();
+        on_finish();
+      });
 
-      if (poll_handle) poll_handle->close();
-      close(stdout_read);
-      elem.promise.set_value(false);
-      continue;
-      // TODO: handle failed status
+      ph->on<uvw::error_event>([tid = meta.task_id, on_finish](
+                                   uvw::error_event& e, uvw::pipe_handle& h) {
+        CRANE_WARN("[Task #{}]  output pipe error: {}. Closing.", tid,
+                   e.what());
+        h.close();
+        on_finish();
+      });
+
+      ph->on<uvw::close_event>(
+          [tid = meta.task_id](uvw::close_event&, uvw::pipe_handle&) {
+            CRANE_TRACE("[Task #{}] Output pipe closed.", tid);
+          });
+
+      ph->read();
+    } else {
+      // pty: use tty_handle. The 2nd argument true means it's a readable tty.
+      th = m_loop_->uninitialized_resource<uvw::tty_handle>(meta.stdout_read,
+                                                            true);
+      err = th->init();
+      if (err) {
+        CRANE_ERROR("[Task #{}] Failed to init tty_handle for pty fd {}: {}",
+                    meta.task_id, meta.stdout_read, uv_strerror(err));
+        elem.promise.set_value(false);
+        continue;
+      }
+      meta.out_handle.tty = th;
+
+      th->on<uvw::data_event>([this](uvw::data_event& e, uvw::tty_handle&) {
+        if (e.length > 0) {
+          std::string output(e.data.get(), e.length);
+          this->TaskOutPutForward(output);
+        }
+      });
+
+      th->on<uvw::end_event>([on_finish](uvw::end_event&, uvw::tty_handle& h) {
+        // The remote end is closed, go to EOF process.
+        h.close();
+        on_finish();
+      });
+
+      th->on<uvw::error_event>([tid = meta.task_id, on_finish](
+                                   uvw::error_event& e, uvw::tty_handle& h) {
+        CRANE_WARN("[Task #{}] pty read error: {}. Closing.", tid, e.what());
+        h.close();
+        on_finish();
+      });
+
+      th->on<uvw::close_event>(
+          [tid = meta.task_id](uvw::close_event&, uvw::tty_handle&) {
+            CRANE_TRACE("[Task #{}] Pty closed.", tid);
+          });
+
+      th->read();
     }
     {
       absl::MutexLock lock(&m_mtx_);
       m_fwd_meta_map[task_id] = meta;
+      if (ph)
+        ph->read();
+      else if (th)
+        th->read();
     }
-    auto poll_cb = [this, task_id, meta](const uvw::poll_event&,
-                                         uvw::poll_handle& h) {
-      CRANE_TRACE("[Task #{}] Detect output.", task_id);
-
-      constexpr int MAX_BUF_SIZE = 4096;
-      char buf[MAX_BUF_SIZE];
-
-      auto ret = read(meta.stdout_read, buf, MAX_BUF_SIZE);
-      bool read_finished{false};
-
-      if (ret == 0) {
-        if (!meta.pty) {
-          read_finished = true;
-        } else {
-          // For pty,do nothing, process exit on return -1 and error set to
-          // EIO
-          CRANE_TRACE("[Task #{}] Read EOF from pty on cfored {}", task_id,
-                      m_cfored_name_);
-        }
-      }
-
-      if (ret == -1) {
-        if (!meta.pty) {
-          CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
-                      std::strerror(errno));
-          return;
-        }
-
-        if (errno == EIO) {
-          // For pty output, the read() will return -1 with errno set to EIO
-          // when process exit.
-          // ref: https://unix.stackexchange.com/questions/538198
-          read_finished = true;
-        } else if (errno == EAGAIN) {
-          // Read before the process begin.
-          return;
-        } else {
-          CRANE_ERROR("[Task #{}] Error when reading output, error {}", task_id,
-                      std::strerror(errno));
-          return;
-        }
-      }
-
-      if (read_finished) {
-        CRANE_TRACE("[Task #{}] to cfored {} finished its output.", task_id,
-                    m_cfored_name_);
-        h.close();
-        close(meta.stdout_read);
-
-        bool ok_to_free = this->TaskOutputFinish(meta.task_id);
-        if (ok_to_free) {
-          CRANE_TRACE("It's ok to begin unregister task #{} on {}", task_id,
-                      m_cfored_name_);
-          TaskEnd(meta.task_id);
-        }
-        return;
-      }
-
-      std::string output(buf, ret);
-      CRANE_TRACE("Fwd to task #{}: len[{}]", task_id, ret);
-      this->TaskOutPutForward(output);
-    };
-    poll_handle->on<uvw::poll_event>(poll_cb);
-    int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-    if (ret < 0) {
-      CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-      if (poll_handle) poll_handle->close();
-      elem.promise.set_value(false);
-      continue;
-    }
-    // Doing one-time triggering in case of missing EOF of fast-ending task.
-    auto immediate = m_loop_->uninitialized_resource<uvw::check_handle>();
-    immediate->init();
-    immediate->on<uvw::check_event>(
-        [poll_cb = poll_cb, poll_handle](const uvw::check_event&,
-                                         uvw::check_handle& h) {
-          uvw::poll_event fake_event{uvw::details::uvw_poll_event::READABLE};
-          poll_cb(fake_event, *poll_handle);
-          h.close();
-        });
-    immediate->start();
-
-    elem.promise.set_value(true);
   }
 }
 
