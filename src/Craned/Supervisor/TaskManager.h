@@ -381,7 +381,6 @@ class TaskManager {
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
   void EvTaskTimerCb_(bool is_deadline);
-  void EvDeadlineTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
