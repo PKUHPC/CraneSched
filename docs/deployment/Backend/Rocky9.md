@@ -1,9 +1,8 @@
 # Rocky Linux 9
-
 !!! tip
-    This tutorial is designed for **Rocky Linux 9**, but it is also compatible with **Rocky Linux 8** and **Fedora**.
+    This tutorial is primarily designed for **Rocky Linux 9**, but it should be compatible with **Rocky Linux 8** and **Fedora**.
 
-    This tutorial is designed for **x86-64** architecture. For other architectures, such as **ARM64**, ensure you modify the download links and commands as needed.
+    The instructions are tailored for the **x86-64** architecture. For other architectures, such as ARM64, ensure you modify the download links and commands as needed.
 
 Please run all commands as the root user throughout this tutorial.
 
