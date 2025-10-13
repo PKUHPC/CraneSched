@@ -1,2 +1,86 @@
-site_name: CraneSched
-theme: readthedocs
+site_name: CraneSched Documentation
+site_description: Documentation for CraneSched, an HPC and AI Scheduling System.
+site_author: High Performance Computing Platform of Peking University
+site_url: https://cranesched.readthedocs.io/
+
+# Repository
+repo_name: PKUHPC/CraneSched
+repo_url: https://github.com/PKUHPC/CraneSched
+
+# Copyright
+copyright: Copyright &copy; 2022 - 2025 PKUHPC
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - navigation.footer
+    - navigation.tracking
+  logo: images/logo.png
+  favicon: images/logo.png
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - attr_list
+  - admonition
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.tasklist
+  - pymdownx.caret
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.arithmatex:
+      generic: true
+
+nav:
+  - Home: index.md
+  - Deployment:
+    - Overview: deployment/index.md
+    - Frontend:
+      - Deployment: deployment/frontend/frontend.md
+      - Plugins: deployment/frontend/plugins.md
+    - Backend:
+      - Rocky Linux 9: deployment/backend/Rocky9.md
+      - CentOS 7: deployment/backend/CentOS7.md
+      - Packaging Guide: deployment/backend/packaging.md
+      - eBPF Support: deployment/backend/eBPF.md
+    - Configuration:
+      - Cluster Configuration: deployment/configuration/config.md
+      - Database Configuration: deployment/configuration/database.md
+      - PAM Module: deployment/configuration/pam.md
+      - Multi-node Deployment: deployment/configuration/multi-node.md
+  - Commands:
+    - cacct: command/cacct.md
+    - cacctmgr: command/cacctmgr.md
+    - calloc: command/calloc.md
+    - cbatch: command/cbatch.md
+    - ccancel: command/ccancel.md
+    - ccontrol: command/ccontrol.md
+    - ceff: command/ceff.md
+    - cinfo: command/cinfo.md
+    - cqueue: command/cqueue.md
+    - crun: command/crun.md
+  - Reference:
+    - Exit Codes: referrence/exit_code.md

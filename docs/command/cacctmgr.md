@@ -1,5 +1,8 @@
 # cacctmgr 管理用户/账户信息 #
 
+!!! warning
+    This document is a work in progress and may contain inaccuracies or incomplete information. Please refer to the official documentation for the most accurate and up-to-date details.
+
 **cacctmgr 可以管理账户/用户信息，包括添加账户/用户、删除账户/用户、查找账户/用户。**
 
 CraneSched作业调度系统中有四个用户角色： 

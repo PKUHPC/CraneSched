@@ -80,7 +80,7 @@ cqueue -h
 ```SQL
 cqueue -N
 ```
-![cqueue](../images/cqueue/cqueue_H.png)
+![cqueue](../images/cqueue/cqueue_N.png)
 
 ```SQL
 cqueue -S
