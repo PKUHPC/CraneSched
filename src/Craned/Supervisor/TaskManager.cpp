@@ -1752,39 +1752,32 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   }
 }
 
-void TaskManager::EvTaskTimerCb_() {
-  CRANE_TRACE("task #{} exceeded its time limit. Terminating it...",
-              g_config.JobId);
-
+void TaskManager::EvTaskTimerCb_(bool is_deadline) {
+  std::string log_reason =
+      is_deadline ? "reached its deadline" : "exceeded its time limit";
+  CRANE_TRACE("task #{} {}. Terminating it...", g_config.JobId, log_reason);
   DelTerminationTimer_();
 
   if (m_step_.IsBatch() || m_step_.IsCrun()) {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
-        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
+        .termination_reason = is_deadline
+                                  ? TerminatedBy::TERMINATION_BY_DEADLINE
+                                  : TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
   } else {
-    ActivateTaskStatusChange_(m_step_.job_id,
-                              crane::grpc::TaskStatus::ExceedTimeLimit,
-                              ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+    if (is_deadline) {
+      ActivateTaskStatusChange_(
+          m_step_.job_id, crane::grpc::TaskStatus::Deadline,
+          ExitCode::kExitCodeReachedDeadline, std::nullopt);
+    } else {
+      ActivateTaskStatusChange_(
+          m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+          ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+    }
   }
 }
 
-void TaskManager::EvDeadlineTaskTimerCb_() {
-  CRANE_TRACE("task #{} reached its deadline. Terminating it...",
-              g_config.JobId);
-
-  DelTerminationTimer_();
-
-  if (m_step_.IsBatch()) {
-    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
-        .termination_reason = TerminatedBy::TERMINATION_BY_DEADLINE});
-    m_terminate_task_async_handle_->send();
-  } else {
-    ActivateTaskStatusChange_(m_step_.job_id, crane::grpc::TaskStatus::Deadline,
-                              ExitCode::kExitCodeReachedDeadline,
-                              std::optional("Deadline"));
-  }
-}
+void TaskManager::EvDeadlineTaskTimerCb_() {}
 
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
@@ -1950,14 +1943,14 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       int64_t new_time_limit_sec =
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
       if (deadline_sec <= new_time_limit_sec) {
-        AddDeadlineTerminationTimer_(deadline_sec);
+        AddTerminationTimer_(deadline_sec, true);
       } else {
-        AddTerminationTimer_(new_time_limit_sec);
+        AddTerminationTimer_(new_time_limit_sec, false);
       }
     } else {
       // If the task haven't timed out, set up a new timer.
       AddTerminationTimer_(
-          ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
+          ToInt64Seconds((new_time_limit - (absl::Now() - start_time))), false);
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
@@ -1981,16 +1974,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (m_step_.GetStep().has_deadline_time()) {
       int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
                              absl::ToUnixSeconds(absl::Now());
-      if (deadline_sec <= sec) {
-        AddDeadlineTerminationTimer_(deadline_sec);
-        CRANE_TRACE("Add a deadline timer of {} seconds", deadline_sec);
-      } else {
-        AddTerminationTimer_(sec);
-        CRANE_TRACE("Add a timer of {} seconds", sec);
-      }
+      bool is_deadline = deadline_sec <= sec ? true : false;
+      std::string log_timer = deadline_sec <= sec ? "deadline" : "time_limit";
+      deadline_sec = deadline_sec <= sec ? deadline_sec : sec;
+      AddTerminationTimer_(deadline_sec, is_deadline);
+      CRANE_TRACE("Add a {} timer of {} seconds", log_timer, deadline_sec);
     } else {
-      AddTerminationTimer_(sec);
-      CRANE_TRACE("Add a timer of {} seconds", sec);
+      AddTerminationTimer_(sec, false);
+      CRANE_TRACE("Add a time_limit timer of {} seconds", sec);
     }
 
     m_step_.pwd.Init(m_step_.uid);
