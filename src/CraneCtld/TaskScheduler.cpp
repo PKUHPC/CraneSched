@@ -1604,7 +1604,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
       m_cancel_task_queue_.enqueue(
           CancelPendingTaskQueueElem{.task = std::move(it->second),
-                                     .reason = "canceled by user"});
+                                     .reason = "cancelled by user"});
       m_cancel_task_async_handle_->send();
 
       m_pending_task_map_.erase(it);
