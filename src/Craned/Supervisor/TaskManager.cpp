@@ -1777,8 +1777,6 @@ void TaskManager::EvTaskTimerCb_(bool is_deadline) {
   }
 }
 
-void TaskManager::EvDeadlineTaskTimerCb_() {}
-
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stop_queue_.try_dequeue(task_id)) {
