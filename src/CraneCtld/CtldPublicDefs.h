@@ -258,6 +258,7 @@ struct CranedMeta {
   ResourceInNode res_in_use;
 
   bool drain{false};
+  bool configure{false};
   std::string state_reason;
   absl::Time last_busy_time;
 
