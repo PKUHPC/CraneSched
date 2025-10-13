@@ -354,34 +354,6 @@ CtldClient::CtldClient() {
         return success;
       });
 
-  if (g_config.HealthCheck.Interval > 0L) {
-    m_health_check_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
-    if (g_config.HealthCheck.Cycle) {
-      m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
-        if (CheckNodeState_())
-          HealthCheck_();
-        int interval = g_config.HealthCheck.Interval;
-        std::mt19937 rng{std::random_device{}()};
-        std::uniform_int_distribution<int> dist(1, interval);
-        int random_delay = dist(rng);
-        h.stop();
-        h.start(std::chrono::seconds(random_delay), std::chrono::seconds(0));
-      });
-      int interval = g_config.HealthCheck.Interval;
-      std::mt19937 rng{std::random_device{}()};
-      std::uniform_int_distribution<int> dist(1, interval);
-      int random_delay = dist(rng);
-      m_health_check_handle_->start(std::chrono::seconds(random_delay), std::chrono::seconds(0));
-    } else {
-      m_health_check_handle_->on<uvw::timer_event>([this](const uvw::timer_event&, uvw::timer_handle& h) {
-        if (!CheckNodeState_()) return;
-        HealthCheck_();
-      });
-      m_health_check_handle_->start(std::chrono::seconds(g_config.HealthCheck.Interval),
-        std::chrono::seconds(g_config.HealthCheck.Interval));
-    }
-  }
-
   m_uvw_thread_ = std::thread([this] {
     util::SetCurrentThreadName("PingCtldThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -411,6 +383,7 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  if (m_health_check_thread_.joinable()) m_uvw_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -700,6 +673,20 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
 
   if (g_config.HealthCheck.Interval > 0L) {
     HealthCheck_();
+    m_health_check_thread_ = std::thread([this] {
+      std::mt19937 rng{std::random_device{}()};
+      do {
+        uint64_t interval = g_config.HealthCheck.Interval;
+        int delay = interval;
+        if (g_config.HealthCheck.Cycle) {
+          std::uniform_int_distribution<int> dist(1, interval);
+          delay = dist(rng);
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(delay));
+        if (m_stopping_ || !m_stub_) return;
+        if (CheckNodeState_()) HealthCheck_();
+      } while (true);
+    });
   }
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
@@ -1001,7 +988,7 @@ bool CtldClient::SendStatusChanges_(
 }
 
 void CtldClient::HealthCheckResultResponse_(bool is_health) const {
-  if (m_stopping_ || !m_stub_) return ;
+  if (m_stopping_ || !m_stub_) return;
 
   grpc::ClientContext context;
   crane::grpc::HealthCheckResponseRequest request;
@@ -1010,109 +997,78 @@ void CtldClient::HealthCheckResultResponse_(bool is_health) const {
   request.set_craned_id(g_config.CranedIdOfThisNode);
   request.set_healthy(is_health);
 
-  m_stub_->HealthCheckResponse(&context, request, &reply);
+  auto result = m_stub_->HealthCheckResponse(&context, request, &reply);
+  if (!result.ok()) {
+    CRANE_ERROR("HealthCheckResultResponse failed: is_health={}", is_health);
+  }
 }
 
 void CtldClient::HealthCheck_() {
+  if (m_stopping_) return;
+
   CRANE_DEBUG("Health checking.....");
 
-  int pipefd[2];
-  if (pipe(pipefd) != 0) {
-    CRANE_ERROR("HealthCheck: pipe error");
+  subprocess_s subprocess{};
+  std::vector<const char*> argv = {g_config.HealthCheck.Program.c_str(), nullptr};
+
+  if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
+    fmt::print(stderr, "[Craned Subprocess] HealthCheck subprocess creation failed: {}.\n", strerror(errno));
     HealthCheckResultResponse_(false);
     return;
   }
 
-  pid_t pid = fork();
-  if (pid < 0) {
-    CRANE_ERROR("HealthCheck: fork failed");
-    close(pipefd[0]);
-    close(pipefd[1]);
-    HealthCheckResultResponse_(false);
-    return;
-  }
+  pid_t pid = subprocess.child;
+  int result = 0;
+  const int max_wait_ms = 60000;
 
-  if (pid == 0) {
-    close(pipefd[0]);
-    dup2(pipefd[1], STDOUT_FILENO);
-    dup2(pipefd[1], STDERR_FILENO);
-    close(pipefd[1]);
-    execl(g_config.HealthCheck.Program.c_str(),
-          g_config.HealthCheck.Program.c_str(), static_cast<char*>(nullptr));
-    perror("execl failed");
-    _exit(127);
-  }
+  auto fut = std::async(std::launch::async, [pid, &result]() {
+    return waitpid(pid, &result, 0);
+  });
 
-  close(pipefd[1]);
-  int flags = fcntl(pipefd[0], F_GETFL, 0);
-  fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
-
-  std::string output;
-  char buf[256];
-  int elapsed = 0;
-  int status = 0;
-  const int interval = 100;  // ms
-  uint64_t max_wait_ms = 60000;
   bool child_exited = false;
-
-  while (elapsed < (int)max_wait_ms) {
-    ssize_t n;
-    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
-      buf[n] = '\0';
-      output += buf;
-    }
-    pid_t result = waitpid(pid, &status, WNOHANG);
-    if (result == pid) {
+  if (fut.wait_for(std::chrono::milliseconds(max_wait_ms)) == std::future_status::ready) {
+    if (fut.get() == pid) {
       child_exited = true;
-      break;
     }
-    usleep(interval * 1000);
-    elapsed += interval;
   }
 
-  ssize_t n;
-  while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
-    buf[n] = '\0';
-    output += buf;
-  }
-  close(pipefd[0]);
+  auto read_stream = [](std::FILE* f) {
+    std::string out;
+    char buf[4096];
+    while (std::fgets(buf, sizeof(buf), f)) out.append(buf);
+    return out;
+  };
+
+  std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
+  std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
 
   if (!child_exited) {
     kill(pid, SIGKILL);
-    waitpid(pid, &status, 0);
-    output += "\nHealth check timed out.";
-    CRANE_WARN("HealthCheck: Timeout. Output: {}", output.c_str());
+    waitpid(pid, &result, 0);
+    CRANE_WARN("HealthCheck: Timeout. stdout: {}, stderr: {}", stdout_str, stderr_str);
+    HealthCheckResultResponse_(false);
+    subprocess_destroy(&subprocess);
+    return;
+  }
+
+  if (subprocess_destroy(&subprocess) != 0)
+    fmt::print(stderr, "[Craned Subprocess] HealthCheck destroy failed.\n");
+
+  if (result != 0) {
+    CRANE_WARN("HealthCheck: Failed (exit code:{}). stdout: {}, stderr: {}", result, stdout_str, stderr_str);
     HealthCheckResultResponse_(false);
     return;
   }
 
-  if (WIFEXITED(status)) {
-    int exit_code = WEXITSTATUS(status);
-    if (exit_code != 0) {
-      CRANE_WARN("HealthCheck: Failed (exit code:{}). Output: {}",
-                 exit_code, output.c_str());
-      HealthCheckResultResponse_(false);
-      return;
-    }
-  } else if (WIFSIGNALED(status)) {
-    CRANE_WARN("HealthCheck: Killed by signal {}. Output: {}",
-               WTERMSIG(status), output.c_str());
-    HealthCheckResultResponse_(false);
-    return;
-  } else {
-    CRANE_WARN("HealthCheck: Unknown exit status {}. Output: {}", status, output.c_str());
-    HealthCheckResultResponse_(false);
-    return;
-  }
-
+  CRANE_DEBUG("Health check success, stdout: {}", stdout_str);
   HealthCheckResultResponse_(true);
-
-  CRANE_DEBUG("Health check success, Output: {}", output);
 }
 
 bool CtldClient::CheckNodeState_() {
-  if (g_config.HealthCheck.NodeState == Config::HealthCheckConfig::ANY) return true;
+  if (g_config.HealthCheck.NodeState == Config::HealthCheckConfig::ANY)
+    return true;
 
+  // use cache?
   if (g_job_mgr->GetNodeState() == g_config.HealthCheck.NodeState) return true;
 
   return false;

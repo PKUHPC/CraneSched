@@ -898,13 +898,12 @@ void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(const CranedId& craned
   if (!craned_meta_map_.Contains(craned_id)) return ;
   auto craned_meta = craned_meta_map_[craned_id];
   // only update drain state when the reason is 'Node failed health check'
-  std::string reason = "Node failed health check";
-  if (craned_meta->drain && craned_meta->state_reason == reason) {
+  if (craned_meta->drain && craned_meta->state_reason == HealthCheckFailedReason) {
     craned_meta->drain = !is_health;
     if (is_health) craned_meta->state_reason.clear();
   } else if (!craned_meta->drain) {
     craned_meta->drain = !is_health;
-    craned_meta->state_reason = reason;
+    craned_meta->state_reason = HealthCheckFailedReason;
     if (is_health) craned_meta->state_reason.clear();
   }
 }
