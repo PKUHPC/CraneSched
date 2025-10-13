@@ -491,7 +491,6 @@ class TaskManager {
 
   // Handle stopped tasks
   void EvTaskTimerCb_(bool is_deadline);
-  void EvDeadlineTaskTimerCb_();
   void EvCleanTaskStopQueueCb_();
 
   // Handle task termination requests
