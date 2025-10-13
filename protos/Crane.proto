@@ -897,7 +897,7 @@ message ResetUserCredentialReply {
   repeated RichError rich_error_list = 2;
 }
 
-message QueryAccountUserSummaryItemRequest {
+message QueryAccountUserQosSummaryItemRequest {
   repeated string filter_accounts = 1;
   repeated string filter_users = 2;
   repeated string filter_qoss = 3;
@@ -905,8 +905,8 @@ message QueryAccountUserSummaryItemRequest {
   google.protobuf.Timestamp filter_end_time = 5;
 }
 
-message QueryAccountUserSummaryItemReply {
-  repeated AccountUserSummaryItem items = 1;
+message QueryAccountUserQosSummaryItemReply {
+  repeated AccountUserQosSummaryItem items = 1;
 }
 
 message QueryAccountUserWckeySummaryItemRequest {
@@ -976,7 +976,7 @@ service CraneCtld {
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
-  rpc QueryAccountUserSummaryItemStream(QueryAccountUserSummaryItemRequest) returns (stream QueryAccountUserSummaryItemReply);
+  rpc QueryAccountUserQosSummaryItemStream(QueryAccountUserQosSummaryItemRequest) returns (stream QueryAccountUserQosSummaryItemReply);
   rpc QueryAccountUserWckeySummaryItemStream(QueryAccountUserWckeySummaryItemRequest) returns (stream QueryAccountUserWckeySummaryItemReply);
 }
 

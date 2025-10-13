@@ -6,9 +6,9 @@ start_time = datetime(2024, 12, 2, 23, 0, 0)
 end_time = datetime(2025, 11, 26, 0, 0, 0)
 task_id = 1
 current_time = start_time
-num_per_hour = 2
+num_per_hour = 4
 account_range = 2
-max_total = 4  # 只生成10000000条
+max_total = 8  # 只生成10000000条
 
 written = 0
 
@@ -21,7 +21,7 @@ with open("tasks_bulk.json", "w") as f:
             acc_num = random.randint(1, account_range)
             account_name = f"account_{acc_num}"
             username = f"user_{acc_num}"
-            time_end = time_start + random.randint(10, 100000)
+            time_end = time_start +  random.randint(10, 20)
             cpus_alloc = float(random.randint(1, 100))
             nodes_alloc = random.randint(1, 100)
 

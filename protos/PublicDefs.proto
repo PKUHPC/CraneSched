@@ -608,7 +608,7 @@ message CranedRemoteMeta {
   uint32 config_crc = 9;
 }
 
-message AccountUserSummaryItem {
+message AccountUserQosSummaryItem {
   string cluster = 1;
   string account = 2;
   string username = 3;
