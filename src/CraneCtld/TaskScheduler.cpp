@@ -799,7 +799,8 @@ void TaskScheduler::ScheduleThread_() {
         if (pd_it != m_pending_task_map_.end()) {
           auto& task = pd_it->second;
           m_cancel_task_queue_.enqueue(
-              CancelPendingTaskQueueElem{.task = std::move(task)});
+              CancelPendingTaskQueueElem{.task = std::move(task),
+                                         .reason = "reached deadline"});
           m_cancel_task_async_handle_->send();
           m_pending_task_map_.erase(pd_it);
           CRANE_DEBUG("Terminate task #{} due to deadline", task_id);
@@ -1602,7 +1603,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_cancelled_tasks(task_id);
 
       m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{std::move(it->second)});
+          CancelPendingTaskQueueElem{.task = std::move(it->second),
+                                     .reason = "canceled by user"});
       m_cancel_task_async_handle_->send();
 
       m_pending_task_map_.erase(it);

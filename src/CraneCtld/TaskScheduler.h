@@ -981,6 +981,7 @@ class TaskScheduler {
 
   struct CancelPendingTaskQueueElem {
     std::unique_ptr<TaskInCtld> task;
+    std::string reason;
   };
 
   struct CancelRunningTaskQueueElem {
