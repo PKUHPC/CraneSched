@@ -1,29 +1,29 @@
 // DO NOT
-#include <linux/bpf.h>
+#include <linux/types.h>
 // REORDER
-#include <bpf/bpf_helpers.h>
+#include <linux/bpf.h>
 // THESE
-#include <bpf/bpf_core_read.h>
+#include <bpf/bpf_helpers.h>
 // HEADERS
-#include <stdint.h>
+#include <bpf/bpf_core_read.h>
 
 enum BPF_PERMISSION { ALLOW = 0, DENY };
 
 #pragma pack(push, 8)
 struct BpfKey {
-  uint64_t cgroup_id;
-  uint32_t major;
-  uint32_t minor;
+  __u64 cgroup_id;
+  __u32 major;
+  __u32 minor;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 8)
 struct BpfDeviceMeta {
-  uint32_t major;
-  uint32_t minor;
-  int permission;
-  int16_t access;
-  int16_t type;
+  __u32 major;
+  __u32 minor;
+  __s32 permission;
+  __s16 access;
+  __s16 type;
 };
 #pragma pack(pop)
 
@@ -40,13 +40,13 @@ struct {
 SEC("cgroup/dev")
 int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   // Using CO-RE to read ctx fields
-  uint32_t major = BPF_CORE_READ(ctx, major);
-  uint32_t minor = BPF_CORE_READ(ctx, minor);
-  uint32_t access_type = BPF_CORE_READ(ctx, access_type);
+  __u32 major = BPF_CORE_READ(ctx, major);
+  __u32 minor = BPF_CORE_READ(ctx, minor);
+  __u32 access_type = BPF_CORE_READ(ctx, access_type);
 
   struct BpfKey key = {bpf_get_current_cgroup_id(), major, minor};
   // value.major in map(0,0,0) contains log level
-  struct BpfKey log_key = {(uint64_t)0, (uint32_t)0, (uint32_t)0};
+  struct BpfKey log_key = {(__u64)0, (__u32)0, (__u32)0};
   struct BpfDeviceMeta *log_level_meta;
 
   log_level_meta =
@@ -72,8 +72,8 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
     return 1;
   }
 
-  short type = access_type & 0xFFFF;
-  short access = access_type >> 16;
+  __s16 type = access_type & 0xFFFF;
+  __s16 access = access_type >> 16;
 
   if (enable_logging)
     bpf_printk("meta Device major=%d, minor=%d, access_type=%d\n", meta->major,
