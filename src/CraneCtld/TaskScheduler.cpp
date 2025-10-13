@@ -1008,7 +1008,7 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       auto iter = m_running_task_map_.find(task_id);
       if (iter == m_running_task_map_.end()) {
         CRANE_TRACE("Task #{} not in Rn queue for suspend", task_id);
-        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
         continue;
       }
 
@@ -1037,19 +1037,21 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
     std::vector<CranedId> offline_nodes;
     offline_nodes.reserve(executing_nodes.size());
     for (const auto& craned_id : executing_nodes) {
-      if (!g_meta_container->CheckCranedOnline(craned_id))
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
         offline_nodes.push_back(craned_id);
+        break;
+      }
     }
 
     if (!offline_nodes.empty()) {
       // Ensure suspension only proceeds when every craned involved is online.
       CRANE_WARN("Task #{} suspend skipped because craned(s) {} are offline.",
                  task_id, absl::StrJoin(offline_nodes, ","));
-      results.emplace_back(CraneErrCode::ERR_NO_AVAIL_NODE);
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
       continue;
     }
 
-    std::vector<job_id_t> job_ids{static_cast<job_id_t>(task_id)};
+    std::vector<job_id_t> job_ids{task_id};
     std::vector<CranedId> suspended_nodes;
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
     std::atomic_bool has_failure{false};
@@ -1177,18 +1179,20 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
     std::vector<CranedId> offline_nodes;
     offline_nodes.reserve(executing_nodes.size());
     for (const auto& craned_id : executing_nodes) {
-      if (!g_meta_container->CheckCranedOnline(craned_id))
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
         offline_nodes.push_back(craned_id);
+        break;
+      }
     }
 
     if (!offline_nodes.empty()) {
       CRANE_WARN("Task #{} resume skipped because craned(s) {} are offline.",
                  task_id, absl::StrJoin(offline_nodes, ","));
-      results.emplace_back(CraneErrCode::ERR_NO_AVAIL_NODE);
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
       continue;
     }
 
-    std::vector<job_id_t> job_ids{static_cast<job_id_t>(task_id)};
+    std::vector<job_id_t> job_ids{task_id};
     std::vector<CranedId> resumed_nodes;
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
     std::atomic_bool has_failure{false};

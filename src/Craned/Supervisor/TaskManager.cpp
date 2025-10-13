@@ -1968,12 +1968,20 @@ void TaskManager::EvCleanTaskSignalQueueCb_() {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
       }
+      if (m_step_.status != crane::grpc::TaskStatus::Running) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
       result = SuspendRunningTasks_();
       if (result == CraneErrCode::SUCCESS)
         m_step_.status = crane::grpc::TaskStatus::Suspended;
       break;
     }
     case TaskSignalQueueElem::Action::Resume: {
+      if (m_step_.status == crane::grpc::TaskStatus::Running) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
       if (m_step_.status != crane::grpc::TaskStatus::Suspended) {
         result = CraneErrCode::ERR_INVALID_PARAM;
         break;
