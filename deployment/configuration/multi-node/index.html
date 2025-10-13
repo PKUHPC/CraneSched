@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/configuration/multi-node/" />
+      <link rel="shortcut icon" href="../../../img/favicon.ico" />
+    <title>Multi-node Deployment - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Multi-node Deployment";
+        var mkdocs_page_input_path = "deployment/configuration/multi-node.md";
+        var mkdocs_page_url = "/deployment/configuration/multi-node/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../../">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" >Configuration</a>
+    <ul class="current">
+                <li class="toctree-l2"><a class="reference internal" href="../config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2 current"><a class="reference internal current" href="#">Multi-node Deployment</a>
+    <ul class="current">
+    <li class="toctree-l3"><a class="reference internal" href="#prerequisites">Prerequisites</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#deployment-methods">Deployment Methods</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#method-1-using-scp">Method 1: Using SCP</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#method-2-using-pdsh">Method 2: Using PDSH</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#alternative-manual-binary-copy">Alternative: Manual Binary Copy</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#verify-deployment">Verify Deployment</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#updating-deployed-nodes">Updating Deployed Nodes</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#troubleshooting">Troubleshooting</a>
+    </li>
+    </ul>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+          <li class="breadcrumb-item">Configuration</li>
+      <li class="breadcrumb-item active">Multi-node Deployment</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/configuration/multi-node.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="multi-node-deployment">Multi-node Deployment</h1>
+<p>This guide covers deploying CraneSched binaries and configurations across multiple nodes in a cluster.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>CraneSched is built and tested on one node (typically the control node)</li>
+<li>All nodes have network connectivity and can resolve hostnames</li>
+<li>You have root or sudo access to all nodes</li>
+</ul>
+<h2 id="deployment-methods">Deployment Methods</h2>
+<h3 id="method-1-using-scp">Method 1: Using SCP</h3>
+<p>Suitable for small clusters or when deploying to specific nodes individually.</p>
+<h4 id="deploy-to-control-node">Deploy to Control Node</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Copy control node binary</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ssh<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;mkdir -p /etc/crane&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>scp<span class="w"> </span>CraneSched-1.1.2-Linux-x86_64-cranectld.rpm<span class="w"> </span>cranectl:/tmp
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>ssh<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm&quot;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>scp<span class="w"> </span>/etc/crane/config.yaml<span class="w"> </span>cranectl:/etc/crane/
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>scp<span class="w"> </span>/etc/crane/database.yaml<span class="w"> </span>cranectl:/etc/crane/
+</code></pre></div>
+<h4 id="deploy-to-compute-nodes">Deploy to Compute Nodes</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Copy compute node binary</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ssh<span class="w"> </span>crane02<span class="w"> </span><span class="s2">&quot;mkdir -p /etc/crane&quot;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>scp<span class="w"> </span>CraneSched-1.1.2-Linux-x86_64-craned.rpm<span class="w"> </span>crane02:/tmp
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>ssh<span class="w"> </span>crane02<span class="w"> </span><span class="s2">&quot;rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm&quot;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>scp<span class="w"> </span>/etc/crane/config.yaml<span class="w"> </span>crane02:/etc/crane/
+</code></pre></div>
+<p>Repeat for each compute node (crane03, crane04, etc.).</p>
+<h3 id="method-2-using-pdsh">Method 2: Using PDSH</h3>
+<p>Recommended for larger clusters. PDSH allows parallel execution across multiple nodes.</p>
+<h4 id="install-pdsh">Install PDSH</h4>
+<p><strong>Rocky 9:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>pdsh
+</code></pre></div></p>
+<p><strong>CentOS 7:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>yum<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>pdsh
+</code></pre></div></p>
+<h4 id="deploy-to-control-nodes">Deploy to Control Nodes</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Copy and install cranectld</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span>CraneSched-1.1.2-Linux-x86_64-cranectld.rpm<span class="w"> </span>/tmp
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># Copy configuration files</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span>/etc/crane/config.yaml<span class="w"> </span>/etc/crane/
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span>/etc/crane/database.yaml<span class="w"> </span>/etc/crane/
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="c1"># Start service</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;systemctl daemon-reload&quot;</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;systemctl enable cranectld&quot;</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;systemctl start cranectld&quot;</span>
+</code></pre></div>
+<h4 id="deploy-to-compute-nodes_1">Deploy to Compute Nodes</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Copy and install craned</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>CraneSched-1.1.2-Linux-x86_64-craned.rpm<span class="w"> </span>/tmp
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Copy configuration file</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>/etc/crane/config.yaml<span class="w"> </span>/etc/crane/
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Start service</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;systemctl daemon-reload&quot;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;systemctl enable craned&quot;</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;systemctl start craned&quot;</span>
+</code></pre></div>
+<h2 id="alternative-manual-binary-copy">Alternative: Manual Binary Copy</h2>
+<p>If you built from source instead of RPM packages:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Control node</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>scp<span class="w"> </span>/usr/local/bin/cranectld<span class="w"> </span>cranectl:/usr/local/bin/
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>scp<span class="w"> </span>/etc/systemd/system/cranectld.service<span class="w"> </span>cranectl:/etc/systemd/system/
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Compute nodes</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>/usr/local/bin/craned<span class="w"> </span>/usr/local/bin/
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>/etc/systemd/system/craned.service<span class="w"> </span>/etc/systemd/system/
+</code></pre></div>
+<h2 id="verify-deployment">Verify Deployment</h2>
+<p>After deployment, verify that all nodes are online:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cinfo
+</code></pre></div>
+<p>You should see all compute nodes listed with state <code>IDLE</code> or <code>ALLOC</code>.</p>
+<h2 id="updating-deployed-nodes">Updating Deployed Nodes</h2>
+<p>To update an existing deployment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Stop services</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;systemctl stop cranectld&quot;</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;systemctl stop craned&quot;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Deploy new version</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span>CraneSched-new-version-cranectld.rpm<span class="w"> </span>/tmp
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;rpm -Uvh /tmp/CraneSched-new-version-cranectld.rpm&quot;</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>CraneSched-new-version-craned.rpm<span class="w"> </span>/tmp
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;rpm -Uvh /tmp/CraneSched-new-version-craned.rpm&quot;</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># Start services</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>cranectl<span class="w"> </span><span class="s2">&quot;systemctl start cranectld&quot;</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>pdsh<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span><span class="s2">&quot;systemctl start craned&quot;</span>
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong>PDSH not found</strong>: Install the <code>pdsh</code> package from EPEL repository.</p>
+<p><strong>Permission denied</strong>: Ensure SSH key authentication is set up for root or your deployment user.</p>
+<p><strong>Nodes not appearing in <code>cinfo</code></strong>: Check firewall settings and ensure inter-node communication is allowed on required ports (10010-10013).</p>
+<p><strong>Service fails to start</strong>: Check logs with <code>journalctl -u cranectld</code> or <code>journalctl -u craned</code>.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../pam/" class="btn btn-neutral float-left" title="PAM Module"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../../command/cacct/" class="btn btn-neutral float-right" title="cacct">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../pam/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../../command/cacct/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../../..";</script>
+    <script src="../../../js/theme_extra.js"></script>
+    <script src="../../../js/theme.js"></script>
+      <script src="../../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

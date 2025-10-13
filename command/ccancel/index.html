@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/command/ccancel/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>ccancel - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "ccancel";
+        var mkdocs_page_input_path = "command/ccancel.md";
+        var mkdocs_page_url = "/command/ccancel/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../deployment/">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">ccancel</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">主要参数</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Commands</li>
+      <li class="breadcrumb-item active">ccancel</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/command/ccancel.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="ccancel">ccancel 取消作业</h1>
+<p><strong>ccancel可以终止正在运行或者在排队中的作业。</strong></p>
+<h4 id="_1"><strong>主要参数</strong></h4>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-A/--account string</strong>：取消账户下的任务</li>
+<li><strong>-C/--config string</strong>：配置文件路径(默认 "/etc/crane/config.yaml")</li>
+<li><strong>-n/--name string</strong>：取消指定任务名的任务</li>
+<li><strong>-w/--nodes strings</strong>：取消指定节点上运行的任务</li>
+<li><strong>-p/--partition string</strong>：取消指定分区上运行的任务</li>
+<li><strong>-t/--state string</strong>：取消某状态的任务。有效的任务状态是 PENDING(PD)、RUNNING(R)。任务状态不区分大小写</li>
+<li><strong>-u/--user string</strong>：取消特定用户提交的任务</li>
+<li><strong>-v/--version：</strong>查询版本号</li>
+</ul>
+<p>例：
+<img alt="ccancel" src="../../images/ccancel/ccancel.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">ccancel</span><span class="w"> </span><span class="o">-</span><span class="n">w</span><span class="w"> </span><span class="n">crane02</span>
+</code></pre></div>
+<img alt="ccancel" src="../../images/ccancel/ccancel_w.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">ccancel</span><span class="w"> </span><span class="o">-</span><span class="n">t</span><span class="w"> </span><span class="n">Pending</span>
+</code></pre></div>
+<img alt="ccancel" src="../../images/ccancel/ccancel_t.png" /></p>
+<ul>
+<li>取消作业号为30686的作业：</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ccancel 30686
+</code></pre></div>
+<p><strong>ccancel运行结果展示</strong>
+<img alt="ccancel" src="../../images/ccancel/ccancel_1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_3.png" /></p>
+<ul>
+<li>取消作业名为test1的作业：</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">ccancel</span><span class="w"> </span><span class="o">-</span><span class="n">n</span><span class="w"> </span><span class="n">test1</span>
+</code></pre></div>
+<p><strong>ccancel运行结果展示</strong></p>
+<p><img alt="ccancel" src="../../images/ccancel/ccancel_n1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_n2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_n3.png" /></p>
+<ul>
+<li>取消CPU分区上的作业</li>
+</ul>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">ccancel</span><span class="w"> </span><span class="o">-</span><span class="n">p</span><span class="w"> </span><span class="n">GPU</span>
+</code></pre></div>
+<img alt="ccancel" src="../../images/ccancel/ccancel_p1.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_p2.png" />
+<img alt="ccancel" src="../../images/ccancel/ccancel_p3.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>ccancel<span class="w"> </span>-A<span class="w"> </span>PKU
+</code></pre></div>
+<img alt="ccancel" src="../../images/ccancel/ccancel_A.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ccancel<span class="w"> </span>-u<span class="w"> </span>ROOT
+</code></pre></div>
+<img alt="ccancel" src="../../images/ccancel/ccancel_u.png" /></p>
+<p>取消作业之后，如果被分配节点上没有用户的其他作业，作业调度系统会终止用户在所分配节点的所有进程，并取消用户在所分配节点上的ssh权限。</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../cbatch/" class="btn btn-neutral float-left" title="cbatch"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../ccontrol/" class="btn btn-neutral float-right" title="ccontrol">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../cbatch/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../ccontrol/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

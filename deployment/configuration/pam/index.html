@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/configuration/pam/" />
+      <link rel="shortcut icon" href="../../../img/favicon.ico" />
+    <title>PAM Module - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "PAM Module";
+        var mkdocs_page_input_path = "deployment/configuration/pam.md";
+        var mkdocs_page_url = "/deployment/configuration/pam/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../../">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" >Configuration</a>
+    <ul class="current">
+                <li class="toctree-l2"><a class="reference internal" href="../config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2 current"><a class="reference internal current" href="#">PAM Module</a>
+    <ul class="current">
+    <li class="toctree-l3"><a class="reference internal" href="#purpose">Purpose</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#installation-steps">Installation Steps</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#1-copy-pam-module">1. Copy PAM Module</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#2-edit-pam-configuration">2. Edit PAM Configuration</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#testing">Testing</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#deployment-to-multiple-nodes">Deployment to Multiple Nodes</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#troubleshooting">Troubleshooting</a>
+    </li>
+    </ul>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+          <li class="breadcrumb-item">Configuration</li>
+      <li class="breadcrumb-item active">PAM Module</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/configuration/pam.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="pam-module-configuration">PAM Module Configuration</h1>
+<p>This guide explains how to configure the CraneSched PAM module to control user access to compute nodes.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<ul>
+<li>Only configure PAM <strong>after the cluster is fully deployed and running</strong>.</li>
+<li><strong>Test the configuration carefully</strong> — misconfiguration can lock you out of SSH access.</li>
+<li>Always keep a backup SSH session open when editing PAM configuration.</li>
+</ul>
+</div>
+<h2 id="purpose">Purpose</h2>
+<p>The PAM module (<code>pam_crane.so</code>) ensures that only users with active jobs can log in to compute nodes, preventing unauthorized access to cluster resources.</p>
+<h2 id="installation-steps">Installation Steps</h2>
+<h3 id="1-copy-pam-module">1. Copy PAM Module</h3>
+<p>After building CraneSched, copy the PAM module to the system library:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cp<span class="w"> </span>build/src/Misc/Pam/pam_crane.so<span class="w"> </span>/usr/lib64/security/
+</code></pre></div>
+<h3 id="2-edit-pam-configuration">2. Edit PAM Configuration</h3>
+<p>Edit <code>/etc/pam.d/sshd</code> and add the following lines:</p>
+<ul>
+<li>Add <code>account required pam_crane.so</code> <strong>before</strong> <code>account include password-auth</code></li>
+<li>Add <code>session required pam_crane.so</code> <strong>after</strong> <code>session include password-auth</code></li>
+</ul>
+<p><strong>Example configuration:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">#%PAM-1.0</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>auth<span class="w">       </span>required<span class="w">     </span>pam_sepermit.so
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>auth<span class="w">       </span>substack<span class="w">     </span>password-auth
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>auth<span class="w">       </span>include<span class="w">      </span>postlogin
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Used with polkit to reauthorize users in remote sessions</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>-auth<span class="w">      </span>optional<span class="w">     </span>pam_reauthorize.so<span class="w"> </span>prepare
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>account<span class="w">    </span>required<span class="w">     </span>pam_crane.so
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>account<span class="w">    </span>required<span class="w">     </span>pam_nologin.so
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>account<span class="w">    </span>include<span class="w">      </span>password-auth
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>password<span class="w">   </span>include<span class="w">      </span>password-auth
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># pam_selinux.so close should be the first session rule</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>session<span class="w">    </span>required<span class="w">     </span>pam_selinux.so<span class="w"> </span>close
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>session<span class="w">    </span>required<span class="w">     </span>pam_loginuid.so
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># pam_selinux.so open should only be followed by sessions to be executed in the user context</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>session<span class="w">    </span>required<span class="w">     </span>pam_selinux.so<span class="w"> </span>open<span class="w"> </span>env_params
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>session<span class="w">    </span>required<span class="w">     </span>pam_namespace.so
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>session<span class="w">    </span>optional<span class="w">     </span>pam_keyinit.so<span class="w"> </span>force<span class="w"> </span>revoke
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>session<span class="w">    </span>include<span class="w">      </span>password-auth
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>session<span class="w">    </span>required<span class="w">     </span>pam_crane.so
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>session<span class="w">    </span>include<span class="w">      </span>postlogin
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="c1"># Used with polkit to reauthorize users in remote sessions</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>-session<span class="w">   </span>optional<span class="w">     </span>pam_reauthorize.so<span class="w"> </span>prepare
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The line <code>session required pam_crane.so</code> must be placed <strong>after</strong> <code>session include password-auth</code>.</p>
+</div>
+<h2 id="testing">Testing</h2>
+<ol>
+<li><strong>Keep an existing SSH session open</strong> as a backup</li>
+<li>Test SSH login with a regular user account</li>
+<li>Verify that users can only access nodes where they have active jobs</li>
+</ol>
+<h2 id="deployment-to-multiple-nodes">Deployment to Multiple Nodes</h2>
+<p>If you have multiple compute nodes, deploy the PAM module to all of them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Using pdsh</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>pdcp<span class="w"> </span>-w<span class="w"> </span>crane<span class="o">[</span><span class="m">01</span>-04<span class="o">]</span><span class="w"> </span>/usr/lib64/security/pam_crane.so<span class="w"> </span>/usr/lib64/security/
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Manually copy PAM configuration or use a configuration management tool</span>
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong>Locked out of SSH</strong>: Boot into single-user mode or use console access to restore <code>/etc/pam.d/sshd</code>.</p>
+<p><strong>PAM module not loading</strong>: Check file permissions and SELinux context:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ls<span class="w"> </span>-lZ<span class="w"> </span>/usr/lib64/security/pam_crane.so
+</code></pre></div></p>
+<p><strong>Users can't log in with jobs</strong>: Verify that <code>craned</code> is running and can communicate with <code>cranectld</code>.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../database/" class="btn btn-neutral float-left" title="Database Configuration"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../multi-node/" class="btn btn-neutral float-right" title="Multi-node Deployment">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../database/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../multi-node/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../../..";</script>
+    <script src="../../../js/theme_extra.js"></script>
+    <script src="../../../js/theme.js"></script>
+      <script src="../../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/command/cbatch/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cbatch - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cbatch";
+        var mkdocs_page_input_path = "command/cbatch.md";
+        var mkdocs_page_url = "/command/cbatch/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../deployment/">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cbatch</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#_1">常用环境变量</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Commands</li>
+      <li class="breadcrumb-item active">cbatch</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/command/cbatch.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cbatch">cbatch 提交批处理作业</h1>
+<p><strong>cbatch主要是将用户描述整个计算过程的脚本传递给作业调度系统，并为作业分配作业号，等待作业调度系统为其分配资源并执行。</strong></p>
+<p>CraneSched系统中必须有用户和账号才能提交作业，添加用户和账户请参考<a href="https://e26ruh1viz.feishu.cn/wiki/wikcn3TaZVHvVsA2Wwk171RVBex">cacctmgr教程</a>。</p>
+<p>首先介绍一个简单的单节点作业的例子:</p>
+<p>下列作业将申请一个节点，一个CPU核心，并在计算节点上运行hostname并退出</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="ch">#!/bin/bash</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1">#CBATCH --ntasks-per-node 1</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1">#CBATCH --nodes 1</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1">#CBATCH -c 1</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1">#CBATCH --mem 20M</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1">#CBATCH --time 0:3:1</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1">#CBATCH -o job.out</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1">#CBATCH -p CPU</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1">#CBATCH -J Test_Job</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>hostname
+</code></pre></div>
+<p>假设上面作业脚本的文件名为cbatch_test.sh，通过cbatch命令提交：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cbatch<span class="w"> </span>cbatch_test.sh
+</code></pre></div>
+<p><strong>cbatch运行结果展示</strong></p>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_run1.png" /></p>
+<p><img alt="cbatch" src="../../images/cbatch/cbatch_run2.png" /></p>
+<p><strong>主要参数：</strong></p>
+<ul>
+<li><strong>-h/--help</strong>: 显示帮助</li>
+<li><strong>-A/--account string</strong>：提交作业的账户</li>
+<li><strong>-D/--chdir string</strong>：任务工作路径</li>
+<li><strong>-C/--config string</strong>：配置文件路径(默认 "/etc/crane/config.yaml")</li>
+<li><strong>-c/--cpus-per-task</strong> <strong>float</strong>: 每个节点申请的CPU核心数</li>
+<li><strong>-e/--error string：</strong>指定脚本错误日志定向路径</li>
+<li><strong>-x/--exclude string ：</strong>功能是从分配中排除特定节点（用逗号分隔的列表 ），用于节点分配管控场景，指定不想参与分配的节点。</li>
+<li><strong>--export string ：</strong>作用为传播环境变量，在涉及环境变量传递，让变量在相关任务、作业等执行环境中生效时使用。</li>
+<li><strong>--extra-attr string ：</strong>可设置作业的额外属性（json格式 ），用于给作业附加自定义的属性信息，方便识别、管理等。</li>
+<li><strong>--get-user-env ：</strong>会加载用户的登录环境变量，让作业等执行时能使用用户登录时的环境变量配置。</li>
+<li><strong>--gres string ：</strong>指定每个任务所需的通用资源，格式如 gpu:a100:1（指定使用 1 块 a100 型号 GPU ）或 gpu:1（指定使用 1 块 GPU ，不限具体型号 ），用于 GPU 等资源分配场景。</li>
+<li><strong>-J/--job-name string</strong>：作业名</li>
+<li><strong>--json</strong>：以 JSON 格式输出</li>
+<li><strong>--mail-type string：</strong>当特定事件发生时，向用户发送邮件通知，支持的值有：无（NONE）、开始（BEGIN）、结束（END）、失败（FAIL）、达到时间限制（TIMELIMIT）、所有事件（ALL）（默认是无（NONE) ）</li>
+<li><strong>--mail-user string：</strong>通知接收者的邮件地址</li>
+<li><strong>--mem string：</strong>最大实际内存量，支持 GB（G，g）、MB（M，m）、KB（K，k）和字节（B）为单位，默认单位是 MB</li>
+<li><strong>-w/--nodelist string ：</strong>要分配给作业的节点（逗号分隔的列表 ）</li>
+<li><strong>-N/--nodes uint32 ：</strong>作业要运行的节点数量（格式 N = min[-max] ，默认 1 ）</li>
+<li><strong>--ntasks-per-node uint32 ：</strong>每个节点要调用的任务数量（默认 1 ）</li>
+<li><strong>--open-mode string ：</strong>设置打开输出和错误文件的模式，支持的值：append（追加 ）、truncate（截断 ，默认 ）</li>
+<li><strong>-o/ --output</strong> <strong>string</strong> ：脚本标准输出的重定向路径</li>
+<li><strong>-p/ --partition string</strong> ：请求的分区</li>
+<li><strong>-q/--qos</strong> <strong>string</strong> ：作业使用的服务质量（QoS ）</li>
+<li><strong>--repeat uint32</strong> ：多次提交作业（默认 1 ）</li>
+<li><strong>-r/--reservation string ：</strong>使用预留资源</li>
+<li><strong>-t /--time string ：</strong>时间限制 ，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示 5 天 1 秒 ）或 "hours:minutes:seconds"（如 10:1:2 表示 10 小时 1 分钟 2 秒 ）</li>
+<li><strong>-v /--version ：</strong>cbatch 的版本</li>
+<li><strong>--wrap string ：</strong>将命令字符串包装到 sh 脚本中并提交</li>
+</ul>
+<p>例：</p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cbatch cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_test.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cbatch -h
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_h.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cbatch -A=acct-test cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_A1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_A2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cbatch -x crane01,crane02 cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_x1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_x2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cbatch -J testjob01 cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_j1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_j2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cbatch -w crane01,crane03 cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_w1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_w2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>cbatch -p GPU cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_p1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_p2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cbatch -t 00:25:25 cbatch_test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_t1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_t2.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">cbatch</span><span class="w"> </span><span class="o">-</span><span class="n">c</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="n">cbatch_test</span><span class="p">.</span><span class="n">sh</span>
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_c1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_c2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_c3.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">cbatch</span><span class="w"> </span><span class="o">--</span><span class="n">mem</span><span class="w"> </span><span class="mi">123</span><span class="n">M</span><span class="w"> </span><span class="n">cbatch_test</span><span class="p">.</span><span class="n">sh</span>
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_mem1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_mem2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_mem3.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">cbatch</span><span class="w"> </span><span class="o">-</span><span class="n">N</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">--</span><span class="n">ntasks</span><span class="o">-</span><span class="n">per</span><span class="o">-</span><span class="n">node</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="n">cbatch_test</span><span class="p">.</span><span class="n">sh</span>
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_N1.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_N2.png" />
+<img alt="cbatch" src="../../images/cbatch/cbatch_N3.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cbatch<span class="w"> </span>-D<span class="w"> </span>/path<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_D1.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cbatch<span class="w"> </span>-e<span class="w"> </span>error.log<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_e.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>cbatch<span class="w"> </span>--export<span class="w"> </span>ALL<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_export.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cbatch<span class="w"> </span>--get-user-env<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_get_user.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>cbatch<span class="w"> </span>-o<span class="w"> </span>output.out<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_o.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>cbatch<span class="w"> </span>-q<span class="w"> </span>qos_test<span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_q.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>cbatch<span class="w"> </span>--repeat<span class="w"> </span><span class="m">3</span><span class="w"> </span>test.sh
+</code></pre></div>
+<img alt="cbatch" src="../../images/cbatch/cbatch_repeat.png" /></p>
+<h4 id="_1">常用环境变量</h4>
+<table>
+<thead>
+<tr>
+<th>变量名</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CRANE_JOB_NODELIST</strong></td>
+<td>作业分配的节点列表</td>
+</tr>
+<tr>
+<td><strong>%j</strong></td>
+<td>作业号</td>
+</tr>
+</tbody>
+</table>
+<p><strong>下面介绍提交一个跨节点多核心的例子：</strong></p>
+<p>c下列作业将在三个节点上运行，每个节点使用4个CPU核心。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>#!/bin/bash
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>#CBATCH -o crane_test%j.out
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>#CBATCH -p CPU
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>#CBATCH -J &quot;crane_test&quot;
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>#CBATCH --nodes 3
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>#CBATCH --ntasks-per-node 4
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>#CBATCH -c 4
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>#CBATCH --time 50:00:00
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a># 生成作业分配的节点的machinefile
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>echo &quot;$CRANE_JOB_NODELIST&quot; | tr &quot;;&quot; &quot;\n&quot; &gt; crane.hosts
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>#加载MPI运行环境
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>module load mpich/4.0 
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>#执行跨节点并行任务
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a>mpirun -n 13 -machinefile crane.hosts helloWorld &gt; log
+</code></pre></div>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../calloc/" class="btn btn-neutral float-left" title="calloc"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../ccancel/" class="btn btn-neutral float-right" title="ccancel">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../calloc/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../ccancel/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

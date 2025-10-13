@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/backend/Rocky9/" />
+      <link rel="shortcut icon" href="../../../img/favicon.ico" />
+    <title>Rocky Linux 9 - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Rocky Linux 9";
+        var mkdocs_page_input_path = "deployment/backend/Rocky9.md";
+        var mkdocs_page_url = "/deployment/backend/Rocky9/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../../">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" >Backend</a>
+    <ul class="current">
+                <li class="toctree-l2 current"><a class="reference internal current" href="#">Rocky Linux 9</a>
+    <ul class="current">
+    <li class="toctree-l3"><a class="reference internal" href="#1-environment-preparation">1. Environment Preparation</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#11-add-epel-repository">1.1 Add EPEL Repository</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#12-enable-time-synchronization">1.2 Enable Time Synchronization</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#13-configure-firewall">1.3 Configure Firewall</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#14-disable-selinux">1.4 Disable SELinux</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#15-select-cgroup-version-optional">1.5 Select CGroup Version (Optional)</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#2-install-toolchain">2. Install Toolchain</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#21-install-build-tools">2.1 Install Build Tools</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#22-install-common-utilities">2.2 Install Common Utilities</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#3-install-project-dependencies">3. Install Project Dependencies</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#4-install-and-configure-mongodb">4. Install and Configure MongoDB</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#5-install-and-configure-cranesched">5. Install and Configure CraneSched</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#51-build-and-install">5.1 Build and Install</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#52-configure-pam-module">5.2 Configure PAM Module</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#53-configure-the-cluster">5.3 Configure the Cluster</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#6-start-cranesched">6. Start CraneSched</a>
+    </li>
+    </ul>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+          <li class="breadcrumb-item">Backend</li>
+      <li class="breadcrumb-item active">Rocky Linux 9</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/backend/Rocky9.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="deployment-guide-for-rocky-linux-9">Deployment Guide for Rocky Linux 9</h1>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>This tutorial is primarily designed for <strong>Rocky Linux 9</strong>, but it should be compatible with any <strong>RHEL-based</strong> distribution (e.g., Rocky Linux 8, AlmaLinux).</p>
+<p>The instructions are tailored for the <strong>x86-64</strong> architecture. For other architectures, such as ARM64, ensure you modify the download links and commands as needed.</p>
+</div>
+<p>Please run all commands as the root user throughout this tutorial.</p>
+<h2 id="1-environment-preparation">1. Environment Preparation</h2>
+<h3 id="11-add-epel-repository">1.1 Add EPEL Repository</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>yum-utils<span class="w"> </span>epel-release
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>dnf<span class="w"> </span>config-manager<span class="w"> </span>--set-enabled<span class="w"> </span>crb
+</code></pre></div>
+<h3 id="12-enable-time-synchronization">1.2 Enable Time Synchronization</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>chrony
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>systemctl<span class="w"> </span>restart<span class="w"> </span>systemd-timedated
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>timedatectl<span class="w"> </span>set-timezone<span class="w"> </span>Asia/Shanghai
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>timedatectl<span class="w"> </span>set-ntp<span class="w"> </span><span class="nb">true</span>
+</code></pre></div>
+<h3 id="13-configure-firewall">1.3 Configure Firewall</h3>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>If you have multiple nodes, perform this step on <strong>each node</strong>. Otherwise, inter-node communication will fail.</p>
+<p>Please see the config file <code>/etc/crane/config.yaml</code> for port configuration details.</p>
+</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>systemctl<span class="w"> </span>stop<span class="w"> </span>firewalld
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>systemctl<span class="w"> </span>disable<span class="w"> </span>firewalld
+</code></pre></div>
+<p>If your cluster requires the firewall to remain active, open the following ports:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>firewall-cmd<span class="w"> </span>--add-port<span class="o">=</span><span class="m">10013</span>/tcp<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>firewall-cmd<span class="w"> </span>--add-port<span class="o">=</span><span class="m">10012</span>/tcp<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>firewall-cmd<span class="w"> </span>--add-port<span class="o">=</span><span class="m">10011</span>/tcp<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>firewall-cmd<span class="w"> </span>--add-port<span class="o">=</span><span class="m">10010</span>/tcp<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>firewall-cmd<span class="w"> </span>--add-port<span class="o">=</span><span class="m">873</span>/tcp<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>firewall-cmd<span class="w"> </span>--reload
+</code></pre></div>
+<h3 id="14-disable-selinux">1.4 Disable SELinux</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Temporary (will be reset after reboot)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>setenforce<span class="w"> </span><span class="m">0</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Permanent (survives reboot)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>sed<span class="w"> </span>-i<span class="w"> </span>s#SELINUX<span class="o">=</span>enforcing#SELINUX<span class="o">=</span>disabled#<span class="w"> </span>/etc/selinux/config
+</code></pre></div>
+<h3 id="15-select-cgroup-version-optional">1.5 Select CGroup Version (Optional)</h3>
+<p>Rocky 9 uses <strong>CGroup v2</strong> by default.
+CraneSched uses <strong>CGroup v1</strong> by default.</p>
+<p>If you prefer to enable CGroup v2 support, you’ll need <a href="../eBPF/">additional configuration</a>,
+or you can switch the system to use CGroup v1.</p>
+<h4 id="151-configure-cgroup-v1">1.5.1 Configure CGroup v1</h4>
+<p>If your system is already using CGroup v1, skip this section.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Set kernel boot parameters to switch to CGroup v1</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>grubby<span class="w"> </span>--update-kernel<span class="o">=</span>/boot/vmlinuz-<span class="k">$(</span>uname<span class="w"> </span>-r<span class="k">)</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>--args<span class="o">=</span><span class="s2">&quot;systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Reboot to apply changes</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>reboot
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Verify version</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>mount<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>cgroup
+</code></pre></div>
+<h4 id="152-configure-cgroup-v2">1.5.2 Configure CGroup v2</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Check if sub-cgroups have access to resources (expect to see cpu, io, memory, etc.)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>cat<span class="w"> </span>/sys/fs/cgroup/cgroup.subtree_control
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Grant resource permissions to subgroups</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;+cpuset +cpu +io +memory +pids&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>/sys/fs/cgroup/cgroup.subtree_control
+</code></pre></div>
+<p>Additionally, if you plan to use GRES with CGroup v2, please refer to the <a href="../eBPF/">eBPF guide</a> for setup instructions.</p>
+<h2 id="2-install-toolchain">2. Install Toolchain</h2>
+<p>The toolchain must meet the following version requirements:</p>
+<ul>
+<li><code>cmake</code> ≥ <strong>3.24</strong></li>
+<li>If using <strong>clang</strong>, version ≥ <strong>19</strong></li>
+<li>If using <strong>g++</strong>, version ≥ <strong>14</strong></li>
+</ul>
+<h3 id="21-install-build-tools">2.1 Install Build Tools</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span>gcc-toolset-14<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span>cmake<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span>patch<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span>flex<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span>bison<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span>ninja-build
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;source /opt/rh/gcc-toolset-14/enable&#39;</span><span class="w"> </span>&gt;&gt;<span class="w"> </span>/etc/profile.d/extra.sh
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="nb">source</span><span class="w"> </span>/etc/profile.d/extra.sh
+</code></pre></div>
+<h3 id="22-install-common-utilities">2.2 Install Common Utilities</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>tar<span class="w"> </span>curl<span class="w"> </span>unzip<span class="w"> </span>git
+</code></pre></div>
+<h2 id="3-install-project-dependencies">3. Install Project Dependencies</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span>libstdc++-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>libstdc++-static<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span>openssl-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span>curl-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span>pam-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span>zlib-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">    </span>libaio-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span>systemd-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">    </span>libcurl-devel<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span>automake
+</code></pre></div>
+<h2 id="4-install-and-configure-mongodb">4. Install and Configure MongoDB</h2>
+<p>MongoDB is required on the <strong>control node</strong> only.</p>
+<p>Please follow the <a href="../../configuration/database/">Database Configuration Guide</a> for detailed instructions.</p>
+<h2 id="5-install-and-configure-cranesched">5. Install and Configure CraneSched</h2>
+<h3 id="51-build-and-install">5.1 Build and Install</h3>
+<ol>
+<li>
+<p>Configure and build CraneSched:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/PKUHPC/CraneSched.git
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">cd</span><span class="w"> </span>CraneSched
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>build
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># For CGroup v1</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>cmake<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>..
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>cmake<span class="w"> </span>--build<span class="w"> </span>.
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="c1"># For CGroup v2</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>cmake<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>..<span class="w"> </span>-DCRANE_ENABLE_CGROUP_V2<span class="o">=</span><span class="nb">true</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>cmake<span class="w"> </span>--build<span class="w"> </span>.
+</code></pre></div></p>
+</li>
+<li>
+<p>Install the built binaries:</p>
+</li>
+</ol>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>If you prefer to use RPM packages, please see the <a href="../packaging/">Packaging Guide</a> for instructions.</p>
+</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>cmake<span class="w"> </span>--install<span class="w"> </span>.
+</code></pre></div>
+<p>For deploying CraneSched to multiple nodes, please follow the <a href="../../configuration/multi-node/">Multi-node Deployment Guide</a>.</p>
+<h3 id="52-configure-pam-module">5.2 Configure PAM Module</h3>
+<p>PAM module configuration is optional but recommended for production clusters to control user access.</p>
+<p>Please follow the <a href="../../configuration/pam/">PAM Module Configuration Guide</a> for detailed instructions.</p>
+<h3 id="53-configure-the-cluster">5.3 Configure the Cluster</h3>
+<p>For cluster configuration details, see the <a href="../../configuration/config/">Cluster Configuration Guide</a>.</p>
+<h2 id="6-start-cranesched">6. Start CraneSched</h2>
+<p>Run manually (foreground):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cranectld
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>craned
+</code></pre></div>
+<p>Or use systemd:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>systemctl<span class="w"> </span>daemon-reload
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>cranectld<span class="w"> </span>--now
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>craned<span class="w"> </span>--now
+</code></pre></div>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../../frontend/plugins/" class="btn btn-neutral float-left" title="Plugins"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../CentOS7/" class="btn btn-neutral float-right" title="CentOS 7">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../../frontend/plugins/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../CentOS7/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../../..";</script>
+    <script src="../../../js/theme_extra.js"></script>
+    <script src="../../../js/theme.js"></script>
+      <script src="../../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

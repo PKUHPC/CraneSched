@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/configuration/database/" />
+      <link rel="shortcut icon" href="../../../img/favicon.ico" />
+    <title>Database Configuration - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Database Configuration";
+        var mkdocs_page_input_path = "deployment/configuration/database.md";
+        var mkdocs_page_url = "/deployment/configuration/database/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../../">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" >Configuration</a>
+    <ul class="current">
+                <li class="toctree-l2"><a class="reference internal" href="../config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2 current"><a class="reference internal current" href="#">Database Configuration</a>
+    <ul class="current">
+    <li class="toctree-l3"><a class="reference internal" href="#1-install-mongodb">1. Install MongoDB</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#install-mongodb-community-edition">Install MongoDB Community Edition</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#2-configure-mongodb">2. Configure MongoDB</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#21-generate-key-file">2.1 Generate Key File</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#22-create-admin-user">2.2 Create Admin User</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#23-enable-authentication-and-replication">2.3 Enable Authentication and Replication</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#24-initialize-replica-set">2.4 Initialize Replica Set</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#3-configure-cranesched-database-connection">3. Configure CraneSched Database Connection</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#troubleshooting">Troubleshooting</a>
+    </li>
+    </ul>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+          <li class="breadcrumb-item">Configuration</li>
+      <li class="breadcrumb-item active">Database Configuration</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/configuration/database.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="database-configuration">Database Configuration</h1>
+<p>This guide covers MongoDB installation and configuration for CraneSched.</p>
+<div class="admonition info">
+<p class="admonition-title">Info</p>
+<p>MongoDB is only required on the <strong>control node</strong>. Compute nodes do not need MongoDB.</p>
+</div>
+<h2 id="1-install-mongodb">1. Install MongoDB</h2>
+<h3 id="install-mongodb-community-edition">Install MongoDB Community Edition</h3>
+<p>Please follow the official MongoDB installation guide for your operating system:</p>
+<p><a href="https://www.mongodb.com/docs/manual/administration/install-community/">MongoDB Community Edition Installation Guide</a></p>
+<div class="admonition warning">
+<p class="admonition-title">CentOS 7 Users</p>
+<p>CentOS 7 has reached End of Life (EOL) and the latest MongoDB version it supports is <strong>MongoDB 7.0</strong>. </p>
+<p>Please refer to the <a href="https://www.mongodb.com/docs/v7.0/tutorial/install-mongodb-on-red-hat/">MongoDB 7.0 installation guide for Red Hat/CentOS 7</a>.</p>
+</div>
+<h4 id="example-rocky-linux-9">Example: Rocky Linux 9</h4>
+<p>For Rocky Linux 9, the installation process typically involves:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Create repository file (check MongoDB docs for the latest version)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>/etc/yum.repos.d/mongodb-org.repo<span class="w"> </span><span class="s">&lt;&lt; &#39;EOF&#39;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s">[mongodb-org-8.2]</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s">name=MongoDB Repository</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s">baseurl=https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.2/x86_64/</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s">gpgcheck=1</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s">enabled=1</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="s">gpgkey=https://pgp.mongodb.com/server-8.0.asc</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s">EOF</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>dnf<span class="w"> </span>makecache
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>dnf<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>mongodb-org
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>mongod
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>systemctl<span class="w"> </span>start<span class="w"> </span>mongod
+</code></pre></div>
+<h4 id="example-ubuntudebian">Example: Ubuntu/Debian</h4>
+<p>For Ubuntu/Debian systems:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Follow the official guide for the latest instructions</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Typical steps include importing GPG key and adding repository</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://www.mongodb.org/static/pgp/server-8.0.asc<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">   </span>sudo<span class="w"> </span>gpg<span class="w"> </span>-o<span class="w"> </span>/usr/share/keyrings/mongodb-server-8.0.gpg<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">   </span>--dearmor
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.2 main&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/etc/apt/sources.list.d/mongodb-org-8.2.list
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1"># Add repository and install</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>sudo<span class="w"> </span>apt-get<span class="w"> </span>update
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>sudo<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>mongodb-org
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>mongod
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>mongod
+</code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>The examples above may become outdated. Always refer to the official MongoDB documentation for the most current installation instructions.</p>
+</div>
+<h2 id="2-configure-mongodb">2. Configure MongoDB</h2>
+<h3 id="21-generate-key-file">2.1 Generate Key File</h3>
+<p>Create a key file for replica set authentication:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w"> </span><span class="m">756</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>-u<span class="w"> </span>mongod<span class="w"> </span>tee<span class="w"> </span>/var/lib/mongo/mongo.key
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>-u<span class="w"> </span>mongod<span class="w"> </span>chmod<span class="w"> </span><span class="m">400</span><span class="w"> </span>/var/lib/mongo/mongo.key
+</code></pre></div>
+<h3 id="22-create-admin-user">2.2 Create Admin User</h3>
+<p>Connect to MongoDB and create an admin user:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>mongosh
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>use<span class="w"> </span>admin
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>db.createUser<span class="o">({</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span>user:<span class="w"> </span><span class="s1">&#39;admin&#39;</span>,<span class="w"> </span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span>pwd:<span class="w"> </span><span class="s1">&#39;123456&#39;</span>,<span class="w">  </span><span class="c1"># Change this in production!</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span>roles:<span class="w"> </span><span class="o">[{</span><span class="w"> </span>role:<span class="w"> </span><span class="s1">&#39;root&#39;</span>,<span class="w"> </span>db:<span class="w"> </span><span class="s1">&#39;admin&#39;</span><span class="w"> </span><span class="o">}]</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="o">})</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>db.shutdownServer<span class="o">()</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>quit
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Use a strong password for the admin user in production environments.</p>
+</div>
+<h3 id="23-enable-authentication-and-replication">2.3 Enable Authentication and Replication</h3>
+<p>Edit <code>/etc/mongod.conf</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">security</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">authorization</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">enabled</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">keyFile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/lib/mongo/mongo.key</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nt">replication</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">replSetName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crane_rs</span>
+</code></pre></div>
+<p>Restart MongoDB:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>systemctl<span class="w"> </span>restart<span class="w"> </span>mongod
+</code></pre></div>
+<h3 id="24-initialize-replica-set">2.4 Initialize Replica Set</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mongosh
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>use<span class="w"> </span>admin
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>db.auth<span class="o">(</span><span class="s2">&quot;admin&quot;</span>,<span class="s2">&quot;123456&quot;</span><span class="o">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="s2">&quot;_id&quot;</span>:<span class="w"> </span><span class="s2">&quot;crane_rs&quot;</span>,
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="s2">&quot;members&quot;</span>:<span class="w"> </span><span class="o">[</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="o">{</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">      </span><span class="s2">&quot;_id&quot;</span>:<span class="w"> </span><span class="m">0</span>,
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">      </span><span class="s2">&quot;host&quot;</span>:<span class="w"> </span><span class="s2">&quot;&lt;hostname&gt;:27017&quot;</span><span class="w">  </span><span class="c1"># Replace with your control node hostname</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span><span class="o">}</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span><span class="c1"># Add more members here if you have multiple MongoDB nodes</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">  </span><span class="o">]</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="o">}</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>rs.initiate<span class="o">(</span>config<span class="o">)</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>quit
+</code></pre></div>
+<h2 id="3-configure-cranesched-database-connection">3. Configure CraneSched Database Connection</h2>
+<p>Create <code>/etc/crane/database.yaml</code> on the <strong>control node only</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">DbUser</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">DbPassword</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;123456&quot;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">DbHost</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">localhost</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nt">DbPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">27017</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nt">DbReplSetName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crane_rs</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">DbName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">crane_db</span>
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This file should only exist on the control node and be readable only by <code>root</code> or the <code>crane</code> user:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>/etc/crane/database.yaml
+</code></pre></div>
+</div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong>Connection failed</strong>: Ensure MongoDB is running and the firewall allows port 27017.</p>
+<p><strong>Authentication failed</strong>: Verify the username and password in <code>database.yaml</code> match the MongoDB user.</p>
+<p><strong>Replica set errors</strong>: Check that the <code>replSetName</code> in <code>mongod.conf</code> matches the value in <code>database.yaml</code>.</p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../config/" class="btn btn-neutral float-left" title="Cluster Configuration"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../pam/" class="btn btn-neutral float-right" title="PAM Module">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../config/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../pam/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../../..";</script>
+    <script src="../../../js/theme_extra.js"></script>
+    <script src="../../../js/theme.js"></script>
+      <script src="../../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

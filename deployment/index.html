@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Overview - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Overview";
+        var mkdocs_page_input_path = "deployment/index.md";
+        var mkdocs_page_url = "/deployment/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">Overview</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#what-youll-deploy">What You'll Deploy</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#quick-start">Quick Start</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#deployment-workflow">Deployment Workflow</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#step-1-build-backend-components">Step 1: Build Backend Components</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#step-2-setup-database">Step 2: Setup Database</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#step-3-configure-cluster">Step 3: Configure Cluster</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#step-4-deploy-to-nodes">Step 4: Deploy to Nodes</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#step-5-install-frontend-tools">Step 5: Install Frontend Tools</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#optional-features">Optional Features</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#plugin-system">Plugin System</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#access-control">Access Control</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#advanced-device-management">Advanced Device Management</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#getting-help">Getting Help</a>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+      <li class="breadcrumb-item active">Overview</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/index.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cranesched-deployment-guide">CraneSched Deployment Guide</h1>
+<p>Welcome to the CraneSched deployment documentation. This guide will walk you through setting up a high-performance computing cluster with CraneSched's job scheduling system.</p>
+<div class="admonition tip">
+<p class="admonition-title">Recommended OS</p>
+<p>We strongly recommend <strong>Rocky Linux 9</strong> for production deployments due to its stability, long-term support, and modern system components.</p>
+</div>
+<h2 id="what-youll-deploy">What You'll Deploy</h2>
+<p>CraneSched consists of three main components:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Description</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Backend</strong></td>
+<td><code>cranectld</code> (scheduler) + <code>craned</code> (worker daemon)</td>
+<td>Control &amp; Compute nodes</td>
+</tr>
+<tr>
+<td><strong>Frontend</strong></td>
+<td>CLI (<code>cbatch</code>, <code>cqueue</code>, etc.) + other services (<code>cfored</code>, <code>cplugind</code>)</td>
+<td>As needed</td>
+</tr>
+<tr>
+<td><strong>Database</strong></td>
+<td>MongoDB for storing jobs, accounts, and usage data</td>
+<td>Control/Storage node</td>
+</tr>
+</tbody>
+</table>
+<p>The diagram below shows a typical placement of CraneSched components across node types.</p>
+<pre class="mermaid"><code>graph TB
+    subgraph Login Node
+        CLIs[CLIs]
+        cfored_login[cfored]
+        cplugind_login[cplugind]
+    end
+
+    subgraph Control Node
+        cranectld[cranectld]
+        cplugind_ctrl[cplugind]
+    end
+
+    subgraph Compute Node
+        craned[craned]
+        cplugind_compute[cplugind]
+    end
+
+    subgraph Storage Node
+        mongodb[(MongoDB)]
+    end
+
+    %% Communication
+    CLIs --&gt; cranectld
+    cfored_login --&gt; cranectld
+    cfored_login &lt;--&gt;|streaming I/O| craned
+    cranectld &lt;--&gt;|dispatch/response| craned
+    cranectld &lt;--&gt; mongodb
+
+    %% Plugin connections
+    cplugind_ctrl &lt;-.-&gt; cranectld
+    cplugind_login &lt;-.-&gt; cranectld
+    cplugind_compute &lt;-.-&gt; craned</code></pre>
+<h2 id="quick-start">Quick Start</h2>
+<p>For a simple single-node test environment:</p>
+<ol>
+<li>Install backend: Follow <a href="backend/Rocky9/">Rocky Linux 9 Guide</a> (Steps 1-5)</li>
+<li>Setup database: Follow <a href="configuration/database/">Database Configuration Guide</a></li>
+<li>Configure cluster: Edit <code>/etc/crane/config.yaml</code> (see <a href="configuration/config/">Configuration Guide</a>)</li>
+<li>Start services: <code>systemctl start cranectld craned</code> (And other frontend services as needed)</li>
+</ol>
+<p><strong>For production multi-node clusters</strong>, follow the complete deployment workflow below.</p>
+<hr />
+<h2 id="deployment-workflow">Deployment Workflow</h2>
+<h3 id="step-1-build-backend-components">Step 1: Build Backend Components</h3>
+<p>Choose your operating system and follow the corresponding guide:</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.4 6 14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg></span> <strong><a href="backend/Rocky9/">RHEL 8+ / Fedora 37+</a></strong></p>
+<hr />
+<p>Recommended for production. Includes environment setup, toolchain installation, and building from source.</p>
+</li>
+<li>
+<p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.36 6 .4 2H18v6h-3.36l-.4-2H7V6zM14 4H5v17h2v-7h5.6l.4 2h7V6h-5.6"/></svg></span> <strong>Debian 11+ / Ubuntu 22.04+</strong></p>
+<hr />
+<p>Supported but not officially recommended. Documentation is coming soon.</p>
+</li>
+<li>
+<p><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2"/></svg></span> <strong><a href="backend/CentOS7/">CentOS 7</a></strong></p>
+<hr />
+<p>Legacy support (End of Life). Use only for existing deployments.</p>
+</li>
+</ul>
+</div>
+<p>All guides cover system preparation, dependencies, and compilation. After building:</p>
+<ul>
+<li><strong><a href="backend/packaging/">Packaging Guide</a></strong> - Create RPM/DEB packages for easier distribution across nodes</li>
+</ul>
+<h3 id="step-2-setup-database">Step 2: Setup Database</h3>
+<p>MongoDB stores job history, user accounts, and resource usage data.</p>
+<ul>
+<li><strong><a href="configuration/database/">Database Configuration</a></strong></li>
+</ul>
+<p>Install MongoDB on the control node, configure authentication, and connect CraneSched.</p>
+<h3 id="step-3-configure-cluster">Step 3: Configure Cluster</h3>
+<p>Define your cluster topology, node resources, and scheduling policies.</p>
+<ul>
+<li><strong><a href="configuration/config/">Cluster Configuration</a></strong></li>
+</ul>
+<p>Learn how to edit <code>/etc/crane/config.yaml</code> to configure:</p>
+<ul>
+<li>Cluster name and control machine</li>
+<li>Node definitions (CPU, memory, GPUs)</li>
+<li>Partitions and scheduling priorities</li>
+<li>Network settings and advanced options</li>
+</ul>
+<h3 id="step-4-deploy-to-nodes">Step 4: Deploy to Nodes</h3>
+<p>For multi-node clusters, distribute binaries and configurations efficiently.</p>
+<ul>
+<li><strong><a href="configuration/multi-node/">Multi-node Deployment</a></strong></li>
+</ul>
+<p>Use SCP, PDSH, or package managers to deploy CraneSched across your cluster.</p>
+<h3 id="step-5-install-frontend-tools">Step 5: Install Frontend Tools</h3>
+<p>Deploy user-facing tools and services for job submission and management.</p>
+<ul>
+<li><strong><a href="frontend/frontend/">Frontend Deployment</a></strong></li>
+</ul>
+<p>Install Go-based frontend components: <code>cbatch</code>, <code>cqueue</code>, <code>cinfo</code>, <code>cacct</code>, and supporting daemons.</p>
+<hr />
+<h2 id="optional-features">Optional Features</h2>
+<h3 id="plugin-system">Plugin System</h3>
+<p>Extend CraneSched with plugins for monitoring, notifications, and more.</p>
+<ul>
+<li><strong><a href="frontend/plugins/">Plugins Guide</a></strong> - Email notifications, resource monitoring, energy tracking</li>
+</ul>
+<h3 id="access-control">Access Control</h3>
+<p>Restrict SSH access to compute nodes for authorized jobs only.</p>
+<ul>
+<li><strong><a href="configuration/pam/">PAM Module</a></strong> - Configure PAM-based access control</li>
+</ul>
+<h3 id="advanced-device-management">Advanced Device Management</h3>
+<p>Enable GPU and device isolation with eBPF on systems using cgroup v2.</p>
+<ul>
+<li><strong><a href="backend/eBPF/">eBPF Support</a></strong> - GRES support with eBPF device control</li>
+</ul>
+<hr />
+<h2 id="getting-help">Getting Help</h2>
+<ul>
+<li>Check individual guides for troubleshooting sections</li>
+<li>Review configuration examples in the <a href="backend/Rocky9/">Rocky 9</a> and <a href="configuration/config/">Config</a> guides</li>
+<li>Verify services are running: <code>systemctl status cranectld craned</code></li>
+<li>Check logs: <code>/var/log/crane/</code> or <code>journalctl -u cranectld</code></li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href=".." class="btn btn-neutral float-left" title="Home"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="frontend/frontend/" class="btn btn-neutral float-right" title="Deployment">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href=".." style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="frontend/frontend/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

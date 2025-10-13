@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/command/cinfo/" />
+      <link rel="shortcut icon" href="../../img/favicon.ico" />
+    <title>cinfo - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../css/theme.css" />
+    <link rel="stylesheet" href="../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "cinfo";
+        var mkdocs_page_input_path = "command/cinfo.md";
+        var mkdocs_page_url = "/command/cinfo/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../deployment/">Overview</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Frontend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/frontend/plugins/">Plugins</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../deployment/configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">cinfo</a>
+    <ul class="current">
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Commands</li>
+      <li class="breadcrumb-item active">cinfo</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/command/cinfo.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cinfo">cinfo 查看节点与分区状态</h1>
+<p><strong>cinfo可查询各分区节点的队列资源信息。</strong></p>
+<p>查看分区节点状态：
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cinfo
+</code></pre></div></p>
+<p><strong>cinfo运行结果展示</strong></p>
+<p><img alt="cinfo" src="../../images/cinfo/cinfo_running.png" /></p>
+<p><strong>主要输出项</strong>
+- <strong>PARTITION</strong>：分区名
+- <strong>AVAIL</strong>： 分区状态
+  - up:  可用
+  - down:不可用
+- <strong>NODES</strong>：节点数
+- <strong>STATE</strong>： 节点状态
+  - <strong>idle</strong>： 空闲
+  - mix： 节点部分核心可以使用
+  - alloc： 节点已被占用
+  - down： 节点不可用
+- <strong>NODELIST</strong>： 节点列表</p>
+<p><strong>主要参数</strong>
+- <strong>-h/--help</strong>: 显示帮助
+- <strong>-C/--config string</strong>：配置文件路径(默认为 "/etc/crane/config.yaml")
+- <strong>-d/--dead</strong>：只显示无响应节点
+- <strong>-i/--iterate uint</strong>：指定间隔秒数刷新查询结果。如 -i=3表示每隔三秒输出一次查询结果
+- <strong>-o/--format string</strong> 指定输出格式
+  - <strong>% p /% Partition</strong> —— 显示当前环境中的所有分区
+  - <strong>% a/% Avail</strong> —— 显示节点的状态
+  - <strong>% n/% Nodes</strong> —— 显示分区节点的数量
+  - <strong>% s/% State</strong> —— 显示分区节点的状态
+  - <strong>% l/% NodeList</strong> —— 显示分区中的所有节点列表</p>
+<p>每个格式标识符或字符串都可以用宽度说明符修改（例如，“%.5j” ）。如果指定了宽度，字段将被格式化为至少达到该宽度。如果格式无效或无法识别，程序将报错并终止。</p>
+<ul>
+<li><strong>--json</strong>：json格式输出命令执行结果</li>
+<li><strong>-n/--nodes string</strong>：显示指定节点信息，多个节点用逗号隔开。例：cinfo -n crane01,crane02</li>
+<li><strong>-N/--noheader</strong>：输出隐藏表头</li>
+<li><strong>-p/--partition string</strong>：显示指定分区信息，多个分区用逗号隔开。例：cinfo -p CPU,GPU</li>
+<li><strong>-r/--responding</strong>：只显示有响应节点</li>
+<li><strong>-t/--states string</strong>：仅显示状态的信息。状态可以为(不区分大小写): IDLE, MIX, ALLOC和DOWN</li>
+<li><strong>-v/--version</strong>：查询版本号</li>
+</ul>
+<p>例：</p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cinfo
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_running.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cinfo -h
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_h.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cinfo -N
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_n.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cinfo -d
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_d.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cinfo -i 3
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_i3.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>cinfo -n crane01,crane02,crane03
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_n123.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">cinfo</span><span class="w"> </span><span class="o">-</span><span class="n">p</span><span class="w"> </span><span class="n">GPU</span><span class="p">,</span><span class="n">CPU</span>
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_p.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">cinfo</span><span class="w"> </span><span class="o">-</span><span class="n">r</span>
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_r.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">cinfo</span><span class="w"> </span><span class="o">-</span><span class="n">t</span><span class="w"> </span><span class="n">IDLE</span>
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_t.png" /></p>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cinfo<span class="w"> </span>-v
+</code></pre></div>
+<img alt="cinfo" src="../../images/cinfo/cinfo_v.png" /></p>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../ceff/" class="btn btn-neutral float-left" title="ceff"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../cqueue/" class="btn btn-neutral float-right" title="cqueue">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../ceff/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../cqueue/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../..";</script>
+    <script src="../../js/theme_extra.js"></script>
+    <script src="../../js/theme.js"></script>
+      <script src="../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

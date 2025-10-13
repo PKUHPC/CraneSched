@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="author" content="High Performance Computing Platform of Peking University" /><link rel="canonical" href="https://cranesched.readthedocs.io/deployment/frontend/plugins/" />
+      <link rel="shortcut icon" href="../../../img/favicon.ico" />
+    <title>Plugins - CraneSched Documentation</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Plugins";
+        var mkdocs_page_input_path = "deployment/frontend/plugins.md";
+        var mkdocs_page_url = "/deployment/frontend/plugins/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../../../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="../../.." class="icon icon-home"> CraneSched Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../../..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Deployment</span></p>
+              <ul class="current">
+                  <li class="toctree-l1"><a class="reference internal" href="../../">Overview</a>
+                  </li>
+                  <li class="toctree-l1 current"><a class="reference internal current" >Frontend</a>
+    <ul class="current">
+                <li class="toctree-l2"><a class="reference internal" href="../frontend/">Deployment</a>
+                </li>
+                <li class="toctree-l2 current"><a class="reference internal current" href="#">Plugins</a>
+    <ul class="current">
+    <li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#plugin-architecture">Plugin Architecture</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#configuration-files">Configuration Files</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#available-plugins">Available Plugins</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#installing-cplugind">Installing cplugind</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#enabling-plugins">Enabling Plugins</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#configuration-options">Configuration Options</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#monitor-plugin">Monitor Plugin</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#prerequisites">Prerequisites</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#configuration">Configuration</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#mail-plugin">Mail Plugin</a>
+        <ul>
+    <li class="toctree-l4"><a class="reference internal" href="#system-mail-configuration">System Mail Configuration</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#plugin-configuration">Plugin Configuration</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#using-email-notifications">Using Email Notifications</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#mail-types">Mail Types</a>
+    </li>
+    <li class="toctree-l4"><a class="reference internal" href="#parameter-priority">Parameter Priority</a>
+    </li>
+        </ul>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#troubleshooting">Troubleshooting</a>
+    </li>
+    </ul>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Backend</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/Rocky9/">Rocky Linux 9</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/CentOS7/">CentOS 7</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/packaging/">Packaging Guide</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../backend/eBPF/">eBPF Support</a>
+                </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Configuration</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/config/">Cluster Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/database/">Database Configuration</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/pam/">PAM Module</a>
+                </li>
+                <li class="toctree-l2"><a class="reference internal" href="../../configuration/multi-node/">Multi-node Deployment</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Commands</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacct/">cacct</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cacctmgr/">cacctmgr</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/calloc/">calloc</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cbatch/">cbatch</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccancel/">ccancel</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ccontrol/">ccontrol</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/ceff/">ceff</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cinfo/">cinfo</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/cqueue/">cqueue</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../command/crun/">crun</a>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Reference</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../../../referrence/exit_code/">Exit Codes</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../..">CraneSched Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="../../.." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Deployment</li>
+          <li class="breadcrumb-item">Frontend</li>
+      <li class="breadcrumb-item active">Plugins</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/PKUHPC/CraneSched/edit/master/docs/deployment/frontend/plugins.md">Edit on PKUHPC/CraneSched</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="plugin-guide">Plugin Guide</h1>
+<h2 id="overview">Overview</h2>
+<p>The CraneSched plugin system is modular and disabled by default. The <code>cplugind</code> daemon must be running on each node to enable plugin functionality. Plugins and <code>cplugind</code> versions are strictly coupled and must be updated together.</p>
+<div class="admonition info">
+<p class="admonition-title">Info</p>
+<p>Plugins are optional. If you do not require any plugin features, you can skip this guide.</p>
+</div>
+<h3 id="plugin-architecture">Plugin Architecture</h3>
+<p>Each CraneSched plugin consists of:</p>
+<ul>
+<li><strong>Shared library</strong> (<code>.so</code> file): Plugin implementation</li>
+<li><strong>Plugin configuration</strong> (<code>.yaml</code> file, optional): Plugin-specific settings</li>
+</ul>
+<h3 id="configuration-files">Configuration Files</h3>
+<p>Understanding the distinction between two types of configuration files is crucial:</p>
+<p><strong>Global Configuration</strong> (<code>/etc/crane/config.yaml</code>)
+: CraneSched's main configuration file containing settings for CLIs, backend, cfored, and cplugind. Plugin paths are registered here.</p>
+<p><strong>Plugin Configuration</strong> (e.g., <code>monitor.yaml</code>)
+: Individual plugin settings. Can be located anywhere readable, with the absolute path specified in the global configuration.</p>
+<h3 id="available-plugins">Available Plugins</h3>
+<p>CraneSched currently provides the following plugins:</p>
+<table>
+<thead>
+<tr>
+<th>Plugin</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Mail</strong></td>
+<td>Send email notifications on job state changes</td>
+</tr>
+<tr>
+<td><strong>Monitor</strong></td>
+<td>Collect job resource usage metrics to InfluxDB (Grafana integration supported)</td>
+</tr>
+<tr>
+<td><strong>Energy</strong></td>
+<td>Monitor power consumption for nodes and jobs to InfluxDB</td>
+</tr>
+<tr>
+<td><strong>Event</strong></td>
+<td>Record node state changes to InfluxDB</td>
+</tr>
+</tbody>
+</table>
+<h2 id="installing-cplugind">Installing cplugind</h2>
+<p>The <code>cplugind</code> daemon is part of the CraneSched-FrontEnd repository. Refer to the <a href="../../backend/Rocky9/">Frontend Deployment Guide</a> for installation instructions.</p>
+<p>Start <code>cplugind</code> manually or via systemd:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>cplugind
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>systemctl<span class="w"> </span>start<span class="w"> </span>cplugind
+</code></pre></div>
+<h2 id="enabling-plugins">Enabling Plugins</h2>
+<p>Edit the global configuration file <code>/etc/crane/config.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">Plugin</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="c1"># Toggle the plugin module in CraneSched</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">Enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1"># Socket path relative to CraneBaseDir</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">PlugindSockPath</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;cplugind/cplugind.sock&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="c1"># Debug level: trace, debug, or info (use info in production)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">PlugindDebugLevel</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;info&quot;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="c1"># Plugins to load</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;monitor&quot;</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="nt">Path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/path/to/monitor.so&quot;</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">      </span><span class="nt">Config</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/path/to/monitor.yaml&quot;</span>
+</code></pre></div>
+<h3 id="configuration-options">Configuration Options</h3>
+<ul>
+<li><strong>Enabled</strong>: Controls whether CraneCtld/Craned uses the plugin system</li>
+<li><strong>PlugindDebugLevel</strong>: Log level (trace/debug/info; recommended: info for production)</li>
+<li><strong>Plugins</strong>: List of plugins to load on this node</li>
+<li><strong>Name</strong>: Plugin identifier (any string)</li>
+<li><strong>Path</strong>: Absolute path to the <code>.so</code> file</li>
+<li><strong>Config</strong>: Absolute path to the plugin configuration file</li>
+</ul>
+<h2 id="monitor-plugin">Monitor Plugin</h2>
+<p>The monitor plugin collects job-level resource usage metrics and requires installation on compute nodes.</p>
+<h3 id="prerequisites">Prerequisites</h3>
+<p>Install InfluxDB (not required on compute nodes, but must be network-accessible):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-p<span class="w"> </span><span class="m">8086</span>:8086<span class="w"> </span>--name<span class="w"> </span>influxdb2<span class="w"> </span>influxdb:2
+</code></pre></div>
+<p>Access the web UI at <code>http://&lt;Host IP&gt;:8086</code> and complete the setup wizard. Record the following information:</p>
+<ul>
+<li><strong>Username</strong>: <code>your_username</code></li>
+<li><strong>Bucket</strong>: <code>your_bucket_name</code></li>
+<li><strong>Org</strong>: <code>your_organization</code></li>
+<li><strong>Token</strong>: <code>your_token</code></li>
+<li><strong>Measurement</strong>: <code>ResourceUsage</code></li>
+</ul>
+<h3 id="configuration">Configuration</h3>
+<ol>
+<li><strong>Create plugin configuration file</strong> (e.g., <code>/etc/crane/monitor.yaml</code>):</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Cgroup path pattern (%j is replaced with job&#39;s cgroup path)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">Cgroup</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">CPU</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/sys/fs/cgroup/cpuacct/%j/cpuacct.usage&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">Memory</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/sys/fs/cgroup/memory/%j/memory.usage_in_bytes&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">ProcList</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/sys/fs/cgroup/memory/%j/cgroup.procs&quot;</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># InfluxDB Configuration</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nt">Database</span><span class="p">:</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="nt">Username</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;your_username&quot;</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="nt">Bucket</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;your_bucket_name&quot;</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span><span class="nt">Org</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;your_organization&quot;</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">  </span><span class="nt">Token</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;your_token&quot;</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">  </span><span class="nt">Measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;ResourceUsage&quot;</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">  </span><span class="nt">Url</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http://localhost:8086&quot;</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="c1"># Sampling interval in milliseconds</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="nt">Interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="c1"># Buffer size for batch writes</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="nt">BufferSize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32</span>
+</code></pre></div>
+<p><strong>Note</strong>: For cgroup v2, update paths accordingly.</p>
+<ol>
+<li><strong>Register plugin in global configuration</strong> (<code>/etc/crane/config.yaml</code>):</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;monitor&quot;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">Path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/path/to/build/plugin/monitor.so&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">Config</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/etc/crane/monitor.yaml&quot;</span>
+</code></pre></div>
+<p>The <code>monitor.so</code> file is typically located in the frontend build directory (<code>build/plugin/monitor.so</code>).</p>
+<h2 id="mail-plugin">Mail Plugin</h2>
+<p>The mail plugin sends job notifications via email from the CraneSched control node (cranectld).</p>
+<h3 id="system-mail-configuration">System Mail Configuration</h3>
+<ol>
+<li><strong>Install mail dependencies</strong>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>dnf<span class="w"> </span>install<span class="w"> </span>s-nail<span class="w"> </span>postfix<span class="w"> </span>ca-certificates
+</code></pre></div>
+<p><strong>Note</strong>: The <code>mail</code> command may have different names across distributions. Postfix handles SMTP requests; sendmail can be used as an alternative.</p>
+<ol>
+<li><strong>Configure SMTP settings</strong> by creating <code>/etc/s-nail.rc</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">set</span><span class="w"> </span><span class="nv">from</span><span class="o">=</span><span class="s2">&quot;your_email@example.com&quot;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">set</span><span class="w"> </span><span class="nv">smtp</span><span class="o">=</span><span class="s2">&quot;smtp.example.com&quot;</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">set</span><span class="w"> </span>smtp-auth-user<span class="o">=</span><span class="s2">&quot;your_email@example.com&quot;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">set</span><span class="w"> </span>smtp-auth-password<span class="o">=</span><span class="s2">&quot;your_app_password&quot;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">set</span><span class="w"> </span>smtp-auth<span class="o">=</span>login
+</code></pre></div>
+<p><strong>Important</strong>: Use an application-specific password, not your account password. Refer to your email provider's documentation.</p>
+<ol>
+<li><strong>Test mail functionality</strong>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Test Mail Body&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>mail<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;Test Mail Subject&quot;</span><span class="w"> </span>recipient@example.com
+</code></pre></div>
+<h3 id="plugin-configuration">Plugin Configuration</h3>
+<ol>
+<li><strong>Create mail plugin configuration</strong> (e.g., <code>/etc/crane/mail.yaml</code>):</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Sender address for mail notifications</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">SenderAddr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example@example.com</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Send subject-only emails (no body)</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nt">SubjectOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<ol>
+<li><strong>Register plugin</strong> in <code>/etc/crane/config.yaml</code> (similar to monitor plugin).</li>
+</ol>
+<h3 id="using-email-notifications">Using Email Notifications</h3>
+<h4 id="in-job-scripts">In Job Scripts</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="ch">#!/bin/bash</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="c1">#CBATCH --nodes 1</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1">#CBATCH --ntasks-per-node 1</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1">#CBATCH --mem 1G</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1">#CBATCH -J EmailTest</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1">#CBATCH --mail-type ALL</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1">#CBATCH --mail-user user@example.com</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>hostname
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;This job triggers email notifications&quot;</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>sleep<span class="w"> </span><span class="m">60</span>
+</code></pre></div>
+<p>Submit the job:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>cbatch<span class="w"> </span>emailjob.sh
+</code></pre></div>
+<h4 id="command-line">Command Line</h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>cbatch<span class="w"> </span>--mail-type<span class="o">=</span>ALL<span class="w"> </span>--mail-user<span class="o">=</span>user@example.com<span class="w"> </span>test.job
+</code></pre></div>
+<h3 id="mail-types">Mail Types</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BEGIN</code></td>
+<td>Job starts running (Pending → Running)</td>
+</tr>
+<tr>
+<td><code>FAILED</code></td>
+<td>Job execution fails</td>
+</tr>
+<tr>
+<td><code>TIMELIMIT</code></td>
+<td>Job exceeds time limit</td>
+</tr>
+<tr>
+<td><code>END</code></td>
+<td>Job finishes (Running → Completed/Failed/Cancelled)</td>
+</tr>
+<tr>
+<td><code>ALL</code></td>
+<td>All of the above events</td>
+</tr>
+</tbody>
+</table>
+<h3 id="parameter-priority">Parameter Priority</h3>
+<ul>
+<li><code>--mail-type</code> and <code>--mail-user</code> automatically update the internal <code>--extra-attr</code> parameter</li>
+<li>In job scripts: Later options override earlier ones</li>
+<li>On command line: <code>--mail-type/user</code> always take precedence over <code>--extra-attr</code></li>
+<li><strong>Recommendation</strong>: Use <code>--mail-type/user</code> unless you have specific requirements for <code>--extra-attr</code></li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<ul>
+<li>Verify <code>Enabled: true</code> in <code>/etc/crane/config.yaml</code></li>
+<li>Check that <code>cplugind</code> is running: <code>systemctl status cplugind</code></li>
+<li>Ensure <code>.so</code> file paths are absolute and readable</li>
+<li>Check <code>cplugind</code> logs for errors</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../frontend/" class="btn btn-neutral float-left" title="Deployment"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../../backend/Rocky9/" class="btn btn-neutral float-right" title="Rocky Linux 9">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+      <p>Copyright &copy; 2022 - 2025 PKUHPC</p>
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/PKUHPC/CraneSched" class="fa fa-code-fork" style="color: #fcfcfc"> PKUHPC/CraneSched</a>
+        </span>
+    
+    
+      <span><a href="../frontend/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../../backend/Rocky9/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../../../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "../../..";</script>
+    <script src="../../../js/theme_extra.js"></script>
+    <script src="../../../js/theme.js"></script>
+      <script src="../../../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
