@@ -48,10 +48,10 @@ CraneSched is an open-source, distributed scheduling system developed by the Hig
 
 1. Choose your deployment guide:
 
-	 - [Backend (Rocky 9, recommended)](<./deployment/Backend/Rocky9.md>)
-	 - [Backend (CentOS 7, legacy)](<./deployment/Backend/CentOS7.md>)
-	 - [Frontend components](./deployment/Frontend.md)
-	 - [eBPF for GRES on cgroup v2](<./deployment/Backend/eBPF.md>)
+	 - [Backend (Rocky 9, recommended)](<./deployment/backend/Rocky9.md>)
+	 - [Backend (CentOS 7, legacy)](<./deployment/backend/CentOS7.md>)
+	 - [Frontend components](./deployment/frontend/frontend.md)
+	 - [eBPF for GRES on cgroup v2](<./deployment/backend/eBPF.md>)
 
 2. Install and start services:
 

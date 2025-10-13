@@ -83,7 +83,7 @@ When building CraneSched, ensure that Clang 19 is correctly installed and **avai
 
 After building, you should see `cgroup_dev_bpf.o` in the `src/Misc/BPF/` directory of the build output.
 
-## 2. eBPF Configuration
+## 3. eBPF Configuration
 
 In the project build directory:
 ```bash
@@ -100,7 +100,7 @@ Enable controllers for child cgroups:
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-## 3. Mounting the BPF Filesystem
+## 4. Mounting the BPF Filesystem
 
 If you see errors like the following:
 

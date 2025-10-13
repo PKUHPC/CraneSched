@@ -1,4 +1,4 @@
-# CentOS 7
+# Deployment Guide for CentOS 7
 
 
 !!! warning
@@ -147,152 +147,39 @@ cmake --build .
 ninja install
 ```
 
-## 6. Install MongoDB
+!!! info
+    If you prefer to use RPM packages, please refer to the [Packaging Guide](packaging.md) for instructions.
 
-Create repo:
+For deploying CraneSched to multiple nodes, please follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
 
-```bash
-sudo tee /etc/yum.repos.d/mongodb-6.0.2.repo << 'EOF'
-[mongodb-org-6.0.2]
-name=MongoDB 6.0.2 Repository
-baseurl=https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/6.0/x86_64/
-gpgcheck=0
-enabled=1
-EOF
-yum makecache
-yum install mongodb-org -y
-systemctl enable mongod
-systemctl start mongod
-```
+## 6. Install and Configure MongoDB
 
-Create key file:
+MongoDB is required on the **control node** only.
 
-```bash
-openssl rand -base64 756 | sudo -u mongod tee /var/lib/mongo/mongo.key
-sudo -u mongod chmod 400 /var/lib/mongo/mongo.key
-```
+Please follow the [Database Configuration Guide](../configuration/database.md) for detailed instructions.
 
-!!! warning
-    Use a strong password for the admin user in production environments.
-
-Create admin user in Mongo shell:
-
-```bash
-mongosh
-use admin
-db.createUser({ user:'admin', pwd:'123456', roles:[{role:'root', db:'admin'}] })
-```
-
-Edit `/etc/mongod.conf`:
-
-```yaml
-security:
-  authorization: enabled
-  keyFile: /var/lib/mongo/mongo.key
-replication:
-  replSetName: crane_rs
-```
-
-Restart and initialize:
-
-```bash
-systemctl restart mongod
-mongosh
-use admin
-db.auth("admin","123456")
-config = {
-  "_id": "crane_rs",      // Same as configured `replSetName` above
-  "members": [
-    {
-      "_id": 0,
-      "host": "<hostname>:27017" // Replication node host
-    }
-    // ... Other nodes (if exits)
-  ]
-}
-rs.initiate()
-```
+!!! info
+    CentOS 7 supports up to MongoDB 7.0. See the database configuration guide for specific installation instructions.
 
 ## 7. PAM Module Setup
 
-!!! warning
-    Only configure PAM **after the cluster is fully deployed and running**.
-    
-    **Misconfiguration may prevent SSH login.**
+PAM module configuration is optional but recommended for production clusters.
+
+Please follow the [PAM Module Configuration Guide](../configuration/pam.md) for detailed instructions.
+
+## 8. Configure and Launch Services
+
+For cluster configuration details, see the [Cluster Configuration Guide](../configuration/config.md).
+
+After configuring, start the services:
 
 ```bash
-cp Crane/build/src/Misc/Pam/pam_crane.so /usr/lib64/security/
-```
+# If using systemd:
+systemctl start cranectld
+systemctl start craned
 
-Edit `/etc/pam.d/sshd` as the following lines:
-
-```bash
-#%PAM-1.0
-auth       required     pam_sepermit.so
-auth       substack     password-auth
-auth       include      postlogin
-# Used with polkit to reauthorize users in remote sessions
--auth      optional     pam_reauthorize.so prepare
-account    required     pam_crane.so
-account    required     pam_nologin.so
-account    include      password-auth
-password   include      password-auth
-# pam_selinux.so close should be the first session rule
-session    required     pam_selinux.so close
-session    required     pam_loginuid.so
-# pam_selinux.so open should only be followed by sessions to be executed in the user context
-session    required     pam_selinux.so open env_params
-session    required     pam_namespace.so
-session    optional     pam_keyinit.so force revoke
-session    include      password-auth
-session    required     pam_crane.so
-session    include      postlogin
-# Used with polkit to reauthorize users in remote sessions
--session   optional     pam_reauthorize.so prepare
-```
-
-!!! warning
-    `session required pam_crane.so` must be placed **after** `session include password-auth`
-
-## 8. Launch Services
-
-Edit and copy configuration:
-
-```bash
-mkdir -p /etc/crane
-cp etc/config.yaml.example /etc/crane/config.yaml
-vim /etc/crane/config.yaml
-```
-
-Run executables:
-
-```bash
+# If using executables directly:
 cd build/src
 CraneCtld/cranectld
 Craned/craned
-```
-
----
-
-## 9. Deploy to Other Nodes
-
-### Using SCP
-
-```bash
-ssh crane02 "mkdir -p /etc/crane"
-scp /usr/local/bin/craned crane02:/usr/local/bin/
-scp /etc/systemd/system/craned.service crane02:/etc/systemd/system/
-scp /etc/crane/config.yaml crane02:/etc/crane/
-```
-
-### Using PDSH
-
-```bash
-yum install -y pdsh
-pdsh -w cranectl systemctl stop cranectld
-pdcp -w cranectl /usr/local/bin/cranectld /usr/local/bin
-pdsh -w cranectl systemctl start cranectld
-pdsh -w crane0[1-4] systemctl stop craned
-pdcp -w crane0[1-4] /usr/local/bin/craned /usr/local/bin
-pdsh -w crane0[1-4] systemctl start craned
 ```

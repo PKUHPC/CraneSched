@@ -1,4 +1,4 @@
-# Frontend Deployment
+# Deployment Guide of Frontend Components
 
 !!! tip
     This tutorial has been verified on **Rocky Linux 9**. It is expected to work on other systemd-based distributions, such as **Debian, Ubuntu, AlmaLinux, and Fedora**.
@@ -12,6 +12,22 @@ This guide assumes a demo cluster with the following nodes:
 - **crane[01-04]**: Compute nodes.
 
 Please run all commands as the root user throughout this tutorial. Ensure the backend environment installation is completed before proceeding.
+
+## Overview
+
+A brief overview of the main frontend components you will install and run:
+
+- CLI tools (`cbatch`, `cqueue`, `cinfo`...):
+    - User-facing command-line utilities for job submission, querying queues and job status, accounting, and job control.
+    - Designed to be lightweight and distributed to user login nodes. They communicate with the control node (`cranectld`).
+
+- `cfored` (Frontend daemon for interactive jobs):
+    - Provides support for interactive jobs (used by `crun`, `calloc`).
+    - Typically runs on login nodes where interactive jobs are submitted. Managed by systemd as `cfored.service`.
+
+- `cplugind` (Plugin daemon):
+    - Loads and manages plugins (mail, monitor, energy, event, etc.) and exposes plugin services to CraneSched components.
+    - Must be running on nodes that require plugin functionality. Plugin `.so` files and plugin configuration are registered in `/etc/crane/config.yaml`.
 
 ## 1. Install Golang
 ```bash
@@ -63,9 +79,9 @@ pdcp -w login01,cranectld,crane[01-04] build/bin/* /usr/local/bin/
 pdcp -w login01,cranectld,crane[01-04] etc/* /usr/lib/systemd/system/
 
 # If you need to submit interactive jobs (crun, calloc), enable Cfored:
-pdsh -w login01,crane[01-04] systemctl daemon-reload
-pdsh -w login01,crane[01-04] systemctl enable cfored
-pdsh -w login01,crane[01-04] systemctl start cfored
+pdsh -w login01 systemctl daemon-reload
+pdsh -w login01 systemctl enable cfored
+pdsh -w login01 systemctl start cfored
 
 # If you configured with plugin, enable cplugind
 pdsh -w login01,crane[01-04] systemctl daemon-reload

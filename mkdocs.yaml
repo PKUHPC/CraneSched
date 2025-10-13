@@ -41,13 +41,16 @@ markdown_extensions:
   - tables
   - attr_list
   - admonition
+  - md_in_html
   - pymdownx.details
   - pymdownx.superfences
-  - pymdownx.emoji
   - pymdownx.tabbed
   - pymdownx.tasklist
   - pymdownx.caret
   - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
 
@@ -55,12 +58,19 @@ nav:
   - Home: index.md
   - Deployment:
     - Overview: deployment/index.md
-    - Frontend Deployment:
-      - Frontend: deployment/Frontend.md
-    - Backend Deployment:
-      - Rocky Linux 9: deployment/Backend/Rocky9.md
-      - CentOS 7: deployment/Backend/CentOS7.md
-      - eBPF Support: deployment/Backend/eBPF.md
+    - Frontend:
+      - Deployment: deployment/frontend/frontend.md
+      - Plugins: deployment/frontend/plugins.md
+    - Backend:
+      - Rocky Linux 9: deployment/backend/Rocky9.md
+      - CentOS 7: deployment/backend/CentOS7.md
+      - Packaging Guide: deployment/backend/packaging.md
+      - eBPF Support: deployment/backend/eBPF.md
+    - Configuration:
+      - Cluster Configuration: deployment/configuration/config.md
+      - Database Configuration: deployment/configuration/database.md
+      - PAM Module: deployment/configuration/pam.md
+      - Multi-node Deployment: deployment/configuration/multi-node.md
   - Commands:
     - cacct: command/cacct.md
     - cacctmgr: command/cacctmgr.md
