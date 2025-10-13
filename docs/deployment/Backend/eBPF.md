@@ -1,9 +1,15 @@
 # eBPF for GRES on cgroup v2
-Purpose: When using cgroup v2 with GRES (Generic RESources), CraneSched relies on an eBPF program to enforce device-level GRES limits. Therefore, eBPF must be configured and loaded on systems where GRES is managed under cgroup v2.
 
-CraneSched supports cgroup v2; if you need GRES enforcement, eBPF must be configured.
-The eBPF program is compiled with clang; please ensure the system has clang 17 or newer (clang 19 instructions below).
-## 1. Clang 19 Installation Guide
+When using cgroup v2 with GRES (Generic RESources, e.g., GPUs), CraneSched relies on eBPF to enforce device-level GRES limits. 
+
+This guide walks you through setting up eBPF on your compute nodes.
+
+## 1. Install Clang 19+
+
+!!! tip
+    If your system already installed clang >= 19 or your distribution provides clang 19 packages, you can skip this section.
+
+    Refer to LLVM's [official documentation](https://llvm.org/docs/GettingStarted.html) for more details.
 
 Install prerequisites:
 ```bash
@@ -64,7 +70,20 @@ make
 make install
 ```
 
-## 2. eBPF System Configuration
+## 2. Build with eBPF Support
+
+CraneSched could be built with GCC or Clang. However, to use eBPF features, you must use Clang 19 or above. 
+
+When building CraneSched, ensure that Clang 19 is correctly installed and **available in your PATH** and build with the following CMake options:
+
+```
+-DCRANE_ENABLE_CGROUP_V2=ON
+-DCRANE_ENABLE_BPF=ON
+```
+
+After building, you should see `cgroup_dev_bpf.o` in the `src/Misc/BPF/` directory of the build output.
+
+## 2. eBPF Configuration
 
 In the project build directory:
 ```bash
@@ -81,23 +100,6 @@ Enable controllers for child cgroups:
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-If you encounter a BPF load failure:
-
-Mount the BPF filesystem:
-```bash
-mount -t bpf bpf /sys/fs/bpf
-```
-
-Mount the BPF debug filesystem:
-```bash
-mount -t debugfs none /sys/kernel/debug
-```
-
-To view device access logs, run:
-```bash
-cat /sys/kernel/debug/tracing/trace_pipe
-```
-
 ## 3. Mounting the BPF Filesystem
 
 If you see errors like the following:
@@ -111,12 +113,24 @@ Failed to load BPF object
 ```
 
 Check whether the BPF filesystem is mounted:
+
 ```bash
 mount | grep bpf
 ```
 
-Mount the BPF filesystem:
+If not mounted, do the following:
+
+1. Mount the BPF filesystem:
 ```bash
-mkdir -p /sys/fs/bpf
 mount -t bpf bpf /sys/fs/bpf
+```
+
+2. Mount the BPF debug filesystem:
+```bash
+mount -t debugfs none /sys/kernel/debug
+```
+
+3. To view device access logs, run:
+```bash
+cat /sys/kernel/debug/tracing/trace_pipe
 ```

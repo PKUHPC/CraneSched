@@ -1,14 +1,9 @@
 # Overview
 
->This section provides step-by-step guides to deploy and configure CraneSched components on different operating systems.
+!!! tip
+    We strongly recommend using **Rocky Linux 9** for production environments. It offers better stability, long-term support, and compatibility with modern kernels and system components.
 
-⚠️ Important: We strongly recommend using **Rocky Linux 9** for production environments. It offers better stability, long-term support, and compatibility with modern kernels and system components.
-
-- Preferred: Rocky Linux 9 — follow the recommended path for the best compatibility and experience.
-
-- Compatible: CentOS 7 — for legacy environments only; lifecycle and ecosystem are outdated.
-
-- Optional/Required for GRES on cgroup v2: eBPF — used to enforce GRES device limits under cgroup v2; enable on supported kernels if you need GRES.
+This section provides step-by-step guides to deploy and configure CraneSched components on different operating systems.
 
 ## What you will deploy
 
@@ -20,43 +15,36 @@ The CraneSched typically includes the following services:
 
 ### Frontend Service
 - cfored: daemon service for crun and calloc.
-- cplugind: daemon service for plugin.
+- cplugind: daemon service for plugins.
 - command line tools: cbatch, ccontrol, cacct, cacctmgr, cqueue, cinfo, crun, etc.
 
-Common accompaniments:
+### Configuration files
 
 - Configuration files: global config is typically at `/etc/crane/config.yaml`; database settings at `/etc/crane/database.yaml`.
 
+## Prerequisites
+
+!!! tip
+    These are general prerequisites; specific guides may have additional requirements.
+
+- **Privileges**: Root or sudo on all nodes.
+- **Networking**: Ensure inter-node connectivity and name resolution (DNS or /etc/hosts).
+- **Time sync**: Enable **NTP** or **chrony** to keep clocks synchronized.
+- **Cgroups**: Mount and configure **cgroup v1 or v2** on all nodes. If using **cgroup v2**, set up **eBPF** for GRES (see eBPF guide).
+- **Systemd**: Use **systemd** to manage services (recommended).
+
+
 ## OS and topic-specific guides
 
-- [Rocky Linux 9 guide (recommended)](<./Backend Deployment/Rocky9.md>)
-- [CentOS 7 guide (legacy)](<./Backend Deployment/Centos7.md>)
-- [eBPF for GRES on cgroup v2](<./Backend Deployment/EBPF.md>)
+Choose the guide that matches your OS:
 
-More general configuration and overview:
+- [Rocky Linux 9 guide (recommended)](<./Backend/Rocky9.md>)
+- [CentOS 7 guide (legacy)](<./Backend/CentOS7.md>)
+
+If cgroup v2 is used, refer to the following guide: 
+
+- [eBPF for GRES on cgroup v2](<./Backend/eBPF.md>)
+
+After backend setup, deploy frontend components as needed:
 
 - [Frontend configuration](./Frontend.md)
-
-## Prerequisites and recommendations
-
-- Administrative privileges: root or a user with sudo.
-- Time sync: enable NTP/chrony to keep node clocks consistent.
-- Networking and hostnames: ensure inter-node connectivity and proper name resolution (DNS or hosts).
-- systemd: a Linux distribution using systemd to manage services (e.g., Rocky Linux 9).
-- Optional kernel capabilities: if using eBPF, ensure kernel and dependencies meet requirements.
-
-## Quick start
-
-1) Choose your OS guide
-
-    - Backend:
-        - [(Preferred) Rocky Linux 9](<./Backend Deployment/Rocky9.md>)
-        - [(Legacy) CentOS 7](<./Backend Deployment/Centos7.md>)
-    - Frontend:
-        - [Frontend applications](./Frontend.md)
-
-2) Install and start services per the guide:
-
-    - Configure and start cranectld (control node)
-    - Deploy and start craned on all worker nodes
-    - Deploy frontend applications on all node(cranectld, craned and login).

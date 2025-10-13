@@ -1,13 +1,17 @@
 # Frontend Deployment
->This tutorial has been tested on Rocky Linux 9. In theory, it should work on any system that uses systemd (e.g., Debian/Ubuntu/AlmaLinux/Fedora, etc.).
->The software involved in this tutorial targets x86-64. If you use architectures such as ARM64, adjust the download links accordingly.
->Run all commands as the root user throughout. It is recommended to complete the backend environment installation first.
 
-For a demo cluster with nodes:
+!!! tip
+    This tutorial has been verified on **Rocky Linux 9**. It is expected to work on other systemd-based distributions, such as **Debian, Ubuntu, AlmaLinux, and Fedora**.
 
-- login01: where user login and submit job
-- cranectld: control node
-- crane[1-4]: compute nodes
+    This tutorial is designed for **x86-64** architecture. For other architectures, such as **ARM64**, ensure you modify the download links and commands as needed.
+
+This guide assumes a demo cluster with the following nodes:
+
+- **login01**: User login and job submission node.
+- **cranectld**: Control node.
+- **crane[01-04]**: Compute nodes.
+
+Please run all commands as the root user throughout this tutorial. Ensure the backend environment installation is completed before proceeding.
 
 ## 1. Install Golang
 ```bash
@@ -38,12 +42,12 @@ unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```
 
-## 3. Pull the project
+## 3. Pull the frontend repository
 ```bash
 git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
 ```
 
-## 4. Build the project and deploy the frontend
+## 4. Build and install
 
 The working directory is CraneSched-FrontEnd. In this directory, compile all Golang components and install.
 ```bash
@@ -52,24 +56,24 @@ make
 make install
 ```
 
-## 5. Deploy frontend to all node
+## 5. Distribute and start services
 
 ```bash
-pdcp -w login01,cranectld,crane[1-4] build/bin/* /usr/local/bin/
-pdcp -w login01,cranectld,crane[1-4] etc/* /usr/lib/systemd/system/
+pdcp -w login01,cranectld,crane[01-04] build/bin/* /usr/local/bin/
+pdcp -w login01,cranectld,crane[01-04] etc/* /usr/lib/systemd/system/
 
 # If you need to submit interactive jobs (crun, calloc), enable Cfored:
-pdsh -w login01,crane[1-4] systemctl daemon-reload
-pdsh -w login01,crane[1-4] systemctl enable cfored
-pdsh -w login01,crane[1-4] systemctl start cfored
+pdsh -w login01,crane[01-04] systemctl daemon-reload
+pdsh -w login01,crane[01-04] systemctl enable cfored
+pdsh -w login01,crane[01-04] systemctl start cfored
 
 # If you configured with plugin, enable cplugind
-pdsh -w login01,crane[1-4] systemctl daemon-reload
-pdsh -w login01,cranectld,crane[1-4] systemctl enable cplugind
-pdsh -w login01,cranectld,crane[1-4] systemctl start cplugind
+pdsh -w login01,crane[01-04] systemctl daemon-reload
+pdsh -w login01,cranectld,crane[01-04] systemctl enable cplugind
+pdsh -w login01,cranectld,crane[01-04] systemctl start cplugind
 ```
 
-## 5. Install Cwrapper aliases (optional)
+## 6. Install CLI aliases (optional)
 You can install Slurm-style aliases for Crane using the following commands, allowing you to use Crane with Slurm command forms:
 
 ```bash
@@ -85,6 +89,6 @@ alias srun='cwrapper srun'
 alias salloc='cwrapper salloc'
 EOF
 
-pdcp -w login01,crane[1-4] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
-pdsh -w login01,crane[1-4] chmod 644 /etc/profile.d/cwrapper.sh
+pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
+pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```

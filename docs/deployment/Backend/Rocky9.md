@@ -1,12 +1,11 @@
 # Rocky Linux 9
 
-> This tutorial is based on **Rocky Linux 9**, but it is also applicable to **Rocky Linux 8** and **Fedora**.  
-> The software used in this guide targets the **x86-64** architecture.  
-> If you are using another architecture such as **ARM64**, please adjust the download links accordingly.  
->  
-> ⚠️ All commands should be executed as the **root** user.
+!!! tip
+    This tutorial is designed for **Rocky Linux 9**, but it is also compatible with **Rocky Linux 8** and **Fedora**.
 
----
+    This tutorial is designed for **x86-64** architecture. For other architectures, such as **ARM64**, ensure you modify the download links and commands as needed.
+
+Please run all commands as the root user throughout this tutorial.
 
 ## 1. Environment Preparation
 
@@ -15,9 +14,7 @@
 ```bash
 dnf install -y yum-utils epel-release
 dnf config-manager --set-enabled crb
-````
-
----
+```
 
 ### 1.2 Enable Time Synchronization
 
@@ -28,11 +25,12 @@ timedatectl set-timezone Asia/Shanghai
 timedatectl set-ntp true
 ```
 
----
+### 1.3 Configure Firewall
 
-### 1.3 Disable Firewall
+!!! tip
+    If you have multiple nodes, perform this step on **each node**. Otherwise, inter-node communication will fail.
 
-To disable the firewall completely:
+    Please see the config file `/etc/crane/config.yaml` for port configuration details.
 
 ```bash
 systemctl stop firewalld
@@ -50,10 +48,6 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 firewall-cmd --reload
 ```
 
-> **Note:** If you have multiple nodes, perform this step on **each node**. Otherwise, inter-node communication will fail.
-
----
-
 ### 1.4 Disable SELinux
 
 ```bash
@@ -64,17 +58,13 @@ setenforce 0
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
----
-
 ### 1.5 Select CGroup Version (Optional)
 
 Rocky 9 uses **CGroup v2** by default.
 CraneSched uses **CGroup v1** by default.
 
-If you prefer to enable CGroup v2 support, you’ll need additional configuration,
+If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md),
 or you can switch the system to use CGroup v1.
-
----
 
 #### 1.5.1 Configure CGroup v1
 
@@ -92,8 +82,6 @@ reboot
 mount | grep cgroup
 ```
 
----
-
 #### 1.5.2 Configure CGroup v2
 
 ```bash
@@ -104,12 +92,7 @@ cat /sys/fs/cgroup/cgroup.subtree_control
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-> **Note:**
-> In CGroup v2, device control differs from v1.
-> v2 uses **eBPF** for device access control.
-> Please refer to CGroup v2 [eBPF documentation](EBPF.md) for configuring bpf programs.
-
----
+Additionally, if you plan to use GRES with CGroup v2, please refer to the [eBPF guide](eBPF.md) for setup instructions.
 
 ## 2. Install Toolchain
 
@@ -120,8 +103,6 @@ The toolchain must meet the following version requirements:
 * `cmake` ≥ **3.24**
 * If using **clang**, version ≥ **19**
 * If using **g++**, version ≥ **14**
-
----
 
 ### 2.2 Install Build Tools
 
@@ -138,15 +119,11 @@ echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
 source /etc/profile.d/extra.sh
 ```
 
----
-
 ### 2.3 Install Common Utilities
 
 ```bash
 dnf install -y tar curl unzip git
 ```
-
----
 
 ## 3. Install Project Dependencies
 
@@ -163,8 +140,6 @@ dnf install -y \
     libcurl-devel \
     automake
 ```
-
----
 
 ## 4. Install and Configure MongoDB
 
@@ -202,8 +177,6 @@ systemctl start mongod
 openssl rand -base64 756 | sudo -u mongod tee /var/lib/mongo/mongo.key
 sudo -u mongod chmod 400 /var/lib/mongo/mongo.key
 ```
-
----
 
 ### 4.2 Configure MongoDB
 
@@ -256,7 +229,7 @@ config = {
 rs.initiate()
 ```
 
----
+
 
 ## 5. Install and Configure CraneSched
 
@@ -269,35 +242,29 @@ mkdir -p build && cd build
 
 # For CGroup v1
 cmake -G Ninja ..
-cmake --build . --target cranectld craned pam_crane csupervisor
+cmake --build .
 
 # For CGroup v2
 cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true
-cmake --build . --target cranectld craned pam_crane csupervisor
-
+cmake --build .
 ```
 
 ### 5.2 Build RPM Package
 
 ```bash
-
 cpack -G RPM
-
-
 ```
 
-> **Notes:**
->
-> * Use `-DCMAKE_BUILD_TYPE=Release` for production builds.
-> * If fetching repositories or dependencies fails, set a proxy.
-
----
+!!! tip
+    Use `-DCMAKE_BUILD_TYPE=Release` for production builds.
+    If fetching repositories or dependencies fails, set a proxy.
 
 ### 5.2 Configure PAM Module
 
-> ⚠️ Only configure PAM **after the cluster is fully deployed and running**.
-> Misconfiguration may prevent SSH login.
-> PAM prevent user without job on the node from logging in. Usually deploy on all compute nodes.
+!!! warning
+    Only configure PAM **after the cluster is fully deployed and running**.
+    
+    **Misconfiguration may prevent SSH login.**
 
 #### 5.2.1 **Copy PAM module:**
 
@@ -337,9 +304,8 @@ session    include      postlogin
 -session   optional     pam_reauthorize.so prepare
 ```
 
-> `session required pam_crane.so` must appear **after** `session include password-auth`
-
----
+!!! warning
+    `session required pam_crane.so` must be placed **after** `session include password-auth`
 
 ### 5.3 Configure CraneSched
 
@@ -379,7 +345,9 @@ DefaultPartition: CPU
 ```
 
 #### 5.3.3 **Configure MongoDB connection in `/etc/crane/database.yaml`:**
-> ⚠️ Only need to configure on Control Node. It is recommended to set it as accessible only by the `root` or `crane` user.
+
+!!! warning
+    Only need to configure on Control Node. It is recommended to set it as accessible only by the `root` or `crane` user.
 
 ```yaml
 DbUser: admin
@@ -390,33 +358,28 @@ DbReplSetName: crane_rs
 DbName: crane_db
 ```
 
----
-
 ## 6. Start CraneSched
 
-* Run manually (foreground):
+Run manually (foreground):
 
 ```bash
 cranectld
 craned
 ```
 
-* Or use systemd:
+Or use systemd:
 
 ```bash
+systemctl daemon-reload
 systemctl enable cranectld --now
 systemctl enable craned --now
 ```
-
----
 
 ## Appendix 1: Common Issues
 
 1. **CMake cannot find libcgroup** → Install `libcgroup` from release source.
 2. **libcgroup.so.0 missing** → Add its path to `LD_LIBRARY_PATH` or fix pkg-config.
 3. **CraneCtld and Craned run, but `cinfo` shows no nodes** → Likely firewall not disabled.
-
----
 
 ## Appendix 2: Multi-node Deployment
 
@@ -429,10 +392,6 @@ ssh crane02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
 scp /etc/crane/config.yaml crane02:/etc/crane/
 ```
 
-> Compute nodes must still install `libcgroup` as described in dependencies.
-
----
-
 ### Using PDSH
 
 ```bash
@@ -443,144 +402,4 @@ pdsh -w cranectl systemctl start cranectld
 pdcp -w crane[01-04] CraneSched-1.1.2-Linux-x86_64-craned.rpm /tmp
 pdsh -w crane[01-04] rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm
 pdsh -w crane[01-04] systemctl start craned
-```
-
----
-
-## Appendix 3: Automated Build Script
-
-This script automates the **Rocky 9** setup — including toolchain, dependencies, and CraneSched build.
-
-> **Notes:**
->
-> * Run this **after completing the environment setup** section.
-> * MongoDB installation and CraneSched configuration must still be done manually.
-> * Adjust the proxy settings inside the `setp` function.
-
-```bash
-#!/bin/bash
-
-# Tested on Rocky Linux 9.3
-
-set -eo pipefail
-
-# Function to set and unset proxy
-setp() {
-    export https_proxy=http://your_proxy
-    export http_proxy=http://your_proxy
-    git config --global http.proxy $http_proxy
-    git config --global https.proxy $https_proxy
-}
-
-unsetp() {
-    unset http_proxy
-    unset https_proxy
-    git config --global --unset http.proxy
-    git config --global --unset https.proxy
-}
-
-# Tools 
-dnf install -y tar unzip git wget curl || {
-    echo "Error installing tools" && exit 1
-}
-
-# Dependency for libcgroup
-dnf install -y bison flex systemd-devel || {
-    echo "Error installing dependency" && exit 1
-}
-
-# Ensure the installation can be found
-export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
-
-# Check if libcgroup is already installed
-if pkg-config --exists libcgroup; then
-    echo "libcgroup is already installed."
-else
-    if [ ! -f "libcgroup-3.1.0.tar.gz" ]; then
-        setp
-        wget https://github.com/libcgroup/libcgroup/releases/download/v3.1.0/libcgroup-3.1.0.tar.gz || {
-            echo "Error downloading libcgroup" && exit 1
-        }
-        unsetp
-    fi
-
-    tar -xzf libcgroup-3.1.0.tar.gz && pushd libcgroup-3.1.0
-    (./configure --prefix=/usr/local && make -j && make install) || {
-        echo "Error compiling libcgroup" && exit 1
-    }
-    popd
-fi
-
-# Install dependencies and toolchain for Crane
-dnf install -y \
-    patch \
-    ninja-build \
-    openssl-devel \
-    pam-devel \
-    zlib-devel \
-    libatomic \
-    libstdc++-static \
-    libtsan \
-    libasan \
-    libaio \
-    libaio-devel || {
-    echo "Error installing toolchain and dependency for craned" && exit 1        
-}
-# libstdc++-static libatomic for debug
-# libtsan for CRANE_THREAD_SANITIZER
-
-# Check if cmake version is higher than 3.24
-required_version="3.24"
-install_version="3.28.1"
-download_url="https://github.com/Kitware/CMake/releases/download/v${install_version}/cmake-${install_version}-linux-x86_64.sh"
-
-current_version=$(cmake --version 2>/dev/null | awk 'NR==1{print $3}')
-
-if [[ -z "$current_version" ]] || [[ "$(printf '%s\n' "$current_version" "$required_version" | sort -V | head -n1)" != "$required_version" ]]; then
-    echo "Installing cmake ${install_version}..."
-    setp
-    wget -O cmake-install.sh "$download_url" || { echo "Error downloading cmake"; exit 1; }
-    bash cmake-install.sh --skip-license --prefix=/usr/local || { echo "Error installing cmake"; exit 1; }
-    rm cmake-install.sh
-    unsetp
-else
-    echo "Current cmake version ($current_version) meets the requirement."
-fi
-
-# Clone the repository
-setp
-if [ ! -d "CraneSched" ]; then
-    git clone https://github.com/PKUHPC/CraneSched.git || {
-        echo "Error cloning CraneSched" && exit 1
-    }
-fi
-
-pushd CraneSched
-# git checkout master
-git fetch && git pull
-unsetp
-
-BUILD_DIR=cmake-build-release
-mkdir -p $BUILD_DIR && pushd $BUILD_DIR
-
-if [ -f "/opt/rh/gcc-toolset-14/enable" ]; then
-    echo "Enable gcc-toolset-14"
-    source /opt/rh/gcc-toolset-14/enable
-fi
-
-setp
-cmake --fresh -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_UNQLITE=ON \
-    -DENABLE_BERKELEY_DB=OFF .. || {
-    echo "Error configuring with cmake" && exit 1
-}
-unsetp
-
-cmake --build . --clean-first || {
-    echo "Error building" && exit 1
-}
-
-popd
-popd
 ```

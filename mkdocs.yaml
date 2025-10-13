@@ -1,8 +1,70 @@
-site_name: CraneSched
-theme: 
+site_name: CraneSched Documentation
+site_description: Documentation for CraneSched, an HPC and AI Scheduling System.
+site_author: High Performance Computing Platform of Peking University
+site_url: https://cranesched.readthedocs.io/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - navigation.footer
+    - navigation.tracking
   logo: images/logo.png
   favicon: images/logo.png
-  name: material
-  language: en
+
 plugins:
   - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - attr_list
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.emoji
+  - pymdownx.tabbed
+  - pymdownx.tasklist
+  - pymdownx.caret
+  - pymdownx.smartsymbols
+  - pymdownx.arithmatex:
+      generic: true
+
+nav:
+  - Home: index.md
+  - Deployment:
+    - Overview: deployment/index.md
+    - Frontend Deployment:
+      - Frontend: deployment/Frontend.md
+    - Backend Deployment:
+      - Rocky Linux 9: deployment/Backend/Rocky9.md
+      - CentOS 7: deployment/Backend/CentOS7.md
+      - EBPF Support: deployment/Backend/eBPF.md
+  - Commands:
+    - cacct: command/cacct.md
+    - cacctmgr: command/cacctmgr.md
+    - calloc: command/calloc.md
+    - cbatch: command/cbatch.md
+    - ccancel: command/ccancel.md
+    - ccontrol: command/ccontrol.md
+    - ccontrol_yufa: command/ccontrol_yufa.md
+    - ceff: command/ceff.md
+    - cinfo: command/cinfo.md
+    - cqueue: command/cqueue.md
+    - crun: command/crun.md
+  - Reference:
+    - Exit Codes: referrence/exit_code.md

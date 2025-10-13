@@ -4,8 +4,6 @@
 
 A distributed intelligent scheduler for HPC and AI workloads, designed for performance, scale, and simplicity.
 
-> Note: For production deployments we recommend **Rocky Linux 9** for better stability and kernel compatibility.
-
 ---
 
 ## What is CraneSched?
@@ -22,13 +20,13 @@ Key components:
 
 ## Highlights
 
-- Powerful: HPC and AI job modes in one system
-- Fast and efficient: 100k+ scheduling decisions per second, quick job–resource matching
-- Scalable: designed for clusters with millions of cores
-- Easy to use: clear user/admin commands and workflows
-- Secure by design: RBAC and encrypted communication
-- Resilient: automatic job recovery, no single point of failure, fast state recovery
-- Open source: community-friendly and extensible
+- **Unified workloads:** HPC and AI job payload in a single, integrated system
+- **High throughput:** 100k+ scheduling decisions per second for rapid job–resource matching
+- **Massive scalability:** designed to manage clusters with millions of cores
+- **User-friendly:** concise, consistent user and admin commands and workflows
+- **Security-conscious:** role-based access control (RBAC), mTLS-encrypted communications, and secure-by-default configurations
+- **Designed for resilience:** automatic job recovery, no single point of failure, and fast state restoration
+- **Open and extensible:** community-driven, pluggable architecture for customization and integration
 
 ---
 
@@ -36,39 +34,34 @@ Key components:
 
 1. Choose your deployment guide:
 
-	 - [Backend (recommended)](<./deployment/Backend Deployment/Rocky9.md>)
-
-	 - [Backend (legacy)](<./deployment/Backend Deployment/Centos7.md>)
-
-	 - [Frontend apps](./deployment/Frontend.md)
-
-	 - [eBPF for GRES on cgroup v2](<./deployment/Backend Deployment/EBPF.md>)
+	 - [Backend (Rocky 9, recommended)](<./deployment/Backend/Rocky9.md>)
+	 - [Backend (CentOS 7, legacy)](<./deployment/Backend/CentOS7.md>)
+	 - [Frontend components](./deployment/Frontend.md)
+	 - [eBPF for GRES on cgroup v2](<./deployment/Backend/eBPF.md>)
 
 2. Install and start services:
 
 	 - Start cranectld on control node(s)
-
 	 - Start craned on all compute nodes
-
 	 - Deploy optional frontend services where needed (cfored, cplugind)
 
 3. Submit a job
 
 	 - [Batch jobs](./command/cbatch.md)
-
 	 - Interactive jobs: [crun](./command/crun.md) and [calloc](./command/calloc.md)
 
 > Tip: Prefer to complete backend setup first, then deploy frontend tools to login/control/compute nodes as needed.
+> Note: For production deployments we recommend **Rocky Linux 9** for better stability and kernel compatibility.
 
 ---
 
-## Documentation map
+## Documentation Index
 
 - Deployment & Configuration
 	- [Overview](./deployment/index.md)
-	- [Backend (Rocky 9)](<./deployment/Backend Deployment/Rocky9.md>)
-	- [Backend (CentOS 7)](<./deployment/Backend Deployment/Centos7.md>)
-	- [eBPF for GRES (cgroup v2)](<./deployment/Backend Deployment/EBPF.md>)
+	- [Backend (Rocky 9)](<./deployment/Backend/Rocky9.md>)
+	- [Backend (CentOS 7)](<./deployment/Backend/CentOS7.md>)
+	- [eBPF for GRES (cgroup v2)](<./deployment/Backend/eBPF.md>)
 	- [Frontend deployment](./deployment/Frontend.md)
 
 - User & Admin Commands
@@ -89,7 +82,6 @@ Key components:
 CraneSched introduces a Resources Manager abstraction to handle different workload types:
 
 - HPC jobs: Cgroup Manager allocates resources and provides cgroup-based isolation
-
 - AI jobs: Container Manager leverages Kubernetes for resource allocation and container lifecycle management
 
 ---
@@ -97,8 +89,8 @@ CraneSched introduces a Resources Manager abstraction to handle different worklo
 ## Demo and repositories
 
 - [Demo cluster](https://hpc.pku.edu.cn/demo/cranesched)
-- [Frontend repository](https://github.com/PKUHPC/CraneSched-FrontEnd)
 - [Backend repository](https://github.com/PKUHPC/CraneSched)
+- [Frontend repository](https://github.com/PKUHPC/CraneSched-FrontEnd)
 
 ---
 
@@ -119,5 +111,5 @@ CraneSched is dual-licensed under AGPLv3 and a commercial license. See `LICENSE`
 ## Need help?
 
 - Browse the docs via the sections above
-- Open an issue on GitHub: <https://github.com/PKUHPC/CraneSched/issues>
-- Contributions are welcome—see the repositories for guidelines
+- Open an issue on GitHub: [https://github.com/PKUHPC/CraneSched/issues](https://github.com/PKUHPC/CraneSched/issues)
+- Contributions are welcome. See the repositories for guidelines.
