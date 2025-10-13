@@ -1,24 +1,28 @@
+// DO NOT
+#include <linux/types.h>
+// REORDER
 #include <linux/bpf.h>
+// THESE
 #include <bpf/bpf_helpers.h>
-#include <stdint.h>
+// HEADERS
 
 enum BPF_PERMISSION { ALLOW = 0, DENY };
 
 #pragma pack(push, 8)
 struct BpfKey {
-  uint64_t cgroup_id;
-  uint32_t major;
-  uint32_t minor;
+  __u64 cgroup_id;
+  __u32 major;
+  __u32 minor;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 8)
 struct BpfDeviceMeta {
-  uint32_t major;
-  uint32_t minor;
-  int permission;
-  short access;
-  short type;
+  __u32 major;
+  __u32 minor;
+  __s32 permission;
+  __s16 access;
+  __s16 type;
 };
 #pragma pack(pop)
 
@@ -36,7 +40,7 @@ SEC("cgroup/dev")
 int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   struct BpfKey key = {bpf_get_current_cgroup_id(), ctx->major, ctx->minor};
   // value.major in map(0,0,0) contains log level
-  struct BpfKey log_key = {(uint64_t)0, (uint32_t)0, (uint32_t)0};
+  struct BpfKey log_key = {(__u64)0, (__u32)0, (__u32)0};
   struct BpfDeviceMeta *log_level_meta;
 
   log_level_meta =
