@@ -720,6 +720,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       crane::grpc::CranedControlState control_state;
       if (craned_meta->drain) {
         control_state = crane::grpc::CranedControlState::CRANE_DRAIN;
+      } else if (craned_meta->configure) {
+        control_state = crane::grpc::CranedControlState::CRANE_CONFIGURING;
       } else {
         control_state = crane::grpc::CranedControlState::CRANE_NONE;
       }
@@ -853,6 +855,14 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     g_plugin_client->NodeEventHookAsync(std::move(event_list));
   }
   return reply;
+}
+
+void CranedMetaContainer::UpdateNodeConfigureState(
+    const std::vector<CranedId>& craned_ids, bool is_configure) {
+  for (const auto& craned_id : craned_ids) {
+    auto craned_meta = craned_meta_map_[craned_id];
+    craned_meta->configure = is_configure;
+  }
 }
 
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(

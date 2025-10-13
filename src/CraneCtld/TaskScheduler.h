@@ -773,6 +773,8 @@ class TaskScheduler {
   crane::grpc::ExecInContainerStepReply ExecInContainerStep(
       const crane::grpc::ExecInContainerStepRequest& request);
 
+  void CancelTaskNoBlock(uint32_t task_id);
+
   CraneErrCode TerminatePendingOrRunningIaStep(job_id_t job_id,
                                                step_id_t step_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);

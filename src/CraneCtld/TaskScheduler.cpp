@@ -3358,28 +3358,31 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                   job_finished_status.value());
       m_running_task_map_.erase(iter);
       for (const auto& epilog : g_config.EpiLogs) {
-        // TODO: add envs
-        RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = {}, .run_uid = 0};
+        RunCommandArgs run_epilog_ctld_args{.program = epilog,
+                                            .args = {},
+                                            .envs = {},
+                                            .run_uid = 0};
         if (g_config.EpilogTimeout) {
           run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
         } else {
           run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
         }
-        CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s",
-          epilog, run_epilog_ctld_args.run_uid, run_epilog_ctld_args.timeout_sec);
+        CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s", epilog,
+                    run_epilog_ctld_args.run_uid,
+                    run_epilog_ctld_args.timeout_sec);
         auto result = util::os::RunCommand(run_epilog_ctld_args);
         if (result.time_out) {
-          CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}",
-                      epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+          CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}", epilog,
+                     run_epilog_ctld_args.timeout_sec, result.output.c_str());
         } else if (result.term_signal != 0) {
-          CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}",
-                      epilog, result.term_signal, result.output.c_str());
+          CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}", epilog,
+                     result.term_signal, result.output.c_str());
         } else if (result.exit_code != 0) {
-          CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}",
-                      epilog, result.exit_code, result.output.c_str());
+          CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}", epilog,
+                     result.exit_code, result.output.c_str());
         } else
-          CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}",
-                     epilog, result.output.c_str());
+          CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}", epilog,
+                     result.output.c_str());
       }
     }
   }
