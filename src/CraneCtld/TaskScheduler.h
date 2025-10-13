@@ -820,8 +820,9 @@ class TaskScheduler {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         meta.has_been_cancelled_on_front_end = true;
       }
-      m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{.task = std::move(task)});
+      m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+          .task = std::move(task),
+          .finish_status = crane::grpc::TaskStatus::Cancelled});
       m_cancel_task_async_handle_->send();
       m_pending_task_map_.erase(pd_it);
       return CraneErrCode::SUCCESS;
@@ -981,7 +982,7 @@ class TaskScheduler {
 
   struct CancelPendingTaskQueueElem {
     std::unique_ptr<TaskInCtld> task;
-    std::string reason;
+    crane::grpc::TaskStatus finish_status;
   };
 
   struct CancelRunningTaskQueueElem {

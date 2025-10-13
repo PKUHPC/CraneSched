@@ -798,9 +798,9 @@ void TaskScheduler::ScheduleThread_() {
         auto pd_it = m_pending_task_map_.find(task_id);
         if (pd_it != m_pending_task_map_.end()) {
           auto& task = pd_it->second;
-          m_cancel_task_queue_.enqueue(
-              CancelPendingTaskQueueElem{.task = std::move(task),
-                                         .reason = "reached deadline"});
+          m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+              .task = std::move(task),
+              .finish_status = crane::grpc::TaskStatus::Deadline});
           m_cancel_task_async_handle_->send();
           m_pending_task_map_.erase(pd_it);
           CRANE_DEBUG("Terminate task #{} due to deadline", task_id);
@@ -1602,9 +1602,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     } else {
       reply.add_cancelled_tasks(task_id);
 
-      m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{.task = std::move(it->second),
-                                     .reason = "cancelled by user"});
+      m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+          .task = std::move(it->second),
+          .finish_status = crane::grpc::TaskStatus::Cancelled});
       m_cancel_task_async_handle_->send();
 
       m_pending_task_map_.erase(it);
@@ -2327,6 +2327,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     std::visit(  //
         VariantVisitor{
             [&](CancelPendingTaskQueueElem& pd_elem) {
+              pd_elem.task->SetStatus(pd_elem.finish_status);
               pending_task_ptr_vec.emplace_back(std::move(pd_elem.task));
             },
             [&](CancelRunningTaskQueueElem& rn_elem) {
@@ -2359,7 +2360,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
   if (pending_task_ptr_vec.empty()) return;
 
   for (auto& task : pending_task_ptr_vec) {
-    task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
     g_account_meta_container->FreeQosResource(*task);
 
