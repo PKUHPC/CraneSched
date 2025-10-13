@@ -1402,6 +1402,17 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
+void TaskScheduler::CancelTaskNoBlock(uint32_t task_id) {
+  auto pd_it = m_pending_task_map_.find(task_id);
+  if (pd_it != m_pending_task_map_.end()) {
+    auto& task = pd_it->second;
+    m_cancel_task_queue_.enqueue(
+        CancelPendingTaskQueueElem{.task = std::move(task)});
+    m_cancel_task_async_handle_->send();
+    m_pending_task_map_.erase(pd_it);
+  }
+}
+
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(
     const crane::grpc::CreateReservationRequest& request) {
   crane::grpc::CreateReservationReply reply;
@@ -2152,28 +2163,31 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     CRANE_TRACE("Move task#{} to the Completed Queue", task_id);
     m_running_task_map_.erase(iter);
     for (const auto& epilog : g_config.EpiLogs) {
-      // TODO: add envs
-      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = {}, .run_uid = 0};
+      RunCommandArgs run_epilog_ctld_args{.program = epilog,
+                                          .args = {},
+                                          .envs = task->env,
+                                          .run_uid = 0};
       if (g_config.EpilogTimeout) {
         run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
       } else {
         run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
       }
-      CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s",
-        epilog, run_epilog_ctld_args.run_uid, run_epilog_ctld_args.timeout_sec);
+      CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s", epilog,
+                  run_epilog_ctld_args.run_uid,
+                  run_epilog_ctld_args.timeout_sec);
       auto result = util::os::RunCommand(run_epilog_ctld_args);
       if (result.time_out) {
-        CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}",
-                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+        CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}", epilog,
+                   run_epilog_ctld_args.timeout_sec, result.output.c_str());
       } else if (result.term_signal != 0) {
-        CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}",
-                    epilog, result.term_signal, result.output.c_str());
+        CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}", epilog,
+                   result.term_signal, result.output.c_str());
       } else if (result.exit_code != 0) {
-        CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}",
-                    epilog, result.exit_code, result.output.c_str());
+        CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}", epilog,
+                   result.exit_code, result.output.c_str());
       } else
-        CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}",
-                   epilog, result.output.c_str());
+        CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}", epilog,
+                   result.output.c_str());
     }
   }
 
@@ -2517,7 +2531,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
 
     // An offline craned shouldn't be scheduled.
-    if (!craned_meta->alive || craned_meta->drain) continue;
+    if (!craned_meta->alive || craned_meta->drain || craned_meta->configure) continue;
 
     std::vector<std::pair<absl::Time, const ResourceInNode*>>
         end_time_task_res_vec;
@@ -2593,7 +2607,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
 
   for (const auto& craned_id : resv_meta->logical_part.craned_ids) {
     auto craned_meta_ptr = craned_meta_map.at(craned_id).GetExclusivePtr();
-    if (!craned_meta_ptr->alive || craned_meta_ptr->drain) continue;
+    if (!craned_meta_ptr->alive || craned_meta_ptr->drain || craned_meta_ptr->configure) continue;
 
     node_time_res_vec_map[craned_id];
   }
@@ -2939,48 +2953,73 @@ void MinLoadFirst::NodeSelect(
     }
 
     if (expected_start_time == now) {
-      // run prolog script
-      bool run_prolog_result = true;
-      // TODO: update node state =  POWER_UP/CONFIGURING
-      for (const auto& prolog : g_config.ProLogs) {
-        // TODO: add envs
-        RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
-        CRANE_TRACE("Running PrologCtld: {} as UID {} ",
-          prolog, run_prolog_ctld_args.run_uid);
-        auto result = util::os::RunCommand(run_prolog_ctld_args);
-        if (result.time_out) {
-          CRANE_INFO("PrologCtld'{}' timed out after {}s. Output: {}",
-                      prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
-          run_prolog_result = false;
-          break;
-        }
-        if (result.term_signal != 0) {
-          CRANE_INFO("PrologCtld '{}' killed by signal {}. Output: {}",
-                      prolog, result.term_signal, result.output.c_str());
-          run_prolog_result = false;
-          break;
-        }
-        if (result.exit_code != 0) {
-          CRANE_INFO("PrologCtld '{}' failed (exit code {}). Output: {}",
-                      prolog, result.exit_code, result.output.c_str());
-          run_prolog_result = false;
-          break;
-        }
+      if (!g_config.ProLogs.empty()) {
+        // update node state =  POWER_UP/CONFIGURING
+        g_meta_container->UpdateNodeConfigureState(task->executing_craned_ids, true);
+        // run prolog script
+        bool run_prolog_result = true;
+        for (const auto& prolog : g_config.ProLogs) {
+          RunCommandArgs run_prolog_ctld_args{.program = prolog,
+                                              .args = {},
+                                              .envs = task->env,
+                                              .run_uid = 0};
+          CRANE_TRACE("Running PrologCtld: {} as UID {} ", prolog,
+                      run_prolog_ctld_args.run_uid);
+          auto result = util::os::RunCommand(run_prolog_ctld_args);
+          if (result.time_out) {
+            CRANE_INFO("PrologCtld'{}' timed out after {}s. Output: {}", prolog,
+                       run_prolog_ctld_args.timeout_sec, result.output.c_str());
+            run_prolog_result = false;
+            break;
+          }
+          if (result.term_signal != 0) {
+            CRANE_INFO("PrologCtld '{}' killed by signal {}. Output: {}",
+                       prolog, result.term_signal, result.output.c_str());
+            run_prolog_result = false;
+            break;
+          }
+          if (result.exit_code != 0) {
+            CRANE_INFO("PrologCtld '{}' failed (exit code {}). Output: {}",
+                       prolog, result.exit_code, result.output.c_str());
+            run_prolog_result = false;
+            break;
+          }
 
-        CRANE_INFO("PrologCtld '{}' finished successfully. Output: {}",
+          CRANE_INFO("PrologCtld '{}' finished successfully. Output: {}",
                      prolog, result.output.c_str());
-      }
+          // parse and add env to task
+          for (const auto& line : absl::StrSplit(result.output, '\n')) {
+            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&line));
+            // Skip empty lines or lines without an equal sign
+            auto eq_pos = line.find('=');
+            if (line.empty() || eq_pos == absl::string_view::npos) continue;
 
-      if (!run_prolog_result) {
-        if (task->IsBatch()) {
-          task->pending_reason = "PrologCranectld failed";
-          continue;
-        } else {
-          // TODO: srun will be cancelled.
-          continue;
+            absl::string_view key = line.substr(0, eq_pos);
+            absl::string_view value = line.substr(eq_pos + 1);
+
+            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&key));
+            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&value));
+
+            if (!key.empty()) {
+              task->env[std::string(key)] = std::string(value);
+              CRANE_TRACE("Added env from prolog: {}={}", key, value);
+            }
+          }
+        }
+
+        // update node state to ready
+        g_meta_container->UpdateNodeConfigureState(task->executing_craned_ids, false);
+        if (!run_prolog_result) {
+          if (task->IsBatch()) {
+            task->pending_reason = "PrologCranectld failed";
+            continue;
+          } else {
+            // crun/calloc will be cancelled.
+            g_task_scheduler->CancelTaskNoBlock(task_id);
+            continue;
+          }
         }
       }
-      // TODO: update node state to ready
 
       // The task can be started now.
 
