@@ -193,12 +193,22 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
   return grpc::Status::OK;
 }
 
-grpc::Status CtldForInternalServiceImpl::HealthCheckResponse(
+grpc::Status CtldForInternalServiceImpl::SendHealthCheckResult(
     grpc::ServerContext *context,
-    const crane::grpc::HealthCheckResponseRequest *request,
+    const crane::grpc::SendHealthCheckResultRequest *request,
     google::protobuf::Empty *response) {
   g_meta_container->UpdateNodeStateWithHealthCheck_(request->craned_id(),
                                                     request->healthy());
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::QueryNodeState(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryNodeStateRequest *request,
+    crane::grpc::QueryNodeStateReply *response) {
+
+  g_meta_container->QueryNodeState(request->craned_id(), response);
 
   return grpc::Status::OK;
 }
