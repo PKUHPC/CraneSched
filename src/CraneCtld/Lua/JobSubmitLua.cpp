@@ -22,6 +22,7 @@
 
 namespace Ctld {
 
+#ifdef HAVA_LUA
 int LogLuaMsg(lua_State* lua_state) {
   std::string prefix = "[lua]";
   int level = 0;
@@ -86,10 +87,10 @@ int GetQosPriority(lua_State* lua_state) {
   lua_pushnumber(lua_state, qos->priority);
   return 1;
 }
-
+#endif
 CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
-
+#ifdef HAVA_LUA
   if (!LoadLuaScript_())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
@@ -129,13 +130,14 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   if (rc != 0)
     return std::unexpected(
         FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
-
+#endif
   return result;
+
 }
 
 CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   CraneExpectedRich<void> result;
-
+#ifdef HAVA_LUA
   crane::grpc::TaskInfo task_info;
   task_in_ctld.SetFieldsOfTaskInfo(&task_info);
 
@@ -181,10 +183,10 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   if (rc != 0)
     return std::unexpected(
         FormatRichErr(static_cast<CraneErrCode>(rc), user_msg));
-
+#endif
   return result;
 }
-
+#ifdef HAVA_LUA
 void JobSubmitLua::RegisterOutputFunctions_() {
   const char* unpack_str;
 
@@ -1203,5 +1205,6 @@ void JobSubmitLua::PushResourceView_(lua_State* L, const ResourceView& res) {
   //  device_map table
   lua_setfield(L, -2, "device_map"); // parent_table.device_map = device_map
 }
+#endif
 
 }  // namespace Ctld
