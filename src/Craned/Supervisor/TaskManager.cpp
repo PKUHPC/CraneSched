@@ -1766,6 +1766,26 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     CRANE_INFO("[Task #{}] Stopped and is doing TaskStatusChange...", task_id);
     auto task = m_step_.GetTaskInstance(task_id);
 
+    for (const auto& epilog : g_config.TaskEpilogs) {
+      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = task->GetChildProcessEnv(), .run_uid = 0};
+      CRANE_TRACE("Running Epilog: {} as UID {} ",
+        epilog, run_epilog_ctld_args.run_uid);
+      auto result = util::os::RunCommand(run_epilog_ctld_args);
+      if (result.time_out) {
+        CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
+                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+      } else if (result.term_signal != 0) {
+        CRANE_INFO("Epilog '{}' killed by signal {}. Output: {}",
+                    epilog, result.term_signal, result.output.c_str());
+      } else if (result.exit_code != 0) {
+        CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
+                    epilog, result.exit_code, result.output.c_str());
+      } else {
+        CRANE_INFO("Epilog '{}' finished successfully. Output: {}",
+                   epilog, result.output.c_str());
+      }
+    }
+
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       ActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
@@ -1944,6 +1964,45 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
               m_step_.job_id, m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
+    }
+
+    bool run_prolog_result = true;
+    for (const auto& prolog : g_config.TaskPrologs) {
+      RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
+      CRANE_TRACE("Running Prolog: {} as UID {} ",
+        prolog, run_prolog_ctld_args.run_uid);
+      auto result = util::os::RunCommand(run_prolog_ctld_args);
+      if (result.time_out) {
+        CRANE_INFO("Prolog'{}' timed out after {}s. Output: {}",
+                    prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
+        run_prolog_result = false;
+        break;
+      }
+      if (result.term_signal != 0) {
+        CRANE_INFO("Prolog '{}' killed by signal {}. Output: {}",
+                    prolog, result.term_signal, result.output.c_str());
+        run_prolog_result = false;
+        break;
+      }
+      if (result.exit_code != 0) {
+        CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
+                    prolog, result.exit_code, result.output.c_str());
+        run_prolog_result = false;
+        break;
+      }
+
+      CRANE_INFO("Prolog '{}' finished successfully. Output: {}",
+                   prolog, result.output.c_str());
+    }
+
+    if (!run_prolog_result) {
+      ActivateTaskStatusChange_(
+          task->task_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodePrologFail,
+          fmt::format(
+              "[Job #{}] Failed to run prolog for uid {} of task",
+              m_step_.job_id, m_step_.uid));
+      elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
     }
 
     auto* task_ptr = task.get();
