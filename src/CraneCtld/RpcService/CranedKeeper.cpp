@@ -265,23 +265,48 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
   return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-crane::grpc::AttachContainerTaskReply CranedStub::AttachContainerTask(
-    const crane::grpc::AttachContainerTaskRequest &request) {
-  using crane::grpc::AttachContainerTaskReply;
-  using crane::grpc::AttachContainerTaskRequest;
+crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
+    const crane::grpc::AttachInContainerTaskRequest &request) {
+  using crane::grpc::AttachInContainerTaskReply;
+  using crane::grpc::AttachInContainerTaskRequest;
 
-  // TODO: Move this into CriClient or somewhere else?
-  static constexpr int64_t kProxiedCriReqTimeout = 180;
-
-  AttachContainerTaskReply reply;
+  AttachInContainerTaskReply reply;
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(kProxiedCriReqTimeout));
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
 
-  auto status = m_stub_->AttachContainerTask(&context, request, &reply);
+  auto status = m_stub_->AttachInContainerTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
-        "AttachContainerTask RPC for Node {} returned with status not ok: {}",
+        "AttachInContainerTask RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+
+    auto *err = reply.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description(status.error_message());
+    reply.set_ok(false);
+    return reply;
+  }
+
+  UpdateLastActiveTime();
+  return reply;
+}
+
+crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
+    const crane::grpc::ExecInContainerTaskRequest &request) {
+  using crane::grpc::ExecInContainerTaskReply;
+  using crane::grpc::ExecInContainerTaskRequest;
+
+  ExecInContainerTaskReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
+
+  auto status = m_stub_->ExecInContainerTask(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "ExecInContainerTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 

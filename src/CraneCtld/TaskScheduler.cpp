@@ -1403,9 +1403,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
-crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
-    const crane::grpc::AttachContainerTaskRequest& request) {
-  crane::grpc::AttachContainerTaskReply response;
+crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
+    const crane::grpc::AttachInContainerTaskRequest& request) {
+  crane::grpc::AttachInContainerTaskReply response;
 
   CranedId target_craned_id;
   {
@@ -1416,7 +1416,7 @@ crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
     auto pd_it = m_pending_task_map_.find(task_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto* err = response.mutable_status();
-      err->set_code(CraneErrCode::ERR_CRI_ATTACH_NOT_READY);
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Task is still pending. Try again later.");
       response.set_ok(false);
       return response;
@@ -1491,7 +1491,87 @@ crane::grpc::AttachContainerTaskReply TaskScheduler::AttachContainerTask(
     return response;
   }
 
-  return stub->AttachContainerTask(request);
+  return stub->AttachInContainerTask(request);
+}
+
+crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
+    const crane::grpc::ExecInContainerTaskRequest& request) {
+  crane::grpc::ExecInContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // Validate command
+    if (request.command_size() == 0) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Command cannot be empty.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to exec.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
+      response.set_ok(false);
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
+    response.set_ok(false);
+    return response;
+  }
+
+  return stub->ExecInContainerTask(request);
 }
 
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(

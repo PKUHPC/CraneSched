@@ -1893,10 +1893,10 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AttachContainerTask(
+grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
     grpc::ServerContext *context,
-    const crane::grpc::AttachContainerTaskRequest *request,
-    crane::grpc::AttachContainerTaskReply *response) {
+    const crane::grpc::AttachInContainerTaskRequest *request,
+    crane::grpc::AttachInContainerTaskReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1930,7 +1930,57 @@ grpc::Status CraneCtldServiceImpl::AttachContainerTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->AttachContainerTask(*request);
+  *response = g_task_scheduler->AttachInContainerTask(*request);
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecInContainerTaskRequest *request,
+    crane::grpc::ExecInContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->command_size() == 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Command cannot be empty");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot exec with both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be enabled");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->ExecInContainerTask(*request);
 
   return grpc::Status::OK;
 }
