@@ -50,6 +50,7 @@ constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
 constexpr const char* HealthCheckFailedReason = "Node failed health check";
+constexpr int MaxHealthCheckWaitTime = 60000;
 
 inline const char* const kDefaultHost = "0.0.0.0";
 

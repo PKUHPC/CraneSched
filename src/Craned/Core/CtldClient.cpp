@@ -1023,13 +1023,12 @@ void CtldClient::HealthCheck_() {
 
   pid_t pid = subprocess.child;
   int result = 0;
-  const int max_wait_ms = 60000;
 
   auto fut = std::async(std::launch::async,
                         [pid, &result]() { return waitpid(pid, &result, 0); });
 
   bool child_exited = false;
-  if (fut.wait_for(std::chrono::milliseconds(max_wait_ms)) ==
+  if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTime)) ==
       std::future_status::ready) {
     if (fut.get() == pid) {
       child_exited = true;
