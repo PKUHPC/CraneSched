@@ -1000,52 +1000,8 @@ int JobSubmitLua::LuaJobRecordField_(lua_State* lua_state,
          lua_pushstring(L, j->qos().data());
                    }},
     {"req_res_view ", [](lua_State* L, const crane::grpc::TaskInfo* j) {
-         const auto& res = j->req_res_view();
-         lua_newtable(L);  // ResourceView table
-
-         // allocatable_res
-         lua_newtable(L);
-         const auto& ar = res.allocatable_res();
-         lua_pushnumber(L, ar.cpu_core_limit());
-         lua_setfield(L, -2, "cpu_core_limit");
-         lua_pushnumber(L, ar.memory_limit_bytes());
-         lua_setfield(L, -2, "memory_limit_bytes");
-         lua_pushnumber(L, ar.memory_sw_limit_bytes());
-         lua_setfield(L, -2, "memory_sw_limit_bytes");
-         lua_setfield(L, -2, "allocatable_res");
-
-         // device_map
-         lua_newtable(L);
-         const auto& dm = res.device_map();
-
-         // name_type_map
-         lua_newtable(L);
-         const auto& name_type_map = dm.name_type_map();
-         for (const auto& dev_pair : name_type_map) {
-           const std::string& device_name = dev_pair.first;
-           const auto& type_count_map = dev_pair.second;
-
-           lua_pushstring(L, device_name.c_str());
-           lua_newtable(L);  // TypeCountMap table
-
-           // type_count_map: map<string, uint64>
-           const auto& tcm = type_count_map.type_count_map();
-           for (const auto& type_pair : tcm) {
-             lua_pushstring(L, type_pair.first.c_str());  // type
-             lua_pushnumber(
-                 L, static_cast<lua_Number>(type_pair.second));  // count
-             lua_settable(L, -3);
-           }
-           // total
-           lua_pushnumber(L, static_cast<lua_Number>(type_count_map.total()));
-           lua_setfield(L, -2, "total");
-
-           lua_settable(L,
-                        -3);  // name_type_map[device_name] = TypeCountMap table
-         }
-         lua_setfield(L, -2, "name_type_map");
-         lua_setfield(L, -2, "device_map");
-    }},
+         PushResourceView_(L, static_cast<ResourceView>(j->req_res_view()));
+          }},
                   {"req_nodes",
                    [](lua_State* L, const crane::grpc::TaskInfo* j) {
          lua_pushstring(L, absl::StrJoin(j->req_nodes(), ",").data());
@@ -1203,9 +1159,9 @@ int JobSubmitLua::ResvField_(lua_State* lua_state,
 }
 
 void JobSubmitLua::PushResourceView_(lua_State* L, const ResourceView& res) {
-  lua_newtable(L);  // 创建 ResourceView table
+  lua_newtable(L);  // ResourceView table
 
-  // allocatable_res 字段
+  // allocatable_res
   lua_newtable(L);
   const auto& ar = res.GetAllocatableRes();
   lua_pushnumber(L, ar.CpuCount());
@@ -1217,36 +1173,35 @@ void JobSubmitLua::PushResourceView_(lua_State* L, const ResourceView& res) {
   lua_setfield(L, -2,
                "allocatable_res");  // ResourceView.allocatable_res = table
 
-  // device_map 字段
+  // device_map
   lua_newtable(L);
-  // TODO: use c++ device map
-  const auto& dm = ToGrpcDeviceMap(res.GetDeviceMap());
-
-  // name_type_map 字段
-  lua_newtable(L);
-  const auto& name_type_map = dm.name_type_map();
-  for (const auto& dev_pair : name_type_map) {
+  for (const auto& dev_pair : res.GetDeviceMap()) {
     const std::string& device_name = dev_pair.first;
-    const auto& type_count_map = dev_pair.second;
+    const auto& untyped_and_type_map = dev_pair.second;
+    uint64_t untyped_req_count = untyped_and_type_map.first;
+    const auto& type_count_map = untyped_and_type_map.second;
 
     lua_pushstring(L, device_name.c_str());
-    lua_newtable(L);  // TypeCountMap table
+    lua_newtable(L); // device entry table
 
-    // type_count_map: map<string, uint64>
-    const auto& tcm = type_count_map.type_count_map();
-    for (const auto& type_pair : tcm) {
-      lua_pushstring(L, type_pair.first.c_str());                    // type
-      lua_pushnumber(L, static_cast<lua_Number>(type_pair.second));  // count
+    // untyped_req_count
+    lua_pushnumber(L, static_cast<lua_Number>(untyped_req_count));
+    lua_setfield(L, -2, "untyped_req_count");
+
+    // type_count_map
+    lua_newtable(L);
+    for (const auto& type_pair : type_count_map) {
+      lua_pushstring(L, type_pair.first.c_str());
+      lua_pushnumber(L, static_cast<lua_Number>(type_pair.second));
       lua_settable(L, -3);
     }
-    // total
-    lua_pushnumber(L, static_cast<lua_Number>(type_count_map.total()));
-    lua_setfield(L, -2, "total");
+    lua_setfield(L, -2, "type_count_map");
 
-    lua_settable(L, -3);  // name_type_map[device_name] = TypeCountMap table
+    lua_settable(L, -3); // device_map[device_name] = device entry table
   }
-  lua_setfield(L, -2, "name_type_map");
-  lua_setfield(L, -2, "device_map");  // ResourceView.device_map = table
+
+  //  device_map table
+  lua_setfield(L, -2, "device_map"); // parent_table.device_map = device_map
 }
 
 }  // namespace Ctld
