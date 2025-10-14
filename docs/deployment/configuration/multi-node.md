@@ -97,6 +97,7 @@ scp /etc/systemd/system/cranectld.service cranectl:/etc/systemd/system/
 
 # Compute nodes
 pdcp -w crane[01-04] /usr/local/bin/craned /usr/local/bin/
+pdcp -w crane[01-04] /usr/libexec/csupervisor /usr/libexec/
 pdcp -w crane[01-04] /etc/systemd/system/craned.service /etc/systemd/system/
 ```
 

@@ -166,8 +166,7 @@ cmake --build .
 2. Install the built binaries:
 
 !!! tip
-    If you prefer to use RPM packages, please see the [Packaging Guide](packaging.md) for instructions.
-
+    We recommend deploying CraneSched using RPM packages. See the [Packaging Guide](packaging.md) for installation instructions.
 ```bash
 cmake --install .
 ```
