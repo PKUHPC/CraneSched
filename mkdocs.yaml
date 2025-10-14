@@ -39,6 +39,8 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
   - tables
+  - toc:
+      permalink: true
   - attr_list
   - admonition
   - md_in_html
