@@ -86,6 +86,8 @@ class StepInstance {
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
+  StepToSupv& GetMutableStep() { return m_step_to_supv_; }
+  
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(
@@ -351,7 +353,9 @@ class TaskManager {
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
-  std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
+  std::future<CraneErrCode> ChangeTaskTimeConstraintAsync(
+      std::optional<absl::Duration> time_limit,
+      std::optional<int64_t> deadline_time);
 
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
@@ -371,10 +375,10 @@ class TaskManager {
     bool mark_as_orphaned{false};
   };
 
-  struct ChangeTaskTimeLimitQueueElem {
-    absl::Duration time_limit;
+  struct ChangeTaskTimeConstraintQueueElem {
     std::promise<CraneErrCode> ok_prom;
-    std::optional<int64_t> deadline_sec{std::nullopt};
+    std::optional<absl::Duration> time_limit{std::nullopt};
+    std::optional<int64_t> deadline_time{std::nullopt};
   };
 
   void EvSigchldCb_();
@@ -384,7 +388,7 @@ class TaskManager {
   void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
-  void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanChangeTaskTimeConstraintQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
@@ -402,8 +406,10 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_change_task_time_constraint_async_handle_;
+  ConcurrentQueue<ChangeTaskTimeConstraintQueueElem>
+      m_task_time_constraint_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

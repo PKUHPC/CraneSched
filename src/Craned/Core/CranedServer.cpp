@@ -306,17 +306,29 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
+grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     grpc::ServerContext *context,
-    const crane::grpc::ChangeJobTimeLimitRequest *request,
-    crane::grpc::ChangeJobTimeLimitReply *response) {
+    const crane::grpc::ChangeJobTimeConstraintRequest *request,
+    crane::grpc::ChangeJobTimeConstraintReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
-      request->task_id(), absl::Seconds(request->time_limit_seconds()));
+
+  std::optional<absl::Duration> time_limit_seconds =
+      request->has_time_limit_seconds()
+          ? std::optional<absl::Duration>(
+                absl::Seconds(request->time_limit_seconds()))
+          : std::nullopt;
+
+  std::optional<int64_t> deadline_time =
+      request->has_deadline_time()
+          ? std::optional<int64_t>(request->deadline_time())
+          : std::nullopt;
+
+  bool ok = g_job_mgr->ChangeJobTimeConstraintAsync(
+      request->task_id(), time_limit_seconds, deadline_time);
   response->set_ok(ok);
 
   return Status::OK;

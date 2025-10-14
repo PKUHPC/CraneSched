@@ -143,12 +143,13 @@ message TerminateOrphanedStepReply {
   string reason = 2;
 }
 
-message ChangeJobTimeLimitRequest {
+message ChangeJobTimeConstraintRequest{
   uint32 task_id = 1;
-  int64 time_limit_seconds = 2;
+  optional int64 time_limit_seconds = 2;
+  optional int64 deadline_time = 3;
 }
 
-message ChangeJobTimeLimitReply {
+message ChangeJobTimeConstraintReply {
   bool ok = 1;
 }
 
@@ -225,6 +226,7 @@ message ModifyTaskRequest {
     TimeLimit = 0;
     Priority = 1;
     Hold = 2;
+    Deadline = 3;
   }
 
   uint32 uid = 1;
@@ -240,6 +242,7 @@ message ModifyTaskRequest {
     // If hold_seconds > 0, add or overwrite a hold constraint timer;
     // If hold_seconds == MaxInt64, add a hold constraint without timer.
     int64 hold_seconds = 7;
+    google.protobuf.Timestamp deadline_time = 8;
   }
 }
 
@@ -1029,7 +1032,7 @@ service Craned {
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
   rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
-  rpc ChangeJobTimeLimit(ChangeJobTimeLimitRequest) returns (ChangeJobTimeLimitReply);
+  rpc ChangeJobTimeConstraint(ChangeJobTimeConstraintRequest) returns (ChangeJobTimeConstraintReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
