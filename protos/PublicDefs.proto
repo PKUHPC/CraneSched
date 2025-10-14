@@ -700,6 +700,8 @@ enum ErrCode {
   ERR_INVALID_CLUSTER = 87;
   ERR_DEL_DEFAULT_WCKEY = 88;
   ERR_NO_DEFAULT_WCKEY = 89;
+
+  ERR_PROLOG = 90;
 }
 
 enum EntityType {
