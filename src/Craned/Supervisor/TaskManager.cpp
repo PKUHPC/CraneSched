@@ -1060,11 +1060,13 @@ CraneErrCode ContainerInstance::ExecuteContainerCommand_(
   if (!WIFEXITED(rc) || WEXITSTATUS(rc) != 0) {
     if (WIFSIGNALED(rc)) {
       CRANE_ERROR(
-          "[Subprocess] Container {} command '{}' terminated by signal {} for task #{}",
+          "[Subprocess] Container {} command '{}' terminated by signal {} for "
+          "task #{}",
           action, cmd, WTERMSIG(rc), m_parent_step_inst_->GetStep().task_id());
     } else {
       CRANE_ERROR(
-          "[Subprocess] Container {} command '{}' exited with code {} for task #{}",
+          "[Subprocess] Container {} command '{}' exited with code {} for task "
+          "#{}",
           action, cmd, WIFEXITED(rc) ? WEXITSTATUS(rc) : rc,
           m_parent_step_inst_->GetStep().task_id());
     }
@@ -1077,8 +1079,7 @@ CraneErrCode ContainerInstance::ExecuteContainerCommand_(
 CraneErrCode ContainerInstance::Suspend() {
   if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
 
-  auto err = ExecuteContainerCommand_(g_config.Container.RuntimePause,
-                                      "pause");
+  auto err = ExecuteContainerCommand_(g_config.Container.RuntimePause, "pause");
   if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Suspend();
   return err;
 }
@@ -1086,8 +1087,8 @@ CraneErrCode ContainerInstance::Suspend() {
 CraneErrCode ContainerInstance::Resume() {
   if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
 
-  auto err = ExecuteContainerCommand_(g_config.Container.RuntimeResume,
-                                      "resume");
+  auto err =
+      ExecuteContainerCommand_(g_config.Container.RuntimeResume, "resume");
   if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Resume();
   return err;
 }
