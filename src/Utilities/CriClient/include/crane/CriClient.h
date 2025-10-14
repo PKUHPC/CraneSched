@@ -100,6 +100,11 @@ class CriClient {
   CraneExpected<std::string> Attach(const std::string& container_id, bool tty,
                                     bool stdin, bool stdout, bool stderr) const;
 
+  CraneExpected<std::string> Exec(const std::string& container_id,
+                                  const std::vector<std::string>& command,
+                                  bool tty, bool stdin, bool stdout,
+                                  bool stderr) const;
+
   // Container Event Streaming
 
   // Start event streaming thread

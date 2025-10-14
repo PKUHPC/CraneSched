@@ -650,7 +650,7 @@ CraneErrCode ContainerInstance::Prepare() {
   }
 
   // chown & chmod for the user
-  if (chmod(m_data_path_.c_str(), 0755) != 0) {
+  if (chmod(m_data_path_.c_str(), 0700) != 0) {
     CRANE_ERROR("Failed to chmod data dir {} for task #{}", m_data_path_,
                 job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
@@ -700,7 +700,7 @@ CraneErrCode ContainerInstance::Prepare() {
     return container_id_expt.error();
   }
   m_container_id_ = std::move(container_id_expt.value());
-  CRANE_DEBUG("Container {} created for task #{}", m_pod_id_, job_id);
+  CRANE_DEBUG("Container {} created for task #{}", m_container_id_, job_id);
 
   return CraneErrCode::SUCCESS;
 }

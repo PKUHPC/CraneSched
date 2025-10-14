@@ -58,6 +58,8 @@ constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
+constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
+
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
@@ -73,8 +75,8 @@ struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
   };
-
   CraneCtldConf CtldConf;
+
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
@@ -144,6 +146,12 @@ struct Config {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
+  PluginConfig Plugin;
+
+  struct ContainerConfig {
+    bool Enabled{false};
+  };
+  ContainerConfig Container;
 
   bool CompressedRpc{};
 
@@ -174,9 +182,6 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
-
-  // Plugin config
-  PluginConfig Plugin;
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;

@@ -939,7 +939,7 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
-message AttachContainerTaskRequest {
+message AttachInContainerTaskRequest {
   uint32 uid = 1;
   uint32 task_id = 2;
 
@@ -949,7 +949,25 @@ message AttachContainerTaskRequest {
   bool stderr = 9;
 }
 
-message AttachContainerTaskReply {
+message AttachInContainerTaskReply {
+  bool ok = 1;
+  RichError status = 2;
+  string url = 3;
+}
+
+message ExecInContainerTaskRequest {
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  repeated string command = 3;
+
+  bool stdin = 6;
+  bool tty = 7;
+  bool stdout = 8;
+  bool stderr = 9;
+}
+
+message ExecInContainerTaskReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
@@ -1014,7 +1032,8 @@ service CraneCtld {
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
-  rpc AttachContainerTask(AttachContainerTaskRequest) returns (AttachContainerTaskReply);
+  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
+  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
 }
 
 service CeffQueryService {
@@ -1054,7 +1073,8 @@ service Craned {
   /*
   Craned will proxy the following container-related RPCs to CRI Service.
   */
-  rpc AttachContainerTask(AttachContainerTaskRequest) returns (AttachContainerTaskReply);
+  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
+  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);

@@ -356,6 +356,37 @@ CraneExpected<std::string> CriClient::Attach(const std::string& container_id,
   return response.url();
 }
 
+CraneExpected<std::string> CriClient::Exec(
+    const std::string& container_id, const std::vector<std::string>& command,
+    bool tty, bool stdin, bool stdout, bool stderr) const {
+  using api::ExecRequest;
+  using api::ExecResponse;
+
+  ExecRequest request;
+  ExecResponse response;
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kCriDefaultReqTimeout);
+
+  request.set_container_id(container_id);
+  for (const auto& cmd : command) {
+    request.add_cmd(cmd);
+  }
+  request.set_tty(tty);
+  request.set_stdin(stdin);
+  request.set_stdout(stdout);
+  request.set_stderr(stderr);
+
+  auto status = m_rs_stub_->Exec(&context, request, &response);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to exec in container: {}", status.error_message());
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  }
+
+  return response.url();
+}
+
 // ===== Container Event Monitoring Implementation =====
 
 void CriClient::StartContainerEventStream(ContainerEventCallback callback) {
