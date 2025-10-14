@@ -173,3 +173,9 @@ Plugin:
     - Name: "dummy"
       Path: "/path/to/dummy.so"
       Config: "/path/to/dummy.yaml"
+
+Preempt:
+  # PreemptType can be none, qos, partition
+  PreemptType: none
+  # PreemptMode can be OFF, CANCEL, REQUEUE, SUSPEND
+  PreemptMode: OFF
