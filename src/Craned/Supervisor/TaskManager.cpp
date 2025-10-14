@@ -2665,7 +2665,7 @@ CraneErrCode TaskManager::SuspendRunningTasks_() {
     if (!task) continue;
     if (task->GetPid() == 0) continue;
     any_signal_sent = true;
-    CraneErrCode err = task->Kill(SIGSTOP);
+    CraneErrCode err = task->Suspend();
     if (err != CraneErrCode::SUCCESS) return err;
   }
 
@@ -2682,7 +2682,7 @@ CraneErrCode TaskManager::ResumeSuspendedTasks_() {
     if (!task) continue;
     if (task->GetPid() == 0) continue;
     any_signal_sent = true;
-    CraneErrCode err = task->Kill(SIGCONT);
+    CraneErrCode err = task->Resume();
     if (err != CraneErrCode::SUCCESS) return err;
   }
 

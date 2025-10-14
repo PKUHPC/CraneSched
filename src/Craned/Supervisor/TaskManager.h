@@ -18,6 +18,7 @@
 
 #pragma once
 #include <sched.h>
+#include <string_view>
 
 #include <expected>
 
@@ -223,6 +224,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Suspend();
+  virtual CraneErrCode Resume();
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
@@ -313,6 +316,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
