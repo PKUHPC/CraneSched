@@ -83,4 +83,4 @@ nav:
     - cqueue: command/cqueue.md
     - crun: command/crun.md
   - Reference:
-    - Exit Codes: referrence/exit_code.md
+    - Exit Codes: reference/exit_code.md

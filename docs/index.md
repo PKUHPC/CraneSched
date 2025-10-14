@@ -108,7 +108,7 @@ CraneSched introduces a Resource Manager to support both HPC and AI workloads:
 
 - User commands: [cbatch](command/cbatch.md), [cqueue](command/cqueue.md), [crun](command/crun.md), [calloc](command/calloc.md), [cinfo](command/cinfo.md)
 - Admin commands: [cacct](command/cacct.md), [cacctmgr](command/cacctmgr.md), [ceff](command/ceff.md), [ccontrol](command/ccontrol.md), [ccancel](command/ccancel.md)
-- Exit codes: [reference](referrence/exit_code.md)
+- Exit codes: [reference](reference/exit_code.md)
 
 ---
 
