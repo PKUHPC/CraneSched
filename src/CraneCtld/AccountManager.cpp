@@ -173,6 +173,14 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
   if (find_qos && !find_qos->deleted)
     return std::unexpected(CraneErrCode::ERR_DB_QOS_ALREADY_EXISTS);
 
+  // Validate preempt list
+  for (const auto& preempt_qos_name : new_qos.preempt) {
+    const Qos* preempt_qos = GetExistedQosInfoNoLock_(preempt_qos_name);
+    if (!preempt_qos) {
+      return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+    }
+  }
+
   return AddQos_(actor_name, new_qos, find_qos);
 }
 
@@ -1011,8 +1019,86 @@ CraneExpected<void> AccountManager::ModifyQos(
   case crane::grpc::ModifyField::MaxTimeLimitPerTask:
     item = "max_time_limit_per_task";
     break;
+  case crane::grpc::ModifyField::Preempt:
+    item = "preempt";
+    break;
+  case crane::grpc::ModifyField::ModifyPreemptMode:
+    item = "preempt_mode";
+    break;
   default:
     std::unreachable();
+  }
+
+  // Handle special fields: preempt (list) and preempt_mode (enum)
+  if (item == Qos::FieldStringOfPreempt()) {
+    // Parse comma-separated QOS names
+    std::list<std::string> preempt_list;
+    if (!value.empty()) {
+      std::istringstream iss(value);
+      std::string qos_name;
+      while (std::getline(iss, qos_name, ',')) {
+        // Trim whitespace
+        qos_name.erase(0, qos_name.find_first_not_of(" \t\n\r"));
+        qos_name.erase(qos_name.find_last_not_of(" \t\n\r") + 1);
+
+        if (!qos_name.empty()) {
+          // Validate QOS exists
+          const Qos* preempt_qos = GetExistedQosInfoNoLock_(qos_name);
+          if (!preempt_qos) {
+            return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+          }
+          preempt_list.emplace_back(qos_name);
+        }
+      }
+    }
+
+    // Update to database
+    mongocxx::client_session::with_transaction_cb callback =
+        [&](mongocxx::client_session* session) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                       name, item, preempt_list);
+        };
+
+    if (!g_db_client->CommitTransaction(callback))
+      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+
+    // Refresh in-memory QOS
+    Qos qos;
+    g_db_client->SelectQos("name", name, &qos);
+    *m_qos_map_[name] = std::move(qos);
+
+    return {};
+  }
+
+  if (item == Qos::FieldStringOfPreemptMode()) {
+    // Parse preempt mode string to enum
+    int32_t preempt_mode_value;
+    if (value == "OFF") {
+      preempt_mode_value =
+          static_cast<int32_t>(crane::grpc::PreemptMode::OFF);
+    } else if (value == "CANCEL") {
+      preempt_mode_value =
+          static_cast<int32_t>(crane::grpc::PreemptMode::CANCEL);
+    } else {
+      return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+    }
+
+    // Update to database
+    mongocxx::client_session::with_transaction_cb callback =
+        [&](mongocxx::client_session* session) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                       name, item, preempt_mode_value);
+        };
+
+    if (!g_db_client->CommitTransaction(callback))
+      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+
+    // Refresh in-memory QOS
+    Qos qos;
+    g_db_client->SelectQos("name", name, &qos);
+    *m_qos_map_[name] = std::move(qos);
+
+    return {};
   }
 
   bool value_is_number{false};

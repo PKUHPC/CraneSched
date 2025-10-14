@@ -947,6 +947,18 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
         qos_view[Qos::FieldStringOfMaxCpusPerUser()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
+
+    if (qos_view.find(Qos::FieldStringOfPreempt()) != qos_view.end()) {
+      for (auto&& preempt_qos :
+           qos_view[Qos::FieldStringOfPreempt()].get_array().value) {
+        qos->preempt.emplace_back(preempt_qos.get_string().value);
+      }
+    }
+
+    if (qos_view.find(Qos::FieldStringOfPreemptMode()) != qos_view.end()) {
+      qos->preempt_mode = static_cast<crane::grpc::PreemptMode>(
+          qos_view[Qos::FieldStringOfPreemptMode()].get_int32().value);
+    }
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -954,7 +966,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{
+  std::array<std::string, 10> fields{
       Qos::FieldStringOfDeleted(),
       Qos::FieldStringOfName(),
       Qos::FieldStringOfDescription(),
@@ -963,9 +975,11 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       Qos::FieldStringOfMaxJobsPerUser(),
       Qos::FieldStringOfMaxCpusPerUser(),
       Qos::FieldStringOfMaxTimeLimitPerTask(),
+      Qos::FieldStringOfPreempt(),
+      Qos::FieldStringOfPreemptMode(),
   };
   std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
-             int64_t>
+             int64_t, std::list<std::string>, int32_t>
       values{false,
              qos.name,
              qos.description,
@@ -973,7 +987,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
              qos.priority,
              qos.max_jobs_per_user,
              qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+             absl::ToInt64Seconds(qos.max_time_limit_per_task),
+             qos.preempt,
+             static_cast<int32_t>(qos.preempt_mode)};
 
   return DocumentConstructor_(fields, values);
 }
