@@ -419,7 +419,7 @@ absl::Time GetSystemBootTime() {
 
 RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
   int pipefd[2];
-    RunCommandResult result{127, "", false, 0};
+  RunCommandResult result{127, "", false, 0};
 
     if (pipe(pipefd) != 0)
         return result;
@@ -501,10 +501,10 @@ RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
     close(pipefd[0]);
 
     if (!child_exited) {
-        kill(-pid, SIGKILL); // kill进程组
+        kill(-pid, SIGKILL);
         waitpid(pid, &status, 0);
         result.time_out = true;
-        result.output += "\nCommand timed out.";
+        return result;
     }
 
     if (WIFEXITED(status)) {
