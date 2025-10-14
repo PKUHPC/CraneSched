@@ -682,39 +682,37 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
 
-  // bool run_prolog_result = true;
-  // for (const auto& prolog : g_config.ProLogs) {
-  //   RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = step->GetJobEnvMap(), .run_uid = 0};
-  //   CRANE_TRACE("Running Prolog: {} as UID {} ",
-  //     prolog, run_prolog_ctld_args.run_uid);
-  //   auto result = util::os::RunCommand(run_prolog_ctld_args);
-  //   if (result.time_out) {
-  //     CRANE_INFO("Prolog'{}' timed out after {}s. Output: {}",
-  //                 prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
-  //     run_prolog_result = false;
-  //     break;
-  //   }
-  //   if (result.term_signal != 0) {
-  //     CRANE_INFO("Prolog '{}' killed by signal {}. Output: {}",
-  //                 prolog, result.term_signal, result.output.c_str());
-  //     run_prolog_result = false;
-  //     break;
-  //   }
-  //   if (result.exit_code != 0) {
-  //     CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
-  //                 prolog, result.exit_code, result.output.c_str());
-  //     run_prolog_result = false;
-  //     break;
-  //   }
-  //
-  //   CRANE_INFO("Prolog '{}' finished successfully. Output: {}",
-  //                prolog, result.output.c_str());
-  // }
-  //
-  // if (!run_prolog_result) {
-  //   // TODO: task requeue and held
-      // return CraneErrCode::ERR_PROLOG;
-  // }
+  bool run_prolog_result = true;
+  for (const auto& prolog : g_config.ProLogs) {
+    RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
+    CRANE_TRACE("Running Prolog: {} as UID {} ",
+      prolog, run_prolog_ctld_args.run_uid);
+    auto result = util::os::RunCommand(run_prolog_ctld_args);
+    if (result.time_out) {
+      CRANE_INFO("Prolog'{}' timed out after {}s. Output: {}",
+                  prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
+      run_prolog_result = false;
+      break;
+    }
+    if (result.term_signal != 0) {
+      CRANE_INFO("Prolog '{}' killed by signal {}. Output: {}",
+                  prolog, result.term_signal, result.output.c_str());
+      run_prolog_result = false;
+      break;
+    }
+    if (result.exit_code != 0) {
+      CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
+                  prolog, result.exit_code, result.output.c_str());
+      run_prolog_result = false;
+      break;
+    }
+
+    CRANE_INFO("Prolog '{}' finished successfully. Output: {}",
+                 prolog, result.output.c_str());
+  }
+
+  if (!run_prolog_result)
+      return CraneErrCode::ERR_PROLOG;
 
   CRANE_INFO("Executing step #{} of job #{}", step.task_id(), step.task_id());
   if (!m_job_map_.Contains(step.task_id())) {
@@ -868,7 +866,6 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // we should send TaskStatusChange manually.
   CraneErrCode err = SpawnSupervisor_(job, step.get());
   if (err != CraneErrCode::SUCCESS) {
-    // TODO: run epilog
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
@@ -898,6 +895,26 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       // Just ignore it. See comments in SpawnProcessInInstance_().
       continue;
     }
+    // TODO: Update node to drain
+    for (const auto& epilog : g_config.EpiLogs) {
+      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = job_ptr->GetJobEnvMap(), .run_uid = 0};
+      CRANE_TRACE("Running Epilog: {} as UID {} ",
+        epilog, run_epilog_ctld_args.run_uid);
+      auto result = util::os::RunCommand(run_epilog_ctld_args);
+      if (result.time_out) {
+        CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
+                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+      } else if (result.term_signal != 0) {
+        CRANE_INFO("Epilog '{}' killed by signal {}. Output: {}",
+                    epilog, result.term_signal, result.output.c_str());
+      } else if (result.exit_code != 0) {
+        CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
+                    epilog, result.exit_code, result.output.c_str());
+      } else {
+        CRANE_INFO("Epilog '{}' finished successfully. Output: {}",
+                   epilog, result.output.c_str());
+      }
+    }
 
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)
@@ -913,30 +930,6 @@ void JobManager::ActivateTaskStatusChangeAsync_(
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
   m_task_status_change_async_handle_->send();
-  // TODO: fixme
-  auto env_map = m_job_map_.GetValueExclusivePtr(task_id)->GetJobEnvMap();
-  for (const auto& prolog : g_config.EpiLogs) {
-    RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = env_map, .run_uid = 0};
-    CRANE_TRACE("Running Epilog: {} as UID {} ",
-      prolog, run_prolog_ctld_args.run_uid);
-    auto result = util::os::RunCommand(run_prolog_ctld_args);
-    if (result.time_out) {
-      CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
-                  prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
-    }
-    if (result.term_signal != 0) {
-      CRANE_INFO("Epilog '{}' killed by signal {}. Output: {}",
-                  prolog, result.term_signal, result.output.c_str());
-    }
-    if (result.exit_code != 0) {
-      CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
-                  prolog, result.exit_code, result.output.c_str());
-    }
-
-    CRANE_INFO("Epilog '{}' finished successfully. Output: {}",
-                 prolog, result.output.c_str());
-  }
-
 }
 
 /**
