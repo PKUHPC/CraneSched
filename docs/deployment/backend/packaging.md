@@ -156,6 +156,7 @@ Contains files for compute nodes:
 
 ```
 /usr/local/bin/craned                       # Execution daemon binary
+/usr/libexec/csupervisor                    # Per-step execution supervisor
 /etc/systemd/system/craned.service          # Systemd service file
 /etc/crane/config.yaml.sample               # Cluster configuration template
 /usr/lib64/security/pam_crane.so            # PAM authentication module
