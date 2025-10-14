@@ -465,6 +465,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  google.protobuf.Timestamp deadline_time = 41;
 }
 
 message StepInfo {

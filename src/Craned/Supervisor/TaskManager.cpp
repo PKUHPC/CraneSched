@@ -1669,10 +1669,8 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
   ChangeTaskTimeLimitQueueElem elem;
   elem.time_limit = time_limit;
   elem.ok_prom = std::move(ok_promise);
-  if (m_step_.GetStep().has_deadline_time()) {
-    elem.deadline_sec =
-        std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
-  }
+  elem.deadline_sec =
+      std::optional<int64_t>(m_step_.GetStep().deadline_time().seconds());
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
   m_change_task_time_limit_async_handle_->send();
   return ok_future;
@@ -2031,21 +2029,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     //       so we move it outside the multithreading part.
 
     int64_t sec = m_step_.GetStep().time_limit().seconds();
-    AddTerminationTimer_(sec);
-    CRANE_INFO("Add a timer of {} seconds", sec);
+    int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
+                           absl::ToUnixSeconds(absl::Now());
 
-    if (m_step_.GetStep().has_deadline_time()) {
-      int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
-                             absl::ToUnixSeconds(absl::Now());
-      bool is_deadline = deadline_sec <= sec ? true : false;
-      std::string log_timer = deadline_sec <= sec ? "deadline" : "time_limit";
-      deadline_sec = deadline_sec <= sec ? deadline_sec : sec;
-      AddTerminationTimer_(deadline_sec, is_deadline);
-      CRANE_TRACE("Add a {} timer of {} seconds", log_timer, deadline_sec);
-    } else {
-      AddTerminationTimer_(sec, false);
-      CRANE_TRACE("Add a time_limit timer of {} seconds", sec);
-    }
+    std::string log_timer = deadline_sec <= sec ? "deadline" : "time_limit";
+    bool is_deadline = deadline_sec <= sec ? true : false;
+    
+    AddTerminationTimer_(std::min(deadline_sec,sec), is_deadline);
+    CRANE_TRACE("Add a {} timer of {} seconds", log_timer, deadline_sec);
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {

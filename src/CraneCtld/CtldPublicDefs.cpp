@@ -1135,7 +1135,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+  task_info->mutable_deadline_time()->set_seconds(ToUnixSeconds(deadline_time));
 }
-
 
 }  // namespace Ctld
