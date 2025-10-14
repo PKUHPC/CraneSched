@@ -306,6 +306,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+  task_info->mutable_deadline_time()->set_seconds(ToUnixSeconds(deadline_time));
 }
 
 crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
@@ -356,10 +357,8 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
   task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
   task_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
 
-  if (this->deadline_time != absl::InfiniteFuture()) {
-    task_to_d.mutable_deadline_time()->set_seconds(
-        ToUnixSeconds(this->deadline_time));
-  }
+  task_to_d.mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(this->deadline_time));
 
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = task_to_d.mutable_batch_meta();
