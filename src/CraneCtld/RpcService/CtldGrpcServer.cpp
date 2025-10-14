@@ -558,8 +558,9 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->ChangeTaskTimeLimit(
-          task_id, request->time_limit_seconds());
+      err = g_task_scheduler->ChangeTaskTimeConstraint(
+          task_id, std::optional<uint64_t>(request->time_limit_seconds()),
+          std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -612,6 +613,28 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
         response->add_not_modified_tasks(false);
         response->add_not_modified_reasons(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+      }
+    }
+  } else if (request->attribute() == ModifyTaskRequest::Deadline) {
+    absl::Time deadline_time =
+        absl::FromUnixSeconds(request->deadline_time().seconds());
+    for (auto task_id : request->task_ids()) {
+      err = g_task_scheduler->ChangeTaskTimeConstraint(
+          task_id, std::nullopt, std::optional<absl::Time>(deadline_time));
+      if (err == CraneErrCode::SUCCESS) {
+        response->add_modified_tasks(task_id);
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Task #{} was not found in running or pending queue.", task_id));
+      } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons("Invalid deadline_time value.");
+      } else {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the deadline of Task#{}: {}.",
+                        task_id, CraneErrStr(err)));
       }
     }
   } else {

@@ -1270,9 +1270,15 @@ std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
-CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
-                                                int64_t secs) {
-  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
+CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
+    task_id_t task_id, std::optional<int64_t> secs,
+    std::optional<absl::Time> deadline_time) {
+  absl::Time now = absl::Now();
+  if (deadline_time && deadline_time.value() <= now) {
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+  if (secs && !CheckIfTimeLimitSecIsValid(secs.value()))
+    return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
 
@@ -1290,8 +1296,14 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
       if (task->reservation != "") {
         auto resv_end_time =
             g_meta_container->GetResvMetaPtr(task->reservation)->end_time;
-        if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
+        if (secs &&
+            resv_end_time <= absl::Now() + absl::Seconds(secs.value())) {
           CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
+                      task_id);
+          return CraneErrCode::ERR_INVALID_PARAM;
+        }
+        if (deadline_time && resv_end_time <= deadline_time.value()) {
+          CRANE_DEBUG("Task #{}'s deadline time exceeds reservation end time",
                       task_id);
           return CraneErrCode::ERR_INVALID_PARAM;
         }
@@ -1307,23 +1319,51 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(task->reservation);
           auto resv_end_time = reservation_meta->end_time;
-          if (resv_end_time <= task->StartTime() + absl::Seconds(secs)) {
+          if (secs && resv_end_time <=
+                          task->StartTime() + absl::Seconds(secs.value())){
             CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
                         task_id);
             return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (deadline_time && resv_end_time <= deadline_time.value()) {
+            CRANE_DEBUG("Task #{}'s deadline time exceeds reservation end time",
+                        task_id);
+            return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (secs) {
+            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+                task->StartTime() + absl::Seconds(secs.value());
+          }
+
+          if (deadline_time) {
+            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+                deadline_time.value();
           }
         }
       }
     }
 
     if (!found) {
-      CRANE_DEBUG("Task #{} not in Pd/Rn queue for time limit change!",
-                  task_id);
+      CRANE_DEBUG(
+          "Task #{} not in Pd/Rn queue for time limit or deadline change!",
+          task_id);
       return CraneErrCode::ERR_NON_EXISTENT;
     }
 
-    task->time_limit = absl::Seconds(secs);
-    task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
+    if (secs) {
+      task->time_limit = absl::Seconds(secs.value());
+      task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(
+          secs.value());
+    }
+
+    if (deadline_time) {
+      task->deadline_time = deadline_time.value();
+      task->MutableTaskToCtld()->mutable_deadline_time()->set_seconds(
+          absl::ToUnixSeconds(deadline_time.value()));
+    }
+
     g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
                                                    task->TaskToCtld());
   }
@@ -1332,10 +1372,12 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
   for (const CranedId& craned_id : craned_ids) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeJobTimeLimit(task_id, secs);
+      CraneErrCode err =
+          stub->ChangeJobTimeConstraint(task_id, secs, deadline_time);
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
-                    task_id, craned_id);
+        CRANE_ERROR(
+            "Failed to change time limit or deadline of task #{} on Node {}",
+            task_id, craned_id);
         return err;
       }
     }

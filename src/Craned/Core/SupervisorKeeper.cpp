@@ -88,13 +88,22 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
+CraneErrCode SupervisorStub::ChangeTaskTimeConstraint(
+    std::optional<absl::Duration> time_limit,
+    std::optional<int64_t> deadline_time) {
   ClientContext context;
-  crane::grpc::supervisor::ChangeTaskTimeLimitRequest request;
-  crane::grpc::supervisor::ChangeTaskTimeLimitReply reply;
+  crane::grpc::supervisor::ChangeTaskTimeConstraintRequest request;
+  crane::grpc::supervisor::ChangeTaskTimeConstraintReply reply;
 
-  request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit));
-  auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
+  if (time_limit) {
+    request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit.value()));
+  }
+
+  if (deadline_time) {
+    request.set_deadline_time(deadline_time.value());
+  }
+
+  auto ok = m_stub_->ChangeTaskTimeConstraint(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
   CRANE_WARN("ChangeTaskTimeLimit failed: reply {},{}", reply.ok(),

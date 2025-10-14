@@ -35,7 +35,9 @@ class SupervisorStub {
   CheckStatus();
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
-  CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
+  CraneErrCode ChangeTaskTimeConstraint(
+      std::optional<absl::Duration> time_limit,
+      std::optional<int64_t> deadline_time);
   CraneErrCode ShutdownSupervisor();
 
   void InitChannelAndStub(const std::string& endpoint);

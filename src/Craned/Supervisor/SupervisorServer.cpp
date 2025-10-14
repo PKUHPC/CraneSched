@@ -64,12 +64,22 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::ChangeTaskTimeLimit(
+grpc::Status SupervisorServiceImpl::ChangeTaskTimeConstraint(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
-    crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) {
-  auto ok = g_task_mgr->ChangeTaskTimeLimitAsync(
-      absl::Seconds(request->time_limit_seconds()));
+    const crane::grpc::supervisor::ChangeTaskTimeConstraintRequest* request,
+    crane::grpc::supervisor::ChangeTaskTimeConstraintReply* response) {
+  std::optional<absl::Duration> time_limit_seconds =
+      request->has_time_limit_seconds()
+          ? std::optional<absl::Duration>(
+                absl::Seconds(request->time_limit_seconds()))
+          : std::nullopt;
+  std::optional<int64_t> deadline_time =
+      request->has_deadline_time()
+          ? std::optional<int64_t>(request->deadline_time())
+          : std::nullopt;
+
+  auto ok = g_task_mgr->ChangeTaskTimeConstraintAsync(time_limit_seconds,
+                                                      deadline_time);
   ok.wait();
   if (ok.get() != CraneErrCode::SUCCESS) {
     response->set_ok(false);
