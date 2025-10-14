@@ -896,7 +896,9 @@ void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_hea
 void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(
     const CranedId& craned_id, bool is_health) {
   if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("Health check: unknown craned_id '{}', cannot update drain state.", craned_id);
+    CRANE_ERROR(
+        "Health check: unknown craned_id '{}', cannot update drain state.",
+        craned_id);
     return;
   }
 
@@ -910,16 +912,18 @@ void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(
     craned_meta->drain = true;
     craned_meta->state_reason = HealthCheckFailedReason;
   }
-  CRANE_TRACE("Health check: craned_id '{}' drain state changed to {}.", craned_id, craned_meta->drain);
+  CRANE_TRACE("Health check: craned_id '{}' drain state changed to {}.",
+              craned_id, craned_meta->drain);
 }
 
 void CranedMetaContainer::QueryNodeState(
-    const CranedId& craned_id, crane::grpc::QueryNodeStateReply *response) {
-
+    const CranedId& craned_id, crane::grpc::QueryNodeStateReply* response) {
   if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("Health check: unknown craned_id '{}', cannot update drain state.", craned_id);
+    CRANE_ERROR(
+        "Health check: unknown craned_id '{}', cannot update drain state.",
+        craned_id);
     response->set_ok(false);
-    return ;
+    return;
   }
 
   auto craned_meta = craned_meta_map_[craned_id];

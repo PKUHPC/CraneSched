@@ -211,9 +211,9 @@ class CtldForInternalServiceImpl final
       google::protobuf::Empty *response) override;
 
   grpc::Status QueryNodeState(
-    grpc::ServerContext* context,
-    const crane::grpc::QueryNodeStateRequest* request,
-    crane::grpc::QueryNodeStateReply* response) override;
+      grpc::ServerContext *context,
+      const crane::grpc::QueryNodeStateRequest *request,
+      crane::grpc::QueryNodeStateReply *response) override;
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,

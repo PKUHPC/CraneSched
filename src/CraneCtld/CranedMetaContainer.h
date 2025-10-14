@@ -94,7 +94,8 @@ class CranedMetaContainer final {
   void UpdateNodeStateWithHealthCheck_(const CranedId& craned_id,
                                        bool is_health);
 
-  void QueryNodeState(const CranedId& craned_id, crane::grpc::QueryNodeStateReply *response);
+  void QueryNodeState(const CranedId& craned_id,
+                      crane::grpc::QueryNodeStateReply* response);
 
   CraneExpected<void> ModifyPartitionAcl(
       const std::string& partition_name, bool is_allowed_list,
