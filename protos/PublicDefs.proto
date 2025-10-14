@@ -542,8 +542,8 @@ enum ErrCode {
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
 
-  ERR_CRI_GENERIC = 80;           // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
-  ERR_CRI_DISABLED = 81;          // CRI support is disabled in the cluster.
+  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
 }
 
