@@ -1018,27 +1018,6 @@ void JobManager::StepStopAndDoStatusChangeAsync(
                                  std::move(reason));
 }
 
-Config::HealthCheckConfig::NodeStateEnum JobManager::GetNodeState() {
-  auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
-  if (!job_map_ptr || job_map_ptr->empty())
-    return Config::HealthCheckConfig::NodeStateEnum::IDLE;
-
-  ResourceInNode res_in_use;
-  for (const auto& [job_id, job_instance] : *job_map_ptr) {
-    auto job = job_instance.GetExclusivePtr();
-    res_in_use += static_cast<ResourceInNode>(job->job_to_d.res());
-  }
-  if (res_in_use.IsZero())
-    return Config::HealthCheckConfig::NodeStateEnum::IDLE;
-
-  ResourceInNode res_avail = (*g_config.CranedRes[g_config.CranedIdOfThisNode]);
-  res_avail -= res_in_use;
-  if (res_avail.allocatable_res.IsAnyZero())
-    return Config::HealthCheckConfig::NodeStateEnum::ALLOC;
-
-  return Config::HealthCheckConfig::NodeStateEnum::MIXED;
-}
-
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {

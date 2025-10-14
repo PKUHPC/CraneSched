@@ -209,11 +209,11 @@ class CtldClient {
 
   void SendStatusChanges_();
 
-  void HealthCheckResultResponse_(bool is_health) const;
+  void SendHealthCheckResult_(bool is_health) const;
 
   void HealthCheck_();
 
-  static bool CheckNodeState_();
+  bool CheckNodeState_();
 
   absl::Mutex m_step_status_change_mtx_;
 
