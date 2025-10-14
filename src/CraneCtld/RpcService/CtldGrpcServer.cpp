@@ -378,6 +378,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
@@ -408,6 +416,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->add_task_id_list(0);
+    response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
 
   std::vector<CraneExpected<std::future<task_id_t>>> results;
 
@@ -1302,7 +1318,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         user_info->set_account(account);
       }
       user_info->set_admin_level(
-          (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+          static_cast<crane::grpc::UserInfo_AdminLevel>(user.admin_level));
       user_info->set_blocked(item.blocked);
 
       auto *partition_qos_list =
@@ -2004,7 +2020,7 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   if (cn_parts.empty() || cn_parts[0].empty()) return "Certificate is invalid";
 
   try {
-    uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
+    auto parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
     if (parsed_uid != uid) return "Uid mismatch";
   } catch (const std::invalid_argument &) {
     return "Certificate contains an invalid UID";
