@@ -75,17 +75,18 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
     fs::path current_dir;
     for (auto& part : dir_path) {
       current_dir /= part;
-      if (!fs::exists(current_dir)) {
-        if (mkdir(current_dir.c_str(), permissions) != 0) {
-          CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
-                      strerror(errno));
+      if (fs::exists(current_dir)) {
+        if (!fs::is_directory(current_dir)) {
+          CRANE_WARN("Path {} exists but not a directory", current_dir);
           return false;
         }
+        continue;
       }
-
-      if (chown(current_dir.c_str(), owner, group) != 0) {
-        CRANE_ERROR("Failed to change ownership of directory {}: {}",
-                    current_dir.c_str(), strerror(errno));
+      // FIXME: potential TOCTOU + symlink attack: create a symlink after the
+      // existence check and before mkdir.
+      if (mkdir(current_dir.c_str(), permissions) != 0) {
+        CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
+                    strerror(errno));
         return false;
       }
     }
