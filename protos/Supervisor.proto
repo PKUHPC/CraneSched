@@ -47,6 +47,8 @@ message InitSupervisorRequest {
     string run_cmd = 4;
     string kill_cmd = 5;
     string delete_cmd = 6;
+    string pause_cmd = 7;
+    string resume_cmd = 8;
   }
   ContainerConfig container_config = 7;
 

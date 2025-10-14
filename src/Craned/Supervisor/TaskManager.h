@@ -18,6 +18,7 @@
 
 #pragma once
 #include <sched.h>
+#include <string_view>
 
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
@@ -192,6 +193,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Suspend();
+  virtual CraneErrCode Resume();
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
@@ -263,6 +266,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
@@ -272,6 +277,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
   std::string ParseOCICmdPattern_(const std::string& cmd) const;
+  CraneErrCode ExecuteContainerCommand_(const std::string& cmd_template,
+                                        std::string_view action) const;
 
   std::filesystem::path m_bundle_path_;
   std::filesystem::path m_temp_path_;

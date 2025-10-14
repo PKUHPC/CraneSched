@@ -531,6 +531,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_run_cmd(g_config.Container.RuntimeRun);
       container_conf->set_kill_cmd(g_config.Container.RuntimeKill);
       container_conf->set_delete_cmd(g_config.Container.RuntimeDelete);
+      container_conf->set_pause_cmd(g_config.Container.RuntimePause);
+      container_conf->set_resume_cmd(g_config.Container.RuntimeResume);
     }
 
     if (g_config.Plugin.Enabled) {

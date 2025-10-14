@@ -245,6 +245,32 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
   return env_map;
 }
 
+CraneErrCode ITaskInstance::Suspend() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  int rc = kill(-m_pid_, SIGSTOP);
+  if ((rc != 0) && (errno != ESRCH)) {
+    CRANE_TRACE("[Subprocess] Failed to suspend task #{} with SIGSTOP: {}",
+                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ITaskInstance::Resume() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  int rc = kill(-m_pid_, SIGCONT);
+  if ((rc != 0) && (errno != ESRCH)) {
+    CRANE_TRACE("[Subprocess] Failed to resume task #{} with SIGCONT: {}",
+                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
 std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
                                                  const std::string& cwd) const {
   std::filesystem::path resolved_path(pattern);
@@ -1016,6 +1042,54 @@ CraneErrCode ContainerInstance::Spawn() {
     //  exit codes
     abort();
   }
+}
+
+CraneErrCode ContainerInstance::ExecuteContainerCommand_(
+    const std::string& cmd_template, std::string_view action) const {
+  if (cmd_template.empty()) return CraneErrCode::ERR_INVALID_PARAM;
+
+  std::string cmd = ParseOCICmdPattern_(cmd_template);
+  int rc = system(cmd.c_str());
+  if (rc == -1) {
+    CRANE_ERROR(
+        "[Subprocess] Failed to {} container for task #{}: system() error: {}",
+        action, m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (!WIFEXITED(rc) || WEXITSTATUS(rc) != 0) {
+    if (WIFSIGNALED(rc)) {
+      CRANE_ERROR(
+          "[Subprocess] Container {} command '{}' terminated by signal {} for task #{}",
+          action, cmd, WTERMSIG(rc), m_parent_step_inst_->GetStep().task_id());
+    } else {
+      CRANE_ERROR(
+          "[Subprocess] Container {} command '{}' exited with code {} for task #{}",
+          action, cmd, WIFEXITED(rc) ? WEXITSTATUS(rc) : rc,
+          m_parent_step_inst_->GetStep().task_id());
+    }
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::Suspend() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  auto err = ExecuteContainerCommand_(g_config.Container.RuntimePause,
+                                      "pause");
+  if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Suspend();
+  return err;
+}
+
+CraneErrCode ContainerInstance::Resume() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  auto err = ExecuteContainerCommand_(g_config.Container.RuntimeResume,
+                                      "resume");
+  if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Resume();
+  return err;
 }
 
 CraneErrCode ContainerInstance::Kill(int signum) {
@@ -2006,7 +2080,7 @@ CraneErrCode TaskManager::SuspendRunningTasks_() {
     if (!task) continue;
     if (task->GetPid() == 0) continue;
     any_signal_sent = true;
-    CraneErrCode err = task->Kill(SIGSTOP);
+    CraneErrCode err = task->Suspend();
     if (err != CraneErrCode::SUCCESS) return err;
   }
 
@@ -2023,7 +2097,7 @@ CraneErrCode TaskManager::ResumeSuspendedTasks_() {
     if (!task) continue;
     if (task->GetPid() == 0) continue;
     any_signal_sent = true;
-    CraneErrCode err = task->Kill(SIGCONT);
+    CraneErrCode err = task->Resume();
     if (err != CraneErrCode::SUCCESS) return err;
   }
 
