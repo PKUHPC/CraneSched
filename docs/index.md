@@ -3,80 +3,123 @@ hide:
   - navigation
 ---
 
-# CraneSched Documentation
+# CraneSched
 
-A distributed intelligent scheduler for HPC and AI workloads, designed for performance, scale, and simplicity.
+<p class="lead">A distributed scheduling system for HPC and AI workloads — built for performance, scale, and simplicity.</p>
 
-## What is CraneSched?
-
-CraneSched is an open-source, distributed scheduling system developed by the High Performance Computing Platform of Peking University. It unifies HPC and AI scheduling with efficient resource management, robust isolation, and a modern architecture.
-
-**Key components:**
-
-- Cranectld: the central controller and scheduler (control node)
-- Craned: the node agent/daemon (compute nodes)
-- Frontend tools and services: CLI commands (cbatch, cqueue, crun, etc.), cfored, cplugind
-
-**Try CraneSched on Web:**
-
-- [Demo cluster](https://hpc.pku.edu.cn/demo/cranesched)
-
-**Source code:**
-
-- [Backend repository](https://github.com/PKUHPC/CraneSched)
-- [Frontend repository](https://github.com/PKUHPC/CraneSched-FrontEnd)
-
-## Highlights
-
-- **Unified workloads:** HPC and AI job payload in a single, integrated system
-- **High throughput:** 100k+ scheduling decisions per second for rapid job–resource matching
-- **Massive scalability:** designed to manage clusters with millions of cores
-- **User-friendly:** concise, consistent user and admin commands and workflows
-- **Security-conscious:** role-based access control (RBAC), mTLS-encrypted communications, and secure-by-default configurations
-- **Designed for resilience:** automatic job recovery, no single point of failure, and fast state restoration
-- **Open and extensible:** community-driven, pluggable architecture for customization and integration
-
-## Latest updates
-
-- 2025-04-08 — v1.1.2: GCC 15/Clang 20 toolchains, node drain/resume events, partition account control, Vault integration
-- 2025-01-24 — v1.1.0: X11 forwarding, user QoS limits, multi-GID, cgroupv2 & Ascend NPU, scheduler/event optimizations
-- 2024-10-24 — v1.0.0: Job monitoring, plugins, device support, IPv6, resource & job management improvements
+[Get started](deployment/index.md){ .md-button .md-button--primary } [Try the demo](https://hpc.pku.edu.cn/demo/cranesched){ .md-button } [GitHub](https://github.com/PKUHPC/CraneSched){ .md-button }
 
 ---
 
-## Quick start
+## Why CraneSched?
 
-1. Choose your deployment guide:
+<div class="grid cards" markdown>
 
-	 - [Backend (Rocky 9, recommended)](<./deployment/backend/Rocky9.md>)
-	 - [Backend (CentOS 7, legacy)](<./deployment/backend/CentOS7.md>)
-	 - [Frontend components](./deployment/frontend/frontend.md)
-	 - [eBPF for GRES on cgroup v2](<./deployment/backend/eBPF.md>)
+- :material-speedometer: **Performance**
 
-2. Install and start services:
+    ---
 
-	 - Start cranectld on control node(s)
-	 - Start craned on all compute nodes
-	 - Deploy optional frontend services where needed (cfored, cplugind)
+    Over 100k scheduling decisions per second with fast job–resource matching.
 
-3. Submit a job
+- :material-arrow-expand: **Scalability**
 
-	 - [Batch jobs](./command/cbatch.md)
-	 - Interactive jobs: [crun](./command/crun.md) and [calloc](./command/calloc.md)
+    ---
+
+    Proven design for million-core clusters and large-scale deployments.
+
+- :material-account-cog: **Usability**
+
+    ---
+
+    Clean, consistent CLI for users and admins (cbatch, cqueue, crun, calloc, cinfo…).
+
+- :material-shield-lock: **Security**
+
+    ---
+
+    RBAC and encrypted communication out of the box.
+
+- :material-heart-pulse: **Resilience**
+
+    ---
+
+    Automatic job recovery, no single point of failure, fast state restoration.
+
+- :material-source-repository: **Open Source**
+
+    ---
+
+    Community-driven and extensible with a pluggable architecture.
+
+</div>
+
+---
+
+## Quick Start
+
+<div class="grid cards" markdown>
+
+- :material-rocket-launch: **Deploy Backend** (Rocky Linux 9)
+
+    ---
+
+    Recommended for production.
+
+    [Open guide →](deployment/backend/Rocky9.md)
+
+- :material-cog: **Configure Cluster**
+
+    ---
+
+    Database, partitions, nodes, and policies.
+
+    [Database](deployment/configuration/database.md) • [Config](deployment/configuration/config.md)
+
+- :material-code-tags: **Deploy Frontend**
+
+    ---
+
+    User tools and services (CLI, cfored, cplugind).
+
+    [Open guide →](deployment/frontend/frontend.md)
+
+- :material-console-line: **Run Your First Job**
+
+    ---
+
+    Batch: [cbatch](command/cbatch.md) • Interactive: [crun](command/crun.md), [calloc](command/calloc.md)
+
+</div>
 
 ---
 
 ## Architecture
 
-![CraneSched architecture](./images/Architecture.png)
+![CraneSched architecture](images/Architecture.png)
 
-CraneSched introduces a Resources Manager abstraction to handle different workload types:
+CraneSched introduces a Resource Manager to support both HPC and AI workloads:
 
-- HPC jobs: Cgroup Manager allocates resources and provides cgroup-based isolation
-- AI jobs: Container Manager leverages Kubernetes for resource allocation and container lifecycle management
+- HPC jobs: the Cgroup Manager allocates resources and provides cgroup-based isolation.
+- AI jobs: the Container Manager uses Kubernetes for resource allocation and container lifecycle management.
 
 ---
 
-## Licenses
+## CLI Reference
 
-CraneSched is dual-licensed under AGPLv3 and a commercial license. See `LICENSE` for details or contact mayinping@pku.edu.cn for commercial licensing.
+- User commands: [cbatch](command/cbatch.md), [cqueue](command/cqueue.md), [crun](command/crun.md), [calloc](command/calloc.md), [cinfo](command/cinfo.md)
+- Admin commands: [cacct](command/cacct.md), [cacctmgr](command/cacctmgr.md), [ceff](command/ceff.md), [ccontrol](command/ccontrol.md), [ccancel](command/ccancel.md)
+- Exit codes: [reference](reference/exit_code.md)
+
+---
+
+## Links
+
+- Demo cluster: <https://hpc.pku.edu.cn/demo/cranesched>
+- Backend: <https://github.com/PKUHPC/CraneSched>
+- Frontend: <https://github.com/PKUHPC/CraneSched-FrontEnd>
+
+---
+
+## License
+
+CraneSched is dual-licensed under AGPLv3 and a commercial license. See `LICENSE` or contact mayinping@pku.edu.cn for commercial licensing.
