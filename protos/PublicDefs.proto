@@ -275,6 +275,9 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+
+  // Crun input will forward to these tasks
+  optional uint32 input_task_id = 8;
 }
 
 message TaskInfo {
