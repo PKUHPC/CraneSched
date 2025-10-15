@@ -415,7 +415,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
         {task->EndTime(), task->AllocatedRes()});
   }
 
-                                             task->Resources());
   g_licenses_manager->MallocLicenseResource(task->licenses_count);
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
