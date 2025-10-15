@@ -557,10 +557,13 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
 
   CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
+    std::optional<int64_t> time_limit_seconds =
+        request->has_time_limit_seconds()
+            ? std::optional<int64_t>(request->time_limit_seconds())
+            : std::nullopt;
     for (auto task_id : request->task_ids()) {
       err = g_task_scheduler->ChangeTaskTimeConstraint(
-          task_id, std::optional<int64_t>(request->time_limit_seconds()),
-          std::nullopt);
+          task_id, time_limit_seconds, std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -616,11 +619,13 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Deadline) {
-    absl::Time deadline_time =
-        absl::FromUnixSeconds(request->deadline_time().seconds());
+    std::optional<int64_t> deadline_time =
+        request->has_deadline_time()
+            ? std::optional<int64_t>(request->deadline_time().seconds())
+            : std::nullopt;
     for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->ChangeTaskTimeConstraint(
-          task_id, std::nullopt, std::optional<absl::Time>(deadline_time));
+      err = g_task_scheduler->ChangeTaskTimeConstraint(task_id, std::nullopt,
+                                                       deadline_time);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {

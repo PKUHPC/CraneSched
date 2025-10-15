@@ -89,9 +89,9 @@ class CranedStub {
   CraneErrCode TerminateOrphanedSteps(
       const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
 
-  CraneErrCode ChangeJobTimeConstraint(uint32_t task_id,
-                                       std::optional<uint64_t> seconds,
-                                       std::optional<absl::Time> deadline_time);
+  CraneErrCode ChangeJobTimeConstraint(
+      uint32_t task_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
 
   crane::grpc::AttachInContainerTaskReply AttachInContainerTask(
       const crane::grpc::AttachInContainerTaskRequest &request);

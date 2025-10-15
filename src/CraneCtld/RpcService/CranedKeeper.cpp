@@ -270,8 +270,8 @@ CraneErrCode CranedStub::FreeSteps(
 }
 
 CraneErrCode CranedStub::ChangeJobTimeConstraint(
-    uint32_t task_id, std::optional<uint64_t> seconds,
-    std::optional<absl::Time> deadline_time) {
+    uint32_t task_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
   using crane::grpc::ChangeJobTimeConstraintReply;
   using crane::grpc::ChangeJobTimeConstraintRequest;
 
@@ -284,18 +284,18 @@ CraneErrCode CranedStub::ChangeJobTimeConstraint(
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
   request.set_task_id(task_id);
 
-  if (seconds) {
-    request.set_time_limit_seconds(seconds.value());
+  if (time_limit_seconds) {
+    request.set_time_limit_seconds(time_limit_seconds.value());
   }
 
   if (deadline_time) {
-    request.set_deadline_time(absl::ToUnixSeconds(deadline_time.value()));
+    request.set_deadline_time(deadline_time.value());
   }
 
   status = m_stub_->ChangeJobTimeConstraint(&context, request, &reply);
 
   if (!status.ok()) {
-    CRANE_ERROR("ChangeTaskTimeConstraintAsync to Craned {} failed: {} ",
+    CRANE_ERROR("ChangeJobTimeConstraintAsync to Craned {} failed: {} ",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;

@@ -89,14 +89,14 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
 }
 
 CraneErrCode SupervisorStub::ChangeTaskTimeConstraint(
-    std::optional<absl::Duration> time_limit,
+    std::optional<int64_t> time_limit_seconds,
     std::optional<int64_t> deadline_time) {
   ClientContext context;
   crane::grpc::supervisor::ChangeTaskTimeConstraintRequest request;
   crane::grpc::supervisor::ChangeTaskTimeConstraintReply reply;
 
-  if (time_limit) {
-    request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit.value()));
+  if (time_limit_seconds) {
+    request.set_time_limit_seconds(time_limit_seconds.value());
   }
 
   if (deadline_time) {

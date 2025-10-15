@@ -1662,8 +1662,7 @@ std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
 }
 
 std::future<CraneErrCode> TaskManager::ChangeTaskTimeConstraintAsync(
-    std::optional<absl::Duration> time_limit,
-    std::optional<int64_t> deadline_time) {
+    std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time) {
   std::promise<CraneErrCode> ok_promise;
   auto ok_future = ok_promise.get_future();
 
@@ -1672,10 +1671,10 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeConstraintAsync(
   if (time_limit) {
     elem.time_limit = time_limit;
     m_step_.GetMutableStep().mutable_time_limit()->set_seconds(
-        ToInt64Seconds(time_limit.value()));
+        time_limit.value());
   } else {
-    elem.time_limit = std::optional<absl::Duration>(
-        absl::Seconds(m_step_.GetStep().time_limit().seconds()));
+    elem.time_limit =
+        std::optional<int64_t>(m_step_.GetStep().time_limit().seconds());
   }
 
   if (deadline_time) {
@@ -1993,11 +1992,11 @@ void TaskManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
     }
     // Delete the old timer.
     DelTerminationTimer_();
-    CRANE_TRACE("Delete the old timer.");
 
     absl::Time start_time =
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
-    absl::Duration const& new_time_limit = elem.time_limit.value();
+    absl::Duration const& new_time_limit =
+        absl::Seconds(elem.time_limit.value());
 
     if (now - start_time >= new_time_limit ||
         absl::ToUnixSeconds(now) >= elem.deadline_time.value()) {
@@ -2045,16 +2044,17 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
 
-    int64_t sec = m_step_.GetStep().time_limit().seconds();
+    int64_t time_limit_sec = m_step_.GetStep().time_limit().seconds();
     int64_t deadline_sec = m_step_.GetStep().deadline_time().seconds() -
                            absl::ToUnixSeconds(absl::Now());
 
-    std::string log_timer = deadline_sec <= sec ? "deadline" : "time_limit";
-    bool is_deadline = deadline_sec <= sec ? true : false;
+    std::string log_timer =
+        deadline_sec <= time_limit_sec ? "deadline" : "time_limit";
+    bool is_deadline = deadline_sec <= time_limit_sec ? true : false;
 
-    AddTerminationTimer_(std::min(deadline_sec, sec), is_deadline);
+    AddTerminationTimer_(std::min(deadline_sec, time_limit_sec), is_deadline);
     CRANE_TRACE("Add a {} timer of {} seconds", log_timer,
-                std::min(deadline_sec, sec));
+                std::min(deadline_sec, time_limit_sec));
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {

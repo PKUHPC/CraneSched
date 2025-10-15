@@ -760,8 +760,8 @@ class TaskScheduler {
                                                  int64_t secs);
 
   CraneErrCode ChangeTaskTimeConstraint(
-      task_id_t task_id, std::optional<int64_t> secs,
-      std::optional<absl::Time> deadline_time);
+      task_id_t task_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
 
   CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
 

@@ -330,10 +330,9 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  std::optional<absl::Duration> time_limit_seconds =
+  std::optional<int64_t> time_limit_seconds =
       request->has_time_limit_seconds()
-          ? std::optional<absl::Duration>(
-                absl::Seconds(request->time_limit_seconds()))
+          ? std::optional<int64_t>(request->time_limit_seconds())
           : std::nullopt;
 
   std::optional<int64_t> deadline_time =

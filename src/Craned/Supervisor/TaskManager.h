@@ -456,8 +456,7 @@ class TaskManager {
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
   std::future<CraneErrCode> ChangeTaskTimeConstraintAsync(
-      std::optional<absl::Duration> time_limit,
-      std::optional<int64_t> deadline_time);
+      std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time);
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
@@ -479,7 +478,7 @@ class TaskManager {
 
   struct ChangeTaskTimeConstraintQueueElem {
     std::promise<CraneErrCode> ok_prom;
-    std::optional<absl::Duration> time_limit{std::nullopt};
+    std::optional<int64_t> time_limit{std::nullopt};
     std::optional<int64_t> deadline_time{std::nullopt};
   };
 
