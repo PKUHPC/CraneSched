@@ -1606,7 +1606,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), container_meta,
-             task_to_ctld.deadline_time().seconds(),
+             task_to_ctld.deadline_time().seconds(), task_to_ctld.deadline_time().seconds(),
              true /* Mark the document having complete job info */};
 
   return DocumentConstructor_(fields, values);

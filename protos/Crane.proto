@@ -149,7 +149,7 @@ message TerminateOrphanedStepReply {
   string reason = 2;
 }
 
-message ChangeJobTimeConstraintRequest{
+message ChangeJobTimeConstraintRequest {
   uint32 task_id = 1;
   optional int64 time_limit_seconds = 2;
   optional int64 deadline_time = 3;

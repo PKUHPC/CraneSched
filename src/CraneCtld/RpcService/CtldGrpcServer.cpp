@@ -559,7 +559,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     for (auto task_id : request->task_ids()) {
       err = g_task_scheduler->ChangeTaskTimeConstraint(
-          task_id, std::optional<uint64_t>(request->time_limit_seconds()),
+          task_id, std::optional<int64_t>(request->time_limit_seconds()),
           std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);

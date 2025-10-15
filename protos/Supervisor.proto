@@ -101,12 +101,12 @@ message CheckStatusReply {
   bool ok = 5;
 }
 
-message ChangeTaskTimeConstraintRequest{
+message ChangeTaskTimeConstraintRequest {
   optional int64 time_limit_seconds = 1;
   optional int64 deadline_time = 2;
 }
 
-message ChangeTaskTimeConstraintReply{
+message ChangeTaskTimeConstraintReply {
   bool ok = 1;
 }
 
