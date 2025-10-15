@@ -185,44 +185,27 @@ class MongodbClient {
 
   enum class RollupType : std::uint8_t { HOUR, HOUR_TO_DAY, DAY_TO_MONTH };
 
-  struct AccountUserAggResult {
+  struct JobSummAggResult {
     double total_cpu_time = 0;
     int32_t total_count = 0;
   };
-  struct AccountUserQosKey {
+  struct JobSummKey {
     std::string account;
     std::string username;
     std::string qos;
-
-    template <typename H>
-    friend H AbslHashValue(H h, const AccountUserQosKey& key) {
-      return H::combine(std::move(h), key.account, key.username, key.qos);
-    }
-    bool operator==(const AccountUserQosKey& other) const {
-      return account == other.account && username == other.username &&
-             qos == other.qos;
-    }
-  };
-
-  struct AccountUserWckeyAggResult {
-    double total_cpu_time = 0;
-    int32_t total_count = 0;
-  };
-  struct AccountUserWckeyKey {
-    std::string account;
-    std::string username;
     std::string wckey;
     int32_t cpu_level;
 
     template <typename H>
-    friend H AbslHashValue(H h, const AccountUserWckeyKey& key) {
-      return H::combine(std::move(h), key.account, key.username, key.wckey,
-                        key.cpu_level);
+    friend H AbslHashValue(H h, const JobSummKey& key) {
+      return H::combine(std::move(h), key.account, key.username, key.qos,
+                        key.wckey, key.cpu_level);
     }
-
-    bool operator==(const AccountUserWckeyKey& other) const {
+    bool operator==(const JobSummKey& other) const {
       return account == other.account && username == other.username &&
-             wckey == other.wckey && cpu_level == other.cpu_level;
+             qos == other.qos && wckey == other.wckey &&
+             cpu_level == other.cpu_level;
+      ;
     }
   };
 
@@ -267,58 +250,32 @@ class MongodbClient {
   bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end);
   bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
   bool AggregateHourTable(std::time_t start, std::time_t end);
-  void QueryAndAggAccountUserQos(
+  void QueryAndAggJobSummary(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
       const std::unordered_set<std::string>& accounts,
       const std::unordered_set<std::string>& users,
       const std::unordered_set<std::string>& qoss,
-      absl::flat_hash_map<AccountUserQosKey, AccountUserAggResult>& agg_map);
-  void QueryAccountUserQosSummary(
+      const std::unordered_set<std::string>& wckeys,
+      absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
+  void QueryJobSummary(
       const std::unordered_set<std::string>& accounts,
       const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& qoss, std::time_t start,
-      std::time_t end,
-      ::grpc::ServerWriter<::crane::grpc::QueryAccountUserQosSummaryItemReply>*
-          stream);
-  void QueryAccountUserWckeySummary(
-      const std::unordered_set<std::string>& accounts,
-      std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& qoss,
       const std::unordered_set<std::string>& wckeys, std::time_t start,
       std::time_t end,
-      ::grpc::ServerWriter<
-          ::crane::grpc::QueryAccountUserWckeySummaryItemReply>* stream);
-  void QueryAndAggAccountUserQosWckey(
-      const std::string& table, const std::string& time_field,
-      std::time_t range_start, std::time_t range_end,
-      const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& wckeys,
-      absl::flat_hash_map<AccountUserWckeyKey, AccountUserWckeyAggResult>&
-          agg_map);
-  void ProduceDayOrMAccountUserQosAgg(
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryItemReply>* stream);
+  void ProducerDayOrMonJobSummAggregation(
       const std::string& src_coll_str,
       ThreadSafeQueue<bsoncxx::array::value>& queue,
       const std::string& src_time_field, const std::string& period_field,
       std::time_t period_start, std::time_t period_end);
-  void ProduceDayOrMAccountUserWckeyAgg(
-      const std::string& src_coll_str,
-      ThreadSafeQueue<bsoncxx::array::value>& queue,
-      const std::string& src_time_field, const std::string& period_field,
-      std::time_t period_start, std::time_t period_end);
-  void ProduceHourAccountUserQosAgg(
+  void ProducerHourJobSummAggregation(
       ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
       std::time_t end, const std::string& task_collection_name);
-  void ProduceHourAccountUserWckeyAgg(
-      ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
-      std::time_t end, const std::string& task_collection_name);
-  bool ConsumerAccountUserQosAgg(const bsoncxx::array::view& arr,
-                                 const std::string& dst_coll_str,
-                                 const std::string& period_field);
-  bool ConsumerAccountUserWckeyAgg(const bsoncxx::array::view& arr,
-                                   const std::string& dst_coll_str,
-                                   const std::string& period_field);
-
+  bool ConsumerJobSummAggregation(const bsoncxx::array::view& arr,
+                                  const std::string& dst_coll_str,
+                                  const std::string& period_field);
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
@@ -487,18 +444,11 @@ class MongodbClient {
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
-  const std::string m_hour_account_user_collection_name_{
-      "hour_account_user_summary_table"};
-  const std::string m_hour_account_user_wckey_collection_name_{
-      "hour_account_user_wckey_summary_table"};
-  const std::string m_day_account_user_qos_collection_name_{
-      "day_account_user_qos_summary_table"};
-  const std::string m_day_account_user_wckey_collection_name_{
-      "day_account_user_wckey_summary_table"};
-  const std::string m_month_account_user_qos_collection_name_{
-      "month_account_user_qos_summary_table"};
-  const std::string m_month_account_user_wckey_collection_name_{
-      "month_account_user_wckey_summary_table"};
+  const std::string m_hour_job_summary_collection_name_{
+      "hour_job_summary_table"};
+  const std::string m_day_job_summary_collection_name_{"day_job_summary_table"};
+  const std::string m_month_job_summary_collection_name_{
+      "month_job_summary_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 

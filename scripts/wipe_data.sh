@@ -71,11 +71,11 @@ if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
 fi
 if [ "$mode" -eq 5 ] || [ "$mode" -eq 7 ] || [ "$mode" -eq 3 ]; then
-  wipe_collection hour_account_user_qos_summary_table
+  wipe_collection hour_job_summary_table
   wipe_collection hour_account_user_wckey_summary_table
-  wipe_collection day_account_user_qos_summary_table
+  wipe_collection day_job_summary_table
   wipe_collection day_account_user_wckey_summary_table
-  wipe_collection month_account_user_qos_summary_table
+  wipe_collection month_job_summary_table
   wipe_collection month_account_user_wckey_summary_table
 fi
 
