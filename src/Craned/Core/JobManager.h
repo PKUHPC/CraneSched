@@ -104,7 +104,7 @@ class JobManager {
   void MarkStepAsOrphanedAndTerminateAsync(task_id_t task_id);
 
   bool ChangeJobTimeConstraintAsync(task_id_t task_id,
-                                    std::optional<absl::Duration> time_limit,
+                                    std::optional<int64_t> time_limit_seconds,
                                     std::optional<int64_t> deadline_time);
 
   void StepStopAndDoStatusChangeAsync(task_id_t job_id,
@@ -142,9 +142,9 @@ class JobManager {
     pid_t pid;
   };
 
-  struct ChangeTaskTimeConstraintQueueElem {
+  struct ChangeJobTimeConstraintQueueElem {
     task_id_t job_id;
-    std::optional<absl::Duration> time_limit{std::nullopt};
+    std::optional<int64_t> time_limit_seconds{std::nullopt};
     std::optional<int64_t> deadline_time{std::nullopt};
     std::promise<bool> ok_prom;
   };
@@ -216,7 +216,7 @@ class JobManager {
 
   void EvCleanTerminateTaskQueueCb_();
 
-  void EvCleanChangeTaskTimeConstraintQueueCb_();
+  void EvCleanChangeJobTimeConstraintQueueCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -244,10 +244,9 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
 
-  std::shared_ptr<uvw::async_handle>
-      m_change_task_time_constraint_async_handle_;
-  ConcurrentQueue<ChangeTaskTimeConstraintQueueElem>
-      m_task_time_constraint_change_queue_;
+  std::shared_ptr<uvw::async_handle> m_change_job_time_constraint_async_handle_;
+  ConcurrentQueue<ChangeJobTimeConstraintQueueElem>
+      m_job_time_constraint_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_step_async_handle_;
   ConcurrentQueue<StepTerminateQueueElem> m_step_terminate_queue_;

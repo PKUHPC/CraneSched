@@ -96,11 +96,11 @@ JobManager::JobManager() {
         EvCleanTaskStatusChangeQueueCb_();
       });
 
-  m_change_task_time_constraint_async_handle_ =
+  m_change_job_time_constraint_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
-  m_change_task_time_constraint_async_handle_->on<uvw::async_event>(
+  m_change_job_time_constraint_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanChangeTaskTimeConstraintQueueCb_();
+        EvCleanChangeJobTimeConstraintQueueCb_();
       });
 
   m_terminate_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -994,18 +994,19 @@ void JobManager::MarkStepAsOrphanedAndTerminateAsync(step_id_t step_id) {
 }
 
 bool JobManager::ChangeJobTimeConstraintAsync(
-    job_id_t job_id, std::optional<absl::Duration> time_limit,
+    job_id_t job_id, std::optional<int64_t> time_limit_seconds,
     std::optional<int64_t> deadline_time) {
   if (m_is_ending_now_.load(std::memory_order_acquire)) {
     return false;
   }
-  ChangeTaskTimeConstraintQueueElem elem{.job_id = job_id,
-                                         .time_limit = time_limit,
-                                         .deadline_time = deadline_time};
+  ChangeJobTimeConstraintQueueElem elem{
+      .job_id = job_id,
+      .time_limit_seconds = time_limit_seconds,
+      .deadline_time = deadline_time};
 
   std::future<bool> ok_fut = elem.ok_prom.get_future();
-  m_task_time_constraint_change_queue_.enqueue(std::move(elem));
-  m_change_task_time_constraint_async_handle_->send();
+  m_job_time_constraint_change_queue_.enqueue(std::move(elem));
+  m_change_job_time_constraint_async_handle_->send();
   return ok_fut.get();
 }
 
@@ -1022,21 +1023,21 @@ void JobManager::StepStopAndDoStatusChangeAsync(
                                  std::move(reason));
 }
 
-void JobManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
-  ChangeTaskTimeConstraintQueueElem elem;
-  while (m_task_time_constraint_change_queue_.try_dequeue(elem)) {
+void JobManager::EvCleanChangeJobTimeConstraintQueueCb_() {
+  ChangeJobTimeConstraintQueueElem elem;
+  while (m_job_time_constraint_change_queue_.try_dequeue(elem)) {
     if (auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id); job_ptr) {
       auto stub = g_supervisor_keeper->GetStub(elem.job_id);
       if (!stub) {
-        CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
+        CRANE_ERROR("Supervisor for job #{} not found", elem.job_id);
         continue;
       }
 
-      auto err =
-          stub->ChangeTaskTimeConstraint(elem.time_limit, elem.deadline_time);
+      auto err = stub->ChangeTaskTimeConstraint(elem.time_limit_seconds,
+                                                elem.deadline_time);
 
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change task time limit or deadline for task #{}",
+        CRANE_ERROR("Failed to change job time limit or deadline for job #{}",
                     elem.job_id);
         continue;
       }
@@ -1044,7 +1045,7 @@ void JobManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
       elem.ok_prom.set_value(true);
     } else {
       CRANE_ERROR(
-          "Try to update the time limit or deadline of a non-existent task "
+          "Try to update the time limit or deadline of a non-existent job "
           "#{}.",
           elem.job_id);
       elem.ok_prom.set_value(false);

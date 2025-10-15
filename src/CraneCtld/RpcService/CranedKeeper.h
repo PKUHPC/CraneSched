@@ -88,9 +88,9 @@ class CranedStub {
 
   CraneErrCode TerminateOrphanedSteps(const std::vector<task_id_t> &task_ids);
 
-  CraneErrCode ChangeJobTimeConstraint(uint32_t task_id,
-                                       std::optional<uint64_t> seconds,
-                                       std::optional<absl::Time> deadline_time);
+  CraneErrCode ChangeJobTimeConstraint(
+      uint32_t task_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
