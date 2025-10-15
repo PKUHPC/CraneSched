@@ -1052,7 +1052,6 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
     }
 
     std::vector<job_id_t> job_ids{task_id};
-    std::vector<CranedId> suspended_nodes;
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
     std::atomic_bool has_failure{false};
     Mutex result_mtx;
@@ -1083,9 +1082,6 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
             if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
           }
           has_failure.store(true, std::memory_order_relaxed);
-        } else {
-          LockGuard lock(&result_mtx);
-          suspended_nodes.push_back(craned_id);
         }
 
         blocking_counter.DecrementCount();
@@ -1095,22 +1091,23 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
     blocking_counter.Wait();
 
     if (has_failure.load(std::memory_order_relaxed)) {
-      for (const auto& craned_id : suspended_nodes) {
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (!stub || stub->Invalid()) {
-          CRANE_ERROR(
-              "Failed to rollback suspended state on craned {}: stub "
-              "unavailable",
-              craned_id);
-          continue;
-        }
+      CRANE_ERROR(
+          "Task #{} suspend partially failed on node(s); abandoning task to "
+          "avoid inconsistent state.",
+          task_id);
 
-        CraneErrCode err = stub->ResumeSteps(job_ids);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Rollback ResumeSteps for task #{} on craned {} failed: {}",
-              task_id, craned_id, CraneErrStr(err));
-        }
+      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      if (terminate_err != CraneErrCode::SUCCESS &&
+          terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
+        CRANE_ERROR(
+            "Failed to terminate task #{} after suspend failure: {}",
+            task_id, CraneErrStr(terminate_err));
+      }
+
+      for (const auto& craned_id : executing_nodes) {
+        TaskStatusChangeAsync(task_id, craned_id,
+                              crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeRpcError);
       }
 
       results.emplace_back(failure_code);
@@ -1192,8 +1189,7 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
       continue;
     }
 
-    std::vector<job_id_t> job_ids{task_id};
-    std::vector<CranedId> resumed_nodes;
+  std::vector<job_id_t> job_ids{task_id};
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
     std::atomic_bool has_failure{false};
     Mutex result_mtx;
@@ -1224,9 +1220,6 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
             if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
           }
           has_failure.store(true, std::memory_order_relaxed);
-        } else {
-          LockGuard lock(&result_mtx);
-          resumed_nodes.push_back(craned_id);
         }
 
         blocking_counter.DecrementCount();
@@ -1236,21 +1229,23 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
     blocking_counter.Wait();
 
     if (has_failure.load(std::memory_order_relaxed)) {
-      for (const auto& craned_id : resumed_nodes) {
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-        if (!stub || stub->Invalid()) {
-          CRANE_ERROR(
-              "Failed to rollback resumed state on craned {}: stub unavailable",
-              craned_id);
-          continue;
-        }
+      CRANE_ERROR(
+          "Task #{} resume partially failed on node(s); abandoning task to "
+          "avoid inconsistent state.",
+          task_id);
 
-        CraneErrCode err = stub->SuspendSteps(job_ids);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR(
-              "Rollback SuspendSteps for task #{} on craned {} failed: {}",
-              task_id, craned_id, CraneErrStr(err));
-        }
+      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      if (terminate_err != CraneErrCode::SUCCESS &&
+          terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
+        CRANE_ERROR(
+            "Failed to terminate task #{} after resume failure: {}",
+            task_id, CraneErrStr(terminate_err));
+      }
+
+      for (const auto& craned_id : executing_nodes) {
+        TaskStatusChangeAsync(task_id, craned_id,
+                              crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeRpcError);
       }
 
       results.emplace_back(failure_code);
