@@ -2055,42 +2055,24 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   return std::nullopt;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryAccountUserQosSummaryItemStream(
+grpc::Status CraneCtldServiceImpl::QueryJobSummaryItemStream(
     ::grpc::ServerContext *context,
-    const ::crane::grpc::QueryAccountUserQosSummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserQosSummaryItemReply>
-        *writer) {
+    const ::crane::grpc::QueryJobSummaryItemRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryItemReply> *writer) {
   std::unordered_set<std::string> req_accounts(
       request->filter_accounts().begin(), request->filter_accounts().end());
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
   std::unordered_set<std::string> req_qoss(request->filter_qoss().begin(),
-                                            request->filter_qoss().end());
-
-  auto start_time = request->filter_start_time().seconds();
-  auto end_time = request->filter_end_time().seconds();
-
-  g_db_client->QueryAccountUserQosSummary(req_accounts, req_users, req_qoss,
-                                          start_time, end_time, writer);
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::QueryAccountUserWckeySummaryItemStream(
-    ::grpc::ServerContext *context,
-    const ::crane::grpc::QueryAccountUserWckeySummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::QueryAccountUserWckeySummaryItemReply>
-        *writer) {
-  std::unordered_set<std::string> req_accounts(
-      request->filter_accounts().begin(), request->filter_accounts().end());
-  std::unordered_set<std::string> req_users(request->filter_users().begin(),
-                                            request->filter_users().end());
+                                           request->filter_qoss().end());
   std::unordered_set<std::string> req_wckeys(request->filter_wckeys().begin(),
-                                            request->filter_wckeys().end());
+                                             request->filter_wckeys().end());
+
   auto start_time = request->filter_start_time().seconds();
   auto end_time = request->filter_end_time().seconds();
 
-  g_db_client->QueryAccountUserWckeySummary(req_accounts, req_users, req_wckeys,
-                                            start_time, end_time, writer);
+  g_db_client->QueryJobSummary(req_accounts, req_users, req_qoss, req_wckeys,
+                               start_time, end_time, writer);
   return grpc::Status::OK;
 }
 
