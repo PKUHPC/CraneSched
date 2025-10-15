@@ -66,21 +66,48 @@ void LicensesManager::GetLicensesInfo(
 }
 
 bool LicensesManager::CheckLicenseCountSufficient(
-    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+    const google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map,
+    bool is_license_or,
+    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
+  actual_licenses->clear();
   auto licenses_map = licenses_map_.GetMapConstSharedPtr();
+  if (is_license_or) {
+    for (const auto& [lic_id, count] : lic_id_to_count_map) {
+      if (licenses_map->contains(lic_id)) {
+        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+        if (lic->free < count) continue;
+        actual_licenses->emplace(lic_id, count);
+        return true;
+      }
+    }
+    return false;
+  }
+
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     if (!licenses_map->contains(lic_id)) return false;
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
     if (lic->free < count) return false;
+    actual_licenses->emplace(lic_id, count);
   }
 
   return true;
 }
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-    const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map) {
+    const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map, bool is_license_or) {
   auto licenses_map = licenses_map_.GetMapConstSharedPtr();
-  for (auto& [lic_id, count] : lic_id_to_count_map) {
+
+  if (is_license_or) {
+    for (const auto& [lic_id, count] : lic_id_to_count_map) {
+      if (licenses_map->contains(lic_id)) {
+        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+        if (count <= lic->total) return {};
+      }
+    }
+    return std::unexpected("Invalid license specification");
+  }
+
+  for (const auto& [lic_id, count] : lic_id_to_count_map) {
     if (!licenses_map->contains(lic_id))
       return std::unexpected("Invalid license specification");
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();

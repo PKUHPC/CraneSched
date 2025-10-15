@@ -530,6 +530,15 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
 
   return grpc::Status::OK;
 }
+grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLicensesInfoRequest *request,
+    crane::grpc::QueryLicensesInfoReply *response) {
+
+  g_licenses_manager->GetLicensesInfo(request, response);
+
+  return grpc::Status::OK;
+}
 
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
