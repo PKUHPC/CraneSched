@@ -594,8 +594,8 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromResv(task->reservation, task->TaskId(),
                                              task->AllocatedRes());
   }
-
-  g_licenses_manager->MallocLicenseResource(task->licenses_count);
+  if (!task->licenses_count.empty())
+    g_licenses_manager->MallocLicenseResource(task->licenses_count);
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
@@ -1192,7 +1192,8 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->FreeResourceFromResv(job->reservation,
                                                    job->TaskId());
           g_account_meta_container->FreeQosResource(*job);
-          g_licenses_manager->FreeLicenseResource(job->licenses_count);
+          if (!task->licenses_count.empty())
+            g_licenses_manager->FreeLicenseResource(job->licenses_count);
         }
 
         // Move failed jobs to the completed queue.
@@ -2604,7 +2605,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         g_meta_container->FreeResourceFromResv(task->reservation,
                                                task->TaskId());
       g_account_meta_container->FreeQosResource(*task);
-      g_licenses_manager->FreeLicenseResource(task->licenses_count);
+      if (!task->licenses_count.empty())
+        g_licenses_manager->FreeLicenseResource(task->licenses_count);
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 
@@ -3668,14 +3670,16 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
 
-  auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
-      task->TaskToCtld().licenses_count());
-  if (!check_licenses_result) {
-    CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
-                check_licenses_result.error());
-    // TODO:
-    return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
+  if (!g_config.lic_id_to_count_map.empty()) {
+    auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
+    task->TaskToCtld().licenses_count(), task->TaskToCtld().is_licenses_or());
+    if (!check_licenses_result) {
+      CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
+                  check_licenses_result.error());
+      return std::unexpected(CraneErrCode::ERR_LICENSE_LEGAL_FAILED);
+    }
   }
+
 
   return {};
 }

@@ -176,6 +176,7 @@ message TaskToCtld {
   google.protobuf.Timestamp begin_time = 39;
 
   map<string, uint32> licenses_count = 40;
+  bool is_licenses_or = 41;
 }
 
 message TaskInEmbeddedDb {
@@ -682,6 +683,7 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+  ERR_LICENSE_LEGAL_FAILED = 78;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.

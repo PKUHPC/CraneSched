@@ -336,7 +336,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["Licenses"]) {
-        std::string licenses_str = config["Licenses"].as<std::string>();
+        auto licenses_str = config["Licenses"].as<std::string>();
         if (!util::ParseLicensesList(licenses_str,
                                      &g_config.lic_id_to_count_map)) {
           CRANE_ERROR("Illegal licenses string format.");
