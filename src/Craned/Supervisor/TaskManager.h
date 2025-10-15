@@ -87,7 +87,7 @@ class StepInstance {
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
   StepToSupv& GetMutableStep() { return m_step_to_supv_; }
-  
+
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(

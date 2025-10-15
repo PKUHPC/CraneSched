@@ -379,7 +379,8 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
-      task->mutable_deadline_time()->set_seconds(view["deadline_time"].get_int64().value);
+      task->mutable_deadline_time()->set_seconds(
+          view["deadline_time"].get_int64().value);
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1153,7 +1154,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), task_to_ctld.container(),
              task_to_ctld.deadline_time().seconds()};
-             
+
   return DocumentConstructor_(fields, values);
 }
 
