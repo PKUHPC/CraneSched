@@ -1064,9 +1064,9 @@ struct User {
 
 struct License {
   LicenseId license_id; /* license name */
-  uint32_t total;  /* The total number of configured license */
-  uint32_t used;  /* Number of license in use */
-  uint32_t free;  /* Number of license in free */
+  uint32_t total;       /* The total number of configured license */
+  uint32_t used;        /* Number of license in use */
+  uint32_t free;        /* Number of license in free */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

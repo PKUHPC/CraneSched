@@ -94,7 +94,8 @@ bool LicensesManager::CheckLicenseCountSufficient(
 }
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-    const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map, bool is_license_or) {
+    const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map,
+    bool is_license_or) {
   auto licenses_map = licenses_map_.GetMapConstSharedPtr();
 
   if (is_license_or) {

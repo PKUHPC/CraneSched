@@ -32,10 +32,10 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "LicensesManager.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
-#include "LicensesManager.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
@@ -341,7 +341,7 @@ void ParseConfig(int argc, char** argv) {
                                      &g_config.lic_id_to_count_map)) {
           CRANE_ERROR("Illegal licenses string format.");
           std::exit(1);
-                                     }
+        }
       }
 
       g_config.RejectTasksBeyondCapacity =
