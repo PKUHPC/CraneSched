@@ -169,7 +169,7 @@ message TaskToCtld {
   bool exclusive = 37;
 
   bool hold = 38;
-  google.protobuf.Timestamp begin_time = 39; 
+  google.protobuf.Timestamp begin_time = 39;
 }
 
 message TaskInEmbeddedDb {
@@ -276,7 +276,7 @@ message InteractiveTaskAdditionalMeta {
   bool x11 = 6;
   X11Meta x11_meta = 7;
 
-  //Crun input will forward to these tasks
+  // Crun input will forward to these tasks
   optional uint32 input_task_id = 8;
 }
 
@@ -612,7 +612,7 @@ message CranedRemoteMeta {
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
-  uint32 config_crc= 9;
+  uint32 config_crc = 9;
 }
 
 enum TxnAction {

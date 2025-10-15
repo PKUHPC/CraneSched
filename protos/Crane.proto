@@ -493,9 +493,9 @@ message QueryTaskEfficiencyRequest {
 message TaskEfficiencyInfo {
   uint32 task_id = 1;
   string hostname = 2;
-  uint64 cpu_usage = 3;      // CPU usage in nanoseconds
-  uint64 memory_usage = 4;   // Memory usage in bytes
-  uint64 proc_count = 5;     // Process count
+  uint64 cpu_usage = 3;     // CPU usage in nanoseconds
+  uint64 memory_usage = 4;  // Memory usage in bytes
+  uint64 proc_count = 5;    // Process count
   google.protobuf.Timestamp timestamp = 6;
 }
 
@@ -887,7 +887,7 @@ message EnableAutoPowerControlReply {
 message SignUserCertificateRequest {
   uint32 uid = 1;
   string csr_content = 2;
-  string alt_names = 3;   // "localhost, *.domainSuffix"
+  string alt_names = 3;  // "localhost, *.domainSuffix"
 }
 
 message SignUserCertificateResponse {
@@ -906,7 +906,7 @@ message ResetUserCredentialReply {
   repeated RichError rich_error_list = 2;
 }
 
-message QueryTxnLogRequest{
+message QueryTxnLogRequest {
   uint32 uid = 1;
   string actor = 2;
   string target = 3;
@@ -915,7 +915,7 @@ message QueryTxnLogRequest{
   TimeInterval time_interval = 6;
 }
 
-message QueryTxnLogReply{
+message QueryTxnLogReply {
   bool ok = 1;
   ErrCode code = 2;
   message Txn {
