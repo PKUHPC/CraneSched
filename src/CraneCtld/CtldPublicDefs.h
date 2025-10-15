@@ -179,6 +179,9 @@ struct Config {
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
+
+  std::unordered_map<LicenseId, uint32_t> lic_id_to_count_map;
+
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
@@ -402,6 +405,8 @@ struct TaskInCtld {
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
+
+  std::unordered_map<std::string, uint32_t> licenses_count;
 
  private:
   /* ------------- [2] -------------
@@ -699,6 +704,13 @@ struct User {
       return "Unknown";
     }
   }
+};
+
+struct License {
+  LicenseId license_id; /* license name */
+  uint32_t total;       /* The total number of configured license */
+  uint32_t used;        /* Number of license in use */
+  uint32_t free;        /* Number of license in free */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

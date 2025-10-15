@@ -300,6 +300,9 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+
+  task_info->mutable_licenses_count()->insert(licenses_count.begin(),
+                                              licenses_count.end());
 }
 
 crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
