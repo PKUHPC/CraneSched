@@ -1277,9 +1277,7 @@ CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
     std::optional<int64_t> deadline_time) {
   absl::Time now = absl::Now();
   std::optional<absl::Time> absl_deadline_time =
-      deadline_time ? std::optional<absl::Time>(
-                          absl::FromUnixSeconds(deadline_time.value()))
-                    : std::nullopt;
+      deadline_time.transform(absl::FromUnixSeconds);
 
   if (absl_deadline_time && absl_deadline_time <= now) {
     return CraneErrCode::ERR_INVALID_PARAM;
