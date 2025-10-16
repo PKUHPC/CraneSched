@@ -148,12 +148,12 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
 
   if (status_remote_service.ok() && reply_from_remote_service.ok()) {
     response->set_ok(true);
-    response->set_task_id(reply_from_remote_service.task_id());
+    response->set_job_id(reply_from_remote_service.job_id());
 
     CRANE_TRACE(
         "ssh client with remote port {} belongs to task #{}. "
         "Moving this ssh session process into the task's cgroup",
-        request->ssh_remote_port(), reply_from_remote_service.task_id());
+        request->ssh_remote_port(), reply_from_remote_service.job_id());
     return Status::OK;
   } else {
     std::optional<TaskInfoOfUid> info_opt =
@@ -165,7 +165,7 @@ grpc::Status CranedForPamServiceImpl::QueryStepFromPortForward(
           "This ssh session process is going to be moved into the task's "
           "cgroup",
           info.first_task_id, request->uid());
-      response->set_task_id(info.first_task_id);
+      response->set_job_id(info.first_task_id);
       response->set_ok(true);
     } else {
       CRANE_TRACE(
@@ -216,13 +216,12 @@ grpc::Status CranedForPamServiceImpl::QuerySshStepEnvVariablesForward(
   }
 
   // First query local device related env list
-  auto job_expt = g_job_mgr->QueryJob(request->task_id());
-  if (!job_expt) {
+  auto job = g_job_mgr->QueryJob(request->task_id());
+  if (!job) {
     response->set_ok(false);
     return Status::OK;
   }
 
-  JobInD *job = job_expt.value();
   for (const auto &[name, value] : job->GetJobEnvMap()) {
     response->mutable_env_map()->emplace(name, value);
   }
