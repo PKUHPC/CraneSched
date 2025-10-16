@@ -1099,9 +1099,8 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       CraneErrCode terminate_err = TerminateRunningTask(task_id);
       if (terminate_err != CraneErrCode::SUCCESS &&
           terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
-        CRANE_ERROR(
-            "Failed to terminate task #{} after suspend failure: {}",
-            task_id, CraneErrStr(terminate_err));
+        CRANE_ERROR("Failed to terminate task #{} after suspend failure: {}",
+                    task_id, CraneErrStr(terminate_err));
       }
 
       for (const auto& craned_id : executing_nodes) {
@@ -1189,7 +1188,7 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
       continue;
     }
 
-  std::vector<job_id_t> job_ids{task_id};
+    std::vector<job_id_t> job_ids{task_id};
     CraneErrCode failure_code = CraneErrCode::SUCCESS;
     std::atomic_bool has_failure{false};
     Mutex result_mtx;
@@ -1237,9 +1236,8 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
       CraneErrCode terminate_err = TerminateRunningTask(task_id);
       if (terminate_err != CraneErrCode::SUCCESS &&
           terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
-        CRANE_ERROR(
-            "Failed to terminate task #{} after resume failure: {}",
-            task_id, CraneErrStr(terminate_err));
+        CRANE_ERROR("Failed to terminate task #{} after resume failure: {}",
+                    task_id, CraneErrStr(terminate_err));
       }
 
       for (const auto& craned_id : executing_nodes) {
