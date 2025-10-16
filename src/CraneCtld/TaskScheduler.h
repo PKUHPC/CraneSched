@@ -777,15 +777,6 @@ class TaskScheduler {
     // Ended jobs will transfer from embedded db to mongodb
     std::unordered_set<TaskInCtld*> job_raw_ptrs;
   };
-
-  enum StepStatus : uint8_t {
-    NONE = 0,
-    CONFIGURE_FAILED,
-    CONFIGURED,
-
-    COMPLETED,
-  };
-
   /**
    *
    * @param new_status step status

@@ -2173,7 +2173,14 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
         context->rn_step_raw_ptrs.insert(step);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
-        g_embedded_db_client->AppendSteps({primary_step.get()});
+        if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
+          step->SetStatus(crane::grpc::TaskStatus::Failed);
+          job_finished = true;
+          CRANE_ERROR("[Job #{}] Failed to append a step to embedded db.",
+                      job->TaskId());
+          context->rn_step_raw_ptrs.erase(step);
+          break;
+        }
         job->SetPrimaryStep(std::move(primary_step));
         for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
           context->craned_step_alloc_map[node_id].emplace_back(
@@ -2686,27 +2693,46 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   free_job_latch.wait();
 
   txn_id_t txn_id;
-  g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-
+  auto ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+  if (!ok) {
+    CRANE_ERROR(
+        "TaskScheduler failed to start job transaction when clean step status "
+        "change.");
+  }
   // Jobs will update in embedded db
   for (auto* job : context.rn_job_raw_ptrs) {
     if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
                                                        job->RuntimeAttr()))
-      CRANE_ERROR("[Job #{}]Failed to call UpdateRuntimeAttrOfTask()",
+      CRANE_ERROR("[Job #{}] Failed to call UpdateRuntimeAttrOfTask()",
                   job->TaskId());
   }
 
-  g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+  ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+  if (!ok) {
+    CRANE_ERROR(
+        "TaskScheduler failed to commit job transaction when clean  step "
+        "status change.");
+  }
 
-  g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
+  ok = g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
+  if (!ok) {
+    CRANE_ERROR(
+        "TaskScheduler failed to start step transaction when clean step status "
+        "change");
+  }
   // Steps will update in embedded db
   for (auto* step : context.rn_step_raw_ptrs) {
     if (!g_embedded_db_client->UpdateRuntimeAttrOfStep(txn_id, step->StepDbId(),
                                                        step->RuntimeAttr()))
-      CRANE_ERROR("[Job #{}.{}]Failed to call UpdateRuntimeAttrOfStep()",
+      CRANE_ERROR("[Job #{}.{}] Failed to call UpdateRuntimeAttrOfStep()",
                   step->job_id, step->StepId());
   }
-  g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
+  ok = g_embedded_db_client->CommitStepVarDbTransaction(txn_id);
+  if (!ok) {
+    CRANE_ERROR(
+        "TaskScheduler failed to commit step transaction when clean step "
+        "status change.");
+  }
 
   ProcessFinalSteps_(context.step_raw_ptrs);
   ProcessFinalTasks_(context.job_raw_ptrs);
