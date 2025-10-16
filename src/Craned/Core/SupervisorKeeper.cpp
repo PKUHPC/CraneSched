@@ -31,6 +31,8 @@ CraneErrCode SupervisorStub::ExecuteTask() {
 
   auto ok = m_stub_->ExecuteTask(&context, request, &reply);
   if (!ok.ok()) {
+    CRANE_ERROR("ExecuteTask failed: reply code:{}, ok:{}.",
+                CraneErrStr(reply.code()), ok.error_message());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -79,6 +81,8 @@ CraneErrCode SupervisorStub::TerminateTask(bool mark_as_orphaned,
   if (ok.ok() && reply.ok()) {
     return CraneErrCode::SUCCESS;
   }
+  CRANE_ERROR("TerminateTask failed: reply {},{}", reply.ok(),
+              ok.error_message());
 
   return CraneErrCode::ERR_RPC_FAILURE;
 }
@@ -124,6 +128,8 @@ CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
   auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
+  CRANE_ERROR("ChangeTaskTimeLimit failed: reply {},{}", reply.ok(),
+              ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
@@ -134,7 +140,7 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
 
   auto ok = m_stub_->ShutdownSupervisor(&context, request, &reply);
   if (ok.ok()) return CraneErrCode::SUCCESS;
-
+  CRANE_ERROR("ShutdownSupervisor failed: {}", ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 

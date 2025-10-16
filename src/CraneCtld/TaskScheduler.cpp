@@ -657,6 +657,7 @@ void TaskScheduler::ScheduleThread_() {
             CRANE_TRACE(
                 "CreateCgroupForTasks for {} tasks to {} failed: craned down.",
                 job_to_d_vec.size(), craned_id);
+            absl::MutexLock lk(&thread_pool_mtx);
             failed_craned_set.emplace(craned_id);
             for (const auto& job_to_d : job_to_d_vec)
               failed_task_id_set.emplace(job_to_d.job_id());

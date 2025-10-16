@@ -92,6 +92,8 @@ inline constexpr bool kCgLimitDeviceRead = true;
 inline constexpr bool kCgLimitDeviceWrite = true;
 inline constexpr bool kCgLimitDeviceMknod = true;
 
+constexpr std::uint64_t kCgMinMem = 1024U * 1024 * 50;
+
 // NOTE: cgroup_name != cgroup_path.
 // For manual cgroup operation, use kSystemCgPathPrefix / cgroup_name
 inline const std::filesystem::path kSystemCgPathPrefix = "/sys/fs/cgroup";
@@ -498,6 +500,8 @@ class AllocatableResourceAllocator {
 
 class DedicatedResourceAllocator {
  public:
+  static bool Allocate(const DedicatedResourceInNode &request_resource,
+                       CgroupInterface *cg);
   static bool Allocate(
       const crane::grpc::DedicatedResourceInNode &request_resource,
       CgroupInterface *cg);
@@ -545,11 +549,13 @@ class CgroupManager {
    * \param cgroup_str cgroup_str for job/step/task.
    * \param resource resource constrains
    * \param recover recover cgroup instead creating new one.
+   * \param min_mem minimum memory size for cgroup, default none, for job cgroup
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,
-      const crane::grpc::ResourceInNode &resource, bool recover);
+      const crane::grpc::ResourceInNode &resource, bool recover,
+      std::uint64_t min_mem = 0U);
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);

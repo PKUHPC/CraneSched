@@ -41,12 +41,6 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
-StepInstance::~StepInstance() {
-  if (termination_timer) {
-    termination_timer->close();
-  }
-}
-
 bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
 
 bool StepInstance::IsCrun() const {
@@ -1686,6 +1680,7 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
   bool orphaned = m_step_.orphaned;
   // No need to free the TaskInstance structure,will destruct with TaskMgr.
   if (m_step_.AllTaskFinished()) {
+    DelTerminationTimer_();
     if (!orphaned)
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));

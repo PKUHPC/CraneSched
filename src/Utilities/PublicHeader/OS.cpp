@@ -106,23 +106,30 @@ bool CreateFoldersForFile(std::string const& p) {
   return true;
 }
 
-bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
-                            mode_t permissions = 0755) {
+bool CreateFoldersForFileEx(const std::filesystem::path& file_path, uid_t owner,
+                            gid_t group, mode_t permissions) {
   namespace fs = std::filesystem;
 
   try {
-    fs::path dir_path = p;
+    fs::path dir_path = file_path;
     dir_path = dir_path.parent_path();
 
     fs::path current_dir;
     for (const auto& part : dir_path) {
       current_dir /= part;
-      if (!fs::exists(current_dir)) {
-        if (mkdir(current_dir.c_str(), permissions) != 0) {
-          CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
-                      strerror(errno));
+      if (fs::exists(current_dir)) {
+        if (!fs::is_directory(current_dir)) {
+          CRANE_WARN("Path {} exists but not a directory", current_dir);
           return false;
         }
+        continue;
+      }
+      // FIXME: potential TOCTOU + symlink attack: create a symlink after the
+      // existence check and before mkdir.
+      if (mkdir(current_dir.c_str(), permissions) != 0) {
+        CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
+                    strerror(errno));
+        return false;
       }
 
       if (chown(current_dir.c_str(), owner, group) != 0) {
@@ -132,7 +139,8 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
       }
     }
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(), e.what());
+    CRANE_ERROR("Failed to create folder for {}: {}", file_path.c_str(),
+                e.what());
     return false;
   }
 

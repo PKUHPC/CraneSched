@@ -54,8 +54,8 @@ bool CreateFolders(std::string const& p);
 
 bool CreateFoldersForFile(std::string const& p);
 
-bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
-                            mode_t permissions);
+bool CreateFoldersForFileEx(const std::filesystem::path& file_path, uid_t owner,
+                            gid_t group, mode_t permissions = 0755);
 
 bool SetFdNonBlocking(int fd);
 
