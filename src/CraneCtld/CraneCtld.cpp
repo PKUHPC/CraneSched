@@ -761,6 +761,10 @@ void DestroyCtldGlobalVariables() {
   g_thread_pool->wait();
   g_thread_pool.reset();
   g_plugin_client.reset();
+
+  if (!util::os::DeleteFile(g_config.CraneBaseDir / kDefaultCraneCtldAlivePath))
+    CRANE_ERROR("Failed to delete folders for CraneCtld alive file!");
+
 }
 
 void InitializeCtldGlobalVariables() {
@@ -872,6 +876,12 @@ void CreateFolders() {
     CRANE_ERROR("Failed to create folders for CraneCtld db files!");
     std::exit(1);
   }
+
+  ok = util::os::CreateFoldersForFile(g_config.CraneBaseDir / kDefaultCraneCtldAlivePath);
+  if (!ok) {
+    CRANE_ERROR("Failed to create folders for CraneCtld alive file!");
+    std::exit(1);
+  }
 }
 
 int StartServer() {
@@ -887,6 +897,14 @@ int StartServer() {
   CreateFolders();
 
   InitializeCtldGlobalVariables();
+
+  std::string file_path = fmt::format("{}/{}", g_config.CraneBaseDir, kDefaultCraneCtldAlivePath);
+  int fd = open(file_path.c_str(), O_CREAT | O_WRONLY, 0666);
+  if (fd == -1) {
+    CRANE_ERROR("Failed to create alive file: {}", strerror(errno));
+  } else {
+    close(fd);
+  }
 
   g_ctld_server->Wait();
 
