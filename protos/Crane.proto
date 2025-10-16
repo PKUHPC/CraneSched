@@ -337,6 +337,7 @@ message DeleteUserRequest {
   uint32 uid = 1;
   repeated string user_list = 2;
   string account = 3;
+  bool force = 4;
 }
 
 message DeleteUserReply {
@@ -516,6 +517,26 @@ message QueryTasksInfoRequest {
 message QueryTasksInfoReply {
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
+}
+
+message QueryTaskEfficiencyRequest {
+  repeated uint32 task_ids = 1;
+  uint32 uid = 2;  // User ID for authorization
+}
+
+message TaskEfficiencyInfo {
+  uint32 task_id = 1;
+  string hostname = 2;
+  uint64 cpu_usage = 3;     // CPU usage in nanoseconds
+  uint64 memory_usage = 4;  // Memory usage in bytes
+  uint64 proc_count = 5;    // Process count
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message QueryTaskEfficiencyReply {
+  bool ok = 1;
+  string error_message = 2;
+  repeated TaskEfficiencyInfo efficiency_data = 3;
 }
 
 message CreateReservationRequest {
@@ -998,6 +1019,10 @@ service CraneCtld {
 
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
+}
+
+service CeffQueryService {
+  rpc QueryTaskEfficiency(QueryTaskEfficiencyRequest) returns (QueryTaskEfficiencyReply);
 }
 
 service CraneCtldForInternal {

@@ -1462,7 +1462,33 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  for (const auto &user_name : request->user_list()) {
+
+  std::unordered_set<std::string> user_list;
+  bool contains_all = std::ranges::find(request->user_list(), "ALL") !=
+                      request->user_list().end();
+  if (contains_all && request->force()) {
+    auto account_ptr =
+        g_account_manager->GetExistedAccountInfo(request->account());
+    if (!account_ptr) {
+      response->set_ok(false);
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_description(request->account());
+      new_err_record->set_code(CraneErrCode::ERR_INVALID_ACCOUNT);
+      return grpc::Status::OK;
+    }
+
+    user_list.insert(account_ptr->users.begin(), account_ptr->users.end());
+  } else if (contains_all && !request->force()) {
+    response->set_ok(false);
+    auto *new_err_record = response->mutable_rich_error_list()->Add();
+    new_err_record->set_description("all");
+    new_err_record->set_code(CraneErrCode::ERR_NOT_FORCE);
+    return grpc::Status::OK;
+  } else if (!contains_all) {
+    user_list.insert(request->user_list().begin(), request->user_list().end());
+  }
+
+  for (const auto &user_name : user_list) {
     auto res = g_account_manager->DeleteUser(request->uid(), user_name,
                                              request->account());
     if (!res) {

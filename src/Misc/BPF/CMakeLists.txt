@@ -12,10 +12,10 @@ else ()
     message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
 
+# If default compiler is gcc, use clang to compile BPF program
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(BPF_COMPILER ${CLANG_EXECUTABLE})
 else ()
-    # set clang 
     set(BPF_COMPILER ${CMAKE_C_COMPILER})
 endif ()
 

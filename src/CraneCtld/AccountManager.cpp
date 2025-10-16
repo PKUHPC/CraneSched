@@ -41,6 +41,9 @@ CraneExpected<void> AccountManager::AddUser(uint32_t uid,
   result = CheckIfUserHasHigherPrivThan_(*op_user, new_user.admin_level);
   if (!result) return result;
 
+  if (new_user.name == "ALL")
+    return std::unexpected(CraneErrCode::ERR_INVALID_USERNAME);
+
   // User must specify an account
   if (new_user.default_account.empty())
     return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
