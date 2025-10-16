@@ -169,6 +169,25 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::SendHealthCheckResult(
+    grpc::ServerContext *context,
+    const crane::grpc::SendHealthCheckResultRequest *request,
+    google::protobuf::Empty *response) {
+  g_meta_container->UpdateNodeStateWithHealthCheck_(request->craned_id(),
+                                                    request->healthy());
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CtldForInternalServiceImpl::QueryNodeState(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryNodeStateRequest *request,
+    crane::grpc::QueryNodeStateReply *response) {
+  g_meta_container->QueryNodeState(request->craned_id(), response);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CforedStream(
     grpc::ServerContext *context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
