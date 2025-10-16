@@ -997,6 +997,285 @@ std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
+std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
+    const std::vector<task_id_t>& task_ids) {
+  std::vector<CraneErrCode> results;
+  results.reserve(task_ids.size());
+  for (task_id_t task_id : task_ids) {
+    std::vector<CranedId> executing_nodes;
+
+    {
+      LockGuard running_guard(&m_running_task_map_mtx_);
+      auto iter = m_running_task_map_.find(task_id);
+      if (iter == m_running_task_map_.end()) {
+        CRANE_TRACE("Task #{} not in Rn queue for suspend", task_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      TaskInCtld* task = iter->second.get();
+      if (task->Status() == crane::grpc::Suspended) {
+        CRANE_TRACE("Task #{} already suspended", task_id);
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+      if (task->Status() != crane::grpc::Running) {
+        CRANE_TRACE("Task #{} is not running (status {}) for suspend", task_id,
+                    static_cast<int>(task->Status()));
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      executing_nodes = task->executing_craned_ids;
+    }
+
+    if (executing_nodes.empty()) {
+      CRANE_WARN("Task #{} has no executing craned when suspending", task_id);
+      results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
+        offline_nodes.push_back(craned_id);
+        break;
+      }
+    }
+
+    if (!offline_nodes.empty()) {
+      // Ensure suspension only proceeds when every craned involved is online.
+      CRANE_WARN("Task #{} suspend skipped because craned(s) {} are offline.",
+                 task_id, absl::StrJoin(offline_nodes, ","));
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
+      continue;
+    }
+
+    std::vector<job_id_t> job_ids{task_id};
+    CraneErrCode failure_code = CraneErrCode::SUCCESS;
+    std::atomic_bool has_failure{false};
+    Mutex result_mtx;
+
+    // Broadcast SuspendSteps via the thread pool and track successes/errors.
+    absl::BlockingCounter blocking_counter(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      g_thread_pool->detach_task([&, craned_id]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!stub || stub->Invalid()) {
+          CRANE_WARN("SuspendSteps stub for {} unavailable", craned_id);
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS)
+              failure_code = CraneErrCode::ERR_RPC_FAILURE;
+          }
+          has_failure.store(true, std::memory_order_relaxed);
+          blocking_counter.DecrementCount();
+          return;
+        }
+
+        CraneErrCode err = stub->SuspendSteps(job_ids);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to suspend task #{} on craned {}: {}", task_id,
+                      craned_id, CraneErrStr(err));
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+          }
+          has_failure.store(true, std::memory_order_relaxed);
+        }
+
+        blocking_counter.DecrementCount();
+      });
+    }
+
+    blocking_counter.Wait();
+
+    if (has_failure.load(std::memory_order_relaxed)) {
+      CRANE_ERROR(
+          "Task #{} suspend partially failed on node(s); abandoning task to "
+          "avoid inconsistent state.",
+          task_id);
+
+      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      if (terminate_err != CraneErrCode::SUCCESS &&
+          terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
+        CRANE_ERROR("Failed to terminate task #{} after suspend failure: {}",
+                    task_id, CraneErrStr(terminate_err));
+      }
+
+      for (const auto& craned_id : executing_nodes) {
+        TaskStatusChangeAsync(task_id, craned_id,
+                              crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeRpcError);
+      }
+
+      results.emplace_back(failure_code);
+      continue;
+    }
+
+    {
+      LockGuard running_guard(&m_running_task_map_mtx_);
+      auto iter = m_running_task_map_.find(task_id);
+      if (iter == m_running_task_map_.end()) {
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        continue;
+      }
+
+      TaskInCtld* task = iter->second.get();
+      if (task->Status() != crane::grpc::Suspended) {
+        task->SetStatus(crane::grpc::Suspended);
+        if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
+                0, task->TaskDbId(), task->RuntimeAttr())) {
+          CRANE_ERROR("Failed to persist suspended status for task #{}",
+                      task_id);
+          results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+          continue;
+        }
+      }
+    }
+
+    results.emplace_back(CraneErrCode::SUCCESS);
+  }
+  return results;
+}
+
+std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
+    const std::vector<task_id_t>& task_ids) {
+  std::vector<CraneErrCode> results;
+  results.reserve(task_ids.size());
+  for (task_id_t task_id : task_ids) {
+    std::vector<CranedId> executing_nodes;
+
+    {
+      LockGuard running_guard(&m_running_task_map_mtx_);
+      auto iter = m_running_task_map_.find(task_id);
+      if (iter == m_running_task_map_.end()) {
+        CRANE_TRACE("Task #{} not in Rn queue for resume", task_id);
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        continue;
+      }
+
+      TaskInCtld* task = iter->second.get();
+      if (task->Status() != crane::grpc::Suspended) {
+        CRANE_TRACE("Task #{} is not suspended (status {}) for resume", task_id,
+                    static_cast<int>(task->Status()));
+        results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+        continue;
+      }
+
+      executing_nodes = task->executing_craned_ids;
+    }
+
+    if (executing_nodes.empty()) {
+      CRANE_WARN("Task #{} has no executing craned when resuming", task_id);
+      results.emplace_back(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+
+    std::vector<CranedId> offline_nodes;
+    offline_nodes.reserve(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      if (!g_meta_container->CheckCranedOnline(craned_id)) {
+        offline_nodes.push_back(craned_id);
+        break;
+      }
+    }
+
+    if (!offline_nodes.empty()) {
+      CRANE_WARN("Task #{} resume skipped because craned(s) {} are offline.",
+                 task_id, absl::StrJoin(offline_nodes, ","));
+      results.emplace_back(CraneErrCode::ERR_RPC_FAILURE);
+      continue;
+    }
+
+    std::vector<job_id_t> job_ids{task_id};
+    CraneErrCode failure_code = CraneErrCode::SUCCESS;
+    std::atomic_bool has_failure{false};
+    Mutex result_mtx;
+
+    // Broadcast ResumeSteps via the thread pool and track successes/errors.
+    absl::BlockingCounter blocking_counter(executing_nodes.size());
+    for (const auto& craned_id : executing_nodes) {
+      g_thread_pool->detach_task([&, craned_id]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (!stub || stub->Invalid()) {
+          CRANE_WARN("ResumeSteps stub for {} unavailable", craned_id);
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS)
+              failure_code = CraneErrCode::ERR_RPC_FAILURE;
+          }
+          has_failure.store(true, std::memory_order_relaxed);
+          blocking_counter.DecrementCount();
+          return;
+        }
+
+        CraneErrCode err = stub->ResumeSteps(job_ids);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to resume task #{} on craned {}: {}", task_id,
+                      craned_id, CraneErrStr(err));
+          {
+            LockGuard lock(&result_mtx);
+            if (failure_code == CraneErrCode::SUCCESS) failure_code = err;
+          }
+          has_failure.store(true, std::memory_order_relaxed);
+        }
+
+        blocking_counter.DecrementCount();
+      });
+    }
+
+    blocking_counter.Wait();
+
+    if (has_failure.load(std::memory_order_relaxed)) {
+      CRANE_ERROR(
+          "Task #{} resume partially failed on node(s); abandoning task to "
+          "avoid inconsistent state.",
+          task_id);
+
+      CraneErrCode terminate_err = TerminateRunningTask(task_id);
+      if (terminate_err != CraneErrCode::SUCCESS &&
+          terminate_err != CraneErrCode::ERR_NON_EXISTENT) {
+        CRANE_ERROR("Failed to terminate task #{} after resume failure: {}",
+                    task_id, CraneErrStr(terminate_err));
+      }
+
+      for (const auto& craned_id : executing_nodes) {
+        TaskStatusChangeAsync(task_id, craned_id,
+                              crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeRpcError);
+      }
+
+      results.emplace_back(failure_code);
+      continue;
+    }
+
+    {
+      LockGuard running_guard(&m_running_task_map_mtx_);
+      auto iter = m_running_task_map_.find(task_id);
+      if (iter == m_running_task_map_.end()) {
+        results.emplace_back(CraneErrCode::ERR_NON_EXISTENT);
+        continue;
+      }
+
+      TaskInCtld* task = iter->second.get();
+      if (task->Status() != crane::grpc::Running) {
+        task->SetStatus(crane::grpc::Running);
+        if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
+                0, task->TaskDbId(), task->RuntimeAttr())) {
+          CRANE_ERROR("Failed to persist resumed status for task #{}", task_id);
+          results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
+          continue;
+        }
+      }
+    }
+
+    results.emplace_back(CraneErrCode::SUCCESS);
+  }
+  return results;
+}
+
 CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
                                                 int64_t secs) {
   if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;

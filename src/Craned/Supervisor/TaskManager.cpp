@@ -22,6 +22,7 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
+#include <signal.h>
 #include <spdlog/fmt/bundled/core.h>
 #include <sys/wait.h>
 
@@ -238,6 +239,32 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
     }
   }
   return env_map;
+}
+
+CraneErrCode ITaskInstance::Suspend() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  int rc = kill(-m_pid_, SIGSTOP);
+  if ((rc != 0) && (errno != ESRCH)) {
+    CRANE_TRACE("[Subprocess] Failed to suspend task #{} with SIGSTOP: {}",
+                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ITaskInstance::Resume() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  int rc = kill(-m_pid_, SIGCONT);
+  if ((rc != 0) && (errno != ESRCH)) {
+    CRANE_TRACE("[Subprocess] Failed to resume task #{} with SIGCONT: {}",
+                m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
 }
 
 std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -1010,9 +1037,68 @@ CraneErrCode ContainerInstance::Spawn() {
   }
 }
 
+CraneErrCode ContainerInstance::ExecuteContainerCommand_(
+    const std::string& cmd_template, std::string_view action) const {
+  if (cmd_template.empty()) return CraneErrCode::ERR_INVALID_PARAM;
+
+  std::string cmd = ParseOCICmdPattern_(cmd_template);
+  int rc = system(cmd.c_str());
+  if (rc == -1) {
+    CRANE_ERROR(
+        "[Subprocess] Failed to {} container for task #{}: system() error: {}",
+        action, m_parent_step_inst_->GetStep().task_id(), strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (!WIFEXITED(rc) || WEXITSTATUS(rc) != 0) {
+    if (WIFSIGNALED(rc)) {
+      CRANE_ERROR(
+          "[Subprocess] Container {} command '{}' terminated by signal {} for "
+          "task #{}",
+          action, cmd, WTERMSIG(rc), m_parent_step_inst_->GetStep().task_id());
+    } else {
+      CRANE_ERROR(
+          "[Subprocess] Container {} command '{}' exited with code {} for task "
+          "#{}",
+          action, cmd, WIFEXITED(rc) ? WEXITSTATUS(rc) : rc,
+          m_parent_step_inst_->GetStep().task_id());
+    }
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::Suspend() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  auto err = ExecuteContainerCommand_(g_config.Container.RuntimePause, "pause");
+  if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Suspend();
+  return err;
+}
+
+CraneErrCode ContainerInstance::Resume() {
+  if (m_pid_ == 0) return CraneErrCode::ERR_NON_EXISTENT;
+
+  auto err =
+      ExecuteContainerCommand_(g_config.Container.RuntimeResume, "resume");
+  if (err == CraneErrCode::ERR_INVALID_PARAM) return ITaskInstance::Resume();
+  return err;
+}
+
 CraneErrCode ContainerInstance::Kill(int signum) {
   using json = nlohmann::json;
   if (m_pid_ != 0) {
+    if (signum == SIGSTOP || signum == SIGCONT) {
+      int rc = kill(-m_pid_, signum);
+      if ((rc != 0) && (errno != ESRCH)) {
+        CRANE_TRACE("[Subprocess] Failed to send signal {} to pid {}: {}",
+                    signum, m_pid_, strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      return CraneErrCode::SUCCESS;
+    }
+
     // If m_pid_ not exists, no further operation.
     int rc = 0;
     std::array<char, 256> buffer{};
@@ -1520,6 +1606,12 @@ TaskManager::TaskManager()
         EvCleanChangeTaskTimeLimitQueueCb_();
       });
 
+  m_task_signal_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_signal_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTaskSignalQueueCb_();
+      });
+
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
@@ -1580,6 +1672,7 @@ void TaskManager::ActivateTaskStatusChange_(task_id_t task_id,
                                             uint32_t exit_code,
                                             std::optional<std::string> reason) {
   // One-shot model: nothing to stop, just proceed to cleanup.
+  m_step_.status = new_status;
   m_step_.oom_baseline_inited = false;
   auto task = m_step_.RemoveTaskInstance(task_id);
   task->Cleanup();
@@ -1675,6 +1768,24 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
       terminated_by_user ? TerminatedBy::CANCELLED_BY_USER : TerminatedBy::NONE;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+std::future<CraneErrCode> TaskManager::SuspendJobAsync() {
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Suspend;
+  auto fut = elem.prom.get_future();
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+  return fut;
+}
+
+std::future<CraneErrCode> TaskManager::ResumeJobAsync() {
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Resume;
+  auto fut = elem.prom.get_future();
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+  return fut;
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1862,6 +1973,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     int sig = SIGTERM;  // For BatchTask
     if (m_step_.IsCrun()) sig = SIGHUP;
 
+    m_step_.status = crane::grpc::TaskStatus::Running;
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     for (auto task_id : m_pid_task_id_map_ | std::views::values) {
       auto task = m_step_.GetTaskInstance(task_id);
@@ -1913,6 +2025,79 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     }
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
+}
+
+void TaskManager::EvCleanTaskSignalQueueCb_() {
+  TaskSignalQueueElem elem;
+  while (m_task_signal_queue_.try_dequeue(elem)) {
+    CraneErrCode result = CraneErrCode::SUCCESS;
+    switch (elem.action) {
+    case TaskSignalQueueElem::Action::Suspend: {
+      if (m_step_.status == crane::grpc::TaskStatus::Suspended) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      if (m_step_.status != crane::grpc::TaskStatus::Running) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      result = SuspendRunningTasks_();
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Suspended;
+      break;
+    }
+    case TaskSignalQueueElem::Action::Resume: {
+      if (m_step_.status == crane::grpc::TaskStatus::Running) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      if (m_step_.status != crane::grpc::TaskStatus::Suspended) {
+        result = CraneErrCode::ERR_INVALID_PARAM;
+        break;
+      }
+      result = ResumeSuspendedTasks_();
+      if (result == CraneErrCode::SUCCESS)
+        m_step_.status = crane::grpc::TaskStatus::Running;
+      break;
+    }
+    }
+
+    elem.prom.set_value(result);
+  }
+}
+
+CraneErrCode TaskManager::SuspendRunningTasks_() {
+  if (m_step_.AllTaskFinished()) return CraneErrCode::ERR_NON_EXISTENT;
+
+  bool any_signal_sent = false;
+  for (const auto& [pid, task_id] : m_pid_task_id_map_) {
+    auto task = m_step_.GetTaskInstance(task_id);
+    if (!task) continue;
+    if (task->GetPid() == 0) continue;
+    any_signal_sent = true;
+    CraneErrCode err = task->Suspend();
+    if (err != CraneErrCode::SUCCESS) return err;
+  }
+
+  if (!any_signal_sent) return CraneErrCode::ERR_INVALID_PARAM;
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode TaskManager::ResumeSuspendedTasks_() {
+  if (m_step_.AllTaskFinished()) return CraneErrCode::ERR_NON_EXISTENT;
+
+  bool any_signal_sent = false;
+  for (const auto& [pid, task_id] : m_pid_task_id_map_) {
+    auto task = m_step_.GetTaskInstance(task_id);
+    if (!task) continue;
+    if (task->GetPid() == 0) continue;
+    any_signal_sent = true;
+    CraneErrCode err = task->Resume();
+    if (err != CraneErrCode::SUCCESS) return err;
+  }
+
+  if (!any_signal_sent) return CraneErrCode::ERR_INVALID_PARAM;
+  return CraneErrCode::SUCCESS;
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {

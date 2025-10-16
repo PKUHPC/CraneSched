@@ -532,6 +532,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       container_conf->set_run_cmd(g_config.Container.RuntimeRun);
       container_conf->set_kill_cmd(g_config.Container.RuntimeKill);
       container_conf->set_delete_cmd(g_config.Container.RuntimeDelete);
+      container_conf->set_pause_cmd(g_config.Container.RuntimePause);
+      container_conf->set_resume_cmd(g_config.Container.RuntimeResume);
     }
 
     if (g_config.Plugin.Enabled) {
@@ -858,6 +860,10 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
     }
 
     bool orphaned = job_ptr->orphaned;
+    for (auto& [step_id, step_inst] : job_ptr->step_map) {
+      if (!step_inst) continue;
+      step_inst->status = status_change.new_status;
+    }
     if (!orphaned)
       g_ctld_client->StepStatusChangeAsync(std::move(status_change));
   }
@@ -962,6 +968,9 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 
     auto* instance = job_instance.get();
     instance->orphaned = elem.mark_as_orphaned;
+    for (auto& [step_id, step_inst] : instance->step_map) {
+      if (step_inst) step_inst->status = crane::grpc::TaskStatus::Running;
+    }
 
     auto stub = g_supervisor_keeper->GetStub(elem.step_id);
     if (!stub) {
@@ -979,6 +988,56 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
           ExitCode::kExitCodeTerminated, "Terminated failed.");
     }
   }
+}
+
+CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
+  auto job_instance = m_job_map_.GetValueExclusivePtr(step_id);
+  if (!job_instance || job_instance->step_map.empty()) {
+    CRANE_DEBUG("Suspend request for nonexistent task #{}", step_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto* step_inst = job_instance->step_map.begin()->second.get();
+  if (step_inst->status == crane::grpc::TaskStatus::Suspended) {
+    CRANE_TRACE("Task #{} already suspended", step_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  auto stub = g_supervisor_keeper->GetStub(step_id);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found when suspending", step_id);
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  CraneErrCode err = stub->SuspendJob();
+  if (err == CraneErrCode::SUCCESS)
+    step_inst->status = crane::grpc::TaskStatus::Suspended;
+  return err;
+}
+
+CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
+  auto job_instance = m_job_map_.GetValueExclusivePtr(step_id);
+  if (!job_instance || job_instance->step_map.empty()) {
+    CRANE_DEBUG("Resume request for nonexistent task #{}", step_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto* step_inst = job_instance->step_map.begin()->second.get();
+  if (step_inst->status != crane::grpc::TaskStatus::Suspended) {
+    CRANE_TRACE("Task #{} is not suspended", step_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  auto stub = g_supervisor_keeper->GetStub(step_id);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found when resuming", step_id);
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  CraneErrCode err = stub->ResumeJob();
+  if (err == CraneErrCode::SUCCESS)
+    step_inst->status = crane::grpc::TaskStatus::Running;
+  return err;
 }
 
 void JobManager::TerminateStepAsync(step_id_t step_id) {

@@ -18,6 +18,8 @@
 
 #include "CranedServer.h"
 
+#include <absl/strings/str_join.h>
+#include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
 
 #include "CgroupManager.h"
@@ -79,6 +81,60 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   for (step_id_t id : request->task_id_list())
     g_job_mgr->TerminateStepAsync(id);
   response->set_ok(true);
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::SuspendSteps(
+    grpc::ServerContext *context,
+    const crane::grpc::SuspendStepsRequest *request,
+    crane::grpc::SuspendStepsReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> reasons;
+
+  for (step_id_t id : request->task_id_list()) {
+    CraneErrCode err = g_job_mgr->SuspendStep(id);
+    if (err != CraneErrCode::SUCCESS) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("task {}: {}", id, CraneErrStr(err)));
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) response->set_reason(absl::StrJoin(reasons, "; "));
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ResumeSteps(
+    grpc::ServerContext *context,
+    const crane::grpc::ResumeStepsRequest *request,
+    crane::grpc::ResumeStepsReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> reasons;
+
+  for (step_id_t id : request->task_id_list()) {
+    CraneErrCode err = g_job_mgr->ResumeStep(id);
+    if (err != CraneErrCode::SUCCESS) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("task {}: {}", id, CraneErrStr(err)));
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) response->set_reason(absl::StrJoin(reasons, "; "));
 
   return Status::OK;
 }

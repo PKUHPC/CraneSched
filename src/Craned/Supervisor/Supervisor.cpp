@@ -107,6 +107,8 @@ void InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeRun = msg.container_config().run_cmd();
     g_config.Container.RuntimeKill = msg.container_config().kill_cmd();
     g_config.Container.RuntimeDelete = msg.container_config().delete_cmd();
+    g_config.Container.RuntimePause = msg.container_config().pause_cmd();
+    g_config.Container.RuntimeResume = msg.container_config().resume_cmd();
   }
 
   // Plugin config
