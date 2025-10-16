@@ -468,7 +468,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
                                     const crane::grpc::ResourceInNode &resource,
-                                    bool recover) {
+                                    bool recover, std::uint64_t min_mem) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -506,17 +506,26 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     g_plugin_client->CreateCgroupHookAsync(
         std::get<0>(ids).value_or(0), cg_unique_ptr->CgroupName(), resource);
   }
+  ResourceInNode resource_in_node(resource);
+  if (min_mem != 0) {
+    if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
+      CRANE_WARN(
+          "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
+          cgroup_str);
+      resource_in_node.allocatable_res.memory_bytes = min_mem;
+      resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
+    }
+  }
 
   CRANE_TRACE("Setting cgroup {}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
-              cgroup_str, resource.allocatable_res_in_node().cpu_core_limit(),
-              resource.allocatable_res_in_node().memory_limit_bytes() /
-                  (1024.0 * 1024.0),
-              util::ReadableGrpcDresInNode(resource.dedicated_res_in_node()));
+              cgroup_str, resource_in_node.allocatable_res.CpuCount(),
+              resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
+              util::ReadableDresInNode(resource_in_node));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      resource.allocatable_res_in_node(), cg_unique_ptr.get());
+      resource_in_node.allocatable_res, cg_unique_ptr.get());
   if (ok)
-    ok &= DedicatedResourceAllocator::Allocate(resource.dedicated_res_in_node(),
+    ok &= DedicatedResourceAllocator::Allocate(resource_in_node.dedicated_res,
                                                cg_unique_ptr.get());
 
   if (ok) return std::move(cg_unique_ptr);
@@ -1555,6 +1564,36 @@ bool AllocatableResourceAllocator::Allocate(
   cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
   cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
   return ok;
+}
+
+bool DedicatedResourceAllocator::Allocate(
+    const DedicatedResourceInNode &request_resource, CgroupInterface *cg) {
+  std::unordered_set<std::string> all_request_slots;
+  for (const auto &type_slots_map :
+       request_resource.name_type_slots_map | std::ranges::views::values) {
+    for (const auto &slots :
+         type_slots_map.type_slots_map | std::ranges::views::values)
+      all_request_slots.insert(slots.cbegin(), slots.cend());
+  };
+
+  if (!cg->SetDeviceAccess(all_request_slots, CgConstant::kCgLimitDeviceRead,
+                           CgConstant::kCgLimitDeviceWrite,
+                           CgConstant::kCgLimitDeviceMknod)) {
+    if (CgroupManager::GetCgroupVersion() ==
+        CgConstant::CgroupVersion::CGROUP_V1) {
+      CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+      return false;
+    }
+    if (CgroupManager::GetCgroupVersion() ==
+        CgConstant::CgroupVersion::CGROUP_V2) {
+      CRANE_WARN("Allocate devices access failed in Cgroup V2.");
+      return false;
+    }
+
+    return true;
+  }
+
+  return true;
 }
 
 bool DedicatedResourceAllocator::Allocate(

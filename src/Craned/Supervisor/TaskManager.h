@@ -34,7 +34,7 @@ enum class TerminatedBy : uint8_t {
   TERMINATION_BY_OOM
 };
 
-struct ITaskInstance;
+class ITaskInstance;
 
 class StepInstance {
  public:
@@ -77,7 +77,7 @@ class StepInstance {
     x11_fwd = interactive_type.has_value() &&
               step.interactive_meta().x11_meta().enable_forwarding();
   };
-  ~StepInstance();
+  ~StepInstance() = default;
 
   bool IsBatch() const;
   bool IsCrun() const;

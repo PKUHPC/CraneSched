@@ -41,7 +41,8 @@ class CranedStub {
   CranedStub &operator=(const CranedStub &) = delete;
   CranedStub &operator=(CranedStub &&) = delete;
 
-  ~CranedStub();
+  ~CranedStub() = default;
+  void Fini();
 
   void SetRegToken(const RegToken &token) {
     absl::MutexLock l(&m_lock_);
@@ -52,7 +53,7 @@ class CranedStub {
     absl::MutexLock l(&m_lock_);
     bool ret = m_token_.has_value() && m_token_.value() == token;
     if (!ret) {
-      CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                          "Token for {} mismatch, resetting token.",
                          m_craned_id_);
       m_token_.reset();
@@ -63,8 +64,8 @@ class CranedStub {
   void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
   void SetReady() {
-    CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
-                       "Craned {} stub ready.", m_craned_id_);
+    CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
+                       m_craned_id_);
     m_registered_.store(true, std::memory_order_release);
     UpdateLastActiveTime();
 
@@ -189,9 +190,9 @@ class CranedKeeper {
     CranedStub *craned;
   };
 
-  static void CranedChannelConnectFail_(CranedStub *stub);
+  static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id);
+  void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
 
   CqTag *InitCranedStateMachine_(CranedStub *craned,
                                  grpc_connectivity_state new_state);
@@ -218,15 +219,15 @@ class CranedKeeper {
   std::unique_ptr<std::pmr::synchronized_pool_resource> m_pmr_pool_res_;
   std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
-  Mutex m_connected_craned_mtx_;
+  Mutex m_connect_craned_mtx_ ABSL_ACQUIRED_BEFORE(m_unavail_craned_set_mtx_);
   NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
-      m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connected_craned_mtx_);
+      m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
   std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
-  std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
-      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
+  std::unordered_set<CranedId> m_connecting_craned_set_
+      ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;
