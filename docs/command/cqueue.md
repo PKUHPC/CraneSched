@@ -23,14 +23,17 @@ cqueue
   - **TimeLimit**：作业时间限制
   - **Nodes**：作业所分配节点数
   - **NodeList**： 作业运行的节点名
+  - **Deadline**： 作业的截止时间
 
 #### **主要参数**
 
 - **-A/--Account** **string**：指定查询作业所属账户，指定多个账户时用逗号隔开
+- **--deadline** **string**：显示作业的截止时间
 - **-C/--config** **string**：配置文件路径
 - **-o/--format** **string**：指定输出格式。由百分号（%）后接一个字符或字符串标识。 在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符或字符串（不区分大小写）：
   - **%a/%Account：** 显示作业关联的账户
   - **%c/%AllocCpus：**显示作业已分配的 CPU 数量
+  - **%deadline/%Deadline：**显示作业的截止时间
   - **%e/%CpuPerNode：**显示作业每个节点请求的 CPU 数量
   - **%h/%ElapsedTime：**显示作业自启动以来的已用时间
   - **%j/%JobId：**显示作业 ID

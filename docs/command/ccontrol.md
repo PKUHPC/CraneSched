@@ -89,7 +89,7 @@ ccontrol show reservation
 
 - priority：优先级
 - timelimit：时间限制(采用时间格式)
-
+- deadline：截止时间(多种时间格式)
 eg：
 
 ```Plain
