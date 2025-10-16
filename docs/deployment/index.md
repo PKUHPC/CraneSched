@@ -79,11 +79,11 @@ Choose your operating system and follow the corresponding guide:
     
     Recommended for production. Includes environment setup, toolchain installation, and building from source.
 
-- :material-flag-outline: **Debian 11+ / Ubuntu 22.04+**
+- :material-flag-outline: **[Debian 11+ / Ubuntu 20.04+](./backend/Ubuntu.md)**
 
     ---
     
-    Supported but not officially recommended. Documentation is coming soon.
+    Supported but not officially recommended.
 
 - :material-alert-circle: **[CentOS 7](./backend/CentOS7.md)**
 
