@@ -79,9 +79,9 @@ class StepInstance {
   };
   ~StepInstance() = default;
 
-  bool IsBatch() const;
-  bool IsCrun() const;
-  bool IsCalloc() const;
+  bool IsBatch() const noexcept;
+  bool IsCrun() const noexcept;
+  bool IsCalloc() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -140,7 +140,6 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 
   int stdin_write;
   int stdout_write;
-  // FIXME: this fd not closed
   int stdin_read;
   int stdout_read;
 

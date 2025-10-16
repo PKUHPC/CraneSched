@@ -815,11 +815,7 @@ message StreamTaskIORequest {
     bytes msg = 2;
   }
 
-  message SupervisorUnRegisterReq {
-    string craned_id = 1;
-    uint32 task_id = 2;
-    uint32 step_id = 3;
-  }
+  message SupervisorUnRegisterReq {}
 
   message TaskX11OutputReq {
     uint32 task_id = 1;
