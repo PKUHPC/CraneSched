@@ -100,7 +100,7 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
 
 uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
   CreateX11FwdQueueElem elem;
-  meta.task_id = task_id;
+  elem.task_id = task_id;
   auto port_future = elem.promise.get_future();
   m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));
   m_clean_x11_fwd_handler_queue_async_handle_->send();
@@ -348,6 +348,8 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       else if (th)
         th->read();
     }
+
+    elem.promise.set_value(true);
   }
 }
 
