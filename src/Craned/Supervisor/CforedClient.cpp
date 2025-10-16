@@ -299,7 +299,6 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
             CRANE_TRACE("[Task #{}] Output pipe closed.", tid);
           });
 
-      ph->read();
     } else {
       // pty: use tty_handle. The 2nd argument true means it's a readable tty.
       th = m_loop_->uninitialized_resource<uvw::tty_handle>(meta.stdout_read,
@@ -308,6 +307,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
       if (err) {
         CRANE_ERROR("[Task #{}] Failed to init tty_handle for pty fd {}: {}",
                     meta.task_id, meta.stdout_read, uv_strerror(err));
+        close(meta.stdout_read);
         elem.promise.set_value(false);
         continue;
       }
@@ -337,17 +337,15 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
           [tid = meta.task_id](uvw::close_event&, uvw::tty_handle&) {
             CRANE_TRACE("[Task #{}] Pty closed.", tid);
           });
-
-      th->read();
     }
     {
       absl::MutexLock lock(&m_mtx_);
       m_fwd_meta_map[task_id] = meta;
-      if (ph)
-        ph->read();
-      else if (th)
-        th->read();
     }
+    if (ph)
+      ph->read();
+    else if (th)
+      th->read();
 
     elem.promise.set_value(true);
   }
