@@ -1947,6 +1947,9 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
+      if (elem.termination_reason == TerminatedBy::TERMINATION_BY_DEADLINE) {
+        task->terminated_by = TerminatedBy::TERMINATION_BY_DEADLINE;
+      }
       if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
