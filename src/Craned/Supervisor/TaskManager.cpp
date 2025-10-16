@@ -188,7 +188,7 @@ ITaskInstance::~ITaskInstance() {
 
     // For crun non pty job, close out fd in CforedClient
     // For crun pty job, close tty fd in CforedClient
-    if (!crun_meta->pty) close(crun_meta->stdin_read);
+    if (!crun_meta->pty) close(crun_meta->stdin_write);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
@@ -330,10 +330,10 @@ CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
     if (pid > 0) {
-      meta->stdin_read = crun_pty_fd;
+      meta->stdin_read = -1;
       meta->stdout_read = crun_pty_fd;
       meta->stdin_write = crun_pty_fd;
-      meta->stdout_write = crun_pty_fd;
+      meta->stdout_write = -1;
     }
   } else {
     pid = fork();

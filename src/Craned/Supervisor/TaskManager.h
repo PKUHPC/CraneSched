@@ -140,7 +140,6 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 
   int stdin_write;
   int stdout_write;
-  // FIXME: this fd not closed
   int stdin_read;
   int stdout_read;
 
