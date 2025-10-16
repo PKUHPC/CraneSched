@@ -780,6 +780,7 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
+      begin = std::chrono::steady_clock::now();
       m_task_indexes_mtx_.Lock();
       for (auto& it : selection_result_list) {
         auto& task = it.first;
@@ -951,6 +952,8 @@ void TaskScheduler::ScheduleThread_() {
           "CreateCgroupForTasks costed {} ms",
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
+
+      begin = std::chrono::steady_clock::now();
 
       // Move tasks into running queue.
       txn_id_t txn_id{0};

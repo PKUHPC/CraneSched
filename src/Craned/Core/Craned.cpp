@@ -908,6 +908,13 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                   job_id, step_id);
       continue;
     }
+    if (supv_status != ctld_status) {
+      CRANE_TRACE(
+          "[Step #{}.{}] status inconsistency, ctld: {}, supervisor: {}, "
+          "mark as failed.",
+          job_id, step_id, ctld_status, supv_status);
+      failed_steps[job_id].insert(step_id);
+    }
   }
   for (auto [job_id, step_ids] : failed_steps) {
     for (auto step_id : step_ids) {

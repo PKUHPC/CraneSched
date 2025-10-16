@@ -327,7 +327,6 @@ struct InteractiveMetaInTask {
     cb_task_res_allocated = other.cb_task_res_allocated;
     cb_task_completed = other.cb_task_completed;
     cb_task_cancel = other.cb_task_cancel;
-    status_change_cnt = other.status_change_cnt;
     has_been_cancelled_on_front_end =
         other.has_been_cancelled_on_front_end.load();
     has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
@@ -339,7 +338,6 @@ struct InteractiveMetaInTask {
     cb_task_res_allocated = other.cb_task_res_allocated;
     cb_task_completed = other.cb_task_completed;
     cb_task_cancel = other.cb_task_cancel;
-    status_change_cnt = other.status_change_cnt;
     has_been_cancelled_on_front_end =
         other.has_been_cancelled_on_front_end.load();
     has_been_terminated_on_craned = other.has_been_terminated_on_craned.load();
@@ -354,9 +352,6 @@ struct InteractiveMetaInTask {
 
   // This will ask front end like crun/calloc to exit
   std::function<void(task_id_t)> cb_task_cancel;
-
-  // only for crun.
-  size_t status_change_cnt{0};
 
   // ccancel for an interactive CALLOC task should call the front end to kill
   // the user's shell, let Cfored to inform CraneCtld of task completion rather
@@ -405,7 +400,7 @@ struct StepInCtld {
   std::string name;
 
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0};
+  cpu_t cpus_per_task{0.0f};
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
@@ -595,7 +590,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0};
+  cpu_t cpus_per_task{0.0f};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
