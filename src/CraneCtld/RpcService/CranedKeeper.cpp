@@ -19,6 +19,7 @@
 #include "CranedKeeper.h"
 
 #include "TaskScheduler.h"
+#include "protos/Crane.pb.h"
 
 namespace Ctld {
 
@@ -259,10 +260,65 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
     return CraneErrCode::ERR_RPC_FAILURE;
   }
   UpdateLastActiveTime();
-  if (reply.ok())
-    return CraneErrCode::SUCCESS;
-  else
-    return CraneErrCode::ERR_GENERIC_FAILURE;
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
+    const crane::grpc::AttachInContainerTaskRequest &request) {
+  using crane::grpc::AttachInContainerTaskReply;
+  using crane::grpc::AttachInContainerTaskRequest;
+
+  AttachInContainerTaskReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
+
+  auto status = m_stub_->AttachInContainerTask(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "AttachInContainerTask RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+
+    auto *err = reply.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description(status.error_message());
+    reply.set_ok(false);
+    return reply;
+  }
+
+  UpdateLastActiveTime();
+  return reply;
+}
+
+crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
+    const crane::grpc::ExecInContainerTaskRequest &request) {
+  using crane::grpc::ExecInContainerTaskReply;
+  using crane::grpc::ExecInContainerTaskRequest;
+
+  ExecInContainerTaskReply reply;
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kProxiedCriReqTimeoutSeconds));
+
+  auto status = m_stub_->ExecInContainerTask(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "ExecInContainerTask RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+
+    auto *err = reply.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description(status.error_message());
+    reply.set_ok(false);
+    return reply;
+  }
+
+  UpdateLastActiveTime();
+  return reply;
 }
 
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
@@ -325,12 +381,15 @@ crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
 
-    if (task->type == crane::grpc::Batch) {
+    if (task->IsBatch()) {
       auto *mutable_meta = mutable_task->mutable_batch_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
-    } else {
+    } else if (task->IsInteractive()) {
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
       mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
+    } else if (task->IsContainer()) {
+      auto *mutable_meta = mutable_task->mutable_container_meta();
+      mutable_meta->CopyFrom(task->TaskToCtld().container_meta());
     }
   }
 

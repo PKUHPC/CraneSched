@@ -611,6 +611,13 @@ void ParseConfig(int argc, char** argv) {
         g_config.IgnoreConfigInconsistency =
             config["IgnoreConfigInconsistency"].as<bool>();
 
+      if (config["Container"]) {
+        const auto& container_config = config["Container"];
+
+        if (container_config["Enabled"])
+          g_config.Container.Enabled = container_config["Enabled"].as<bool>();
+      }
+
       if (config["Plugin"]) {
         const auto& plugin_config = config["Plugin"];
 
