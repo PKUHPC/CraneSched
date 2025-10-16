@@ -107,7 +107,7 @@ bool CreateFoldersForFile(std::string const& p) {
 }
 
 bool CreateFoldersForFileEx(const std::filesystem::path& file_path, uid_t owner,
-                            gid_t group, mode_t permissions = 0755) {
+                            gid_t group, mode_t permissions) {
   namespace fs = std::filesystem;
 
   try {
