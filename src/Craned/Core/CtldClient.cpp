@@ -389,17 +389,17 @@ void CtldClient::Init() {
         // FIXME: step recovery
         auto token = arg.req.token();
 
-        std::map<job_id_t, std::set<step_id_t>> job_steps_id_map;
+        std::map<job_id_t, std::set<step_id_t>> ctld_job_steps_id_map;
         for (const auto& [job_id, job_steps] : arg.req.job_steps()) {
-          job_steps_id_map[job_id] = job_steps.steps() | std::views::keys |
-                                     std::ranges::to<std::set>();
+          ctld_job_steps_id_map[job_id] = job_steps.steps() | std::views::keys |
+                                          std::ranges::to<std::set>();
         }
-        auto job_ids = job_steps_id_map | std::views::keys;
+        auto ctld_job_ids = ctld_job_steps_id_map | std::views::keys;
 
         CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
                            "Configuring action for token {}. Steps [{}]",
                            ProtoTimestampToString(token),
-                           util::JobStepsToString(job_steps_id_map));
+                           util::JobStepsToString(ctld_job_steps_id_map));
 
         // std::map keys are ordered, so we can use set difference.
         std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
@@ -409,25 +409,32 @@ void CtldClient::Init() {
              auto& [k, v] : status_change_steps) {
           exact_job_steps[k].insert(v.begin(), v.end());
         }
-        auto exact_job_ids = exact_job_steps | std::views::keys;
+        auto craned_job_ids = exact_job_steps | std::views::keys;
         std::set<job_id_t> lost_jobs{};
         std::set<job_id_t> invalid_jobs{};
         std::set<job_id_t> valid_jobs{};
 
-        std::ranges::set_difference(job_ids, exact_job_ids,
+        std::ranges::set_difference(ctld_job_ids, craned_job_ids,
                                     std::inserter(lost_jobs, lost_jobs.end()));
         std::ranges::set_difference(
-            exact_job_ids, job_ids,
+            craned_job_ids, ctld_job_ids,
             std::inserter(invalid_jobs, invalid_jobs.end()));
         std::ranges::set_intersection(
-            job_ids, exact_job_ids,
+            ctld_job_ids, craned_job_ids,
             std::inserter(valid_jobs, valid_jobs.end()));
 
         std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
         std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
         std::unordered_map<job_id_t, std::set<step_id_t>> valid_steps{};
+
+        // For lost jobs, all steps are lost
+        for (auto job_id : lost_jobs) {
+          lost_steps[job_id].merge(ctld_job_steps_id_map.at(job_id));
+        }
+
+        // For valid jobs, do step-level comparison
         for (auto job_id : valid_jobs) {
-          const auto& ctld_steps = job_steps_id_map.at(job_id);
+          const auto& ctld_steps = ctld_job_steps_id_map.at(job_id);
           const auto& craned_steps = exact_job_steps.at(job_id);
           std::ranges::set_difference(
               ctld_steps, craned_steps,
@@ -462,7 +469,7 @@ void CtldClient::Init() {
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
         if (!invalid_steps.empty()) {
-          CRANE_INFO("Terminating orphaned : [{}].",
+          CRANE_INFO("Terminating invalid step as orphaned : [{}].",
                      util::JobStepsToString(invalid_steps));
           for (auto [job_id, steps] : invalid_steps) {
             for (auto step_id : steps)

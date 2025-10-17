@@ -135,11 +135,19 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
              util::JobStepsToString(orphaned_steps));
 
-  if (!orphaned_steps.empty())
+  if (!orphaned_steps.empty()) {
+    for (const auto &[job_id, steps] : orphaned_steps) {
+      for (const auto step_id : steps | std::views::reverse)
+        g_task_scheduler->StepStatusChangeWithReasonAsync(
+            job_id, step_id, request->craned_id(),
+            crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+            "Craned re-registered but step lost.");
+    }
     g_thread_pool->detach_task([steps = std::move(orphaned_steps),
                                 craned = request->craned_id()] mutable {
       g_task_scheduler->TerminateOrphanedSteps(steps, craned);
     });
+  }
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
