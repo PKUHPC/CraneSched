@@ -18,6 +18,7 @@
 
 #include "SupervisorServer.h"
 
+#include "CranedClient.h"
 #include "TaskManager.h"
 
 namespace Craned::Supervisor {
@@ -26,6 +27,7 @@ grpc::Status SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,
     crane::grpc::supervisor::TaskExecutionReply* response) {
+  CRANE_ASSERT(g_config.StepSpec.step_type() != crane::grpc::StepType::DAEMON);
   std::future<CraneErrCode> code_future = g_task_mgr->ExecuteTaskAsync();
   code_future.wait();
 
@@ -55,7 +57,9 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
     const crane::grpc::supervisor::CheckStatusRequest* request,
     crane::grpc::supervisor::CheckStatusReply* response) {
   response->set_job_id(g_config.JobId);
+  response->set_step_id(g_config.StepId);
   response->set_supervisor_pid(getpid());
+  response->set_status(g_runtime_status.Status);
   response->set_ok(true);
   return Status::OK;
 }
@@ -89,6 +93,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
+  CRANE_INFO("Grpc shutdown request received.");
   g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
   return Status::OK;
 }
@@ -96,15 +101,13 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
 SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
-  std::filesystem::path supervisor_sock_path =
-      std::filesystem::path(kDefaultSupervisorUnixSockDir) /
-      fmt::format("task_{}.sock", g_config.JobId);
-  auto unix_socket_path = fmt::format("unix://{}", supervisor_sock_path);
+  auto unix_socket_path =
+      fmt::format("unix://{}", g_config.SupervisorUnixSockPath);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());
 
-  chmod(supervisor_sock_path.c_str(), 0600);
+  chmod(g_config.SupervisorUnixSockPath.c_str(), 0600);
   m_server_ = builder.BuildAndStart();
 }
 }  // namespace Craned::Supervisor
