@@ -145,9 +145,45 @@ class CranedMetaContainer final {
   ResvMetaMapPtr GetResvMetaMapPtr();
 
   void MallocResourceFromResv(ResvId resv_id, task_id_t task_id,
-                              const LogicalPartition::RnTaskRes& res);
+                              const ResourceV2& res);
 
   void FreeResourceFromResv(ResvId resv_id, task_id_t task_id);
+
+  // Store Resource reduction events happened during scheduling here.
+  // Cases:
+  // 1. Craned node down/drain: resources on nodes are reduced.
+  // 2. Reservation created: resources on nodes are reduced.
+  // 3. Reservation deleted: resources in reservation are reduced.
+  // 4. Reservation modified (not implemented): resources in old reservation and
+  // on nodes of new reservation are reduced.
+  struct ResReduceEvent {
+    using affected_resv_t = ResvId;
+    using affected_nodes_t = std::pair<absl::Time, std::vector<CranedId>>;
+
+    std::variant<affected_resv_t, affected_nodes_t> affected_resources;
+  };
+
+  void LockResReduceEvents() { m_res_reduce_events_mtx_.Lock(); }
+  void UnlockResReduceEvents() { m_res_reduce_events_mtx_.Unlock(); }
+  void AddResReduceEventsAndUnlock(ResReduceEvent&& event) {
+    if (logging_enabled) {
+      m_res_reduce_events_.emplace_back(std::move(event));
+    }
+    UnlockResReduceEvents();
+  }
+  const std::vector<ResReduceEvent>& LockAndGetResReduceEvents() {
+    LockResReduceEvents();
+    return m_res_reduce_events_;
+  }
+  void StopLoggingAndUnlock() {
+    m_res_reduce_events_.clear();
+    logging_enabled = false;
+    UnlockResReduceEvents();
+  }
+  void StartLogging() {
+    absl::MutexLock lk(&m_res_reduce_events_mtx_);
+    logging_enabled = true;
+  }
 
  private:
   // In this part of code, the following lock sequence MUST be held
@@ -170,6 +206,12 @@ class CranedMetaContainer final {
  private:  // Helper functions
   void SetGrpcCranedInfoByCranedMeta_(const CranedMeta& craned_meta,
                                       crane::grpc::CranedInfo* craned_info);
+
+  std::vector<ResReduceEvent> m_res_reduce_events_
+      ABSL_GUARDED_BY(m_res_reduce_events_mtx_);
+  bool logging_enabled{false};
+  absl::Mutex
+      m_res_reduce_events_mtx_;  // lock before get resv_meta & craned_meta
 };
 
 }  // namespace Ctld

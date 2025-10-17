@@ -21,69 +21,156 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "CranedMetaContainer.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
 
-using OrderedTaskMap = absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+class IUpdateNodeCostPolicy {
+ public:
+  virtual ~IUpdateNodeCostPolicy() = default;
+  virtual void UpdateCost(double& cost, const absl::Time& start_time,
+                          const absl::Time& end_time,
+                          const ResourceInNode& resources,
+                          const ResourceInNode& total_res) const = 0;
+};
 
-using UnorderedTaskMap =
-    absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
+ public:
+  void UpdateCost(double& cost, const absl::Time& start_time,
+                  const absl::Time& end_time, const ResourceInNode& resources,
+                  const ResourceInNode& total_res) const override {
+    cost += absl::ToInt64Seconds(end_time - start_time) *
+            (static_cast<double>(resources.allocatable_res.cpu_count) /
+             static_cast<double>(total_res.allocatable_res.cpu_count));
+  }
+};
+
+struct RnJobInScheduler {
+  task_id_t job_id;
+  absl::Duration time_limit;
+
+  PartitionId partition_id;
+  std::string reservation;
+
+  absl::Time submit_time;
+  uint32_t partition_priority;
+  uint32_t qos_priority;
+  std::string account;
+
+  uint32_t node_num;
+  absl::Time start_time;
+  absl::Time end_time;
+  ResourceV2 allocated_res;
+  ResourceView allocated_res_view;
+
+  RnJobInScheduler(TaskInCtld* job)
+      : job_id(job->TaskId()),
+        time_limit(job->time_limit),
+        partition_id(job->partition_id),
+        reservation(job->reservation),
+        submit_time(job->SubmitTime()),
+        partition_priority(job->partition_priority),
+        qos_priority(job->qos_priority),
+        account(job->account),
+        start_time(job->StartTime()),
+        end_time(job->EndTime()),
+        allocated_res(job->AllocatedRes()),
+        allocated_res_view(job->allocated_res_view) {}
+};
+
+struct PdJobInScheduler {
+  task_id_t job_id;
+  absl::Duration time_limit;
+
+  PartitionId partition_id;
+  std::string reservation;
+
+  ResourceView requested_node_res_view;
+  uint32_t node_num;
+  uint32_t ntasks_per_node;
+  cpu_t cpus_per_task;
+  bool exclusive;
+
+  std::unordered_set<std::string> included_nodes;
+  std::unordered_set<std::string> excluded_nodes;
+
+  absl::Time submit_time;
+  uint32_t partition_priority;
+  uint32_t qos_priority;
+  std::string account;
+
+  double priority;
+
+  absl::Time start_time;
+  ResourceV2 allocated_res;
+  std::vector<CranedId> craned_ids;
+
+  std::string reason;
+
+  PdJobInScheduler(TaskInCtld* job)
+      : job_id(job->TaskId()),
+        time_limit(job->time_limit),
+        partition_id(job->partition_id),
+        reservation(job->reservation),
+        requested_node_res_view(job->requested_node_res_view),
+        node_num(job->node_num),
+        ntasks_per_node(job->ntasks_per_node),
+        cpus_per_task(job->cpus_per_task),
+        exclusive(job->exclusive),
+        included_nodes(job->included_nodes),
+        excluded_nodes(job->excluded_nodes),
+        submit_time(job->SubmitTime()),
+        partition_priority(job->partition_priority),
+        qos_priority(job->qos_priority),
+        account(job->account),
+        priority(job->mandated_priority) {}
+};
 
 class IPrioritySorter {
  public:
-  virtual std::vector<task_id_t> GetOrderedTaskIdList(
-      const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit,
-      absl::Time now) = 0;
+  virtual void GetOrderedJobPtrVec(
+      const absl::Time& now,
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs,
+      const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      size_t limit, std::vector<PdJobInScheduler*>& job_ptr_vec) = 0;
 
   virtual ~IPrioritySorter() = default;
 };
 
 class BasicPriority : public IPrioritySorter {
  public:
-  std::vector<task_id_t> GetOrderedTaskIdList(
-      const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit,
-      absl::Time now) override {
-    size_t len = std::min(pending_task_map.size(), limit);
+  void GetOrderedJobPtrVec(
+      const absl::Time& now,
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs,
+      const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      size_t limit, std::vector<PdJobInScheduler*>& job_ptr_vec) override {
+    size_t len = std::min(pending_jobs.size(), limit);
 
-    std::vector<task_id_t> task_id_vec;
-    task_id_vec.reserve(len);
+    job_ptr_vec.reserve(len);
 
-    int i = 0;
-    for (auto it = pending_task_map.begin(); i < len; i++, it++) {
-      TaskInCtld* task = it->second.get();
-      if (task->Held()) {
-        it->second->pending_reason = "Held";
-        continue;
-      }
-      if (task->begin_time > now) {
-        it->second->pending_reason = "BeginTime";
-        continue;
-      }
-      it->second->pending_reason = "";
-      task_id_vec.emplace_back(it->first);
+    for (int i = 0; i < len; i++) {
+      job_ptr_vec.emplace_back(pending_jobs[i].get());
     }
-
-    return task_id_vec;
+    for (int i = len; i < pending_jobs.size(); i++) {
+      pending_jobs[i]->reason = "Priority";
+    }
   }
 };
 
 class MultiFactorPriority : public IPrioritySorter {
  public:
-  std::vector<task_id_t> GetOrderedTaskIdList(
-      const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit_num,
-      absl::Time now) override;
+  void GetOrderedJobPtrVec(
+      const absl::Time& now,
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs,
+      const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      size_t limit, std::vector<PdJobInScheduler*>& job_ptr_vec) override;
 
  private:
   struct FactorBound {
     uint64_t age_max, age_min;
     uint32_t qos_priority_max, qos_priority_min;
     uint32_t part_priority_max, part_priority_min;
-    uint32_t nodes_alloc_max, nodes_alloc_min;
+    uint32_t node_num_max, node_num_min;
     uint64_t mem_alloc_max, mem_alloc_min;
     double cpus_alloc_max, cpus_alloc_min;
     double service_val_max, service_val_min;
@@ -91,15 +178,16 @@ class MultiFactorPriority : public IPrioritySorter {
     absl::flat_hash_map<std::string, double> acc_service_val_map;
   };
 
-  void CalculateFactorBound_(const OrderedTaskMap& pending_task_map,
-                             const UnorderedTaskMap& running_task_map,
-                             absl::Time now);
-  double CalculatePriority_(Ctld::TaskInCtld* task, absl::Time now) const;
+  void CalculateFactorBound_(
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs,
+      const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      const absl::Time& now);
+  double CalculatePriority_(PdJobInScheduler* job, const absl::Time& now) const;
 
   FactorBound m_factor_bound_;
 };
 
-class INodeSelectionAlgo {
+class SchedulerAlgo {
  public:
   /**
    * This map stores how much resource is available
@@ -113,53 +201,339 @@ class INodeSelectionAlgo {
    */
   using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
 
-  // Pair content: <The task which is going to be run,
-  //                The craned id on which it will be run>
-  // Partition information is not needed because scheduling is carried out in
-  // one partition to which the task belongs.
-  using NodeSelectionResult =
-      std::pair<std::unique_ptr<TaskInCtld>, std::list<CranedId>>;
-
-  virtual ~INodeSelectionAlgo() = default;
-
-  /**
-   * Do node selection for all pending tasks.
-   * Note: During this function call, the global meta is locked. This function
-   * should return as quick as possible.
-   * @param[in,out] all_partitions_meta_map Callee should make necessary
-   * modification in this structure to keep the consistency of global meta data.
-   * e.g. When a task is added to \b selection_result_list, corresponding
-   * resource should be subtracted from the fields in all_partitions_meta.
-   * @param[in,out] pending_task_map A list that contains all pending task. The
-   * list is order by committing time. The later committed task is at the tail
-   * of the list. When scheduling is done, scheduled tasks \b SHOULD be removed
-   * from \b pending_task_list
-   * @param[out] selected_tasks A list that contains the result of
-   * scheduling. See the annotation of \b SchedulingResult
-   */
-  virtual void NodeSelect(
-      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
-          running_tasks,
-      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
-      std::list<NodeSelectionResult>* selection_result_list) = 0;
-};
-
-class MinLoadFirst : public INodeSelectionAlgo {
- public:
-  explicit MinLoadFirst(IPrioritySorter* priority_sorter)
+  SchedulerAlgo(IPrioritySorter* priority_sorter)
       : m_priority_sorter_(priority_sorter) {}
 
+  /**
+   * Do node selection for all pending jobs.
+   * Note: After this function call, events reduce resources should be
+   * handled.
+   * @param[in,out] running_jobs Const reference to the vector of running
+   jobs.
+   * @param[in,out] pending_jobs Const reference to the vector of pending
+   jobs,
+   * results of scheduling are stored in JobInScheduler.
+   */
   void NodeSelect(
-      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
-          running_tasks,
-      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
-      std::list<NodeSelectionResult>* selection_result_list) override;
+      const absl::Time& now,
+      const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs);
 
  private:
   static constexpr bool kAlgoTraceOutput = false;
+  // TODO: move to config
   static constexpr bool kAlgoRedundantNode = false;
   static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
+
+  struct NodeState {
+    // Running jobs and active reservations
+    struct AllocatedRes {
+      absl::Time end_time;
+      ResourceInNode res;
+    };
+    // Pending reservations
+    struct ReservedRes {
+      absl::Time start_time;
+      absl::Time end_time;
+      ResourceInNode res;
+    };
+
+    const CranedId craned_id;
+    const ResourceInNode res_total;
+    ResourceInNode res_avail;
+    std::vector<AllocatedRes> allocated_res;
+    std::vector<ReservedRes> reserved_res;
+
+    TimeAvailResMap time_avail_res_map;
+
+    NodeState(const CranedId& craned_id, const ResourceInNode& res_total)
+        : craned_id(craned_id), res_total(res_total), res_avail(res_total) {}
+
+    void InitTimeAvailResMap(const absl::Time& now,
+                             const absl::Time& end = absl::InfiniteFuture()) {
+      std::vector<std::pair<absl::Time, std::pair<bool, const ResourceInNode*>>>
+          resource_changes;
+      for (const auto& [start_time, end_time, res] : reserved_res) {
+        resource_changes.emplace_back(start_time, std::make_pair(true, &res));
+        resource_changes.emplace_back(end_time, std::make_pair(false, &res));
+      }
+
+      for (const auto& [end_time, res] : allocated_res) {
+        resource_changes.emplace_back(end_time, std::make_pair(false, &res));
+        res_avail -= res;
+      }
+
+      std::ranges::sort(resource_changes, [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first ||
+               (lhs.first == rhs.first &&
+                lhs.second.first <
+                    rhs.second.first);  // release before allocate
+      });
+
+      auto [cur_iter, ok] = time_avail_res_map.emplace(now, res_avail);
+
+      for (const auto& change : resource_changes) {
+        if (change.first != cur_iter->first) {
+          std::tie(cur_iter, ok) =
+              time_avail_res_map.emplace(change.first, cur_iter->second);
+        }
+        if (change.second.first) {
+          cur_iter->second -= *(change.second.second);
+        } else {
+          cur_iter->second += *(change.second.second);
+        }
+      }
+
+      time_avail_res_map[end].SetToZero();
+    }
+
+    void SubtractResourceInNode(const absl::Time& start_time,
+                                const absl::Time& end_time,
+                                const ResourceInNode& res) {
+      bool ok;
+      auto task_duration_begin_it = time_avail_res_map.upper_bound(start_time);
+      if (task_duration_begin_it == time_avail_res_map.end()) {
+        --task_duration_begin_it;  // task_duration_begin_it->first <=
+                                   // start_time < end_time
+        // Case #1
+        //                     task duration
+        //                   |<-------------->|
+        // *-----------------*----------------------> inf
+        //                   ^
+        //        task_duration_begin_it
+        //
+        // *-----------------*----------------|-----> inf
+        //                           ^        ^
+        //                           |      insert here
+        //                      subtract resource here
+        //
+        // OR Case #2
+        //                        task duration
+        //                      |<-------------->|
+        // *-----------------*----------------------> inf
+        //                   ^
+        //        task_duration_begin_it
+        //
+        // *-----------------*--|----------------|--> inf
+        //                      ^      ^         ^
+        //                insert here  |     insert here
+        //                      subtract resource here
+
+        TimeAvailResMap::iterator inserted_it;
+        std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+            end_time, task_duration_begin_it->second);
+        CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+        if (task_duration_begin_it->first == start_time) {
+          // Case #1, subtract resource at start_time
+          CRANE_ASSERT(res <= task_duration_begin_it->second);
+          task_duration_begin_it->second -= res;
+        } else {
+          // Case #2, insert subtracted resource at start_time
+          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+              start_time, task_duration_begin_it->second);
+          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+          CRANE_ASSERT(res <= inserted_it->second);
+          inserted_it->second -= res;
+        }
+      } else {
+        --task_duration_begin_it;  // task_duration_begin_it->first <=
+                                   // start_time < end_time
+        // Case #3
+        //                    task duration
+        //                |<-------------->|
+        // *-------*----------*---------*------------
+        //         ^                    ^
+        //  task_duration_begin_it     task_duration_end_it
+        // *-------*------|---*---------*--|---------
+        //                ^  ^     ^     ^ ^
+        //       insert here |     |     | insert here
+        //                 subtract at these points
+        //
+        // Or Case #4
+        //               task duration
+        //         |<----------------->|
+        // *-------*----------*--------*------------
+        //         ^                   ^
+        //  task_duration_begin_it   task_duration_end_it
+
+        // std::prev can be used without any check here.
+        // There will always be one time point (now) before end_time.
+
+        if (task_duration_begin_it->first != start_time) {
+          // Case #3, copy resource before start_time to start_time
+          TimeAvailResMap::iterator inserted_it;
+          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+              start_time, task_duration_begin_it->second);
+          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+          task_duration_begin_it = inserted_it;
+        }
+        auto task_duration_end_it = std::prev(time_avail_res_map.upper_bound(
+            end_time));  // task_duration_end_it->first <= end_time
+
+        // Subtract the required resources within the interval.
+        for (auto in_duration_it = task_duration_begin_it;
+             in_duration_it != task_duration_end_it; in_duration_it++) {
+          CRANE_ASSERT(res <= in_duration_it->second);
+          in_duration_it->second -= res;
+        }
+
+        if (task_duration_end_it->first != end_time) {
+          TimeAvailResMap::iterator inserted_it;
+          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+              end_time, task_duration_end_it->second);
+          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+          CRANE_ASSERT(res <= task_duration_end_it->second);
+          task_duration_end_it->second -= res;
+        }
+      }
+    }
+  };
+
+  class INodeSelector {
+   public:
+    virtual ~INodeSelector() = default;
+
+    virtual TimeAvailResMap& GetTimeAvailResMap(const CranedId& craned_id) = 0;
+    virtual const TimeAvailResMap& GetTimeAvailResMap(
+        const CranedId& craned_id) const = 0;
+
+    virtual void AddNode(const absl::Time& now, NodeState* node_state,
+                         double cost = 0.0) = 0;
+
+    virtual void UpdateCost(const CranedId& craned_id,
+                            const absl::Time& start_time,
+                            const absl::Time& end_time,
+                            const ResourceInNode& resources) = 0;
+
+    virtual NodeState* GetNodeState(const CranedId& craned_id) const = 0;
+    virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
+        const = 0;
+
+    virtual void SubtractResource(const absl::Time& start_time,
+                                  const absl::Time& end_time,
+                                  const ResourceV2& res) = 0;
+  };
+
+  class NodeSelector : public INodeSelector {
+   public:
+    explicit NodeSelector(
+        std::unique_ptr<const IUpdateNodeCostPolicy> update_cost_policy)
+        : m_update_cost_policy_(std::move(update_cost_policy)) {}
+
+    struct NodeRater {
+      NodeRater(const IUpdateNodeCostPolicy* policy, const absl::Time& now,
+                NodeState* node_state, double initial_cost = 0.0)
+          : node_state(node_state), cost(initial_cost) {
+        for (const auto& [start_time, end_time, res] :
+             node_state->reserved_res) {
+          policy->UpdateCost(cost, start_time, end_time, res,
+                             node_state->res_total);
+        }
+
+        for (const auto& [end_time, res] : node_state->allocated_res) {
+          policy->UpdateCost(cost, now, end_time, res, node_state->res_total);
+        }
+      }
+
+      NodeState* node_state;
+      double cost;
+      std::set<std::pair<double, NodeState*>>::iterator cost_node_info_set_it;
+    };
+
+    TimeAvailResMap& GetTimeAvailResMap(const CranedId& craned_id) override {
+      return m_node_info_map_.at(craned_id).node_state->time_avail_res_map;
+    }
+    const TimeAvailResMap& GetTimeAvailResMap(
+        const CranedId& craned_id) const override {
+      return m_node_info_map_.at(craned_id).node_state->time_avail_res_map;
+    }
+
+    void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
+                    const absl::Time& end_time,
+                    const ResourceInNode& resources) override {
+      NodeRater& node_info = m_node_info_map_.at(craned_id);
+      m_cost_node_info_set_.erase(node_info.cost_node_info_set_it);
+      m_update_cost_policy_->UpdateCost(node_info.cost, start_time, end_time,
+                                        resources,
+                                        node_info.node_state->res_total);
+      node_info.cost_node_info_set_it =
+          m_cost_node_info_set_.emplace(node_info.cost, node_info.node_state)
+              .first;
+    }
+
+    void AddNode(const absl::Time& now, NodeState* node_state,
+                 double cost = 0.0) override {
+      NodeRater& node_info = m_node_info_map_
+                                 .emplace(node_state->craned_id,
+                                          NodeRater(m_update_cost_policy_.get(),
+                                                    now, node_state, cost))
+                                 .first->second;
+      node_info.cost_node_info_set_it =
+          m_cost_node_info_set_.emplace(node_info.cost, node_info.node_state)
+              .first;
+    }
+
+    NodeState* GetNodeState(const CranedId& craned_id) const override {
+      return m_node_info_map_.at(craned_id).node_state;
+    }
+
+    const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
+        const override {
+      return m_cost_node_info_set_;
+    }
+
+    void SubtractResource(const absl::Time& start_time,
+                          const absl::Time& end_time,
+                          const ResourceV2& res) override {
+      for (const auto& [craned_id, res_in_node] : res.EachNodeResMap()) {
+        m_node_info_map_.at(craned_id).node_state->SubtractResourceInNode(
+            start_time, end_time, res_in_node);
+        UpdateCost(craned_id, start_time, end_time, res_in_node);
+      }
+    }
+
+   private:
+    std::unique_ptr<const IUpdateNodeCostPolicy> m_update_cost_policy_;
+    absl::flat_hash_map<CranedId, NodeRater> m_node_info_map_;
+    // Nodes are sorted by cost, store NodeState* rather than CranedId to reduce
+    // memory usage and improve performance.
+    std::set<std::pair<double, NodeState*>> m_cost_node_info_set_;
+  };
+
+  class LocalScheduler {
+   public:
+    using Mutex = absl::Mutex;
+    using LockGuard = absl::MutexLock;
+    using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+
+    template <typename Policy, typename... Args>
+    void InitializeNodeSelector(const absl::Time& now,
+                                const std::vector<NodeState*>& node_info_vec,
+                                Args&&... args) {
+      m_node_selector_ = std::make_unique<NodeSelector>(
+          std::make_unique<const Policy>(std::forward<Args>(args)...));
+      for (const auto& node_state : node_info_vec) {
+        m_node_selector_->AddNode(now, node_state);
+      }
+    }
+
+    bool CalculateRunningNodesAndStartTime_(const absl::Time& now,
+                                            PdJobInScheduler* job);
+
+    void UpdateNodeSelector(PdJobInScheduler* job) {
+      m_node_selector_->SubtractResource(job->start_time,
+                                         job->start_time + job->time_limit,
+                                         job->allocated_res);
+    }
+
+   private:
+    std::unique_ptr<INodeSelector> m_node_selector_;
+  };
 
   class TimeAvailResMapIter;
 
@@ -277,97 +651,27 @@ class MinLoadFirst : public INodeSelectionAlgo {
     bool m_satisfied_flag_;
   };
 
-  class NodeSelectionInfo {
-   public:
-    void InitCostAndTimeAvailResMap(
-        const CranedId& craned_id, const ResourceInNode& res_total,
-        const ResourceInNode& res_avail, const absl::Time& now,
-        const std::vector<std::pair<absl::Time, const ResourceInNode*>>&
-            running_tasks,
-        const absl::flat_hash_map<ResvId, CranedMeta::ResvInNode>* resv_map);
-
-    void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
-                    const absl::Time& end_time,
-                    const ResourceInNode& resources) {
-      uint64_t& cost = m_node_cost_map_.at(craned_id);
-      m_cost_node_id_set_.erase({cost, craned_id});
-      UpdateCostFunc(cost, start_time, end_time, resources,
-                     m_node_res_total_map_.at(craned_id));
-      m_cost_node_id_set_.emplace(cost, craned_id);
-    }
-
-    TimeAvailResMap& GetTimeAvailResMap(const CranedId& craned_id) {
-      return m_node_time_avail_res_map_.at(craned_id);
-    }
-
-    const TimeAvailResMap& GetTimeAvailResMap(const CranedId& craned_id) const {
-      return m_node_time_avail_res_map_.at(craned_id);
-    }
-
-    const std::set<std::pair<uint64_t, CranedId>>& GetCostNodeIdSet() const {
-      return m_cost_node_id_set_;
-    }
-
-    // Todo: Move to Reservation Mini-Scheduler.
-    absl::Time GetFirstResvTime(const CranedId& craned_id) {
-      auto iter = m_first_resv_time_map_.find(craned_id);
-      if (iter == m_first_resv_time_map_.end()) return absl::InfiniteFuture();
-      return iter->second;
-    }
-
-    void SetFirstResvTime(const CranedId& craned_id, absl::Time time) {
-      m_first_resv_time_map_[craned_id] = time;
-    }
-
-   private:
-    void UpdateCostFunc(uint64_t& cost, const absl::Time& start_time,
-                        const absl::Time& end_time,
-                        const ResourceInNode& resources,
-                        const ResourceInNode& total_res) {
-      double cpu_ratio =
-          static_cast<double>(resources.allocatable_res.cpu_count) /
-          static_cast<double>(total_res.allocatable_res.cpu_count);
-      cost += std::round((end_time - start_time) / absl::Seconds(1) *
-                         cpu_ratio * 256);
-    }
-
-    // Craned_ids are sorted by cost.
-    std::set<std::pair<uint64_t, CranedId>> m_cost_node_id_set_;
-    std::unordered_map<CranedId, uint64_t> m_node_cost_map_;
-    std::unordered_map<CranedId, TimeAvailResMap> m_node_time_avail_res_map_;
-    std::unordered_map<CranedId, absl::Time> m_first_resv_time_map_;
-
-    // TODO: High copy cost, consider using pointer.
-    std::unordered_map<CranedId, ResourceInNode> m_node_res_total_map_;
-  };
-
-  // Select a subset of craned nodes that can start the task as early as
-  // possible. Not necessary if the number of craned nodes equals
-  // task->node_num.
   class EarliestStartSubsetSelector {
    public:
-    EarliestStartSubsetSelector(TaskInCtld* task,
-                                const NodeSelectionInfo& node_selection_info,
-                                const std::vector<CranedId>& craned_indexes)
-        : m_satisfied_iters_(task->node_num),
+    EarliestStartSubsetSelector(PdJobInScheduler* job,
+                                const std::vector<NodeState*> nodes)
+        : m_satisfied_iters_(job->node_num),
           m_time_priority_queue_([](const TimeAvailResMapIter* lhs,
                                     const TimeAvailResMapIter* rhs) {
             return (*lhs)->first > (*rhs)->first;
           }) {
-      m_res_map_iters_.reserve(craned_indexes.size());
-      for (const CranedId& craned_id : craned_indexes) {
-        const auto& time_avail_res_map =
-            node_selection_info.GetTimeAvailResMap(craned_id);
+      m_res_map_iters_.reserve(nodes.size());
+      for (const NodeState* node : nodes) {
+        const auto& time_avail_res_map = node->time_avail_res_map;
         m_res_map_iters_.emplace_back(
-            craned_id, time_avail_res_map.begin(), time_avail_res_map.end(),
-            &m_satisfied_iters_, &task->AllocatedRes().at(craned_id));
+            node->craned_id, time_avail_res_map.begin(),
+            time_avail_res_map.end(), &m_satisfied_iters_,
+            &job->allocated_res.at(node->craned_id));
         m_time_priority_queue_.emplace(&m_res_map_iters_.back());
       }
     }
 
-    bool CalcEarliestStartTime(TaskInCtld* task, absl::Time now,
-                               absl::Time* start_time,
-                               std::list<CranedId>* craned_ids) {
+    bool CalcEarliestStartTime(absl::Time now, PdJobInScheduler* job) {
       while (!m_time_priority_queue_.empty()) {
         absl::Time current_time = (*m_time_priority_queue_.top())->first;
         if (current_time - now > kAlgoMaxTimeWindow) return false;
@@ -393,19 +697,19 @@ class MinLoadFirst : public INodeSelectionAlgo {
         if (kth_time == absl::InfiniteFuture()) continue;
 
         if (m_time_priority_queue_.empty() ||
-            kth_time + task->time_limit <=
+            kth_time + job->time_limit <=
                 (*m_time_priority_queue_.top())->first) {
-          *start_time = kth_time;
+          job->start_time = kth_time;
 
-          craned_ids->clear();
+          job->craned_ids.clear();
           auto it = m_satisfied_iters_.Begin();
           while (true) {
-            craned_ids->emplace_back(it->res_map_it->GetCranedId());
+            job->craned_ids.emplace_back(it->res_map_it->GetCranedId());
             if (it++ == m_satisfied_iters_.KthIterator()) break;
           }
 
-          CRANE_ASSERT(*start_time != absl::InfiniteFuture());
-          CRANE_ASSERT(craned_ids->size() == task->node_num);
+          CRANE_ASSERT(job->start_time != absl::InfiniteFuture());
+          CRANE_ASSERT(job->craned_ids.size() == job->node_num);
           return true;
         }
       }
@@ -421,34 +725,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
                                            const TimeAvailResMapIter*)>>
         m_time_priority_queue_;
   };
-
-  static void CalculateNodeSelectionInfoOfPartition_(
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
-          running_tasks,
-      absl::Time now, const PartitionId& partition_id,
-      const std::unordered_set<CranedId>& craned_ids,
-      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
-      NodeSelectionInfo* node_selection_info);
-
-  // TODO: Move to Reservation Mini-Scheduler.
-  static void CalculateNodeSelectionInfoOfReservation_(
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
-          running_tasks,
-      absl::Time now, const ResvMeta* resv_meta,
-      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
-      NodeSelectionInfo* node_selection_info);
-
-  static bool CalculateRunningNodesAndStartTime_(
-      const NodeSelectionInfo& node_selection_info,
-      const util::Synchronized<PartitionMeta>& partition_meta_ptr,
-      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
-      TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
-      absl::Time* start_time);
-
-  static void SubtractTaskResourceNodeSelectionInfo_(
-      absl::Time const& expected_start_time, absl::Duration const& duration,
-      ResourceV2 const& resources, std::list<CranedId> const& craned_ids,
-      NodeSelectionInfo* node_selection_info);
 
   IPrioritySorter* m_priority_sorter_;
 };
@@ -475,8 +751,6 @@ class TaskScheduler {
   ~TaskScheduler();
 
   bool Init();
-
-  void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
   /// \return The future is set to 0 if task submission is failed.
   /// Otherwise, it is set to newly allocated task id.
@@ -578,14 +852,6 @@ class TaskScheduler {
       const crane::grpc::DeleteReservationRequest& request);
 
  private:
-  std::expected<void, std::string> CreateResv_(
-      const crane::grpc::CreateReservationRequest& request);
-
-  std::expected<void, std::string> DeleteResvMeta_(
-      CranedMetaContainer::ResvMetaMapPtr& resv_meta_map,
-      const ResvId& resv_id);
-
- private:
   template <class... Ts>
   struct VariantVisitor : Ts... {
     using Ts::operator()...;
@@ -611,7 +877,12 @@ class TaskScheduler {
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 
-  std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
+  std::expected<void, std::string> CreateResv_(
+      const crane::grpc::CreateReservationRequest& request);
+
+  std::expected<void, std::string> DeleteResvMeta_(const ResvId& resv_id);
+
+  std::unique_ptr<SchedulerAlgo> m_node_selection_algo_;
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
