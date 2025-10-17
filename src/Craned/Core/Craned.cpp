@@ -845,6 +845,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
         craned_steps, ctld_steps,
         std::inserter(valid_steps[job_id], valid_steps[job_id].end()));
   }
+
+  // For lost jobs, all steps are lost
+  for (auto job_id : lost_jobs) {
+    lost_steps[job_id].merge(ctld_step_ids.at(job_id));
+  }
   CRANE_INFO("Step [{}] is lost when craned down. Valid steps [{}].",
              util::JobStepsToString(lost_steps),
              util::JobStepsToString(valid_steps));

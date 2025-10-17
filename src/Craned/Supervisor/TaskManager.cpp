@@ -1970,6 +1970,8 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
+      m_pid_task_id_map_[task->GetPid()] = task->task_id;
+      m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       return;
     }
