@@ -54,8 +54,6 @@ void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
 }
 
 void CranedClient::AsyncSendThread_() {
-  std::this_thread::sleep_for(std::chrono::seconds(1));
-
   while (true) {
     {
       absl::MutexLock lock(&m_mutex_);
