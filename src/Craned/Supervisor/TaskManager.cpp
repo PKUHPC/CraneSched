@@ -40,12 +40,6 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
-StepInstance::~StepInstance() {
-  if (termination_timer) {
-    termination_timer->close();
-  }
-}
-
 bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
 }
