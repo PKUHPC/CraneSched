@@ -549,6 +549,8 @@ void TaskScheduler::ScheduleThread_() {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
+  absl::Time absl_begin;
+  std::vector<task_id_t> cancel_tasks;
   while (!m_thread_stop_) {
     // Note: In other parts of code, we must avoid the happening of the
     // situation where m_running_task_map_mtx is acquired and then
@@ -566,6 +568,28 @@ void TaskScheduler::ScheduleThread_() {
                                            m_pending_task_map_.size());
 
       begin = std::chrono::steady_clock::now();
+      absl_begin = absl::Now();
+      for (const auto& [task_id, task] : m_pending_task_map_) {
+        if (task->deadline_time < absl_begin) {
+          CRANE_DEBUG(
+              "Pending task #{} was added to cancel_tasks because reaching "
+              "deadline",
+              task_id);
+          cancel_tasks.push_back(task_id);
+        }
+      }
+      for (const auto task_id : cancel_tasks) {
+        auto pd_it = m_pending_task_map_.find(task_id);
+        if (pd_it != m_pending_task_map_.end()) {
+          auto& task = pd_it->second;
+          m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+              .task = std::move(task),
+              .finish_status = crane::grpc::TaskStatus::Deadline});
+          m_cancel_task_async_handle_->send();
+          m_pending_task_map_.erase(pd_it);
+        }
+      }
+      cancel_tasks.clear();
 
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
       m_node_selection_algo_->NodeSelect(
@@ -997,9 +1021,19 @@ std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
-CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
-                                                int64_t secs) {
-  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
+CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
+    task_id_t task_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  absl::Time now = absl::Now();
+  std::optional<absl::Time> absl_deadline_time =
+      deadline_time.transform(absl::FromUnixSeconds);
+
+  if (absl_deadline_time && absl_deadline_time <= now) {
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+  if (time_limit_seconds &&
+      !CheckIfTimeLimitSecIsValid(time_limit_seconds.value()))
+    return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
 
@@ -1017,8 +1051,15 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
       if (task->reservation != "") {
         auto resv_end_time = g_meta_container->GetResvMetaPtr(task->reservation)
                                  ->logical_part.end_time;
-        if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
+        if (time_limit_seconds &&
+            resv_end_time <=
+                absl::Now() + absl::Seconds(time_limit_seconds.value())) {
           CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
+                      task_id);
+          return CraneErrCode::ERR_INVALID_PARAM;
+        }
+        if (absl_deadline_time && resv_end_time <= absl_deadline_time.value()) {
+          CRANE_DEBUG("Task #{}'s deadline time exceeds reservation end time",
                       task_id);
           return CraneErrCode::ERR_INVALID_PARAM;
         }
@@ -1034,25 +1075,57 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
           const auto& reservation_meta =
               g_meta_container->GetResvMetaPtr(task->reservation);
           auto resv_end_time = reservation_meta->logical_part.end_time;
-          if (resv_end_time <= task->StartTime() + absl::Seconds(secs)) {
+
+          if (time_limit_seconds &&
+              resv_end_time <= task->StartTime() +
+                                   absl::Seconds(time_limit_seconds.value())) {
             CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
                         task_id);
             return CraneErrCode::ERR_INVALID_PARAM;
           }
-          reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
-              task->StartTime() + absl::Seconds(secs);
+
+          if (absl_deadline_time &&
+              resv_end_time <= absl_deadline_time.value()) {
+            CRANE_DEBUG("Task #{}'s deadline time exceeds reservation end time",
+                        task_id);
+            return CraneErrCode::ERR_INVALID_PARAM;
+          }
+
+          if (time_limit_seconds) {
+            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+                std::min(task->StartTime() +
+                             absl::Seconds(time_limit_seconds.value()),
+                         task->deadline_time);
+          }
+
+          if (absl_deadline_time) {
+            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+                std::min(task->StartTime() + task->time_limit,
+                         absl_deadline_time.value());
+          }
         }
       }
     }
 
     if (!found) {
-      CRANE_DEBUG("Task #{} not in Pd/Rn queue for time limit change!",
-                  task_id);
+      CRANE_DEBUG(
+          "Task #{} not in Pd/Rn queue for time limit or deadline change!",
+          task_id);
       return CraneErrCode::ERR_NON_EXISTENT;
     }
 
-    task->time_limit = absl::Seconds(secs);
-    task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
+    if (time_limit_seconds) {
+      task->time_limit = absl::Seconds(time_limit_seconds.value());
+      task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(
+          time_limit_seconds.value());
+    }
+
+    if (absl_deadline_time) {
+      task->deadline_time = absl_deadline_time.value();
+      task->MutableTaskToCtld()->mutable_deadline_time()->set_seconds(
+          absl::ToUnixSeconds(absl_deadline_time.value()));
+    }
+
     g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
                                                    task->TaskToCtld());
   }
@@ -1061,10 +1134,12 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
   for (const CranedId& craned_id : craned_ids) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeJobTimeLimit(task_id, secs);
+      CraneErrCode err = stub->ChangeJobTimeConstraint(
+          task_id, time_limit_seconds, deadline_time);
       if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
-                    task_id, craned_id);
+        CRANE_ERROR(
+            "Failed to change time limit or deadline of task #{} on Node {}",
+            task_id, craned_id);
         return err;
       }
     }
@@ -1329,8 +1404,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     } else {
       reply.add_cancelled_tasks(task_id);
 
-      m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{std::move(it->second)});
+      m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+          .task = std::move(it->second),
+          .finish_status = crane::grpc::TaskStatus::Cancelled});
       m_cancel_task_async_handle_->send();
 
       m_pending_task_map_.erase(it);
@@ -1868,6 +1944,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     std::visit(  //
         VariantVisitor{
             [&](CancelPendingTaskQueueElem& pd_elem) {
+              pd_elem.task->SetStatus(pd_elem.finish_status);
               pending_task_ptr_vec.emplace_back(std::move(pd_elem.task));
             },
             [&](CancelRunningTaskQueueElem& rn_elem) {
@@ -1899,7 +1976,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
   if (pending_task_ptr_vec.empty()) return;
 
   for (auto& task : pending_task_ptr_vec) {
-    task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
     g_account_meta_container->FreeQosResource(*task);
 
@@ -3384,7 +3460,6 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     task->pending_reason = "";
     task_priority_vec.emplace_back(task.get(), priority);
   }
-
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
             [](const std::pair<TaskInCtld*, double>& a,
                const std::pair<TaskInCtld*, double>& b) {

@@ -201,9 +201,15 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
+
   if (val.has_begin_time()) {
     begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
   }
+
+  if (val.has_deadline_time()) {
+    deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());
+  }
+
   SetHeld(val.hold());
 }
 
@@ -300,6 +306,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+  task_info->mutable_deadline_time()->set_seconds(ToUnixSeconds(deadline_time));
 }
 
 crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
@@ -349,6 +356,9 @@ crane::grpc::TaskToD TaskInCtld::GetTaskToD(const CranedId& craned_id) const {
 
   task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
   task_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+
+  task_to_d.mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(this->deadline_time));
 
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = task_to_d.mutable_batch_meta();

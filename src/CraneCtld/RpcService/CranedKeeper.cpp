@@ -236,24 +236,33 @@ CraneErrCode CranedStub::ReleaseCgroupForJobs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
-                                            uint64_t seconds) {
-  using crane::grpc::ChangeJobTimeLimitReply;
-  using crane::grpc::ChangeJobTimeLimitRequest;
+CraneErrCode CranedStub::ChangeJobTimeConstraint(
+    uint32_t task_id, std::optional<int64_t> time_limit_seconds,
+    std::optional<int64_t> deadline_time) {
+  using crane::grpc::ChangeJobTimeConstraintReply;
+  using crane::grpc::ChangeJobTimeConstraintRequest;
 
   ClientContext context;
   Status status;
-  ChangeJobTimeLimitRequest request;
-  ChangeJobTimeLimitReply reply;
+  ChangeJobTimeConstraintRequest request;
+  ChangeJobTimeConstraintReply reply;
 
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
   request.set_task_id(task_id);
-  request.set_time_limit_seconds(seconds);
-  status = m_stub_->ChangeJobTimeLimit(&context, request, &reply);
+
+  if (time_limit_seconds) {
+    request.set_time_limit_seconds(time_limit_seconds.value());
+  }
+
+  if (deadline_time) {
+    request.set_deadline_time(deadline_time.value());
+  }
+
+  status = m_stub_->ChangeJobTimeConstraint(&context, request, &reply);
 
   if (!status.ok()) {
-    CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
+    CRANE_ERROR("ChangeJobTimeConstraintAsync to Craned {} failed: {} ",
                 m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
@@ -271,70 +280,6 @@ void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
                m_craned_id_);
     g_meta_container->CranedDown(m_craned_id_);
   }
-}
-
-crane::grpc::ExecuteStepsRequest CranedStub::NewExecuteTasksRequests(
-    const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
-  crane::grpc::ExecuteStepsRequest request;
-
-  for (TaskInCtld *task : tasks) {
-    auto *mutable_task = request.add_tasks();
-
-    // Set time_limit
-    mutable_task->mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(task->time_limit)));
-
-    // Set resources
-    auto *mutable_res_in_node = mutable_task->mutable_resources();
-    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        task->AllocatedRes().at(craned_id));
-
-    // Set type
-    mutable_task->set_type(task->type);
-    mutable_task->set_task_id(task->TaskId());
-    mutable_task->set_name(task->name);
-    mutable_task->set_account(task->account);
-    mutable_task->set_qos(task->qos);
-    mutable_task->set_partition(task->partition_id);
-
-    for (auto &&node : task->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto &&node : task->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    mutable_task->set_node_num(task->node_num);
-    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
-
-    mutable_task->set_uid(task->uid);
-    mutable_task->set_gid(task->gid);
-    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
-
-    mutable_task->set_cwd(task->cwd);
-    mutable_task->set_get_user_env(task->get_user_env);
-
-    for (const auto &hostname : task->CranedIds())
-      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
-
-    mutable_task->mutable_start_time()->set_seconds(
-        task->StartTimeInUnixSecond());
-    mutable_task->mutable_time_limit()->set_seconds(
-        ToInt64Seconds(task->time_limit));
-
-    if (task->type == crane::grpc::Batch) {
-      auto *mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
-    } else {
-      auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
-    }
-  }
-
-  return request;
 }
 
 CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
