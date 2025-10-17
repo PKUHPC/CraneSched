@@ -238,6 +238,8 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 75 - 79
         "ERR_IDENTITY_MISMATCH",
+        "ERR_NOT_FORCE",
+        "ERR_INVALID_USERNAME",
         "Lua script validation failed"
     };
 // clang-format on
