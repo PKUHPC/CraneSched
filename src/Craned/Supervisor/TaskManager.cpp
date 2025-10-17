@@ -44,12 +44,6 @@ bool StepInstance::IsContainer() const noexcept {
   return m_step_to_supv_.has_container_meta();
 }
 
-StepInstance::~StepInstance() {
-  if (termination_timer) {
-    termination_timer->close();
-  }
-}
-
 bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
 }
