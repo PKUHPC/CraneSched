@@ -194,7 +194,7 @@ class MongodbClient {
     std::string username;
     std::string qos;
     std::string wckey;
-    int32_t cpu_level;
+    uint32_t cpu_level;
 
     template <typename H>
     friend H AbslHashValue(H h, const JobSummKey& key) {
@@ -244,6 +244,15 @@ class MongodbClient {
   bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end);
   bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
   bool AggregateHourTable(std::time_t start, std::time_t end);
+  void QueryAndAggJobSizeSummary(
+      const std::string& table, const std::string& time_field,
+      std::time_t range_start, std::time_t range_end,
+      const std::unordered_set<std::string>& accounts,
+      const std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& qoss,
+      const std::unordered_set<std::string>& wckeys,
+      const std::vector<uint32_t>& grouping_list,
+      absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
   void QueryAndAggJobSummary(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
@@ -252,6 +261,15 @@ class MongodbClient {
       const std::unordered_set<std::string>& qoss,
       const std::unordered_set<std::string>& wckeys,
       absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
+  void QueryJobSizeSummary(
+      const std::unordered_set<std::string>& accounts,
+      const std::unordered_set<std::string>& users,
+      const std::unordered_set<std::string>& qoss,
+      const std::unordered_set<std::string>& wckeys,
+      const std::vector<std::uint32_t>& grouping_list, std::time_t start,
+      std::time_t end,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>*
+          stream);
   void QueryJobSummary(
       const std::unordered_set<std::string>& accounts,
       const std::unordered_set<std::string>& users,
@@ -259,17 +277,14 @@ class MongodbClient {
       const std::unordered_set<std::string>& wckeys, std::time_t start,
       std::time_t end,
       ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryItemReply>* stream);
-  void ProducerDayOrMonJobSummAggregation(
-      const std::string& src_coll_str,
-      ThreadSafeQueue<bsoncxx::array::value>& queue,
-      const std::string& src_time_field, const std::string& period_field,
-      std::time_t period_start, std::time_t period_end);
-  void ProducerHourJobSummAggregation(
-      ThreadSafeQueue<bsoncxx::array::value>& queue, std::time_t start,
-      std::time_t end, const std::string& task_collection_name);
-  bool ConsumerJobSummAggregation(const bsoncxx::array::view& arr,
+  void DayOrMonJobSummAggregation(const std::string& src_coll_str,
                                   const std::string& dst_coll_str,
-                                  const std::string& period_field);
+                                  const std::string& src_time_field,
+                                  const std::string& period_field,
+                                  std::time_t period_start,
+                                  std::time_t period_end);
+  void HourJobSummAggregation(std::time_t start, std::time_t end,
+                              const std::string& task_collection_name);
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
