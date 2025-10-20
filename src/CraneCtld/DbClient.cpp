@@ -19,6 +19,7 @@
 #include "DbClient.h"
 
 #include <bsoncxx/exception/exception.hpp>
+#include <cstdint>
 #include <mongocxx/exception/exception.hpp>
 #include <optional>
 
@@ -449,7 +450,10 @@ bool MongodbClient::FetchJobRecords(
             static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
                 container_meta));
       }
-      task->mutable_deadline_time()->set_seconds(view["deadline_time"].get_int64().value);
+      int64_t deadline_time = view["deadline_time"]
+                                  ? view["deadline_time"].get_int64().value
+                                  : INT64_MAX;
+      task->mutable_deadline_time()->set_seconds(deadline_time);
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
