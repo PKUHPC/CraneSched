@@ -662,11 +662,12 @@ CraneErrCode ContainerInstance::Prepare() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // Always pull the latest image before running the container
+  // Pull image according to pull policy
   auto* cri_client = m_parent_step_inst_->GetCriClient();
   auto image_id_opt = cri_client->PullImage(
       ca_meta.image().image(), ca_meta.image().username(),
-      ca_meta.image().password(), ca_meta.image().server_address());
+      ca_meta.image().password(), ca_meta.image().server_address(),
+      ca_meta.image().pull_policy());
 
   if (!image_id_opt.has_value()) {
     CRANE_ERROR("Failed to pull image {} for task #{}", ca_meta.image().image(),

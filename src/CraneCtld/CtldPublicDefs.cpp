@@ -42,7 +42,8 @@ ContainerMetaInTask::ContainerMetaInTask(
     : image_info{.image = rhs.image().image(),
                  .username = rhs.image().username(),
                  .password = rhs.image().password(),
-                 .server_address = rhs.image().server_address()},
+                 .server_address = rhs.image().server_address(),
+                 .pull_policy = rhs.image().pull_policy()},
       name(rhs.name()),
       labels(rhs.labels().begin(), rhs.labels().end()),
       annotations(rhs.annotations().begin(), rhs.annotations().end()),
@@ -68,6 +69,7 @@ ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
   image->set_username(this->image_info.username);
   image->set_password(this->image_info.password);
   image->set_server_address(this->image_info.server_address);
+  image->set_pull_policy(this->image_info.pull_policy);
 
   result.set_name(this->name);
 

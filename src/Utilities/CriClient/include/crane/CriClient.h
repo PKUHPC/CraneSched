@@ -130,7 +130,8 @@ class CriClient {
   std::optional<std::string> PullImage(const std::string& image_name,
                                        const std::string& username,
                                        const std::string& password,
-                                       const std::string& server_addr) const;
+                                       const std::string& server_addr,
+                                       const std::string& pull_policy) const;
 
  private:
   // Inject labels and metadata for future selection

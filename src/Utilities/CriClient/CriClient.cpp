@@ -125,9 +125,64 @@ std::optional<std::string> CriClient::GetImageId(
 
 std::optional<std::string> CriClient::PullImage(
     const std::string& image_name, const std::string& username,
-    const std::string& password, const std::string& server_addr) const {
+    const std::string& password, const std::string& server_addr,
+    const std::string& pull_policy) const {
   using api::PullImageRequest;
   using api::PullImageResponse;
+
+  // Determine the effective pull policy
+  std::string effective_policy = pull_policy;
+  if (effective_policy.empty()) {
+    // Smart default: Always for :latest or untagged, IfNotPresent for versioned
+    size_t colon_pos = image_name.find_last_of(':');
+    size_t at_pos = image_name.find_last_of('@');
+
+    bool has_digest = (at_pos != std::string::npos);
+    bool has_tag = (colon_pos != std::string::npos && !has_digest);
+
+    if (!has_tag || (has_tag && image_name.substr(colon_pos + 1) == "latest")) {
+      effective_policy = "Always";
+      CRANE_TRACE(
+          "Image {} uses default pull policy: Always (untagged or :latest)",
+          image_name);
+    } else {
+      effective_policy = "IfNotPresent";
+      CRANE_TRACE(
+          "Image {} uses default pull policy: IfNotPresent (versioned tag)",
+          image_name);
+    }
+  }
+
+  // Handle "Never" policy
+  if (effective_policy == "Never") {
+    auto image_id = GetImageId(image_name);
+    if (image_id.has_value()) {
+      CRANE_TRACE("Using local image {} (pull policy: Never)", image_name);
+      return image_id;
+    } else {
+      CRANE_ERROR("Image {} not found locally and pull policy is Never",
+                  image_name);
+      return std::nullopt;
+    }
+  }
+
+  // Handle "IfNotPresent" policy
+  if (effective_policy == "IfNotPresent") {
+    auto image_id = GetImageId(image_name);
+    if (image_id.has_value()) {
+      CRANE_TRACE("Using existing local image {} (pull policy: IfNotPresent)",
+                  image_name);
+      return image_id;
+    }
+    CRANE_TRACE(
+        "Image {} not found locally, pulling from registry (pull policy: "
+        "IfNotPresent)",
+        image_name);
+  }
+
+  // Handle "Always" policy (or fallback for IfNotPresent when image not found)
+  CRANE_TRACE("Pulling image {} from registry (pull policy: {})", image_name,
+              effective_policy);
 
   PullImageRequest request{};
   PullImageResponse response{};

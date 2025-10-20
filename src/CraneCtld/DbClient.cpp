@@ -799,7 +799,11 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
     // Serialize ImageInfo
     container_doc.append(kvp("image_info", [&v](sub_document image_doc) {
       image_doc.append(kvp("image", v.image_info.image));
-      // NOTE: We do not serialize auth related fields for security reason
+      image_doc.append(kvp("pull_policy", v.image_info.pull_policy));
+      // NOTE: We DO NOT serialize auth related fields (username/password) for
+      // security, which means when a job is done, no credentials in disk.
+      // But we DO need them in embedded db when pending/running to speak with
+      // CRI ImageService.
     }));
 
     // Basic fields
@@ -1187,7 +1191,11 @@ ContainerMetaInTask MongodbClient::BsonToContainerMeta(
       if (auto image_elem = image_doc["image"]) {
         result.image_info.image = image_elem.get_string().value;
       }
-      // NOTE: We do not serialize auth related fields for security reason
+      if (auto pull_policy_elem = image_doc["pull_policy"]) {
+        result.image_info.pull_policy = pull_policy_elem.get_string().value;
+      }
+      // NOTE: We do not deserialize auth fields (username/password) for
+      // security
     }
 
     // Parse basic fields

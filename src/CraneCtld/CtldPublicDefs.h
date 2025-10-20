@@ -376,6 +376,7 @@ struct ContainerMetaInTask {
     std::string username;
     std::string password;
     std::string server_address;
+    std::string pull_policy;
   };
 
   ImageInfo image_info{};
