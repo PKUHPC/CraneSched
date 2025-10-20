@@ -39,7 +39,84 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
-StepInCtld::~StepInCtld() {}
+ContainerMetaInTask::ContainerMetaInTask(
+    const crane::grpc::ContainerTaskAdditionalMeta& rhs)
+    : image_info{.image = rhs.image().image(),
+                 .username = rhs.image().username(),
+                 .password = rhs.image().password(),
+                 .server_address = rhs.image().server_address(),
+                 .pull_policy = rhs.image().pull_policy()},
+      name(rhs.name()),
+      labels(rhs.labels().begin(), rhs.labels().end()),
+      annotations(rhs.annotations().begin(), rhs.annotations().end()),
+      command(rhs.command()),
+      args(rhs.args().begin(), rhs.args().end()),
+      workdir(rhs.workdir()),
+      env(rhs.env().begin(), rhs.env().end()),
+      detached(rhs.detached()),
+      tty(rhs.tty()),
+      stdin(rhs.stdin()),
+      stdin_once(rhs.stdin_once()),
+      userns(rhs.userns()),
+      run_as_user(rhs.run_as_user()),
+      run_as_group(rhs.run_as_group()),
+      mounts(rhs.mounts().begin(), rhs.mounts().end()),
+      port_mappings(rhs.ports().begin(), rhs.ports().end()) {}
+
+ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
+  crane::grpc::ContainerTaskAdditionalMeta result;
+
+  auto* image = result.mutable_image();
+  image->set_image(this->image_info.image);
+  image->set_username(this->image_info.username);
+  image->set_password(this->image_info.password);
+  image->set_server_address(this->image_info.server_address);
+  image->set_pull_policy(this->image_info.pull_policy);
+
+  result.set_name(this->name);
+
+  auto* labels_map = result.mutable_labels();
+  for (const auto& label : this->labels) {
+    (*labels_map)[label.first] = label.second;
+  }
+
+  auto* annotations_map = result.mutable_annotations();
+  for (const auto& annotation : this->annotations) {
+    (*annotations_map)[annotation.first] = annotation.second;
+  }
+
+  result.set_command(this->command);
+  for (const auto& arg : this->args) {
+    result.add_args(arg);
+  }
+  result.set_workdir(this->workdir);
+
+  auto* env_map = result.mutable_env();
+  for (const auto& env_var : this->env) {
+    (*env_map)[env_var.first] = env_var.second;
+  }
+
+  result.set_detached(this->detached);
+  result.set_tty(this->tty);
+  result.set_stdin(this->stdin);
+  result.set_stdin_once(this->stdin_once);
+
+  result.set_userns(this->userns);
+  result.set_run_as_user(this->run_as_user);
+  result.set_run_as_group(this->run_as_group);
+
+  auto* mounts_map = result.mutable_mounts();
+  for (const auto& mount : this->mounts) {
+    (*mounts_map)[mount.first] = mount.second;
+  }
+
+  auto* ports_map = result.mutable_ports();
+  for (const auto& port : this->port_mappings) {
+    (*ports_map)[port.first] = port.second;
+  }
+
+  return result;
+}
 
 void StepInCtld::SetStepType(crane::grpc::StepType type) {
   step_type = type;
@@ -169,7 +246,10 @@ void StepInCtld::RecoverFromDb(
   requeue_if_failed = step_to_ctld.requeue_if_failed();
   get_user_env = step_to_ctld.get_user_env();
   env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
-  container = step_to_ctld.container();
+
+  if (job.IsContainer() && step_to_ctld.has_container_meta())
+    container_meta =
+        static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
   requested_node_res_view =
@@ -221,13 +301,16 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
   env = job.env;
-  container = job.container;
 
   time_limit = job.time_limit;
   requested_node_res_view = job.requested_node_res_view;
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
+
+  if (job.IsContainer()) {
+    container_meta = std::get<ContainerMetaInTask>(job.meta);
+  }
 
   SetStepType(crane::grpc::StepType::DAEMON);
 
@@ -248,7 +331,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
-  /*Fields in DaemonStepInCtld*/
+  /* Fields in DaemonStepInCtld */
   partition = job.partition_id;
   account = job.account;
   qos = job.qos;
@@ -276,7 +359,12 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-  step.set_container(container);
+
+  if (job.IsContainer()) {
+    step.mutable_container_meta()->CopyFrom(
+        crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
+  }
+
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -310,8 +398,6 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
-
-  step_to_d.set_container(this->container);
   step_to_d.set_get_user_env(this->get_user_env);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -322,6 +408,10 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+
+  if (this->container_meta.has_value())
+    step_to_d.mutable_container_meta()->CopyFrom(
+        crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
 
   return step_to_d;
 }
@@ -436,12 +526,11 @@ void DaemonStepInCtld::RecoverFromDb(
 }
 
 void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
-  // For primary step
-
   /*Fields in StepInCtld*/
 
   this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
+
   job_id = job.TaskId();
   uid = job.uid;
   gids = {job.gid};
@@ -453,13 +542,15 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
   env = job.env;
-  container = job.container;
 
   time_limit = job.time_limit;
   requested_node_res_view = job.requested_node_res_view;
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
+
+  if (job.IsContainer())
+    container_meta = std::get<ContainerMetaInTask>(job.meta);
 
   SetStepType(crane::grpc::StepType::PRIMARY);
 
@@ -483,15 +574,14 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
 
   /*Fields in CommonStepInCtld*/
   cmd_line = job.cmd_line;
-
   cwd = job.cwd;
-  container = job.container;
   extra_attr = job.extra_attr;
 
   allocated_craneds_regex = job.allocated_craneds_regex;
   // pending_reason = job.pending_reason;
 
   crane::grpc::StepToCtld step;
+
   step.mutable_time_limit()->CopyFrom(
       google::protobuf::util::TimeUtil::MillisecondsToDuration(
           ToInt64Milliseconds(time_limit)));
@@ -507,20 +597,23 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.set_requeue_if_failed(requeue_if_failed);
   step.set_get_user_env(get_user_env);
   step.mutable_gid()->Assign(gids.begin(), gids.end());
-  // No batch or ia meta need to set
+
   if (job.type == crane::grpc::Batch) {
     step.mutable_batch_meta()->CopyFrom(job.TaskToCtld().batch_meta());
-  } else {
+  } else if (job.IsInteractive()) {
     step.mutable_interactive_meta()->CopyFrom(
         job.TaskToCtld().interactive_meta());
+  } else if (job.IsContainer()) {
+    step.mutable_container_meta()->CopyFrom(job.TaskToCtld().container_meta());
   }
+
   step.set_extra_attr(job.extra_attr);
   step.set_cmd_line(job.cmd_line);
   step.set_cwd(job.cwd);
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-  step.set_container(container);
+
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -560,7 +653,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
-  step_to_d.set_container(this->container);
   step_to_d.set_get_user_env(this->get_user_env);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -575,10 +667,14 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = step_to_d.mutable_batch_meta();
     mutable_meta->CopyFrom(StepToCtld().batch_meta());
-  } else {
+  } else if (this->type == crane::grpc::Interactive) {
     auto* mutable_meta = step_to_d.mutable_interactive_meta();
     mutable_meta->CopyFrom(StepToCtld().interactive_meta());
+  } else if (this->type == crane::grpc::Container) {
+    auto* mutable_meta = step_to_d.mutable_container_meta();
+    mutable_meta->CopyFrom(StepToCtld().container_meta());
   }
+
   return step_to_d;
 }
 
@@ -729,13 +825,13 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 void CommonStepInCtld::RecoverFromDb(
     const TaskInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
+
   cmd_line = StepToCtld().cmd_line();
   cwd = StepToCtld().cwd();
-
   extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "Not impled yet";
+  pending_reason = "Not implemented yet";
 }
 
 bool TaskInCtld::IsX11() const {
@@ -753,7 +849,7 @@ bool TaskInCtld::IsX11WithPty() const {
 bool TaskInCtld::ShouldLaunchOnAllNodes() const {
   // For cbatch tasks whose --node > 1,
   // only execute the command at the first allocated node.
-  if (type == crane::grpc::Batch) return false;
+  if (type != crane::grpc::Interactive) return false;
 
   const auto& ia_meta = TaskToCtld().interactive_meta();
   // For calloc tasks we still need to execute a dummy empty task to
@@ -842,7 +938,7 @@ void TaskInCtld::SetEndTime(absl::Time const& val) {
 }
 
 void TaskInCtld::SetEndTimeByUnixSecond(uint64_t val) {
-  if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
+  val = std::min<uint64_t>(val, kTaskMaxTimeStampSec);
   end_time = absl::FromUnixSeconds(val);
   runtime_attr.mutable_end_time()->set_seconds(val);
 }
@@ -874,14 +970,17 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   type = val.type();
 
-  if (type == crane::grpc::Batch) {
+  if (IsBatch()) {
     meta.emplace<BatchMetaInTask>(BatchMetaInTask{
         .sh_script = val.batch_meta().sh_script(),
         .interpreter = val.batch_meta().interpreter(),
         .output_file_pattern = val.batch_meta().output_file_pattern(),
         .error_file_pattern = val.batch_meta().error_file_pattern(),
     });
-  } else {
+  } else if (IsContainer()) {
+    meta.emplace<ContainerMetaInTask>(
+        static_cast<ContainerMetaInTask>(val.container_meta()));
+  } else if (IsInteractive()) {
     auto& ia_meta = std::get<InteractiveMetaInTask>(meta);
     ia_meta.interactive_type = val.interactive_meta().interactive_type();
   }
@@ -903,7 +1002,6 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   cmd_line = val.cmd_line();
   cwd = val.cwd();
-  container = val.container();
 
   for (const auto& [k, v] : val.env()) env[k] = v;
 
@@ -944,9 +1042,9 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
                       runtime_attr.craned_ids().end());
     allocated_craneds_regex = util::HostNameListToStr(craned_ids);
 
-    if (type == crane::grpc::Batch)
+    if (type == crane::grpc::Batch || type == crane::grpc::Container) {
       executing_craned_ids.emplace_back(craned_ids.front());
-    else {
+    } else if (type == crane::grpc::Interactive) {
       const auto& int_meta = std::get<InteractiveMetaInTask>(meta);
       if (int_meta.interactive_type == crane::grpc::Calloc)
         // For calloc tasks we still need to execute a dummy empty task to
@@ -956,6 +1054,8 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
         // For crun tasks we need to execute tasks on all allocated nodes.
         for (auto const& craned_id : craned_ids)
           executing_craned_ids.emplace_back(craned_id);
+    } else {
+      std::unreachable();
     }
 
     allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());
@@ -994,10 +1094,21 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
                                              excluded_nodes.end());
 
-  task_info->set_container(container);
   task_info->set_extra_attr(extra_attr);
   task_info->set_reservation(reservation);
 
+  // Only pass container meta if it's a container task
+  // This is because ccon command requires more info than cqueue/cacct.
+  if (IsContainer()) {
+    task_info->mutable_container_meta()->CopyFrom(
+        static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
+            std::get<ContainerMetaInTask>(meta)));
+    // Remove sensitive info
+    task_info->mutable_container_meta()->mutable_image()->clear_username();
+    task_info->mutable_container_meta()->mutable_image()->clear_password();
+  }
+
+  // Dynamic fields
   task_info->set_held(held);
   task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                               executing_craned_ids.end());
@@ -1006,7 +1117,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
 
   task_info->set_exit_code(runtime_attr.exit_code());
-  task_info->set_priority(cached_priority);
+  task_info->set_priority(cached_priority);  // FIXME: A BUG?
 
   task_info->set_status(status);
   if (Status() == crane::grpc::Pending) {

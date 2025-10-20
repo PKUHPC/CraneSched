@@ -124,6 +124,7 @@ enum TaskStatus {
 enum TaskType {
   Interactive = 0;
   Batch = 1;
+  Container = 2;
 }
 
 enum InteractiveTaskType {
@@ -156,9 +157,10 @@ message TaskToCtld {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
+    ContainerTaskAdditionalMeta container_meta = 23;
   }
 
-  string extra_attr = 23;
+  string extra_attr = 30;
 
   string cmd_line = 31;
   string cwd = 32;  // Current working directory
@@ -166,7 +168,6 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
 
   string reservation = 36;
   bool exclusive = 37;
@@ -226,9 +227,10 @@ message StepToCtld {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
+    ContainerTaskAdditionalMeta container_meta = 23;
   }
 
-  string extra_attr = 23;
+  string extra_attr = 30;
 
   string cmd_line = 31;
   string cwd = 32;  // Current working directory
@@ -306,6 +308,7 @@ message StepToD {
   // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;
   optional InteractiveTaskAdditionalMeta interactive_meta = 10;
+  optional ContainerTaskAdditionalMeta container_meta = 11;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -320,12 +323,11 @@ message StepToD {
 
   repeated string nodelist = 20;
 
-  uint32 node_num = 21;
-  uint32 ntasks_per_node = 22;
-  double cpus_per_task = 23;
+  uint32 node_num = 22;
+  uint32 ntasks_per_node = 23;
+  double cpus_per_task = 24;
 
-  bool get_user_env = 24;
-  string container = 25;
+  bool get_user_env = 25;
 
   // Not used now.
   string extra_attr = 29;
@@ -372,6 +374,39 @@ message InteractiveTaskAdditionalMeta {
   optional uint32 input_task_id = 8;
 }
 
+message ContainerTaskAdditionalMeta {
+  message ImageInfo {
+    string image = 1;
+    string username = 2;
+    string password = 3;
+    string server_address = 4;
+    string pull_policy = 5;
+  }
+
+  string name = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  ImageInfo image = 6;
+
+  string command = 11;
+  repeated string args = 12;
+  string workdir = 13;
+  map<string, string> env = 14;  // env in container
+
+  bool detached = 15;
+  bool tty = 16;
+  bool stdin = 17;
+  bool stdin_once = 18;
+
+  bool userns = 21;
+  uint32 run_as_user = 22;
+  uint32 run_as_group = 23;
+
+  map<string, string> mounts = 24;
+  map<int32, int32> ports = 25;
+}
+
 message TaskInfo {
   // Static task information
   TaskType type = 1;
@@ -400,8 +435,11 @@ message TaskInfo {
   string extra_attr = 21;
   string reservation = 22;
 
-  string container = 23;
-  /* 24-29 Reserved */
+  // This is only used when querying Container tasks.
+  // For other types of tasks, this field is ignored.
+  optional ContainerTaskAdditionalMeta container_meta = 23;
+
+  /* 26-29 Reserved */
 
   // Dynamic task information
   bool held = 30;
@@ -641,6 +679,10 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+
+  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
 }
 
 enum EntityType {

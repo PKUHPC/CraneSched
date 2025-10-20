@@ -35,11 +35,11 @@ namespace Ctld {
 
 using txn_id_t = uint32_t;
 
-enum DbErrorCode {
-  kNotFound,
-  kBufferSmall,
-  kParsingError,
-  kOther,
+enum class DbErrorCode : uint8_t {
+  NOT_FOUND,
+  BUFFER_SMALL,
+  PARSING_ERR,
+  OTHER,
 };
 
 class IEmbeddedDb {
@@ -418,7 +418,7 @@ class EmbeddedDbClient {
         FetchTypeFromDb_(db, txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
-    if (fetch_result.error() == DbErrorCode::kNotFound) {
+    if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
       CRANE_TRACE(
           "Key {} not found in embedded db. Initialize it with given value.",
           key);
@@ -446,7 +446,7 @@ class EmbeddedDbClient {
         FetchTypeFromDb_(db, txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
-    if (fetch_result.error() == DbErrorCode::kNotFound) {
+    if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
       CRANE_TRACE("Key {} not found in embedded db. Initializing it.", key);
 
       std::expected store_result = StoreTypeIntoDb_(db, txn_id, key, &value);
@@ -493,24 +493,26 @@ class EmbeddedDbClient {
     std::string buf;
 
     auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (!result && result.error() != kBufferSmall) {
-      CRANE_ERROR("Unexpected error when fetching the size of proto key '{}'",
-                  key);
+    if (!result && result.error() != DbErrorCode::BUFFER_SMALL) {
+      CRANE_ERROR(
+          "Unexpected error when fetching the size of proto key '{}': {}", key,
+          static_cast<uint8_t>(result.error()));
       return result;
     }
 
     buf.resize(n_bytes);
     result = db->Fetch(txn_id, key, buf.data(), &n_bytes);
     if (!result) {
-      CRANE_ERROR("Unexpected error when fetching the data of proto key '{}'",
-                  key);
+      CRANE_ERROR(
+          "Unexpected error when fetching the data of proto key '{}': {}", key,
+          static_cast<uint8_t>(result.error()));
       return result;
     }
 
-    bool ok = value->ParseFromArray(buf.data(), n_bytes);
+    bool ok = value->ParseFromArray(buf.data(), static_cast<int>(n_bytes));
     if (!ok) {
       CRANE_ERROR("Failed to parse protobuf data of key {}", key);
-      return std::unexpected(DbErrorCode::kParsingError);
+      return std::unexpected(DbErrorCode::PARSING_ERR);
     }
 
     return {n_bytes};
@@ -523,7 +525,7 @@ class EmbeddedDbClient {
                                                       T* buf) {
     size_t n_bytes{sizeof(T)};
     auto result = db->Fetch(txn_id, key, buf, &n_bytes);
-    if (!result && result.error() != DbErrorCode::kNotFound)
+    if (!result && result.error() != DbErrorCode::NOT_FOUND)
       CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
     return result;
   }
@@ -572,12 +574,12 @@ class EmbeddedDbClient {
     value->SerializeToCodedStream(&codedOutputStream);
 
     if (!BeginDbTransaction_(db, &txn_id))
-      return std::unexpected(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::OTHER);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
     if (!fetch_result) {
-      if (fetch_result.error() == DbErrorCode::kNotFound) {
+      if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
         CommitDbTransaction_(db, txn_id);
         return {};
       }
@@ -596,12 +598,12 @@ class EmbeddedDbClient {
       IEmbeddedDb* db, txn_id_t txn_id, const std::string& key,
       const T* value) {
     if (!BeginDbTransaction_(db, &txn_id))
-      return std::unexpected(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::OTHER);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
     if (!fetch_result) {
-      if (fetch_result.error() == DbErrorCode::kNotFound) {
+      if (fetch_result.error() == DbErrorCode::NOT_FOUND) {
         CommitDbTransaction_(db, txn_id);
         return {};
       }

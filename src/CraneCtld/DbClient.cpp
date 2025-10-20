@@ -20,6 +20,10 @@
 
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
+#include <optional>
+
+#include "CtldPublicDefs.h"
+#include "crane/Logger.h"
 
 namespace Ctld {
 
@@ -33,8 +37,7 @@ bool MongodbClient::Connect() {
 
     std::vector<std::string> database_name = client->list_database_names();
 
-    if (std::find(database_name.begin(), database_name.end(), m_db_name_) ==
-        database_name.end()) {
+    if (std::ranges::find(database_name, m_db_name_) == database_name.end()) {
       CRANE_INFO(
           "Mongodb: database {} is not existed, crane will create the new "
           "database.",
@@ -342,6 +345,17 @@ bool MongodbClient::FetchJobRecords(
   // Documents created by InsertSteps only have task_id and steps array
   filter.append(kvp("has_job_info", true));
 
+  bool has_task_types_constraint = !request->filter_task_types().empty();
+  if (has_task_types_constraint) {
+    filter.append(kvp("type", [&request](sub_document type_doc) {
+      array type_array;
+      for (const auto& type : request->filter_task_types()) {
+        type_array.append(static_cast<std::int32_t>(type));
+      }
+      type_doc.append(kvp("$in", type_array));
+    }));
+  }
+
   mongocxx::options::find option;
   option = option.limit(limit);
 
@@ -360,12 +374,14 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container      has_job_info
+  // 35 mem_alloc     device_map     meta_container      has_job_info
 
   try {
     for (auto view : cursor) {
       auto* task = task_list->Add();
 
+      task->set_type(
+          static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
       task->set_task_id(view["task_id"].get_int32().value);
 
       task->set_node_num(view["nodes_alloc"].get_int32().value);
@@ -417,8 +433,6 @@ bool MongodbClient::FetchJobRecords(
         task->set_cmd_line(std::string(view["submit_line"].get_string().value));
       task->set_exit_code(view["exit_code"].get_int32().value);
 
-      task->set_type((crane::grpc::TaskType)view["type"].get_int32().value);
-
       task->set_extra_attr(view["extra_attr"].get_string().value.data());
 
       task->set_priority(view["priority"].get_int64().value);
@@ -427,7 +441,14 @@ bool MongodbClient::FetchJobRecords(
         task->set_reservation(view["reservation"].get_string().value.data());
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
-      task->set_container(view["container"].get_string().value);
+
+      if (task->type() == crane::grpc::Container) {
+        auto* meta_info = task->mutable_container_meta();
+        auto container_meta = BsonToContainerMeta(view);
+        meta_info->CopyFrom(
+            static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
+                container_meta));
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -707,18 +728,18 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
 }
 
 bool MongodbClient::UpdateUser(const Ctld::User& user) {
-  document doc = UserToDocument_(user), setDocument, filter;
+  document doc = UserToDocument_(user), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", user.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
-            *GetSession_(), filter.view(), setDocument.view());
+            *GetSession_(), filter.view(), set_document.view());
 
-    if (!update_result || !update_result->modified_count()) {
+    if (!update_result || update_result->modified_count() == 0) {
       return false;
     }
   } catch (const std::exception& e) {
@@ -728,18 +749,18 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
 }
 
 bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
-  document doc = AccountToDocument_(account), setDocument, filter;
+  document doc = AccountToDocument_(account), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", account.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
-            *GetSession_(), filter.view(), setDocument.view());
+            *GetSession_(), filter.view(), set_document.view());
 
-    if (!update_result || !update_result->modified_count()) {
+    if (!update_result || update_result->modified_count() == 0) {
       return false;
     }
   } catch (const std::exception& e) {
@@ -749,18 +770,18 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
 }
 
 bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
-  document doc = QosToDocument_(qos), setDocument, filter;
+  document doc = QosToDocument_(qos), set_document, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-  setDocument.append(kvp("$set", doc));
+  set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", qos.name));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
         (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
-            filter.view(), setDocument.view());
+            filter.view(), set_document.view());
 
-    if (!update_result || !update_result->modified_count()) {
+    if (!update_result || update_result->modified_count() == 0) {
       return false;
     }
   } catch (const std::exception& e) {
@@ -866,13 +887,13 @@ template <>
 void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
     document& doc, const std::string& key,
     const User::AccountToAttrsMap& value) {
-  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
-    for (const auto& mapItem : value) {
-      mapValueDocument.append(
-          kvp(mapItem.first, [&mapItem, this](sub_document itemDoc) {
-            itemDoc.append(kvp("blocked", mapItem.second.blocked));
-            SubDocumentAppendItem_(itemDoc, "allowed_partition_qos_map",
-                                   mapItem.second.allowed_partition_qos_map);
+  doc.append(kvp(key, [&value, this](sub_document map_value_doc) {
+    for (const auto& map_item : value) {
+      map_value_doc.append(
+          kvp(map_item.first, [&map_item, this](sub_document item_doc) {
+            item_doc.append(kvp("blocked", map_item.second.blocked));
+            SubDocumentAppendItem_(item_doc, "allowed_partition_qos_map",
+                                   map_item.second.allowed_partition_qos_map);
           }));
     }
   }));
@@ -882,18 +903,19 @@ template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& mapItem : value) {
-      auto mapKey = mapItem.first;
-      auto mapValue = mapItem.second;
+  doc.append(kvp(key, [&value](sub_document map_value_document) {
+    for (const auto& map_item : value) {
+      auto map_key = map_item.first;
+      auto map_value = map_item.second;
 
-      mapValueDocument.append(kvp(mapKey, [&mapValue](sub_array pairArray) {
-        pairArray.append(mapValue.first);  // pair->first, default qos
+      map_value_document.append(
+          kvp(map_key, [&map_value](sub_array pair_array) {
+            pair_array.append(map_value.first);  // pair->first, default qos
 
-        array listArray;
-        for (const auto& s : mapValue.second) listArray.append(s);
-        pairArray.append(listArray);
-      }));
+            array list_array;
+            for (const auto& s : map_value.second) list_array.append(s);
+            pair_array.append(list_array);
+          }));
     }
   }));
 }
@@ -902,23 +924,23 @@ template <>
 void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
                                                    const std::string& key,
                                                    const DeviceMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
-    for (const auto& mapItem : value) {
-      const auto& device_name = mapItem.first;
-      const auto& pair_val = mapItem.second;
+  doc.append(kvp(key, [&value](sub_document map_value_document) {
+    for (const auto& map_item : value) {
+      const auto& device_name = map_item.first;
+      const auto& pair_val = map_item.second;
       uint64_t total = pair_val.first;
       const auto& type_count_map = pair_val.second;
 
-      mapValueDocument.append(
-          kvp(device_name, [&total, &type_count_map](sub_document deviceDoc) {
-            deviceDoc.append(kvp("total", static_cast<int64_t>(total)));
-            deviceDoc.append(
-                kvp("type_count_map", [&type_count_map](sub_document typeDoc) {
-                  for (const auto& typeItem : type_count_map) {
-                    typeDoc.append(kvp(typeItem.first,
-                                       static_cast<int64_t>(typeItem.second)));
-                  }
-                }));
+      map_value_document.append(
+          kvp(device_name, [&total, &type_count_map](sub_document device_doc) {
+            device_doc.append(kvp("total", static_cast<int64_t>(total)));
+            device_doc.append(kvp("type_count_map", [&type_count_map](
+                                                        sub_document type_doc) {
+              for (const auto& type_item : type_count_map) {
+                type_doc.append(kvp(type_item.first,
+                                    static_cast<int64_t>(type_item.second)));
+              }
+            }));
           }));
     }
   }));
@@ -977,6 +999,89 @@ void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
     DocumentAppendItem_(node_res_doc, node, res);
   }
   doc.append(kvp(key, node_res_doc));
+}
+
+template <>
+void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
+    document& doc, const std::string& key,
+    const std::optional<ContainerMetaInTask>& value) {
+  if (!value.has_value()) {
+    doc.append(kvp(key, bsoncxx::types::b_null{}));
+    return;
+  }
+
+  const auto& v = value.value();
+
+  doc.append(kvp(key, [&v](sub_document container_doc) {
+    // Serialize ImageInfo
+    container_doc.append(kvp("image_info", [&v](sub_document image_doc) {
+      image_doc.append(kvp("image", v.image_info.image));
+      image_doc.append(kvp("pull_policy", v.image_info.pull_policy));
+      // NOTE: We DO NOT serialize auth related fields (username/password) for
+      // security, which means when a job is done, no credentials in disk.
+      // But we DO need them in embedded db when pending/running to speak with
+      // CRI ImageService.
+    }));
+
+    // Basic fields
+    container_doc.append(kvp("name", v.name));
+    container_doc.append(kvp("command", v.command));
+    container_doc.append(kvp("workdir", v.workdir));
+
+    container_doc.append(kvp("detached", v.detached));
+    container_doc.append(kvp("tty", v.tty));
+    container_doc.append(kvp("stdin", v.stdin));
+    container_doc.append(kvp("stdin_once", v.stdin_once));
+
+    container_doc.append(kvp("userns", v.userns));
+    container_doc.append(
+        kvp("run_as_user", static_cast<int32_t>(v.run_as_user)));
+    container_doc.append(
+        kvp("run_as_group", static_cast<int32_t>(v.run_as_group)));
+
+    // Serialize args array
+    container_doc.append(kvp("args", [&v](sub_array args_array) {
+      for (const auto& arg : v.args) {
+        args_array.append(arg);
+      }
+    }));
+
+    // Serialize labels map
+    container_doc.append(kvp("labels", [&v](sub_document labels_doc) {
+      for (const auto& label : v.labels) {
+        labels_doc.append(kvp(label.first, label.second));
+      }
+    }));
+
+    // Serialize annotations map
+    container_doc.append(kvp("annotations", [&v](sub_document annotations_doc) {
+      for (const auto& annotation : v.annotations) {
+        annotations_doc.append(kvp(annotation.first, annotation.second));
+      }
+    }));
+
+    // Serialize env map
+    container_doc.append(kvp("env", [&v](sub_document env_doc) {
+      for (const auto& env_var : v.env) {
+        env_doc.append(kvp(env_var.first, env_var.second));
+      }
+    }));
+
+    // Serialize mounts map
+    container_doc.append(kvp("mounts", [&v](sub_document mounts_doc) {
+      for (const auto& mount : v.mounts) {
+        mounts_doc.append(kvp(mount.first, mount.second));
+      }
+    }));
+
+    // Serialize port_mappings map
+    container_doc.append(kvp("port_mappings", [&v](sub_document ports_doc) {
+      for (const auto& port : v.port_mappings) {
+        ports_doc.append(
+            kvp(std::to_string(port.first), static_cast<int32_t>(port.second)));
+      }
+    }));
+  }));
 }
 
 template <typename... Ts, std::size_t... Is>
@@ -1059,8 +1164,9 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
                 default_qos, std::move(allowed_qos_list)};
       }
       user->account_to_attrs_map[std::string(account_to_attrs_map_item.key())] =
-          User::AttrsInAccount{std::move(temp),
-                               account_to_attrs_map_item["blocked"].get_bool()};
+          User::AttrsInAccount{
+              .allowed_partition_qos_map = std::move(temp),
+              .blocked = account_to_attrs_map_item["blocked"].get_bool()};
     }
 
     user->cert_number = ViewValueOr_(user_view["cert_number"], std::string{""});
@@ -1279,10 +1385,140 @@ DeviceMap MongodbClient::BsonToDeviceMap(const bsoncxx::document::view& doc) {
   return device_map;
 }
 
+ContainerMetaInTask MongodbClient::BsonToContainerMeta(
+    const bsoncxx::document::view& doc) {
+  ContainerMetaInTask result;
+
+  try {
+    auto container_elem = doc["meta_container"];
+    if (!container_elem || container_elem.type() != bsoncxx::type::k_document) {
+      CRANE_LOGGER_ERROR(m_logger_,
+                         "Error in reading container metadata for a container "
+                         "task: Unexpected document type.");
+      return result;
+    }
+
+    auto container_doc = container_elem.get_document().view();
+
+    // Parse ImageInfo
+    if (auto image_info_elem = container_doc["image_info"];
+        image_info_elem &&
+        image_info_elem.type() == bsoncxx::type::k_document) {
+      auto image_doc = image_info_elem.get_document().view();
+      if (auto image_elem = image_doc["image"]) {
+        result.image_info.image = image_elem.get_string().value;
+      }
+      if (auto pull_policy_elem = image_doc["pull_policy"]) {
+        result.image_info.pull_policy = pull_policy_elem.get_string().value;
+      }
+      // NOTE: We do not deserialize auth fields (username/password) for
+      // security
+    }
+
+    // Parse basic fields
+    if (auto name_elem = container_doc["name"]) {
+      result.name = name_elem.get_string().value;
+    }
+    if (auto command_elem = container_doc["command"]) {
+      result.command = command_elem.get_string().value;
+    }
+    if (auto workdir_elem = container_doc["workdir"]) {
+      result.workdir = workdir_elem.get_string().value;
+    }
+
+    if (auto detached_elem = container_doc["detached"]) {
+      result.detached = detached_elem.get_bool().value;
+    }
+    if (auto tty_elem = container_doc["tty"]) {
+      result.tty = tty_elem.get_bool().value;
+    }
+    if (auto stdin_elem = container_doc["stdin"]) {
+      result.stdin = stdin_elem.get_bool().value;
+    }
+    if (auto stdin_once_elem = container_doc["stdin_once"]) {
+      result.stdin_once = stdin_once_elem.get_bool().value;
+    }
+
+    if (auto userns_elem = container_doc["userns"]) {
+      result.userns = userns_elem.get_bool().value;
+    }
+    if (auto user_elem = container_doc["run_as_user"]) {
+      result.run_as_user = static_cast<uid_t>(user_elem.get_int32().value);
+    }
+    if (auto group_elem = container_doc["run_as_group"]) {
+      result.run_as_group = static_cast<gid_t>(group_elem.get_int32().value);
+    }
+
+    // Parse args array
+    if (auto args_elem = container_doc["args"];
+        args_elem && args_elem.type() == bsoncxx::type::k_array) {
+      for (const auto& arg : args_elem.get_array().value) {
+        result.args.emplace_back(arg.get_string().value);
+      }
+    }
+
+    // Parse labels map
+    if (auto labels_elem = container_doc["labels"];
+        labels_elem && labels_elem.type() == bsoncxx::type::k_document) {
+      for (const auto& label : labels_elem.get_document().view()) {
+        result.labels[std::string(label.key())] = label.get_string().value;
+      }
+    }
+
+    // Parse annotations map
+    if (auto annotations_elem = container_doc["annotations"];
+        annotations_elem &&
+        annotations_elem.type() == bsoncxx::type::k_document) {
+      for (const auto& annotation : annotations_elem.get_document().view()) {
+        result.annotations[std::string(annotation.key())] =
+            annotation.get_string().value;
+      }
+    }
+
+    // Parse env map
+    if (auto env_elem = container_doc["env"];
+        env_elem && env_elem.type() == bsoncxx::type::k_document) {
+      for (const auto& env_var : env_elem.get_document().view()) {
+        result.env[std::string(env_var.key())] = env_var.get_string().value;
+      }
+    }
+
+    // Parse mounts map
+    if (auto mounts_elem = container_doc["mounts"];
+        mounts_elem && mounts_elem.type() == bsoncxx::type::k_document) {
+      for (const auto& mount : mounts_elem.get_document().view()) {
+        result.mounts[std::string(mount.key())] = mount.get_string().value;
+      }
+    }
+
+    // Parse port_mappings map
+    if (auto ports_elem = container_doc["port_mappings"];
+        ports_elem && ports_elem.type() == bsoncxx::type::k_document) {
+      for (const auto& port : ports_elem.get_document().view()) {
+        uint32_t key =
+            static_cast<uint32_t>(std::stoul(std::string(port.key())));
+        uint32_t value = static_cast<uint32_t>(port.get_int32().value);
+        result.port_mappings[key] = value;
+      }
+    }
+
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return result;
+}
+
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     const crane::grpc::TaskInEmbeddedDb& task) {
   auto const& task_to_ctld = task.task_to_ctld();
   auto const& runtime_attr = task.runtime_attr();
+
+  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
+  if (task_to_ctld.type() == crane::grpc::TaskType::Container) {
+    container_meta =
+        static_cast<ContainerMetaInTask>(task_to_ctld.container_meta());
+  }
 
   auto resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
   ResourceView allocated_res_view;
@@ -1303,7 +1539,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     container     has_job_info
+  // 35 mem_alloc     device_map     meta_container     has_job_info
 
   // clang-format off
   std::array<std::string, 39> fields{
@@ -1321,64 +1557,69 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
-    // 35 - 38
-    "mem_alloc", "device_map", "container", "has_job_info",
+      // 35 - 39
+    "mem_alloc", "device_map", "meta_container", "has_job_info"
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::string, bool>                /*35-38*/
-      values{
-          // 0-4
-          static_cast<int32_t>(runtime_attr.task_id()),
-          runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-          task_to_ctld.account(),
-          // 5-9
-          task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-          static_cast<int64_t>(task_to_ctld.req_resources()
-                                   .allocatable_res()
-                                   .memory_limit_bytes()),
-          task_to_ctld.name(), env_str,
-          static_cast<int32_t>(task_to_ctld.uid()),
-          // 10-14
-          static_cast<int32_t>(task_to_ctld.gid()),
-          util::HostNameListToStr(runtime_attr.craned_ids()),
-          runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
-          // 15-19
-          runtime_attr.cached_priority(), 0,
-          runtime_attr.start_time().seconds(),
-          runtime_attr.end_time().seconds(), 0,
-          // 20-24
-          task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-          task_to_ctld.time_limit().seconds(),
-          runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
-          // 25-29
-          task_to_ctld.cmd_line(), runtime_attr.exit_code(),
-          runtime_attr.username(), task_to_ctld.qos(),
-          task_to_ctld.get_user_env(),
-          // 30-34
-          task_to_ctld.type(), task_to_ctld.extra_attr(),
-          task_to_ctld.reservation(), task_to_ctld.exclusive(),
-          allocated_res_view.CpuCount(),
-          // 35-38
-          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-          allocated_res_view.GetDeviceMap(), task_to_ctld.container(),
-          true  // has_job_info: mark this document contains complete job info
-      };
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,      /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,     /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,    /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,            /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,    /*20-24*/
+             std::string, int32_t, std::string, std::string, bool,   /*25-29*/
+             int32_t, std::string, std::string, bool, double,        /*30-34*/
+             int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
+             bool>                                                   /*38*/
+      values{                                                        // 0-4
+             static_cast<int32_t>(runtime_attr.task_id()),
+             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
+             task_to_ctld.account(),
+             // 5-9
+             task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
+             static_cast<int64_t>(task_to_ctld.req_resources()
+                                      .allocatable_res()
+                                      .memory_limit_bytes()),
+             task_to_ctld.name(), env_str,
+             static_cast<int32_t>(task_to_ctld.uid()),
+             // 10-14
+             static_cast<int32_t>(task_to_ctld.gid()),
+             util::HostNameListToStr(runtime_attr.craned_ids()),
+             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
+             // 15-19
+             runtime_attr.cached_priority(), 0,
+             runtime_attr.start_time().seconds(),
+             runtime_attr.end_time().seconds(), 0,
+             // 20-24
+             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+             task_to_ctld.time_limit().seconds(),
+             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
+             // 25-29
+             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
+             runtime_attr.username(), task_to_ctld.qos(),
+             task_to_ctld.get_user_env(),
+             // 30-34
+             task_to_ctld.type(), task_to_ctld.extra_attr(),
+             task_to_ctld.reservation(), task_to_ctld.exclusive(),
+             allocated_res_view.CpuCount(),
+             // 35-39
+             static_cast<int64_t>(allocated_res_view.MemoryBytes()),
+             allocated_res_view.GetDeviceMap(), container_meta,
+             true /* Mark the document having complete job info */};
 
   return DocumentConstructor_(fields, values);
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string script;
+  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
+
   if (task->type == crane::grpc::Batch)
     script = std::get<BatchMetaInTask>(task->meta).sh_script;
+  else if (task->type == crane::grpc::Container)
+    container_meta = std::get<ContainerMetaInTask>(task->meta);
+
+  // TODO: Interactive meta?
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task->env) {
@@ -1394,7 +1635,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container      has_job_info
+  // 35 mem_alloc     device_map     meta_container      has_job_info
 
   // clang-format off
   std::array<std::string, 39> fields{
@@ -1412,47 +1653,48 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
-      // 35 - 38
-      "mem_alloc", "device_map", "container", "has_job_info",
+      // 35 - 39
+      "mem_alloc", "device_map", "meta_container", "has_job_info"
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::string, bool>                /*35-38*/
-      values{
-          // 0-4
-          static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-          absl::ToUnixSeconds(absl::Now()), false, task->account,
-          // 5-9
-          static_cast<double>(task->requested_node_res_view.CpuCount()),
-          static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
-          task->name, env_str, static_cast<int32_t>(task->uid),
-          // 10-14
-          static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
-          static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-          // 15-19
-          static_cast<int64_t>(task->CachedPriority()), 0,
-          task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
-          // 20-24
-          script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-          task->SubmitTimeInUnixSecond(), task->cwd,
-          // 25-29
-          task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-          task->get_user_env,
-          // 30-34
-          task->type, task->extra_attr, task->reservation,
-          task->TaskToCtld().exclusive(), task->allocated_res_view.CpuCount(),
-          // 35-38
-          static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-          task->allocated_res_view.GetDeviceMap(), task->container,
-          true  // has_job_info: mark this document contains complete job info
-      };
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,      /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,     /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,    /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,            /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,    /*20-24*/
+             std::string, int32_t, std::string, std::string, bool,   /*25-29*/
+             int32_t, std::string, std::string, bool, double,        /*30-34*/
+             int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
+             bool>                                                   /*38*/
+      values{                                                        // 0-4
+             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+             absl::ToUnixSeconds(absl::Now()), false, task->account,
+             // 5-9
+             task->requested_node_res_view.CpuCount(),
+             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+             task->name, env_str, static_cast<int32_t>(task->uid),
+             // 10-14
+             static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
+             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+             // 15-19
+             static_cast<int64_t>(task->CachedPriority()), 0,
+             task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+             // 20-24
+             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+             task->SubmitTimeInUnixSecond(), task->cwd,
+             // 25-29
+             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+             task->get_user_env,
+             // 30-34
+             task->type, task->extra_attr, task->reservation,
+             task->TaskToCtld().exclusive(),
+             task->allocated_res_view.CpuCount(),
+             // 35-37
+             static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
+             task->allocated_res_view.GetDeviceMap(), container_meta,
+             true /* Mark the document having complete job info */};
+
   return DocumentConstructor_(fields, values);
 }
 
@@ -1472,8 +1714,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
   // 5  step_name       env           id_user         id_group      nodelist
   // 10 nodes_alloc     node_inx      time_eligible   time_start    time_end
   // 15 time_suspended  script        state           timelimit     time_submit
-  // 20 work_dir        submit_line   exit_code       get_user_env  type  // 25
-  // extra_attr      res_alloc     step_type       container
+  // 20 work_dir        submit_line   exit_code       get_user_env  type
+  // 25 extra_attr      res_alloc     step_type       container
 
   // clang-format off
   std::array<std::string, 29> fields{
@@ -1488,7 +1730,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       // 20 - 24
         "work_dir","submit_line", "exit_code","get_user_env","type",
       // 25 - 28
-         "extra_attr", "res_alloc", "step_type", "container",
+         "extra_attr", "res_alloc", "step_type", "meta_container",
   };
 
   // clang-format on
@@ -1499,7 +1741,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              int64_t, int64_t, int64_t, std::string, int32_t,     /*15-19*/
              int64_t, int64_t, std::string, std::string, int32_t, /*20-24*/
              bool, int32_t, std::string, ResourceV2, int32_t,     /*25-29*/
-             std::string>                                         /*30-30*/
+             std::optional<ContainerMetaInTask>>                  /*30-30*/
       values{                                                     // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
@@ -1519,7 +1761,7 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              step->ExitCode(), step->get_user_env, step->type,
              // 25-28
              step->StepToCtld().extra_attr(), step->AllocatedRes(),
-             step->StepType(), step->container};
+             step->StepType(), step->container_meta};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1528,9 +1770,16 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
     crane::grpc::StepInEmbeddedDb const& step) {
   const auto& step_to_ctld = step.step_to_ctld();
   const auto& runtime_attr = step.runtime_attr();
+
   std::string script;
   if (step_to_ctld.type() == crane::grpc::Batch)
     script = step_to_ctld.batch_meta().sh_script();
+
+  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
+  if (step_to_ctld.type() == crane::grpc::Container) {
+    container_meta =
+        static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
+  }
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : step_to_ctld.env()) {
@@ -1544,7 +1793,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
   // 15 time_suspended  script        state         timelimit     time_submit
   // 20 work_dir        submit_line   exit_code     get_user_env  type
-  // 25 extra_attr      res_alloc     step_type     container
+  // 25 extra_attr      res_alloc     step_type     meta_container
 
   // clang-format off
   std::array<std::string, 29> fields{
@@ -1559,8 +1808,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       // 20 - 24
        "work_dir","submit_line", "exit_code","get_user_env","type",
       // 25 - 29
-         "extra_attr", "res_alloc", "step_type",
-    "container",
+         "extra_attr", "res_alloc", "step_type", "meta_container",
   };
 
   // clang-format on
@@ -1570,7 +1818,8 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
              int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/
              int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
              std::string, std::string, int32_t, bool, int32_t, /*20-24*/
-             std::string, ResourceV2, int32_t, std::string>    /*25-28*/
+             std::string, ResourceV2, int32_t,
+             std::optional<ContainerMetaInTask>> /*25-28*/
 
       values{
           // 0-4
@@ -1597,7 +1846,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           step_to_ctld.get_user_env(), step_to_ctld.type(),
           // 25-28
           step_to_ctld.extra_attr(), ResourceV2(runtime_attr.allocated_res()),
-          runtime_attr.step_type(), step_to_ctld.container()};
+          runtime_attr.step_type(), container_meta};
 
   return DocumentConstructor_(fields, values);
 }
