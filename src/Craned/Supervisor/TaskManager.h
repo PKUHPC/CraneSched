@@ -132,9 +132,9 @@ class StepInstance {
 
   // TODO: Move these into a variant.
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
-  bool pty;
-  bool x11;
-  bool x11_fwd;
+  bool pty{false};
+  bool x11{false};
+  bool x11_fwd{false};
 
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   bool orphaned{false};
