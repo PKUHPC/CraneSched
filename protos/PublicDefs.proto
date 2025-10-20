@@ -851,7 +851,7 @@ message JobSummaryItem {
   string username = 3;
   string qos = 4;
   string wckey = 5;
-  CpuLevel cpu_level = 6;
+  uint32 cpu_level = 6;
   double total_cpu_time = 7;
   int64 total_count = 8;
 }

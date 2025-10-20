@@ -2076,6 +2076,36 @@ grpc::Status CraneCtldServiceImpl::QueryJobSummaryItemStream(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryJobSizeSummaryItemStream(
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::QueryJobSizeSummaryItemRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply> *writer) {
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  std::unordered_set<std::string> req_qoss(request->filter_qoss().begin(),
+                                           request->filter_qoss().end());
+  std::unordered_set<std::string> req_wckeys(request->filter_wckeys().begin(),
+                                             request->filter_wckeys().end());
+  std::vector<std::uint32_t> req_grouping_list(
+      request->filter_grouping_list().begin(),
+      request->filter_grouping_list().end());
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+  std::vector<std::uint32_t> req_job_ids(request->filter_job_ids().begin(),
+                                         request->filter_job_ids().end());
+
+  if (request->filter_job_ids().size() > 0) {
+    g_db_client->FetchJobSizeSummaryRecords(request, writer);
+  } else {
+    g_db_client->QueryJobSizeSummary(req_accounts, req_users, req_qoss,
+                                     req_wckeys, req_grouping_list, start_time,
+                                     end_time, writer);
+  }
+  return grpc::Status::OK;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
 
