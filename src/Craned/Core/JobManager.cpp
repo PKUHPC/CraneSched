@@ -694,12 +694,6 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
       run_prolog_result = false;
       break;
     }
-    if (result.term_signal != 0) {
-      CRANE_INFO("Prolog '{}' killed by signal {}. Output: {}",
-                  prolog, result.term_signal, result.output.c_str());
-      run_prolog_result = false;
-      break;
-    }
     if (result.exit_code != 0) {
       CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
                   prolog, result.exit_code, result.output.c_str());
@@ -707,8 +701,7 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
       break;
     }
 
-    CRANE_INFO("Prolog '{}' finished successfully. Output: {}",
-                 prolog, result.output.c_str());
+    CRANE_INFO("Prolog '{}' finished successfully.", prolog);
   }
 
   if (!run_prolog_result)
@@ -904,15 +897,11 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       if (result.time_out) {
         CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
                     epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
-      } else if (result.term_signal != 0) {
-        CRANE_INFO("Epilog '{}' killed by signal {}. Output: {}",
-                    epilog, result.term_signal, result.output.c_str());
       } else if (result.exit_code != 0) {
         CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
                     epilog, result.exit_code, result.output.c_str());
       } else {
-        CRANE_INFO("Epilog '{}' finished successfully. Output: {}",
-                   epilog, result.output.c_str());
+        CRANE_INFO("Epilog '{}' finished successfully.",epilog);
       }
     }
 

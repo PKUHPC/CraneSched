@@ -2177,17 +2177,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                   run_epilog_ctld_args.timeout_sec);
       auto result = util::os::RunCommand(run_epilog_ctld_args);
       if (result.time_out) {
-        CRANE_INFO("EpilogCtld'{}' timed out after {}s. Output: {}", epilog,
+        CRANE_DEBUG("EpilogCtld'{}' timed out after {}s. Output: {}", epilog,
                    run_epilog_ctld_args.timeout_sec, result.output.c_str());
-      } else if (result.term_signal != 0) {
-        CRANE_INFO("EpilogCtld '{}' killed by signal {}. Output: {}", epilog,
-                   result.term_signal, result.output.c_str());
       } else if (result.exit_code != 0) {
-        CRANE_INFO("EpilogCtld '{}' failed (exit code {}). Output: {}", epilog,
+        CRANE_DEBUG("EpilogCtld '{}' failed (exit code {}). Output: {}", epilog,
                    result.exit_code, result.output.c_str());
       } else
-        CRANE_INFO("EpilogCtld '{}' finished successfully. Output: {}", epilog,
-                   result.output.c_str());
+        CRANE_TRACE("EpilogCtld '{}' finished successfully.", epilog);
     }
   }
 
@@ -2967,26 +2963,20 @@ void MinLoadFirst::NodeSelect(
                       run_prolog_ctld_args.run_uid);
           auto result = util::os::RunCommand(run_prolog_ctld_args);
           if (result.time_out) {
-            CRANE_INFO("PrologCtld'{}' timed out after {}s. Output: {}", prolog,
+            CRANE_DEBUG("PrologCtld'{}' timed out after {}s. Output: {}", prolog,
                        run_prolog_ctld_args.timeout_sec, result.output.c_str());
             run_prolog_result = false;
             break;
           }
-          if (result.term_signal != 0) {
-            CRANE_INFO("PrologCtld '{}' killed by signal {}. Output: {}",
-                       prolog, result.term_signal, result.output.c_str());
-            run_prolog_result = false;
-            break;
-          }
+
           if (result.exit_code != 0) {
-            CRANE_INFO("PrologCtld '{}' failed (exit code {}). Output: {}",
+            CRANE_DEBUG("PrologCtld '{}' failed (exit code {}). Output: {}",
                        prolog, result.exit_code, result.output.c_str());
             run_prolog_result = false;
             break;
           }
 
-          CRANE_INFO("PrologCtld '{}' finished successfully. Output: {}",
-                     prolog, result.output.c_str());
+          CRANE_TRACE("PrologCtld '{}' finished successfully.", prolog);
           // parse and add env to task
           for (const auto& line : absl::StrSplit(result.output, '\n')) {
             absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&line));
