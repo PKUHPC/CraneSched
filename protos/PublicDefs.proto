@@ -608,21 +608,13 @@ message CranedRemoteMeta {
   uint32 config_crc = 9;
 }
 
-enum CpuLevel {
-    CPU_LEVEL_0_49      = 0;
-    CPU_LEVEL_50_249    = 1;
-    CPU_LEVEL_250_499   = 2;
-    CPU_LEVEL_500_999   = 3;
-    CPU_LEVEL_1000_PLUS = 4;
-}
-
 message JobSummaryItem {
   string cluster = 1;
   string account = 2;
   string username = 3;
   string qos = 4;
   string wckey = 5;
-  CpuLevel cpu_level = 6;
+  uint32 cpu_level = 6;
   double total_cpu_time = 7;
   int64 total_count = 8;
 }
