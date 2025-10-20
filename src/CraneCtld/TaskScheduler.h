@@ -1054,21 +1054,19 @@ class TaskScheduler {
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
-  ConcurrentQueue<task_id_t> m_job_deadline_timer_queue_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_queue_;
 
-  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
   ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
 
-  TreeMap<task_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
+  TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
 
   void CancelDeadlineTaskCb_();
 
-  void CleanDeadlineTimerCb_(task_id_t task_id);
-
   void CreateDeadlineTimerCb_();
 
-  void DelDeadlineTimer_(task_id_t task_id);
+  void DelDeadlineTimer_(job_id_t job_id);
 };
 
 }  // namespace Ctld

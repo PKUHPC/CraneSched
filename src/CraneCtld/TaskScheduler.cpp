@@ -71,7 +71,7 @@ bool TaskScheduler::Init() {
   CraneErrCode err;
 
   uvw_deadline_loop = uvw::loop::create();
-  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
 
   EmbeddedDbClient::DbSnapshot snapshot;
@@ -1294,55 +1294,62 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 
 void TaskScheduler::CreateDeadlineTimerCb_() {
   absl::Time now = absl::Now();
-  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   DeadlineTimerQueueElem elem;
   while (m_job_deadline_timer_create_queue_.try_dequeue(elem)) {
-    task_id_t task_id = elem.first;
+    job_id_t job_id = elem.first;
     int64_t deadline_time = elem.second;
 
+    if (m_deadline_timer_map_.contains(job_id)) {
+      m_deadline_timer_map_[job_id]->close();
+      m_deadline_timer_map_[job_id].reset();
+    }
+
     if (deadline_time <= absl::ToUnixSeconds(now)) {
-      CRANE_ERROR("Job #{}'s deadline is earlier than now", task_id);
-      continue;
+      CRANE_ERROR("Job #{}'s deadline is earlier than now", job_id);
+      {
+        LockGuard pending_guard(&m_pending_task_map_mtx_);
+        auto pd_it = m_pending_task_map_.find(job_id);
+        if (pd_it != m_pending_task_map_.end()) {
+          auto& task = pd_it->second;
+          m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+              .task = std::move(task),
+              .finish_status = crane::grpc::TaskStatus::Deadline});
+          m_pending_task_map_.erase(pd_it);
+        }
+      }
+      return;
     }
 
     auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
     deadline_timer->on<uvw::timer_event>(
-        [this, task_id](const uvw::timer_event&, uvw::timer_handle& h) {
-          CleanDeadlineTimerCb_(task_id);
+        [this, job_id](const uvw::timer_event&, uvw::timer_handle& h) {
+          CRANE_TRACE("Pending job #{} reaches its deadline", job_id);
+          DelDeadlineTimer_(job_id);
+          m_job_deadline_timer_queue_.enqueue(job_id);
+          m_job_deadline_timer_async_handle_->send();
         });
 
     deadline_timer->start(
-        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(absl::Now())),
+        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
         std::chrono::seconds(0));
 
-    if (m_deadline_timer_map_.contains(task_id)) {
-      m_deadline_timer_map_[task_id]->close();
-      m_deadline_timer_map_[task_id].reset();
-    }
-
-    m_deadline_timer_map_[task_id] = deadline_timer;
+    m_deadline_timer_map_[job_id] = deadline_timer;
   }
 }
 
-void TaskScheduler::DelDeadlineTimer_(task_id_t task_id) {
-  if (m_deadline_timer_map_.contains(task_id)) {
-    m_deadline_timer_map_[task_id]->close();
-    m_deadline_timer_map_[task_id].reset();
+void TaskScheduler::DelDeadlineTimer_(job_id_t job_id) {
+  if (m_deadline_timer_map_.contains(job_id)) {
+    m_deadline_timer_map_[job_id]->close();
+    m_deadline_timer_map_[job_id].reset();
   }
-}
-
-void TaskScheduler::CleanDeadlineTimerCb_(task_id_t task_id) {
-  CRANE_TRACE("Pending job #{} reaches its deadline", task_id);
-  DelDeadlineTimer_(task_id);
-  m_job_deadline_timer_queue_.enqueue(task_id);
-  m_job_deadline_timer_async_handle_->send();
 }
 
 void TaskScheduler::CancelDeadlineTaskCb_() {
-  task_id_t task_id;
+  job_id_t job_id;
   m_pending_task_map_mtx_.Lock();
-  while (m_job_deadline_timer_queue_.try_dequeue(task_id)) {
-    auto pd_it = m_pending_task_map_.find(task_id);
+  while (m_job_deadline_timer_queue_.try_dequeue(job_id)) {
+    auto pd_it = m_pending_task_map_.find(job_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto& task = pd_it->second;
       m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
@@ -1483,16 +1490,18 @@ CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
   }
 
   // Only send request to the executing node
-  for (const CranedId& craned_id : craned_ids) {
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub && !stub->Invalid()) {
-      CraneErrCode err = stub->ChangeJobTimeConstraint(
-          task_id, time_limit_seconds, deadline_time);
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR(
-            "Failed to change time limit or deadline of task #{} on Node {}",
-            task_id, craned_id);
-        return err;
+  if (!is_pending) {
+    for (const CranedId& craned_id : craned_ids) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub && !stub->Invalid()) {
+        CraneErrCode err = stub->ChangeJobTimeConstraint(
+            task_id, time_limit_seconds, deadline_time);
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR(
+              "Failed to change time limit or deadline of task #{} on Node {}",
+              task_id, craned_id);
+          return err;
+        }
       }
     }
   }
@@ -2554,7 +2563,7 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 void TaskScheduler::CleanSubmitQueueCb_() {
   using SubmitQueueElem =
       std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
-  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
@@ -3837,6 +3846,9 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+
+  if (task->deadline_time <= task->SubmitTime())
+    return std::unexpected(CraneErrCode::ERR_INVALID_DEADLINE);
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;

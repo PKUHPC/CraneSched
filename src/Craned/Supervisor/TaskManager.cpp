@@ -2006,9 +2006,9 @@ void TaskManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
     } else {
       // If the task haven't timed out, set up a new timer.
       int64_t deadline_sec =
-          elem.deadline_time.value() - absl::ToUnixSeconds(absl::Now());
+          elem.deadline_time.value() - absl::ToUnixSeconds(now);
       int64_t new_time_limit_sec =
-          ToInt64Seconds((new_time_limit - (absl::Now() - start_time)));
+          ToInt64Seconds((new_time_limit - (now - start_time)));
       bool is_deadline = deadline_sec <= new_time_limit_sec ? true : false;
       std::string log_timer =
           deadline_sec <= new_time_limit_sec ? "deadline" : "time_limit";
