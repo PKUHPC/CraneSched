@@ -20,7 +20,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
 #include <lua.hpp>
 #endif
 
@@ -29,7 +29,7 @@
 #include "crane/Lock.h"
 
 namespace Ctld {
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
 int LogLuaMsg(lua_State *lua_state);
 int LogLuaError(lua_State *lua_state);
 int TimeStr2Mins(lua_State *lua_state);
@@ -54,7 +54,7 @@ class JobSubmitLua {
 public:
 
   explicit JobSubmitLua(const std::string& lua_script){
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
     m_lua_script_ = lua_script;
     if ((m_lua_state_ = luaL_newstate()) == nullptr) {
       CRANE_ERROR("luaL_newstate() failed to allocate");
@@ -66,7 +66,7 @@ public:
     RegisterLuaCraneStructFunctions_(m_lua_state_);
 #endif
   }
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
   JobSubmitLua(const JobSubmitLua&) = delete;
   JobSubmitLua& operator=(const JobSubmitLua&) = delete;
   JobSubmitLua(JobSubmitLua&&) = delete;
@@ -81,7 +81,7 @@ public:
   CraneExpectedRich<void> JobSubmit(TaskInCtld& task_in_ctld);
 
   CraneExpectedRich<void> JobModify(TaskInCtld& task_in_ctld);
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
 private:
   void RegisterOutputFunctions_();
   void LuaTableRegister_(const luaL_Reg* l);
@@ -164,13 +164,16 @@ public:
     std::unique_ptr<JobSubmitLua> m_lua_;
   };
 
-  LuaPool(size_t pool_size, const std::string& lua_script) {
-#ifndef HAVA_LUA
-    CRANE_ERROR("Lua support not compiled in. Cannot perform job_submit Lua check");
-    std::exit(1);
-#endif
+  LuaPool() = default;
+
+  bool Init(size_t pool_size, const std::string& lua_script) {
+#ifdef HAVE_LUA
     for (size_t i = 0; i < pool_size; ++i)
       m_pool_.push(std::make_unique<JobSubmitLua>(lua_script));
+    return true;
+#endif
+
+    return false;
   }
 
   Handle Acquire() {
