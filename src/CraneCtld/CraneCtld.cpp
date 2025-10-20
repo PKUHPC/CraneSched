@@ -917,10 +917,16 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+  if (!g_config.JobSubmitLuaScript.empty()) {
+    g_lua_pool = std::make_unique<Ctld::LuaPool>();
+    if (!g_lua_pool->Init(5, g_config.JobSubmitLuaScript)) {
+      CRANE_ERROR("Lua support not compiled in. Cannot perform job_submit Lua check");
+      DestroyCtldGlobalVariables();
+      std::exit(1);
+    }
+  }
 
-  if (!g_config.JobSubmitLuaScript.empty())
-    g_lua_pool = std::make_unique<Ctld::LuaPool>(5, g_config.JobSubmitLuaScript);
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
 }
