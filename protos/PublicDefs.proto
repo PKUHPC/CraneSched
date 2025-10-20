@@ -506,6 +506,8 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+
+  ERR_INVALID_DEADLINE = 78;
 }
 
 enum EntityType {
