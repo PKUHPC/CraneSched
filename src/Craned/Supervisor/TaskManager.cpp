@@ -1016,7 +1016,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
   }
 
   // command and args
-  m_container_config_.mutable_command()->Add()->assign(ca_meta.command());
+  if (!ca_meta.command().empty())
+    m_container_config_.mutable_command()->Add()->assign(ca_meta.command());
   m_container_config_.mutable_args()->CopyFrom(ca_meta.args());
 
   // envs
