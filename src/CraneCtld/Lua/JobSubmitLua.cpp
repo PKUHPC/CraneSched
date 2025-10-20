@@ -22,7 +22,7 @@
 
 namespace Ctld {
 
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
 int LogLuaMsg(lua_State* lua_state) {
   std::string prefix = "[lua]";
   int level = 0;
@@ -90,7 +90,7 @@ int GetQosPriority(lua_State* lua_state) {
 #endif
 CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
   CraneExpectedRich<void> result{};
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
   if (!LoadLuaScript_())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
@@ -137,7 +137,7 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
 
 CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   CraneExpectedRich<void> result;
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
   crane::grpc::TaskInfo task_info;
   task_in_ctld.SetFieldsOfTaskInfo(&task_info);
 
@@ -152,7 +152,7 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
   if (lua_isnil(m_lua_state_, -1))
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR, ""));
 
-  // FIXME: dead lock
+  // dead lock
   // UpdateJobGloable_();
   UpdateJobResvGloable_();
 
@@ -186,7 +186,7 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
 #endif
   return result;
 }
-#ifdef HAVA_LUA
+#ifdef HAVE_LUA
 void JobSubmitLua::RegisterOutputFunctions_() {
   const char* unpack_str;
 
@@ -427,18 +427,6 @@ int JobSubmitLua::SetJobReqField_(lua_State* lua_state) {
   if (name == "get_user_env") {
     job_desc->get_user_env = lua_toboolean(lua_state, 3);
   }
-
-  // if (name == "env") {
-  //   if (lua_istable(lua_state, 3)) {
-  //     lua_pushnil(lua_state);
-  //     while (lua_next(lua_state, 3) != 0) {
-  //       const char* key = luaL_checkstring(lua_state, -2);
-  //       const char* value = luaL_checkstring(lua_state, -1);
-  //       job_desc->env[key] = value;
-  //       lua_pop(lua_state, 1);
-  //     }
-  //   }
-  // }
 
   return 0;
 }
