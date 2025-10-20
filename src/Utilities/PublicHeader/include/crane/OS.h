@@ -58,7 +58,6 @@ struct RunCommandResult {
   int exit_code;
   std::string output;
   bool time_out;
-  int term_signal;
 };
 
 namespace util::os {

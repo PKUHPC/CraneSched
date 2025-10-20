@@ -417,9 +417,10 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+// TODO: update
 RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
   int pipefd[2];
-  RunCommandResult result{127, "", false, 0};
+  RunCommandResult result{127, "", false};
 
     if (pipe(pipefd) != 0)
         return result;
@@ -509,13 +510,8 @@ RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
 
     if (WIFEXITED(status)) {
         result.exit_code = WEXITSTATUS(status);
-        result.term_signal = 0;
-    } else if (WIFSIGNALED(status)) {
-        result.exit_code = 127;
-        result.term_signal = WTERMSIG(status);
     } else {
         result.exit_code = 127;
-        result.term_signal = 0;
     }
     return result;
 }
