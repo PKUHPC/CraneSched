@@ -962,7 +962,7 @@ class TaskScheduler {
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::shared_ptr<uvw::loop> uvw_deadline_loop;
-  std::thread m_task_deadline_timer_thread_;
+  std::thread m_job_deadline_timer_thread_;
   void DeadlineTimerThread_();
 
   // Working as channels in golang.
@@ -1053,47 +1053,22 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::shared_ptr<uvw::async_handle> m_task_deadline_timer_async_handle_;
-  ConcurrentQueue<task_id_t> m_task_deadline_timer_queue_;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
+  ConcurrentQueue<task_id_t> m_job_deadline_timer_queue_;
 
-  TreeMap<task_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_
-      ABSL_GUARDED_BY(m_deadline_timer_map_mtx_);
-  Mutex m_deadline_timer_map_mtx_;
+  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
+  ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
+
+  TreeMap<task_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
 
   void CancelDeadlineTaskCb_();
 
-  void CleanDeadlineTimerCb_(task_id_t task_id, int64_t deadline_time);
+  void CleanDeadlineTimerCb_(task_id_t task_id);
 
-  void AddDeadlineTimer(task_id_t task_id, int64_t deadline_time) {
-    absl::Time now = absl::Now();
-    if (deadline_time <= absl::ToUnixSeconds(now)) {
-      std::string now_str = absl::FormatTime("%Y-%m-%d %H:%M:%S", absl::Now(),
-                                             absl::LocalTimeZone());
-      std::string deadline_str = absl::FormatTime(
-          "%Y-%m-%d %H:%M:%S", absl::FromUnixSeconds(deadline_time),
-          absl::LocalTimeZone());
-      CRANE_ERROR("Deadline {} is earlier than now {}", deadline_str, now_str);
-    }
-    auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
-    deadline_timer->on<uvw::timer_event>(
-        [this, task_id, deadline_time](const uvw::timer_event&,
-                                       uvw::timer_handle& h) {
-          CleanDeadlineTimerCb_(task_id, deadline_time);
-        });
-    deadline_timer->start(
-        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
-        std::chrono::seconds(0));
-    LockGuard deadline_guard(&m_deadline_timer_map_mtx_);
-    m_deadline_timer_map_[task_id] = deadline_timer;
-  }
+  void CreateDeadlineTimerCb_();
 
-  void DelDeadlineTimer_(task_id_t task_id) {
-    LockGuard deadline_guard(&m_deadline_timer_map_mtx_);
-    if (m_deadline_timer_map_.contains(task_id)) {
-      m_deadline_timer_map_[task_id]->close();
-      m_deadline_timer_map_[task_id].reset();
-    }
-  }
+  void DelDeadlineTimer_(task_id_t task_id);
 };
 
 }  // namespace Ctld

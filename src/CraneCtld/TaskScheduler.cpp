@@ -56,6 +56,8 @@ TaskScheduler::~TaskScheduler() {
   if (m_task_status_change_thread_.joinable())
     m_task_status_change_thread_.join();
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
+  if (m_job_deadline_timer_thread_.joinable())
+    m_job_deadline_timer_thread_.join();
   if (m_task_deadline_timer_thread_.joinable())
     m_task_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
@@ -67,6 +69,10 @@ bool TaskScheduler::Init() {
 
   bool ok;
   CraneErrCode err;
+
+  uvw_deadline_loop = uvw::loop::create();
+  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
 
   EmbeddedDbClient::DbSnapshot snapshot;
   ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
@@ -171,7 +177,8 @@ bool TaskScheduler::Init() {
       }
 
       if (!mark_task_as_failed && task->deadline_time != infiniteFuture) {
-        AddDeadlineTimer(task_id, absl::ToUnixSeconds(task->deadline_time));
+        deadline_timer_vec.emplace_back(
+            task_id, absl::ToUnixSeconds(task->deadline_time));
       }
 
       if (!mark_task_as_failed) {
@@ -566,16 +573,27 @@ bool TaskScheduler::Init() {
     }
   }
 
-  uvw_deadline_loop = uvw::loop::create();
-
-  m_task_deadline_timer_async_handle_ =
+  m_job_deadline_timer_async_handle_ =
       uvw_deadline_loop->resource<uvw::async_handle>();
-  m_task_deadline_timer_async_handle_->on<uvw::async_event>(
+  m_job_deadline_timer_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         CancelDeadlineTaskCb_();
       });
-  m_task_deadline_timer_thread_ =
+  m_job_deadline_timer_thread_ =
       std::thread([this]() { DeadlineTimerThread_(); });
+
+  m_job_deadline_timer_create_async_handle_ =
+      uvw_deadline_loop->resource<uvw::async_handle>();
+  m_job_deadline_timer_create_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CreateDeadlineTimerCb_();
+      });
+
+  if (!deadline_timer_vec.empty()) {
+    m_job_deadline_timer_create_queue_.enqueue_bulk(deadline_timer_vec.data(),
+                                                    deadline_timer_vec.size());
+    m_job_deadline_timer_create_async_handle_->send();
+  }
 
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
@@ -713,7 +731,7 @@ void TaskScheduler::TaskStatusChangeThread_(
 }
 
 void TaskScheduler::DeadlineTimerThread_() {
-  util::SetCurrentThreadName("TaskDeadlineTimerThr");
+  util::SetCurrentThreadName("TaskDeadlineThr");
 
   std::shared_ptr<uvw::idle_handle> idle_handle =
       uvw_deadline_loop->resource<uvw::idle_handle>();
@@ -732,6 +750,7 @@ void TaskScheduler::DeadlineTimerThread_() {
 
   uvw_deadline_loop->run();
 }
+
 void TaskScheduler::CleanResvThread_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
   util::SetCurrentThreadName("CleanResvThr");
@@ -1273,21 +1292,56 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
-void TaskScheduler::CleanDeadlineTimerCb_(task_id_t task_id,
-                                          int64_t deadline_time) {
-  CRANE_TRACE("Pending task #{} reaches its deadline: {}", task_id,
-              absl::FormatTime("%Y-%m-%d %H:%M:%S",
-                               absl::FromUnixSeconds(deadline_time),
-                               absl::LocalTimeZone()));
+void TaskScheduler::CreateDeadlineTimerCb_() {
+  absl::Time now = absl::Now();
+  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
+  DeadlineTimerQueueElem elem;
+  while (m_job_deadline_timer_create_queue_.try_dequeue(elem)) {
+    task_id_t task_id = elem.first;
+    int64_t deadline_time = elem.second;
+
+    if (deadline_time <= absl::ToUnixSeconds(now)) {
+      CRANE_ERROR("Job #{}'s deadline is earlier than now", task_id);
+      continue;
+    }
+
+    auto deadline_timer = uvw_deadline_loop->resource<uvw::timer_handle>();
+    deadline_timer->on<uvw::timer_event>(
+        [this, task_id](const uvw::timer_event&, uvw::timer_handle& h) {
+          CleanDeadlineTimerCb_(task_id);
+        });
+
+    deadline_timer->start(
+        std::chrono::seconds(deadline_time - absl::ToUnixSeconds(absl::Now())),
+        std::chrono::seconds(0));
+
+    if (m_deadline_timer_map_.contains(task_id)) {
+      m_deadline_timer_map_[task_id]->close();
+      m_deadline_timer_map_[task_id].reset();
+    }
+
+    m_deadline_timer_map_[task_id] = deadline_timer;
+  }
+}
+
+void TaskScheduler::DelDeadlineTimer_(task_id_t task_id) {
+  if (m_deadline_timer_map_.contains(task_id)) {
+    m_deadline_timer_map_[task_id]->close();
+    m_deadline_timer_map_[task_id].reset();
+  }
+}
+
+void TaskScheduler::CleanDeadlineTimerCb_(task_id_t task_id) {
+  CRANE_TRACE("Pending job #{} reaches its deadline", task_id);
   DelDeadlineTimer_(task_id);
-  m_task_deadline_timer_queue_.enqueue(task_id);
-  m_task_deadline_timer_async_handle_->send();
+  m_job_deadline_timer_queue_.enqueue(task_id);
+  m_job_deadline_timer_async_handle_->send();
 }
 
 void TaskScheduler::CancelDeadlineTaskCb_() {
   task_id_t task_id;
   m_pending_task_map_mtx_.Lock();
-  while (m_task_deadline_timer_queue_.try_dequeue(task_id)) {
+  while (m_job_deadline_timer_queue_.try_dequeue(task_id)) {
     auto pd_it = m_pending_task_map_.find(task_id);
     if (pd_it != m_pending_task_map_.end()) {
       auto& task = pd_it->second;
@@ -1418,8 +1472,9 @@ CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
       task->MutableTaskToCtld()->mutable_deadline_time()->set_seconds(
           absl::ToUnixSeconds(absl_deadline_time.value()));
       if (is_pending && task->deadline_time != absl::InfiniteFuture()) {
-        DelDeadlineTimer_(task_id);
-        AddDeadlineTimer(task_id, deadline_time.value());
+        m_job_deadline_timer_create_queue_.enqueue(
+            {task_id, deadline_time.value()});
+        m_job_deadline_timer_create_async_handle_->send();
       }
     }
 
@@ -2499,14 +2554,14 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 void TaskScheduler::CleanSubmitQueueCb_() {
   using SubmitQueueElem =
       std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
-
+  using DeadlineTimerQueueElem = std::pair<task_id_t, int64_t>;
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
   std::vector<SubmitQueueElem> accepted_tasks;
   std::vector<TaskInCtld*> accepted_task_ptrs;
   std::vector<SubmitQueueElem> rejected_tasks;
-
+  std::vector<DeadlineTimerQueueElem> deadline_timer_vec;
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
   size_t accepted_size;
   size_t rejected_size;
@@ -2562,7 +2617,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       absl::Time deadline_time = accepted_tasks[pos].first->deadline_time;
 
       if (deadline_time != infiniteFuture) {
-        AddDeadlineTimer(id, absl::ToUnixSeconds(deadline_time));
+        deadline_timer_vec.emplace_back(id, absl::ToUnixSeconds(deadline_time));
       }
 
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
@@ -2572,6 +2627,11 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                      std::memory_order_release);
     m_pending_task_map_mtx_.Unlock();
+    if (!deadline_timer_vec.empty()) {
+      m_job_deadline_timer_create_queue_.enqueue_bulk(
+          deadline_timer_vec.data(), deadline_timer_vec.size());
+      m_job_deadline_timer_create_async_handle_->send();
+    }
   } while (false);
 
   // Reject tasks beyond queue capacity
