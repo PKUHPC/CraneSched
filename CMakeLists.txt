@@ -275,7 +275,7 @@ endif ()
 
 find_package(Lua QUIET)
 if(LUA_FOUND)
-    set(-DHAVE_LUA)
+    add_definitions(-DHAVE_LUA)
     set(LUA_INCLUDE_DIR ${LUA_INCLUDE_DIR} CACHE PATH "Lua include dir")
     set(LUA_LIBRARIES ${LUA_LIBRARIES} CACHE STRING "Lua libraries")
     message(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
