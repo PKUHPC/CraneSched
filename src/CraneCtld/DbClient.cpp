@@ -380,10 +380,8 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
-      int64_t deadline_time = view["deadline_time"]
-                                  ? view["deadline_time"].get_int64().value
-                                  : INT64_MAX;
-      task->mutable_deadline_time()->set_seconds(deadline_time);
+      task->mutable_deadline_time()->set_seconds(ViewValueOr_(
+          view["deadline_time"], std::numeric_limits<int64_t>::max()));
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
