@@ -144,23 +144,49 @@ sudo dpkg -i CraneSched-*-craned.deb
 Contains files for the control node:
 
 ```
-/usr/local/bin/cranectld                    # Control daemon binary
-/etc/systemd/system/cranectld.service       # Systemd service file
+/usr/bin/cranectld                          # Control daemon binary
+/usr/lib/systemd/system/cranectld.service   # Systemd service file
 /etc/crane/config.yaml.sample               # Cluster configuration template
 /etc/crane/database.yaml.sample             # Database configuration template
 ```
+
+!!! warning "Installation Path Differences"
+    The file paths differ depending on the installation method:
+
+    **When using RPM/DEB packages (`cpack`):**
+    - Binaries are installed to `/usr/bin/` (following FHS standard)
+    - Example: `/usr/bin/cranectld`
+
+    **When using direct installation (`cmake --install`):**
+    - Binaries are installed to `/usr/local/bin/` (default `CMAKE_INSTALL_PREFIX`)
+    - Example: `/usr/local/bin/cranectld`
+    - You can customize this with `cmake --install --prefix=/custom/path`
 
 ### craned Package
 
 Contains files for compute nodes:
 
 ```
-/usr/local/bin/craned                       # Execution daemon binary
+/usr/bin/craned                             # Execution daemon binary
 /usr/libexec/csupervisor                    # Per-step execution supervisor
-/etc/systemd/system/craned.service          # Systemd service file
+/usr/lib/systemd/system/craned.service      # Systemd service file
 /etc/crane/config.yaml.sample               # Cluster configuration template
 /usr/lib64/security/pam_crane.so            # PAM authentication module
 ```
+
+!!! warning "Installation Path Differences"
+    The file paths differ depending on the installation method:
+
+    **When using RPM/DEB packages (`cpack`):**
+    - Binaries are installed to `/usr/bin/` (following FHS standard)
+    - Supervisor is installed to `/usr/libexec/`
+    - Examples: `/usr/bin/craned`, `/usr/libexec/csupervisor`
+
+    **When using direct installation (`cmake --install`):**
+    - Binaries are installed to `/usr/local/bin/` (default `CMAKE_INSTALL_PREFIX`)
+    - Supervisor is installed to `/usr/local/libexec/`
+    - Examples: `/usr/local/bin/craned`, `/usr/local/libexec/csupervisor`
+    - You can customize this with `cmake --install --prefix=/custom/path`
 
 ### Post-Installation Actions
 
