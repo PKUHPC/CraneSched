@@ -168,11 +168,11 @@ cd CraneSched
 mkdir -p build && cd build
 
 # For CGroup v1
-cmake -G Ninja ..
+cmake -G Ninja .. -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER/usr/bin/g++ 
 cmake --build .
 
 # For CGroup v2
-cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true
+cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER/usr/bin/g++ 
 cmake --build .
 ```
 
