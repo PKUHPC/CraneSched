@@ -704,8 +704,10 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
     CRANE_INFO("Prolog '{}' finished successfully.", prolog);
   }
 
-  if (!run_prolog_result)
-      return CraneErrCode::ERR_PROLOG;
+  if (!run_prolog_result) {
+    g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+    return CraneErrCode::ERR_PROLOG;
+  }
 
   CRANE_INFO("Executing step #{} of job #{}", step.task_id(), step.task_id());
   if (!m_job_map_.Contains(step.task_id())) {
@@ -888,7 +890,8 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       // Just ignore it. See comments in SpawnProcessInInstance_().
       continue;
     }
-    // TODO: Update node to drain
+
+    bool epilog_result = true;
     for (const auto& epilog : g_config.EpiLogs) {
       RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = job_ptr->GetJobEnvMap(), .run_uid = 0};
       CRANE_TRACE("Running Epilog: {} as UID {} ",
@@ -897,12 +900,17 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       if (result.time_out) {
         CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
                     epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
+        epilog_result = false;
       } else if (result.exit_code != 0) {
         CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
                     epilog, result.exit_code, result.output.c_str());
+        epilog_result = false;
       } else {
         CRANE_INFO("Epilog '{}' finished successfully.",epilog);
       }
+    }
+    if (!epilog_result) {
+      g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
     }
 
     bool orphaned = job_ptr->orphaned;
