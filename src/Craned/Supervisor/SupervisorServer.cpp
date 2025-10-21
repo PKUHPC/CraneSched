@@ -102,10 +102,10 @@ grpc::Status SupervisorServiceImpl::SuspendJob(
   return Status::OK;
 }
 
-grpc::Status SupervisorServiceImpl::ResumeTask(
+grpc::Status SupervisorServiceImpl::ResumeJob(
     grpc::ServerContext* context,
-    const crane::grpc::supervisor::ResumeTaskRequest* request,
-    crane::grpc::supervisor::ResumeTaskReply* response) {
+    const crane::grpc::supervisor::ResumeJobRequest* request,
+    crane::grpc::supervisor::ResumeJobReply* response) {
   auto future = g_task_mgr->ResumeJobAsync();
   future.wait();
   CraneErrCode err = future.get();

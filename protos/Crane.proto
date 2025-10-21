@@ -134,20 +134,22 @@ message TerminateStepsReply {
   string reason = 2;
 }
 
-message SuspendStepsRequest {
-  repeated uint32 task_id_list = 1;
+message SuspendJobsRequest {
+  // Suspend operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
 }
 
-message SuspendStepsReply {
+message SuspendJobsReply {
   bool ok = 1;
   string reason = 2;
 }
 
-message ResumeStepsRequest {
-  repeated uint32 task_id_list = 1;
+message ResumeJobsRequest {
+  // Resume operations are applied on job granularity.
+  repeated uint32 job_id_list = 1;
 }
 
-message ResumeStepsReply {
+message ResumeJobsReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -1048,8 +1050,8 @@ service Craned {
   If the task is a batch task, just kill it.
   */
   rpc TerminateSteps(TerminateStepsRequest) returns (TerminateStepsReply);
-  rpc SuspendSteps(SuspendStepsRequest) returns (SuspendStepsReply);
-  rpc ResumeSteps(ResumeStepsRequest) returns (ResumeStepsReply);
+  rpc SuspendJobs(SuspendJobsRequest) returns (SuspendJobsReply);
+  rpc ResumeJobs(ResumeJobsRequest) returns (ResumeJobsReply);
   rpc TerminateOrphanedStep(TerminateOrphanedStepRequest) returns (TerminateOrphanedStepReply);
   rpc ChangeJobTimeLimit(ChangeJobTimeLimitRequest) returns (ChangeJobTimeLimitReply);
 

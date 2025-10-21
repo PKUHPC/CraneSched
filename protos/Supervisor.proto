@@ -128,9 +128,9 @@ message SuspendJobReply {
   string reason = 2;
 }
 
-message ResumeTaskRequest {}
+message ResumeJobRequest {}
 
-message ResumeTaskReply {
+message ResumeJobReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -146,6 +146,6 @@ service Supervisor {
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
   rpc SuspendJob(SuspendJobRequest) returns (SuspendJobReply);
-  rpc ResumeTask(ResumeTaskRequest) returns (ResumeTaskReply);
+  rpc ResumeJob(ResumeJobRequest) returns (ResumeJobReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }

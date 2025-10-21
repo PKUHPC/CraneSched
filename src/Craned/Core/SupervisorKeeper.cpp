@@ -105,10 +105,10 @@ CraneErrCode SupervisorStub::SuspendJob() {
 
 CraneErrCode SupervisorStub::ResumeJob() {
   ClientContext context;
-  crane::grpc::supervisor::ResumeTaskRequest request;
-  crane::grpc::supervisor::ResumeTaskReply reply;
+  crane::grpc::supervisor::ResumeJobRequest request;
+  crane::grpc::supervisor::ResumeJobReply reply;
 
-  auto ok = m_stub_->ResumeTask(&context, request, &reply);
+  auto ok = m_stub_->ResumeJob(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
   CRANE_ERROR("ResumeJob failed: {}, {}", reply.reason(), ok.error_message());

@@ -159,8 +159,6 @@ Container:
   RuntimeBin: /usr/bin/runc
   RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
   RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM
-  RuntimePause: /usr/bin/runc --rootless=true --root=/run/user/%U/ pause %u.%U.%j.%x
-  RuntimeResume: /usr/bin/runc --rootless=true --root=/run/user/%U/ resume %u.%U.%j.%x
   RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
   RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
 
