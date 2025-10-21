@@ -195,7 +195,7 @@ class JobManager {
 
   bool FreeJobAllocation_(std::vector<JobInD>&& jobs);
 
-  void FreeStepAllocation_(std::vector<StepInstance*>&& steps);
+  void FreeStepAllocation_(std::vector<std::unique_ptr<StepInstance>>&& steps);
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
@@ -257,6 +257,7 @@ class JobManager {
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   absl::Mutex m_free_job_step_mtx_;
+  // Step may hold by a job, use raw pointer here.
   std::unordered_map<StepInstance*, int /*retry count*/>
       m_completing_step_retry_map_ ABSL_GUARDED_BY(m_free_job_step_mtx_);
   std::unordered_map<job_id_t, JobInD> m_completing_job_

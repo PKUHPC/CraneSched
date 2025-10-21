@@ -263,7 +263,7 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
       steps_to_free.emplace_back(step.get());
     }
     if (job->step_map.size() != 1) {
-      CRANE_DEBUG("Job #{} to free has more one step.", job_id);
+      CRANE_DEBUG("Job #{} to free has more than one step.", job_id);
     }
     jobs_to_free.emplace_back(std::move(job.value()));
   }
@@ -341,7 +341,8 @@ void JobManager::FreeSteps(
 
 bool JobManager::EvCheckSupervisorRunning_() {
   std::vector<JobInD> jobs_to_clean;
-  std::vector<StepInstance*> steps_to_clean;
+  // Step is completing, get ownership here.
+  std::vector<std::unique_ptr<StepInstance>> steps_to_clean;
   {
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
@@ -367,15 +368,18 @@ bool JobManager::EvCheckSupervisorRunning_() {
     for (auto* step : exit_steps) {
       m_completing_step_retry_map_.erase(step);
       if (!m_completing_job_.contains(step->job_id)) {
-        steps_to_clean.push_back(step);
+        // Only the step is completing
+        steps_to_clean.emplace_back(step);
         continue;
       }
       auto& job = m_completing_job_.at(step->job_id);
       if (!job.step_map.contains(step->step_id)) {
-        steps_to_clean.push_back(step);
+        // The step is considered completing before the job considered
+        // completing, already remove form step map.
+        steps_to_clean.emplace_back(std::move(step));
         continue;
       }
-      steps_to_clean.push_back(job.step_map.at(step->step_id).release());
+      steps_to_clean.emplace_back(std::move(job.step_map.at(step->step_id)));
       job.step_map.erase(step->step_id);
       if (job.step_map.empty()) {
         jobs_to_clean.emplace_back(std::move(job));
@@ -387,7 +391,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
   if (!steps_to_clean.empty()) {
     CRANE_TRACE(
         "Supervisor for Step [{}] found to be exited",
-        absl::StrJoin(steps_to_clean | std::views::transform([](auto* step) {
+        absl::StrJoin(steps_to_clean | std::views::transform([](auto& step) {
                         return std::make_pair(step->job_id, step->step_id);
                       }) | std::views::transform(util::StepIdPairToString),
                       ","));
@@ -862,9 +866,10 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
   return true;
 }
 
-void JobManager::FreeStepAllocation_(std::vector<StepInstance*>&& steps) {
-  for (auto* step : steps) {
-    delete step;
+void JobManager::FreeStepAllocation_(
+    std::vector<std::unique_ptr<StepInstance>>&& steps) {
+  for (auto& step : steps) {
+    step.reset();
   }
   // TODO: delete cgroup
 }
@@ -1111,7 +1116,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
           CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
                       step_id);
           auto* step = job_instance->step_map.at(step_id).release();
-          steps_to_clean.emplace_back(step);
+          steps_to_clean.push_back(step);
           job_instance->step_map.erase(step_id);
         }
       }
