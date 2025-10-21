@@ -639,7 +639,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   return true;
 }
 
-bool EmbeddedDbClient::RetrieveLastStepInfo(StepDbSnapshot* snapshot) {
+bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
   using TaskStatus = crane::grpc::TaskStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfStep;
 

@@ -47,12 +47,11 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       supv_pid(supv_pid),
       status(status) {}
 
-bool StepInstance::IsDaemon() const {
+bool StepInstance::IsDaemon() const noexcept {
   return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
 }
 
-bool StepInstance::CanOperate() const { return status != StepStatus::Running; }
-std::string StepInstance::StepIdString() const {
+std::string StepInstance::StepIdString() const noexcept {
   return fmt::format("{}.{}", job_id, step_id);
 }
 

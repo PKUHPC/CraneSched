@@ -229,7 +229,7 @@ bool TaskScheduler::Init() {
   }
 
   EmbeddedDbClient::StepDbSnapshot step_snapshot;
-  ok = g_embedded_db_client->RetrieveLastStepInfo(&step_snapshot);
+  ok = g_embedded_db_client->RetrieveStepInfo(&step_snapshot);
   if (!ok) {
     CRANE_ERROR("Failed to retrieve embedded DB step snapshot!");
     return false;
@@ -361,9 +361,9 @@ bool TaskScheduler::Init() {
       purged_step_db_ids.push_back(step_info.runtime_attr().step_db_id());
   }
   for (auto& step_info : completed_steps) {
-    step_db_id_t step_db_id = step_info.runtime_attr().step_db_id();
-    purged_step_db_ids.push_back(step_db_id);
-    if (!g_db_client->CheckStepDbIdExisted(step_db_id)) {
+    purged_step_db_ids.push_back(step_info.runtime_attr().step_db_id());
+    if (!g_db_client->CheckStepExisted(step_info.step_to_ctld().job_id(),
+                                       step_info.runtime_attr().step_id())) {
       g_db_client->InsertRecoveredStep(step_info);
     }
   }
