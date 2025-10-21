@@ -972,7 +972,6 @@ class TaskScheduler {
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
 
-
   std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
       m_task_timer_handles_;
 

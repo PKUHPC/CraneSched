@@ -949,7 +949,8 @@ message QueryTxnLogReply {
   }
   repeated Txn txn_log_list = 3;
 }
-message QueryAccountUserSummaryItemRequest {
+
+message QueryJobSummaryRequest {
   repeated string filter_accounts = 1;
   repeated string filter_users = 2;
   repeated string filter_qoss = 3;
@@ -969,7 +970,7 @@ message QueryAccountUserWckeySummaryItemRequest {
   google.protobuf.Timestamp filter_end_time = 5;
 }
 
-message QueryJobSummaryItemReply {
+message QueryJobSummaryReply {
   repeated JobSummaryItem item_list = 1;
 }
 
@@ -986,7 +987,7 @@ message QueryJobSizeSummaryItemRequest {
 }
 
 message QueryJobSizeSummaryItemReply {
-    repeated JobSummaryItem item_list = 1;
+    repeated JobSizeSummaryItem item_list = 1;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
@@ -1048,8 +1049,8 @@ service CraneCtld {
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
-  rpc QueryJobSummaryItemStream(QueryJobSummaryItemRequest) returns (stream QueryJobSummaryItemReply);
-  rpc QueryJobSizeSummaryItemStream(QueryJobSizeSummaryItemRequest) returns (stream QueryJobSizeSummaryItemReply);
+  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+  rpc QueryJobSizeSummaryItem(QueryJobSizeSummaryItemRequest) returns (stream QueryJobSizeSummaryItemReply);
 
 }
 

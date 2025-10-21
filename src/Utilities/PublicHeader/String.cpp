@@ -649,7 +649,6 @@ std::vector<TimeRange> EfficientSplitTimeRange(std::time_t start,
     }
   }
 
-  // Print result
   CRANE_INFO("Split result (merged):");
   for (const auto &r : result) {
     CRANE_INFO(" [{}] {} ~ {} ({} ~ {})", r.type, r.start, r.end,

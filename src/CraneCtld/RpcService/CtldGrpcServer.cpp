@@ -2055,53 +2055,22 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   return std::nullopt;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobSummaryItemStream(
+grpc::Status CraneCtldServiceImpl::QueryJobSummary(
     ::grpc::ServerContext *context,
-    const ::crane::grpc::QueryJobSummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryItemReply> *writer) {
-  std::unordered_set<std::string> req_accounts(
-      request->filter_accounts().begin(), request->filter_accounts().end());
-  std::unordered_set<std::string> req_users(request->filter_users().begin(),
-                                            request->filter_users().end());
-  std::unordered_set<std::string> req_qoss(request->filter_qoss().begin(),
-                                           request->filter_qoss().end());
-  std::unordered_set<std::string> req_wckeys(request->filter_wckeys().begin(),
-                                             request->filter_wckeys().end());
-
-  auto start_time = request->filter_start_time().seconds();
-  auto end_time = request->filter_end_time().seconds();
-
-  g_db_client->QueryJobSummary(req_accounts, req_users, req_qoss, req_wckeys,
-                               start_time, end_time, writer);
+    const ::crane::grpc::QueryJobSummaryRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer) {
+  g_db_client->QueryJobSummary(request, writer);
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobSizeSummaryItemStream(
+grpc::Status CraneCtldServiceImpl::QueryJobSizeSummaryItem(
     ::grpc::ServerContext *context,
     const ::crane::grpc::QueryJobSizeSummaryItemRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply> *writer) {
-  std::unordered_set<std::string> req_accounts(
-      request->filter_accounts().begin(), request->filter_accounts().end());
-  std::unordered_set<std::string> req_users(request->filter_users().begin(),
-                                            request->filter_users().end());
-  std::unordered_set<std::string> req_qoss(request->filter_qoss().begin(),
-                                           request->filter_qoss().end());
-  std::unordered_set<std::string> req_wckeys(request->filter_wckeys().begin(),
-                                             request->filter_wckeys().end());
-  std::vector<std::uint32_t> req_grouping_list(
-      request->filter_grouping_list().begin(),
-      request->filter_grouping_list().end());
-  auto start_time = request->filter_start_time().seconds();
-  auto end_time = request->filter_end_time().seconds();
-  std::vector<std::uint32_t> req_job_ids(request->filter_job_ids().begin(),
-                                         request->filter_job_ids().end());
-
   if (request->filter_job_ids().size() > 0) {
     g_db_client->FetchJobSizeSummaryRecords(request, writer);
   } else {
-    g_db_client->QueryJobSizeSummary(req_accounts, req_users, req_qoss,
-                                     req_wckeys, req_grouping_list, start_time,
-                                     end_time, writer);
+    g_db_client->QueryJobSizeSummary(request, writer);
   }
   return grpc::Status::OK;
 }

@@ -534,7 +534,6 @@ bool TaskScheduler::Init() {
   m_resv_clean_thread_ = std::thread(
       [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
 
-
   // TODO: Move this to Reservation Mini-Scheduler.
   // Reservation should be recovered after creating m_resv_clean_thread_ thread.
   std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>
