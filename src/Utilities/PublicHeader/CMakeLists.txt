@@ -17,6 +17,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         crane_proto_lib
         fpm
         yaml-cpp
+        subprocess
 )
 
 # This trimmed version is used for PAM module

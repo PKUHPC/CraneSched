@@ -185,6 +185,11 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
       } else {
         uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
       }
+      if (!g_config.ProLogs.empty() && g_config.PrologFlags & Config::PrologFlagEnum::Alloc) {
+        if (g_config.PrologFlags & Config::PrologFlagEnum::Contain) {
+          // MigrateProcToCgroupOfJob()
+        }
+      }
     }
   }
 
@@ -682,29 +687,14 @@ CraneErrCode JobManager::ExecuteStepAsync(StepToD const& step) {
     return CraneErrCode::ERR_SHUTTING_DOWN;
   }
 
-  bool run_prolog_result = true;
-  for (const auto& prolog : g_config.ProLogs) {
-    RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
-    CRANE_TRACE("Running Prolog: {} as UID {} ",
-      prolog, run_prolog_ctld_args.run_uid);
-    auto result = util::os::RunCommand(run_prolog_ctld_args);
-    if (result.time_out) {
-      CRANE_INFO("Prolog'{}' timed out after {}s. Output: {}",
-                  prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
-      run_prolog_result = false;
-      break;
-    }
-    if (result.exit_code != 0) {
-      CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
-                  prolog, result.exit_code, result.output.c_str());
-      run_prolog_result = false;
-      break;
-    }
 
-    CRANE_INFO("Prolog '{}' finished successfully.", prolog);
-  }
+  RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs, .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+  if (g_config.PrologTimeout > 0)
+    run_prolog_args.timeout_sec = g_config.PrologTimeout;
+  else if (g_config.PrologEpilogTimeout > 0)
+    run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
 
-  if (!run_prolog_result) {
+  if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
     g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
     return CraneErrCode::ERR_PROLOG;
   }
@@ -891,27 +881,15 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    bool epilog_result = true;
-    for (const auto& epilog : g_config.EpiLogs) {
-      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = job_ptr->GetJobEnvMap(), .run_uid = 0};
-      CRANE_TRACE("Running Epilog: {} as UID {} ",
-        epilog, run_epilog_ctld_args.run_uid);
-      auto result = util::os::RunCommand(run_epilog_ctld_args);
-      if (result.time_out) {
-        CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
-                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
-        epilog_result = false;
-      } else if (result.exit_code != 0) {
-        CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
-                    epilog, result.exit_code, result.output.c_str());
-        epilog_result = false;
-      } else {
-        CRANE_INFO("Epilog '{}' finished successfully.",epilog);
-      }
-    }
-    if (!epilog_result) {
+    RunLogHookArgs run_epilog_args{.scripts = g_config.EpiLogs, .envs = job_ptr->GetJobEnvMap(), .run_uid = 0, .run_gid = 0, .is_prolog = false};
+    if (g_config.EpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.EpilogTimeout;
+    else if (g_config.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.EpilogTimeout;
+
+    bool epilog_result = util::os::RunPrologOrEpiLog(run_epilog_args);
+    if (!epilog_result)
       g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
-    }
 
     bool orphaned = job_ptr->orphaned;
     if (!orphaned)

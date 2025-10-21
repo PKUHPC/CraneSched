@@ -1766,21 +1766,9 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     CRANE_INFO("[Task #{}] Stopped and is doing TaskStatusChange...", task_id);
     auto task = m_step_.GetTaskInstance(task_id);
 
-    for (const auto& epilog : g_config.TaskEpilogs) {
-      RunCommandArgs run_epilog_ctld_args{.program = epilog, .args = {}, .envs = task->GetChildProcessEnv(), .run_uid = 0};
-      CRANE_TRACE("Running Epilog: {} as UID {} ",
-        epilog, run_epilog_ctld_args.run_uid);
-      auto result = util::os::RunCommand(run_epilog_ctld_args);
-      if (result.time_out) {
-        CRANE_INFO("Epilog'{}' timed out after {}s. Output: {}",
-                    epilog, run_epilog_ctld_args.timeout_sec, result.output.c_str());
-      } else if (result.exit_code != 0) {
-        CRANE_INFO("Epilog '{}' failed (exit code {}). Output: {}",
-                    epilog, result.exit_code, result.output.c_str());
-      } else {
-        CRANE_INFO("Epilog '{}' finished successfully.", epilog);
-      }
-    }
+    RunLogHookArgs run_epilog_args{.scripts = g_config.TaskEpilogs,
+      .envs = task->GetChildProcessEnv(), .run_uid=0, .run_gid = 0, .is_prolog = false};
+    util::os::RunPrologOrEpiLog(run_epilog_args);
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
@@ -1962,29 +1950,10 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       return;
     }
 
-    bool run_prolog_result = true;
-    for (const auto& prolog : g_config.TaskPrologs) {
-      RunCommandArgs run_prolog_ctld_args{.program = prolog, .args = {}, .envs = {}, .run_uid = 0};
-      CRANE_TRACE("Running Prolog: {} as UID {} ",
-        prolog, run_prolog_ctld_args.run_uid);
-      auto result = util::os::RunCommand(run_prolog_ctld_args);
-      if (result.time_out) {
-        CRANE_INFO("Prolog'{}' timed out after {}s. Output: {}",
-                    prolog, run_prolog_ctld_args.timeout_sec, result.output.c_str());
-        run_prolog_result = false;
-        break;
-      }
-      if (result.exit_code != 0) {
-        CRANE_INFO("Prolog '{}' failed (exit code {}). Output: {}",
-                    prolog, result.exit_code, result.output.c_str());
-        run_prolog_result = false;
-        break;
-      }
+    RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
+      .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
 
-      CRANE_INFO("Prolog '{}' finished successfully.", prolog);
-    }
-
-    if (!run_prolog_result) {
+    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
       ActivateTaskStatusChange_(
           task->task_id, crane::grpc::TaskStatus::Failed,
           ExitCode::kExitCodePrologFail,

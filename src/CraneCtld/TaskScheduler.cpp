@@ -940,6 +940,7 @@ void TaskScheduler::ScheduleThread_() {
         // Move failed tasks to the completed queue.
         std::vector<TaskInCtld*> failed_task_raw_ptrs;
         for (auto& it : failed_result_list) {
+          // TODO: if prolog failed, requeue and failed?
           auto& task = it.first;
           failed_task_raw_ptrs.emplace_back(task.get());
 
@@ -2162,29 +2163,19 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     CRANE_TRACE("Move task#{} to the Completed Queue", task_id);
     m_running_task_map_.erase(iter);
-    for (const auto& epilog : g_config.EpiLogs) {
-      RunCommandArgs run_epilog_ctld_args{.program = epilog,
-                                          .args = {},
+
+    RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.EpiLogs,
                                           .envs = task->env,
-                                          .run_uid = 0};
-      if (g_config.EpilogTimeout) {
-        run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
-      } else {
-        run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
-      }
-      CRANE_TRACE("Running EpilogCtld: {} as UID {} with timeout {}s", epilog,
-                  run_epilog_ctld_args.run_uid,
-                  run_epilog_ctld_args.timeout_sec);
-      auto result = util::os::RunCommand(run_epilog_ctld_args);
-      if (result.time_out) {
-        CRANE_DEBUG("EpilogCtld'{}' timed out after {}s. Output: {}", epilog,
-                   run_epilog_ctld_args.timeout_sec, result.output.c_str());
-      } else if (result.exit_code != 0) {
-        CRANE_DEBUG("EpilogCtld '{}' failed (exit code {}). Output: {}", epilog,
-                   result.exit_code, result.output.c_str());
-      } else
-        CRANE_TRACE("EpilogCtld '{}' finished successfully.", epilog);
+                                          .run_uid = 0, .run_gid = 0, .is_prolog = false};
+    if (g_config.EpilogTimeout) {
+      run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
+    } else {
+      run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
     }
+    CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
+                run_epilog_ctld_args.run_uid,
+                run_epilog_ctld_args.timeout_sec);
+    util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
   }
 
   for (auto& [craned_id, cgroups] : craned_cgroups_map) {
@@ -2953,61 +2944,25 @@ void MinLoadFirst::NodeSelect(
         // update node state =  POWER_UP/CONFIGURING
         g_meta_container->UpdateNodeConfigureState(task->executing_craned_ids, true);
         // run prolog script
-        bool run_prolog_result = true;
-        for (const auto& prolog : g_config.ProLogs) {
-          RunCommandArgs run_prolog_ctld_args{.program = prolog,
-                                              .args = {},
-                                              .envs = task->env,
-                                              .run_uid = 0};
-          CRANE_TRACE("Running PrologCtld: {} as UID {} ", prolog,
-                      run_prolog_ctld_args.run_uid);
-          auto result = util::os::RunCommand(run_prolog_ctld_args);
-          if (result.time_out) {
-            CRANE_DEBUG("PrologCtld'{}' timed out after {}s. Output: {}", prolog,
-                       run_prolog_ctld_args.timeout_sec, result.output.c_str());
-            run_prolog_result = false;
-            break;
-          }
-
-          if (result.exit_code != 0) {
-            CRANE_DEBUG("PrologCtld '{}' failed (exit code {}). Output: {}",
-                       prolog, result.exit_code, result.output.c_str());
-            run_prolog_result = false;
-            break;
-          }
-
-          CRANE_TRACE("PrologCtld '{}' finished successfully.", prolog);
-          // parse and add env to task
-          for (const auto& line : absl::StrSplit(result.output, '\n')) {
-            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&line));
-            // Skip empty lines or lines without an equal sign
-            auto eq_pos = line.find('=');
-            if (line.empty() || eq_pos == absl::string_view::npos) continue;
-
-            absl::string_view key = line.substr(0, eq_pos);
-            absl::string_view value = line.substr(eq_pos + 1);
-
-            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&key));
-            absl::StripAsciiWhitespace(absl::Nonnull<std::string*>(&value));
-
-            if (!key.empty()) {
-              task->env[std::string(key)] = std::string(value);
-              CRANE_TRACE("Added env from prolog: {}={}", key, value);
-            }
-          }
+        RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
+          .envs = task->env, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+        if (g_config.EpilogTimeout) {
+          run_prolog_args.timeout_sec = g_config.EpilogTimeout;
+        } else {
+          run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
         }
-
+        CRANE_TRACE("Running PrologCtld as UID {} with timeout {}s",
+                    run_prolog_args.run_uid,
+                    run_prolog_args.timeout_sec);
+        bool run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
         // update node state to ready
         g_meta_container->UpdateNodeConfigureState(task->executing_craned_ids, false);
         if (!run_prolog_result) {
-          if (task->IsBatch()) {
+          if (task->IsBatch())
             task->pending_reason = "PrologCranectld failed";
-            continue;
-          } else {
-            // crun/calloc will be cancelled.
-            g_task_scheduler->CancelTaskNoBlock(task_id);
-            continue;
-          }
+           else
+            g_task_scheduler->CancelTaskNoBlock(task_id); // crun/calloc will be cancelled.
+          continue;
         }
       }
 
