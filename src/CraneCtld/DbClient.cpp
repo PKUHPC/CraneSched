@@ -1459,34 +1459,31 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  // 0  job_id        step_db_id    step_id         mod_time      deleted
-  // 5  cpus_req      mem_req       step_name       env           id_user
-  // 10 id_group      nodelist      nodes_alloc     node_inx      time_eligible
-  // 15 time_start    time_end      time_suspended  script        state
-  // 20 timelimit     time_submit   work_dir        submit_line   exit_code
-  // 25 get_user_env  type          extra_attr      res_alloc     step_type
-  // 30 container
+  // 0  step_id         mod_time      deleted         cpus_req      mem_req
+  // 5  step_name       env           id_user         id_group      nodelist
+  // 10 nodes_alloc     node_inx      time_eligible   time_start    time_end
+  // 15 time_suspended  script        state           timelimit     time_submit
+  // 20 work_dir        submit_line   exit_code       get_user_env  type  // 25
+  // extra_attr      res_alloc     step_type       container
 
   // clang-format off
-  std::array<std::string, 31> fields{
+  std::array<std::string, 29> fields{
       // 0 - 4
-      "job_id",  "step_db_id", "step_id", "mod_time",    "deleted",
+      "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
-      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+      "task_name",   "env",      "id_user","id_group", "nodelist",
       // 10 - 14
-      "id_group", "nodelist",   "nodes_alloc", "node_inx",  "time_eligible",
+        "nodes_alloc", "node_inx",  "time_eligible","time_start", "time_end",
       // 15 - 19
-       "time_start", "time_end", "time_suspended","script", "state",
+        "time_suspended","script", "state","timelimit", "time_submit",
       // 20 - 24
-       "timelimit", "time_submit", "work_dir","submit_line", "exit_code",
-      // 25 - 29
-        "get_user_env","type", "extra_attr", "res_alloc", "step_type",
-      // 30 - 30
-    "container",
+        "work_dir","submit_line", "exit_code","get_user_env","type",
+      // 25 - 28
+         "extra_attr", "res_alloc", "step_type", "container",
   };
 
   // clang-format on
-  std::tuple<int32_t, step_db_id_t, int32_t, int64_t, bool,      /*0-4*/
+  std::tuple<int32_t, int64_t, bool,                             /*0-4*/
              double, int64_t, std::string, std::string, int32_t, /*5-9*/
              std::vector<gid_t>, std::string, int32_t, int32_t,
              int64_t,                                             /*10-14*/
@@ -1495,28 +1492,25 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
              bool, int32_t, std::string, ResourceV2, int32_t,     /*25-29*/
              std::string>                                         /*30-30*/
       values{                                                     // 0-4
-             static_cast<int32_t>(step->job_id), step->StepDbId(),
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             // 5-9
              step->requested_node_res_view.CpuCount(),
              static_cast<int64_t>(step->requested_node_res_view.MemoryBytes()),
-             step->name, env_str, static_cast<int32_t>(step->uid),
+             // 5-9
+             step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
+             util::HostNameListToStr(step->CranedIds()),
              // 10-14
-             step->gids, util::HostNameListToStr(step->CranedIds()),
              static_cast<int32_t>(step->CranedIds().size()), 0, 0,
-             // 15-19
              ToUnixSeconds(step->StartTime()), ToUnixSeconds(step->EndTime()),
-             0, script, step->Status(),
+             // 15-19
+             0, script, step->Status(), absl::ToInt64Seconds(step->time_limit),
+             ToUnixSeconds(step->SubmitTime()),
              // 20-24
-             absl::ToInt64Seconds(step->time_limit),
-             ToUnixSeconds(step->SubmitTime()), step->StepToCtld().cwd(),
-             step->StepToCtld().cmd_line(), step->ExitCode(),
-             // 25-29
-             step->get_user_env, step->type, step->StepToCtld().extra_attr(),
-             step->AllocatedRes(), step->StepType(),
-             // 30-30
-             step->container};
+             step->StepToCtld().cwd(), step->StepToCtld().cmd_line(),
+             step->ExitCode(), step->get_user_env, step->type,
+             // 25-28
+             step->StepToCtld().extra_attr(), step->AllocatedRes(),
+             step->StepType(), step->container};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1536,71 +1530,65 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  // 0  job_id        step_db_id    step_id         mod_time      deleted
-  // 5  cpus_req      mem_req       step_name       env           id_user
-  // 10 id_group      nodelist      nodes_alloc     node_inx      time_eligible
-  // 15 time_start    time_end      time_suspended  script        state
-  // 20 timelimit     time_submit   work_dir        submit_line   exit_code
-  // 25 get_user_env  type          extra_attr      res_alloc     step_type
-  // 30 container
+  // 0  step_id         mod_time      deleted       cpus_req      mem_req
+  // 5  step_name       env           id_user       id_group      nodelist
+  // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
+  // 15 time_suspended  script        state         timelimit     time_submit
+  // 20 work_dir        submit_line   exit_code     get_user_env  type
+  // 25 extra_attr      res_alloc     step_type     container
 
   // clang-format off
-  std::array<std::string, 31> fields{
+  std::array<std::string, 29> fields{
       // 0 - 4
-      "job_id",  "step_db_id", "step_id", "mod_time",    "deleted",
+      "step_id", "mod_time",    "deleted","cpus_req", "mem_req",
       // 5 - 9
-      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+         "task_name",   "env",      "id_user","id_group", "nodelist",
       // 10 - 14
-      "id_group", "nodelist",   "nodes_alloc", "node_inx",  "time_eligible",
+       "nodes_alloc", "node_inx",  "time_eligible","time_start", "time_end",
       // 15 - 19
-       "time_start", "time_end", "time_suspended","script", "state",
+       "time_suspended","script", "state","timelimit", "time_submit",
       // 20 - 24
-       "timelimit", "time_submit", "work_dir","submit_line", "exit_code",
+       "work_dir","submit_line", "exit_code","get_user_env","type",
       // 25 - 29
-        "get_user_env","type", "extra_attr", "res_alloc", "step_type",
-      // 30 - 30
+         "extra_attr", "res_alloc", "step_type",
     "container",
   };
 
   // clang-format on
-  std::tuple<int32_t, step_db_id_t, int32_t, int64_t, bool,      /*0-4*/
-             double, int64_t, std::string, std::string, int32_t, /*5-9*/
-             std::vector<gid_t>, std::string, int32_t, int32_t,
-             int64_t,                                             /*10-14*/
-             int64_t, int64_t, int64_t, std::string, int32_t,     /*15-19*/
-             int64_t, int64_t, std::string, std::string, int32_t, /*20-24*/
-             bool, int32_t, std::string, ResourceV2, int32_t,     /*25-29*/
-             std::string>                                         /*30-30*/
+  std::tuple<int32_t, int64_t, bool, double, int64_t, /*0-4*/
+             std::string, std::string, int32_t, std::vector<gid_t>,
+             std::string,                                      /*5-9*/
+             int32_t, int32_t, int64_t, int64_t, int64_t,      /*10-14*/
+             int64_t, std::string, int32_t, int64_t, int64_t,  /*15-19*/
+             std::string, std::string, int32_t, bool, int32_t, /*20-24*/
+             std::string, ResourceV2, int32_t, std::string>    /*25-28*/
+
       values{
           // 0-4
-          static_cast<int32_t>(step_to_ctld.job_id()),
-          runtime_attr.step_db_id(),
           static_cast<int32_t>(runtime_attr.step_id()),
           absl::ToUnixSeconds(absl::Now()), false,
-          // 5-9
           step_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
           static_cast<int64_t>(step_to_ctld.req_resources()
                                    .allocatable_res()
                                    .memory_limit_bytes()),
+          // 5-9
           step_to_ctld.name(), env_str, step_to_ctld.uid(),
-          // 10-14
           std::vector<gid_t>(step_to_ctld.gid().begin(),
                              step_to_ctld.gid().end()),
           util::HostNameListToStr(runtime_attr.craned_ids()),
+          // 10-14
           runtime_attr.craned_ids_size(), 0, 0,
-          // 15-19
           runtime_attr.start_time().seconds(),
-          runtime_attr.end_time().seconds(), 0, script, runtime_attr.status(),
+          runtime_attr.end_time().seconds(),
+          // 15-19
+          0, script, runtime_attr.status(), step_to_ctld.time_limit().seconds(),
+          runtime_attr.submit_time().seconds(),
           // 20-24
-          step_to_ctld.time_limit().seconds(),
-          runtime_attr.submit_time().seconds(), step_to_ctld.cwd(),
-          step_to_ctld.cmd_line(), runtime_attr.exit_code(),
-          // 25-29
+          step_to_ctld.cwd(), step_to_ctld.cmd_line(), runtime_attr.exit_code(),
           step_to_ctld.get_user_env(), step_to_ctld.type(),
+          // 25-28
           step_to_ctld.extra_attr(), ResourceV2(runtime_attr.allocated_res()),
-          runtime_attr.step_type(),
-          // 30-30
-          step_to_ctld.container()};
+          runtime_attr.step_type(), step_to_ctld.container()};
 
   return DocumentConstructor_(fields, values);
 }

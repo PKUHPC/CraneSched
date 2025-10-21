@@ -136,7 +136,6 @@ auto FlattenMapView(const Map &m) {
 }
 
 std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
-std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step);
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
 
 std::string StepToDIdString(const crane::grpc::StepToD &step_to_d);
