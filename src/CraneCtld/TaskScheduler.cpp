@@ -1300,9 +1300,10 @@ void TaskScheduler::CreateDeadlineTimerCb_() {
     job_id_t job_id = elem.first;
     int64_t deadline_time = elem.second;
 
-    if (m_deadline_timer_map_.contains(job_id)) {
-      m_deadline_timer_map_[job_id]->close();
-      m_deadline_timer_map_[job_id].reset();
+    auto it = m_deadline_timer_map_.find(job_id);
+    if (it != m_deadline_timer_map_.end()) {
+      it->second->close();
+      it->second.reset();
     }
 
     if (deadline_time <= absl::ToUnixSeconds(now)) {
@@ -1339,9 +1340,10 @@ void TaskScheduler::CreateDeadlineTimerCb_() {
 }
 
 void TaskScheduler::DelDeadlineTimer_(job_id_t job_id) {
-  if (m_deadline_timer_map_.contains(job_id)) {
-    m_deadline_timer_map_[job_id]->close();
-    m_deadline_timer_map_[job_id].reset();
+  auto it = m_deadline_timer_map_.find(job_id);
+  if (it != m_deadline_timer_map_.end()) {
+    it->second->close();
+    it->second.reset();
   }
 }
 
