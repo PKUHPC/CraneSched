@@ -2535,26 +2535,16 @@ void MongodbClient::QueryAndAggJobSummary(
     std::time_t range_start, std::time_t range_end,
     const crane::grpc::QueryJobSummaryRequest* request,
     absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map) {
-  using Clock = std::chrono::steady_clock;
-  auto t0 = Clock::now();
-
-  // 1. 获取集合和建索引（建议实际部署时不要每次建索引）
   auto jobs = (*GetClient_())[m_db_name_][table];
   try {
-    auto t1 = Clock::now();
     jobs.create_index(bsoncxx::builder::stream::document{}
                       << time_field << 1 << "account" << 1 << "username" << 1
                       << "qos" << 1 << "wckey" << 1
                       << bsoncxx::builder::stream::finalize);
-    auto t2 = Clock::now();
-    CRANE_INFO(
-        "create_index cost {} ms",
-        std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count());
   } catch (const std::exception& e) {
     CRANE_ERROR("Create index error: {}", e.what());
   }
 
-  auto t3 = Clock::now();
   std::unordered_set<std::string> accounts(request->filter_accounts().begin(),
                                            request->filter_accounts().end());
   std::unordered_set<std::string> users(request->filter_users().begin(),
@@ -2563,10 +2553,6 @@ void MongodbClient::QueryAndAggJobSummary(
                                        request->filter_qoss().end());
   std::unordered_set<std::string> wckeys(request->filter_wckeys().begin(),
                                          request->filter_wckeys().end());
-  auto t4 = Clock::now();
-  CRANE_INFO(
-      "build filter sets cost {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count());
 
   bsoncxx::builder::stream::document match_builder;
   match_builder << time_field << bsoncxx::builder::stream::open_document
@@ -2603,11 +2589,6 @@ void MongodbClient::QueryAndAggJobSummary(
                   << bsoncxx::builder::stream::close_document;
   }
 
-  auto t5 = Clock::now();
-  CRANE_INFO(
-      "build match_builder cost {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count());
-
   // Build aggregation pipeline
   mongocxx::pipeline pipeline;
   pipeline.match(match_builder << bsoncxx::builder::stream::finalize);
@@ -2628,27 +2609,13 @@ void MongodbClient::QueryAndAggJobSummary(
                    << "_id" << 1 << "total_cpu_time" << 1 << "total_count" << 1
                    << bsoncxx::builder::stream::finalize);
 
-  auto t6 = Clock::now();
-  CRANE_INFO(
-      "build pipeline cost {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count());
-
   auto options = mongocxx::options::aggregate{};
   options.allow_disk_use(true);
   auto coll = (*GetClient_())[m_db_name_][table];
 
-  auto t7 = Clock::now();
   auto cursor = coll.aggregate(pipeline, options);
 
-  //for (auto&& doc : cursor) {}
-  auto t8 = Clock::now();
-  CRANE_INFO(
-      "aggregate query cost {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t8 - t7).count());
-
   // Read aggregation results into agg_map
-  size_t result_count = 0;
-  auto t9 = Clock::now();
   for (auto&& doc : cursor) {
     auto id = doc["_id"].get_document().view();
     std::string acc = std::string(id["account"].get_string().value);
@@ -2668,17 +2635,7 @@ void MongodbClient::QueryAndAggJobSummary(
         doc["total_cpu_time"].get_double().value;
     agg_map[{acc, user, qos, wk}].total_count +=
         doc["total_count"].get_int32().value;
-    ++result_count;
   }
-  auto t10 = Clock::now();
-  CRANE_INFO(
-      "process results cost {} ms, result count = {}",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t10 - t9).count(),
-      result_count);
-
-  CRANE_INFO(
-      "total cost {} ms",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t10 - t0).count());
 }
 
 bool MongodbClient::FetchJobSizeSummaryRecords(
@@ -2791,7 +2748,7 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
     item.set_cluster(g_config.CraneClusterName);
     item.set_account(kv.first.account);
     item.set_wckey(kv.first.wckey);
-    item.set_cpu_level(kv.first.cpu_level);
+    item.set_cpu_alloc(kv.first.cpu_alloc);
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_item_list()->CopyFrom(item);
@@ -2896,7 +2853,7 @@ void MongodbClient::QueryJobSizeSummary(
     item.set_cluster(g_config.CraneClusterName);
     item.set_account(kv.first.account);
     item.set_wckey(kv.first.wckey);
-    item.set_cpu_level(kv.first.cpu_level);
+    item.set_cpu_alloc(kv.first.cpu_alloc);
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_item_list()->CopyFrom(item);
@@ -2918,7 +2875,6 @@ uint64_t MongodbClient::MillisecondsToNextHour() {
 
   tm_now.tm_min = 0;
   tm_now.tm_sec = 0;
-  tm_now.tm_hour = 0;
   tm_now.tm_hour += 1;
   time_t next_hour_time_t = mktime(&tm_now);
 
@@ -2938,11 +2894,11 @@ bool MongodbClient::Init() {
         ClusterRollupUsage();
       });
 
-  uint64_t first_delay = MillisecondsToNextHour();
-  uint64_t repeat = 3600 * 1000;
+  uint64_t first_delay_ms = MillisecondsToNextHour();
+  uint64_t repeat_ms = 3600 * 1000;
 
-  mongodb_task_timer_handle->start(std::chrono::milliseconds(first_delay),
-                                   std::chrono::milliseconds(repeat));
+  mongodb_task_timer_handle->start(std::chrono::milliseconds(first_delay_ms),
+                                   std::chrono::milliseconds(repeat_ms));
 
   m_mongodb_sum_thread_ =
       std::thread([this, loop = std::move(loop)]() { MongoDbSumaryTh_(loop); });
