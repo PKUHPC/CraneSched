@@ -176,8 +176,9 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
   mongocxx::options::bulk_write bulk_options;
 
   try {
-    auto bulk = (*GetClient_())[m_db_name_][m_task_collection_name_]
-                    .create_bulk_write(*GetSession_(), bulk_options);
+    auto bulk =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].create_bulk_write(
+            *GetSession_(), bulk_options);
 
     for (const auto& task : tasks) {
       document job_doc = TaskInCtldToDocument_(task);
@@ -191,10 +192,9 @@ bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
       // created if document doesn't exist
       document update_doc;
       update_doc.append(kvp("$set", job_doc));
-      update_doc.append(
-          kvp("$setOnInsert", [](sub_document set_on_insert) {
-            set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
-          }));
+      update_doc.append(kvp("$setOnInsert", [](sub_document set_on_insert) {
+        set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
+      }));
 
       mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
       update_op.upsert(true);
@@ -494,8 +494,9 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   mongocxx::options::bulk_write bulk_options;
 
   try {
-    auto bulk = (*GetClient_())[m_db_name_][m_task_collection_name_]
-                    .create_bulk_write(*GetSession_(), bulk_options);
+    auto bulk =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].create_bulk_write(
+            *GetSession_(), bulk_options);
 
     for (const auto& [job_id, job_steps] : steps_by_job) {
       // Build array of step documents
@@ -514,17 +515,16 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
       // $setOnInsert: create minimal document if it doesn't exist
       document update_doc;
       update_doc.append(kvp("$push", [&steps_array](sub_document push_doc) {
-        push_doc.append(
-            kvp("steps", [&steps_array](sub_document each_doc) {
-              each_doc.append(kvp("$each", steps_array));
-            }));
+        push_doc.append(kvp("steps", [&steps_array](sub_document each_doc) {
+          each_doc.append(kvp("$each", steps_array));
+        }));
       }));
-      update_doc.append(kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
-        set_on_insert.append(kvp("task_id", static_cast<int32_t>(job_id)));
-      }));
+      update_doc.append(
+          kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
+            set_on_insert.append(kvp("task_id", static_cast<int32_t>(job_id)));
+          }));
 
-      mongocxx::model::update_one update_op{filter.view(),
-                                            update_doc.view()};
+      mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
       update_op.upsert(true);
 
       bulk.append(update_op);
