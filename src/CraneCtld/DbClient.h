@@ -115,16 +115,30 @@ class MongodbClient {
     std::string username;
     std::string qos;
     std::string wckey;
-    uint32_t cpu_level;
 
     template <typename H>
     friend H AbslHashValue(H h, const JobSummKey& key) {
       return H::combine(std::move(h), key.account, key.username, key.qos,
-                        key.wckey, key.cpu_level);
+                        key.wckey);
     }
     bool operator==(const JobSummKey& other) const {
       return account == other.account && username == other.username &&
-             qos == other.qos && wckey == other.wckey &&
+             qos == other.qos && wckey == other.wckey;
+      ;
+    }
+  };
+
+  struct JobSizeSummKey {
+    std::string account;
+    std::string wckey;
+    uint32_t cpu_level;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const JobSizeSummKey& key) {
+      return H::combine(std::move(h), key.account, key.wckey, key.cpu_level);
+    }
+    bool operator==(const JobSizeSummKey& other) const {
+      return account == other.account && wckey == other.wckey &&
              cpu_level == other.cpu_level;
       ;
     }
@@ -169,53 +183,34 @@ class MongodbClient {
   bool RollupHourToDay();
   bool RollupDayToMonth();
   void ClusterRollupUsage();
-  bool AggregateMonthFromDay(std::time_t month_start, std::time_t month_end);
-  bool AggregateDayFromHour(std::time_t day_start, std::time_t day_end);
-  bool AggregateHourTable(std::time_t start, std::time_t end);
+  bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
   void QueryAndAggJobSizeSummary(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
-      const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& qoss,
-      const std::unordered_set<std::string>& wckeys,
-      const std::vector<uint32_t>& grouping_list,
-      absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
+      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
+      absl::flat_hash_map<JobSizeSummKey, JobSummAggResult>& agg_map);
   void QueryAndAggJobSummary(
       const std::string& table, const std::string& time_field,
       std::time_t range_start, std::time_t range_end,
-      const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& qoss,
-      const std::unordered_set<std::string>& wckeys,
+      const crane::grpc::QueryJobSummaryRequest* request,
       absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
   void QueryJobSizeSummary(
-      const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& qoss,
-      const std::unordered_set<std::string>& wckeys,
-      const std::vector<std::uint32_t>& grouping_list, std::time_t start,
-      std::time_t end,
-      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>*
-          stream);
+      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
   bool FetchJobSizeSummaryRecords(
       const crane::grpc::QueryJobSizeSummaryItemRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
   void QueryJobSummary(
-      const std::unordered_set<std::string>& accounts,
-      const std::unordered_set<std::string>& users,
-      const std::unordered_set<std::string>& qoss,
-      const std::unordered_set<std::string>& wckeys, std::time_t start,
-      std::time_t end,
-      ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryItemReply>* stream);
+      const crane::grpc::QueryJobSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+  void HourJobSummAggregation(std::time_t start, std::time_t end,
+                              const std::string& task_collection_name);
   void DayOrMonJobSummAggregation(const std::string& src_coll_str,
                                   const std::string& dst_coll_str,
                                   const std::string& src_time_field,
                                   const std::string& period_field,
                                   std::time_t period_start,
                                   std::time_t period_end);
-  void HourJobSummAggregation(std::time_t start, std::time_t end,
-                              const std::string& task_collection_name);
   void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
   uint64_t MillisecondsToNextHour();
 
