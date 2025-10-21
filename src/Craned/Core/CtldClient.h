@@ -202,6 +202,8 @@ class CtldClient {
                              uint32_t exit_code,
                              std::optional<std::string> reason = std::nullopt);
 
+  void UpdateNodeDrainState(bool is_drain, const std::string& reason);
+
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
 

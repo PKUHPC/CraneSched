@@ -865,6 +865,26 @@ void CranedMetaContainer::UpdateNodeConfigureState(
   }
 }
 
+bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
+                                               bool is_drain, const std::string& reason) {
+  if (!craned_meta_map_.Contains(craned_id)) {
+    CRANE_ERROR(
+        "unknown craned_id '{}', cannot update drain state.",
+        craned_id);
+    return false;
+  }
+
+  auto craned_meta = craned_meta_map_[craned_id];
+  if (craned_meta->drain == is_drain) return true;
+
+  craned_meta->drain = is_drain;
+  craned_meta->state_reason = reason;
+
+  CRANE_DEBUG("Update node '{}' drain state to {}", craned_id, is_drain);
+
+  return true;
+}
+
 CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
     const std::string& partition_name, bool is_allowed_list,
     std::unordered_set<std::string>&& accounts) {
