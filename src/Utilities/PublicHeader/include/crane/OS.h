@@ -31,6 +31,8 @@
 #include <pwd.h>
 #include <sys/wait.h>
 
+#include <subprocess/subprocess.h>
+
 #include "crane/Logger.h"
 
 struct SystemRelInfo {
@@ -45,19 +47,16 @@ struct NodeSpecInfo {
   double memory_gb;
 };
 
-struct RunCommandArgs {
-  std::string program;
-  std::vector<std::string> args;
+// prolog or epilog
+struct RunLogHookArgs {
+  std::vector<std::string> scripts;
   std::unordered_map<std::string, std::string> envs;
   uint32_t timeout_sec;
   int run_uid;
   int run_gid;
-};
-
-struct RunCommandResult {
-  int exit_code;
-  std::string output;
-  bool time_out;
+  bool is_prolog;
+  task_id_t job_id;
+  std::function<void(pid_t, task_id_t)> callback;
 };
 
 namespace util::os {
@@ -108,7 +107,7 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
-RunCommandResult RunCommand(const RunCommandArgs& args);
+bool RunPrologOrEpiLog(const RunLogHookArgs& args);
 
 
 }  // namespace util::os

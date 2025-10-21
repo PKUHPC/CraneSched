@@ -30,6 +30,8 @@
 
 #include "crane/Logger.h"
 
+#include <future>
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -417,103 +419,87 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-// TODO: update
-RunCommandResult RunCommand(const RunCommandArgs& run_command_args) {
-  int pipefd[2];
-  RunCommandResult result{127, "", false};
+bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
+  bool is_failed = true;
+  auto start_time = std::chrono::steady_clock::now();
 
-    if (pipe(pipefd) != 0)
-        return result;
+  auto read_stream = [](std::FILE* f) {
+    std::string out;
+    char buf[4096];
+    while (std::fgets(buf, sizeof(buf), f)) out.append(buf);
+    return out;
+  };
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
-        return result;
+  for (const auto& script : args.scripts) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start_time);
+    if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
+      CRANE_ERROR("Total timeout ({}s) reached before running {}.",
+                  args.timeout_sec, script.c_str());
+      return false;
     }
 
-    if (pid == 0) {
-        close(pipefd[0]);
-        setsid();
-        if (run_command_args.run_gid >= 0) {
-            if (setgid(run_command_args.run_gid) != 0) _exit(127);
-        }
-        if (run_command_args.run_uid >= 0) {
-            struct passwd *pw = getpwuid(run_command_args.run_uid);
-            if (pw) initgroups(pw->pw_name, run_command_args.run_gid >= 0 ? run_command_args.run_gid : pw->pw_gid);
-            if (setuid(run_command_args.run_uid) != 0) _exit(127);
-        }
-
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
-
-        std::vector<char*> argv;
-        argv.push_back(const_cast<char*>(run_command_args.program.c_str()));
-        for (const auto& arg : run_command_args.args)
-            argv.push_back(const_cast<char*>(arg.c_str()));
-        argv.push_back(nullptr);
-
-        std::vector<char*> envp;
-        if (!run_command_args.envs.empty()) {
-            for (const auto& [k, v] : run_command_args.envs)
-                envp.push_back(fmt::format("{}={}", k, v).data());
-            envp.push_back(nullptr);
-        }
-
-        if (!run_command_args.envs.empty())
-            execve(run_command_args.program.c_str(), argv.data(), envp.data());
-        else
-            execv(run_command_args.program.c_str(), argv.data());
-        _exit(127);
+    subprocess_s subprocess{};
+    std::vector<const char*> argv = {script.c_str(), nullptr};
+    if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
+      CRANE_ERROR("{} subprocess creation failed: {}.", script,
+                  strerror(errno));
+      if (args.is_prolog) return false;
+      is_failed = false;
+      continue;
     }
 
-    close(pipefd[1]);
-    int flags = fcntl(pipefd[0], F_GETFL, 0);
-    fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    pid_t pid = subprocess.child;
+    if (args.callback) args.callback(pid, args.job_id);
+    int result = 0;
+    auto fut = std::async(std::launch::async, [pid, &result]() {
+      return waitpid(pid, &result, 0);
+    });
 
-    char buf[256];
-    int elapsed = 0;
-    const int interval = 100;  // ms
-    int status = 0;
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_now =
+        std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+    int remaining_time =
+        args.timeout_sec > 0
+            ? std::max<int>(0, args.timeout_sec - elapsed_now.count())
+            : 0;
     bool child_exited = false;
-    uint32_t timeout_ms = run_command_args.timeout_sec > 0 ? run_command_args.timeout_sec * 1000 : 0;
-
-    while (timeout_ms <= 0 || elapsed < timeout_ms) {
-        ssize_t n;
-        while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
-            buf[n] = '\0';
-            result.output += buf;
-        }
-        pid_t r = waitpid(pid, &status, WNOHANG);
-        if (r == pid) {
-            child_exited = true;
-            break;
-        }
-        usleep(interval * 1000);
-        elapsed += interval;
+    if (args.timeout_sec == 0) {
+      fut.get();
+      child_exited = true;
+    } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
+               std::future_status::ready) {
+      if (fut.get() == pid) {
+        child_exited = true;
+      }
     }
-
-    ssize_t n;
-    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
-        buf[n] = '\0';
-        result.output += buf;
-    }
-    close(pipefd[0]);
 
     if (!child_exited) {
-        kill(-pid, SIGKILL);
-        waitpid(pid, &status, 0);
-        result.time_out = true;
-        return result;
+      kill(pid, SIGKILL);
+      waitpid(pid, &result, 0);
+      CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
+                  read_stream(subprocess_stdout(&subprocess)),
+                  read_stream(subprocess_stderr(&subprocess)));
+      if (args.is_prolog) return false;
+      is_failed = false;
+      continue;
     }
 
-    if (WIFEXITED(status)) {
-        result.exit_code = WEXITSTATUS(status);
-    } else {
-        result.exit_code = 127;
+    subprocess_destroy(&subprocess);
+
+    if (result != 0) {
+      CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
+                  result, read_stream(subprocess_stdout(&subprocess)),
+                  read_stream(subprocess_stderr(&subprocess)));
+      if (args.is_prolog) return false;
+      is_failed = false;
+      continue;
     }
-    return result;
+
+    CRANE_DEBUG("{} finished successfully.", script);
+  }
+
+  return is_failed;
 }
 
 }  // namespace util::os

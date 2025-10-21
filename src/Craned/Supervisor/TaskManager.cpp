@@ -2451,7 +2451,18 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
+    RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
+      .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
 
+    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+      TaskFinish_(
+          task->task_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodePrologFail,
+          fmt::format(
+              "[Job #{}] Failed to run prolog for uid {} of task",
+              m_step_.job_id, m_step_.uid));
+      elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
+    }
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");

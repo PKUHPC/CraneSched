@@ -169,12 +169,23 @@ struct Config {
   std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
 
+  enum PrologFlagEnum : std::uint8_t {
+    Alloc               = 1 << 0, // 0000 0001 = 1
+    Contain             = 1 << 1, // 0000 0010 = 2
+    DeferBatch          = 1 << 2, // 0000 0100 = 4
+    NoHold              = 1 << 3, // 0000 1000 = 8
+    ForceRequeueOnFail  = 1 << 4, // 0001 0000 = 16
+    RunInJob            = 1 << 5, // 0010 0000 = 32
+    Serial              = 1 << 6, // 0100 0000 = 64
+    X11                 = 1 << 7  // 1000 0000 = 128
+};
+
   std::vector<std::string> ProLogs;
   std::vector<std::string> EpiLogs;
   uint32_t PrologTimeout{0};
   uint32_t EpilogTimeout{0};
   uint32_t PrologEpilogTimeout{0};
-  std::unordered_set<std::string> PrologFlags;
+  int PrologFlags{0};
 
   std::vector<std::string> TaskPrologs;
   std::vector<std::string> TaskEpilogs;

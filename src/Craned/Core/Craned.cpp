@@ -698,10 +698,12 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["Prolog"])
-        util::ParseLogHookPaths(config["Prolog"].as<std::string>(), kDefaultConfigPath, &g_config.ProLogs);
+        util::ParseLogHookPaths(config["Prolog"].as<std::string>(),
+                                kDefaultConfigPath, &g_config.ProLogs);
 
       if (config["Epilog"])
-        util::ParseLogHookPaths(config["Epilog"].as<std::string>(), kDefaultConfigPath, &g_config.EpiLogs);
+        util::ParseLogHookPaths(config["Epilog"].as<std::string>(),
+                                kDefaultConfigPath, &g_config.EpiLogs);
 
       if (config["PrologTimeout"])
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
@@ -710,7 +712,33 @@ void ParseConfig(int argc, char** argv) {
         g_config.EpilogTimeout = config["EpilogTimeout"].as<uint32_t>();
 
       if (config["PrologEpilogTimeout"])
-        g_config.PrologEpilogTimeout = config["PrologEpilogTimeout"].as<uint32_t>();
+        g_config.PrologEpilogTimeout =
+            config["PrologEpilogTimeout"].as<uint32_t>();
+
+      if (config["PrologFlags"]) {
+        auto prolog_flags = config["PrologFlags"].as<std::string>();
+        for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
+          std::string trimmed(absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
+          if (trimmed == "alloc")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+          if (trimmed == "contain")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
+          if (trimmed == "deferbatch")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::DeferBatch;
+          if (trimmed == "nohold")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::NoHold;
+          if (trimmed == "forcerequeueonfail")
+            g_config.PrologFlags |=
+                Craned::Config::PrologFlagEnum::ForceRequeueOnFail;
+          if (trimmed == "runinjob")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::RunInJob;
+          if (trimmed == "serial")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Serial;
+          if (trimmed == "x11")
+            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::X11;
+        }
+        // TODO: add judge for prolog flags
+      }
 
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,

@@ -202,7 +202,7 @@ Container:
 
 Prolog: prolog1.sh,prolog1.sh
 PrologTimeout: 60
-PrologFlags: Alloc
+# PrologFlags: Alloc  # Alloc, Contain, DeferBatch, NoHold, ForceRequeueOnFail, RunInJob, Serial, X11
 Epilog: epilog1.sh,epilog2.sh
 EpilogTimeout: 60
 PrologEpilogTimeout: 120
