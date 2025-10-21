@@ -123,7 +123,7 @@ class MongodbClient {
   bool InsertRecoveredStep(
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
-  bool CheckStepDbIdExisted(int64_t step_db_id);
+  bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
@@ -295,7 +295,6 @@ class MongodbClient {
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
-  const std::string m_step_collection_name_{"step_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};

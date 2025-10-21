@@ -500,7 +500,7 @@ bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   return false;
 }
 
-bool MongodbClient::CheckStepDbIdExisted(int64_t step_db_id) {
+bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
   document doc;
   doc.append(kvp("step_db_id", step_db_id));
 

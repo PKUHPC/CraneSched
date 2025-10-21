@@ -185,7 +185,7 @@ class EmbeddedDbClient {
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
-  bool RetrieveLastStepInfo(StepDbSnapshot* snapshot);
+  bool RetrieveStepInfo(StepDbSnapshot* snapshot);
 
   bool RetrieveReservationInfo(
       std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
