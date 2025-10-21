@@ -41,17 +41,20 @@ namespace Craned::Supervisor {
 
 using Common::CgroupManager;
 
-bool StepInstance::IsBatch() const { return !interactive_type.has_value(); }
+bool StepInstance::IsBatch() const noexcept {
+  return !interactive_type.has_value();
+}
 
-bool StepInstance::IsCrun() const {
+bool StepInstance::IsCrun() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Crun;
 }
 
-bool StepInstance::IsCalloc() const {
+bool StepInstance::IsCalloc() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Calloc;
 }
+
 EnvMap StepInstance::GetStepProcessEnv() const {
   std::unordered_map<std::string, std::string> env_map;
 
@@ -184,10 +187,9 @@ ITaskInstance::~ITaskInstance() {
   if (m_parent_step_inst_->IsCrun()) {
     auto* crun_meta = GetCrunMeta();
 
-    close(crun_meta->stdin_read);
-    // For crun pty job, avoid close same fd twice
-    if (crun_meta->stdout_read != crun_meta->stdin_read)
-      close(crun_meta->stdout_read);
+    // For crun non pty job, close out fd in CforedClient
+    // For crun pty job, close tty fd in CforedClient
+    if (!crun_meta->pty) close(crun_meta->stdin_write);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
@@ -355,10 +357,10 @@ CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
     if (pid > 0) {
-      meta->stdin_read = crun_pty_fd;
+      meta->stdin_read = -1;
       meta->stdout_read = crun_pty_fd;
       meta->stdin_write = crun_pty_fd;
-      meta->stdout_write = crun_pty_fd;
+      meta->stdout_write = -1;
     }
   } else {
     pid = fork();
@@ -395,12 +397,12 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
   auto ok = parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
-      m_pid_, meta->stdin_write, meta->stdout_read, meta->pty);
+      task_id, meta->stdin_write, meta->stdout_read, meta->pty);
   if (!ok) return false;
 
   if (m_parent_step_inst_->x11) {
     if (m_parent_step_inst_->x11_fwd)
-      meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(m_pid_);
+      meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(task_id);
     else
       meta->x11_port = parent_step.interactive_meta().x11_meta().port();
 
@@ -410,9 +412,6 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
                 m_parent_step_inst_->x11_fwd, meta->x11_port);
   }
 
-  // TODO: It's ok here to start the uv loop thread, since currently 1 task only
-  //  corresponds to 1 step.
-  parent_cfored_client->StartUvLoopThread();
   return true;
 }
 
@@ -1838,10 +1837,10 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     if (m_step_.IsCrun()) {
       // TaskStatusChange of a crun task is triggered in
       // CforedManager.
-      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(pid);
+      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(task_id);
       if (ok_to_free) {
         CRANE_TRACE("It's ok to unregister task #{}", task_id);
-        m_step_.GetCforedClient()->TaskEnd(pid);
+        m_step_.GetCforedClient()->TaskEnd(task_id);
       }
     } else /* Batch / Calloc */ {
       // If the TaskInstance has no process left,
@@ -1861,7 +1860,7 @@ void TaskManager::EvTaskTimerCb_() {
 
   DelTerminationTimer_();
 
-  if (m_step_.IsBatch()) {
+  if (m_step_.IsBatch() || m_step_.IsCrun()) {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
@@ -1912,7 +1911,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
           ActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-              exit_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+              ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
           ActivateTaskStatusChange_(

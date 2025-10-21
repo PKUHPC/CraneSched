@@ -49,6 +49,8 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
+constexpr step_id_t kDaemonStepId = 0;
+
 inline const char* const kDefaultHost = "0.0.0.0";
 
 inline const char* kCtldDefaultPort = "10011";
