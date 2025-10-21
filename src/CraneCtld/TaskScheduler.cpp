@@ -1772,9 +1772,11 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
 
       TaskInCtld* task = iter->second.get();
       if (task->Status() != crane::grpc::Suspended) {
+        auto prev_status = task->Status();
         task->SetStatus(crane::grpc::Suspended);
         if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
                 0, task->TaskDbId(), task->RuntimeAttr())) {
+          task->SetStatus(prev_status);
           CRANE_ERROR("Failed to persist suspended status for task #{}",
                       task_id);
           results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
@@ -1909,9 +1911,11 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
 
       TaskInCtld* task = iter->second.get();
       if (task->Status() != crane::grpc::Running) {
+        auto prev_status = task->Status();
         task->SetStatus(crane::grpc::Running);
         if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(
                 0, task->TaskDbId(), task->RuntimeAttr())) {
+          task->SetStatus(prev_status);
           CRANE_ERROR("Failed to persist resumed status for task #{}", task_id);
           results.emplace_back(CraneErrCode::ERR_GENERIC_FAILURE);
           continue;
