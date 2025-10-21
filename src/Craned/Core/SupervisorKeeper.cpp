@@ -92,10 +92,14 @@ CraneErrCode SupervisorStub::SuspendJob() {
   crane::grpc::supervisor::SuspendJobRequest request;
   crane::grpc::supervisor::SuspendJobReply reply;
 
-  auto ok = m_stub_->SuspendJob(&context, request, &reply);
-  if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
+  auto status = m_stub_->SuspendJob(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("SuspendJob RPC failed: {}", status.error_message());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_ERROR("SuspendJob failed: {}, {}", reply.reason(), ok.error_message());
+  CRANE_ERROR("SuspendJob declined: {}", reply.reason());
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
     return CraneErrCode::ERR_INVALID_PARAM;
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))
@@ -108,10 +112,14 @@ CraneErrCode SupervisorStub::ResumeJob() {
   crane::grpc::supervisor::ResumeJobRequest request;
   crane::grpc::supervisor::ResumeJobReply reply;
 
-  auto ok = m_stub_->ResumeJob(&context, request, &reply);
-  if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
+  auto status = m_stub_->ResumeJob(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("ResumeJob RPC failed: {}", status.error_message());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  if (reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_ERROR("ResumeJob failed: {}, {}", reply.reason(), ok.error_message());
+  CRANE_ERROR("ResumeJob declined: {}", reply.reason());
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_INVALID_PARAM))
     return CraneErrCode::ERR_INVALID_PARAM;
   if (reply.reason() == CraneErrStr(CraneErrCode::ERR_NON_EXISTENT))
