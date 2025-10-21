@@ -38,7 +38,7 @@ void CranedStub::Fini() {
 
 void CranedStub::ConfigureCraned(const CranedId& craned_id,
                                  const RegToken& token) {
-  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
+  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                      "Configuring craned {} with token {}", craned_id,
                      ProtoTimestampToString(token));
 
@@ -459,7 +459,7 @@ void CranedKeeper::Shutdown() {
   m_cq_closed_ = true;
 
   {
-    util::lock_guard l(m_connected_craned_mtx_);
+    util::lock_guard l(m_connect_craned_mtx_);
     for (auto&& [craned_id, stub] : m_connected_craned_id_stub_map_) {
       stub->m_channel_.reset();
     }
@@ -771,13 +771,13 @@ uint32_t CranedKeeper::AvailableCranedCount() {
 }
 
 bool CranedKeeper::IsCranedConnected(const CranedId& craned_id) {
-  ReaderLock lock(&m_connected_craned_mtx_);
+  ReaderLock lock(&m_connect_craned_mtx_);
   return m_connected_craned_id_stub_map_.contains(craned_id);
 }
 
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId& craned_id) {
-  ReaderLock lock(&m_connected_craned_mtx_);
+  ReaderLock lock(&m_connect_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
   if (iter != m_connected_craned_id_stub_map_.end()) return iter->second;
 
@@ -803,7 +803,8 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string& crane_id,
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const& craned_id) {
+void CranedKeeper::ConnectCranedNode_(const CranedId& craned_id,
+                                      const RegToken& token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -872,7 +873,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const& craned_id) {
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
   craned->m_craned_id_ = craned_id;
-  craned->m_clean_up_cb_ = CranedChannelConnFailNoLock_;
+  craned->SetRegToken(token);
+  craned->m_clean_up_cb_ = CranedChannelConnectFail_;
 
   CqTag* tag = m_tag_sync_allocator_->new_object<CqTag>(
       CqTag{CqTag::kInitializingCraned, craned});
