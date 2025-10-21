@@ -196,6 +196,8 @@ class CtldClient {
 
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
+  void UpdateNodeDrainState(bool is_drain, const std::string& reason);
+
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
 
