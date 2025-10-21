@@ -168,11 +168,11 @@ cd CraneSched
 mkdir -p build && cd build
 
 # For CGroup v1
-cmake -G Ninja .. -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER/usr/bin/g++ 
+cmake -G Ninja .. -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ 
 cmake --build .
 
 # For CGroup v2
-cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER/usr/bin/g++ 
+cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ 
 cmake --build .
 ```
 
@@ -180,12 +180,12 @@ cmake --build .
 
 !!! tip
     We recommend deploying CraneSched using DEB packages. See the [Packaging Guide](packaging.md) for installation instructions.
+
 ```bash
 cmake --install .
 ```
 
 For deploying CraneSched to multiple nodes, please follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
-
 
 ### 5.2 Configure PAM Module
 
