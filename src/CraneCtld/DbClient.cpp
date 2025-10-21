@@ -146,22 +146,41 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
 
 bool MongodbClient::InsertJobs(const std::unordered_set<TaskInCtld*>& tasks) {
   if (tasks.empty()) return false;
-  std::vector<bsoncxx::document::value> documents;
 
-  for (const auto& task : tasks) {
-    document doc = TaskInCtldToDocument_(task);
-    documents.push_back(doc.extract());
-  }
-
-  mongocxx::options::insert insert_options;
-  insert_options.ordered(false);  // unordered to speed up the operation
+  mongocxx::options::bulk_write bulk_options;
 
   try {
-    bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
-        (*GetClient_())[m_db_name_][m_task_collection_name_].insert_many(
-            *GetSession_(), documents, insert_options);
-    if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
+    auto bulk = (*GetClient_())[m_db_name_][m_task_collection_name_]
+                    .create_bulk_write(*GetSession_(), bulk_options);
+
+    for (const auto& task : tasks) {
+      document job_doc = TaskInCtldToDocument_(task);
+
+      // Create filter by task_id
+      document filter;
+      filter.append(kvp("task_id", static_cast<int32_t>(task->TaskId())));
+
+      // Use $set to update job fields, and $setOnInsert for steps array
+      // This ensures job fields are always updated, but steps array is only
+      // created if document doesn't exist
+      document update_doc;
+      update_doc.append(kvp("$set", job_doc));
+      update_doc.append(
+          kvp("$setOnInsert", [](sub_document set_on_insert) {
+            set_on_insert.append(kvp("steps", bsoncxx::types::b_array{}));
+          }));
+
+      mongocxx::model::update_one update_op{filter.view(), update_doc.view()};
+      update_op.upsert(true);
+
+      bulk.append(update_op);
+    }
+
+    auto result = bulk.execute();
+    if (result) {
+      // Success if operations were performed (inserted or matched)
       return true;
+    }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -424,22 +443,55 @@ bool MongodbClient::InsertRecoveredStep(
 
 bool MongodbClient::InsertSteps(const std::unordered_set<StepInCtld*>& steps) {
   if (steps.empty()) return false;
-  std::vector<bsoncxx::document::value> documents;
 
+  std::unordered_map<job_id_t, std::vector<StepInCtld*>> steps_by_job;
   for (const auto& step : steps) {
-    document doc = StepInCtldToDocument_(step);
-    documents.push_back(doc.extract());
+    steps_by_job[step->job_id].push_back(step);
   }
 
-  mongocxx::options::insert insert_options;
-  insert_options.ordered(false);  // unordered to speed up the operation
+  mongocxx::options::bulk_write bulk_options;
 
   try {
-    bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
-        (*GetClient_())[m_db_name_][m_step_collection_name_].insert_many(
-            *GetSession_(), documents, insert_options);
-    if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == steps.size())
+    auto bulk = (*GetClient_())[m_db_name_][m_task_collection_name_]
+                    .create_bulk_write(*GetSession_(), bulk_options);
+
+    for (const auto& [job_id, job_steps] : steps_by_job) {
+      // Build array of step documents
+      array steps_array;
+      for (const auto& step : job_steps) {
+        document step_doc = StepInCtldToDocument_(step);
+        steps_array.append(step_doc);
+      }
+
+      // Filter by task_id (job_id)
+      document filter;
+      filter.append(kvp("task_id", static_cast<int32_t>(job_id)));
+
+      // Combine $push and $setOnInsert
+      // $push: append steps to existing document
+      // $setOnInsert: create minimal document if it doesn't exist
+      document update_doc;
+      update_doc.append(kvp("$push", [&steps_array](sub_document push_doc) {
+        push_doc.append(
+            kvp("steps", [&steps_array](sub_document each_doc) {
+              each_doc.append(kvp("$each", steps_array));
+            }));
+      }));
+      update_doc.append(kvp("$setOnInsert", [&job_id](sub_document set_on_insert) {
+        set_on_insert.append(kvp("task_id", static_cast<int32_t>(job_id)));
+      }));
+
+      mongocxx::model::update_one update_op{filter.view(),
+                                            update_doc.view()};
+      update_op.upsert(true);
+
+      bulk.append(update_op);
+    }
+
+    auto result = bulk.execute();
+    if (result) {
       return true;
+    }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
