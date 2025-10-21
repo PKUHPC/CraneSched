@@ -1304,6 +1304,7 @@ void TaskScheduler::CreateDeadlineTimerCb_() {
     if (it != m_deadline_timer_map_.end()) {
       it->second->close();
       it->second.reset();
+      m_deadline_timer_map_.erase(it);
     }
 
     if (deadline_time <= absl::ToUnixSeconds(now)) {
@@ -1335,7 +1336,7 @@ void TaskScheduler::CreateDeadlineTimerCb_() {
         std::chrono::seconds(deadline_time - absl::ToUnixSeconds(now)),
         std::chrono::seconds(0));
 
-    m_deadline_timer_map_[job_id] = deadline_timer;
+    m_deadline_timer_map_.emplace(job_id, deadline_timer);
   }
 }
 
@@ -1344,6 +1345,7 @@ void TaskScheduler::DelDeadlineTimer_(job_id_t job_id) {
   if (it != m_deadline_timer_map_.end()) {
     it->second->close();
     it->second.reset();
+    m_deadline_timer_map_.erase(it);
   }
 }
 
