@@ -26,7 +26,7 @@ namespace Ctld {
 
 using grpc::ClientContext;
 using grpc::Status;
-CranedStub::CranedStub(CranedKeeper *craned_keeper)
+CranedStub::CranedStub(CranedKeeper* craned_keeper)
     : m_craned_keeper_(craned_keeper),
       m_failure_retry_times_(0),
       m_disconnected_(true),
@@ -38,9 +38,9 @@ void CranedStub::Fini() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
-void CranedStub::ConfigureCraned(const CranedId &craned_id,
-                                 const RegToken &token) {
-  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+void CranedStub::ConfigureCraned(const CranedId& craned_id,
+                                 const RegToken& token) {
+  CRANE_LOGGER_TRACE(g_runtime_status.connection_logger,
                      "Configuring craned {} with token {}", craned_id,
                      ProtoTimestampToString(token));
 
@@ -388,7 +388,7 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
 CranedKeeper::~CranedKeeper() {
   Shutdown();
 
-  for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
+  for (auto& cq_thread : m_cq_thread_vec_) cq_thread.join();
   if (m_period_connect_thread_.joinable()) m_period_connect_thread_.join();
 
   CRANE_TRACE("CranedKeeper has been closed.");
@@ -400,8 +400,8 @@ void CranedKeeper::Shutdown() {
   m_cq_closed_ = true;
 
   {
-    util::lock_guard l(m_connect_craned_mtx_);
-    for (auto &&[craned_id, stub] : m_connected_craned_id_stub_map_) {
+    util::lock_guard l(m_connected_craned_mtx_);
+    for (auto&& [craned_id, stub] : m_connected_craned_id_stub_map_) {
       stub->m_channel_.reset();
     }
     m_connected_craned_id_stub_map_.clear();
@@ -420,12 +420,12 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
   util::SetCurrentThreadName(fmt::format("KeeStatMon{:0>3}", thread_id));
 
   bool ok;
-  CqTag *tag;
+  CqTag* tag;
   grpc::CompletionQueue::NextStatus next_status;
 
   while (true) {
     auto ddl = std::chrono::system_clock::now() + std::chrono::seconds(10);
-    next_status = m_cq_vec_[thread_id].AsyncNext((void **)&tag, &ok, ddl);
+    next_status = m_cq_vec_[thread_id].AsyncNext((void**)&tag, &ok, ddl);
 
     // If Shutdown() is called, return immediately.
     if (next_status == grpc::CompletionQueue::SHUTDOWN) break;
@@ -443,9 +443,9 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       // and it is handled in state machines.
       // It's fine to ignore the value of ok.
 
-      auto *craned = tag->craned;
+      auto* craned = tag->craned;
 
-      CqTag *next_tag = nullptr;
+      CqTag* next_tag = nullptr;
       grpc_connectivity_state new_state = craned->m_channel_->GetState(true);
 
       switch (tag->type) {
@@ -522,8 +522,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
   }
 }
 
-CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
-    CranedStub *craned, grpc_connectivity_state new_state) {
+CranedKeeper::CqTag* CranedKeeper::InitCranedStateMachine_(
+    CranedStub* craned, grpc_connectivity_state new_state) {
   // CRANE_TRACE("Enter InitCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
@@ -619,8 +619,8 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   return nullptr;
 }
 
-CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
-    CranedStub *craned, grpc_connectivity_state new_state) {
+CranedKeeper::CqTag* CranedKeeper::EstablishedCranedStateMachine_(
+    CranedStub* craned, grpc_connectivity_state new_state) {
   // CRANE_TRACE("Enter EstablishedCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
@@ -720,14 +720,14 @@ uint32_t CranedKeeper::AvailableCranedCount() {
   return m_connected_craned_id_stub_map_.size();
 }
 
-bool CranedKeeper::IsCranedConnected(const CranedId &craned_id) {
-  ReaderLock lock(&m_connect_craned_mtx_);
+bool CranedKeeper::IsCranedConnected(const CranedId& craned_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
   return m_connected_craned_id_stub_map_.contains(craned_id);
 }
 
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
-    const CranedId &craned_id) {
-  ReaderLock lock(&m_connect_craned_mtx_);
+    const CranedId& craned_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
   if (iter != m_connected_craned_id_stub_map_.end()) return iter->second;
 
@@ -735,7 +735,7 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
 }
 
 void CranedKeeper::SetCranedConnectedCb(
-    std::function<void(CranedId, const RegToken &)> cb) {
+    std::function<void(CranedId, const RegToken&)> cb) {
   m_craned_connected_cb_ = std::move(cb);
 }
 
@@ -743,8 +743,8 @@ void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
   m_craned_disconnected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
-                                         const RegToken &token) {
+void CranedKeeper::PutNodeIntoUnavailSet(const std::string& crane_id,
+                                         const RegToken& token) {
   if (m_cq_closed_) return;
 
   CRANE_TRACE("Put craned {} into unavail. Token: {}.", crane_id,
@@ -753,8 +753,7 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
-                                      RegToken token) {
+void CranedKeeper::ConnectCranedNode_(CranedId const& craned_id) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -790,8 +789,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
     }
   }
 
-  auto *craned = new CranedStub(this);
-  craned->SetRegToken(token);
+  auto* craned = new CranedStub(this);
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -826,7 +824,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
   craned->m_craned_id_ = craned_id;
   craned->m_clean_up_cb_ = CranedChannelConnFailNoLock_;
 
-  CqTag *tag = m_tag_sync_allocator_->new_object<CqTag>(
+  CqTag* tag = m_tag_sync_allocator_->new_object<CqTag>(
       CqTag{CqTag::kInitializingCraned, craned});
 
   // Round-robin distribution here.

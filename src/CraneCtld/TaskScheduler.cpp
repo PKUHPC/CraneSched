@@ -1705,13 +1705,13 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
     std::atomic_bool has_failure{false};
     Mutex result_mtx;
 
-    // Broadcast SuspendSteps via the thread pool and track successes/errors.
+    // Broadcast SuspendJobs via the thread pool and track successes/errors.
     absl::BlockingCounter blocking_counter(executing_nodes.size());
     for (const auto& craned_id : executing_nodes) {
       g_thread_pool->detach_task([&, craned_id]() {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         if (!stub || stub->Invalid()) {
-          CRANE_WARN("SuspendSteps stub for {} unavailable", craned_id);
+          CRANE_WARN("SuspendJobs stub for {} unavailable", craned_id);
           {
             LockGuard lock(&result_mtx);
             if (failure_code == CraneErrCode::SUCCESS)
@@ -1722,7 +1722,7 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
           return;
         }
 
-        CraneErrCode err = stub->SuspendSteps(job_ids);
+        CraneErrCode err = stub->SuspendJobs(job_ids);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to suspend task #{} on craned {}: {}", task_id,
                       craned_id, CraneErrStr(err));
@@ -1842,13 +1842,13 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
     std::atomic_bool has_failure{false};
     Mutex result_mtx;
 
-    // Broadcast ResumeSteps via the thread pool and track successes/errors.
+    // Broadcast ResumeJobs via the thread pool and track successes/errors.
     absl::BlockingCounter blocking_counter(executing_nodes.size());
     for (const auto& craned_id : executing_nodes) {
       g_thread_pool->detach_task([&, craned_id]() {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         if (!stub || stub->Invalid()) {
-          CRANE_WARN("ResumeSteps stub for {} unavailable", craned_id);
+          CRANE_WARN("ResumeJobs stub for {} unavailable", craned_id);
           {
             LockGuard lock(&result_mtx);
             if (failure_code == CraneErrCode::SUCCESS)
@@ -1859,7 +1859,7 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
           return;
         }
 
-        CraneErrCode err = stub->ResumeSteps(job_ids);
+        CraneErrCode err = stub->ResumeJobs(job_ids);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to resume task #{} on craned {}: {}", task_id,
                       craned_id, CraneErrStr(err));
