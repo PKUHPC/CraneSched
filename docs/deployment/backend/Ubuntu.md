@@ -109,8 +109,11 @@ apt install libmpfr-dev libgmp3-dev libmpc-dev -y
 wget http://ftp.gnu.org/gnu/gcc/gcc-14.1.0/gcc-14.1.0.tar.gz
 tar -xf gcc-14.1.0.tar.gz
 cd gcc-14.1.0
-./configure -v --build=$(uname -m)-linux-gnu --host=$(uname -m)-linux-gnu --target=$(uname -m)-linux-gnu --prefix=/usr/local/gcc-14.1.0 --enable-checking=release --enable-languages=c,c++ --disable-multilib --program-suffix=-14.1.0
-make
+
+./contrib/download_prerequisites
+mkdir build && cd build
+../configure --enable-checking=release --enable-languages=c,c++ --disable-multilib
+make -j
 make install
 
 #For ubuntu 20.04
