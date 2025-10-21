@@ -476,10 +476,6 @@ std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id) {
   return fmt::format("{}.{}", job_id, step_id);
 }
 
-std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step) {
-  return StepIdsToString(std::get<0>(step), std::get<1>(step));
-}
-
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step) {
   return StepIdsToString(step.first, step.second);
 }
