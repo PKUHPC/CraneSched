@@ -1030,6 +1030,7 @@ void JobManager::EvCleanChangeJobTimeConstraintQueueCb_() {
       auto stub = g_supervisor_keeper->GetStub(elem.job_id);
       if (!stub) {
         CRANE_ERROR("Supervisor for job #{} not found", elem.job_id);
+        elem.ok_prom.set_value(false);
         continue;
       }
 
@@ -1039,6 +1040,7 @@ void JobManager::EvCleanChangeJobTimeConstraintQueueCb_() {
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("Failed to change job time limit or deadline for job #{}",
                     elem.job_id);
+        elem.ok_prom.set_value(false);
         continue;
       }
 
