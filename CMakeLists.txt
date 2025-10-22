@@ -126,7 +126,7 @@ option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 
-option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" ON)
+option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" OFF)
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
