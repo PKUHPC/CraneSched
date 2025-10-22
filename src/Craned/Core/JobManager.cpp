@@ -185,11 +185,24 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
       } else {
         uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
       }
-      if (!g_config.ProLogs.empty() && g_config.PrologFlags & Config::PrologFlagEnum::Alloc) {
-        if (g_config.PrologFlags & Config::PrologFlagEnum::Contain) {
-          // MigrateProcToCgroupOfJob()
-        }
-      }
+      // if (!g_config.ProLogs.empty() && g_config.PrologFlags & Config::PrologFlagEnum::Alloc) {
+      //   RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs, .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+      //   if (g_config.PrologTimeout > 0)
+      //     run_prolog_args.timeout_sec = g_config.PrologTimeout;
+      //   else if (g_config.PrologEpilogTimeout > 0)
+      //     run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+      //
+      //   if (g_config.PrologFlags & Config::PrologFlagEnum::Contain) {
+      //     run_prolog_args.callback = [this](pid_t pid, task_id_t job_id) {
+      //       return this->MigrateProcToCgroupOfJob(pid, job_id);
+      //     };
+      //     run_prolog_args.job_id = job_id;
+      //   }
+      //   if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+      //     g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+      //     return false;
+      //   }
+      // }
     }
   }
 
