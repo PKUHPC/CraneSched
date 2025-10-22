@@ -835,17 +835,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  {
-    std::unordered_set<job_id_t> jobs;
-    for (auto &job_info : response->task_info_list()) {
-      jobs.insert(job_info.task_id());
-    }
-    if (!g_db_client->FetchStepRecords(jobs, response)) {
-      CRANE_ERROR("Failed to call g_db_client->FetchStepRecords");
-      return grpc::Status::OK;
-    }
-  }
-
   sort_and_truncate(task_list, num_limit);
   response->set_ok(true);
   return grpc::Status::OK;

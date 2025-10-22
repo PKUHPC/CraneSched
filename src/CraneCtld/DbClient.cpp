@@ -424,6 +424,11 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
       task->set_container(view["container"].get_string().value);
+      for (const auto& elem : view["steps"].get_array().value) {
+        auto step_info = ViewToStepInfo_(elem.get_document().value);
+        (*task->mutable_step_info())[step_info.step_id()] =
+            std::move(step_info);
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -561,49 +566,6 @@ bool MongodbClient::CheckStepExisted(job_id_t job_id, step_id_t step_id) {
   }
 
   return false;
-}
-
-bool MongodbClient::FetchStepRecords(
-    const std::unordered_set<job_id_t>& jobs,
-    crane::grpc::QueryTasksInfoReply* response) {
-  document filter;
-
-  if (!jobs.empty()) {
-    filter.append(kvp("job_id", [&jobs](sub_document job_id_doc) {
-      array job_id_array;
-      for (const auto& job_id : jobs) {
-        job_id_array.append(static_cast<std::int32_t>(job_id));
-      }
-      job_id_doc.append(kvp("$in", job_id_array));
-    }));
-  }
-  mongocxx::options::find option;
-  document sort_doc;
-  sort_doc.append(kvp("step_db_id", -1));
-  option = option.sort(sort_doc.view());
-
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_].find(filter.view(), option);
-
-  std::unordered_map<job_id_t, std::vector<crane::grpc::StepInfo>>
-      job_step_info;
-  try {
-    for (auto view : cursor) {
-      auto step_info = ViewToStepInfo_(view);
-      auto job_id = step_info.job_id();
-      job_step_info[job_id].emplace_back(std::move(step_info));
-    }
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, e.what());
-  }
-  for (auto& job_info : *response->mutable_task_info_list()) {
-    for (auto&& step_info : job_step_info[job_info.task_id()]) {
-      (*job_info.mutable_step_info())[step_info.step_id()] =
-          std::move(step_info);
-    }
-  }
-
-  return true;
 }
 
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {

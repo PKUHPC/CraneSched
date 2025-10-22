@@ -123,8 +123,6 @@ class MongodbClient {
   bool InsertRecoveredStep(
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
   bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
-  bool FetchStepRecords(const std::unordered_set<job_id_t>& jobs,
-                        crane::grpc::QueryTasksInfoReply* response);
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   /* ----- Method of operating the account table ----------- */
