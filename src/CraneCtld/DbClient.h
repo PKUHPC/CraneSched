@@ -292,6 +292,7 @@ class MongodbClient {
   document StepInCtldToDocument_(StepInCtld* step);
   document StepInEmbeddedDbToDocument_(
       crane::grpc::StepInEmbeddedDb const& step);
+  crane::grpc::StepInfo ViewToStepInfo_(const bsoncxx::document::view& view);
 
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
   DedicatedResourceInNode BsonToDedicatedResourceInNode(
