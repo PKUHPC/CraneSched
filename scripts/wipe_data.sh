@@ -53,7 +53,3 @@ fi
 if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
 fi
-
-if [ "$mode" -eq 5 ] || [ "$mode" -eq 7 ]; then
-  wipe_collection step_table
-fi

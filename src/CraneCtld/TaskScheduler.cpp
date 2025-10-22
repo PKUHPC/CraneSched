@@ -1103,7 +1103,6 @@ void TaskScheduler::ScheduleThread_() {
 
       // Set succeed tasks status and do callbacks.
       for (auto& job : jobs_created) {
-
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_mtx_.Lock();
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
@@ -2327,7 +2326,6 @@ TaskScheduler::DaemonStepStatusChangeHandler_(
           context->rn_step_raw_ptrs.erase(step);
           break;
         }
-        g_embedded_db_client->AppendSteps({primary_step.get()});
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
           meta.cb_task_res_allocated(StepInteractiveMeta::StepResAllocArgs{

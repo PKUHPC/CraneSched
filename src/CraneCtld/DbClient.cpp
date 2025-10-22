@@ -426,6 +426,8 @@ bool MongodbClient::FetchJobRecords(
       task->set_container(view["container"].get_string().value);
       for (const auto& elem : view["steps"].get_array().value) {
         auto step_info = ViewToStepInfo_(elem.get_document().value);
+
+        step_info.set_job_id(task->task_id());
         (*task->mutable_step_info())[step_info.step_id()] =
             std::move(step_info);
       }
@@ -1652,16 +1654,13 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
 crane::grpc::StepInfo MongodbClient::ViewToStepInfo_(
     const bsoncxx::document::view& view) {
   crane::grpc::StepInfo step_info;
-  // 0  job_id        step_db_id    step_id         mod_time      deleted
-  // 5  cpus_req      mem_req       step_name       env           id_user
-  // 10 id_group      nodelist      nodes_alloc     node_inx      time_eligible
-  // 15 time_start    time_end      time_suspended  script        state
-  // 20 timelimit     time_submit   work_dir        submit_line   exit_code
-  // 25 get_user_env  type          extra_attr      res_alloc     step_type
-  // 30 container
-  job_id_t job_id = view["job_id"].get_int32().value;
+  // 0  step_id         mod_time      deleted       cpus_req      mem_req
+  // 5  step_name       env           id_user       id_group      nodelist
+  // 10 nodes_alloc     node_inx      time_eligible time_start    time_end
+  // 15 time_suspended  script        state         timelimit     time_submit
+  // 20 work_dir        submit_line   exit_code     get_user_env  type
+  // 25 extra_attr      res_alloc     step_type     container
   step_id_t step_id = view["step_id"].get_int32().value;
-  step_info.set_job_id(job_id);
   step_info.set_step_id(step_id);
   auto* mutable_req_res_view = step_info.mutable_req_res_view();
   auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
