@@ -838,6 +838,8 @@ bool EmbeddedDbClient::PurgeEndedTasks(
     }
   }
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
+
+  absl::MutexLock lock_ids(&s_step_id_mtx_);
   auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
   for (const auto& job_id : job_ids | std::views::keys) {
     next_step_id_map.erase(job_id);
@@ -864,7 +866,7 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
   // one single thread and the lock here is actually useless.
   // However, it costs little and prevents race condition,
   // so we just leave it here.
-  absl::MutexLock lock_ids(&s_step_db_id_mtx_);
+  absl::MutexLock lock_ids(&s_step_id_mtx_);
 
   db_id_t step_db_id{s_next_step_db_id_};
   auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};

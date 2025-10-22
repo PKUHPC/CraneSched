@@ -620,9 +620,11 @@ class EmbeddedDbClient {
   inline static std::string const s_next_task_db_id_str_{"NDI"};
   inline static std::string const s_next_task_id_str_{"NI"};
 
-  inline static task_id_t s_next_task_id_;
-  inline static db_id_t s_next_task_db_id_;
   inline static absl::Mutex s_task_id_and_db_id_mtx_;
+  inline static task_id_t s_next_task_id_
+      ABSL_GUARDED_BY(s_task_id_and_db_id_mtx_);
+  inline static db_id_t s_next_task_db_id_
+      ABSL_GUARDED_BY(s_task_id_and_db_id_mtx_);
 
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;
@@ -631,9 +633,10 @@ class EmbeddedDbClient {
   inline static std::string const s_next_step_db_id_str_{"NSDI"};
   inline static std::string const s_next_step_id_str_{"NSI"};
 
-  inline static db_id_t s_next_step_db_id_;
-  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_;
-  inline static absl::Mutex s_step_db_id_mtx_;
+  inline static absl::Mutex s_step_id_mtx_;
+  inline static db_id_t s_next_step_db_id_ ABSL_GUARDED_BY(s_step_id_mtx_);
+  inline static crane::grpc::StepNextIdInEmbeddedDb s_next_step_id_map_
+      ABSL_GUARDED_BY(s_step_id_mtx_);
   std::unique_ptr<IEmbeddedDb> m_step_var_db_;
   std::unique_ptr<IEmbeddedDb> m_step_fixed_db_;
 };
