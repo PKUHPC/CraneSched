@@ -45,8 +45,8 @@
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
-using Craned::g_config;
 using namespace Craned::Common;
+using Craned::g_config;
 using Craned::JobInD;
 
 CraneErrCode TryToRecoverCgForJobs(
@@ -78,7 +78,7 @@ CraneErrCode TryToRecoverCgForJobs(
     }
 
     for (const auto& [job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (rn_jobs_from_ctld.find(job_id) != rn_jobs_from_ctld.end()) continue;
+      if (rn_jobs_from_ctld.contains(job_id)) continue;
 
       CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
       for (const auto& key : bpf_key_vec) {

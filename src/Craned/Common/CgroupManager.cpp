@@ -280,10 +280,11 @@ std::string CgroupManager::CgroupStrByJobId(job_id_t job_id) {
   return std::format("{}{}", CgConstant::kJobCgNamePrefix, job_id);
 }
 
-std::string CgroupManager::CgroupStrByStepId(job_id_t job_id,
-                                             step_id_t step_id) {
-  return std::format("{}/{}{}", CgroupStrByJobId(job_id),
-                     CgConstant::kStepCgNamePrefix, step_id);
+std::string CgroupManager::CgroupStrByStepId(job_id_t job_id, step_id_t step_id,
+                                             bool system) {
+  std::string_view suffix = system ? "system" : "user";
+  return std::format("{}/{}/{}", CgroupStrByJobId(job_id),
+                     CgConstant::kStepCgNamePrefix, step_id, suffix);
 }
 
 std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
@@ -294,9 +295,12 @@ std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
 
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
     const std::string &cgroup_str) {
+  // Pattern now includes optional system/user suffix for step:
+  // job_{job_id}[/step_{step_id}[/system|user[/task_{task_id}]]]
   static const auto cg_pattern_str = std::format(
-      R"(.*{}(\d+)(?:\/{}(\d+))?(?:\/{}(\d+))?)", CgConstant::kJobCgNamePrefix,
-      CgConstant::kStepCgNamePrefix, CgConstant::kTaskCgNamePrefix);
+      R"(.*{}(\d+)(?:\/{}(\d+)(?:\/(?:system|user)(?:\/{}(\d+))?)?)?)",
+      CgConstant::kJobCgNamePrefix, CgConstant::kStepCgNamePrefix,
+      CgConstant::kTaskCgNamePrefix);
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
 
   CgroupStrParsedIds parsed_ids{};
@@ -709,35 +713,6 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   }
 
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
-}
-
-std::optional<std::string> CgroupManager::ResolveCgroupPathForPid(pid_t pid) {
-  auto ids_result = GetIdsByPid(pid);
-  if (!ids_result.has_value()) {
-    CRANE_WARN("Failed to get cgroup IDs for pid {}", pid);
-    return std::nullopt;
-  }
-
-  auto [job_id_opt, step_id_opt, task_id_opt] = *ids_result;
-  if (!job_id_opt.has_value()) {
-    CRANE_TRACE("No valid job id found in cgroup path of pid {}", pid);
-    return std::nullopt;
-  }
-
-  std::string cgroup_str;
-  if (task_id_opt.has_value()) {
-    cgroup_str = CgroupStrByTaskId(*job_id_opt, *step_id_opt, *task_id_opt);
-  } else if (step_id_opt.has_value()) {
-    cgroup_str = CgroupStrByStepId(*job_id_opt, *step_id_opt);
-  } else {
-    cgroup_str = CgroupStrByJobId(*job_id_opt);
-  }
-
-  // Return generic cgroup path, let the caller decide which controller to
-  // access
-  std::filesystem::path full_path = CgConstant::kSystemCgPathPrefix /
-                                    CgConstant::kRootCgNamePrefix / cgroup_str;
-  return full_path.string();
 }
 
 bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
