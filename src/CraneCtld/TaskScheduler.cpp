@@ -3097,27 +3097,17 @@ void TaskScheduler::TerminateOrphanedSteps(
 
   for (auto& [craned_id, craned_steps] : craned_steps_map) {
     if (craned_id == excluded_node) continue;
-    g_thread_pool->detach_task([this, craned_id,
-                                node_job_steps = std::move(craned_steps)] {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      bool success{false};
-      if (!stub || stub->Invalid()) {
-        if (auto err = stub->TerminateOrphanedSteps(node_job_steps);
-            err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("Failed to terminate orphaned steps [{}] on node {}.",
-                      util::JobStepsToString(node_job_steps), craned_id);
-        } else
-          success = true;
-      }
-      if (!success)
-        for (const auto& [job_id, step_ids] : node_job_steps) {
-          for (const auto& step_id : step_ids) {
-            StepStatusChangeAsync(job_id, step_id, craned_id,
-                                  crane::grpc::TaskStatus::Failed,
-                                  ExitCode::kExitCodeCranedDown, "Craned down");
+    g_thread_pool->detach_task(
+        [this, craned_id, node_job_steps = std::move(craned_steps)] {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          if (stub && !stub->Invalid()) {
+            if (auto err = stub->TerminateOrphanedSteps(node_job_steps);
+                err != CraneErrCode::SUCCESS) {
+              CRANE_ERROR("Failed to terminate orphaned steps [{}] on node {}.",
+                          util::JobStepsToString(node_job_steps), craned_id);
+            }
           }
-        }
-    });
+        });
   }
 }
 

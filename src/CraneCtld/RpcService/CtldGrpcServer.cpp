@@ -137,6 +137,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
 
   if (!orphaned_steps.empty()) {
     for (const auto &[job_id, steps] : orphaned_steps) {
+      // Reverse order: we should process larger step_id first to avoid warnings
+      // abort daemon/primary steps
       for (const auto step_id : steps | std::views::reverse)
         g_task_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
