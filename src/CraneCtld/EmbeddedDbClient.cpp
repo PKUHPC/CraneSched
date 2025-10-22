@@ -876,8 +876,6 @@ bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
       next_step_id_map[step->job_id] = 0;
     }
     step->SetStepId(next_step_id_map[step->job_id]++);
-    CRANE_INFO("Appending step id: {} / step db id: {}", step->StepId(),
-               step->StepDbId());
     step->SetStepDbId(step_db_id++);
 
     result = StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,

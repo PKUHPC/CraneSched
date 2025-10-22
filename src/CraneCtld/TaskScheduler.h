@@ -756,6 +756,9 @@ class TaskScheduler {
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
+  std::future<step_id_t> SubmitStepAsync(
+      std::unique_ptr<CommonStepInCtld> step);
+
   std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
                                                  int64_t secs);
 
@@ -770,7 +773,7 @@ class TaskScheduler {
       std::unique_ptr<TaskInCtld> task);
 
   CraneExpected<std::future<step_id_t>> SubmitStepToScheduler(
-      std::unique_ptr<StepInCtld> step);
+      std::unique_ptr<CommonStepInCtld> step);
 
   void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
                                        const CranedId& craned_index,
@@ -881,10 +884,8 @@ class TaskScheduler {
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
-  static CraneExpected<void> AcquireStepAttributes(const TaskInCtld& job,
-                                                   StepInCtld* step);
-  static CraneExpected<void> CheckStepValidity(const TaskInCtld& task,
-                                               StepInCtld* step);
+  static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
+  static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
   // TODO: Move to Reservation Mini-Scheduler.
   crane::grpc::CreateReservationReply CreateResv(
@@ -955,6 +956,9 @@ class TaskScheduler {
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
+  std::thread m_step_schedule_thread_;
+  void StepScheduleThread_();
+
   std::thread m_task_release_thread_;
   void ReleaseTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
@@ -963,6 +967,9 @@ class TaskScheduler {
 
   std::thread m_task_submit_thread_;
   void SubmitTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::thread m_step_submit_thread_;
+  void StepSubmitThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
@@ -1019,6 +1026,18 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
   void CleanSubmitQueueCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_submit_step_timer_handle_;
+  void SubmitStepTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_submit_step_async_handle_;
+  ConcurrentQueue<
+      std::pair<std::unique_ptr<CommonStepInCtld>, std::promise<step_id_t>>>
+      m_submit_step_queue_;
+  void SubmitStepAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_step_submit_queue_handle_;
+  void CleanStepSubmitQueueCb_();
 
   std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle_;
   void TaskStatusChangeTimerCb_();

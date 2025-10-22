@@ -763,6 +763,7 @@ struct TaskInCtld {
     CRANE_ASSERT(step->type == crane::grpc::TaskType::Interactive);
     CRANE_ASSERT(step->StepToCtld().interactive_meta().interactive_type() ==
                  crane::grpc::InteractiveTaskType::Crun);
+    step->job = this;
     m_steps_.emplace(step->StepId(), std::move(step));
   }
 

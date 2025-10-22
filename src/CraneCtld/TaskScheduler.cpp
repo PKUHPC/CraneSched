@@ -49,6 +49,7 @@ TaskScheduler::~TaskScheduler() {
   if (m_task_release_thread_.joinable()) m_task_release_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
   if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
+  if (m_step_submit_thread_.joinable()) m_step_submit_thread_.join();
   if (m_task_status_change_thread_.joinable())
     m_task_status_change_thread_.join();
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
@@ -305,47 +306,44 @@ bool TaskScheduler::Init() {
                    step_id);
         completed_steps.emplace_back(std::move(step_info));
       }
-      StepInCtld* step;
+      std::unique_ptr<StepInCtld> step;
       if (step_type == crane::grpc::StepType::DAEMON) {
-        step = new DaemonStepInCtld();
+        step = std::make_unique<DaemonStepInCtld>();
       } else {
-        step = new CommonStepInCtld();
+        step = std::make_unique<CommonStepInCtld>();
       }
       step->RecoverFromDb(*job, step_info);
-      if (auto err_expt = AcquireStepAttributes(*job, step);
+      if (auto err_expt = AcquireStepAttributes(step.get());
           !err_expt.has_value()) {
         CRANE_ERROR(
             "[Step #{}{}] AcquireStepAttributes failed: {}, step dropped!",
             job_id, step_id, CraneErrStr(err_expt.error()));
-        delete step;
+        step.reset();
         invalid_steps[job_id].emplace_back(std::move(step_info));
 
         continue;
       }
-      if (auto err_expt = CheckStepValidity(*job, step);
+      if (auto err_expt = CheckStepValidity(step.get());
           !err_expt.has_value()) {
         CRANE_ERROR("[Step #{}{}] CheckStepValidity failed: {}, step dropped!",
                     job_id, step_id, CraneErrStr(err_expt.error()));
-        delete step;
+        step.reset();
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
       if (step_type == crane::grpc::StepType::DAEMON) {
-        std::unique_ptr<DaemonStepInCtld> step_ptr(
-            dynamic_cast<DaemonStepInCtld*>(step));
-        job->SetDaemonStep(std::move(step_ptr));
+        job->SetDaemonStep(std::unique_ptr<DaemonStepInCtld>(
+            static_cast<DaemonStepInCtld*>(step.release())));
         CRANE_INFO("Daemon step recovered for job #{}", job->TaskId());
       } else if (step_type == crane::grpc::StepType::PRIMARY) {
-        std::unique_ptr<CommonStepInCtld> step_ptr(
-            dynamic_cast<CommonStepInCtld*>(step));
         CRANE_INFO("Primary step recovered for job #{}", job->TaskId());
-        job->SetPrimaryStep(std::move(step_ptr));
+        job->SetPrimaryStep(std::unique_ptr<CommonStepInCtld>(
+            static_cast<CommonStepInCtld*>(step.release())));
       } else {
-        std::unique_ptr<CommonStepInCtld> step_ptr(
-            dynamic_cast<CommonStepInCtld*>(step));
         CRANE_INFO("Common step {} recovered for job #{}", job->TaskId(),
                    step->StepId());
-        job->AddStep(std::move(step_ptr));
+        job->AddStep(std::unique_ptr<CommonStepInCtld>(
+            static_cast<CommonStepInCtld*>(step.release())));
       }
     }
     if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty())
@@ -446,6 +444,36 @@ bool TaskScheduler::Init() {
 
   m_task_submit_thread_ = std::thread(
       [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_submit_step_loop = uvw::loop::create();
+  m_submit_step_timer_handle_ =
+      uvw_submit_step_loop->resource<uvw::timer_handle>();
+  m_submit_step_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        SubmitStepTimerCb_();
+      });
+  m_submit_step_timer_handle_->start(
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
+
+  m_submit_step_async_handle_ =
+      uvw_submit_step_loop->resource<uvw::async_handle>();
+  m_submit_step_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        SubmitStepAsyncCb_();
+      });
+
+  m_clean_step_submit_queue_handle_ =
+      uvw_submit_step_loop->resource<uvw::async_handle>();
+  m_clean_step_submit_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanStepSubmitQueueCb_();
+      });
+
+  m_step_submit_thread_ =
+      std::thread([this, loop = std::move(uvw_submit_step_loop)]() {
+        StepSubmitThread_(loop);
+      });
 
   std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
   m_task_status_change_timer_handle_ =
@@ -628,6 +656,28 @@ void TaskScheduler::SubmitTaskThread_(
 
   if (idle_handle->start() != 0) {
     CRANE_ERROR("Failed to start the idle event in submit loop.");
+  }
+
+  uvw_loop->run();
+}
+
+void TaskScheduler::StepSubmitThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("SubmitStepThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(50ms);
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in submit step loop.");
   }
 
   uvw_loop->run();
@@ -1180,6 +1230,13 @@ void TaskScheduler::ScheduleThread_() {
   }
 }
 
+void TaskScheduler::StepScheduleThread_() {
+  util::SetCurrentThreadName("StepSchedThread");
+  while (!m_thread_stop_) {
+    // Need a global pending step map?
+  }
+}
+
 std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
     std::unique_ptr<TaskInCtld> task) {
   std::promise<task_id_t> promise;
@@ -1187,6 +1244,17 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 
   m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
+
+  return std::move(future);
+}
+
+std::future<step_id_t> TaskScheduler::SubmitStepAsync(
+    std::unique_ptr<CommonStepInCtld> step) {
+  std::promise<step_id_t> promise;
+  std::future<step_id_t> future = promise.get_future();
+
+  m_submit_step_queue_.enqueue({std::move(step), std::move(promise)});
+  m_submit_step_async_handle_->send();
 
   return std::move(future);
 }
@@ -1395,14 +1463,14 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
 }
 
 CraneExpected<std::future<step_id_t>> TaskScheduler::SubmitStepToScheduler(
-    std::unique_ptr<StepInCtld> step) {
+    std::unique_ptr<CommonStepInCtld> step) {
   step->SetSubmitTime(absl::Now());
 
-  auto result = TaskScheduler::AcquireStepAttributes(task.get());
-  if (result) result = TaskScheduler::CheckStepValidity(task.get());
+  auto result = TaskScheduler::AcquireStepAttributes(step.get());
+  if (result) result = TaskScheduler::CheckStepValidity(step.get());
   if (result) {
-    std::future<task_id_t> future =
-        g_task_scheduler->SubmitTaskAsync(std::move(task));
+    std::future<step_id_t> future =
+        g_task_scheduler->SubmitStepAsync(std::move(step));
     return {std::move(future)};
   }
 
@@ -2280,6 +2348,66 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       rejected_tasks[i].second.set_value(0);
     }
   } while (false);
+}
+
+void TaskScheduler::SubmitStepTimerCb_() {
+  m_submit_step_async_handle_->send();
+}
+
+void TaskScheduler::SubmitStepAsyncCb_() {
+  if (m_submit_step_queue_.size_approx() >= kSubmitTaskBatchNum)
+    m_clean_submit_queue_handle_->send();
+}
+
+void TaskScheduler::CleanStepSubmitQueueCb_() {
+  using SubmitQueueElem =
+      std::pair<std::unique_ptr<CommonStepInCtld>, std::promise<step_id_t>>;
+
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_submit_step_queue_.size_approx();
+
+  std::vector<SubmitQueueElem> elems;
+  std::vector<CommonStepInCtld*> step_ptrs;
+
+  if (approximate_size == 0) return;
+  elems.resize(approximate_size);
+
+  auto actual_size =
+      m_submit_step_queue_.try_dequeue_bulk(elems.begin(), approximate_size);
+  if (actual_size == 0) return;
+
+  step_ptrs.reserve(actual_size);
+
+  // The order of element inside the bulk is reverse.
+  for (uint32_t i = 0; i < elems.size(); i++) {
+    uint32_t pos = elems.size() - 1 - i;
+    auto* step = elems[pos].first.release();
+    step->SetStatus(crane::grpc::Pending);
+    step_ptrs.emplace_back(step);
+  }
+
+  std::vector<StepInCtld*> valid_steps;
+  absl::MutexLock lk(&m_running_task_map_mtx_);
+  for (uint32_t i = 0; i < elems.size(); i++) {
+    uint32_t pos = elems.size() - 1 - i;
+    auto* step = elems[pos].first.get();
+    auto it = m_running_task_map_.find(step->job_id);
+    if (it != m_running_task_map_.end()) {
+      step->job = it->second.get();
+      valid_steps.emplace_back(step);
+    } else {
+      elems[pos].second.set_value(0);
+    }
+  }
+  // TODO: Potential performance issue
+  if (g_embedded_db_client->AppendSteps(valid_steps)) {
+    for (auto* step : valid_steps) {
+      step->job->AddStep(std::unique_ptr<CommonStepInCtld>(
+          static_cast<CommonStepInCtld*>(step)));
+    }
+  } else {
+    CRANE_ERROR("Failed to append a batch of steps to embedded db queue.");
+  }
 }
 
 void TaskScheduler::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
@@ -3851,39 +3979,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   return {};
 }
 
-CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& job,
-                                                         StepInCtld* step) {
-  auto part_it = g_config.Partitions.find(job.partition_id);
-  if (part_it == g_config.Partitions.end()) {
-    CRANE_ERROR("Failed to call AcquireStepAttributes: {}",
-                CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
-  }
-
-  Config::Partition const& part_meta = part_it->second;
-
-  // Calculate step memory value based on MEM_PER_CPU and user-set memory.
-  AllocatableResource& step_alloc_res =
-      step->requested_node_res_view.GetAllocatableRes();
-  double core_double = static_cast<double>(step_alloc_res.cpu_count);
-  // FIXME: core_double must greater than 0, so as job.
-
-  double step_mem_per_cpu = (double)step_alloc_res.memory_bytes / core_double;
-  if (step_alloc_res.memory_bytes == 0) {
-    // If a step leaves its memory bytes to 0,
-    // use the partition's default value.
-    step_mem_per_cpu = part_meta.default_mem_per_cpu;
-  } else if (part_meta.max_mem_per_cpu != 0) {
-    // If a step sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
-    step_mem_per_cpu =
-        std::min(step_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
-  }
-  uint64_t mem_bytes = core_double * step_mem_per_cpu;
-
-  step->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  step->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
   if (!step->StepToCtld().nodelist().empty() && step->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().nodelist(), &nodes);
@@ -3903,8 +3999,7 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& job,
   return {};
 }
 
-CraneExpected<void> TaskScheduler::CheckStepValidity(const TaskInCtld& task,
-                                                     StepInCtld* step) {
+CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
