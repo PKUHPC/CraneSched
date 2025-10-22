@@ -49,9 +49,10 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
-constexpr step_id_t kDaemonStepId = 0;
-
 inline const char* const kDefaultHost = "0.0.0.0";
+
+constexpr step_id_t kDaemonStepId = 0;
+constexpr step_id_t kPrimaryStepId = 1;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -431,6 +432,7 @@ class ResourceV2 {
 
   bool IsZero() const;
   void SetToZero();
+  ResourceView View() const noexcept;
 
   std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
     return each_node_res_map;

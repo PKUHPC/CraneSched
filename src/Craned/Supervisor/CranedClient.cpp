@@ -54,8 +54,6 @@ void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
 }
 
 void CranedClient::AsyncSendThread_() {
-  std::this_thread::sleep_for(std::chrono::seconds(1));
-
   while (true) {
     {
       absl::MutexLock lock(&m_mutex_);
@@ -73,12 +71,11 @@ void CranedClient::AsyncSendThread_() {
 
     {
       std::list<StepStatusChangeQueueElem> elems;
-      m_mutex_.Lock();
-      if (!m_task_status_change_queue_.empty()) {
-        elems.splice(elems.end(), std::move(m_task_status_change_queue_));
-        m_mutex_.Unlock();
-      } else {
-        m_mutex_.Unlock();
+      {
+        absl::MutexLock lock(&m_mutex_);
+        if (!m_task_status_change_queue_.empty()) {
+          elems.splice(elems.end(), std::move(m_task_status_change_queue_));
+        }
       }
 
       while (!elems.empty()) {
@@ -89,9 +86,10 @@ void CranedClient::AsyncSendThread_() {
         grpc::Status status;
 
         CRANE_TRACE("Sending StepStatusChange for step status: {}",
-                    util::StepStatusToString(elem.new_status));
+                    elem.new_status);
 
-        request.set_task_id(g_config.JobId);
+        request.set_job_id(g_config.JobId);
+        request.set_step_id(g_config.StepId);
         request.set_new_status(elem.new_status);
         request.set_exit_code(elem.exit_code);
         if (elem.reason.has_value()) request.set_reason(elem.reason.value());
@@ -101,14 +99,13 @@ void CranedClient::AsyncSendThread_() {
           CRANE_ERROR(
               "Failed to send StepStatusChange: "
               "NewStatus: {}, reason: {} | {}, code: {}",
-              util::StepStatusToString(elem.new_status), status.error_message(),
+              elem.new_status, status.error_message(),
               context.debug_error_string(), int(status.error_code()));
           break;
         }
-        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
-                    util::StepStatusToString(elem.new_status), reply.ok());
-
         elems.pop_front();
+        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
+                    elem.new_status, reply.ok());
       }
       m_mutex_.Lock();
       if (!elems.empty()) {
