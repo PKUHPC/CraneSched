@@ -3095,11 +3095,11 @@ void TaskScheduler::TerminateOrphanedSteps(
     }
   }
 
-  for (const auto& [craned_id, craned_steps] : craned_steps_map) {
+  for (auto& [craned_id, craned_steps] : craned_steps_map) {
     if (craned_id == excluded_node) continue;
-    g_thread_pool->detach_task([this, craned_id, &craned_steps_map] {
+    g_thread_pool->detach_task([this, craned_id,
+                                node_job_steps = std::move(craned_steps)] {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      auto& node_job_steps = craned_steps_map[craned_id];
       bool success{false};
       if (!stub || stub->Invalid()) {
         if (auto err = stub->TerminateOrphanedSteps(node_job_steps);
