@@ -136,8 +136,14 @@ auto FlattenMapView(const Map &m) {
 }
 
 std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
-std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step);
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
+
+std::string StepToDIdString(const crane::grpc::StepToD &step_to_d);
+template <typename Range>
+std::string StepToDRangeIdString(const Range &step_to_d_range) {
+  return absl::StrJoin(step_to_d_range | std::views::transform(StepToDIdString),
+                       ",");
+}
 
 template <typename Map>
 std::string JobStepsToString(const Map &m) {
@@ -165,9 +171,9 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         // 5 - 9
         "Cancelled",
         "OutOfMemory",
-        "Invalid",
-        "Invalid",
-        "Invalid",
+        "Configuring",
+        "Configured",
+        "Completing",
         // 10 - 14
         "Invalid",
         "Invalid",

@@ -26,11 +26,12 @@ import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
 
 message StepStatusChangeRequest {
-  uint32 task_id = 1;
-  string craned_id = 2;
-  TaskStatus new_status = 3;
-  uint32 exit_code = 4;
-  string reason = 5;
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  string craned_id = 3;
+  TaskStatus new_status = 4;
+  uint32 exit_code = 5;
+  string reason = 6;
 }
 
 message StepStatusChangeReply {
@@ -44,9 +45,8 @@ message CranedTriggerReverseConnRequest {
 
 message ConfigureCranedRequest {
   bool ok = 1;
-  map<uint32, JobToD> job_map = 2;
-  map<uint32, TaskToD> job_tasks_map = 3;
-  google.protobuf.Timestamp token = 4;
+  map<uint32, JobStepsToD> job_steps = 2;
+  google.protobuf.Timestamp token = 3;
 }
 
 message CranedRegisterRequest {
@@ -98,35 +98,40 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
-message ExecuteStepsRequest {
-  repeated TaskToD tasks = 1;
+message AllocJobsRequest {
+  repeated JobToD jobs = 1;
 }
 
-message ExecuteStepsReply {
-  repeated uint32 failed_task_id_list = 1;
+message AllocJobsReply {}
+
+message AllocStepsRequest {
+  repeated StepToD steps = 1;
 }
 
-message CreateCgroupForJobsRequest {
-  repeated JobToD job_list = 1;
-}
-
-message CreateCgroupForJobsReply {}
+message AllocStepsReply {}
 
 message FreeStepsRequest {
-  repeated uint32 job_id_list = 1;
+  map<uint32, JobStepIds> job_step_ids_map = 1;
 }
 
 message FreeStepsReply {}
 
-message ReleaseCgroupForJobsRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
+message FreeJobsRequest {
+  repeated uint32 job_id_list = 1;
 }
 
-message ReleaseCgroupForJobsReply {}
+message FreeJobsReply {}
+
+message ExecuteStepsRequest {
+  map<uint32, JobStepIds> job_step_ids_map = 1;
+}
+
+message ExecuteStepsReply {
+  map<uint32, JobStepIds> failed_job_step_ids_map = 1;
+}
 
 message TerminateStepsRequest {
-  repeated uint32 task_id_list = 1;
+  map<uint32, JobStepIds> job_step_ids_map = 1;
 }
 
 message TerminateStepsReply {
@@ -135,7 +140,7 @@ message TerminateStepsReply {
 }
 
 message TerminateOrphanedStepRequest {
-  repeated uint32 task_id_list = 1;
+  map<uint32, JobStepIds> job_step_ids_map = 1;
 }
 
 message TerminateOrphanedStepReply {
@@ -177,7 +182,7 @@ message QueryStepFromPortRequest {
 
 message QueryStepFromPortReply {
   bool ok = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
 }
 
 message QueryStepFromPortForwardRequest {
@@ -189,7 +194,7 @@ message QueryStepFromPortForwardRequest {
 message QueryStepFromPortForwardReply {
   bool ok = 1;
   bool from_user = 2;
-  uint32 task_id = 3;
+  uint32 job_id = 3;
   string cgroup_path = 4;
 }
 
@@ -562,8 +567,9 @@ message StreamCallocRequest {
   }
 
   message TaskCompleteReq {
-    uint32 task_id = 1;
-    TaskStatus status = 2;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
+    TaskStatus status = 3;
   }
 
   CallocRequestType type = 1;
@@ -584,8 +590,9 @@ message StreamCallocReply {
 
   message TaskIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    string failure_reason = 4;
   }
 
   message TaskResAllocatedReply {
@@ -593,9 +600,7 @@ message StreamCallocReply {
     string allocated_craned_regex = 2;
   }
 
-  message TaskCancelRequest {
-    uint32 task_id = 1;
-  }
+  message TaskCancelRequest {}
 
   message TaskCompletionAckReply {
     bool ok = 1;
@@ -632,9 +637,10 @@ message StreamCforedRequest {
 
   message TaskCompleteReq {
     string cfored_name = 1;
-    uint32 task_id = 2;
-    TaskStatus status = 3;
-    InteractiveTaskType interactive_type = 4;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    TaskStatus status = 4;
+    InteractiveTaskType interactive_type = 5;
   }
 
   message GracefulExitReq {
@@ -662,24 +668,28 @@ message StreamCtldReply {
   message TaskIdReply {
     int32 pid = 1;
     bool ok = 2;
-    uint32 task_id = 3;
-    string failure_reason = 4;
+    uint32 job_id = 3;
+    uint32 step_id = 4;
+    string failure_reason = 5;
   }
 
   message TaskResAllocatedReply {
-    uint32 task_id = 1;
-    bool ok = 2;
-    string allocated_craned_regex = 3;
-    string failure_reason = 4;
-    repeated string craned_ids = 5;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
+    bool ok = 3;
+    string allocated_craned_regex = 4;
+    string failure_reason = 5;
+    repeated string craned_ids = 6;
   }
 
   message TaskCancelRequest {
-    uint32 task_id = 1;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
   }
 
   message TaskCompletionAckReply {
-    uint32 task_id = 1;
+    uint32 job_id = 1;
+    uint32 step_id = 2;
   }
 
   message CforedRegistrationAck {
@@ -717,19 +727,16 @@ message StreamCrunRequest {
   }
 
   message TaskCompleteReq {
-    uint32 task_id = 1;
-    TaskStatus status = 2;
+    TaskStatus status = 1;
   }
 
   message TaskIOForwardReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
-    bool eof = 3;
+    bytes msg = 1;
+    bool eof = 2;
   }
 
   message TaskX11ForwardReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
+    bytes msg = 1;
   }
 
   CrunRequestType type = 1;
@@ -755,8 +762,9 @@ message StreamCrunReply {
 
   message TaskIdReply {
     bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
+    uint32 job_id = 2;
+    uint32 step_id = 3;
+    string failure_reason = 4;
   }
 
   message TaskResAllocatedReply {
@@ -764,9 +772,7 @@ message StreamCrunReply {
     string allocated_craned_regex = 2;
   }
 
-  message TaskCancelRequest {
-    uint32 task_id = 1;
-  }
+  message TaskCancelRequest {}
 
   message TaskCompletionAckReply {
     bool ok = 1;
@@ -807,20 +813,18 @@ message StreamTaskIORequest {
 
   message SupervisorRegisterReq {
     string craned_id = 1;
-    uint32 task_id = 2;
+    uint32 job_id = 2;
     uint32 step_id = 3;
   }
 
   message TaskOutputReq {
-    bytes msg = 2;
+    bytes msg = 1;
   }
 
   message SupervisorUnRegisterReq {}
 
   message TaskX11OutputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
+    bytes msg = 1;
   }
 
   SupervisorRequestType type = 1;
@@ -846,10 +850,8 @@ message StreamTaskIOReply {
   }
 
   message TaskInputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
-    bool eof = 4;
+    bytes msg = 1;
+    bool eof = 2;
   }
 
   message SupervisorUnregisterReply {
@@ -857,9 +859,7 @@ message StreamTaskIOReply {
   }
 
   message TaskX11InputReq {
-    uint32 task_id = 1;
-    uint32 step_id = 2;
-    bytes msg = 3;
+    bytes msg = 1;
   }
 
   SupervisorReplyType type = 1;
@@ -1017,10 +1017,10 @@ service Craned {
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteSteps(ExecuteStepsRequest) returns (ExecuteStepsReply);
 
-  rpc CreateCgroupForJobs(CreateCgroupForJobsRequest) returns (CreateCgroupForJobsReply);
+  rpc AllocJobs(AllocJobsRequest) returns (AllocJobsReply);
+  rpc AllocSteps(AllocStepsRequest) returns (AllocStepsReply);
   rpc FreeSteps(FreeStepsRequest) returns (FreeStepsReply);
-  rpc ReleaseCgroupForJobs(ReleaseCgroupForJobsRequest) returns (ReleaseCgroupForJobsReply);
-
+  rpc FreeJobs(FreeJobsRequest) returns (FreeJobsReply);
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.
