@@ -126,7 +126,7 @@ option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 
-option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" ON)
+option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" OFF)
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
@@ -463,6 +463,7 @@ set(CPACK_GENERATOR "RPM;DEB")
 set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/PKUHPC/CraneSched")
 set(CPACK_PACKAGE_NAME "CraneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
+set(CPACK_PACKAGE_VERSION ${CMAKE_PROJECT_VERSION})
 set(CPACK_PACKAGE_CONTACT "CraneSched <service@csjstt.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "An HPC and Cloud Computing Fused Job Scheduling System")
 set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling System")
