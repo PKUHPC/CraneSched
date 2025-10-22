@@ -1,46 +1,42 @@
-# Deployment Guide for CentOS 7
-
+# CentOS 7 部署指南
 
 !!! warning
-    This guide is for **CentOS 7**, which has reached **End of Life (EOL)**. Future updates of CraneSched rely on modern compilers, so this tutorial **may not work as intended** and is no longer guaranteed to be maintained.
+    本指南适用于 **CentOS 7**，该系统已达到**生命周期终止（EOL）**。CraneSched 的未来更新依赖于现代编译器，因此本教程**可能无法按预期工作**，且不再保证得到维护。
 
+## 1. 配置构建环境
 
-## 1. Configure Build Environment
+以下所有命令应在**构建节点**上以 **root** 用户身份执行。
 
-All commands below should be executed on the **build node** as the **root** user.
-
-
-Install additional repositories:
+安装附加仓库：
 
 ```bash
 yum install -y epel-release centos-release-scl-rh
 yum install -y ninja-build patch devtoolset-11 rh-git218
 ```
 
-Add to `~/.bash_profile`:
+添加到 `~/.bash_profile`：
 
 ```bash
 source scl_source enable devtoolset-11
 source scl_source enable rh-git218
 ```
 
-## 2. Environment Preparation
+## 2. 环境准备
 
-### 2.1 Disable SELinux
+### 2.1 禁用 SELinux
 
 ```bash
 setenforce 0
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
-### 2.2 Install Certificates
+### 2.2 安装证书
 
 ```bash
 yum -y install ca-certificates
 ```
 
-### 2.3 Synchronize System Time
-
+### 2.3 同步系统时间
 
 ```bash
 yum -y install ntp ntpdate
@@ -49,19 +45,19 @@ systemctl enable ntpd
 timedatectl set-timezone Asia/Shanghai
 ```
 
-### 2.4 Configure Firewall
+### 2.4 配置防火墙
 
 !!! tip
-    If you have multiple nodes, perform this step on **each node**. Otherwise, inter-node communication will fail.
+    如果您有多个节点，请在**每个节点**上执行此步骤。否则，节点间通信将失败。
 
-    Please see the config file `/etc/crane/config.yaml` for port configuration details.
+    有关端口配置详细信息，请参阅配置文件 `/etc/crane/config.yaml`。
 
 ```bash
 systemctl stop firewalld
 systemctl disable firewalld
 ```
 
-If your cluster requires the firewall to remain active, open the following ports:
+如果您的集群需要保持防火墙处于活动状态，请开放以下端口：
 
 ```bash
 firewall-cmd --add-port=10013/tcp --permanent --zone=public
@@ -72,13 +68,13 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 firewall-cmd --reload
 ```
 
-## 3. Install Dependencies
+## 3. 安装依赖
 
 ```bash
 yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel automake libcurl-devel
 ```
 
-Install libcgroup from source:
+从源码安装 libcgroup：
 
 ```bash
 yum install -y tar bison flex systemd-devel
@@ -92,13 +88,13 @@ make -j
 make install
 ```
 
-## 4. Install Toolchain
+## 4. 安装工具链
 
-CraneSched requires the following toolchain versions:
+CraneSched 需要以下工具链版本：
 
 * CMake ≥ 3.24
 * libstdc++ ≥ 11
-* clang ≥ 19 or g++ ≥ 14
+* clang ≥ 19 或 g++ ≥ 14
 
 ### 4.1 CMake
 
@@ -111,7 +107,7 @@ cmake --version
 
 ### 4.2 GCC 14
 
-CraneSched requires **libstdc++ ≥ 11**. The default GCC 4.8 on CentOS 7 is too old, so we need to build and install GCC 14 from source.
+CraneSched 需要 **libstdc++ ≥ 11**。CentOS 7 上的默认 GCC 4.8 太旧，因此我们需要从源码构建并安装 GCC 14。
 
 ```bash
 yum install -y tar bzip2
@@ -127,14 +123,14 @@ make -j
 make install
 ```
 
-If you are using clang, you can use libstdc++ from GCC 14 by adding the following flags to CMake (step 6):
+如果您使用 clang，可以通过向 CMake 添加以下标志（步骤 6）来使用 GCC 14 的 libstdc++：
 
 ```bash
 -DCMAKE_C_FLAGS_INIT="--gcc-toolchain=/usr/local" \
 -DCMAKE_CXX_FLAGS_INIT="--gcc-toolchain=/usr/local"
 ```
 
-## 5. Build and Install
+## 5. 构建和安装
 
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
@@ -148,37 +144,37 @@ ninja install
 ```
 
 !!! info
-    If you prefer to use RPM packages, please refer to the [Packaging Guide](packaging.md) for instructions.
+    如果您希望使用 RPM 软件包，请参阅[打包指南](packaging.md)获取说明。
 
-For deploying CraneSched to multiple nodes, please follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
+对于多节点部署 CraneSched，请按照[多节点部署指南](../configuration/multi-node.md)。
 
-## 6. Install and Configure MongoDB
+## 6. 安装和配置 MongoDB
 
-MongoDB is required on the **control node** only.
+MongoDB 仅在**控制节点**上需要。
 
-Please follow the [Database Configuration Guide](../configuration/database.md) for detailed instructions.
+请按照[数据库配置指南](../configuration/database.md)获取详细说明。
 
 !!! info
-    CentOS 7 supports up to MongoDB 7.0. See the database configuration guide for specific installation instructions.
+    CentOS 7 最高支持 MongoDB 7.0。有关具体安装说明，请参阅数据库配置指南。
 
-## 7. PAM Module Setup
+## 7. PAM 模块设置
 
-PAM module configuration is optional but recommended for production clusters.
+PAM 模块配置是可选的，但建议用于生产集群。
 
-Please follow the [PAM Module Configuration Guide](../configuration/pam.md) for detailed instructions.
+请按照 [PAM 模块配置指南](../configuration/pam.md)获取详细说明。
 
-## 8. Configure and Launch Services
+## 8. 配置和启动服务
 
-For cluster configuration details, see the [Cluster Configuration Guide](../configuration/config.md).
+有关集群配置详细信息，请参阅[集群配置指南](../configuration/config.md)。
 
-After configuring, start the services:
+配置完成后，启动服务：
 
 ```bash
-# If using systemd:
+# 如果使用 systemd：
 systemctl start cranectld
 systemctl start craned
 
-# If using executables directly:
+# 如果直接使用可执行文件：
 cd build/src
 CraneCtld/cranectld
 Craned/craned

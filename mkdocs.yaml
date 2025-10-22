@@ -29,6 +29,40 @@ theme:
 
 plugins:
   - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+          nav_translations:
+            Home: 首页
+            Deployment: 部署指南
+            Overview: 概览
+            Frontend: 前端
+            Backend: 后端
+            Configuration: 配置
+            Commands: 命令参考
+            Reference: 参考文档
+            Exit Codes: 退出代码
+            Use Cases: 使用案例
+            Rocky Linux 9: Rocky Linux 9
+            Ubuntu: Ubuntu
+            CentOS 7: CentOS 7
+            Packaging Guide: 打包指南
+            eBPF Support: eBPF 支持
+            Cluster Configuration: 集群配置
+            Database Configuration: 数据库配置
+            PAM Module: PAM 模块
+            Multi-node Deployment: 多节点部署
+            Plugins: 插件
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -87,3 +121,4 @@ nav:
     - crun: command/crun.md
   - Reference:
     - Exit Codes: reference/exit_code.md
+    - Use Cases: reference/use_cases.md

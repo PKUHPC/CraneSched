@@ -1,72 +1,211 @@
-# ccancel 取消作业 #
+# ccancel - Cancel Jobs
 
-**ccancel可以终止正在运行或者在排队中的作业。**
+**ccancel terminates running or pending jobs in the queue.**
 
-#### **主要参数**
+You can cancel jobs by job ID or by using filter conditions to cancel multiple jobs at once.
 
-- **-h/--help**: 显示帮助
-- **-A/--account string**：取消账户下的任务
-- **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
-- **-n/--name string**：取消指定任务名的任务
-- **-w/--nodes strings**：取消指定节点上运行的任务
-- **-p/--partition string**：取消指定分区上运行的任务
-- **-t/--state string**：取消某状态的任务。有效的任务状态是 PENDING(PD)、RUNNING(R)。任务状态不区分大小写
-- **-u/--user string**：取消特定用户提交的任务
-- **-v/--version：**查询版本号
+## Command Syntax
 
-例：
-![ccancel](../images/ccancel/ccancel.png)
-
-```SQL
-ccancel -w crane02
+```bash
+ccancel [job_id[,job_id...]] [OPTIONS]
 ```
-![ccancel](../images/ccancel/ccancel_w.png)
 
-```SQL
-ccancel -t Pending
-```
-![ccancel](../images/ccancel/ccancel_t.png)
+## Command Line Options
 
-- 取消作业号为30686的作业：
+### Job Selection
+- **job_id[,job_id...]**: Job ID(s) to cancel (comma-separated list). Format: `<job_id>` or `<job_id>,<job_id>,<job_id>...`
 
-```Plaintext
+### Filter Options
+- **-n, --name string**: Cancel jobs with the specified job name
+- **-u, --user string**: Cancel jobs submitted by the specified user
+- **-A, --account string**: Cancel jobs under the specified account
+- **-p, --partition string**: Cancel jobs in the specified partition
+- **-t, --state string**: Cancel jobs in the specified state. Valid states: `PENDING` (P), `RUNNING` (R), `ALL` (case-insensitive)
+- **-w, --nodes strings**: Cancel jobs running on the specified nodes (comma-separated list)
+
+### Output Options
+- **--json**: Output in JSON format
+
+### Miscellaneous
+- **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
+- **-h, --help**: Display help information
+- **-v, --version**: Display version number
+
+## Filter Rules
+
+!!! important
+    At least one condition must be provided: either job ID(s) or at least one filter option.
+
+When using multiple filters, jobs matching **all** specified conditions will be cancelled (AND logic).
+
+## Usage Examples
+
+### Cancel by Job ID
+
+Cancel a single job:
+```bash
 ccancel 30686
 ```
 
-**ccancel运行结果展示**
+**Result:**
+
 ![ccancel](../images/ccancel/ccancel_1.png)
 ![ccancel](../images/ccancel/ccancel_2.png)
 ![ccancel](../images/ccancel/ccancel_3.png)
 
-- 取消作业名为test1的作业：
+Cancel multiple jobs:
+```bash
+ccancel 30686,30687,30688
+```
 
-```C
+### Cancel by Job Name
+
+Cancel all jobs named "test1":
+```bash
 ccancel -n test1
 ```
 
-**ccancel运行结果展示**
+**Result:**
 
 ![ccancel](../images/ccancel/ccancel_n1.png)
 ![ccancel](../images/ccancel/ccancel_n2.png)
 ![ccancel](../images/ccancel/ccancel_n3.png)
 
-- 取消CPU分区上的作业
+### Cancel by Partition
 
-```C
+Cancel all jobs in GPU partition:
+```bash
 ccancel -p GPU
 ```
+
+**Result:**
+
 ![ccancel](../images/ccancel/ccancel_p1.png)
 ![ccancel](../images/ccancel/ccancel_p2.png)
 ![ccancel](../images/ccancel/ccancel_p3.png)
 
-```Bash
+### Cancel by Node
+
+Cancel all jobs running on crane02:
+```bash
+ccancel -w crane02
+```
+
+![ccancel](../images/ccancel/ccancel_w.png)
+
+### Cancel by State
+
+Cancel all pending jobs:
+```bash
+ccancel -t Pending
+```
+
+![ccancel](../images/ccancel/ccancel_t.png)
+
+Cancel all running jobs:
+```bash
+ccancel -t Running
+```
+
+Cancel all jobs (pending and running):
+```bash
+ccancel -t All
+```
+
+### Cancel by Account
+
+Cancel all jobs under PKU account:
+```bash
 ccancel -A PKU
 ```
+
 ![ccancel](../images/ccancel/ccancel_A.png)
 
-```Bash
+### Cancel by User
+
+Cancel all jobs submitted by user ROOT:
+```bash
 ccancel -u ROOT
 ```
+
 ![ccancel](../images/ccancel/ccancel_u.png)
 
-取消作业之后，如果被分配节点上没有用户的其他作业，作业调度系统会终止用户在所分配节点的所有进程，并取消用户在所分配节点上的ssh权限。
+### Combined Filters
+
+Cancel all pending jobs in CPU partition:
+```bash
+ccancel -t Pending -p CPU
+```
+
+Cancel all jobs by user alice in GPU partition:
+```bash
+ccancel -u alice -p GPU
+```
+
+Cancel running jobs on specific nodes:
+```bash
+ccancel -t Running -w crane01,crane02
+```
+
+### JSON Output
+
+Get cancellation results in JSON format:
+```bash
+ccancel 30686 --json
+```
+
+Cancel with filters and JSON output:
+```bash
+ccancel -p GPU -t Pending --json
+```
+
+## Examples Overview
+
+![ccancel](../images/ccancel/ccancel.png)
+
+## Behavior After Cancellation
+
+After a job is cancelled:
+
+1. **Process Termination**: If there are no other jobs from the user on the allocated nodes, the job scheduling system will terminate all user processes on those nodes
+
+2. **SSH Access Revocation**: SSH access to the allocated nodes will be revoked for the user
+
+3. **Resource Release**: All allocated resources (CPUs, memory, GPUs) are immediately released and become available for other jobs
+
+4. **Job State Update**: The job state changes to `CANCELLED` in the job history
+
+## Permission Requirements
+
+- **Regular Users**: Can only cancel their own jobs
+- **Coordinators**: Can cancel jobs within their account
+- **Operators/Admins**: Can cancel any job in the system
+
+## Important Notes
+
+1. **Immediate Effect**: Job cancellation takes effect immediately. Running jobs are terminated without grace period by default
+
+2. **Multiple Jobs**: You can cancel multiple jobs at once using comma-separated job IDs or filter conditions
+
+3. **No Confirmation**: There is no confirmation prompt. Jobs are cancelled immediately upon command execution
+
+4. **State Filtering**: Use `-t` to target specific job states to avoid accidentally cancelling jobs in unintended states
+
+5. **Job ID Format**: Job IDs must follow the format `<job_id>` or `<job_id>,<job_id>,<job_id>...` with no spaces
+
+## Error Handling
+
+Common errors:
+
+- **Invalid Job ID**: Returns error if job ID doesn't exist or you don't have permission to cancel it
+- **No Matching Jobs**: If filter conditions match no jobs, returns success with zero jobs cancelled
+- **Invalid State**: State must be one of: PENDING, RUNNING, ALL (case-insensitive)
+
+## See Also
+
+- [cbatch](cbatch.md) - Submit batch jobs
+- [crun](crun.md) - Run interactive tasks
+- [calloc](calloc.md) - Allocate interactive resources
+- [cqueue](cqueue.md) - View job queue
+- [cacct](cacct.md) - View job accounting information
+- [ccontrol](ccontrol.md) - Control jobs and system resources
