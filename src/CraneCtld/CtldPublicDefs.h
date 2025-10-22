@@ -555,8 +555,7 @@ struct CommonStepInCtld : StepInCtld {
   std::string pending_reason;
   ~CommonStepInCtld() override = default;
   void InitPrimaryStepFromJob(const TaskInCtld& job);
-  [[nodiscard]] bool SetFieldsByStepToCtld(
-      const crane::grpc::StepToCtld& step_to_ctld);
+  void SetFieldsByStepToCtld(const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
   void RecoverFromDb(const TaskInCtld& job,

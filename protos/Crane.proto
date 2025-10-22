@@ -624,6 +624,7 @@ message StreamCforedRequest {
   enum CforedRequestType {
     CFORED_REGISTRATION = 0;
     TASK_REQUEST = 1;
+    STEP_REQUEST = 4;
     TASK_COMPLETION_REQUEST = 2;
     CFORED_GRACEFUL_EXIT = 3;
   }
@@ -637,6 +638,12 @@ message StreamCforedRequest {
     string cfored_name = 1;
     int32 pid = 2;
     TaskToCtld task = 3;
+  }
+
+  message StepReq{
+    string cfored_name = 1;
+    int32 pid = 2;
+    StepToCtld step = 3;
   }
 
   message TaskCompleteReq {
@@ -654,6 +661,7 @@ message StreamCforedRequest {
   oneof payload {
     CforedReg payload_cfored_reg = 2;
     TaskReq payload_task_req = 3;
+    StepReq payload_step_req = 6;
     TaskCompleteReq payload_task_complete_req = 4;
     GracefulExitReq payload_graceful_exit_req = 5;
   }
@@ -720,6 +728,7 @@ message StreamCtldReply {
 message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
+    STEP_REQUEST = 4;
     TASK_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
     TASK_X11_FORWARD = 3;
@@ -728,6 +737,11 @@ message StreamCrunRequest {
   message TaskReq {
     int32 crun_pid = 1;
     TaskToCtld task = 2;
+  }
+
+  message StepReq {
+    int32 crun_pid = 1;
+    StepToCtld step = 2;
   }
 
   message TaskCompleteReq {
@@ -747,6 +761,7 @@ message StreamCrunRequest {
 
   oneof payload {
     TaskReq payload_task_req = 2;
+    StepReq payload_step_req = 6;
     TaskCompleteReq payload_task_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
     TaskX11ForwardReq payload_task_x11_forward_req = 5;

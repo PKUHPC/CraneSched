@@ -769,6 +769,9 @@ class TaskScheduler {
   CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
+  CraneExpected<std::future<step_id_t>> SubmitStepToScheduler(
+      std::unique_ptr<StepInCtld> step);
+
   void StepStatusChangeWithReasonAsync(uint32_t task_id, step_id_t step_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
@@ -878,7 +881,7 @@ class TaskScheduler {
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
-  static CraneExpected<void> AcquireStepAttributes(const TaskInCtld& task,
+  static CraneExpected<void> AcquireStepAttributes(const TaskInCtld& job,
                                                    StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(const TaskInCtld& task,
                                                StepInCtld* step);

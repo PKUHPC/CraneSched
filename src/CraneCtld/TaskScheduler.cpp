@@ -1394,6 +1394,21 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
   return std::unexpected(result.error());
 }
 
+CraneExpected<std::future<step_id_t>> TaskScheduler::SubmitStepToScheduler(
+    std::unique_ptr<StepInCtld> step) {
+  step->SetSubmitTime(absl::Now());
+
+  auto result = TaskScheduler::AcquireStepAttributes(task.get());
+  if (result) result = TaskScheduler::CheckStepValidity(task.get());
+  if (result) {
+    std::future<task_id_t> future =
+        g_task_scheduler->SubmitTaskAsync(std::move(task));
+    return {std::move(future)};
+  }
+
+  return std::unexpected(result.error());
+}
+
 CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
                                                       bool hold) {
   m_pending_task_map_mtx_.Lock();
@@ -3836,9 +3851,9 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   return {};
 }
 
-CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& task,
+CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& job,
                                                          StepInCtld* step) {
-  auto part_it = g_config.Partitions.find(task.partition_id);
+  auto part_it = g_config.Partitions.find(job.partition_id);
   if (part_it == g_config.Partitions.end()) {
     CRANE_ERROR("Failed to call AcquireStepAttributes: {}",
                 CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));

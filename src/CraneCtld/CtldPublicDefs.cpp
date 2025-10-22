@@ -474,11 +474,40 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   *MutableStepToCtld() = std::move(step);
 }
 
-bool CommonStepInCtld::SetFieldsByStepToCtld(
+void CommonStepInCtld::SetFieldsByStepToCtld(
     const crane::grpc::StepToCtld& step_to_ctld) {
-  // Not implemented yet
-  CRANE_ASSERT(false);
-  return false;
+  /*Fields in StepInCtld*/
+  type = step_to_ctld.type();
+  job_id = step_to_ctld.job_id();
+  uid = step_to_ctld.uid();
+  gids = step_to_ctld.gid() | std::ranges::to<std::vector>();
+  name = step_to_ctld.name();
+
+  ntasks_per_node = step_to_ctld.ntasks_per_node();
+  cpus_per_task = static_cast<cpu_t>(step_to_ctld.cpus_per_task());
+
+  requeue_if_failed = step_to_ctld.requeue_if_failed();
+  get_user_env = step_to_ctld.get_user_env();
+  env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
+  container = step_to_ctld.container();
+  extra_attr = step_to_ctld.extra_attr();
+
+  time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
+  requested_node_res_view = step_to_ctld.req_resources();
+  node_num = step_to_ctld.node_num();
+  included_nodes =
+      step_to_ctld.nodelist() | std::ranges::to<std::unordered_set>();
+  excluded_nodes =
+      step_to_ctld.excludes() | std::ranges::to<std::unordered_set>();
+
+  SetStepType(crane::grpc::StepType::COMMON);
+
+  SetRequeueCount(0);
+  SetConfigureFailedStatus(crane::grpc::TaskStatus::Invalid);
+  SetFinishFailedStatus(crane::grpc::TaskStatus::Invalid);
+  SetStatus(crane::grpc::TaskStatus::Pending);
+  SetHeld(false);
+  *MutableStepToCtld() = step_to_ctld;
 }
 
 crane::grpc::StepToD CommonStepInCtld::GetStepToD(
