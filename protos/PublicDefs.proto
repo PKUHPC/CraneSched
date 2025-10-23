@@ -405,9 +405,6 @@ message ContainerTaskAdditionalMeta {
 
   map<string, string> mounts = 24;
   map<int32, int32> ports = 25;
-
-  // Crun input will forward to these tasks
-  optional uint32 input_task_id = 8;
 }
 
 message TaskInfo {

@@ -48,7 +48,7 @@ struct StepInstance {
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
                         StepStatus status);  // Step recovery
 
-  [[nodiscard]] bool IsDaemon() const noexcept {
+  [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
   }
 
