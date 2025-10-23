@@ -114,6 +114,7 @@ enum TaskStatus {
   ExceedTimeLimit = 4;
   Cancelled = 5;
   OutOfMemory = 6;
+  Suspended = 7;
 
   Invalid = 15;
 }

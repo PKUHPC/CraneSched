@@ -630,6 +630,22 @@ void ParseConfig(int argc, char** argv) {
               std::exit(1);
             }
 
+            if (container_config["RuntimePause"]) {
+              g_config.Container.RuntimePause =
+                  container_config["RuntimePause"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimePause is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeResume"]) {
+              g_config.Container.RuntimeResume =
+                  container_config["RuntimeResume"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeResume is not configured.");
+              std::exit(1);
+            }
+
             if (container_config["RuntimeDelete"]) {
               g_config.Container.RuntimeDelete =
                   container_config["RuntimeDelete"].as<std::string>();
