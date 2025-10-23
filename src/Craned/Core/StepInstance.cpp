@@ -115,8 +115,9 @@ void StepInstance::CleanUp() {
 }
 
 CraneErrCode StepInstance::Prepare() {
-  auto cg_expt = CgroupManager::CreateOrOpenCgroup(
-      CgroupManager::CgroupStrByStepId(job_id, step_id, true), false);
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
+      false);
   if (!cg_expt) return cg_expt.error();
   this->crane_cgroup = std::move(cg_expt.value());
   auto* cg = this->crane_cgroup.get();
@@ -402,6 +403,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
       std::abort();
     }
+
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
@@ -409,6 +411,48 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
 
     util::os::CloseFdFromExcept(3,
                                 {craned_supervisor_fd, supervisor_craned_fd});
+    // Message will send to stdin of Supervisor for its init.
+    for (int retry_count{0}; retry_count < 5; ++retry_count) {
+      if (-1 == dup2(craned_supervisor_fd, STDIN_FILENO)) {
+        if (errno == EINTR) {
+          fmt::print(
+              stderr,
+              "[Step #{}.{}] Retrying dup2 stdin: interrupted system call, "
+              "retry count: {}",
+              job_id, step_id, retry_count);
+          continue;
+        }
+        std::error_code ec(errno, std::generic_category());
+        fmt::print(stderr, "[Step #{}.{}] Failed to dup2 stdin: {}.", job_id,
+                   step_id, ec.message());
+        std::abort();
+      }
+
+      break;
+    }
+
+    for (int retry_count{0}; retry_count < 5; ++retry_count) {
+      if (-1 == dup2(supervisor_craned_fd, STDOUT_FILENO)) {
+        if (errno == EINTR) {
+          fmt::print(
+              stderr,
+              "[Step #{}.{}] Retrying dup2 stdout: interrupted system call, "
+              "retry count: {}",
+              job_id, step_id, retry_count);
+          continue;
+        }
+        std::error_code ec(errno, std::generic_category());
+        fmt::print(stderr, "[Step #{}.{}] Failed to dup2 stdout: {}.", job_id,
+                   step_id, ec.message());
+        std::abort();
+      }
+
+      break;
+    }
+    close(craned_supervisor_fd);
+    close(supervisor_craned_fd);
+
+    util::os::CloseFdFrom(3);
 
     // Prepare the command line arguments.
     std::vector<std::string> string_argv;

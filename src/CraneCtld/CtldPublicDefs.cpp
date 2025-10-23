@@ -209,7 +209,7 @@ void StepInCtld::SetAllocatedRes(const ResourceV2& res) {
       static_cast<crane::grpc::ResourceV2>(res);
 }
 
-void StepInCtld::SetCranedIds(const std::unordered_set<CranedId>& craned_list) {
+void StepInCtld::SetCranedIds(const std::vector<CranedId>& craned_list) {
   this->m_craned_ids_ = craned_list;
   this->m_runtime_attr_.mutable_craned_ids()->Assign(craned_list.begin(),
                                                      craned_list.end());
@@ -471,9 +471,10 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
-  SetExecutionNodes(CranedIds());
-  SetConfiguringNodes(CranedIds());
-  SetRunningNodes(CranedIds());
+  auto node_set = job.CranedIds() | std::ranges::to<std::unordered_set>();
+  SetExecutionNodes(node_set);
+  SetConfiguringNodes(node_set);
+  SetRunningNodes(node_set);
 
   SetSubmitTime(job.SubmitTime());
   SetStartTime(job.StartTime());
@@ -520,8 +521,8 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.set_uid(uid);
   step.mutable_gid()->Assign(gids.begin(), gids.end());
 
-  // No batch or ia meta need to set
-
+  // No batch/ia/io meta need to set
+  // No script to set
   step.set_node_num(node_num);
   step.set_ntasks(ntasks);
   step.set_ntasks_per_node(ntasks_per_node_max);
@@ -570,10 +571,10 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
-
-  step_to_d.set_get_user_env(this->get_user_env);
+  // No need to set batch/ia/io meta and script
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
-
+  step_to_d.set_get_user_env(this->get_user_env);
+  step_to_d.set_ntasks_total(this->job->task_res_map);
   step_to_d.set_extra_attr(extra_attr);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -679,12 +680,17 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
-          meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+          auto arg = StepInteractiveMeta::StepResAllocArgs{
               .job_id = primary_step->job_id,
               .step_id = primary_step->StepId(),
-              .allocated_nodes{std::make_pair(
-                  job->allocated_craneds_regex,
-                  job->CranedIds() | std::ranges::to<std::unordered_set>())}});
+              .res_allocate_expt{
+                  StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                      .allocated_craned_regex = job->allocated_craneds_regex,
+                      .allocated_craned_ids = job->CranedIds(),
+                      .craned_task_map = primary_step->craned_task_map,
+                      .ntasks_total = static_cast<uint32_t>(
+                          primary_step->task_res_map.size())}}};
+          meta.cb_step_res_allocated(arg);
         }
 
         job->SetPrimaryStep(std::move(primary_step));
@@ -961,6 +967,10 @@ void CommonStepInCtld::InitPrimaryStepFromJob(TaskInCtld& job) {
           job.TaskToCtld().container_meta());
     }
   }
+  if (job.TaskToCtld().has_io_meta()) {
+    step.mutable_io_meta()->CopyFrom(job.TaskToCtld().io_meta());
+  }
+  step.set_sh_script(job.TaskToCtld().sh_script());
 
   step.set_extra_attr(job.extra_attr);
   step.set_cmd_line(job.cmd_line);
@@ -1098,6 +1108,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
+  step_to_d.set_get_user_env(this->get_user_env);
+  step_to_d.set_ntasks_total(this->task_res_map.size());
   step_to_d.set_extra_attr(extra_attr);
 
   step_to_d.set_get_user_env(this->get_user_env);
@@ -1110,14 +1122,15 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-
-  if (this->type == crane::grpc::Batch) {
-    auto* mutable_meta = step_to_d.mutable_batch_meta();
-    mutable_meta->CopyFrom(StepToCtld().batch_meta());
-  } else if (this->type == crane::grpc::Interactive) {
-    auto* mutable_meta = step_to_d.mutable_interactive_meta();
-    mutable_meta->CopyFrom(StepToCtld().interactive_meta());
-  } else if (this->type == crane::grpc::Container) {
+  switch (this->type) {
+  case crane::grpc::Batch:
+    step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
+    break;
+  case crane::grpc::Interactive:
+    step_to_d.mutable_interactive_meta()->CopyFrom(
+        StepToCtld().interactive_meta());
+    break;
+  case crane::grpc::Container:
     if (pod_meta.has_value()) {
       step_to_d.mutable_pod_meta()->CopyFrom(
           crane::grpc::PodTaskAdditionalMeta(pod_meta.value()));
@@ -1129,12 +1142,21 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
       // cbatch --pod primary step runs batch script under container job
       step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
     }
+    break;
+  default:
+    std::unreachable();
   }
 
   step_to_d.mutable_signals()->CopyFrom(job->TaskToCtld().signals());
 
   step_to_d.set_task_prolog(task_prolog);
   step_to_d.set_task_epilog(task_epilog);
+  if (StepToCtld().has_io_meta()) {
+    auto* mutable_meta = step_to_d.mutable_io_meta();
+    mutable_meta->CopyFrom(StepToCtld().io_meta());
+  }
+  step_to_d.set_sh_script(StepToCtld().sh_script());
+  step_to_d.mutable_io_meta()->CopyFrom(StepToCtld().io_meta());
 
   return step_to_d;
 }
@@ -1165,7 +1187,6 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Starting / Failed / Cancelled,
-    if (!craned_id.empty()) this->NodeConfigured(craned_id);
     if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);

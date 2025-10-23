@@ -218,6 +218,8 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
+
+
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
@@ -239,6 +241,8 @@ class ITaskInstance {
   ITaskInstance& operator=(ITaskInstance&&) = delete;
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
+  [[nodiscard]] bool IsBatch() const { return m_parent_step_inst_->IsBatch(); }
+  [[nodiscard]] bool IsCrun() const { return m_parent_step_inst_->IsCrun(); }
   // Helper methods shared by all task instances
   StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
@@ -405,8 +409,11 @@ struct ProcInstanceMeta {
   ProcInstanceMeta& operator=(const ProcInstanceMeta&) = delete;
   ProcInstanceMeta& operator=(ProcInstanceMeta&&) = delete;
 
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
+  std::string parsed_sh_script_path{};
+  // Empty parsed pattern will redirect to /dev/null
+  std::string parsed_input_file_pattern{};
+  std::string parsed_output_file_pattern{};
+  std::string parsed_error_file_pattern{};
 };
 
 struct BatchInstanceMeta final : ProcInstanceMeta {
@@ -426,10 +433,16 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
   CrunInstanceMeta& operator=(const CrunInstanceMeta&) = delete;
   CrunInstanceMeta& operator=(CrunInstanceMeta&&) = delete;
 
-  int stdin_write{};
-  int stdout_write{};
-  int stdin_read{};
-  int stdout_read{};
+  int stdin_write;
+  int stdout_write;
+  int stderr_write;
+  int stdin_read;
+  int stdout_read;
+  int stderr_read;
+
+  bool fwd_stdin;
+  bool fwd_stdout;
+  bool fwd_stderr;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -466,8 +479,11 @@ class ProcInstance : public ITaskInstance {
   CrunInstanceMeta* GetCrunMeta_() const {
     return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
   };
+  // returns: pair of (parsed file path, true need forward to cfored)
+  std::pair<std::string, bool> CrunParseFilePattern_(
+      const std::string& pattern) const;
 
-  CraneExpected<pid_t> ForkCrunAndInitMeta_();
+  CraneExpected<pid_t> ForkCrunAndInitIOfd_();
 
   bool SetupCrunFwdAtParent_();
   void SetupCrunFwdAtChild_();
@@ -487,12 +503,12 @@ class ProcInstance : public ITaskInstance {
   std::vector<std::string> GetChildProcExecArgv_() const;
 
   /* Perform file name substitutions
-   * %j - Job ID
-   * %u - Username
-   * %x - Job name
+   * @return: pair of (parsed file path, true if file on local machine)
    */
   std::string ParseFilePathPattern_(const std::string& pattern,
-                                    const std::string& cwd) const;
+                                    const std::string& cwd,
+                                    bool is_batch_stdout,
+                                    bool* is_local_file) const;
 
   std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
@@ -629,6 +645,7 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  void EvSupervisorFinishInitCb_();
   void EvShutdownSupervisorCb_();
 
   // Process exited
@@ -654,6 +671,7 @@ class TaskManager {
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
+  std::shared_ptr<uvw::async_handle> m_supervisor_finish_init_handle_;
   ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
       m_shutdown_status_queue_;
   std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;

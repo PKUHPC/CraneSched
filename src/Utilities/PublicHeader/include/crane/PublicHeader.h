@@ -122,6 +122,9 @@ constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 
+constexpr const char* const kCrunFwdALL = "all";
+constexpr const char* const kCrunFwdNONE = "none";
+
 enum PrologFlagEnum : std::uint8_t {
   Contain = 1 << 0,             // 0000 0001 = 1
   ForceRequeueOnFail = 1 << 1,  // 0000 0010 = 2
@@ -144,7 +147,16 @@ inline constexpr size_t kSystemExitCodeNum =
 inline constexpr size_t kCraneExitCodeBase = kSystemExitCodeNum;
 
 enum ExitCodeEnum : uint16_t {
-  EC_TERMINATED = kCraneExitCodeBase,
+  // exit() code range begin
+  EC_EXITSTATUS_BEGIN = 0,
+  // exit() code range end
+  EC_EXITSTATUS_END = 255,
+  // termination by signal range begin
+  EC_TERMINATION_SIGNAL_BEGIN = 256,
+  // termination by signal range end
+  EC_TERMINATION_SIGNAL_END = 319,
+  // Crane defined exit code range begin
+  EC_TERMINATED = 320,
   EC_PERMISSION_DENIED,
   EC_CGROUP_ERR,
   EC_FILE_NOT_FOUND,

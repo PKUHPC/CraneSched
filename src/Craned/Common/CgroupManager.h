@@ -109,10 +109,10 @@ inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
 
-constexpr int kParsedJobIdIdx = 0;
-constexpr int kParsedStepIdIdx = 1;
-constexpr int kParsedSystemFlagIdx = 2;
-constexpr int kParsedTaskIdIdx = 3;
+constexpr int KParsedJobIdIdx = 0;
+constexpr int KParsedStepIdIdx = 1;
+constexpr int KParsedSystemFlagIdx = 2;
+constexpr int KParsedTaskIdIdx = 3;
 
 // Common cgroup filename constants
 // cgroup v2 memory events file used to read OOM and OOM_KILL counters
@@ -575,7 +575,6 @@ class CgroupManager {
    * \param recover recover cgroup instead creating new one.
    * \param min_mem minimum memory size for cgroup, default none, for job cgroup
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
-   *
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,

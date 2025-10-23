@@ -424,6 +424,16 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+CraneExpected<std::string> GetHostname() {
+  char hostname[HOST_NAME_MAX + 1];
+  if (gethostname(hostname, sizeof(hostname)) != 0) {
+    int err = errno;
+    CRANE_ERROR("gethostname failed: errno={} ({})\n", err, strerror(err));
+    return std::unexpected{CraneErrCode::ERR_SYSTEM_ERR};
+  }
+  return std::string(hostname);
+}
+
 bool IsAbsolutePath(const std::string& path) {
   return std::filesystem::path(path).is_absolute();
 }

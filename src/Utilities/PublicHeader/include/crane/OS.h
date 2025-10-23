@@ -106,6 +106,8 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
+CraneExpected<std::string> GetHostname();
+
 bool IsAbsolutePath(const std::string& path);
 
 void KillPg(pid_t pid);
