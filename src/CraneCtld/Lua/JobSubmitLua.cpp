@@ -152,7 +152,7 @@ int JobSubmitLua::GetQosPriority_(lua_State* lua_state) {
 
   auto qos = g_account_manager->GetExistedQosInfo(qos_name);
   if (!qos) {
-    CRANE_ERROR("Invalid QOS name:", qos_name);
+    CRANE_ERROR("Invalid QOS name: {}", qos_name);
     return 0;
   }
 
