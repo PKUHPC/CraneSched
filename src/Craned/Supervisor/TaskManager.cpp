@@ -38,40 +38,123 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
-
+using namespace std::chrono_literals;
+using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
 CraneErrCode StepInstance::Prepare() {
-  // No need to write script for calloc or container steps
-  if (IsCalloc() || IsContainer() || IsPod()) return CraneErrCode::SUCCESS;
+  if (!(IsCalloc() || IsContainer() || IsPod())) {
+    auto sh_path =
+        g_config.CraneScriptDir /
+        fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
 
-  auto sh_path = g_config.CraneScriptDir /
-                 fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
+    FILE* fptr = fopen(sh_path.c_str(), "w");
+    if (fptr == nullptr) {
+      CRANE_ERROR("Failed write the script");
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
 
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script");
-    return CraneErrCode::ERR_SYSTEM_ERR;
+    if (this->IsCrun())
+      fputs(m_step_to_supv_.interactive_meta().sh_script().c_str(), fptr);
+    else
+      fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
+
+    fclose(fptr);
+
+    chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+    if (chown(sh_path.c_str(), m_step_to_supv_.uid(), gids[0]) != 0) {
+      CRANE_ERROR("Failed to change ownership of script file:{}",
+                  strerror(errno));
+    }
+    script_path = sh_path;
   }
 
-  if (this->IsCrun())
-    fputs(m_step_to_supv_.interactive_meta().sh_script().c_str(), fptr);
-  else
-    fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
+  // Init CriClient before preparation
+  if (IsPod() || IsContainer()) InitCriClient();
 
-  fclose(fptr);
+  // Init cfored
+  if (IsCrun()) {
+    InitCforedClient();
 
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  if (chown(sh_path.c_str(), m_step_to_supv_.uid(), gids[0]) != 0) {
-    CRANE_ERROR("Failed to change ownership of script file:{}",
-                strerror(errno));
+    auto cfored_client = GetCforedClient();
+    if (x11) {
+      X11Meta x11_meta{};
+      if (x11_fwd)
+        x11_meta.x11_port = cfored_client->InitUvX11FwdHandler();
+      else
+        x11_meta.x11_port = GetStep().interactive_meta().x11_meta().port();
+
+      CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
+                  x11_fwd, x11_meta.x11_port);
+
+      auto x11_auth_path =
+          fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd.HomeDir());
+
+      bool ok = util::os::CreateFoldersForFileEx(x11_auth_path, pwd.Uid(),
+                                                 pwd.Gid(), 0700);
+      if (!ok) {
+        CRANE_ERROR("Failed to create xauth source file for");
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+
+      // Default file permission is 0600.
+      int xauth_fd = mkstemp(x11_auth_path.data());
+      if (xauth_fd == -1) {
+        CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+
+      int ret = fchown(xauth_fd, pwd.Uid(), pwd.Gid());
+      if (ret == -1) {
+        CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      x11_meta.x11_auth_path = x11_auth_path;
+      this->x11_meta = std::move(x11_meta);
+      close(xauth_fd);
+    }
   }
-  script_path = sh_path;
   return CraneErrCode::SUCCESS;
 }
 
 void StepInstance::CleanUp() {
   if (script_path.has_value()) util::os::DeleteFile(script_path.value());
+  if (x11_meta.has_value()) {
+    auto x11_auth_path = x11_meta.value().x11_auth_path;
+    if (!x11_auth_path.empty() && !absl::EndsWith(x11_auth_path, "XXXXXX")) {
+      std::error_code ec;
+      bool ok = std::filesystem::remove(x11_auth_path, ec);
+      if (!ok)
+        CRANE_ERROR("Failed to remove x11 auth {}: {}", x11_auth_path,
+                    ec.message());
+    }
+  }
+
+  if (step_user_cg) {
+    int cnt = 0;
+
+    while (true) {
+      if (step_user_cg->Empty()) break;
+
+      if (cnt >= 5) {
+        CRANE_ERROR(
+            "Couldn't kill the processes in cgroup {} after {} times. "
+            "Skipping it.",
+            step_user_cg->CgroupName(), cnt);
+        break;
+      }
+
+      step_user_cg->KillAllProcesses(SIGKILL);
+      ++cnt;
+      std::this_thread::sleep_for(100ms);
+    }
+    step_user_cg->Destroy();
+
+    step_user_cg.reset();
+  }
+  StopCforedClient();
+  // Explicitly release CriClient
+  StopCriClient();
 }
 
 bool StepInstance::IsInteractive() const noexcept {
@@ -145,6 +228,83 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   return env_map;
 }
 
+void StepInstance::GotNewStatus(StepStatus new_status) {
+  switch (new_status) {
+  case StepStatus::Configuring:
+  case StepStatus::Pending:
+  case StepStatus::Invalid: {
+    CRANE_ERROR("[Step #{}.{}] Invalid new status received: {}, ignored.",
+                job_id, step_id, new_status);
+    return;
+  }
+
+  case StepStatus::Running: {
+    if (this->IsDaemon()) {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Daemon step status is not 'Configuring' when "
+            "receiving new status 'Running', current status: {}.",
+            job_id, step_id, m_status_.load());
+    } else {
+      if (m_status_ != StepStatus::Starting)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Starting' when receiving new "
+            "status 'Running', current status: {}.",
+            job_id, step_id, m_status_.load());
+    }
+    break;
+  }
+  case StepStatus::Starting: {
+    if (this->IsDaemon()) {
+      CRANE_WARN(
+          "[Step {}.{}] Daemon step got invalid status 'Starting' current "
+          "status: {}.",
+          job_id, step_id, m_status_.load());
+      return;
+    } else {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Configuring' when "
+            "receiving new status 'Starting', current status: {}.",
+            job_id, step_id, m_status_.load());
+    }
+    break;
+  }
+
+  case StepStatus::Completing: {
+    if (m_status_ != StepStatus::Running)
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not 'Running' when receiving new "
+          "status 'Completing', current status: {}.",
+          job_id, step_id, m_status_.load());
+    break;
+  }
+  // Finished status
+  case StepStatus::ExceedTimeLimit:
+  case StepStatus::OutOfMemory:
+  case StepStatus::Cancelled:
+  case StepStatus::Failed:
+  case StepStatus::Completed: {
+    if (m_status_ != StepStatus::Running &&
+        m_status_ != StepStatus::Completing &&
+        m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, m_status_.load());
+    }
+    break;
+  }
+  default: {
+    std::unreachable();
+  }
+  }
+
+  m_status_ = new_status;
+}
+
 void StepInstance::AddTaskInstance(task_id_t task_id,
                                    std::unique_ptr<ITaskInstance>&& task) {
   m_task_map_.emplace(task_id, std::move(task));
@@ -216,6 +376,49 @@ bool StepInstance::EvaluateOomOnExit() {
   return oom_kill > baseline_oom_kill_count;
 }
 
+CraneErrCode ITaskInstance::Prepare() {
+  // TODO: Use task res.
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+                                       task_id),
+      m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
+  if (!cg_expt.has_value()) {
+    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+               g_config.JobId, g_config.StepId, task_id,
+               static_cast<int>(cg_expt.error()));
+    return cg_expt.error();
+  }
+  m_task_cg = std::move(cg_expt.value());
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ITaskInstance::Cleanup() {
+  if (m_task_cg) {
+    int cnt = 0;
+
+    while (true) {
+      if (m_task_cg->Empty()) break;
+
+      if (cnt >= 5) {
+        CRANE_ERROR(
+            "Couldn't kill the processes in cgroup {} after {} times. "
+            "Skipping it.",
+            m_task_cg->CgroupName(), cnt);
+        break;
+      }
+
+      m_task_cg->KillAllProcesses(SIGKILL);
+      ++cnt;
+      std::this_thread::sleep_for(100ms);
+    }
+    // TODO: Plugin support step cgroup destroy hooks.
+    m_task_cg->Destroy();
+
+    m_task_cg.reset();
+  }
+  return CraneErrCode::SUCCESS;
+}
+
 void ITaskInstance::InitEnvMap() {
   // Job env from CraneD
   for (const auto& [name, value] : g_config.JobEnv) {
@@ -237,15 +440,6 @@ ProcInstance::~ProcInstance() {
     // For crun non pty job, close out fd in CforedClient
     // For crun pty job, close tty fd in CforedClient
     if (!m_parent_step_inst_->pty) close(crun_meta->stdin_write);
-
-    if (!crun_meta->x11_auth_path.empty() &&
-        !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
-      std::error_code ec;
-      bool ok = std::filesystem::remove(crun_meta->x11_auth_path, ec);
-      if (!ok)
-        CRANE_ERROR("Failed to remove x11 auth {} for task #{}: {}",
-                    crun_meta->x11_auth_path, task_id, ec.message());
-    }
   }
 }
 
@@ -254,7 +448,18 @@ void ProcInstance::InitEnvMap() {
   if (m_parent_step_inst_->IsCrun()) {
     const auto& ia_meta = m_parent_step_inst_->GetStep().interactive_meta();
     if (!ia_meta.term_env().empty()) m_env_.emplace("TERM", ia_meta.term_env());
+    if (ia_meta.x11()) {
+      auto const& x11_meta = ia_meta.x11_meta();
+
+      std::string target =
+          ia_meta.x11_meta().enable_forwarding() ? "" : x11_meta.target();
+      m_env_["DISPLAY"] = fmt::format(
+          "{}:{}", target, m_parent_step_inst_->x11_meta->x11_port - 6000);
+      m_env_["XAUTHORITY"] = m_parent_step_inst_->x11_meta->x11_auth_path;
+    }
   }
+  m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
+  m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -279,36 +484,6 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
                       &resolved_path_pattern);
 
   return resolved_path_pattern;
-}
-
-CraneErrCode ProcInstance::PrepareXauthFiles_() {
-  auto* inst_crun_meta = this->GetCrunMeta_();
-  const PasswordEntry& pwd_entry = m_parent_step_inst_->pwd;
-
-  inst_crun_meta->x11_auth_path =
-      fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd_entry.HomeDir());
-
-  bool ok = util::os::CreateFoldersForFileEx(
-      inst_crun_meta->x11_auth_path, pwd_entry.Uid(), pwd_entry.Gid(), 0700);
-  if (!ok) {
-    CRANE_ERROR("Failed to create xauth source file for task #{}", task_id);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // Default file permission is 0600.
-  int xauth_fd = mkstemp(inst_crun_meta->x11_auth_path.data());
-  if (xauth_fd == -1) {
-    CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  int ret = fchown(xauth_fd, m_parent_step_inst_->pwd.Uid(),
-                   m_parent_step_inst_->pwd.Gid());
-  if (ret == -1) {
-    CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  return CraneErrCode::SUCCESS;
 }
 
 CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
@@ -339,6 +514,10 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   }
 
   pid_t pid = -1;
+  if (m_parent_step_inst_->pty && m_parent_step_inst_->task_ids.size() > 1) {
+    CRANE_ERROR("Crun pty task with task-per-node >1 not supported.");
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+  }
   if (m_parent_step_inst_->pty) {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
@@ -367,9 +546,8 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   return pid;
 }
 
-bool ProcInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
+bool ProcInstance::SetupCrunFwdAtParent_() {
   auto* meta = GetCrunMeta_();
-  pid_t pid = std::get<pid_t>(*GetExecId());
 
   if (!m_parent_step_inst_->pty) {
     // For non-pty tasks, pipe is used for stdin/stdout and one end should be
@@ -380,24 +558,11 @@ bool ProcInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   // For pty tasks, stdin_read and stdout_write are the same fd and should not
   // be closed.
 
-  const auto& parent_step = GetParentStep();
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
   auto ok = parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
       task_id, meta->stdin_write, meta->stdout_read, m_parent_step_inst_->pty);
   if (!ok) return false;
-
-  if (m_parent_step_inst_->x11) {
-    if (m_parent_step_inst_->x11_fwd)
-      meta->x11_port = parent_cfored_client->InitUvX11FwdHandler(task_id);
-    else
-      meta->x11_port = parent_step.interactive_meta().x11_meta().port();
-
-    if (x11_port != nullptr) *x11_port = meta->x11_port;
-
-    CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
-                m_parent_step_inst_->x11_fwd, meta->x11_port);
-  }
   CRANE_INFO("Task #{} fwd ready.", task_id);
   return true;
 }
@@ -523,7 +688,7 @@ void ProcInstance::SetupCrunFwdAtChild_() {
 }
 
 void ProcInstance::SetupChildProcCrunX11_() {
-  auto* inst_crun_meta = this->GetCrunMeta_();
+  auto x11_meta = m_parent_step_inst_->x11_meta.value();
   const auto& proto_x11_meta =
       this->GetParentStep().interactive_meta().x11_meta();
 
@@ -534,13 +699,14 @@ void ProcInstance::SetupChildProcCrunX11_() {
       proto_x11_meta.enable_forwarding() ? "%s/unix:%u" : "%s:%u";
 
   std::string display =
-      fmt::sprintf(x11_disp_fmt, x11_target, inst_crun_meta->x11_port - 6000);
+      fmt::sprintf(x11_disp_fmt, x11_target,
+                   m_parent_step_inst_->x11_meta.value().x11_port - 6000);
 
   std::vector<const char*> xauth_argv{
       "/usr/bin/xauth",
       "-v",
       "-f",
-      inst_crun_meta->x11_auth_path.c_str(),
+      x11_meta.x11_auth_path.c_str(),
       "add",
       display.c_str(),
       "MIT-MAGIC-COOKIE-1",
@@ -583,10 +749,6 @@ void ProcInstance::SetupChildProcCrunX11_() {
     fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
                xauth_stderr_str);
   }
-
-  // After xauth is set up, set DISPLAY and XAUTHORITY envs
-  m_env_["DISPLAY"] = display;
-  m_env_["XAUTHORITY"] = inst_crun_meta->x11_auth_path;
 }
 
 CraneErrCode ProcInstance::SetChildProcEnv_() const {
@@ -1000,6 +1162,8 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   const auto& step_to_supv = m_parent_step_inst_->GetStep();
   const auto* pod_meta =
       step_to_supv.has_pod_meta() ? &step_to_supv.pod_meta() : nullptr;
@@ -1166,10 +1330,11 @@ CraneErrCode ContainerInstance::Kill(int /*signum*/) {
 }
 
 CraneErrCode ContainerInstance::Cleanup() {
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
   // For container jobs, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove container.
-  CraneErrCode err = Kill(0);
-  m_bindfs_mounts_.clear();
+  err = Kill(0);
   return err;
 }
 
@@ -1501,6 +1666,9 @@ CraneErrCode ContainerInstance::SetupIdMappedMounts_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
+
   // Write m_meta_
   if (m_parent_step_inst_->IsCrun()) {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
@@ -1527,15 +1695,13 @@ CraneErrCode ProcInstance::Prepare() {
     m_meta_ = std::move(meta);
   }
 
-  std::filesystem::path sh_path = m_parent_step_inst_->script_path.value();
-  m_meta_->parsed_sh_script_path = sh_path;
-
   // If interpreter is not set, let system decide.
-  m_executable_ = sh_path.string();
+  m_executable_ = m_parent_step_inst_->script_path.value().string();
   if (!m_parent_step_inst_->IsInteractive() &&
       !GetParentStep().batch_meta().interpreter().empty()) {
-    m_executable_ = fmt::format(
-        "{} {}", GetParentStep().batch_meta().interpreter(), sh_path.string());
+    m_executable_ =
+        fmt::format("{} {}", GetParentStep().batch_meta().interpreter(),
+                    m_parent_step_inst_->script_path.value().string());
   }
   // TODO: Currently we don't support arguments in scripts.
   // m_arguments_ = std::list<std::string>{};
@@ -1556,14 +1722,6 @@ CraneErrCode ProcInstance::Spawn() {
 
   std::vector<int> to_crun_pipe(2, -1);
   std::vector<int> from_crun_pipe(2, -1);
-
-  if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
-    auto err = PrepareXauthFiles_();
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("Failed to prepare crun X11 forwarding.");
-      return err;
-    }
-  }
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
@@ -1600,11 +1758,10 @@ CraneErrCode ProcInstance::Spawn() {
     bool crun_init_success{true};
     if (m_parent_step_inst_->IsCrun()) {
       if (m_parent_step_inst_->x11) {
-        uint16_t x11_port;
-        crun_init_success = SetupCrunFwdAtParent_(&x11_port);
-        msg.set_x11_port(x11_port);
+        crun_init_success = SetupCrunFwdAtParent_();
+        msg.set_x11_port(m_parent_step_inst_->x11_meta.value().x11_port);
       } else {
-        crun_init_success = SetupCrunFwdAtParent_(nullptr);
+        crun_init_success = SetupCrunFwdAtParent_();
       }
 
       CRANE_DEBUG("Task #{} has initialized crun forwarding.", task_id);
@@ -1660,6 +1817,11 @@ CraneErrCode ProcInstance::Spawn() {
   } else {  // Child proc
     ResetChildProcSigHandler_();
 
+    auto success = m_task_cg->MigrateProcIn(getpid());
+    if (!success) {
+      fmt::print(stderr, "[Subprocess] MigrateProcIn returned {}\n", success);
+      std::abort();
+    }
     CraneErrCode err = SetChildProcProperty_();
     if (err != CraneErrCode::SUCCESS) std::abort();
 
@@ -1713,7 +1875,6 @@ CraneErrCode ProcInstance::Spawn() {
     util::os::CloseFdFrom(3);
 
     if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
-      this->GetCrunMeta_()->x11_port = msg.x11_port();
       SetupChildProcCrunX11_();
     }
 
@@ -1805,10 +1966,10 @@ CraneErrCode ProcInstance::Kill(int signum) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
     // Send the signal to the whole process group.
-    int err = kill(-m_pid_, signum);
-    if (err == 0) return CraneErrCode::SUCCESS;
+    bool success = this->m_task_cg->KillAllProcesses(signum);
+    if (success) return CraneErrCode::SUCCESS;
 
-    CRANE_TRACE("Killing pid {} failed, error: {}", m_pid_, strerror(errno));
+    CRANE_TRACE("[Task #{}] failed to kill.", task_id);
     return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
@@ -1816,12 +1977,8 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
-  // No cleanup for calloc.
-  if (!m_parent_step_inst_->IsCalloc()) {
-    const std::string& path = m_meta_->parsed_sh_script_path;
-    if (!path.empty())
-      g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
-  }
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
 
   // Dummy return
   return CraneErrCode::SUCCESS;
@@ -1871,8 +2028,7 @@ TaskManager::TaskManager()
       [this](const uvw::timer_event&, uvw::timer_handle&) {
         EvSigchldTimerCb_();
       });
-  m_sigchld_timer_handle_->start(std::chrono::seconds(1),
-                                 std::chrono::seconds(1));
+  m_sigchld_timer_handle_->start(1s, 1s);
 
   m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_process_sigchld_async_handle_->on<uvw::async_event>(
@@ -1936,6 +2092,20 @@ TaskManager::TaskManager()
         EvGrpcQueryStepEnvCb_();
       });
 
+  m_grpc_check_status_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_check_status_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcCheckStatusCb_();
+      });
+
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcMigrateSshProcToCgroupCb_();
+      });
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -1946,7 +2116,7 @@ TaskManager::TaskManager()
             h.parent().stop();
             CRANE_TRACE("Stopping supervisor.");
           }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          std::this_thread::sleep_for(50ms);
         });
     if (idle_handle->start() != 0) {
       CRANE_ERROR("Failed to start the idle event in TaskManager loop.");
@@ -1984,6 +2154,11 @@ TaskManager::~TaskManager() {
   }
 }
 
+void TaskManager::SupervisorFinishInit(StepStatus status) {
+  m_step_.GotNewStatus(status);
+  g_craned_client->StepStatusChangeAsync(status, 0, std::nullopt);
+}
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
@@ -2010,16 +2185,6 @@ void TaskManager::TaskFinish_(task_id_t task_id,
       "[Task #{}] Task status changed to {} (exit code: {}, reason: {}).",
       task_id, new_status, exit_code, reason.value_or(""));
 
-  // NOTE: Daemon step's supervisor only sent Running/Failed/Completed status
-  // when starting or actively shutting down the step.
-
-  if (!m_step_.IsDaemon() &&
-      g_runtime_status.Status.load() != StepStatus::Completing) {
-    CRANE_INFO("Step completing now, prev status: {}.",
-               g_runtime_status.Status.load());
-    g_runtime_status.Status = StepStatus::Completing;
-  }
-
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
     CRANE_DEBUG("[Task #{}] Task not found.", task_id);
@@ -2035,17 +2200,25 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                static_cast<int>(err));
   }
 
-  bool orphaned = m_step_.orphaned;
+  auto& status = m_step_.final_termination_status;
+  if (status.max_exit_code < exit_code) {
+    // Bigger exit code always mean a FAILED status cased by a none zero exit
+    // code, signal or crane error.
+    status.max_exit_code = exit_code;
+    status.final_status_on_termination = new_status;
+    status.final_reason_on_termination = reason.value_or("");
+  }
+  // Error status has higher priority than success status.
+  if (new_status != StepStatus::Completed)
+    status.final_status_on_termination = new_status;
   if (m_step_.AllTaskFinished()) {
+    m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
-    m_step_.StopCforedClient();
-    m_step_.StopCriClient();
-
-    if (!orphaned && !m_step_.IsDaemon()) {
-      g_craned_client->StepStatusChangeAsync(new_status, exit_code,
-                                             std::move(reason));
+    if (!m_step_.orphaned) {
+      g_craned_client->StepStatusChangeAsync(
+          status.final_status_on_termination, status.max_exit_code,
+          status.final_reason_on_termination);
     }
-
     ShutdownSupervisorAsync();
   }
 }
@@ -2058,17 +2231,6 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.IsPod()) {
-    // Pod
-    elem.instance = std::make_unique<PodInstance>(&m_step_);
-  } else if (m_step_.IsContainer()) {
-    // Container
-    elem.instance = std::make_unique<ContainerInstance>(&m_step_);
-  } else {
-    // Process
-    elem.instance = std::make_unique<ProcInstance>(&m_step_);
-  }
-
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
   return ok_future;
@@ -2077,9 +2239,6 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   // Prepare/Spawn should not be called for Calloc steps.
   CRANE_ASSERT_MSG(!m_step_.IsCalloc(), "Calloc step should not launch tasks");
-
-  // Init CriClient before preparation
-  if (m_step_.IsPod() || m_step_.IsContainer()) m_step_.InitCriClient();
 
   // Prepare for execution
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
@@ -2091,9 +2250,6 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
         fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
     return err;
   }
-
-  // Init cfored before start the task.
-  if (m_step_.IsCrun()) m_step_.InitCforedClient();
 
   CRANE_INFO("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
@@ -2139,36 +2295,56 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   m_terminate_task_async_handle_->send();
 }
 
+void TaskManager::CheckStatusAsync(
+    crane::grpc::supervisor::CheckStatusReply* response) {
+  std::promise<StepStatus> status_promise;
+  auto status_future = status_promise.get_future();
+  m_grpc_check_status_queue_.enqueue(std::move(status_promise));
+  m_grpc_check_status_async_handle_->send();
+  response->set_job_id(g_config.JobId);
+  response->set_step_id(g_config.StepId);
+  response->set_supervisor_pid(getpid());
+  response->set_status(status_future.get());
+  response->set_ok(true);
+}
+
+std::future<CraneErrCode> TaskManager::MigrateSshProcToCgroupAsync(pid_t pid) {
+  CRANE_INFO("Migrating ssh process pid {} to cgroup.", pid);
+  std::promise<CraneErrCode> ok_promise;
+  auto ok_future = ok_promise.get_future();
+
+  std::pair elem{pid, std::move(ok_promise)};
+
+  m_grpc_migrate_ssh_proc_to_cgroup_queue_.enqueue(std::move(elem));
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->send();
+  return ok_future;
+}
+
 void TaskManager::EvShutdownSupervisorCb_() {
   std::tuple<crane::grpc::TaskStatus, uint32_t, std::string> final_status;
   bool got_final_status = false;
   do {
     got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
     if (!got_final_status) continue;
-
     if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
       CRANE_WARN("Daemon step not shutting down unless explicitly requested.");
       continue;
     }
-
     auto& [status, exit_code, reason] = final_status;
-
     if (m_step_.IsDaemon()) {
-      // For daemon steps, always send a status change when shutting down.
-      CRANE_DEBUG("Sending a {} status as daemon step.", status);
-      g_runtime_status.Status = status;
-      if (!m_step_.orphaned)
+      m_step_.GotNewStatus(status);
+      if (!m_step_.orphaned) {
+        CRANE_DEBUG("Sending a {} status as daemon step.", status);
         g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
+      }
     }
 
-    CRANE_INFO("All tasks finished, exiting...");
     m_step_.CleanUp();
 
     g_craned_client->Shutdown();
     g_server->Shutdown();
 
     this->Shutdown();
-
   } while (!got_final_status);
 }
 
@@ -2225,14 +2401,16 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     if (m_step_.IsCrun()) {
       // TaskStatusChange of a crun task is triggered in
       // CforedManager.
-      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(task_id);
+      uint32_t exit_code = exit_info->value;
+      if (exit_info->is_terminated_by_signal)
+        exit_code += ExitCode::KCrunExitCodeStatusNum;
+      auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(
+          task_id, exit_code, exit_info.value().is_terminated_by_signal);
       if (ok_to_free) {
         CRANE_TRACE("It's ok to unregister task #{}", task_id);
         m_step_.GetCforedClient()->TaskEnd(task_id);
       }
     } else /* Batch / Calloc */ {
-      // If has no process/container left,
-      // send TaskStatusChange for this task.
       TaskStopAndDoStatusChange(task_id);
     }
   }
@@ -2374,10 +2552,10 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
       }
 
       if (signalled) {
+        uint32_t exit_code = exit_info.value + ExitCode::kTerminationSignalBase;
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::Cancelled,
-                      exit_info.value + ExitCode::kTerminationSignalBase,
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Cancelled, exit_code,
                       std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
@@ -2385,13 +2563,11 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
                       ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
-                      exit_info.value + ExitCode::kTerminationSignalBase,
+          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory, exit_code,
                       "Detected by oom_kill counter delta");
           break;
         default:
-          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                      exit_info.value + ExitCode::kTerminationSignalBase,
+          TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_code,
                       std::nullopt);
         }
       } else if (exit_info.value == 0) {
@@ -2440,23 +2616,26 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
-    if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
-      not_ready_elems.emplace_back(elem);
+    if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
+      not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
 
     if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Terminating a completing step #{}.{}, ignored.",
-                  g_config.JobId, g_config.StepId);
+      CRANE_DEBUG(
+          "[Step #{}.{}] Terminating a completing step without orphaned flag, "
+          "ignored.",
+          g_config.JobId, g_config.StepId);
       continue;
     }
 
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
     if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
-      CRANE_DEBUG("No task is running, shutting down...");
-      g_task_mgr->ShutdownSupervisorAsync();
+      CRANE_DEBUG(
+          "No task is running and terminated as orphaned, shutting down...");
+      g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
@@ -2502,7 +2681,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
   std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (!g_runtime_status.CanStepOperate()) {
+    if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Task is not ready to change time limit, will check next time.");
@@ -2541,22 +2720,37 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    if (!elem.instance) {
-      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
-      continue;
+    m_step_.GotNewStatus(StepStatus::Running);
+    for (auto task_id : m_step_.task_ids) {
+      std::unique_ptr<ITaskInstance> instance;
+      if (m_step_.IsPod()) {
+        // Pod
+        instance = std::make_unique<PodInstance>(&m_step_, task_id);
+      } else if (m_step_.IsContainer()) {
+        // Container
+        instance = std::make_unique<ContainerInstance>(&m_step_, task_id);
+      } else {
+        // Process
+        instance = std::make_unique<ProcInstance>(&m_step_, task_id);
+      }
+      m_step_.AddTaskInstance(task_id, std::move(instance));
     }
 
-    g_runtime_status.Status = StepStatus::Running;
-    task_id_t task_id = elem.instance->task_id;
-    m_step_.AddTaskInstance(task_id, std::move(elem.instance));
-
-    auto* task = m_step_.GetTaskInstance(task_id);
-    if (auto err = m_step_.Prepare(); err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to prepare step for task execution.");
-      elem.ok_prom.set_value(err);
-      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::EC_FILE_NOT_FOUND, "");
-      continue;
+    {
+      auto err = m_step_.Prepare();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
+                    m_step_.step_id, static_cast<int>(err));
+        for (auto task_id : m_step_.task_ids) {
+          g_task_mgr->TaskFinish_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::EC_FILE_NOT_FOUND,
+              fmt::format("Failed to prepare step, code: {}",
+                          static_cast<int>(err)));
+        }
+        elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+        continue;
+      }
     }
 
     if (!m_step_.IsDaemon()) {
@@ -2569,34 +2763,61 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::EC_PERMISSION_DENIED,
-                  fmt::format("Failed to look up password entry for uid {}",
-                              m_step_.uid));
+      for (auto task_id : m_step_.task_ids)
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                    ExitCode::EC_PERMISSION_DENIED,
+                    fmt::format("Failed to look up password entry for uid {}",
+                                m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
+
+    // TODO: We dont need to exec task for a calloc job
+
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
-      m_exec_id_task_id_map_[0] = task_id;  // Placeholder
+      m_exec_id_task_id_map_[0] = 0;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
     }
+    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+        CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                         false),
+        m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+    if (!cg_expt.has_value()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                  m_step_.step_id);
+      for (auto task_id : m_step_.task_ids) {
+        g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                                ExitCode::EC_CGROUP_ERR,
+                                "Failed to allocate cgroup");
+      }
+      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+      continue;
+    }
+    m_step_.step_user_cg = std::move(cg_expt.value());
+    m_step_.cgroup_path = m_step_.step_user_cg->CgroupPath();
 
+    m_step_.InitOomBaseline();
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    auto err = LaunchExecution_(task);
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("[Task #{}] Failed to launch process.", task_id);
-    } else {
-      auto exec_id = task->GetExecId().value();
-      CRANE_INFO("[Task #{}] Launched exection, id: {}.", task_id,
-                 std::visit([](auto&& arg) { return std::format("{}", arg); },
-                            exec_id));
-      m_exec_id_task_id_map_[exec_id] = task_id;
-      m_step_.InitOomBaseline();
+    CraneErrCode err = CraneErrCode::SUCCESS;
+    for (auto task_id : m_step_.task_ids) {
+      auto* task = m_step_.GetTaskInstance(task_id);
+      // TODO: Maybe we can launch tasks in parallel
+      auto task_err = LaunchExecution_(task);
+      if (task_err != CraneErrCode::SUCCESS) {
+        CRANE_WARN("[task #{}] Failed to launch process.", task_id);
+        err = task_err;
+      } else {
+        auto exec_id = task->GetExecId().value();
+        CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+                   std::visit([](auto&& arg) { return std::format("{}", arg); },
+                              exec_id));
+        m_exec_id_task_id_map_[exec_id] = task_id;
+      }
     }
 
     elem.ok_prom.set_value(err);
@@ -2609,4 +2830,43 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
     elem.set_value(m_step_.GetStepProcessEnv());
   }
 }
+
+void TaskManager::EvGrpcCheckStatusCb_() {
+  std::promise<StepStatus> elem;
+  while (m_grpc_check_status_queue_.try_dequeue(elem)) {
+    elem.set_value(m_step_.GetStatus());
+  }
+}
+
+void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
+  std::pair<pid_t, std::promise<CraneErrCode>> elem;
+  while (m_grpc_migrate_ssh_proc_to_cgroup_queue_.try_dequeue(elem)) {
+    auto& pid = elem.first;
+    auto& prom = elem.second;
+    if (!m_step_.IsDaemon()) {
+      CRANE_ERROR("Trying to move pid {} to no daemon step", pid);
+      prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
+    }
+    if (!m_step_.step_user_cg) {
+      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+          CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                           false),
+          m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+      if (!cg_expt.has_value()) {
+        CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                    m_step_.step_id);
+        prom.set_value(CraneErrCode::ERR_CGROUP);
+        continue;
+      }
+      m_step_.step_user_cg = std::move(cg_expt.value());
+    }
+    if (m_step_.step_user_cg->MigrateProcIn(pid)) {
+      prom.set_value(CraneErrCode::SUCCESS);
+    } else {
+      prom.set_value(CraneErrCode::ERR_CGROUP);
+    }
+  }
+}
+
 }  // namespace Craned::Supervisor

@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <memory>
-
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
@@ -605,6 +603,7 @@ struct StepInCtld {
 
   std::unordered_set<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
+
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
 
@@ -756,6 +755,9 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
+  // TODO: Schedule thread should fill in following task map
+  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
+  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
@@ -765,10 +767,11 @@ struct CommonStepInCtld : StepInCtld {
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        const std::string& reason, const CranedId& craned_id,
-                        const google::protobuf::Timestamp& timestamp,
-                        StepStatusChangeContext* context);
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
+      crane::grpc::TaskStatus new_status, uint32_t exit_code,
+      const std::string& reason, const CranedId& craned_id,
+      const google::protobuf::Timestamp& timestamp,
+      StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
@@ -991,6 +994,10 @@ struct TaskInCtld {
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
+  bool AllStepsFinished() const {
+    return m_steps_.empty() && !m_primary_step_ && !m_daemon_step_;
+  }
+
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
     CRANE_ASSERT(step->type != crane::grpc::TaskType::Batch);
     step->job = this;
@@ -1073,8 +1080,18 @@ struct TaskInCtld {
       step->SetExecutionNodes(step_craned_ids);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
-
-      // Crun steps need the callback. Ccon steps do not.
+      task_id_t cur_task_id = 0;
+      for (const auto& craned_id : step_craned_ids) {
+        for (int i = 0; i < step->ntasks_per_node; ++i) {
+          step->craned_task_map[craned_id].insert(cur_task_id);
+          auto res = step_alloc_res.at(craned_id);
+          // Mem is allocated at step level, set to 0 here to avoid mem limit.
+          res.allocatable_res.memory_bytes = 0;
+          res.allocatable_res.memory_sw_bytes = 0;
+          step->task_res_map[cur_task_id] = res;
+          ++cur_task_id;
+        }
+      }
       if (step->ia_meta.has_value()) {
         const auto& meta = step->ia_meta.value();
         meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
@@ -1083,7 +1100,6 @@ struct TaskInCtld {
             .allocated_nodes{std::make_pair(
                 util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
       }
-
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       ++popped_count;
