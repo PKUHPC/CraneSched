@@ -20,7 +20,7 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorStub.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
 
