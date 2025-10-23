@@ -995,6 +995,26 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
       CgConstant::ControllerFile::CPU_SHARES, share);
 }
 
+bool CgroupV1::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v1, cpuset controller is separate
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
+    CRANE_WARN("CPUSET controller is not mounted, cannot set CPU binding for v1");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  // Convert cpu_set to comma-separated string (e.g., "0,1,2,5")
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER,
+      CgConstant::ControllerFile::CPUSET_CPUS, cpu_list);
+}
+
 /*
  * CPU_CFS_PERIOD_US is the period of time in microseconds for how long a
  * cgroup's access to CPU resources is measured.
@@ -1276,6 +1296,25 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::CPU_CONTROLLER_V2,
       CgConstant::ControllerFile::CPU_WEIGHT_V2, share);
+}
+
+bool CgroupV2::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v2, cpuset.cpus is under the cpuset controller
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
+    CRANE_WARN("CPUSET controller is not mounted, cannot set CPU binding for v2");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER_V2,
+      CgConstant::ControllerFile::CPUSET_CPUS_V2, cpu_list);
 }
 
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
