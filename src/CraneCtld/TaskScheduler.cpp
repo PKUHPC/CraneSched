@@ -1006,8 +1006,6 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      begin = std::chrono::steady_clock::now();
-
       // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
       // ids to node maps immediately before CreateCgroupForTasks to ensure
       // that if a CraneD crash, the callback of CranedKeeper can call
@@ -1069,6 +1067,7 @@ void TaskScheduler::ScheduleThread_() {
         job->SetDaemonStep(std::move(daemon_step));
       }
 
+      begin = std::chrono::steady_clock::now();
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
         jobs_failed.insert(jobs_failed.end(),
                            std::make_move_iterator(jobs_to_run.begin()),
@@ -1086,7 +1085,13 @@ void TaskScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Append steps to embedded DB costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
       std::latch alloc_job_latch(craned_alloc_job_map.size());
@@ -1094,7 +1099,7 @@ void TaskScheduler::ScheduleThread_() {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
 
-        m_rpc_worker_pool_->detach_task([&]() {
+        m_rpc_worker_pool_->detach_task([&] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send AllocJobs for {} tasks to {}", jobs.size(),
                       craned_id);
@@ -1145,7 +1150,13 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc job costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1192,6 +1203,11 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc daemon steps costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
       for (auto& job : jobs_to_run) {
@@ -1201,12 +1217,6 @@ void TaskScheduler::ScheduleThread_() {
           jobs_created.emplace_back(std::move(job));
         }
       }
-
-      end = std::chrono::steady_clock::now();
-      CRANE_TRACE(
-          "CreateCgroupForJobs costed {} ms",
-          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-              .count());
 
       begin = std::chrono::steady_clock::now();
 
