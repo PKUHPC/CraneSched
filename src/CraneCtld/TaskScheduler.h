@@ -917,14 +917,6 @@ class TaskScheduler {
   }
 
  private:
-  template <class... Ts>
-  struct VariantVisitor : Ts... {
-    using Ts::operator()...;
-  };
-
-  template <class... Ts>
-  VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
-
   void RequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);
 
@@ -943,7 +935,7 @@ class TaskScheduler {
   static void PersistAndTransferTasksToMongodb_(
       std::unordered_set<TaskInCtld*> const& tasks);
 
-  CraneErrCode TerminateRunningStepNoLock_(StepInCtld* step);
+  CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 
