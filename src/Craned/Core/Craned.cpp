@@ -873,7 +873,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 
     // For ctld completing step, cleanup
     if (ctld_status == StepStatus::Completing) {
-      if (step->IsDaemon()) {
+      if (step->IsDaemonStep()) {
         CRANE_TRACE("[Job #{}] is completing", job_id);
         completing_jobs.insert(job_id);
       } else {
@@ -883,7 +883,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       continue;
     }
     if (supv_status == StepStatus::Configured) {
-      CRANE_ASSERT(!step->IsDaemon());
+      CRANE_ASSERT(!step->IsDaemonStep());
       // For configured but not running step, remove this, ctld will consider it
       // failed
       failed_steps[job_id].insert(step_id);

@@ -46,6 +46,10 @@ bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
 }
 
+bool StepInstance::IsInteractive() const noexcept {
+  return interactive_type.has_value();
+}
+
 bool StepInstance::IsCrun() const noexcept {
   return interactive_type.has_value() &&
          interactive_type.value() == crane::grpc::Crun;
@@ -56,7 +60,7 @@ bool StepInstance::IsCalloc() const noexcept {
          interactive_type.value() == crane::grpc::Calloc;
 }
 
-bool StepInstance::IsDaemon() const noexcept {
+bool StepInstance::IsDaemonStep() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
 
@@ -213,7 +217,7 @@ EnvMap ITaskInstance::GetChildProcessEnv() const {
   }
 
   // TODO: Move this to step instance.
-  if (this->m_parent_step_inst_->IsCrun()) {
+  if (m_parent_step_inst_->IsCrun()) {
     auto const& ia_meta = this->GetParentStep().interactive_meta();
     if (!ia_meta.term_env().empty())
       env_map.emplace("TERM", ia_meta.term_env());
@@ -296,7 +300,7 @@ CraneErrCode ITaskInstance::SetupCrunX11_() {
 CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
   if (!m_parent_step_inst_->IsCrun()) return fork();
 
-  auto* meta = GetCrunInstanceMeta();
+  auto* meta = GetCrunMeta();
   meta->pty = m_parent_step_inst_->GetStep().interactive_meta().pty();
   CRANE_DEBUG("Launch crun task #{} pty: {}", task_id, meta->pty);
 
@@ -492,7 +496,7 @@ CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
 }
 
 void ITaskInstance::SetupCrunFwdAtChild_() {
-  const auto* meta = GetCrunInstanceMeta();
+  const auto* meta = GetCrunMeta();
 
   if (!meta->pty) {
     dup2(meta->stdin_read, STDIN_FILENO);
@@ -1183,8 +1187,7 @@ CraneErrCode ProcInstance::Spawn() {
   std::vector<int> to_crun_pipe(2, -1);
   std::vector<int> from_crun_pipe(2, -1);
 
-  if (this->m_parent_step_inst_->IsCrun() &&
-      this->GetParentStep().interactive_meta().x11()) {
+  if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
     auto err = SetupCrunX11_();
     if (err != CraneErrCode::SUCCESS) {
       CRANE_WARN("Failed to setup crun X11 forwarding.");
@@ -1339,8 +1342,7 @@ CraneErrCode ProcInstance::Spawn() {
     if (m_parent_step_inst_->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
-    if (m_parent_step_inst_->IsCrun() &&
-        GetParentStep().interactive_meta().x11()) {
+    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
       this->GetCrunMeta()->x11_port = msg.x11_port();
       SetupChildProcessCrunX11_();
     }
@@ -1535,7 +1537,7 @@ void TaskManager::Wait() {
 
 void TaskManager::ShutdownSupervisor() {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemon()) {
+  if (m_step_.IsDaemonStep()) {
     CRANE_DEBUG("Sending a completed status as daemon step.");
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
                                            0, "");
@@ -1775,14 +1777,14 @@ void TaskManager::EvTaskTimerCb_() {
 
   DelTerminationTimer_();
 
-  if (m_step_.IsBatch() || m_step_.IsCrun() || m_step_.IsContainer()) {
-    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
-        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
-    m_terminate_task_async_handle_->send();
-  } else {
+  if (m_step_.IsCalloc()) {
     // For calloc job, we use job id, send TaskFinish_ directly.
     TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
                 ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+  } else {
+    m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+        .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
+    m_terminate_task_async_handle_->send();
   }
 }
 
@@ -1810,7 +1812,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     }
 
     const auto& exit_info = task->GetExitInfo();
-    if (m_step_.IsBatch() || m_step_.IsCrun() || m_step_.IsContainer()) {
+    if (!m_step_.IsCalloc()) {
       bool signalled = exit_info.is_terminated_by_signal;
       if (task->terminated_by == TerminatedBy::NONE) {
         if (m_step_.EvaluateOomOnExit()) {

@@ -319,7 +319,7 @@ void JobManager::FreeSteps(
         continue;
       }
       auto& step = job->step_map.at(step_id);
-      if (step->IsDaemon()) {
+      if (step->IsDaemonStep()) {
         CRANE_ERROR("Not allowed to free daemon step #{}.{}", job_id, step_id);
         continue;
       }
@@ -1157,7 +1157,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
   std::latch shutdown_step_latch(steps.size());
   for (auto* step : steps) {
-    if (!step->IsDaemon()) {
+    if (!step->IsDaemonStep()) {
       g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
       shutdown_step_latch.count_down();
       continue;

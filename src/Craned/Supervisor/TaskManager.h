@@ -54,6 +54,7 @@ class StepInstance {
   uid_t uid;
   std::vector<gid_t> gids;
 
+  // TODO: Move these into ProcInstance
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
   bool pty;
   bool x11;
@@ -86,9 +87,11 @@ class StepInstance {
 
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsBatch() const noexcept;
+  [[nodiscard]] bool IsInteractive() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
-  [[nodiscard]] bool IsDaemon() const noexcept;
+
+  [[nodiscard]] bool IsDaemonStep() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -204,10 +207,6 @@ class ITaskInstance {
     return m_parent_step_inst_->GetStep();
   }
 
-  CrunInstanceMeta* GetCrunInstanceMeta() const {
-    return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
-  }
-
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
   // FIXME: Remove this in future.
@@ -228,6 +227,7 @@ class ITaskInstance {
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
+  // TODO: Move these into ProcInstance
   CrunInstanceMeta* GetCrunMeta() const {
     return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
   };
