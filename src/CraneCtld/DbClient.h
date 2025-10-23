@@ -203,6 +203,18 @@ class MongodbClient {
   void QueryJobSummary(
       const crane::grpc::QueryJobSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+  void QueryJobSummaryNew(
+      const crane::grpc::QueryJobSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+  void QueryJobSizeSummaryNew(
+      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
+  bsoncxx::document::value JobSingleMatch(
+      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+      const crane::grpc::QueryJobSummaryRequest* request);
+  bsoncxx::document::value JobSizeSingleMatch(
+      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+      const crane::grpc::QueryJobSizeSummaryItemRequest* request);
   void HourJobSummAggregation(std::time_t start, std::time_t end,
                               const std::string& task_collection_name);
   void DayOrMonJobSummAggregation(const std::string& src_coll_str,

@@ -2764,6 +2764,314 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
   return true;
 }
 
+bsoncxx::document::value MongodbClient::JobSizeSingleMatch(
+    const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+    const crane::grpc::QueryJobSizeSummaryItemRequest* request) {
+  bsoncxx::builder::basic::document match_doc;
+  match_doc.append(bsoncxx::builder::basic::kvp(
+      time_field, bsoncxx::builder::basic::make_document(
+                      bsoncxx::builder::basic::kvp(
+                          "$gte", static_cast<int64_t>(range.first)),
+                      bsoncxx::builder::basic::kvp(
+                          "$lt", static_cast<int64_t>(range.second)))));
+  // account
+  if (request && request->filter_accounts_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& acc : request->filter_accounts()) arr.append(acc);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "account", bsoncxx::builder::basic::make_document(
+                       bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // username
+  if (request && request->filter_users_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& user : request->filter_users()) arr.append(user);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "username", bsoncxx::builder::basic::make_document(
+                        bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // qos
+  if (request && request->filter_qoss_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& qos : request->filter_qoss()) arr.append(qos);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "qos", bsoncxx::builder::basic::make_document(
+                   bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // wckey
+  if (request && request->filter_wckeys_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "wckey", bsoncxx::builder::basic::make_document(
+                     bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+
+  // partition
+  if (request && request->filter_partitions_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& partition : request->filter_partitions())
+      arr.append(partition);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "partition_name", bsoncxx::builder::basic::make_document(
+                              bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+
+  return match_doc.extract();
+}
+
+bsoncxx::document::value MongodbClient::JobSingleMatch(
+    const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+    const crane::grpc::QueryJobSummaryRequest* request) {
+  bsoncxx::builder::basic::document match_doc;
+  match_doc.append(bsoncxx::builder::basic::kvp(
+      time_field, bsoncxx::builder::basic::make_document(
+                      bsoncxx::builder::basic::kvp(
+                          "$gte", static_cast<int64_t>(range.first)),
+                      bsoncxx::builder::basic::kvp(
+                          "$lt", static_cast<int64_t>(range.second)))));
+
+  // account
+  if (request && request->filter_accounts_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& acc : request->filter_accounts()) arr.append(acc);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "account", bsoncxx::builder::basic::make_document(
+                       bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // username
+  if (request && request->filter_users_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& user : request->filter_users()) arr.append(user);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "username", bsoncxx::builder::basic::make_document(
+                        bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // qos
+  if (request && request->filter_qoss_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& qos : request->filter_qoss()) arr.append(qos);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "qos", bsoncxx::builder::basic::make_document(
+                   bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // wckey
+  if (request && request->filter_wckeys_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "wckey", bsoncxx::builder::basic::make_document(
+                     bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  return match_doc.extract();
+}
+
+void MongodbClient::QueryJobSummaryNew(
+    const crane::grpc::QueryJobSummaryRequest* request,
+    grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream) {
+  int max_data_size = 5000;
+  absl::flat_hash_map<JobSummKey, JobSummAggResult> agg_map;
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+
+  auto hour_job_summ_table =
+      (*GetClient_())[m_db_name_]["hour_job_summary_table"];
+  auto day_job_summ_table =
+      (*GetClient_())[m_db_name_]["day_job_summary_table"];
+  auto month_job_summ_table =
+      (*GetClient_())[m_db_name_]["month_job_summary_table"];
+  auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
+
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges, day_ranges,
+      month_ranges;
+  for (const auto& r : ranges) {
+    if (r.type == "hour")
+      hour_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "day")
+      day_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "month")
+      month_ranges.emplace_back(r.start, r.end);
+  }
+  mongocxx::collection* entry_table = nullptr;
+  mongocxx::pipeline pipeline;
+  try {
+    // Dynamically select entry table and entry time range
+    if (!hour_ranges.empty()) {
+      entry_table = &hour_job_summ_table;
+      pipeline.match(JobSingleMatch("hour", hour_ranges[0], request).view());
+      // unionWith other hour ranges
+      for (size_t i = 1; i < hour_ranges.size(); ++i) {
+        auto match_bson = JobSingleMatch("hour", hour_ranges[i], request);
+        auto hour_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "hour_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(hour_union.view());
+      }
+      // unionWith all day/month ranges
+      for (const auto& r : day_ranges) {
+        auto day_match = JobSingleMatch("day", r, request);
+        auto day_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "day_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", day_match.view())))))));
+        pipeline.append_stage(day_union.view());
+      }
+      for (const auto& r : month_ranges) {
+        auto month_match = JobSingleMatch("month", r, request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", month_match.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else if (!day_ranges.empty()) {
+      entry_table = &day_job_summ_table;
+      pipeline.match(JobSingleMatch("day", day_ranges[0], request).view());
+      // unionWith other day ranges
+      for (size_t i = 1; i < day_ranges.size(); ++i) {
+        auto match_bson = JobSingleMatch("day", day_ranges[i], request);
+        auto day_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "day_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(day_union.view());
+      }
+      // unionWith all month ranges
+      for (const auto& r : month_ranges) {
+        auto month_match = JobSingleMatch("month", r, request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", month_match.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else if (!month_ranges.empty()) {
+      entry_table = &month_job_summ_table;
+      pipeline.match(JobSingleMatch("month", month_ranges[0], request).view());
+      // unionWith other month ranges
+      for (size_t i = 1; i < month_ranges.size(); ++i) {
+        auto match_bson = JobSingleMatch("month", month_ranges[i], request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else {
+      std::cout << "No time ranges to query." << std::endl;
+      return;
+    }
+
+    // Grouping
+    auto group_bson = bsoncxx::from_json(R"({
+    "$group": {
+        "_id": {
+            "account": "$account",
+            "username": "$username",
+            "qos": "$qos",
+            "wckey": "$wckey"
+        },
+        "total_cpu_time": { "$sum": "$total_cpu_time" },
+        "total_count": { "$sum": "$total_count" }
+    }
+})");
+    pipeline.append_stage(group_bson.view());
+
+    mongocxx::options::aggregate agg_opts;
+    agg_opts.allow_disk_use(true);
+
+    auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    int count = 0;
+    absl::flat_hash_map<JobSummKey, JobSummAggResult> agg_map;
+    for (auto&& doc : cursor) {
+      // std::cout << bsoncxx::to_json(doc) << std::endl;
+      ++count;
+      auto id = doc["_id"].get_document().view();
+      std::string acc = std::string(id["account"].get_string().value);
+      std::string user = std::string(id["username"].get_string().value);
+      std::string qos = std::string(id["qos"].get_string().value);
+      std::string wk = std::string(id["wckey"].get_string().value);
+
+      agg_map[{acc, user, qos, wk}].total_cpu_time +=
+          doc["total_cpu_time"].get_double().value;
+      agg_map[{acc, user, qos, wk}].total_count +=
+          doc["total_count"].get_int32().value;
+    }
+    crane::grpc::QueryJobSummaryReply reply;
+    for (const auto& kv : agg_map) {
+      crane::grpc::JobSummaryItem item;
+      item.set_cluster(g_config.CraneClusterName);
+      item.set_account(kv.first.account);
+      item.set_username(kv.first.username);
+      item.set_qos(kv.first.qos);
+      item.set_wckey(kv.first.wckey);
+      item.set_total_cpu_time(kv.second.total_cpu_time);
+      item.set_total_count(kv.second.total_count);
+      reply.add_item_list()->CopyFrom(item);
+      if (reply.item_list_size() >= max_data_size) {
+        stream->Write(reply);
+        reply.clear_item_list();
+      }
+    }
+    if (reply.item_list_size() > 0) {
+      stream->Write(reply);
+    }
+    std::cout << "Total output: " << count << std::endl;
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
 void MongodbClient::QueryJobSummary(
     const crane::grpc::QueryJobSummaryRequest* request,
     grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream) {
@@ -2813,6 +3121,243 @@ void MongodbClient::QueryJobSummary(
   }
   if (reply.item_list_size() > 0) {
     stream->Write(reply);
+  }
+}
+
+void MongodbClient::QueryJobSizeSummaryNew(
+    const crane::grpc::QueryJobSizeSummaryItemRequest* request,
+    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream) {
+  int max_data_size = 5000;
+
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+  std::vector<std::uint32_t> grouping_list(
+      request->filter_grouping_list().begin(),
+      request->filter_grouping_list().end());
+  absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
+  auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
+
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
+  for (const auto& r : ranges) {
+    if (r.type == "hour")
+      hour_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "day")
+      day_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "month")
+      month_ranges.emplace_back(r.start, r.end);
+  }
+  auto hour_job_summ_table =
+      (*GetClient_())[m_db_name_]["hour_job_summary_table"];
+  auto day_job_summ_table =
+      (*GetClient_())[m_db_name_]["day_job_summary_table"];
+  auto month_job_summ_table =
+      (*GetClient_())[m_db_name_]["month_job_summary_table"];
+
+  mongocxx::collection* entry_table = nullptr;
+  mongocxx::pipeline pipeline;
+
+  try {
+    // Dynamically select entry table and entry time range
+    if (!hour_ranges.empty()) {
+      entry_table = &hour_job_summ_table;
+      pipeline.match(
+          JobSizeSingleMatch("hour", hour_ranges[0], request).view());
+      // unionWith other hour ranges
+      for (size_t i = 1; i < hour_ranges.size(); ++i) {
+        auto match_bson = JobSizeSingleMatch("hour", hour_ranges[i], request);
+        auto hour_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "hour_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(hour_union.view());
+      }
+      // unionWith all day/month ranges
+      for (const auto& r : day_ranges) {
+        auto day_match = JobSizeSingleMatch("day", r, request);
+        auto day_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "day_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", day_match.view())))))));
+        pipeline.append_stage(day_union.view());
+      }
+      for (const auto& r : month_ranges) {
+        auto month_match = JobSizeSingleMatch("month", r, request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", month_match.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else if (!day_ranges.empty()) {
+      entry_table = &day_job_summ_table;
+      pipeline.match(JobSizeSingleMatch("day", day_ranges[0], request).view());
+      // unionWith other day ranges
+      for (size_t i = 1; i < day_ranges.size(); ++i) {
+        auto match_bson = JobSizeSingleMatch("day", day_ranges[i], request);
+        auto day_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "day_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(day_union.view());
+      }
+      // unionWith all month ranges
+      for (const auto& r : month_ranges) {
+        auto month_match = JobSizeSingleMatch("month", r, request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", month_match.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else if (!month_ranges.empty()) {
+      entry_table = &month_job_summ_table;
+      pipeline.match(
+          JobSizeSingleMatch("month", month_ranges[0], request).view());
+      // unionWith other month ranges
+      for (size_t i = 1; i < month_ranges.size(); ++i) {
+        auto match_bson = JobSizeSingleMatch("month", month_ranges[i], request);
+        auto month_union =
+            bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(
+                "$unionWith",
+                bsoncxx::builder::basic::make_document(
+                    bsoncxx::builder::basic::kvp("coll",
+                                                 "month_job_summary_table"),
+                    bsoncxx::builder::basic::kvp(
+                        "pipeline",
+                        bsoncxx::builder::basic::make_array(
+                            bsoncxx::builder::basic::make_document(
+                                bsoncxx::builder::basic::kvp(
+                                    "$match", match_bson.view())))))));
+        pipeline.append_stage(month_union.view());
+      }
+    } else {
+      std::cout << "No time ranges to query." << std::endl;
+      return;
+    }
+
+    // Grouping
+    auto group_bson = bsoncxx::from_json(R"({
+    "$group": {
+        "_id": {
+            "account": "$account",
+            "username": "$username",
+            "qos": "$qos",
+            "wckey": "$wckey",
+            "cpu_alloc": "$cpu_alloc"
+        },
+        "total_cpu_time": { "$sum": "$total_cpu_time" },
+        "total_count": { "$sum": "$total_count" }
+    }
+    })");
+    pipeline.append_stage(group_bson.view());
+
+    mongocxx::options::aggregate agg_opts;
+    agg_opts.allow_disk_use(true);
+
+    auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    int count = 0;
+    absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
+    for (auto&& doc : cursor) {
+      ++count;
+      auto id = doc["_id"].get_document().view();
+      std::string acc = std::string(id["account"].get_string().value);
+      std::string wk = std::string(id["wckey"].get_string().value);
+      uint32_t cpu_alloc = 0;
+      auto cpu_alloc_elem = id["cpu_alloc"];
+      if (cpu_alloc_elem) {
+        if (cpu_alloc_elem.type() == bsoncxx::type::k_int32)
+          cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int32().value);
+        else if (cpu_alloc_elem.type() == bsoncxx::type::k_int64)
+          cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int64().value);
+        else if (cpu_alloc_elem.type() == bsoncxx::type::k_double)
+          cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_double().value);
+      }
+
+      if (grouping_list.empty()) {
+        agg_map[{acc, wk, cpu_alloc}].total_cpu_time +=
+            doc["total_cpu_time"].get_double().value;
+        agg_map[{acc, wk, cpu_alloc}].total_count +=
+            doc["total_count"].get_int32().value;
+      } else {
+        int group_index = 0;
+        for (const auto group : grouping_list) {
+          if (cpu_alloc < group) {
+            break;
+          }
+          group_index++;
+        }
+
+        agg_map[{acc, wk, grouping_list[group_index - 1]}].total_cpu_time +=
+            doc["total_cpu_time"].get_double().value;
+        agg_map[{acc, wk, grouping_list[group_index - 1]}].total_count +=
+            doc["total_count"].get_int32().value;
+      }
+    }
+
+    crane::grpc::QueryJobSizeSummaryItemReply reply;
+    for (const auto& kv : agg_map) {
+      crane::grpc::JobSizeSummaryItem item;
+      item.set_cluster(g_config.CraneClusterName);
+      item.set_account(kv.first.account);
+      item.set_wckey(kv.first.wckey);
+      item.set_cpu_alloc(kv.first.cpu_alloc);
+      item.set_total_cpu_time(kv.second.total_cpu_time);
+      item.set_total_count(kv.second.total_count);
+      reply.add_item_list()->CopyFrom(item);
+      if (reply.item_list_size() >= max_data_size) {
+        stream->Write(reply);
+        reply.clear_item_list();
+      }
+    }
+    if (reply.item_list_size() > 0) {
+      stream->Write(reply);
+    }
+    std::cout << "Total output: " << count << std::endl;
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
@@ -2891,7 +3436,7 @@ bool MongodbClient::Init() {
 
   mongodb_task_timer_handle->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        ClusterRollupUsage();
+        // ClusterRollupUsage();
       });
 
   uint64_t first_delay_ms = MillisecondsToNextHour();
