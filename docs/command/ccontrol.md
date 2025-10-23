@@ -1,223 +1,357 @@
-# ccontrol语法
+# ccontrol - Control Cluster Resources
 
-### 命令主要结构
+**ccontrol is a command-line tool for managing and controlling CraneSched cluster resources.**
 
-**ccontrol可以查看分区和节点的状态。**
+ccontrol provides SQL-style syntax for managing nodes, partitions, jobs, and reservations in a CraneSched cluster. The tool supports operations such as viewing status, updating configurations, holding/releasing jobs, and creating/deleting reservations.
 
-**主要命令**
+## Command Structure
 
-- **help**：显示帮助
-- **show**：显示实体的状态，默认为所有记录
-- **update**：修改作业/分区/节点信息
-- **hold**：暂停作业调度
-- **release**：继续作业调度
-- **create：**创建一个新实体
-- **delete：**删除指定的实体
-
-**支持的命令行选项：**
-
-- **-h/--help**: 显示帮助
-- **--json**：json格式输出命令执行结果
-- **-v/--version：**查询版本号
-- **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
-
-### 各命令使用方式
-
-#### 查看
-
-1. **查看分区状态**
-
-无可选参数
-
-eg:
-
-```Plain
-ccontrol show partition
+```
+ccontrol <ACTION> <ENTITY> [OPTIONS]
 ```
 
-**运行截图**：
+### Actions
 
-![ccontrol](../images/ccontrol/ccontrol_showp2.png)
+- **show** - Display information about entities
+- **update** - Modify attributes of entities  
+- **hold** - Hold entities (prevent jobs from starting)
+- **release** - Release previously held entities
+- **create** - Create new entities
+- **delete** - Delete existing entities
 
-1. **查看节点状态**
+### Entities
 
-无可选参数
+- **node** - Compute nodes
+- **partition** - Node partitions
+- **job** - Jobs/tasks
+- **reservation** - Resource reservations
 
-eg:
+## Global Options
 
-```Plain
+- **-h/--help**: Display help message
+- **-v/--version**: Show version information
+- **-J/--json**: Format output as JSON
+- **-C/--config**: Specify alternative configuration file path (default: "/etc/crane/config.yaml")
+
+## Command Reference
+
+### Show Commands
+
+#### Show Nodes
+
+Display information about compute nodes.
+
+```bash
+# Show all nodes
 ccontrol show node
+
+# Show specific node
+ccontrol show node <nodename>
 ```
 
-**运行截图**：
+**Example:**
+```bash
+ccontrol show node
+ccontrol show node crane01
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_shownode2.png)
 
-1. **查看作业状态**
+#### Show Partitions
 
-无可选参数
+Display information about partitions.
 
-eg:
+```bash
+# Show all partitions
+ccontrol show partition
 
-```Plain
-ccontrol show job
+# Show specific partition
+ccontrol show partition <partition_name>
 ```
 
-**运行截图**：
+**Example:**
+```bash
+ccontrol show partition
+ccontrol show partition CPU
+```
+
+![ccontrol](../images/ccontrol/ccontrol_showp2.png)
+
+#### Show Jobs
+
+Display information about jobs.
+
+```bash
+# Show all jobs
+ccontrol show job
+
+# Show specific job
+ccontrol show job <job_id>
+```
+
+**Example:**
+```bash
+ccontrol show job
+ccontrol show job 12345
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_showjob2.png)
 
-1. **查看预定状态**
+#### Show Reservations
 
-无可选参数
+Display information about reservations.
 
-eg：
-
-```Plain
+```bash
+# Show all reservations
 ccontrol show reservation
+
+# Show specific reservation
+ccontrol show reservation <reservation_name>
 ```
 
-**运行截图**：
+**Example:**
+```bash
+ccontrol show reservation
+ccontrol show reservation my_reservation
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_showreservation.png)
 
-#### 修改
+### Update Commands
 
-1. **修改作业信息**
+#### Update Node
 
-可选参数：
+Modify node attributes, typically to drain or resume nodes.
 
-- priority：优先级
-- timelimit：时间限制(采用时间格式)
-
-eg：
-
-```Plain
-ccontrol update jobid=11 priority=1 timelimit=01:00:00
+```bash
+ccontrol update nodeName=<nodename> state=<state> [reason=<reason>]
 ```
 
-**运行截图**：
+**Parameters:**
+- **nodeName** (required): Name of the node to update
+- **state** (required): New state for the node
+  - `drain` - Prevent new jobs from being scheduled on the node
+  - `resume` - Make node available for scheduling again
+- **reason** (required when draining): Reason for draining the node
 
-![ccontrol](../images/ccontrol/ccontrol_updatejp.png)
+**Examples:**
+```bash
+# Drain a node
+ccontrol update nodename=crane01 state=drain reason="Maintenance"
 
-1. **修改节点信息**
-
-必填参数：
-
-- state：状态
-- reason：原因
-
-eg:
-
-```Plain
-ccontrol update nodename=test_node state=drain reason="test"
+# Resume a node
+ccontrol update nodename=crane01 state=resume
 ```
-
-**运行截图**：
 
 ![ccontrol](../images/ccontrol/ccontrol_updatens.png)
 
-1. **修改分区信息**
+#### Update Job
 
-可选参数：
+Modify job attributes including priority, time limit, comment, and email settings.
 
-- accounts：允许用户
-- deniedaccounts：拒绝的用户
-
-eg：
-
-```Plain
-ccontrol update partition=test accounts=test_user
+```bash
+ccontrol update jobid=<job_id> [priority=<priority>] [timelimit=<timelimit>] [comment=<comment>] [mailuser=<email>] [mailtype=<type>]
 ```
 
-**运行截图**：
+**Parameters:**
+- **jobid** (required): ID of the job to update
+- **priority** (optional): New priority value (floating-point number)
+- **timelimit** (optional): New time limit (format: HH:MM:SS or D-HH:MM:SS)
+- **comment** (optional): New comment string for the job
+- **mailuser** (optional): Email address for notifications
+- **mailtype** (optional): Type of email notifications (NONE, BEGIN, END, FAIL, TIMELIMIT, ALL)
+
+**Examples:**
+```bash
+# Update job priority
+ccontrol update jobid=11 priority=100
+
+# Update time limit
+ccontrol update jobid=11 timelimit=01:00:00
+
+# Update multiple attributes
+ccontrol update jobid=11 priority=1 timelimit=01:00:00 comment="High priority job"
+
+# Update email notifications
+ccontrol update jobid=11 mailuser=user@example.com mailtype=END
+```
+
+![ccontrol](../images/ccontrol/ccontrol_updatejp.png)
+
+#### Update Partition
+
+Modify partition access control lists.
+
+```bash
+ccontrol update partitionName=<partition> [accounts=<accounts>] [deniedaccounts=<accounts>]
+```
+
+**Parameters:**
+- **partitionName** (required): Name of the partition to update
+- **accounts** (optional): Comma-separated list of accounts allowed to use the partition
+- **deniedaccounts** (optional): Comma-separated list of accounts denied from using the partition
+
+**Note:** When AllowedAccounts is set, DeniedAccounts will not take effect.
+
+**Examples:**
+```bash
+# Allow specific accounts
+ccontrol update partition=GPU accounts=research,staff
+
+# Deny specific accounts
+ccontrol update partition=CPU deniedaccounts=guest
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_updatepa.png)
 
-#### 暂停/恢复
+### Hold and Release Commands
 
-1. **暂停作业**
+#### Hold Job
 
-可选参数：
+Hold specified job(s) to prevent them from starting.
 
-- timelimit:时间限制(采用时间格式)
+```bash
+ccontrol hold <job_id> [timelimit=<duration>]
+```
 
-eg:
+**Parameters:**
+- **job_id** (required): ID of the job to hold
+- **timelimit** (optional): Duration to hold the job (format: HH:MM:SS)
 
-```Plain
+**Examples:**
+```bash
+# Hold a job indefinitely
+ccontrol hold 1
+
+# Hold a job for 1 hour
 ccontrol hold 1 timelimit=01:00:00
 ```
 
-**运行截图**：
-
 ![ccontrol](../images/ccontrol/ccontrol_hold1t.png)
 
-1. **恢复作业**
+#### Release Job
 
-无可选参数
+Release a previously held job.
 
-eg:
+```bash
+ccontrol release <job_id>
+```
 
-```Plain
+**Example:**
+```bash
 ccontrol release 1
 ```
 
-**运行截图**：
-
 ![ccontrol](../images/ccontrol/ccontrol_release_1.png)
 
-#### 创建/删除
+### Create and Delete Commands
 
-1. **创建预订**
+#### Create Reservation
 
-必选参数：
+Create a new resource reservation.
 
-- starttime：开始时间（采用日期|时间格式）
-- duration：长度(采用时间格式)
-- account：使用账户
-
-可选参数：
-
-- partition：使用分区
-- nodes：使用节点
-- user：使用用户
-
-eg：
-
-```Plain
-ccontrol create reservation test_reservation duration=01:00:00 partition=test_partition nodes=test_node account=test_account
+```bash
+ccontrol create reservation <name> startTime=<time> duration=<duration> account=<account> [partition=<partition>] [nodes=<nodelist>] [nodeCnt=<count>] [user=<username>]
 ```
 
-**注意：**这里user支持=+和=-的用法，当=+表示允许用户，当=-的时候表示删除某用户
+**Parameters:**
+- **name** (required): Name of the reservation
+- **startTime** (required): When the reservation starts (format: YYYY-MM-DDTHH:MM:SS)
+- **duration** (required): Length of reservation (format: HH:MM:SS or D-HH:MM:SS)
+- **account** (required): Account to associate with the reservation
+- **partition** (optional): Partition to reserve resources from
+- **nodes** (optional): Specific nodes to reserve (comma-separated list)
+- **nodeCnt** (optional): Number of nodes to reserve (used when nodes is not specified)
+- **user** (optional): User to associate with the reservation
 
-**运行截图**：
+**Examples:**
+```bash
+# Create a reservation with specific nodes
+ccontrol create reservation my_reservation startTime=2024-12-01T10:00:00 duration=01:00:00 partition=CPU nodes=crane01,crane02 account=research
+
+# Create a reservation with node count
+ccontrol create reservation test_reservation startTime=2024-12-01T14:00:00 duration=02:00:00 partition=GPU nodeCnt=2 account=staff user=alice
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_create.png)
 
-1. **删除预订**
+#### Delete Reservation
 
-无可选参数
+Delete an existing reservation.
 
-eg:
-
-```Plain
-ccontrol delete reservation test_reservation
+```bash
+ccontrol delete reservation <name>
 ```
 
-**运行截图**：
+**Example:**
+```bash
+ccontrol delete reservation my_reservation
+```
 
 ![ccontrol](../images/ccontrol/ccontrol_delete.png)
 
-### 删除的命令
+## JSON Output
 
-由于删除了cobra框架，现在completion自动补全代码命令已经无法使用
+All commands support JSON output format using the `--json` flag:
 
-### 文件结构
+```bash
+ccontrol --json show node
+ccontrol --json show partition CPU
+ccontrol --json show job 12345
+```
 
-help.go：由于删除了cobra框架，现在help命令的输出编写在help.go中
+This is useful for scripting and automation purposes.
 
-ccontrol.go：向后端通信的函数实现
+## Permission Requirements
 
-CmdArgParser.go：命令解析文件，将使用解析到的命令行数据来调用ccontrol.go的函数
+Different operations require different permission levels:
 
-parser.go：解析器函数，定义数据结构与解析规则
+| Operation | Permission Required |
+|-----------|-------------------|
+| Show commands | User can view their own jobs; admin can view all |
+| Update node | Administrator only |
+| Update partition | Administrator only |
+| Update job | Job owner or administrator |
+| Hold/Release job | Job owner or administrator |
+| Create reservation | Administrator or authorized user |
+| Delete reservation | Reservation creator or administrator |
+
+## Use Cases
+
+### Node Maintenance
+
+```bash
+# Drain node for maintenance
+ccontrol update nodename=crane01 state=drain reason="Hardware upgrade"
+
+# After maintenance, resume node
+ccontrol update nodename=crane01 state=resume
+```
+
+### Job Priority Management
+
+```bash
+# Increase priority for urgent job
+ccontrol update jobid=1234 priority=1000
+
+# Extend time limit for long-running job
+ccontrol update jobid=1234 timelimit=10:00:00
+```
+
+### Resource Reservation
+
+```bash
+# Reserve nodes for scheduled maintenance window
+ccontrol create reservation maint_window startTime=2024-12-15T02:00:00 duration=04:00:00 partition=ALL nodes=crane[01-10] account=admin
+
+# Delete reservation when no longer needed
+ccontrol delete reservation maint_window
+```
+
+## Related Commands
+
+- [cinfo](cinfo.md) - View cluster resource status
+- [cqueue](cqueue.md) - View job queue
+- [cacctmgr](cacctmgr.md) - Manage accounts and users
+- [cbatch](cbatch.md) - Submit batch jobs
+- [ccancel](ccancel.md) - Cancel jobs

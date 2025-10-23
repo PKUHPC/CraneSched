@@ -1,87 +1,181 @@
-# crun 提交交互式任务
+# crun - Submit Interactive Task
 
-crun使用命令行指定的参数申请资源并在计算节点启动指定的任务，用户的输入将被转发到计算节点上对应的任务，任务的输出将被转发回用户终端。crun需要在有cfored运行的节点上启动。
+crun allocates resources based on command-line parameters and starts the specified task on compute nodes. User input is forwarded to the corresponding task on compute nodes, and task output is forwarded back to the user terminal. crun must be started on nodes where cfored is running.
 
-crun只支持通过命令行指定请求参数，支持的命令行选项：
+crun only supports request parameters via command line. Supported command-line options:
 
-- **-h/--help**: 显示帮助
-- **-A/--account string**：提交作业的账户
-- **-D/--chdir string**：任务工作路径
-- **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
-- **-c/--cpus-per-task** **float**：每个任务所需的 CPU 数量（默认值为 1）
-  - **--debug-level string：**可用的调试级别：trace、debug、info（默认值为 "info"）
-- **-x/--exclude string：**从分配中排除特定节点（以逗号分隔的列表）
-  - **--export string：**传播环境变量
-  - **--extra-attr string：**作业的额外属性（JSON 格式）
-  - **--get-user-env：**加载用户的登录环境变量
-  - **--gres string：**每个任务所需的通用资源，格式："gpu:a100:1" 或 "gpu:1"
-- **-J, --job-name string：**作业名称
-  - **--mail-type string：**当特定事件发生时通过邮件通知用户，支持的值：NONE、BEGIN、END、FAIL、TIMELIMIT、ALL（默认值为 NONE）
-  - **--mail-user string：**通知接收者的邮件地址
-  - **--mem string：**最大实际内存量，支持 GB(G, g)、MB(M, m)、KB(K, k) 和 Bytes(B)，默认单位是 MB
-- **-w/--nodelist string：**要分配给作业的节点（以逗号分隔的列表）
-- **-N/--nodes uint32:** 要在其上运行作业的节点数量（格式为 N = min[-max]，默认值为 1）
-  - **--ntasks-per-node uint32：**每个节点上要调用的任务数量（默认值为 1）
-- **-p/--partition string:**请求的分区
-  - **--pty:**使用伪终端运行
-- **-q/--qos string:**作业使用的服务质量（QoS）
-- **-r/--reservation string：**使用预留资源
-- **-t/--time string：**时间限制，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示 5 天 1 秒）或 "hours:minutes:seconds"（如 10:1:2 表示 10 小时 1 分钟 2 秒）
-- **-v/--version:crun** 的版本
-  - **--x11:**启用 X11 支持，默认值为 false。如果未配合 --x11-forwarding 使用，则直接使用 X11（不安全）
-  - **--x11-forwarding:**由 CraneSched 启用 X11 转发（安全），默认值为 false
-- 例：在CPU分区，申请两个节点，一个CPU核心，200M内存，并运行bash程序：
+## Main Options
 
-```C
+- **-h/--help**: Display help
+- **-A/--account string**: Account for job submission
+- **-D/--chdir string**: Working directory for the task
+- **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
+- **-c/--cpus-per-task float**: Number of CPUs required per task (default: 1)
+- **--comment string**: Comment for the job
+- **--debug-level string**: Available debug levels: trace, debug, info (default: "info")
+- **-x/--exclude string**: Exclude specific nodes from allocation (comma-separated list)
+- **--exclusive**: Exclusive node resources
+- **--export string**: Propagate environment variables
+- **--extra-attr string**: Extra attributes of the job (in JSON format)
+- **--get-user-env**: Load user's login environment variables
+- **--gres string**: Generic resources required per task, format: "gpu:a100:1" or "gpu:1"
+- **-H/--hold**: Hold the job until it is released
+- **-i/--input string**: Source and destination of stdin redirection (default: "all")
+- **-J/--job-name string**: Job name
+- **--mail-type string**: Notify user by mail when certain events occur. Supported values: NONE, BEGIN, END, FAIL, TIMELIMIT, ALL (default: NONE)
+- **--mail-user string**: Mail address of the notification receiver
+- **--mem string**: Maximum amount of real memory. Supports GB(G, g), MB(M, m), KB(K, k) and Bytes(B). Default unit is MB
+- **-w/--nodelist string**: Nodes to be allocated to the job (comma-separated list)
+- **-N/--nodes uint32**: Number of nodes to run on (format: N = min[-max], default: 1)
+- **--ntasks-per-node uint32**: Number of tasks to invoke on each node (default: 1)
+- **-p/--partition string**: Requested partition
+- **--pty**: Run with a pseudo-terminal
+- **-q/--qos string**: QoS used for the job
+- **-r/--reservation string**: Use reserved resources
+- **-t/--time string**: Time limit, format: "day-hours:minutes:seconds" (e.g., 5-0:0:1 for 5 days, 1 second) or "hours:minutes:seconds" (e.g., 10:1:2 for 10 hours, 1 minute, 2 seconds)
+- **-v/--version**: crun version
+- **--x11**: Enable X11 support, default is false. If not used with --x11-forwarding, direct X11 is used (insecure)
+- **--x11-forwarding**: Enable X11 forwarding by CraneSched (secure), default is false
+
+## Usage Examples
+
+**Allocate resources and run bash:**
+
+Request 2 nodes, 1 CPU core, 200M memory in CPU partition, and run bash:
+```bash
 crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
 ```
 
-运行结果：
-
 ![crun](../images/crun/crun_c.png)
 
-- 例：申请一个节点，且节点不能是crane01,crane02，任务名称为testjob，运行时间限制为0:25:25，并运行bash程序：
+**Exclude specific nodes:**
+
+Request 1 node, exclude crane01 and crane02, set job name to testjob, time limit 0:25:25, and run bash:
+```bash
+crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
+```
 
 ![crun](../images/crun/crun_N1.png)
 
-- 例：在GPU分区申请一个节点和200M运行内存，节点只能在crane02、crane03中选择，并运行bash程序：
+**Specify node list:**
+
+Request 1 node and 200M memory in GPU partition, nodes must be chosen from crane02 or crane03, and run bash:
+```bash
+crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
+```
 
 ![crun](../images/crun/crun_N2.png)
 
-crun还可以在calloc任务内嵌套启动，将自动继承calloc任务的所有资源。不需要指定除需要运行的程序外其他参数。
+**Nested execution within calloc:**
+
+crun can also be started nested within a calloc task and will automatically inherit all resources from the calloc task. No need to specify parameters other than the program to run:
 
 ![crun](../images/crun/crun_N3.png)
 
-```Bash
+**Advanced options:**
+
+```bash
+# With account, QoS, and environment settings
 crun -A ROOT -J test_crun -x cranetest03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
 ```
 
 ![crun](../images/crun/crun_A.png)
 
-```Bash
-crun -D --debug-level trace --export ALL /path /usr/bin/bash
+```bash
+# With working directory and debug level
+crun -D /path --debug-level trace --export ALL /usr/bin/bash
 ```
 
 ![crun](../images/crun/crun_D.png)
 
-```Bash
+```bash
+# Run on specific node
 crun -w cranetest04 /usr/bin/bash
 ```
 
 ![crun](../images/crun/crun_w.png)
 
-```Bash
+**X11 forwarding:**
+
+```bash
+# Run X11 applications
 crun --x11 xclock
 ```
 
 ![crun](../images/crun/crun_clock.png)
 
-向crun启动的程序传递参数
+## Passing Arguments to Programs
 
-Pass arguments to your programe launched by crun:
+Pass arguments to your program launched by crun:
 
-```Plain
-crun -c 1 -- your_programe --your_args
-// or
-crun -c 1 "your_programe --your_args"
+```bash
+# Using double dash
+crun -c 1 -- your_program --your_args
+
+# Using quotes
+crun -c 1 "your_program --your_args"
 ```
+
+## New Features
+
+### Exclusive Mode (--exclusive)
+
+Request exclusive access to allocated nodes, preventing other jobs from sharing:
+```bash
+crun --exclusive -N 2 /usr/bin/bash
+```
+
+### Hold Mode (-H/--hold)
+
+Submit the job in held state, preventing it from starting until manually released:
+```bash
+crun --hold -c 4 /usr/bin/bash
+# Release later with: ccontrol release <job_id>
+```
+
+### Reservation (-r/--reservation)
+
+Use pre-reserved resources for the job:
+```bash
+crun -r my_reservation /usr/bin/bash
+```
+
+### Email Notifications (--mail-type/--mail-user)
+
+Receive email notifications for job events:
+```bash
+crun --mail-type=END --mail-user=user@example.com -c 4 /usr/bin/bash
+```
+
+Supported mail types:
+- **NONE**: No notifications (default)
+- **BEGIN**: Job started
+- **END**: Job completed
+- **FAIL**: Job failed
+- **TIMELIMIT**: Job reached time limit
+- **ALL**: All events above
+
+### Job Comments (--comment)
+
+Add descriptive comments to your jobs:
+```bash
+crun --comment "Testing new algorithm" -c 8 /usr/bin/python script.py
+```
+
+### Standard Input Redirection (-i/--input)
+
+Control stdin redirection behavior:
+```bash
+# Default: all tasks receive stdin
+crun -i all /usr/bin/bash
+
+# No stdin redirection
+crun -i none /usr/bin/bash
+```
+
+## Related Commands
+
+- [calloc](calloc.md) - Allocate resources for interactive use
+- [cbatch](cbatch.md) - Submit batch jobs
+- [ccancel](ccancel.md) - Cancel jobs
+- [cqueue](cqueue.md) - View job queue

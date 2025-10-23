@@ -1,23 +1,23 @@
-# Multi-node Deployment
+# 多节点部署
 
-This guide covers deploying CraneSched binaries and configurations across multiple nodes in a cluster.
+本指南介绍如何在集群中的多个节点上部署 CraneSched 二进制文件和配置。
 
-## Prerequisites
+## 先决条件
 
-- CraneSched is built and tested on one node (typically the control node)
-- All nodes have network connectivity and can resolve hostnames
-- You have root or sudo access to all nodes
+- CraneSched 已在一个节点（通常是控制节点）上构建和测试
+- 所有节点都有网络连接并可以解析主机名
+- 您对所有节点具有 root 或 sudo 访问权限
 
-## Deployment Methods
+## 部署方法
 
-### Method 1: Using SCP
+### 方法 1：使用 SCP
 
-Suitable for small clusters or when deploying to specific nodes individually.
+适用于小型集群或单独部署到特定节点。
 
-#### Deploy to Control Node
+#### 部署到控制节点
 
 ```bash
-# Copy control node binary
+# 复制控制节点二进制文件
 ssh cranectl "mkdir -p /etc/crane"
 scp CraneSched-1.1.2-Linux-x86_64-cranectld.rpm cranectl:/tmp
 ssh cranectl "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm"
@@ -25,119 +25,119 @@ scp /etc/crane/config.yaml cranectl:/etc/crane/
 scp /etc/crane/database.yaml cranectl:/etc/crane/
 ```
 
-#### Deploy to Compute Nodes
+#### 部署到计算节点
 
 ```bash
-# Copy compute node binary
+# 复制计算节点二进制文件
 ssh crane02 "mkdir -p /etc/crane"
 scp CraneSched-1.1.2-Linux-x86_64-craned.rpm crane02:/tmp
 ssh crane02 "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
 scp /etc/crane/config.yaml crane02:/etc/crane/
 ```
 
-Repeat for each compute node (crane03, crane04, etc.).
+对每个计算节点（crane03、crane04 等）重复此操作。
 
-### Method 2: Using PDSH
+### 方法 2：使用 PDSH
 
-Recommended for larger clusters. PDSH allows parallel execution across multiple nodes.
+推荐用于较大的集群。PDSH 允许跨多个节点并行执行。
 
-#### Install PDSH
+#### 安装 PDSH
 
-**Rocky 9:**
+**Rocky 9：**
 ```bash
 dnf install -y pdsh
 ```
 
-**CentOS 7:**
+**CentOS 7：**
 ```bash
 yum install -y pdsh
 ```
 
-#### Deploy to Control Nodes
+#### 部署到控制节点
 
 ```bash
-# Copy and install cranectld
+# 复制并安装 cranectld
 pdcp -w cranectl CraneSched-1.1.2-Linux-x86_64-cranectld.rpm /tmp
 pdsh -w cranectl "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-cranectld.rpm"
 
-# Copy configuration files
+# 复制配置文件
 pdcp -w cranectl /etc/crane/config.yaml /etc/crane/
 pdcp -w cranectl /etc/crane/database.yaml /etc/crane/
 
-# Start service
+# 启动服务
 pdsh -w cranectl "systemctl daemon-reload"
 pdsh -w cranectl "systemctl enable cranectld"
 pdsh -w cranectl "systemctl start cranectld"
 ```
 
-#### Deploy to Compute Nodes
+#### 部署到计算节点
 
 ```bash
-# Copy and install craned
+# 复制并安装 craned
 pdcp -w crane[01-04] CraneSched-1.1.2-Linux-x86_64-craned.rpm /tmp
 pdsh -w crane[01-04] "rpm -ivh /tmp/CraneSched-1.1.2-Linux-x86_64-craned.rpm"
 
-# Copy configuration file
+# 复制配置文件
 pdcp -w crane[01-04] /etc/crane/config.yaml /etc/crane/
 
-# Start service
+# 启动服务
 pdsh -w crane[01-04] "systemctl daemon-reload"
 pdsh -w crane[01-04] "systemctl enable craned"
 pdsh -w crane[01-04] "systemctl start craned"
 ```
 
-## Alternative: Manual Binary Copy
+## 替代方案：手动复制二进制文件
 
-If you built from source instead of RPM packages:
+如果您从源码构建而不是 RPM 软件包：
 
 ```bash
-# Control node
+# 控制节点
 scp /usr/local/bin/cranectld cranectl:/usr/local/bin/
 scp /etc/systemd/system/cranectld.service cranectl:/etc/systemd/system/
 
-# Compute nodes
+# 计算节点
 pdcp -w crane[01-04] /usr/local/bin/craned /usr/local/bin/
 pdcp -w crane[01-04] /usr/libexec/csupervisor /usr/libexec/
 pdcp -w crane[01-04] /etc/systemd/system/craned.service /etc/systemd/system/
 ```
 
-## Verify Deployment
+## 验证部署
 
-After deployment, verify that all nodes are online:
+部署后，验证所有节点都在线：
 
 ```bash
 cinfo
 ```
 
-You should see all compute nodes listed with state `IDLE` or `ALLOC`.
+您应该看到所有计算节点都列出，状态为 `IDLE` 或 `ALLOC`。
 
-## Updating Deployed Nodes
+## 更新已部署的节点
 
-To update an existing deployment:
+更新现有部署：
 
 ```bash
-# Stop services
+# 停止服务
 pdsh -w cranectl "systemctl stop cranectld"
 pdsh -w crane[01-04] "systemctl stop craned"
 
-# Deploy new version
+# 部署新版本
 pdcp -w cranectl CraneSched-new-version-cranectld.rpm /tmp
 pdsh -w cranectl "rpm -Uvh /tmp/CraneSched-new-version-cranectld.rpm"
 
 pdcp -w crane[01-04] CraneSched-new-version-craned.rpm /tmp
 pdsh -w crane[01-04] "rpm -Uvh /tmp/CraneSched-new-version-craned.rpm"
 
-# Start services
+# 启动服务
 pdsh -w cranectl "systemctl start cranectld"
 pdsh -w crane[01-04] "systemctl start craned"
 ```
 
-## Troubleshooting
+## 故障排除
 
-**PDSH not found**: Install the `pdsh` package from EPEL repository.
+**找不到 PDSH**：从 EPEL 仓库安装 `pdsh` 软件包。
 
-**Permission denied**: Ensure SSH key authentication is set up for root or your deployment user.
+**权限被拒绝**：确保为 root 或您的部署用户设置了 SSH 密钥身份验证。
 
-**Nodes not appearing in `cinfo`**: Check firewall settings and ensure inter-node communication is allowed on required ports (10010-10013).
+**节点未出现在 `cinfo` 中**：检查防火墙设置，并确保允许在所需端口（10010-10013）上进行节点间通信。
 
-**Service fails to start**: Check logs with `journalctl -u cranectld` or `journalctl -u craned`.
+**服务无法启动**：使用 `journalctl -u cranectld` 或 `journalctl -u craned` 检查日志。

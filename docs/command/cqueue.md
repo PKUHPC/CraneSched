@@ -1,162 +1,212 @@
-# cqueue 查看作业队列#
+# cqueue - View Job Queue
 
-**cqueue可以查看队列中的作业信息。**
+**cqueue displays information about jobs in the queue.**
 
-查看集群中所有队列的作业信息（包括状态pending、running、cancelled），默认输出100条信息。
+View all jobs in the cluster's queues (including pending, running, and cancelled statuses). By default, displays 100 entries.
 
 ~~~bash
 cqueue
 ~~~
 
-**cqueue运行结果展示**
+**cqueue Output Example**
 
 ![cqueue](../images/cqueue/cqueue.png)
 
-- **主要输出项**
-  - **JobId**：作业号
-  - **Partition**：作业所在分区
-  - **Name**: 作业名
-  - **User**：作业所属用户
-  - **Account**：作业所属账户
-  - **Status**：作业状态
-  - **Type**： 作业类型
-  - **TimeLimit**：作业时间限制
-  - **Nodes**：作业所分配节点数
-  - **NodeList**： 作业运行的节点名
+## Main Output Fields
 
-#### **主要参数**
+- **JobId**: Job number
+- **Partition**: Partition where the job is located
+- **Name**: Job name
+- **User**: Job owner
+- **Account**: Job account
+- **Status**: Job status
+- **Type**: Job type
+- **TimeLimit**: Job time limit
+- **Nodes**: Number of nodes allocated to the job
+- **NodeList**: Names of nodes where the job is running
 
-- **-A/--Account** **string**：指定查询作业所属账户，指定多个账户时用逗号隔开
-- **-C/--config** **string**：配置文件路径
-- **-o/--format** **string**：指定输出格式。由百分号（%）后接一个字符或字符串标识。 在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符或字符串（不区分大小写）：
-  - **%a/%Account：** 显示作业关联的账户
-  - **%c/%AllocCpus：**显示作业已分配的 CPU 数量
-  - **%e/%CpuPerNode：**显示作业每个节点请求的 CPU 数量
-  - **%h/%ElapsedTime：**显示作业自启动以来的已用时间
-  - **%j/%JobId：**显示作业 ID
-  - **%k/%Comment：**显示作业的备注
-  - **%l/%NodeList：**显示作业正在运行的节点列表
-  - **%m/%TimeLimit：**显示作业的时间限制
-  - **%n/%MemPerNode：**显示作业每个节点请求的内存量
-  - **%N/%NodeNum：**显示作业请求的节点数量
-  - **%n/%Name：**显示作业名称
-  - **%P/%Partition：**显示作业运行所在的分区
-  - **%p/%Priority：**显示作业的优先级
-  - **%Q/%QOS**：显示作业的服务质量（QoS）级别
-  - **%R/%Reason：**显示作业挂起的原因
-  - **%r/%ReqNodes：**显示作业请求的节点
-  - **%S/%StartTime：**显示作业的开始时间
-  - **%s/%SubmitTime：**显示作业的提交时间
-  - **%t/%State：**显示作业的当前状态
-  - **%T/%JobType：**显示作业类型
-  - **%u/%Uid：显示作业的 UID**
-  - **%U/%User：**显示提交作业的用户
-  - **%x/%ExcludeNodes：**显示作业排除的节点
-  - 每个格式标识符或字符串可用宽度说明符修改（如 "%.5j" ）。 若指定宽度，则会被格式化为至少达到该宽度。 若格式无效或无法识别，程序会报错并终止。 
-    - 例：**--format "%.5j %.20n %t"** 会输出作业 ID（最小宽度 5）、名称（最小宽度 20）和状态。
-- **-F/--full**: 显示完整的内容，如果未指定，默认每项输出30个字符
-- **-h/--help**: 显示帮助
-- **-i/--iterate** **uint**：指定间隔秒数刷新查询结果。如 -i=3表示每隔三秒输出一次查询结果
-- **-j/--job** **string**：指定查询作业号，指定多个作业号时用逗号隔开。如 -j=2,3,4
-  - **--json：**json格式输出命令执行结果
-- **-m/--MaxVisibleLines** **uint32**：指定输出结果的最大条数。如-m=500表示最多输出500行查询结果
-- **-n/--name** **string**：指定查询作业名，指定多个作业名时用逗号隔开
-- **-N/--noHeader**：输出隐藏表头
-- **-p/--partition** **string**：指定查询作业所在分区，指定多个分区时用逗号隔开
-- **-q/--qos** **string**：指定查询作业的QoS，指定多个QoS时用逗号隔开
-  - **--self：**查看当前用户提交的作业
-- **-S/--start**：显示作业的开始时间（pending作业显示预期开始时间）
-- **-t/--state** **string**：指定查询作业状态，指定多个状态时用逗号隔开
-- **-u/--user** **string**：指定查询作业所属用户，指定多个用户时用逗号隔开
-- **-v/--version：**查询版本号
+## Main Options
 
-例：
+- **-A/--account string**: Specify accounts to query (comma-separated list for multiple accounts)
+- **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
+- **-F/--full**: Display full content. If not specified, only 30 characters per cell are displayed by default
+- **-h/--help**: Display help
+- **-i/--iterate uint**: Refresh query results at specified intervals (seconds). For example, `-i=3` outputs results every 3 seconds
+- **-j/--job string**: Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`
+- **--json**: Output command execution results in JSON format
+- **-m/--max-lines uint32**: Specify maximum number of output lines. For example, `-m=500` limits output to 500 lines
+- **-n/--name string**: Specify job names to query (comma-separated list for multiple names)
+- **-N/--noheader**: Hide table headers in output
+- **-p/--partition string**: Specify partitions to query (comma-separated list for multiple partitions)
+- **-q/--qos string**: Specify QoS to query (comma-separated list for multiple QoS)
+- **--self**: View jobs submitted by current user
+- **-S/--start**: Display job start time (for pending jobs, shows expected start time)
+- **-t/--state string**: Specify job states to query. Valid values are 'pending(p)', 'running(r)' and 'all'. Default is 'all' (both pending and running jobs)
+- **-u/--user string**: Specify users to query (comma-separated list for multiple users)
+- **-v/--version**: Query version number
 
-```SQL
+### Format Specifiers (-o/--format)
+
+The `--format` option allows customized output formatting. Fields are identified by a percent sign (%) followed by a character or string.
+
+**Format Specification Syntax:**
+- `%[.]<size><type>` - Format field with optional width and alignment
+  - Without size: Field uses natural width
+  - With size only (`%5j`): Minimum width, left-aligned (padding on right)
+  - With dot and size (`%.5j`): Minimum width, right-aligned (padding on left)
+
+**Supported Format Identifiers** (case-insensitive):
+
+| Identifier | Full Name | Description |
+|------------|-----------|-------------|
+| %a | Account | Account associated with the job |
+| %c | AllocCpus | CPUs allocated to the job |
+| %C | ReqCpus | Total CPUs requested by the job |
+| %e | ElapsedTime | Elapsed time since job started |
+| %h | Held | Hold state of the job |
+| %j | JobID | Job ID |
+| %k | Comment | Comment of the job |
+| %l | TimeLimit | Time limit for the job |
+| %L | NodeList | List of nodes the job is running on (or reason for pending) |
+| %m | AllocMemPerNode | Allocated memory per node |
+| %M | ReqMemPerNode | Requested memory per node |
+| %n | Name | Job name |
+| %N | NodeNum | Number of nodes requested by the job |
+| %o | Command | Command line of the job |
+| %p | Priority | Priority of the job |
+| %P | Partition | Partition the job is running in |
+| %q | QoS | Quality of Service level for the job |
+| %Q | ReqCpuPerNode | Requested CPUs per node |
+| %r | ReqNodes | Requested nodes |
+| %R | Reason | Reason for pending status |
+| %s | SubmitTime | Submission time of the job |
+| %S | StartTime | Start time of the job |
+| %t | State | Current state of the job |
+| %T | JobType | Job type |
+| %u | User | User who submitted the job |
+| %U | Uid | UID of the job |
+| %x | ExcludeNodes | Nodes excluded from the job |
+| %X | Exclusive | Exclusive status of the job |
+
+**Format Examples:**
+
+```bash
+# Natural width for all fields
+cqueue --format "%j %n %t"
+
+# Left-aligned with minimum widths
+cqueue --format "%5j %20n %t"
+
+# Right-aligned with minimum widths
+cqueue --format "%.5j %.20n %t"
+
+# Mixed formatting with labels
+cqueue --format "ID:%8j | Name:%.15n | State:%t"
+```
+
+**Note:** If the format is invalid or unrecognized, the program will terminate with an error message.
+
+## Usage Examples
+
+**Display help:**
+```bash
 cqueue -h
 ```
 ![cqueue](../images/cqueue/cqueue_h.png)
 
-```SQL
+**Hide table header:**
+```bash
 cqueue -N
 ```
 ![cqueue](../images/cqueue/cqueue_N.png)
 
-```SQL
+**Show start times:**
+```bash
 cqueue -S
 ```
 ![cqueue](../images/cqueue/cqueue_S.png)
 
-```SQL
+**Query specific jobs:**
+```bash
 cqueue -j 30674,30675
 ```
 ![cqueue](../images/cqueue/cqueue_j.png)
 
-```SQL
+**Filter by state (pending jobs):**
+```bash
 cqueue -t Pending
 ```
 ![cqueue](../images/cqueue/cqueue_t.png)
 
-```Bash
+**Filter by state (running jobs, shorthand):**
+```bash
 cqueue -t r
 ```
 ![cqueue](../images/cqueue/cqueue_tr.png)
 
-```SQL
+**Query jobs for specific user:**
+```bash
 cqueue -u cranetest
 ```
 ![cqueue](../images/cqueue/cqueue_u.png)
 
-```SQL
+**Query jobs for specific account:**
+```bash
 cqueue -A CraneTest
 ```
 ![cqueue](../images/cqueue/cqueue_A.png)
 
-```SQL
+**Auto-refresh every 3 seconds:**
+```bash
 cqueue -i 3
 ```
 ![cqueue](../images/cqueue/cqueue_i.png)
 
-```SQL
+**Filter by partition:**
+```bash
 cqueue -p CPU
 ```
 ![cqueue](../images/cqueue/cqueue_p.png)
 
-```SQL
+**Limit output to 3 lines:**
+```bash
 cqueue -m 3
 ```
 ![cqueue](../images/cqueue/cqueue_m.png)
 
-```SQL
+**Custom format output:**
+```bash
 cqueue -o="%n %u %.5j %.5t %.3T %.5T"
 ```
 ![cqueue](../images/cqueue/cqueue_o.png)
 
-format中的指定列的对应缩写对照：
-
-- j-TaskId；n-Name；t-State；p-Partition；u-User；a-Account；T-Type；I-NodeIndex；l-TimeLimit；N-Nodes
-
-```Bash
+**Filter by job name:**
+```bash
 cqueue -n test
 ```
 ![cqueue](../images/cqueue/cqueue_n1.png)
 
-```Bash
-cqueue -N
-```
-![cqueue](../images/cqueue/cqueue_N2.png)
-
-```Bash
+**Filter by QoS:**
+```bash
 cqueue -q test_qos
 ```
 ![cqueue](../images/cqueue/cqueue_q.png)
 
-```Bash
+**Show only current user's jobs:**
+```bash
 cqueue --self
 ```
 ![cqueue](../images/cqueue/cqueue_self.png)
 
-```Bash
-cqueue -t Running -S 2024-01-02T15:04:05~2024-01-11T11:12:41
+**JSON output:**
+```bash
+cqueue --json
 ```
-![cqueue](../images/cqueue/cqueue_tRunning.png)
+
+## Related Commands
+
+- [cbatch](cbatch.md) - Submit batch jobs
+- [crun](crun.md) - Run interactive jobs
+- [calloc](calloc.md) - Allocate resources
+- [ccancel](ccancel.md) - Cancel jobs
+- [cacct](cacct.md) - Query completed jobs
