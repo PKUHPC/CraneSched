@@ -410,7 +410,9 @@ struct TaskInCtld;
 
 using StepInteractiveMeta = InteractiveMetaInTask;
 
+// Abstract interface of all the steps in Ctld.
 struct StepInCtld {
+ public:
   crane::grpc::TaskType type;
 
   job_id_t job_id;
@@ -420,7 +422,7 @@ struct StepInCtld {
   std::string name;
 
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0f};
+  cpu_t cpus_per_task{0.0F};
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
@@ -432,6 +434,7 @@ struct StepInCtld {
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
+  // TODO: Find somewhere else to put this field?
   std::optional<ContainerMetaInTask> container_meta;
 
  protected:
@@ -476,21 +479,26 @@ struct StepInCtld {
   crane::grpc::RuntimeAttrOfStep m_runtime_attr_;
 
  public:
-  virtual ~StepInCtld();
+  virtual ~StepInCtld() = default;
+
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
+
   void SetStepToCtld(const crane::grpc::StepToCtld& step_to_ctld) {
     m_step_to_ctld_ = step_to_ctld;
   }
   const crane::grpc::StepToCtld& StepToCtld() const;
   crane::grpc::StepToCtld* MutableStepToCtld();
+
   void SetStepId(step_id_t id);
   step_id_t StepId() const { return m_step_id_; }
+
   void SetStepDbId(step_db_id_t id);
   step_db_id_t StepDbId() const { return m_step_db_id_; }
 
   void SetRequeueCount(std::int32_t count);
   std::int32_t RequeueCount() const { return m_requeue_count_; }
+
   void SetAllocatedRes(const ResourceV2& res);
   ResourceV2 AllocatedRes() const { return m_allocated_res_; }
 
@@ -498,6 +506,7 @@ struct StepInCtld {
   const std::unordered_set<CranedId>& CranedIds() const {
     return m_craned_ids_;
   }
+
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
     return m_execute_nodes_;
@@ -506,15 +515,19 @@ struct StepInCtld {
   void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
   void NodeConfigured(const CranedId& node);
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
+
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> RunningNodes() const { return m_running_nodes_; }
-  void NodeFinish(const CranedId& node);
+
+  void SetNodeFinished(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
 
   void SetSubmitTime(absl::Time submit_time);
   absl::Time SubmitTime() const { return m_submit_time_; }
+
   void SetStartTime(absl::Time start_time);
   absl::Time StartTime() const { return m_start_time_; }
+
   void SetEndTime(absl::Time end_time);
   absl::Time EndTime() const { return m_end_time_; }
 
@@ -525,6 +538,7 @@ struct StepInCtld {
   crane::grpc::TaskStatus ConfigureFailedStatus() const {
     return m_configure_failed_status_;
   }
+
   void SetFinishFailedStatus(crane::grpc::TaskStatus status);
   bool FinishWithFailedStatus() const {
     return m_finish_failed_status_ != crane::grpc::TaskStatus::Invalid;
@@ -532,8 +546,10 @@ struct StepInCtld {
   crane::grpc::TaskStatus FinishFailedStatus() const {
     return m_finish_failed_status_;
   }
+
   void SetStatus(crane::grpc::TaskStatus new_status);
   crane::grpc::TaskStatus Status() const { return m_status_; }
+
   void SetExitCode(uint32_t exit_code);
   uint32_t ExitCode() const { return m_exit_code_; }
 
@@ -543,10 +559,12 @@ struct StepInCtld {
   crane::grpc::RuntimeAttrOfStep const& RuntimeAttr() const {
     return m_runtime_attr_;
   }
-  virtual void RecoverFromDb(const TaskInCtld& job,
-                             crane::grpc::StepInEmbeddedDb const& step_in_db);
+
+  // Interface methods
   [[nodiscard]] virtual crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const = 0;
+  virtual void RecoverFromDb(const TaskInCtld& job,
+                             crane::grpc::StepInEmbeddedDb const& step_in_db);
 };
 
 struct DaemonStepInCtld : StepInCtld {
@@ -555,9 +573,11 @@ struct DaemonStepInCtld : StepInCtld {
   std::string qos;
 
   ~DaemonStepInCtld() override = default;
+
   void InitFromJob(const TaskInCtld& job);
   [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 
+  // Interface methods
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
@@ -567,10 +587,8 @@ struct DaemonStepInCtld : StepInCtld {
 
 struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
-
   std::string cmd_line;
   std::string cwd;
-
   std::string extra_attr;
 
   // TODO: fill this field
@@ -583,12 +601,19 @@ struct CommonStepInCtld : StepInCtld {
 
   std::string allocated_craneds_regex;
   std::string pending_reason;
+
   ~CommonStepInCtld() override = default;
+
   void InitPrimaryStepFromJob(const TaskInCtld& job);
+
   [[nodiscard]] bool SetFieldsByStepToCtld(
       const crane::grpc::StepToCtld& step_to_ctld);
+
+  // Interface methods
+
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
+
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
 };
@@ -612,7 +637,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0f};
+  cpu_t cpus_per_task{0.0F};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
