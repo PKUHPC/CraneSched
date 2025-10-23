@@ -508,9 +508,14 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetExitCode(this->PrevErrorExitCode());
       } else {
         this->SetStatus(crane::grpc::TaskStatus::Completed);
+        this->SetExitCode(0U);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
                  this->StepId(), this->Status());
+      // Daemon step terminated by user before primary step created
+      if (job->PrimaryStepStatus() == crane::grpc::TaskStatus::Invalid) {
+        return std::pair{this->Status(), this->ExitCode()};
+      }
       return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
     }
   }
@@ -578,7 +583,26 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   extra_attr = job.extra_attr;
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  // pending_reason = job.pending_reason;
+  // FIXME: Following task fields should set by scheduler
+  task_id_t cur_task_id = 0;
+  if (job.IsBatch() || job.IsCalloc()) {
+    // Batch/Calloc: will launch one task on one node only
+    craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
+    task_res_map[cur_task_id] =
+        job.AllocatedRes().at(job.executing_craned_ids.front());
+  } else {
+    for (const auto& craned_id : job.CranedIds()) {
+      for (int i = 0; i < job.ntasks_per_node; ++i) {
+        craned_task_map[craned_id].insert(cur_task_id);
+        auto res = job.AllocatedRes().at(craned_id);
+        // Mem is allocated at step level, set to 0 here to avoid mem limit.
+        res.allocatable_res.memory_bytes = 0;
+        res.allocatable_res.memory_sw_bytes = 0;
+        task_res_map[cur_task_id] = res;
+        ++cur_task_id;
+      }
+    }
+  }
 
   crane::grpc::StepToCtld step;
 
@@ -650,6 +674,17 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+
+  auto* task_res_map = step_to_d.mutable_task_res_map();
+  auto task_it = this->craned_task_map.find(craned_id);
+  if (task_it != this->craned_task_map.end()) {
+    for (auto task_id : task_it->second) {
+      auto& res = this->task_res_map.at(task_id);
+      task_res_map->emplace(task_id,
+                            static_cast<crane::grpc::ResourceInNode>(res));
+    }
+  }
+
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
@@ -663,16 +698,19 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-
-  if (this->type == crane::grpc::Batch) {
-    auto* mutable_meta = step_to_d.mutable_batch_meta();
-    mutable_meta->CopyFrom(StepToCtld().batch_meta());
-  } else if (this->type == crane::grpc::Interactive) {
-    auto* mutable_meta = step_to_d.mutable_interactive_meta();
-    mutable_meta->CopyFrom(StepToCtld().interactive_meta());
-  } else if (this->type == crane::grpc::Container) {
-    auto* mutable_meta = step_to_d.mutable_container_meta();
-    mutable_meta->CopyFrom(StepToCtld().container_meta());
+  switch (this->type) {
+  case crane::grpc::Batch:
+    step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
+    break;
+  case crane::grpc::Interactive:
+    step_to_d.mutable_interactive_meta()->CopyFrom(
+        StepToCtld().interactive_meta());
+    break;
+  case crane::grpc::Container:
+    step_to_d.mutable_container_meta()->CopyFrom(StepToCtld().container_meta());
+    break;
+  default:
+    std::unreachable();
   }
 
   return step_to_d;
@@ -699,9 +737,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
-    // Configuring -> Configured / Failed / Cancelled,
+    // Configuring -> Starting / Failed / Cancelled,
     this->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configured) {
+    if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
@@ -831,7 +869,6 @@ void CommonStepInCtld::RecoverFromDb(
   extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "Not implemented yet";
 }
 
 bool TaskInCtld::IsX11() const {

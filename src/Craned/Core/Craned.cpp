@@ -39,7 +39,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -47,25 +47,28 @@
 using namespace Craned::Common;
 using Craned::g_config;
 using Craned::JobInD;
+using Craned::StepInstance;
 
-CraneErrCode RecoverCgForJobs(
-    std::unordered_map<job_id_t, Craned::JobInD>& rn_jobs_from_ctld) {
+CraneErrCode RecoverCgForJobSteps(
+    std::unordered_map<job_id_t, JobInD>& rn_jobs_from_ctld,
+    absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                        std::unique_ptr<StepInstance>>& rn_step_from_ctld) {
   using namespace Craned;
   using namespace Common::CgConstant;
 
-  std::set<job_id_t> rn_job_ids_with_cg;
+  std::set<CgroupStrParsedIds> rn_job_ids_with_cg;
   if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1) {
     // FIXME: What about the case of inconsistency?
 
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
 
   } else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
-    rn_job_ids_with_cg = CgroupManager::GetJobIdsFromCgroupV2_(
+    rn_job_ids_with_cg = CgroupManager::GetIdsFromCgroupV2_(
         kSystemCgPathPrefix / kRootCgNamePrefix);
 
 #ifdef CRANE_ENABLE_BPF
@@ -76,10 +79,21 @@ CraneErrCode RecoverCgForJobs(
       return CraneErrCode::ERR_EBPF;
     }
 
-    for (const auto& [job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (rn_jobs_from_ctld.contains(job_id)) continue;
-
-      CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
+    for (const auto& [ids, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
+      auto job_id = std::get<KParsedJobIdIdx>(ids).value();
+      auto step_id = std::get<KParsedStepIdIdx>(ids);
+      if (step_id.has_value()) {
+        if (rn_step_from_ctld.contains({job_id, step_id.value()})) {
+          continue;
+        } else {
+          CRANE_DEBUG("Erase bpf map entry for rn step {} {} not in Ctld.",
+                      job_id, step_id.value());
+        }
+      }
+      if (rn_jobs_from_ctld.contains(job_id))
+        continue;
+      else
+        CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
       for (const auto& key : bpf_key_vec) {
         if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
                                  &key, sizeof(BpfKey), BPF_ANY) < 0) {
@@ -95,31 +109,70 @@ CraneErrCode RecoverCgForJobs(
     return CraneErrCode::ERR_CGROUP;
   }
 
-  for (job_id_t job_id : rn_job_ids_with_cg) {
-    if (rn_jobs_from_ctld.contains(job_id)) {
-      // Job is found in both ctld and cgroup
-      JobInD& job = rn_jobs_from_ctld.at(job_id);
+  for (auto ids : rn_job_ids_with_cg) {
+    auto [job_id_opt, step_id_opt, system_flag, task_id_opt] = ids;
+    job_id_t job_id = job_id_opt.value();
+    // For craned, we don't care task cgroup
+    if (task_id_opt.has_value()) continue;
+    if (step_id_opt.has_value()) {
+      step_id_t step_id = step_id_opt.value();
+      // Step cgroup recovery
+      if (rn_step_from_ctld.contains({job_id, step_id})) {
+        // Step is found in both ctld and cgroup
+        auto& step_instance = rn_step_from_ctld.at({job_id, step_id});
 
-      CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
-      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-          CgroupManager::CgroupStrByJobId(job_id), job.job_to_d.res(), true);
-      if (cg_expt.has_value()) {
-        // Job cgroup is recovered.
-        job.cgroup = std::move(cg_expt.value());
-      } else {
+        // For common step cgroup, craned only cares about system cgroup
+        // For daemon step cgroup, craned cares about both system and user
+        // cgroup
+        if (!step_instance->IsDaemonStep() && !system_flag) {
+          continue;
+        }
+        CRANE_DEBUG("Recover existing cgroup for step {} of job #{}", step_id,
+                    job_id);
+        auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+            CgroupManager::CgroupStrByStepId(job_id, step_id, system_flag),
+            step_instance->step_to_d.res(), true);
+        if (cg_expt.has_value()) {
+          if (system_flag)
+            step_instance->crane_cgroup = std::move(cg_expt.value());
+          continue;
+        }
         // If the cgroup is found but is unrecoverable, just logging out.
-        CRANE_ERROR("Cgroup for job #{} is found but not recoverable.", job_id);
+        CRANE_ERROR(
+            "Cgroup for step {} of job #{} is found but not "
+            "recoverable.",
+            step_id, job_id);
       }
 
-      continue;
-    }
+      // Job is found in cgroup but not in ctld. Cleaning up.
+      CRANE_DEBUG("Removing cgroup for step #{}.{} not in Ctld.", job_id,
+                  step_id);
+    } else {
+      if (rn_jobs_from_ctld.contains(job_id)) {
+        // Job is found in both ctld and cgroup
+        JobInD& job = rn_jobs_from_ctld.at(job_id);
 
-    // Job is found in cgroup but not in ctld. Cleaning up.
-    CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
+        CRANE_DEBUG("Recover existing cgroup for job #{}", job_id);
+        auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+            CgroupManager::CgroupStrByJobId(job_id), job.job_to_d.res(), true);
+        if (cg_expt.has_value()) {
+          // Job cgroup is recovered.
+          job.cgroup = std::move(cg_expt.value());
+        } else {
+          // If the cgroup is found but is unrecoverable, just logging out.
+          CRANE_ERROR("Cgroup for job #{} is found but not recoverable.",
+                      job_id);
+        }
+
+        continue;
+      }
+      // Job is found in cgroup but not in ctld. Cleaning up.
+      CRANE_DEBUG("Removing cgroup for job #{} not in Ctld.", job_id);
+    }
     std::unique_ptr<CgroupInterface> cg_ptr;
 
     // Open cgroup and destroy it.
-    auto cg_str = CgroupManager::CgroupStrByJobId(job_id);
+    auto cg_str = CgroupManager::CgroupStrByParsedIds(ids);
 
     // NOLINTBEGIN(readability-suspicious-call-argument)
     if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V1)
@@ -137,7 +190,7 @@ CraneErrCode RecoverCgForJobs(
       continue;
     }
 
-    cg_ptr->KillAllProcesses();
+    cg_ptr->KillAllProcesses(SIGKILL);
     cg_ptr->Destroy();
   }
 
@@ -804,8 +857,7 @@ void CreateRequiredDirectories() {
 void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
-
-  using Craned::JobInD, Craned::StepInstance;
+  using Craned::SupervisorStub;
   std::map<job_id_t, std::set<step_id_t>> ctld_step_ids;
 
   for (const auto& [job_id, job_steps] : config_from_ctld.job_steps()) {
@@ -817,12 +869,11 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
               util::JobStepsToString(ctld_step_ids));
 
   CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    std::pair<pid_t, Craned::StepStatus>>>
-      steps = g_supervisor_keeper->InitAndGetRecoveredMap();
+                                    SupervisorStub::SupervisorRecoverInfo>>
+      steps = SupervisorStub::InitAndGetRecoveredMap();
 
-  // JobId,supervisor pid
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      std::pair<pid_t, Craned::StepStatus>>
+                      SupervisorStub::SupervisorRecoverInfo>
       step_supv_map;
   if (steps.has_value()) step_supv_map = steps.value();
 
@@ -885,9 +936,10 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   for (const auto& [job_id, job_steps] : valid_steps) {
     const auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
     for (const auto& step_id : job_steps) {
-      auto [pid, status] = step_supv_map.at(std::make_pair(job_id, step_id));
+      auto& [pid, status, stub] =
+          step_supv_map.at(std::make_pair(job_id, step_id));
       auto step_inst = std::make_unique<StepInstance>(
-          proto_job_steps.steps().at(step_id), pid, status);
+          proto_job_steps.steps().at(step_id), pid, status, stub);
       step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
   }
@@ -899,9 +951,6 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
                     JobInD{config_from_ctld.job_steps().at(job_id).job()});
   }
 
-  /******************* Recover job cgroup info *******************/
-  RecoverCgForJobs(job_map);
-
   /******************* Handle step status inconsistency *******************/
   using Craned::StepStatus;
   std::set<job_id_t> completing_jobs{};
@@ -912,7 +961,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     auto [job_id, step_id] = ids;
     auto ctld_status =
         config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
-    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).second;
+    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).status;
     CRANE_TRACE("[Step #{}.{}] Ctld status: {}, supervisor reported: {}",
                 job_id, step_id, ctld_status, supv_status);
 
@@ -927,7 +976,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       }
       continue;
     }
-    if (supv_status == StepStatus::Configured) {
+    if (supv_status == StepStatus::Starting) {
       CRANE_ASSERT(!step->IsDaemonStep());
       // For configured but not running step, remove this, ctld will consider it
       // failed
@@ -946,8 +995,8 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
   for (auto [job_id, step_ids] : failed_steps) {
     for (auto step_id : step_ids) {
-      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-      if (stub) {
+      {
+        auto& stub = step_map.at({job_id, step_id})->supervisor_stub;
         auto err = stub->TerminateTask(true, false);
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("[Supervisor] Failed to terminate task #{}.{}", job_id,
@@ -958,10 +1007,10 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     }
   }
 
+  /******************* Recover job cgroup info *******************/
+  RecoverCgForJobSteps(job_map, step_map);
+
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
-  for (const auto& [job_id, step_ids] : invalid_steps)
-    for (auto step_id : step_ids)
-      g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
 
   if (!invalid_steps.empty()) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
@@ -984,8 +1033,6 @@ void GlobalVariableInit() {
   // It is always ok to create thread pool first.
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
-  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
   using CgConstant::Controller;
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
@@ -1048,7 +1095,7 @@ void GlobalVariableInit() {
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 
   // Make sure all grpc server is ready to receive requests.
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  std::this_thread::sleep_for(1000ms);
 }
 
 void WaitForStopAndDoGvarFini() {
@@ -1089,12 +1136,6 @@ void WaitForStopAndDoGvarFini() {
   g_ctld_client.reset();
   // After ctld client destroyed, it is ok to destroy ctld client state machine
   g_ctld_client_sm.reset();
-
-  /*
-   * Called from G_SERVER, JobMgr
-   * CtldClient: ActionConfigureCb
-   */
-  g_supervisor_keeper.reset();
 
   g_thread_pool.reset();
 
