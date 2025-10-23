@@ -379,6 +379,7 @@ class CgroupInterface {
   virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
+  virtual bool SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) = 0;
   virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
   virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
   virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
