@@ -61,9 +61,27 @@ class StepInstance {
   bool x11_fwd{};
   bool pty{};
 
-  std::optional<std::filesystem::path> script_path;
+  struct X11Meta {
+    uint16_t x11_port;
+    std::string x11_auth_path;
+  };
+
+  std::optional<X11Meta> x11_meta;
 
   std::string cgroup_path;  // resolved cgroup path
+  std::optional<std::filesystem::path> script_path;
+
+  // Only daemon step may migrate ssh procs to cgroup
+  std::unique_ptr<Common::CgroupInterface> step_user_cg;
+
+  struct TerminationStatus {
+    // Will return to crun for interactive steps
+    uint32_t max_exit_code{0};
+    StepStatus final_status_on_termination{StepStatus::Completed};
+    std::string final_reason_on_termination{""};
+  };
+
+  TerminationStatus final_termination_status;
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
@@ -72,7 +90,8 @@ class StepInstance {
       : m_step_to_supv_(step),
         job_id(step.job_id()),
         step_id(step.step_id()),
-        task_ids({0}),  // TODO: Set task_id here
+        task_ids(step.task_res_map() | std::views::keys |
+                 std::ranges::to<std::vector>()),
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
@@ -90,6 +109,8 @@ class StepInstance {
   StepInstance& operator=(const StepInstance&) = delete;
   StepInstance& operator=(StepInstance&&) = delete;
 
+  // Do not do any clean up action in destructor. This will only be called when
+  // supervisor is exiting.
   ~StepInstance() = default;
   CraneErrCode Prepare();
   void CleanUp();
@@ -102,7 +123,12 @@ class StepInstance {
 
   [[nodiscard]] bool IsDaemonStep() const noexcept;
 
-  const StepToSupv& GetStep() const { return m_step_to_supv_; }
+  [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
+  [[nodiscard]] bool IsRunning() const noexcept {
+    return m_status_ == StepStatus::Running;
+  }
+
+  const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
 
   // Cfored client in step
   void InitCforedClient() {
@@ -155,11 +181,14 @@ class StepInstance {
 
   EnvMap GetStepProcessEnv() const;
 
+  void GotNewStatus(StepStatus new_status);
+
   // OOM monitoring methods
   void InitOomBaseline();
   bool EvaluateOomOnExit();
 
  private:
+  StepStatus m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
@@ -168,8 +197,6 @@ class StepInstance {
 
 struct TaskInstanceMeta {
   virtual ~TaskInstanceMeta() = default;
-
-  std::string parsed_sh_script_path;
 };
 
 struct BatchInstanceMeta : TaskInstanceMeta {
@@ -186,10 +213,6 @@ struct CrunInstanceMeta : TaskInstanceMeta {
   int stdout_write;
   int stdin_read;
   int stdout_read;
-
-  std::string x11_target;
-  uint16_t x11_port;
-  std::string x11_auth_path;
 };
 
 struct TaskExitInfo {
@@ -202,8 +225,8 @@ using TaskExecId = std::variant<std::string, pid_t>;
 
 class ITaskInstance {
  public:
-  explicit ITaskInstance(StepInstance* step_inst)
-      : m_parent_step_inst_(step_inst) {}
+  explicit ITaskInstance(StepInstance* step_inst, task_id_t task_id)
+      : task_id(task_id), m_parent_step_inst_(step_inst) {}
 
   virtual ~ITaskInstance() = default;
 
@@ -240,12 +263,13 @@ class ITaskInstance {
   StepInstance* m_parent_step_inst_;
   TaskExitInfo m_exit_info_{};
   EnvMap m_env_;
+  std::unique_ptr<Common::CgroupInterface> m_task_cg;
 };
 
 class ContainerInstance : public ITaskInstance {
  public:
-  explicit ContainerInstance(StepInstance* step_spec)
-      : ITaskInstance(step_spec) {}
+  explicit ContainerInstance(StepInstance* step_spec, task_id_t task_id)
+      : ITaskInstance(step_spec, task_id) {}
   ~ContainerInstance() override = default;
 
   ContainerInstance(const ContainerInstance&) = delete;
@@ -317,7 +341,8 @@ class ContainerInstance : public ITaskInstance {
 
 class ProcInstance : public ITaskInstance {
  public:
-  explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  explicit ProcInstance(StepInstance* step_spec, task_id_t task_id)
+      : ITaskInstance(step_spec, task_id) {}
 
   ~ProcInstance() override;
 
@@ -351,10 +376,9 @@ class ProcInstance : public ITaskInstance {
 
   CraneExpected<pid_t> ForkCrunAndInitMeta_();
 
-  bool SetupCrunFwdAtParent_(uint16_t* x11_port);
+  bool SetupCrunFwdAtParent_();
   void SetupCrunFwdAtChild_();
 
-  CraneErrCode PrepareXauthFiles_();
   void SetupChildProcCrunX11_();
 
   // Methods related to Batch only
@@ -395,8 +419,14 @@ class TaskManager {
   TaskManager& operator=(const TaskManager&) = delete;
   TaskManager& operator=(TaskManager&&) = delete;
 
+  void SupervisorFinishInit();
+
   void Wait();
-  void ShutdownSupervisor();
+  // Shutdown supervisor asynchronously with given status, exit code and reason.
+  // Status change will be sent only if daemon step.
+  void ShutdownSupervisorAsync(
+      crane::grpc::TaskStatus new_status = StepStatus::Completed,
+      uint32_t exit_code = 0, std::string reason = "");
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
@@ -431,6 +461,7 @@ class TaskManager {
     }
   }
 
+  // Should called in uvw thread, otherwise data race may happen.
   void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
                    uint32_t exit_code, std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);
@@ -454,6 +485,10 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
+
+  std::future<CraneErrCode> MigrateSshProcToCgroupAsync(pid_t pid);
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -461,7 +496,6 @@ class TaskManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   struct ExecuteTaskElem {
-    std::unique_ptr<ITaskInstance> instance;
     std::promise<CraneErrCode> ok_prom;
   };
 
@@ -474,6 +508,9 @@ class TaskManager {
     absl::Duration time_limit;
     std::promise<CraneErrCode> ok_prom;
   };
+
+  void EvSupervisorFinishInitCb_();
+  void EvShutdownSupervisorCb_();
 
   // Process exited
   void EvSigchldCb_();
@@ -493,8 +530,15 @@ class TaskManager {
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+  void EvGrpcCheckStatusCb_();
+  void EvGrpcMigrateSshProcToCgroupCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
+
+  std::shared_ptr<uvw::async_handle> m_supervisor_finish_init_handle_;
+  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
+      m_shutdown_status_queue_;
+  std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -525,6 +569,14 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_grpc_query_step_env_async_handle_;
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_check_status_async_handle_;
+  ConcurrentQueue<std::promise<StepStatus>> m_grpc_check_status_queue_;
+
+  std::shared_ptr<uvw::async_handle>
+      m_grpc_migrate_ssh_proc_to_cgroup_async_handle_;
+  ConcurrentQueue<std::pair<pid_t, std::promise<CraneErrCode>>>
+      m_grpc_migrate_ssh_proc_to_cgroup_queue_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;

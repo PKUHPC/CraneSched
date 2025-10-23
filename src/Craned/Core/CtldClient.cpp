@@ -20,7 +20,7 @@
 
 #include "CranedServer.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorStub.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
 
@@ -466,7 +466,7 @@ void CtldClient::Init() {
         // Ctld valid status:
         //   - Completing
         //   - Running
-        //   - Configured
+        //   - Starting
         //   - Configuring
         // Craned valid status:
         //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
@@ -474,7 +474,7 @@ void CtldClient::Init() {
         //   - Completing (All task finished on CommonStep / Asked to exit on
         //     DaemonStep, during Epilog)
         //   - Running
-        //   - Configured (Only for CommonStep)
+        //   - Starting (Only for CommonStep)
         //   - Configuring
         auto GetStatusPriority = [](StepStatus status) -> int {
           switch (status) {
@@ -491,11 +491,11 @@ void CtldClient::Init() {
           case StepStatus::Running:
             return 50;  // Active execution
 
-          case StepStatus::Configured:
+          case StepStatus::Starting:
             return 30;  // Configuration completed
 
           case StepStatus::Configuring:
-            return 20;  // Being configured
+            return 20;  // Being starting
 
           case StepStatus::Pending:
             return 10;  // Lowest priority
@@ -555,10 +555,10 @@ void CtldClient::Init() {
                   "{}), sent a statuschange to kick ctld step status machine",
                   job_id, step_id, craned_status, ctld_status);
               steps_to_sync[job_id][step_id] = craned_status;
-            } else if (craned_status == StepStatus::Configured) {
-              // For configured but not running step, terminate it
+            } else if (craned_status == StepStatus::Starting) {
+              // For starting but not running step, terminate it
               CRANE_TRACE(
-                  "[Step #{}.{}] is configured but not running, mark as "
+                  "[Step #{}.{}] is starting but not running, mark as "
                   "invalid",
                   job_id, step_id);
               invalid_steps[job_id].insert(step_id);
@@ -572,9 +572,9 @@ void CtldClient::Init() {
               //   though this should rarely happen as CommonSteps should be
               //   killed by timer)
               // - Other cases where Ctld has equal or higher priority
-              // Craned: Configuring with Ctld: Running/Configured should
+              // Craned: Configuring with Ctld: Running/Starting should
               // not occur in the normal state machine flow, as Configuring
-              // means Ctld hasn't received the Configured status yet. The only
+              // means Ctld hasn't received the Starting status yet. The only
               // valid case for Ctld to be ahead is when Ctld marks it as
               // Completing (handled above).
               CRANE_WARN(

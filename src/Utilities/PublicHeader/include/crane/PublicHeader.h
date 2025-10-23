@@ -115,6 +115,7 @@ constexpr uint64_t kEraseResvIntervalSec = 5;
 
 namespace ExitCode {
 
+constexpr size_t KCrunExitCodeStatusNum = 128;
 inline constexpr size_t kExitStatusNum = 256;
 inline constexpr size_t kTerminationSignalBase = kExitStatusNum;
 inline constexpr size_t kTerminationSignalNum = 64;
@@ -538,3 +539,11 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
+
+template <class... Ts>
+struct VariantVisitor : Ts... {
+  using Ts::operator()...;
+};
+
+template <class... Ts>
+VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
