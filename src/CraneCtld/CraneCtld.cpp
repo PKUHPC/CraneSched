@@ -920,7 +920,7 @@ void InitializeCtldGlobalVariables() {
   }
 
   if (!g_config.JobSubmitLuaScript.empty()) {
-    g_lua_pool = std::make_unique<Ctld::LuaPool>();
+    g_lua_pool = std::make_unique<crane::LuaPool<Ctld::JobSubmitLua>>();
     if (!g_lua_pool->Init(5, g_config.JobSubmitLuaScript)) {
       CRANE_ERROR("Lua support not compiled in. Cannot perform job_submit Lua check");
       DestroyCtldGlobalVariables();
