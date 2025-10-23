@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <memory>
-
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
@@ -101,9 +99,12 @@ struct Config {
   struct Partition {
     std::string nodelist_str;
     uint32_t priority{0};
+    // default_mem_per_cpu and default_mem_per_node are mutually exclusive
     uint64_t default_mem_per_cpu{0};
-    // optional, 0 indicates no limit
+    uint64_t default_mem_per_node{0};
+    // optional, 0 indicates no limit; both can be set
     uint64_t max_mem_per_cpu{0};
+    uint64_t max_mem_per_node{0};
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> allowed_accounts;
     std::unordered_set<std::string> denied_accounts;
@@ -568,7 +569,9 @@ struct StepInCtld {
 
   std::string cwd;
 
-  uint32_t ntasks_per_node{0};
+  uint32_t ntasks_per_node_min{1};
+  uint32_t ntasks_per_node_max{0};
+  uint32_t ntasks{0};
 
   bool requeue_if_failed{false};
 
@@ -578,12 +581,10 @@ struct StepInCtld {
 
   absl::Duration time_limit;
 
-  // For now, its cpu is ntasks_per_node * cpus_per_task in
-  // requested_task_res_view other parts are same as requested_task_res_view
-  ResourceView requested_node_res_view;
-  // Set by user request and should not be used now, without support for
-  // task-based-resources-request.
-  ResourceView requested_task_res_view;
+  ResourceView node_res_view;
+  ResourceView task_res_view;
+  ResourceView total_res_view;
+
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -611,6 +612,7 @@ struct StepInCtld {
 
   std::unordered_set<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
+
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
 
@@ -762,19 +764,23 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
+  // TODO: Schedule thread should fill in following task map
+  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
+  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
-  void InitPrimaryStepFromJob(const TaskInCtld& job);
+  void InitPrimaryStepFromJob(TaskInCtld& job);
   bool IsPrimaryStep() const noexcept;
   void SetFieldsByStepToCtld(const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        const std::string& reason, const CranedId& craned_id,
-                        const google::protobuf::Timestamp& timestamp,
-                        StepStatusChangeContext* context);
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
+      crane::grpc::TaskStatus new_status, uint32_t exit_code,
+      const std::string& reason, const CranedId& craned_id,
+      const google::protobuf::Timestamp& timestamp,
+      StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
@@ -787,8 +793,9 @@ struct TaskInCtld {
 
   PartitionId partition_id;
 
-  // Set by user request and probably include untyped devices.
-  ResourceView requested_node_res_view;
+  ResourceView node_res_view;
+  ResourceView task_res_view;
+  ResourceView total_res_view;
 
   crane::grpc::TaskType type;
 
@@ -799,8 +806,9 @@ struct TaskInCtld {
   std::string qos;
 
   uint32_t node_num{0};
-  uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0F};
+  uint32_t ntasks{0};
+  uint32_t ntasks_per_node_min{1};
+  uint32_t ntasks_per_node_max{0};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -1005,6 +1013,10 @@ struct TaskInCtld {
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
+  bool AllStepsFinished() const {
+    return m_steps_.empty() && !m_primary_step_ && !m_daemon_step_;
+  }
+
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
     CRANE_ASSERT(step->type != crane::grpc::TaskType::Batch);
     step->job = this;
@@ -1036,77 +1048,11 @@ struct TaskInCtld {
     return m_steps_;
   }
 
+  ResourceV2& StepResAvail() { return step_res_avail_; }
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
-    int popped_count = 0;
-    auto now = absl::Now();
-    while (!pending_step_ids_.empty()) {
-      const step_id_t& step_id = pending_step_ids_.front();
-      const auto& step = GetStep(step_id);
-      if (step == nullptr) {
-        // step has been removed
-        ++popped_count;
-        pending_step_ids_.pop();
-        continue;
-      }
-
-      ResourceV2 step_alloc_res;
-      std::unordered_set<CranedId> step_craned_ids;
-      for (auto const& craned_id :
-           step_res_avail_.EachNodeResMap() | std::views::keys) {
-        if (step->excluded_nodes.contains(craned_id)) {
-          continue;
-        }
-        if (!step->included_nodes.empty() &&
-            !step->included_nodes.contains(craned_id)) {
-          continue;
-        }
-        ResourceInNode feasible_res;
-        bool ok = step->requested_node_res_view.GetFeasibleResourceInNode(
-            step_res_avail_.at(craned_id), &feasible_res);
-        if (!ok) {
-          continue;
-        }
-        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-        step_craned_ids.insert(craned_id);
-        if (step_craned_ids.size() >= step->node_num) {
-          break;
-        }
-      }
-
-      if (step_craned_ids.size() < step->node_num) {
-        break;
-      }
-
-      step->SetAllocatedRes(step_alloc_res);
-      step->SetCranedIds(step_craned_ids);
-      step->allocated_craneds_regex =
-          util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(step_craned_ids);
-      step->SetExecutionNodes(step_craned_ids);
-      step->SetStartTime(now);
-      step->SetStatus(crane::grpc::TaskStatus::Configuring);
-
-      // Crun steps need the callback. Ccon steps do not.
-      if (step->ia_meta.has_value()) {
-        const auto& meta = step->ia_meta.value();
-        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
-            .job_id = step->job_id,
-            .step_id = step->StepId(),
-            .allocated_nodes{std::make_pair(
-                util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
-      }
-
-      step_res_avail_ -= step_alloc_res;
-      pending_step_ids_.pop();
-      ++popped_count;
-      scheduled_steps->push_back(step);
-    }
-    return popped_count;
-  }
-
-  void SetCachedPriority(double val);
+  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
+  void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
   void SetAllocatedRes(ResourceV2&& val);
@@ -1348,7 +1294,7 @@ struct LicenseResourceInDb {
   std::string name;
   std::string server;
   std::string server_type;
-  crane::grpc::LicenseResource_Type type;
+  crane::grpc::LicenseResource::Type type;
   uint32_t allocated{0};     /* count allocated to the cluster_resources */
   uint32_t last_consumed{0}; /* number from the server saying how many it
                               * currently has consumed */

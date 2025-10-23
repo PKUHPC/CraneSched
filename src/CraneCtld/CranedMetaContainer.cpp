@@ -437,6 +437,10 @@ CranedMetaContainer::QueryAllPartitionInfo() {
         g_config.Partitions[part_name].default_mem_per_cpu);
     part_info->set_max_mem_per_cpu(
         g_config.Partitions[part_name].max_mem_per_cpu);
+    part_info->set_default_mem_per_node(
+        g_config.Partitions[part_name].default_mem_per_node);
+    part_info->set_max_mem_per_node(
+        g_config.Partitions[part_name].max_mem_per_node);
 
     if (part_meta->partition_global_meta.alive_craned_cnt > 0)
       part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
@@ -483,6 +487,10 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
       g_config.Partitions[partition_name].default_mem_per_cpu);
   part_info->set_max_mem_per_cpu(
       g_config.Partitions[partition_name].max_mem_per_cpu);
+  part_info->set_default_mem_per_node(
+      g_config.Partitions[partition_name].default_mem_per_node);
+  part_info->set_max_mem_per_node(
+      g_config.Partitions[partition_name].max_mem_per_node);
 
   *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);
