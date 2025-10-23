@@ -2405,6 +2405,11 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
   } else {
     step = job->GetStep(step_id);
   }
+  if (!step) {
+    CRANE_ERROR("[Step #{}.{}] not found when StatusChange.", job->TaskId(),
+                step_id);
+    return;
+  }
 
   /**
    * Step final status
@@ -2462,6 +2467,9 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
     if (new_status != crane::grpc::TaskStatus::Completed) {
       step->SetFinishFailedStatus(new_status);
     }
+    CRANE_DEBUG(
+        "[Step #{}.{}] got a finish status, waiting for {} status change.",
+        step->job_id, step->StepId(), step->RunningNodes().size());
     step_finished = step->AllNodesFinished();
 
   } else {
