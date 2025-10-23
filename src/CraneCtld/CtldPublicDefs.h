@@ -374,9 +374,13 @@ struct InteractiveMeta {
   struct StepResAllocArgs {
     job_id_t job_id;
     step_id_t step_id;
-    std::expected<std::pair<std::string, std::unordered_set<CranedId>>,
-                  std::string>
-        allocated_nodes;
+    struct ResAllocInfo {
+      std::string allocated_craned_regex;
+      std::vector<CranedId> allocated_craned_ids;
+      std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
+      uint32_t ntasks_total;
+    };
+    std::expected<ResAllocInfo, std::string> res_allocate_expt;
   };
   std::function<void(StepResAllocArgs const&)> cb_step_res_allocated;
 
@@ -609,7 +613,8 @@ struct StepInCtld {
   std::int32_t m_requeue_count_{0};
   ResourceV2 m_allocated_res_;
 
-  std::unordered_set<CranedId> m_craned_ids_;
+  // craned_id must be ordered;
+  std::vector<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
 
   std::unordered_set<CranedId> m_configuring_nodes_;
@@ -638,6 +643,17 @@ struct StepInCtld {
 
  public:
   virtual ~StepInCtld() = default;
+  bool IsBatch() const { return type == crane::grpc::Batch; }
+  bool IsCalloc() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Calloc;
+  }
+  bool IsCrun() const {
+    return type == crane::grpc::JobType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveJobType::Crun;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -660,10 +676,8 @@ struct StepInCtld {
   void SetAllocatedRes(const ResourceV2& res);
   ResourceV2 AllocatedRes() const { return m_allocated_res_; }
 
-  void SetCranedIds(const std::unordered_set<CranedId>& craned_list);
-  const std::unordered_set<CranedId>& CranedIds() const {
-    return m_craned_ids_;
-  }
+  void SetCranedIds(const std::vector<CranedId>& craned_list);
+  const std::vector<CranedId>& CranedIds() const { return m_craned_ids_; }
 
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
@@ -774,7 +788,7 @@ struct CommonStepInCtld : StepInCtld {
   std::string allocated_craneds_regex;
   // TODO: Schedule thread should fill in following job map
   std::unordered_map<task_id_t, ResourceInNode> task_res_map;
-  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
+  std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 

@@ -207,6 +207,8 @@ message JobToCtld {
   // ccon (nested): Container (StepToCtld only)
   optional PodJobAdditionalMeta pod_meta = 23;
   optional ContainerJobAdditionalMeta container_meta = 24;
+  IoMeta io_meta = 25;
+  string sh_script = 26;  // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -299,6 +301,9 @@ message StepToCtld {
 
   // Step <-> Container
   optional ContainerJobAdditionalMeta container_meta = 24;
+
+  IoMeta io_meta = 25;
+  string sh_script = 26;
 
   string task_prolog = 27;
   string task_epilog = 28;
@@ -424,6 +429,9 @@ message StepToD {
   // task_node_list[task_id] = index of the node in nodelist that owns this task.
   // Size equals ntasks. Provides the authoritative task_id -> node_idx mapping.
   repeated uint32 task_node_list = 34;
+
+  IoMeta io_meta = 35;
+  string sh_script = 36;
 }
 
 message JobStepsToD {
@@ -436,12 +444,20 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message BatchJobAdditionalMeta {
-  string sh_script = 1;
-  optional bool open_mode_append = 2;
+message IoMeta {
+  // Append mode for output and error files
+  optional bool open_mode_append = 1;
+  string input_file_pattern = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
-  string interpreter = 5;
+
+  // For crun only
+  optional uint32 input_task_id = 5;
+  optional uint32 output_task_id = 6;
+}
+
+message BatchJobAdditionalMeta {
+  string interpreter = 1;
 }
 
 message X11Meta {
@@ -454,7 +470,6 @@ message X11Meta {
 
 message InteractiveJobAdditionalMeta {
   string cfored_name = 1;
-  string sh_script = 2;
   string term_env = 3;
   InteractiveJobType interactive_type = 4;
 

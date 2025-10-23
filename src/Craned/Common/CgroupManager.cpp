@@ -1315,9 +1315,9 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
       return false;
     }
 
-    if (bpf_object__load(bpf_obj_) != 0) {
-      CRANE_ERROR("Failed to load BPF object {}: {}",
-                  CgConstant::kBpfObjectFilePath, std::strerror(errno));
+    if (auto err = bpf_object__load(bpf_obj_); err != 0) {
+      CRANE_ERROR("Failed to load BPF object {}: {} {}",
+                  CgConstant::kBpfObjectFilePath, err, std::strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }
