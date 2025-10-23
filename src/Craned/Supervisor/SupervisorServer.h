@@ -60,6 +60,11 @@ class SupervisorServiceImpl : public Supervisor::Service {
       const crane::grpc::supervisor::TerminateTaskRequest* request,
       crane::grpc::supervisor::TerminateTaskReply* response) override;
 
+  grpc::Status MigrateSshProcToCgroup(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::MigrateSshProcToCgroupRequest* request,
+      crane::grpc::supervisor::MigrateSshProcToCgroupReply* response) override;
+
   grpc::Status ShutdownSupervisor(
       grpc::ServerContext* context,
       const crane::grpc::supervisor::ShutdownSupervisorRequest* request,

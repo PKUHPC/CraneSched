@@ -115,7 +115,7 @@ enum TaskStatus {
   Cancelled = 5;
   OutOfMemory = 6;
   Configuring = 7;
-  Configured = 8;
+  Starting = 8;
   Completing = 9;
 
   Invalid = 15;
@@ -374,6 +374,7 @@ message StepToD {
 
   uint32 uid = 6;
   repeated uint32 gid = 7;
+  map<uint32 /*task id*/, ResourceInNode> task_res_map = 8;
 
   // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;

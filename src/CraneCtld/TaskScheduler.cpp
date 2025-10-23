@@ -1123,8 +1123,6 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      begin = std::chrono::steady_clock::now();
-
       // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
       // ids to node maps immediately before CreateCgroupForTasks to ensure
       // that if a CraneD crash, the callback of CranedKeeper can call
@@ -1239,6 +1237,7 @@ void TaskScheduler::ScheduleThread_() {
         job->SetDaemonStep(std::move(daemon_step));
       }
 
+      begin = std::chrono::steady_clock::now();
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
         jobs_failed.insert(jobs_failed.end(),
                            std::make_move_iterator(jobs_to_run.begin()),
@@ -1257,7 +1256,13 @@ void TaskScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Append steps to embedded DB costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
       std::latch alloc_job_latch(craned_alloc_job_map.size());
@@ -1265,7 +1270,7 @@ void TaskScheduler::ScheduleThread_() {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
 
-        m_rpc_worker_pool_->detach_task([&]() {
+        m_rpc_worker_pool_->detach_task([&] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send AllocJobs for {} tasks to {}", jobs.size(),
                       craned_id);
@@ -1315,7 +1320,13 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc job costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1362,6 +1373,11 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc daemon steps costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
       for (auto& job : jobs_to_run) {
@@ -1371,12 +1387,6 @@ void TaskScheduler::ScheduleThread_() {
           jobs_created.emplace_back(std::move(job));
         }
       }
-
-      end = std::chrono::steady_clock::now();
-      CRANE_TRACE(
-          "CreateCgroupForJobs costed {} ms",
-          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-              .count());
 
       begin = std::chrono::steady_clock::now();
 
@@ -1885,18 +1895,8 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
-  if (step->StepType() == crane::grpc::StepType::DAEMON) {
-    for (CranedId const& craned_id : step->ExecutionNodes()) {
-      m_cancel_task_queue_.enqueue(
-          CancelRunningTaskQueueElem{.job_id = step->job_id,
-                                     .step_id = step->StepId(),
-                                     .craned_id = craned_id});
-      m_cancel_task_async_handle_->send();
-    }
-    return CraneErrCode::SUCCESS;
-  }
-
+CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -2087,15 +2087,19 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           job_steps.add_steps(step->StepId());
         }
       } else {
-        // User cancel jobs with node/name... filter
-        auto daemon_step = task->DaemonStep();
-        if (!daemon_step) {
-          CRANE_ERROR(
-              "[Job #{}] Daemon step not found when cancelling running job",
-              task_id);
+        if (task->Status() == crane::grpc::TaskStatus::Configuring) {
+          (*reply.mutable_not_cancelled_job_steps())[task->TaskId()].set_reason(
+              "Cannot cancel configuring job");
           return;
         }
-        TerminateRunningStepNoLock_(daemon_step);
+        // User cancel jobs with node/name... filter or cancel a job.
+        auto primary_step = task->PrimaryStep();
+        if (!primary_step) {
+          CRANE_DEBUG(
+              "[Job #{}] Primary step not found when cancelling running job",
+              task_id);
+        }
+        TerminateRunningStepNoLock_(primary_step);
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
         cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
       }
@@ -2188,7 +2192,7 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");
@@ -2330,7 +2334,7 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
     const auto& container_meta = step->container_meta.value();
 
     if (step->Status() != crane::grpc::TaskStatus::Running &&
-        step->Status() != crane::grpc::TaskStatus::Configured) {
+        step->Status() != crane::grpc::TaskStatus::Starting) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
       err->set_description("Step is not running.");
@@ -3346,11 +3350,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
       CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
                   task_id, step_id, new_status);
-      step->StepStatusChange(new_status, exit_code, reason, craned_index,
-                             timestamp, &context);
+      job_finished_status = step->StepStatusChange(
+          new_status, exit_code, reason, craned_index, timestamp, &context);
     }
 
     if (job_finished_status.has_value()) {
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  job_finished_status.value());
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
 
@@ -3440,9 +3446,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // Pending / Running -> Completed / Failed / Cancelled.
       // It means all task status changes will put the task into mongodb,
       // so we don't have any branch code here and just put it into mongodb.
-
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
       m_running_task_map_.erase(iter);
     }
   }
