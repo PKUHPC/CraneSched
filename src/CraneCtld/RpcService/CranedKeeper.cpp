@@ -206,6 +206,7 @@ CraneErrCode CranedStub::AllocSteps(
   }
   return CraneErrCode::SUCCESS;
 }
+
 CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>>
 CranedStub::ExecuteSteps(
     const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {

@@ -183,6 +183,7 @@ void GlobalVariableInit() {
   signal(SIGALRM, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
 
+  // Set OOM score adjustment for supervisor process
   std::filesystem::path oom_adj_file =
       fmt::format("/proc/{}/oom_score_adj", getpid());
 
