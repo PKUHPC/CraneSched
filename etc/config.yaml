@@ -79,6 +79,8 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
+JobSubmitLuaScript: /path/to/your/job_submit.lua
+
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
@@ -161,9 +163,6 @@ Container:
   RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM
   RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
   RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
-
-
-JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 Plugin:
   # Toggle the plugin module in CraneSched
