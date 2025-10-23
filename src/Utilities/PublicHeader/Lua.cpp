@@ -18,10 +18,89 @@
 
 #include "crane/Lua.h"
 
+#include "crane/String.h"
+
 namespace crane {
 
 #ifdef HAVE_LUA
-int LogLuaMsg(lua_State* lua_state) {
+
+bool LuaEnvironment::Init(const std::string& script) {
+  m_lua_script_ = script;
+  if ((m_lua_state_ = luaL_newstate()) == nullptr) {
+    CRANE_ERROR("luaL_newstate() failed to allocate");
+    return false;
+  }
+
+  luaL_openlibs(m_lua_state_);
+
+  RegisterFunctions_();
+  return true;
+}
+
+void LuaEnvironment::LuaTableRegister(const luaL_Reg* l) {
+  lua_getglobal(m_lua_state_, "crane");
+#if LUA_VERSION_NUM == 501
+  luaL_register(m_lua_state_, NULL, l);
+#else
+  luaL_setfuncs(m_lua_state_, l, 0);
+#endif
+  lua_pop(m_lua_state_, 1);
+}
+
+
+void LuaEnvironment::RegisterLuaCraneStructFunctions(
+    const luaL_Reg* global_funcs) {
+  for (const luaL_Reg* reg = global_funcs; reg->name != nullptr; ++reg) {
+    lua_pushcfunction(m_lua_state_, reg->func);
+    lua_setglobal(m_lua_state_, reg->name);
+  }
+}
+
+bool LuaEnvironment::LoadLuaScript(const char* req_funcs[]) {
+  if (m_lua_state_ == nullptr) {
+    CRANE_DEBUG(
+    "Lua state (m_lua_state_) is null when loading script '{}'. "
+    "This usually indicates Lua VM initialization failed.",
+    m_lua_script_);
+
+    if ((m_lua_state_ = luaL_newstate()) == nullptr) {
+      CRANE_ERROR("luaL_newstate() failed to allocate");
+      return false;
+    }
+    luaL_openlibs(m_lua_state_);
+
+    RegisterFunctions_();
+
+    return false;
+  }
+
+  if (luaL_loadfile(m_lua_state_, m_lua_script_.data())) {
+    CRANE_ERROR("luaL_loadfile failed.");
+    lua_pop(m_lua_state_, 1);
+    return false;
+  }
+
+  if (lua_pcall(m_lua_state_, 0, 1, 0)) {
+    CRANE_ERROR("{}:{}", m_lua_script_, lua_tostring(m_lua_state_, -1));
+    lua_pop(m_lua_state_, 1);
+    return false;
+  }
+  int rc = static_cast<int>(lua_tonumber(m_lua_state_, -1));
+  lua_pop(m_lua_state_, 1);
+  if (rc) {
+    CRANE_ERROR("{}: returned {} on load", m_lua_script_, rc);
+    return false;
+  }
+
+  if (!CheckLuaScriptFunctions_(m_lua_state_, m_lua_script_, req_funcs)) {
+    CRANE_ERROR("{}: required function(s) not present", m_lua_script_);
+    return false;
+  }
+
+  return true;
+}
+
+int LuaEnvironment::LogLuaMsg_(lua_State* lua_state) {
   std::string prefix = "[lua]";
   int level = 0;
   std::string msg;
@@ -56,7 +135,7 @@ int LogLuaMsg(lua_State* lua_state) {
   return (0);
 }
 
-int LogLuaError(lua_State* lua_state) {
+int LuaEnvironment::LogLuaError_(lua_State* lua_state) {
   std::string prefix = "[lua]";
   std::string msg = lua_tostring(lua_state, -1);
   CRANE_ERROR("{}: {}", prefix, msg);
@@ -64,25 +143,15 @@ int LogLuaError(lua_State* lua_state) {
   return (0);
 }
 
-int TimeStr2Mins(lua_State* lua_state) {
-  std::string time = lua_tostring(lua_state, -1);
-  int minutes = 0;
-  // TODO: TimeStr2Mins
-  // int minutes = crane::TimeStr2Mins(time);
+int LuaEnvironment::TimeStr2Mins_(lua_State* lua_state) {
+  std::string_view time = lua_tostring(lua_state, -1);
+  int minutes = util::TimeStr2Mins(time);
   lua_pushnumber(lua_state, minutes);
   return 1;
 }
 
-bool LuaEnvironment::Init(const std::string& script) {
-  m_lua_script_ = script;
-  if ((m_lua_state_ = luaL_newstate()) == nullptr) {
-    CRANE_ERROR("luaL_newstate() failed to allocate");
-    return false;
-  }
-
-  luaL_openlibs(m_lua_state_);
-
-  const char* unpack_str;
+void LuaEnvironment::RegisterFunctions_() {
+    const char* unpack_str;
 
 #if LUA_VERSION_NUM == 501
   unpack_str = "unpack";
@@ -146,60 +215,6 @@ bool LuaEnvironment::Init(const std::string& script) {
   // all used flags
 
   lua_setglobal(m_lua_state_, "crane");
-
-  return true;
-}
-
-void LuaEnvironment::LuaTableRegister(const luaL_Reg* l) {
-  lua_getglobal(m_lua_state_, "crane");
-#if LUA_VERSION_NUM == 501
-  luaL_register(m_lua_state_, NULL, l);
-#else
-  luaL_setfuncs(m_lua_state_, l, 0);
-#endif
-  lua_pop(m_lua_state_, 1);
-}
-
-
-void LuaEnvironment::RegisterLuaCraneStructFunctions(
-    const luaL_Reg* global_funcs) {
-  for (const luaL_Reg* reg = global_funcs; reg->name != nullptr; ++reg) {
-    lua_pushcfunction(m_lua_state_, reg->func);
-    lua_setglobal(m_lua_state_, reg->name);
-  }
-}
-
-bool LuaEnvironment::LoadLuaScript(const char* req_funcs[]) {
-  if (m_lua_state_ == nullptr) {
-    CRANE_ERROR(
-        "Lua state (m_lua_state_) is null when loading script '{}'. "
-        "This usually indicates Lua VM initialization failed.",
-        m_lua_script_);
-    return false;
-  }
-
-  if (luaL_loadfile(m_lua_state_, m_lua_script_.data())) {
-    CRANE_ERROR("luaL_loadfile failed.");
-    lua_close(m_lua_state_);
-    return false;
-  }
-
-  if (lua_pcall(m_lua_state_, 0, 1, 0)) {
-    CRANE_ERROR("{}:{}", m_lua_script_, lua_tostring(m_lua_state_, -1));
-    return false;
-  }
-  int rc = static_cast<int>(lua_tonumber(m_lua_state_, -1));
-  if (rc) {
-    CRANE_ERROR("{}: returned {} on load", m_lua_script_, rc);
-    return false;
-  }
-
-  if (!CheckLuaScriptFunctions_(m_lua_state_, m_lua_script_, req_funcs)) {
-    CRANE_ERROR("{}: required function(s) not present", m_lua_script_);
-    return false;
-  }
-
-  return true;
 }
 
 void LuaEnvironment::LuaTableRegister_(const luaL_Reg* l) {
@@ -209,6 +224,13 @@ void LuaEnvironment::LuaTableRegister_(const luaL_Reg* l) {
   luaL_setfuncs(m_lua_state_, l, 0);
 #endif
 }
+
+const luaL_Reg LuaEnvironment::kCraneFunctions[] = {
+  { "log", LogLuaMsg_ },
+  { "error", LogLuaError_ },
+  { "time_str2mins", TimeStr2Mins_ },
+  { nullptr, nullptr }
+};
 
 void LuaEnvironment::RegisterOutputErrTab_() {
   const google::protobuf::EnumDescriptor* desc =
