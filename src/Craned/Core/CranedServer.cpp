@@ -71,7 +71,7 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
@@ -96,7 +96,7 @@ grpc::Status CranedServiceImpl::TerminateOrphanedStep(
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
   for (const auto &[job_id, steps] : request->job_step_ids_map()) {
@@ -121,7 +121,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   CRANE_TRACE("Receive QueryStepFromPort RPC from {}: port: {}",
@@ -229,7 +229,7 @@ grpc::Status CranedServiceImpl::AllocJobs(
     crane::grpc::AllocJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   std::vector<JobInD> jobs;
@@ -251,8 +251,9 @@ grpc::Status CranedServiceImpl::AllocSteps(
     crane::grpc::AllocStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
+
   g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>());
   return Status::OK;
 }
@@ -262,7 +263,7 @@ grpc::Status CranedServiceImpl::FreeSteps(
     crane::grpc::FreeStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
@@ -281,7 +282,7 @@ grpc::Status CranedServiceImpl::FreeJobs(
     crane::grpc::FreeJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   CRANE_TRACE("Receive FreeJobs RPC for Job [{}]",
@@ -300,8 +301,9 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
+
   auto stub = g_supervisor_keeper->GetStub(request->task_id(), kDaemonStepId);
   if (!stub) {
     CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
@@ -325,13 +327,15 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
+
   auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
   if (!stub) {
     CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
     return Status::OK;
   }
+
   auto err =
       stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
   if (err != CraneErrCode::SUCCESS) {
@@ -499,7 +503,7 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
   g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
                                    request->new_status(), request->exit_code(),

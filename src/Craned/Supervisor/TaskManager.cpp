@@ -34,9 +34,9 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
-using Common::kStepRequestCheckIntervalMs;
 
 using Common::CgroupManager;
+using Common::kStepRequestCheckIntervalMs;
 
 bool StepInstance::IsContainer() const noexcept {
   return m_step_to_supv_.has_container_meta();

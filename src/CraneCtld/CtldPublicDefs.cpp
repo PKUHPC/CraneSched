@@ -37,7 +37,84 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
-StepInCtld::~StepInCtld() {}
+ContainerMetaInTask::ContainerMetaInTask(
+    const crane::grpc::ContainerTaskAdditionalMeta& rhs)
+    : image_info{.image = rhs.image().image(),
+                 .username = rhs.image().username(),
+                 .password = rhs.image().password(),
+                 .server_address = rhs.image().server_address(),
+                 .pull_policy = rhs.image().pull_policy()},
+      name(rhs.name()),
+      labels(rhs.labels().begin(), rhs.labels().end()),
+      annotations(rhs.annotations().begin(), rhs.annotations().end()),
+      command(rhs.command()),
+      args(rhs.args().begin(), rhs.args().end()),
+      workdir(rhs.workdir()),
+      env(rhs.env().begin(), rhs.env().end()),
+      detached(rhs.detached()),
+      tty(rhs.tty()),
+      stdin(rhs.stdin()),
+      stdin_once(rhs.stdin_once()),
+      userns(rhs.userns()),
+      run_as_user(rhs.run_as_user()),
+      run_as_group(rhs.run_as_group()),
+      mounts(rhs.mounts().begin(), rhs.mounts().end()),
+      port_mappings(rhs.ports().begin(), rhs.ports().end()) {}
+
+ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
+  crane::grpc::ContainerTaskAdditionalMeta result;
+
+  auto* image = result.mutable_image();
+  image->set_image(this->image_info.image);
+  image->set_username(this->image_info.username);
+  image->set_password(this->image_info.password);
+  image->set_server_address(this->image_info.server_address);
+  image->set_pull_policy(this->image_info.pull_policy);
+
+  result.set_name(this->name);
+
+  auto* labels_map = result.mutable_labels();
+  for (const auto& label : this->labels) {
+    (*labels_map)[label.first] = label.second;
+  }
+
+  auto* annotations_map = result.mutable_annotations();
+  for (const auto& annotation : this->annotations) {
+    (*annotations_map)[annotation.first] = annotation.second;
+  }
+
+  result.set_command(this->command);
+  for (const auto& arg : this->args) {
+    result.add_args(arg);
+  }
+  result.set_workdir(this->workdir);
+
+  auto* env_map = result.mutable_env();
+  for (const auto& env_var : this->env) {
+    (*env_map)[env_var.first] = env_var.second;
+  }
+
+  result.set_detached(this->detached);
+  result.set_tty(this->tty);
+  result.set_stdin(this->stdin);
+  result.set_stdin_once(this->stdin_once);
+
+  result.set_userns(this->userns);
+  result.set_run_as_user(this->run_as_user);
+  result.set_run_as_group(this->run_as_group);
+
+  auto* mounts_map = result.mutable_mounts();
+  for (const auto& mount : this->mounts) {
+    (*mounts_map)[mount.first] = mount.second;
+  }
+
+  auto* ports_map = result.mutable_ports();
+  for (const auto& port : this->port_mappings) {
+    (*ports_map)[port.first] = port.second;
+  }
+
+  return result;
+}
 
 void StepInCtld::SetStepType(crane::grpc::StepType type) {
   step_type = type;
@@ -104,7 +181,7 @@ void StepInCtld::SetRunningNodes(const std::unordered_set<CranedId>& nodes) {
                                                         nodes.end());
 }
 
-void StepInCtld::NodeFinish(const CranedId& node) {
+void StepInCtld::SetNodeFinished(const CranedId& node) {
   this->m_running_nodes_.erase(node);
   this->m_runtime_attr_.mutable_running_nodes()->Assign(
       m_running_nodes_.begin(), m_running_nodes_.end());
@@ -166,10 +243,9 @@ void StepInCtld::RecoverFromDb(
   get_user_env = step_to_ctld.get_user_env();
   env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
 
-  if (job.IsContainer() && step_to_ctld.has_container_meta()) {
+  if (job.IsContainer() && step_to_ctld.has_container_meta())
     container_meta =
         static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
-  }
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
   requested_node_res_view =
@@ -207,7 +283,7 @@ void StepInCtld::RecoverFromDb(
 }
 
 void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
-  /*Fields in StepInCtld*/
+  /* Fields in StepInCtld */
   type = job.type;
   job_id = job.TaskId();
   uid = job.uid;
@@ -250,7 +326,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
-  /*Fields in DaemonStepInCtld*/
+  /* Fields in DaemonStepInCtld */
   partition = job.partition_id;
   account = job.account;
   qos = job.qos;
@@ -365,9 +441,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
 
-  if (job.IsContainer()) {
+  if (job.IsContainer())
     container_meta = std::get<ContainerMetaInTask>(job.meta);
-  }
 
   SetStepType(crane::grpc::StepType::PRIMARY);
 
@@ -494,92 +569,13 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 void CommonStepInCtld::RecoverFromDb(
     const TaskInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
+
   cmd_line = StepToCtld().cmd_line();
   cwd = StepToCtld().cwd();
-
   extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "Not impled yet";
-}
-
-ContainerMetaInTask::ContainerMetaInTask(
-    const crane::grpc::ContainerTaskAdditionalMeta& rhs)
-    : image_info{.image = rhs.image().image(),
-                 .username = rhs.image().username(),
-                 .password = rhs.image().password(),
-                 .server_address = rhs.image().server_address(),
-                 .pull_policy = rhs.image().pull_policy()},
-      name(rhs.name()),
-      labels(rhs.labels().begin(), rhs.labels().end()),
-      annotations(rhs.annotations().begin(), rhs.annotations().end()),
-      command(rhs.command()),
-      args(rhs.args().begin(), rhs.args().end()),
-      workdir(rhs.workdir()),
-      env(rhs.env().begin(), rhs.env().end()),
-      detached(rhs.detached()),
-      tty(rhs.tty()),
-      stdin(rhs.stdin()),
-      stdin_once(rhs.stdin_once()),
-      userns(rhs.userns()),
-      run_as_user(rhs.run_as_user()),
-      run_as_group(rhs.run_as_group()),
-      mounts(rhs.mounts().begin(), rhs.mounts().end()),
-      port_mappings(rhs.ports().begin(), rhs.ports().end()) {}
-
-ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
-  crane::grpc::ContainerTaskAdditionalMeta result;
-
-  auto* image = result.mutable_image();
-  image->set_image(this->image_info.image);
-  image->set_username(this->image_info.username);
-  image->set_password(this->image_info.password);
-  image->set_server_address(this->image_info.server_address);
-  image->set_pull_policy(this->image_info.pull_policy);
-
-  result.set_name(this->name);
-
-  auto* labels_map = result.mutable_labels();
-  for (const auto& label : this->labels) {
-    (*labels_map)[label.first] = label.second;
-  }
-
-  auto* annotations_map = result.mutable_annotations();
-  for (const auto& annotation : this->annotations) {
-    (*annotations_map)[annotation.first] = annotation.second;
-  }
-
-  result.set_command(this->command);
-  for (const auto& arg : this->args) {
-    result.add_args(arg);
-  }
-  result.set_workdir(this->workdir);
-
-  auto* env_map = result.mutable_env();
-  for (const auto& env_var : this->env) {
-    (*env_map)[env_var.first] = env_var.second;
-  }
-
-  result.set_detached(this->detached);
-  result.set_tty(this->tty);
-  result.set_stdin(this->stdin);
-  result.set_stdin_once(this->stdin_once);
-
-  result.set_userns(this->userns);
-  result.set_run_as_user(this->run_as_user);
-  result.set_run_as_group(this->run_as_group);
-
-  auto* mounts_map = result.mutable_mounts();
-  for (const auto& mount : this->mounts) {
-    (*mounts_map)[mount.first] = mount.second;
-  }
-
-  auto* ports_map = result.mutable_ports();
-  for (const auto& port : this->port_mappings) {
-    (*ports_map)[port.first] = port.second;
-  }
-
-  return result;
+  pending_reason = "Not implemented yet";
 }
 
 bool TaskInCtld::IsX11() const {
