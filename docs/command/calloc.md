@@ -6,6 +6,7 @@ calloc 只支持通过命令行指定请求参数，支持的命令行选项：
 
 - **-h/--help**: 显示帮助
 - **-A/--account string**：提交作业的账户
+- **--deadline string**：作业的截止时间
 - **-D/--chdir string**：任务工作路径
 - **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
 - **-c/--cpus-per-task** **float**: 每个节点申请的CPU核心数

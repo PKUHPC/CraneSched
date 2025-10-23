@@ -31,7 +31,8 @@ enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
   TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM
+  TERMINATION_BY_OOM,
+  TERMINATION_BY_DEADLINE
 };
 
 class ITaskInstance;
@@ -84,6 +85,8 @@ class StepInstance {
   bool IsCalloc() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
+
+  StepToSupv& GetMutableStep() { return m_step_to_supv_; }
 
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
@@ -306,11 +309,11 @@ class TaskManager {
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
-  void AddTerminationTimer_(Duration duration) {
+  void AddTerminationTimer_(Duration duration, bool is_deadline) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
-          EvTaskTimerCb_();
+        [this, is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvTaskTimerCb_(is_deadline);
         });
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -318,11 +321,11 @@ class TaskManager {
     m_step_.termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(int64_t secs) {
+  void AddTerminationTimer_(int64_t secs, bool is_deadline) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
-          EvTaskTimerCb_();
+        [this, is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+          EvTaskTimerCb_(is_deadline);
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -350,7 +353,8 @@ class TaskManager {
 
   std::future<CraneExpected<EnvMap>> QueryStepEnvAsync();
 
-  std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
+  std::future<CraneErrCode> ChangeTaskTimeConstraintAsync(
+      std::optional<int64_t> time_limit, std::optional<int64_t> deadline_time);
 
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
@@ -370,19 +374,20 @@ class TaskManager {
     bool mark_as_orphaned{false};
   };
 
-  struct ChangeTaskTimeLimitQueueElem {
-    absl::Duration time_limit;
+  struct ChangeTaskTimeConstraintQueueElem {
     std::promise<CraneErrCode> ok_prom;
+    std::optional<int64_t> time_limit{std::nullopt};
+    std::optional<int64_t> deadline_time{std::nullopt};
   };
 
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
-  void EvTaskTimerCb_();
+  void EvTaskTimerCb_(bool is_deadline);
   void EvCleanTaskStopQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
-  void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanChangeTaskTimeConstraintQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
@@ -400,8 +405,10 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
-  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
-  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+  std::shared_ptr<uvw::async_handle>
+      m_change_task_time_constraint_async_handle_;
+  ConcurrentQueue<ChangeTaskTimeConstraintQueueElem>
+      m_task_time_constraint_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

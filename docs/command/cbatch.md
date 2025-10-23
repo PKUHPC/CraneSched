@@ -38,9 +38,11 @@ cbatch cbatch_test.sh
 
 - **-h/--help**: 显示帮助
 - **-A/--account string**：提交作业的账户
+- **-b/--begin string**: 指定作业的启动时间
 - **-D/--chdir string**：任务工作路径
 - **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
 - **-c/--cpus-per-task** **float**: 每个节点申请的CPU核心数
+- **--deadline string**: 指定作业的截止时间
 - **-e/--error string：**指定脚本错误日志定向路径
 - **-x/--exclude string ：**功能是从分配中排除特定节点（用逗号分隔的列表 ），用于节点分配管控场景，指定不想参与分配的节点。
   - **--export string ：**作用为传播环境变量，在涉及环境变量传递，让变量在相关任务、作业等执行环境中生效时使用。
