@@ -1384,8 +1384,9 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   uid = val.uid();
   password_entry = std::make_unique<PasswordEntry>(uid);
-  if (password_entry)
-    username = password_entry->Username();
+  if (password_entry && password_entry->Valid()) {
+       SetUsername(password_entry->Username());
+  }
 
   // Note: gid is egid, which may be different from the
   // primary group of the user in `password_entry`.

@@ -31,16 +31,6 @@
 
 namespace crane {
 #ifdef HAVE_LUA
-int LogLuaMsg(lua_State *lua_state);
-int LogLuaError(lua_State *lua_state);
-int TimeStr2Mins(lua_State *lua_state);
-
-static const luaL_Reg kCraneFunctions[] = {
-  { "log", LogLuaMsg },
-  { "error", LogLuaError },
-  { "time_str2mins", TimeStr2Mins },
-  { nullptr, nullptr }
-};
 
 class LuaEnvironment {
 public:
@@ -64,6 +54,15 @@ public:
   }
 
 private:
+
+  static const luaL_Reg kCraneFunctions[];
+
+  static int LogLuaMsg_(lua_State *lua_state);
+  static int LogLuaError_(lua_State *lua_state);
+  static int TimeStr2Mins_(lua_State *lua_state);
+
+  void RegisterFunctions_();
+
   void LuaTableRegister_(const luaL_Reg* l);
 
   void RegisterOutputErrTab_();
@@ -121,7 +120,7 @@ public:
       auto lua = std::make_unique<T>();
       if (!lua->Init(lua_script)) {
         CRANE_ERROR("Lua env init failed");
-        continue;
+        return false;
       }
       m_pool_.push(std::move(lua));
     }
