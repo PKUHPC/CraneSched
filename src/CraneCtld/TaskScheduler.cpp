@@ -1230,7 +1230,7 @@ void TaskScheduler::ScheduleThread_() {
             alloc_job_latch.count_down();
             return;
           }
-
+          // TODO: is prolog failed?
           auto err = stub->AllocJobs(jobs);
           if (err == CraneErrCode::SUCCESS) {
             alloc_job_latch.count_down();

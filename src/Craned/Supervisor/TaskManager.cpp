@@ -2453,7 +2453,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     }
     RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
       .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
-
     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
       TaskFinish_(
           task->task_id, crane::grpc::TaskStatus::Failed,
