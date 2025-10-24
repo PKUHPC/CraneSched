@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CtldPreCompiledHeader.h"
+#include "protos/PublicDefs.pb.h"
 // Precompiled header come first!
 
 namespace Ctld {
@@ -57,6 +58,8 @@ constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
+constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
+
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
@@ -72,8 +75,8 @@ struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
   };
-
   CraneCtldConf CtldConf;
+
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
@@ -143,6 +146,12 @@ struct Config {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
+  PluginConfig Plugin;
+
+  struct ContainerConfig {
+    bool Enabled{false};
+  };
+  ContainerConfig Container;
 
   bool CompressedRpc{};
 
@@ -173,9 +182,6 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
-
-  // Plugin config
-  PluginConfig Plugin;
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
@@ -364,6 +370,46 @@ struct BatchMetaInTask {
   std::string error_file_pattern;
 };
 
+struct ContainerMetaInTask {
+  struct ImageInfo {
+    std::string image;
+    std::string username;
+    std::string password;
+    std::string server_address;
+    std::string pull_policy;
+  };
+
+  ImageInfo image_info{};
+
+  std::string name;
+  std::unordered_map<std::string, std::string> labels;
+  std::unordered_map<std::string, std::string> annotations;
+
+  std::string command;
+  std::vector<std::string> args;
+  std::string workdir;
+  std::unordered_map<std::string, std::string> env;
+
+  bool detached{true};
+  bool tty{false};
+  bool stdin{false};
+  bool stdin_once{false};
+
+  bool userns{true};
+  uid_t run_as_user{0};
+  gid_t run_as_group{0};
+
+  std::unordered_map<std::string, std::string> mounts;
+  std::unordered_map<uint32_t, uint32_t> port_mappings;
+
+ public:
+  ContainerMetaInTask() = default;
+
+  explicit ContainerMetaInTask(
+      const crane::grpc::ContainerTaskAdditionalMeta& rhs);
+  explicit operator crane::grpc::ContainerTaskAdditionalMeta() const;
+};
+
 struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
@@ -394,11 +440,11 @@ struct TaskInCtld {
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
-  std::string container;
 
   std::string extra_attr;
 
-  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+  std::variant<InteractiveMetaInTask, BatchMetaInTask, ContainerMetaInTask>
+      meta;
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
@@ -475,6 +521,7 @@ struct TaskInCtld {
   // =================== Get Attr ==================
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
+  bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;
