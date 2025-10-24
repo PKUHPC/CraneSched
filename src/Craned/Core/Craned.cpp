@@ -738,6 +738,35 @@ void ParseConfig(int argc, char** argv) {
             g_config.PrologFlags |= Craned::Config::PrologFlagEnum::X11;
         }
         // TODO: add judge for prolog flags
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Contain) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        }
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::DeferBatch) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        }
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::NoHold) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+          if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Contain ||
+            g_config.PrologFlags & Craned::Config::PrologFlagEnum::X11) {
+            CRANE_ERROR("Cannot set NoHold, Contain, and X11 flags at the same time.");
+            std::exit(1);
+          }
+        }
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::ForceRequeueOnFail) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        }
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::RunInJob) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
+          if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Serial) {
+            CRANE_ERROR("Cannot set RunInJob and Serial flags at the same time.");
+            std::exit(1);
+          }
+        }
+        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::X11) {
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
+        }
       }
 
     } catch (YAML::BadFile& e) {
