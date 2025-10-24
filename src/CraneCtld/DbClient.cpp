@@ -2869,6 +2869,9 @@ bsoncxx::document::value MongodbClient::JobSingleMatch(
 void MongodbClient::QueryJobSummaryNew(
     const crane::grpc::QueryJobSummaryRequest* request,
     grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream) {
+  using namespace std::chrono;
+  auto t_start = steady_clock::now();
+
   int max_data_size = 5000;
   absl::flat_hash_map<JobSummKey, JobSummAggResult> agg_map;
   auto start_time = request->filter_start_time().seconds();
@@ -2882,8 +2885,11 @@ void MongodbClient::QueryJobSummaryNew(
       (*GetClient_())[m_db_name_]["month_job_summary_table"];
   auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
 
-  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges, day_ranges,
-      month_ranges;
+  auto t_split_range = steady_clock::now();
+
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
   for (const auto& r : ranges) {
     if (r.type == "hour")
       hour_ranges.emplace_back(r.start, r.end);
@@ -2892,10 +2898,15 @@ void MongodbClient::QueryJobSummaryNew(
     else if (r.type == "month")
       month_ranges.emplace_back(r.start, r.end);
   }
+
+  auto t_range_classify = steady_clock::now();
+
   mongocxx::collection* entry_table = nullptr;
   mongocxx::pipeline pipeline;
   try {
     // Dynamically select entry table and entry time range
+    auto t_pipeline_start = steady_clock::now();
+
     if (!hour_ranges.empty()) {
       entry_table = &hour_job_summ_table;
       pipeline.match(JobSingleMatch("hour", hour_ranges[0], request).view());
@@ -3007,9 +3018,11 @@ void MongodbClient::QueryJobSummaryNew(
         pipeline.append_stage(month_union.view());
       }
     } else {
-      std::cout << "No time ranges to query." << std::endl;
+      CRANE_LOGGER_INFO(m_logger_, "No time ranges to query.");
       return;
     }
+
+    auto t_pipeline_end = steady_clock::now();
 
     // Grouping
     auto group_bson = bsoncxx::from_json(R"({
@@ -3029,12 +3042,18 @@ void MongodbClient::QueryJobSummaryNew(
     mongocxx::options::aggregate agg_opts;
     agg_opts.allow_disk_use(true);
 
+    auto t_agg_start = steady_clock::now();
+
     auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    auto t_agg_end = steady_clock::now();
 
     int count = 0;
     absl::flat_hash_map<JobSummKey, JobSummAggResult> agg_map;
+
+    auto t_loop_start = steady_clock::now();
+
     for (auto&& doc : cursor) {
-      // std::cout << bsoncxx::to_json(doc) << std::endl;
       ++count;
       auto id = doc["_id"].get_document().view();
       std::string acc = std::string(id["account"].get_string().value);
@@ -3047,7 +3066,13 @@ void MongodbClient::QueryJobSummaryNew(
       agg_map[{acc, user, qos, wk}].total_count +=
           doc["total_count"].get_int32().value;
     }
+
+    auto t_loop_end = steady_clock::now();
+
     crane::grpc::QueryJobSummaryReply reply;
+
+    auto t_stream_start = steady_clock::now();
+
     for (const auto& kv : agg_map) {
       crane::grpc::JobSummaryItem item;
       item.set_cluster(g_config.CraneClusterName);
@@ -3066,7 +3091,20 @@ void MongodbClient::QueryJobSummaryNew(
     if (reply.item_list_size() > 0) {
       stream->Write(reply);
     }
-    std::cout << "Total output: " << count << std::endl;
+
+    auto t_stream_end = steady_clock::now();
+
+    CRANE_LOGGER_INFO(
+        m_logger_,
+        "Split range: {} ms, Range classify: {} ms, Pipeline build: {} ms, "
+        "Aggregate: {} ms, Loop: {} ms, Stream: {} ms, Total output: {}",
+        duration_cast<milliseconds>(t_split_range - t_start).count(),
+        duration_cast<milliseconds>(t_range_classify - t_split_range).count(),
+        duration_cast<milliseconds>(t_pipeline_end - t_pipeline_start).count(),
+        duration_cast<milliseconds>(t_agg_end - t_agg_start).count(),
+        duration_cast<milliseconds>(t_loop_end - t_loop_start).count(),
+        duration_cast<milliseconds>(t_stream_end - t_stream_start).count(),
+        count);
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -3127,6 +3165,10 @@ void MongodbClient::QueryJobSummary(
 void MongodbClient::QueryJobSizeSummaryNew(
     const crane::grpc::QueryJobSizeSummaryItemRequest* request,
     grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream) {
+  using namespace std::chrono;
+
+  auto t_start = steady_clock::now();
+
   int max_data_size = 5000;
 
   auto start_time = request->filter_start_time().seconds();
@@ -3134,8 +3176,11 @@ void MongodbClient::QueryJobSizeSummaryNew(
   std::vector<std::uint32_t> grouping_list(
       request->filter_grouping_list().begin(),
       request->filter_grouping_list().end());
+
   absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
   auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
+
+  auto t_split_range = steady_clock::now();
 
   std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
   std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
@@ -3148,6 +3193,9 @@ void MongodbClient::QueryJobSizeSummaryNew(
     else if (r.type == "month")
       month_ranges.emplace_back(r.start, r.end);
   }
+
+  auto t_range_classify = steady_clock::now();
+
   auto hour_job_summ_table =
       (*GetClient_())[m_db_name_]["hour_job_summary_table"];
   auto day_job_summ_table =
@@ -3159,7 +3207,9 @@ void MongodbClient::QueryJobSizeSummaryNew(
   mongocxx::pipeline pipeline;
 
   try {
-    // Dynamically select entry table and entry time range
+    // Pipeline build start
+    auto t_pipeline_start = steady_clock::now();
+
     if (!hour_ranges.empty()) {
       entry_table = &hour_job_summ_table;
       pipeline.match(
@@ -3277,6 +3327,8 @@ void MongodbClient::QueryJobSizeSummaryNew(
       return;
     }
 
+    auto t_pipeline_end = steady_clock::now();
+
     // Grouping
     auto group_bson = bsoncxx::from_json(R"({
     "$group": {
@@ -3296,10 +3348,17 @@ void MongodbClient::QueryJobSizeSummaryNew(
     mongocxx::options::aggregate agg_opts;
     agg_opts.allow_disk_use(true);
 
+    auto t_agg_start = steady_clock::now();
+
     auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    auto t_agg_end = steady_clock::now();
 
     int count = 0;
     absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
+
+    auto t_loop_start = steady_clock::now();
+
     for (auto&& doc : cursor) {
       ++count;
       auto id = doc["_id"].get_document().view();
@@ -3337,7 +3396,12 @@ void MongodbClient::QueryJobSizeSummaryNew(
       }
     }
 
+    auto t_loop_end = steady_clock::now();
+
     crane::grpc::QueryJobSizeSummaryItemReply reply;
+
+    auto t_stream_start = steady_clock::now();
+
     for (const auto& kv : agg_map) {
       crane::grpc::JobSizeSummaryItem item;
       item.set_cluster(g_config.CraneClusterName);
@@ -3355,7 +3419,20 @@ void MongodbClient::QueryJobSizeSummaryNew(
     if (reply.item_list_size() > 0) {
       stream->Write(reply);
     }
-    std::cout << "Total output: " << count << std::endl;
+
+    auto t_stream_end = steady_clock::now();
+
+    CRANE_LOGGER_INFO(
+        m_logger_,
+        "Split range: {} ms, Range classify: {} ms, Pipeline build: {} ms, "
+        "Aggregate: {} ms, Loop: {} ms, Stream: {} ms, Total output: {}",
+        duration_cast<milliseconds>(t_split_range - t_start).count(),
+        duration_cast<milliseconds>(t_range_classify - t_split_range).count(),
+        duration_cast<milliseconds>(t_pipeline_end - t_pipeline_start).count(),
+        duration_cast<milliseconds>(t_agg_end - t_agg_start).count(),
+        duration_cast<milliseconds>(t_loop_end - t_loop_start).count(),
+        duration_cast<milliseconds>(t_stream_end - t_stream_start).count(),
+        count);
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
