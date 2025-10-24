@@ -299,11 +299,11 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           if (result) {
             auto submit_result =
-              g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+                g_task_scheduler->SubmitTaskToScheduler(std::move(task));
 
             if (submit_result.has_value()) {
               result = std::expected<task_id_t, std::string>{
-                submit_result.value().get()};
+                  submit_result.value().get()};
             } else {
               result = std::unexpected(CraneErrStr(submit_result.error()));
             }
@@ -389,7 +389,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
@@ -556,7 +555,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     if (!lua_result) {
       response->add_not_modified_tasks(task_id);
       if (lua_result.error().description().empty())
-        response->add_not_modified_reasons(CraneErrStr(lua_result.error().code()));
+        response->add_not_modified_reasons(
+            CraneErrStr(lua_result.error().code()));
       else
         response->add_not_modified_reasons(lua_result.error().description());
       continue;

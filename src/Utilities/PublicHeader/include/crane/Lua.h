@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,7 @@
 #pragma once
 
 #ifdef HAVE_LUA
-#include <lua.hpp>
+#  include <lua.hpp>
 #endif
 
 #include <condition_variable>
@@ -33,7 +33,7 @@ namespace crane {
 #ifdef HAVE_LUA
 
 class LuaEnvironment {
-public:
+ public:
   LuaEnvironment() = default;
   ~LuaEnvironment() {
     if (m_lua_state_ != nullptr) lua_close(m_lua_state_);
@@ -49,17 +49,14 @@ public:
 
   lua_State* GetLuaState() const { return m_lua_state_; }
   std::string GetUserMsg() const { return m_user_msg_; }
-  void ResetUserMsg() {
-    m_user_msg_.clear();
-  }
+  void ResetUserMsg() { m_user_msg_.clear(); }
 
-private:
-
+ private:
   static const luaL_Reg kCraneFunctions[];
 
-  static int LogLuaMsg_(lua_State *lua_state);
-  static int LogLuaError_(lua_State *lua_state);
-  static int TimeStr2Mins_(lua_State *lua_state);
+  static int LogLuaMsg_(lua_State* lua_state);
+  static int LogLuaError_(lua_State* lua_state);
+  static int TimeStr2Mins_(lua_State* lua_state);
 
   void RegisterFunctions_();
 
@@ -67,10 +64,12 @@ private:
 
   void RegisterOutputErrTab_();
 
-  int LogLuaUserMsg_(lua_State *lua_state);
-  static int LogLuaUserMsgStatic_(lua_State *lua_state);
-  static bool CheckLuaScriptFunction_(lua_State *lua_state, const char *name);
-  static bool CheckLuaScriptFunctions_(lua_State *lua_state, const std::string& script_pash, const char **req_fxns);
+  int LogLuaUserMsg_(lua_State* lua_state);
+  static int LogLuaUserMsgStatic_(lua_State* lua_state);
+  static bool CheckLuaScriptFunction_(lua_State* lua_state, const char* name);
+  static bool CheckLuaScriptFunctions_(lua_State* lua_state,
+                                       const std::string& script_pash,
+                                       const char** req_fxns);
 
   std::string m_lua_script_;
   lua_State* m_lua_state_{};
@@ -80,14 +79,16 @@ private:
 
 template <typename T>
 class LuaPool {
-public:
+ public:
   class Handle {
-  public:
+   public:
     Handle(LuaPool* pool, std::unique_ptr<T> obj)
         : m_pool_(pool), m_lua_(std::move(obj)) {}
 
     Handle(Handle&& other) noexcept
-        : m_pool_(other.m_pool_), m_lua_(std::move(other.m_lua_)) { other.m_pool_ = nullptr; }
+        : m_pool_(other.m_pool_), m_lua_(std::move(other.m_lua_)) {
+      other.m_pool_ = nullptr;
+    }
 
     Handle& operator=(Handle&& other) noexcept {
       if (this != &other) {
@@ -107,7 +108,8 @@ public:
     }
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
-  private:
+
+   private:
     LuaPool* m_pool_;
     std::unique_ptr<T> m_lua_;
   };
@@ -137,7 +139,8 @@ public:
     m_pool_.pop();
     return Handle(this, std::move(obj));
   }
-private:
+
+ private:
   void Release_(std::unique_ptr<T> obj) {
     {
       std::unique_lock<std::mutex> lock(m_mutex_);
@@ -150,4 +153,4 @@ private:
   std::condition_variable m_cv_;
 };
 
-} // namespace crane
+}  // namespace crane
