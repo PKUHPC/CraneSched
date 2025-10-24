@@ -330,6 +330,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  map<string, string> env = 41;
 }
 
 message PartitionInfo {
@@ -502,6 +503,7 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+  ERR_LUA_FAILED = 78;
 }
 
 enum EntityType {

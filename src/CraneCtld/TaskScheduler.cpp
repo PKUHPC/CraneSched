@@ -23,6 +23,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "Lua/JobSubmitLua.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
@@ -1119,6 +1120,42 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
                                                  task->TaskToCtld());
   return CraneErrCode::SUCCESS;
+}
+
+CraneExpectedRich<void> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
+  if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
+  auto handle = g_lua_pool->Acquire();
+  if (handle.get() == nullptr)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
+                      "Failed to acquire Lua interpreter handle."));
+
+  return handle->JobSubmit(task);
+}
+
+CraneExpectedRich<void> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {
+  if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
+  auto handle = g_lua_pool->Acquire();
+  if (handle.get() == nullptr)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
+                      "Failed to acquire Lua interpreter handle."));
+
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    auto pd_iter = m_pending_task_map_.find(task_id);
+    if (pd_iter != m_pending_task_map_.end())
+      return handle->JobModify(*pd_iter->second);
+  }
+
+  {
+    LockGuard running_guard(&m_running_task_map_mtx_);
+    auto rn_iter = m_running_task_map_.find(task_id);
+    if (rn_iter != m_running_task_map_.end())
+      return handle->JobModify(*rn_iter->second);
+  }
+
+  return CraneExpectedRich<void>{};
 }
 
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
