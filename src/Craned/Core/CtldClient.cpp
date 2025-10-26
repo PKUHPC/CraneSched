@@ -1208,9 +1208,7 @@ void CtldClient::MemConfigCheck_() {
       static_cast<double>(config_cpu_mem_bytes) / (1024 * 1024 * 1024);
 
   if (std::abs(node.memory_gb - config_cpu_mem_gb) <= kMemoryToleranceGB) {
-    CRANE_DEBUG(
-        "MemConfigCheck success.",
-        config_cpu_mem_gb, node.memory_gb);
+    CRANE_DEBUG("MemConfigCheck success.", config_cpu_mem_gb, node.memory_gb);
     SendMemConfigCheckResult_(true);
     return;
   } else {

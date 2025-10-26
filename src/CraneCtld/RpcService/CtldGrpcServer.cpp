@@ -215,7 +215,7 @@ grpc::Status CtldForInternalServiceImpl::SendMemConfigCheckResult(
     const crane::grpc::SendMemConfigCheckResultRequest *request,
     google::protobuf::Empty *response) {
   g_meta_container->UpdateNodeStateWithMemConfigCheck_(request->craned_id(),
-                                                    request->matched());
+                                                       request->matched());
 
   return grpc::Status::OK;
 }
