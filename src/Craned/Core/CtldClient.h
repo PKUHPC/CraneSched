@@ -225,6 +225,11 @@ class CtldClient {
 
   void HealthCheck_();
   bool NeedHealthCheck_();
+  void SendStatusChanges_();
+
+  void SendMemConfigCheckResult_(bool is_match);
+
+  void MemConfigCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
 
@@ -260,6 +265,7 @@ class CtldClient {
   std::shared_ptr<uvw::loop> m_health_check_uvw_loop_;
   std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
   std::shared_ptr<uvw::async_handle> m_health_check_async_;
+  std::thread m_mem_config_check_thread_;
 };
 
 }  // namespace Craned

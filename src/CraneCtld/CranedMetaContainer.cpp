@@ -920,6 +920,29 @@ CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
   return result;
 }
 
+void CranedMetaContainer::UpdateNodeStateWithMemConfigCheck_(
+    const CranedId& craned_id, bool is_match) {
+  if (!craned_meta_map_.Contains(craned_id)) {
+    CRANE_ERROR(
+        "MemConfig check: unknown craned_id '{}', cannot update drain state.",
+        craned_id);
+    return;
+  }
+
+  auto craned_meta = craned_meta_map_[craned_id];
+
+  if (craned_meta->drain &&
+      craned_meta->state_reason == MemConfigCheckFailedReason) {
+    craned_meta->drain = !is_match;
+    if (is_match) craned_meta->state_reason.clear();
+  } else if (!craned_meta->drain && !is_match) {
+    craned_meta->drain = true;
+    craned_meta->state_reason = MemConfigCheckFailedReason;
+  }
+  CRANE_TRACE("MemConfig check: craned_id '{}' drain state changed to {}.",
+              craned_id, craned_meta->drain);
+}
+
 CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     const std::string& partition_name, const std::string& account_name) {
   auto part_metas_map = partition_meta_map_.GetMapSharedPtr();

@@ -440,6 +440,7 @@ CtldClient::~CtldClient() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   if (m_health_check_uvw_thread_ && m_health_check_uvw_thread_->joinable())
     m_health_check_uvw_thread_->join();
+  if (m_mem_config_check_thread_.joinable()) m_mem_config_check_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -728,6 +729,15 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
+
+  m_mem_config_check_thread_ = std::thread([this] {
+    do {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+      if (m_stopping_ || !m_stub_) return;
+      // TODO: should check state?
+      MemConfigCheck_();
+    } while (true);
+  });
 }
 
 void CtldClient::AddGrpcCtldConnectedCb(std::function<void()> cb) {
@@ -1159,6 +1169,56 @@ bool CtldClient::Ping_() {
   } else
     g_ctld_client_sm->EvPingFailed();
   return reply.ok();
+}
+
+void CtldClient::SendMemConfigCheckResult_(bool is_match) {
+  if (m_stopping_ || !m_stub_) return;
+
+  grpc::ClientContext context;
+  crane::grpc::SendMemConfigCheckResultRequest request;
+  google::protobuf::Empty reply;
+
+  request.set_craned_id(g_config.CranedIdOfThisNode);
+  request.set_matched(is_match);
+
+  auto result = m_stub_->SendMemConfigCheckResult(&context, request, &reply);
+  if (!result.ok()) {
+    CRANE_ERROR("SendMemConfigCheckResult failed: is_matched={}", is_match);
+  }
+}
+
+void CtldClient::MemConfigCheck_() {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) return;
+
+  NodeSpecInfo node;
+  if (!util::os::GetNodeInfo(&node)) {
+    CRANE_ERROR("Failed to get node info.");
+    return;
+  }
+  // TODO add gres surpport
+  if (node.cpu == 0) {
+    return;
+  }
+
+  CRANE_DEBUG("Start MemConfig checking....");
+
+  uint64_t config_cpu_mem_bytes =
+      g_config.CranedRes.at(g_config.Hostname)->allocatable_res.memory_bytes;
+  double config_cpu_mem_gb =
+      static_cast<double>(config_cpu_mem_bytes) / (1024 * 1024 * 1024);
+
+  if (std::abs(node.memory_gb - config_cpu_mem_gb) <= kMemoryToleranceGB) {
+    CRANE_DEBUG(
+        "MemConfigCheck success.",
+        config_cpu_mem_gb, node.memory_gb);
+    SendMemConfigCheckResult_(true);
+    return;
+  } else {
+    SendMemConfigCheckResult_(false);
+    CRANE_DEBUG("MemConfigCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
+                config_cpu_mem_gb, node.memory_gb);
+    return;
+  }
 }
 
 }  // namespace Craned

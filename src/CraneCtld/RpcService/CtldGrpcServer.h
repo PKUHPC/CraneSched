@@ -215,6 +215,11 @@ class CtldForInternalServiceImpl final
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                                crane::grpc::StreamCforedRequest> *stream)
       override;
+      
+  grpc::Status SendMemConfigCheckResult(
+      grpc::ServerContext *context,
+      const crane::grpc::SendMemConfigCheckResultRequest *request,
+      google::protobuf::Empty *response) override;
 
  private:
   CtldServer *m_ctld_server_;

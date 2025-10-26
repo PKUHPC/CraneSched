@@ -210,6 +210,16 @@ grpc::Status CtldForInternalServiceImpl::QueryCranedInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CtldForInternalServiceImpl::SendMemConfigCheckResult(
+    grpc::ServerContext *context,
+    const crane::grpc::SendMemConfigCheckResultRequest *request,
+    google::protobuf::Empty *response) {
+  g_meta_container->UpdateNodeStateWithMemConfigCheck_(request->craned_id(),
+                                                    request->matched());
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CtldForInternalServiceImpl::CforedStream(
     grpc::ServerContext* context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
