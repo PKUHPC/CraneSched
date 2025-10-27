@@ -65,8 +65,9 @@ CraneExpectedRich<void> JobSubmitLua::JobSubmit(TaskInCtld& task) {
     } else {
       CRANE_INFO("{}/lua: non-numeric return code", __func__);
     }
-    lua_pop(m_lua_env_->GetLuaState(), 1);
   }
+  lua_pop(m_lua_env_->GetLuaState(), 1);
+
   std::string user_msg;
   if (!m_lua_env_->GetUserMsg().empty()) {
     CRANE_TRACE("lua user_msg: {}", m_lua_env_->GetUserMsg());
@@ -116,8 +117,9 @@ CraneExpectedRich<void> JobSubmitLua::JobModify(TaskInCtld& task_in_ctld) {
     } else {
       CRANE_INFO("{}/lua: non-numeric return code", __func__);
     }
-    lua_pop(m_lua_env_->GetLuaState(), 1);
   }
+  lua_pop(m_lua_env_->GetLuaState(), 1);
+
   std::string user_msg;
   if (!m_lua_env_->GetUserMsg().empty()) {
     CRANE_TRACE("lua user_msg: {}", m_lua_env_->GetUserMsg());
@@ -293,7 +295,7 @@ int JobSubmitLua::GetPartRecFieldName_(lua_State* lua_state) {
       lua_touserdata(lua_state, 1));
   const char* name = luaL_checkstring(lua_state, 2);
   if (partition_meta == nullptr) {
-    CRANE_ERROR("partition_meta is nill");
+    CRANE_ERROR("partition_meta is nil");
     lua_pushnil(lua_state);
     return 1;
   }
