@@ -95,7 +95,7 @@ bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
 
-bool RunPrologOrEpiLog(const RunLogHookArgs& args);
+std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
 
 }  // namespace os
 
