@@ -433,16 +433,16 @@ CtldClient::CtldClient() {
   });
   m_last_active_time_ = std::chrono::steady_clock::time_point{};
 
-  m_mem_check_timer_ = m_uvw_loop_->resource<uvw::timer_handle>();
-  m_mem_check_timer_->on<uvw::timer_event>(
+  m_config_check_timer_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_config_check_timer_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (m_stopping_ || !m_stub_) return;
         // TODO: should check state?
-        MemConfigCheck_();
+        ConfigMatchCheck_();
       });
-  if (g_config.MemCheckInterval > 0) {
-    auto interval = std::chrono::seconds(g_config.MemCheckInterval);
-    m_mem_check_timer_->start(interval, interval);
+  if (g_config.ConfigCheckInterval > 0) {
+    auto interval = std::chrono::seconds(g_config.ConfigCheckInterval);
+    m_config_check_timer_->start(interval, interval);
   }
 }
 
@@ -1192,36 +1192,47 @@ void CtldClient::CranedReportHealth_(bool is_match) {
   }
 }
 
-void CtldClient::MemConfigCheck_() {
+void CtldClient::ConfigMatchCheck_() {
   if (!g_server->ReadyFor(RequestSource::CTLD)) return;
 
-  NodeSpecInfo node;
-  if (!util::os::GetNodeInfo(&node)) {
-    CRANE_ERROR("Failed to get node info.");
-    return;
-  }
-  // TODO add gres surpport
-  if (node.cpu == 0) {
+  NodeSpecInfo node_real;
+
+  if (!util::os::GetNodeInfo(&node_real)) {
+    CRANE_ERROR("Failed to get node real info.");
     return;
   }
 
-  CRANE_DEBUG("Start MemConfig checking....");
-
-  uint64_t config_cpu_mem_bytes =
-      g_config.CranedRes.at(g_config.Hostname)->allocatable_res.memory_bytes;
-  double config_cpu_mem_gb =
-      static_cast<double>(config_cpu_mem_bytes) / (1024 * 1024 * 1024);
-
-  if (std::abs(node.memory_gb - config_cpu_mem_gb) <= kMemoryToleranceGB) {
-    CRANE_DEBUG("MemConfigCheck success.", config_cpu_mem_gb, node.memory_gb);
-    CranedReportHealth_(true);
+  if (!g_config.CranedRes.contains(g_config.Hostname)) {
+    CRANE_ERROR("Failed to get node config info.");
     return;
-  } else {
+  }
+
+  auto node_config = g_config.CranedRes.at(g_config.Hostname);
+
+  CRANE_DEBUG("Start ConfigMatch checking....");
+
+  if (node_real.cpu !=
+      static_cast<int64_t>(node_config->allocatable_res.cpu_count)) {
     CranedReportHealth_(false);
-    CRANE_DEBUG("MemConfigCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
-                config_cpu_mem_gb, node.memory_gb);
     return;
   }
+
+  uint64_t mem_bytes_config = node_config->allocatable_res.memory_bytes;
+  double mem_gb_config =
+      static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
+
+  if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
+    CranedReportHealth_(false);
+    CRANE_DEBUG("ConfigMatchCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
+                mem_gb_config, node_real.memory_gb);
+    return;
+  }
+
+  // TODO add gres surpport
+
+  CRANE_DEBUG("ConfigMatchCheck success.");
+  CranedReportHealth_(true);
+  return;
 }
 
 }  // namespace Craned

@@ -192,7 +192,7 @@ struct Config {
 
   JobLifecycleHookConfig JobLifecycleHook;
 
-  uint64_t MemCheckInterval;
+  uint64_t ConfigCheckInterval;
 };
 
 inline Config g_config{};

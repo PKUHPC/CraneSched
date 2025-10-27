@@ -229,7 +229,7 @@ class CtldClient {
 
   void CranedReportHealth_(bool is_match);
 
-  void MemConfigCheck_();
+  void ConfigMatchCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
 
@@ -266,6 +266,7 @@ class CtldClient {
   std::shared_ptr<uvw::timer_handle> m_health_check_handle_;
   std::shared_ptr<uvw::async_handle> m_health_check_async_;
   std::thread m_mem_config_check_thread_;
+  std::shared_ptr<uvw::timer_handle> m_config_check_timer_;
 };
 
 }  // namespace Craned
