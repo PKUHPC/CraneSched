@@ -548,65 +548,70 @@ std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
 }
 
 int TimeStr2Mins(std::string_view input) {
-    // Trim whitespace
-    auto ltrim = [](std::string_view sv) {
-        size_t i = 0;
-        while (i < sv.size() && std::isspace(static_cast<unsigned char>(sv[i]))) ++i;
-        return sv.substr(i);
-    };
-    auto rtrim = [](std::string_view sv) {
-        size_t i = sv.size();
-        while (i > 0 && std::isspace(static_cast<unsigned char>(sv[i - 1]))) --i;
-        return sv.substr(0, i);
-    };
-    input = ltrim(rtrim(input));
+  // Trim whitespace
+  auto ltrim = [](std::string_view sv) {
+    size_t i = 0;
+    while (i < sv.size() && std::isspace(static_cast<unsigned char>(sv[i])))
+      ++i;
+    return sv.substr(i);
+  };
+  auto rtrim = [](std::string_view sv) {
+    size_t i = sv.size();
+    while (i > 0 && std::isspace(static_cast<unsigned char>(sv[i - 1]))) --i;
+    return sv.substr(0, i);
+  };
+  input = ltrim(rtrim(input));
 
-    // Case-insensitive compare
-    auto iequals = [](std::string_view a, std::string_view b) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i)
-            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
-                return false;
-        return true;
-    };
+  // Case-insensitive compare
+  auto iequals = [](std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+      if (std::tolower(static_cast<unsigned char>(a[i])) !=
+          std::tolower(static_cast<unsigned char>(b[i])))
+        return false;
+    return true;
+  };
 
-    if (input.empty()) return -1;
-    if (iequals(input, "-1") || iequals(input, "INFINITE") || iequals(input, "UNLIMITED"))
-        return -1;
+  if (input.empty()) return -1;
+  if (iequals(input, "-1") || iequals(input, "INFINITE") ||
+      iequals(input, "UNLIMITED"))
+    return -1;
 
-    // Check valid characters (digits, ':', '-', whitespace)
-    if (!std::all_of(input.begin(), input.end(), [](char c) {
-        return std::isdigit(static_cast<unsigned char>(c)) || c == ':' || c == '-' || std::isspace(static_cast<unsigned char>(c));
-    })) return -1;
+  // Check valid characters (digits, ':', '-', whitespace)
+  if (!std::all_of(input.begin(), input.end(), [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c)) || c == ':' ||
+               c == '-' || std::isspace(static_cast<unsigned char>(c));
+      }))
+    return -1;
 
-    int days = 0, hours = 0, minutes = 0, seconds = 0;
-    auto dash_pos = input.find('-');
-    if (dash_pos != std::string_view::npos) {
-        // Format: days-hours:minutes:seconds
-        std::string day_part(input.substr(0, dash_pos));
-        std::string rest_part(input.substr(dash_pos + 1));
-        std::replace(rest_part.begin(), rest_part.end(), ':', ' ');
-        std::istringstream iss_day(day_part);
-        iss_day >> days;
-        std::istringstream iss_rest(rest_part);
-        iss_rest >> hours >> minutes >> seconds;
+  int days = 0, hours = 0, minutes = 0, seconds = 0;
+  auto dash_pos = input.find('-');
+  if (dash_pos != std::string_view::npos) {
+    // Format: days-hours:minutes:seconds
+    std::string day_part(input.substr(0, dash_pos));
+    std::string rest_part(input.substr(dash_pos + 1));
+    std::replace(rest_part.begin(), rest_part.end(), ':', ' ');
+    std::istringstream iss_day(day_part);
+    iss_day >> days;
+    std::istringstream iss_rest(rest_part);
+    iss_rest >> hours >> minutes >> seconds;
+  } else {
+    // Format: hours:minutes:seconds, minutes:seconds, or minutes
+    int colon_count = std::count(input.begin(), input.end(), ':');
+    std::string temp(input);
+    std::replace(temp.begin(), temp.end(), ':', ' ');
+    std::istringstream iss(temp);
+    if (colon_count == 2) {
+      iss >> hours >> minutes >> seconds;
+    } else if (colon_count == 1) {
+      iss >> minutes >> seconds;
     } else {
-        // Format: hours:minutes:seconds, minutes:seconds, or minutes
-        int colon_count = std::count(input.begin(), input.end(), ':');
-        std::string temp(input);
-        std::replace(temp.begin(), temp.end(), ':', ' ');
-        std::istringstream iss(temp);
-        if (colon_count == 2) {
-            iss >> hours >> minutes >> seconds;
-        } else if (colon_count == 1) {
-            iss >> minutes >> seconds;
-        } else {
-            iss >> minutes;
-        }
+      iss >> minutes;
     }
-    int total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
-    int total_minutes = (total_seconds + 59) / 60; // round up
-    return total_minutes;
+  }
+  int total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+  int total_minutes = (total_seconds + 59) / 60;  // round up
+  return total_minutes;
 }
 
 }  // namespace util
