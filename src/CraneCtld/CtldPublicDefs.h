@@ -172,6 +172,7 @@ struct Config {
   uint32_t PrologTimeout{0};
   uint32_t EpilogTimeout{0};
   uint32_t PrologEpilogTimeout{0};
+  int PrologFlags{0};
 
   bool CompressedRpc{};
 

@@ -118,6 +118,17 @@ constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 
+enum PrologFlagEnum : std::uint8_t {
+  Alloc               = 1 << 0, // 0000 0001 = 1
+  Contain             = 1 << 1, // 0000 0010 = 2
+  DeferBatch          = 1 << 2, // 0000 0100 = 4
+  NoHold              = 1 << 3, // 0000 1000 = 8
+  ForceRequeueOnFail  = 1 << 4, // 0001 0000 = 16
+  RunInJob            = 1 << 5, // 0010 0000 = 32
+  Serial              = 1 << 6, // 0100 0000 = 64
+  X11                 = 1 << 7  // 1000 0000 = 128
+};
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;

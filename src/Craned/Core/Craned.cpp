@@ -720,52 +720,52 @@ void ParseConfig(int argc, char** argv) {
         for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
           std::string trimmed(absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
           if (trimmed == "alloc")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+            g_config.PrologFlags |= PrologFlagEnum::Alloc;
           if (trimmed == "contain")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
+            g_config.PrologFlags |= PrologFlagEnum::Contain;
           if (trimmed == "deferbatch")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::DeferBatch;
+            g_config.PrologFlags |= PrologFlagEnum::DeferBatch;
           if (trimmed == "nohold")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::NoHold;
+            g_config.PrologFlags |= PrologFlagEnum::NoHold;
           if (trimmed == "forcerequeueonfail")
             g_config.PrologFlags |=
-                Craned::Config::PrologFlagEnum::ForceRequeueOnFail;
+                ForceRequeueOnFail;
           if (trimmed == "runinjob")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::RunInJob;
+            g_config.PrologFlags |= PrologFlagEnum::RunInJob;
           if (trimmed == "serial")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Serial;
+            g_config.PrologFlags |= PrologFlagEnum::Serial;
           if (trimmed == "x11")
-            g_config.PrologFlags |= Craned::Config::PrologFlagEnum::X11;
+            g_config.PrologFlags |= PrologFlagEnum::X11;
         }
-        // TODO: add judge for prolog flags
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Contain) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        // judge
+        if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
         }
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::DeferBatch) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        if (g_config.PrologFlags & PrologFlagEnum::DeferBatch) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
         }
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::NoHold) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
-          if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Contain ||
-            g_config.PrologFlags & Craned::Config::PrologFlagEnum::X11) {
+        if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
+          if (g_config.PrologFlags & PrologFlagEnum::Contain ||
+            g_config.PrologFlags & PrologFlagEnum::X11) {
             CRANE_ERROR("Cannot set NoHold, Contain, and X11 flags at the same time.");
             std::exit(1);
           }
         }
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::ForceRequeueOnFail) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
+        if (g_config.PrologFlags & PrologFlagEnum::ForceRequeueOnFail) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
         }
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::RunInJob) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
-          if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::Serial) {
+        if (g_config.PrologFlags & PrologFlagEnum::RunInJob) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
+          g_config.PrologFlags |= PrologFlagEnum::Contain;
+          if (g_config.PrologFlags & PrologFlagEnum::Serial) {
             CRANE_ERROR("Cannot set RunInJob and Serial flags at the same time.");
             std::exit(1);
           }
         }
-        if (g_config.PrologFlags & Craned::Config::PrologFlagEnum::X11) {
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Alloc;
-          g_config.PrologFlags |= Craned::Config::PrologFlagEnum::Contain;
+        if (g_config.PrologFlags & PrologFlagEnum::X11) {
+          g_config.PrologFlags |= PrologFlagEnum::Alloc;
+          g_config.PrologFlags |= PrologFlagEnum::Contain;
         }
       }
 
