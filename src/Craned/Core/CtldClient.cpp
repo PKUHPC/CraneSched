@@ -1210,9 +1210,12 @@ void CtldClient::ConfigMatchCheck_() {
   auto node_config = g_config.CranedRes.at(g_config.Hostname);
 
   CRANE_DEBUG("Start ConfigMatch checking....");
-
-  if (node_real.cpu !=
-      static_cast<int64_t>(node_config->allocatable_res.cpu_count)) {
+  int64_t cpu_count =
+      static_cast<int64_t>(node_config->allocatable_res.cpu_count);
+  if (node_real.cpu != cpu_count) {
+    CRANE_DEBUG(
+        "ConfigMatchCheck fail. config cpu_count: {}, real cpu_count: {}",
+        cpu_count, node_real.cpu);
     CranedReportHealth_(false);
     return;
   }
@@ -1228,7 +1231,17 @@ void CtldClient::ConfigMatchCheck_() {
     return;
   }
 
-  // TODO add gres surpport
+  const auto& devices = each_node_device[g_config.Hostname];
+  for (const auto& dev_arg : devices) {
+    auto& [name, type, path_vec, env_injector] = dev_arg;
+    for (const auto& path : path_vec) {
+      if (!std::filesystem::exists(path)) {
+        CRANE_DEBUG("ConfigMatchCheck fail. Invalid path: {}", path);
+        CranedReportHealth_(false);
+        return;
+      }
+    }
+  }
 
   CRANE_DEBUG("ConfigMatchCheck success.");
   CranedReportHealth_(true);
