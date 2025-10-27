@@ -266,6 +266,31 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     } else {
       uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
     }
+    if (!g_config.ProLogs.empty() && g_config.PrologFlags & PrologFlagEnum::Alloc) {
+      bool script_lock = false;
+      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+        m_prolog_serial_mutex_.Lock();
+        script_lock = true;
+      }
+      RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs, .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+      if (g_config.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.PrologTimeout;
+      else if (g_config.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+
+      if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+        run_prolog_args.callback = [this](pid_t pid, task_id_t job_id) {
+          return this->MigrateProcToCgroupOfJob(pid, job_id);
+        };
+        run_prolog_args.job_id = job_id;
+      }
+      if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+        if (script_lock) m_prolog_serial_mutex_.Unlock();
+        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+        return false;
+      }
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
+    }
   }
 
   return true;
@@ -758,6 +783,27 @@ CraneErrCode JobManager::ExecuteStepAsync(
   }
 
   for (auto& [job_id, step_ids] : steps) {
+    if (!g_config.ProLogs.empty()) {
+      bool script_lock = false;
+      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+        m_prolog_serial_mutex_.Lock();
+        script_lock = true;
+      }
+
+      RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs, .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+      if (g_config.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.PrologTimeout;
+      else if (g_config.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+
+      if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+        if (script_lock) m_prolog_serial_mutex_.Unlock();
+        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+        return CraneErrCode::ERR_PROLOG;
+      }
+
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
+    }
     for (auto step_id : step_ids) {
       auto job = m_job_map_[job_id];
       if (!job) {

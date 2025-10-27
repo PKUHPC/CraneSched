@@ -198,8 +198,6 @@ void ParseConfig(int argc, char** argv) {
           std::string trimmed(absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
           if (trimmed == "deferbatch")
             g_config.PrologFlags |= PrologFlagEnum::DeferBatch;
-          if (trimmed == "serial")
-            g_config.PrologFlags |= PrologFlagEnum::Serial;
         }
         // judge
         if (g_config.PrologFlags & PrologFlagEnum::Serial) {
