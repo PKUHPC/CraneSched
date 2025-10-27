@@ -432,6 +432,18 @@ CtldClient::CtldClient() {
     m_uvw_loop_->run();
   });
   m_last_active_time_ = std::chrono::steady_clock::time_point{};
+
+  m_mem_check_timer_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_mem_check_timer_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle& h) {
+        if (m_stopping_ || !m_stub_) return;
+        // TODO: should check state?
+        MemConfigCheck_();
+      });
+  if (g_config.MemCheckInterval > 0) {
+    auto interval = std::chrono::seconds(g_config.MemCheckInterval);
+    m_mem_check_timer_->start(interval, interval);
+  }
 }
 
 CtldClient::~CtldClient() {
@@ -729,15 +741,6 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
-
-  m_mem_config_check_thread_ = std::thread([this] {
-    do {
-      std::this_thread::sleep_for(std::chrono::seconds(5));
-      if (m_stopping_ || !m_stub_) return;
-      // TODO: should check state?
-      MemConfigCheck_();
-    } while (true);
-  });
 }
 
 void CtldClient::AddGrpcCtldConnectedCb(std::function<void()> cb) {
@@ -1171,17 +1174,19 @@ bool CtldClient::Ping_() {
   return reply.ok();
 }
 
-void CtldClient::SendMemConfigCheckResult_(bool is_match) {
+void CtldClient::CranedReportHealth_(bool is_match) {
   if (m_stopping_ || !m_stub_) return;
 
   grpc::ClientContext context;
-  crane::grpc::SendMemConfigCheckResultRequest request;
+  crane::grpc::CranedReportHealthRequest request;
   google::protobuf::Empty reply;
 
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
   request.set_craned_id(g_config.CranedIdOfThisNode);
   request.set_matched(is_match);
 
-  auto result = m_stub_->SendMemConfigCheckResult(&context, request, &reply);
+  auto result = m_stub_->CranedReportHealth(&context, request, &reply);
   if (!result.ok()) {
     CRANE_ERROR("SendMemConfigCheckResult failed: is_matched={}", is_match);
   }
@@ -1209,10 +1214,10 @@ void CtldClient::MemConfigCheck_() {
 
   if (std::abs(node.memory_gb - config_cpu_mem_gb) <= kMemoryToleranceGB) {
     CRANE_DEBUG("MemConfigCheck success.", config_cpu_mem_gb, node.memory_gb);
-    SendMemConfigCheckResult_(true);
+    CranedReportHealth_(true);
     return;
   } else {
-    SendMemConfigCheckResult_(false);
+    CranedReportHealth_(false);
     CRANE_DEBUG("MemConfigCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
                 config_cpu_mem_gb, node.memory_gb);
     return;

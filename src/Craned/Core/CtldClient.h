@@ -227,7 +227,7 @@ class CtldClient {
   bool NeedHealthCheck_();
   void SendStatusChanges_();
 
-  void SendMemConfigCheckResult_(bool is_match);
+  void CranedReportHealth_(bool is_match);
 
   void MemConfigCheck_();
 

@@ -457,6 +457,9 @@ void ParseConfig(int argc, char** argv) {
             YamlValueOr<bool>(health_check_config["Cycle"], false);
       }
 
+      g_config.MemCheckInterval =
+          YamlValueOr<uint64_t>(config["MemCheckInterval"], 30);
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {

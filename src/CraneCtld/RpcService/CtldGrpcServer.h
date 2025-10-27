@@ -216,9 +216,9 @@ class CtldForInternalServiceImpl final
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
-  grpc::Status SendMemConfigCheckResult(
+  grpc::Status CranedReportHealth(
       grpc::ServerContext *context,
-      const crane::grpc::SendMemConfigCheckResultRequest *request,
+      const crane::grpc::CranedReportHealthRequest *request,
       google::protobuf::Empty *response) override;
 
  private:
