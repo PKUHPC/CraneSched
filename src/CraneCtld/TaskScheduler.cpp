@@ -3360,15 +3360,20 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.EpiLogs,
                                           .envs = task->env,
                                           .run_uid = 0, .run_gid = 0, .is_prolog = false};
-      if (g_config.EpilogTimeout) {
-        run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
-      } else {
-        run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
+      if (!g_config.EpiLogs.empty()) {
+        RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.EpiLogs,
+                                        .envs = task->env,
+                                        .run_uid = 0, .run_gid = 0, .is_prolog = false};
+        if (g_config.EpilogTimeout) {
+          run_epilog_ctld_args.timeout_sec = g_config.EpilogTimeout;
+        } else {
+          run_epilog_ctld_args.timeout_sec = g_config.PrologEpilogTimeout;
+        }
+        CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
+                    run_epilog_ctld_args.run_uid,
+                    run_epilog_ctld_args.timeout_sec);
+        util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
       }
-      CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
-                  run_epilog_ctld_args.run_uid,
-                  run_epilog_ctld_args.timeout_sec);
-      util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
     }
   }
 
