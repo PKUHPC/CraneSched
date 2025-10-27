@@ -296,12 +296,12 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
           args.job_id = job_id;
         }
 
-        bool ok = util::os::RunPrologOrEpiLog(args);
+        auto ok = util::os::RunPrologOrEpiLog(args);
 
         if (script_lock)
           m_prolog_serial_mutex_.Unlock();
 
-        return ok;
+        return ok ? true : false;
       };
 
       if (g_config.PrologFlags & PrologFlagEnum::NoHold) {

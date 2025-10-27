@@ -107,7 +107,7 @@ bool CheckUserHasPermission(uid_t uid, gid_t gid,
 
 absl::Time GetSystemBootTime();
 
-bool RunPrologOrEpiLog(const RunLogHookArgs& args);
+std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
 
 
 }  // namespace util::os

@@ -419,7 +419,7 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
+std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
   bool is_failed = true;
   auto start_time = std::chrono::steady_clock::now();
 
@@ -430,13 +430,15 @@ bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
     return out;
   };
 
+  std::string output;
+
   for (const auto& script : args.scripts) {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start_time);
     if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
       CRANE_ERROR("Total timeout ({}s) reached before running {}.",
                   args.timeout_sec, script.c_str());
-      return false;
+      return std::nullopt;
     }
 
     subprocess_s subprocess{};
@@ -444,7 +446,7 @@ bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
     if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
       CRANE_ERROR("{} subprocess creation failed: {}.", script,
                   strerror(errno));
-      if (args.is_prolog) return false;
+      if (args.is_prolog) return std::nullopt;
       is_failed = false;
       continue;
     }
@@ -480,7 +482,7 @@ bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
       CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
                   read_stream(subprocess_stdout(&subprocess)),
                   read_stream(subprocess_stderr(&subprocess)));
-      if (args.is_prolog) return false;
+      if (args.is_prolog) return std::nullopt;
       is_failed = false;
       continue;
     }
@@ -491,15 +493,17 @@ bool RunPrologOrEpiLog(const RunLogHookArgs& args) {
       CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
                   result, read_stream(subprocess_stdout(&subprocess)),
                   read_stream(subprocess_stderr(&subprocess)));
-      if (args.is_prolog) return false;
+      if (args.is_prolog) return std::nullopt;
       is_failed = false;
       continue;
     }
-
+    output.append(read_stream(subprocess_stdout(&subprocess)));
     CRANE_DEBUG("{} finished successfully.", script);
   }
 
-  return is_failed;
+  if (is_failed) return std::nullopt;
+
+  return output;
 }
 
 }  // namespace util::os
