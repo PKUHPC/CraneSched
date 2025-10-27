@@ -12,6 +12,7 @@ copyright: Copyright &copy; 2022 - 2025 PKUHPC
 
 theme:
   name: material
+  language: en
   features:
     - navigation.tabs
     - navigation.sections
@@ -28,17 +29,22 @@ theme:
   favicon: images/logo.png
 
 plugins:
-  - search
+  - search:
+      lang:
+        - en
+        - zh
   - i18n:
       docs_structure: suffix
       fallback_to_default: true
       reconfigure_material: true
       reconfigure_search: true
+      default_language: en
+      default_language_only: false
       languages:
         - locale: en
-          default: true
           name: English
           build: true
+          default: true
         - locale: zh
           name: 中文
           build: true
@@ -97,6 +103,15 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
+
+extra:
+  alternate:
+    - name: English
+      link: ./en/
+      lang: en
+    - name: 中文
+      link: ./zh/
+      lang: zh
 
 nav:
   - Home: index.md
