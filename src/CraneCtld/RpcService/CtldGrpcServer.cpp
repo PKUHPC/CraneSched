@@ -382,18 +382,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
             }
           }
 
-          auto submit_result =
-              g_task_scheduler->SubmitStepAsync(std::move(step));
-          std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
-          auto submit_expt = submit_result.get();
-          if (submit_expt.has_value()) {
-            step_id_t step_id = submit_expt.value();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, step_id)};
-          } else {
-            result = std::unexpected(CraneErrStr(submit_expt.error()));
-          }
-
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
@@ -488,7 +476,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
-
   auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
   if (!lua_result) {
     response->set_ok(false);
@@ -672,7 +659,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     if (!lua_result) {
       response->add_not_modified_tasks(task_id);
       if (lua_result.error().description().empty())
-        response->add_not_modified_reasons(CraneErrStr(lua_result.error().code()));
+        response->add_not_modified_reasons(
+            CraneErrStr(lua_result.error().code()));
       else
         response->add_not_modified_reasons(lua_result.error().description());
       continue;
