@@ -564,14 +564,14 @@ int TimeStr2Mins(std::string_view input) {
         return true;
     };
 
-    if (input.empty()) return 0;
+    if (input.empty()) return -1;
     if (iequals(input, "-1") || iequals(input, "INFINITE") || iequals(input, "UNLIMITED"))
-        return 0;
+        return -1;
 
     // Check valid characters (digits, ':', '-', whitespace)
     if (!std::all_of(input.begin(), input.end(), [](char c) {
         return std::isdigit(static_cast<unsigned char>(c)) || c == ':' || c == '-' || std::isspace(static_cast<unsigned char>(c));
-    })) return 0;
+    })) return -1;
 
     int days = 0, hours = 0, minutes = 0, seconds = 0;
     auto dash_pos = input.find('-');
