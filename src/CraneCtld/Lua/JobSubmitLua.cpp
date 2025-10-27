@@ -549,7 +549,8 @@ void JobSubmitLua::UpdateJobGloable_() {
     lua_setmetatable(m_lua_env_->GetLuaState(), -2);
 
     /* Lua copies passed strings, so we can reuse the buffer. */
-    lua_setfield(m_lua_env_->GetLuaState(), -2, std::to_string(task.task_id()).data());
+    lua_setfield(m_lua_env_->GetLuaState(), -2,
+                 std::to_string(task.task_id()).data());
   }
 
   lua_setfield(m_lua_env_->GetLuaState(), -2, "jobs");

@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ */
 
 #include "crane/Lua.h"
 
@@ -39,14 +39,13 @@ bool LuaEnvironment::Init(const std::string& script) {
 
 void LuaEnvironment::LuaTableRegister(const luaL_Reg* l) {
   lua_getglobal(m_lua_state_, "crane");
-#if LUA_VERSION_NUM == 501
+#  if LUA_VERSION_NUM == 501
   luaL_register(m_lua_state_, NULL, l);
-#else
+#  else
   luaL_setfuncs(m_lua_state_, l, 0);
-#endif
+#  endif
   lua_pop(m_lua_state_, 1);
 }
-
 
 void LuaEnvironment::RegisterLuaCraneStructFunctions(
     const luaL_Reg* global_funcs) {
@@ -59,9 +58,9 @@ void LuaEnvironment::RegisterLuaCraneStructFunctions(
 bool LuaEnvironment::LoadLuaScript(const char* req_funcs[]) {
   if (m_lua_state_ == nullptr) {
     CRANE_DEBUG(
-    "Lua state (m_lua_state_) is null when loading script '{}'. "
-    "This usually indicates Lua VM initialization failed.",
-    m_lua_script_);
+        "Lua state (m_lua_state_) is null when loading script '{}'. "
+        "This usually indicates Lua VM initialization failed.",
+        m_lua_script_);
 
     if ((m_lua_state_ = luaL_newstate()) == nullptr) {
       CRANE_ERROR("luaL_newstate() failed to allocate");
@@ -151,13 +150,13 @@ int LuaEnvironment::TimeStr2Mins_(lua_State* lua_state) {
 }
 
 void LuaEnvironment::RegisterFunctions_() {
-    const char* unpack_str;
+  const char* unpack_str;
 
-#if LUA_VERSION_NUM == 501
+#  if LUA_VERSION_NUM == 501
   unpack_str = "unpack";
-#else
+#  else
   unpack_str = "table.unpack";
-#endif
+#  endif
 
   lua_newtable(m_lua_state_);
   LuaTableRegister_(kCraneFunctions);
@@ -218,19 +217,18 @@ void LuaEnvironment::RegisterFunctions_() {
 }
 
 void LuaEnvironment::LuaTableRegister_(const luaL_Reg* l) {
-#if LUA_VERSION_NUM == 501
+#  if LUA_VERSION_NUM == 501
   luaL_register(m_lua_state_, NULL, l);
-#else
+#  else
   luaL_setfuncs(m_lua_state_, l, 0);
-#endif
+#  endif
 }
 
 const luaL_Reg LuaEnvironment::kCraneFunctions[] = {
-  { "log", LogLuaMsg_ },
-  { "error", LogLuaError_ },
-  { "time_str2mins", TimeStr2Mins_ },
-  { nullptr, nullptr }
-};
+    {"log", LogLuaMsg_},
+    {"error", LogLuaError_},
+    {"time_str2mins", TimeStr2Mins_},
+    {nullptr, nullptr}};
 
 void LuaEnvironment::RegisterOutputErrTab_() {
   const google::protobuf::EnumDescriptor* desc =

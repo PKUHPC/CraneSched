@@ -1565,8 +1565,8 @@ CraneExpectedRich<void> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
   auto handle = g_lua_pool->Acquire();
   if (handle.get() == nullptr)
     return std::unexpected(
-      FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
-        "Failed to acquire Lua interpreter handle."));
+        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
+                      "Failed to acquire Lua interpreter handle."));
 
   return handle->JobSubmit(task);
 }
@@ -1576,8 +1576,8 @@ CraneExpectedRich<void> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {
   auto handle = g_lua_pool->Acquire();
   if (handle.get() == nullptr)
     return std::unexpected(
-      FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
-        "Failed to acquire Lua interpreter handle."));
+        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
+                      "Failed to acquire Lua interpreter handle."));
 
   {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
