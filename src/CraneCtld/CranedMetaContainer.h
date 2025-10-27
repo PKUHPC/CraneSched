@@ -92,8 +92,8 @@ class CranedMetaContainer final {
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
 
-  void UpdateNodeStateWithMemConfigCheck_(const CranedId& craned_id,
-                                          bool is_match);
+  void UpdateNodeStateWithConfigCheck_(const CranedId& craned_id,
+                                       bool is_match);
   CraneExpected<void> ModifyPartitionAcl(
       const std::string& partition_name, bool is_allowed_list,
       std::unordered_set<std::string>&& accounts);

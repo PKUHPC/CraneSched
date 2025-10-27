@@ -21,6 +21,7 @@
 #include <random>
 
 #include "CranedServer.h"
+#include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
 #include "crane/GrpcHelper.h"
@@ -1188,7 +1189,7 @@ void CtldClient::CranedReportHealth_(bool is_match) {
 
   auto result = m_stub_->CranedReportHealth(&context, request, &reply);
   if (!result.ok()) {
-    CRANE_ERROR("SendMemConfigCheckResult failed: is_matched={}", is_match);
+    CRANE_ERROR("CranedReportHealth_ failed: is_matched={}", is_match);
   }
 }
 
@@ -1231,12 +1232,11 @@ void CtldClient::ConfigMatchCheck_() {
     return;
   }
 
-  const auto& devices = each_node_device[g_config.Hostname];
-  for (const auto& dev_arg : devices) {
-    auto& [name, type, path_vec, env_injector] = dev_arg;
-    for (const auto& path : path_vec) {
-      if (!std::filesystem::exists(path)) {
-        CRANE_DEBUG("ConfigMatchCheck fail. Invalid path: {}", path);
+  for (const auto& device_pair : Common::g_this_node_device) {
+    const auto& device = device_pair.second;
+    for (const auto& file_meta : device->device_file_metas) {
+      if (!std::filesystem::exists(file_meta.path)) {
+        CRANE_DEBUG("ConfigMatchCheck fail. Invalid path: {}", file_meta.path);
         CranedReportHealth_(false);
         return;
       }
