@@ -267,30 +267,56 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
       uid_map_ptr->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
     }
     if (!g_config.ProLogs.empty() && g_config.PrologFlags & PrologFlagEnum::Alloc) {
-      bool script_lock = false;
-      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
-      RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs, .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
-      if (g_config.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologTimeout;
-      else if (g_config.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+      CRANE_DEBUG("Running Prolog In AllocJobs.");
+      auto run_prolog = [this](task_id_t job_id) -> bool {
+        bool script_lock = false;
 
-      if (g_config.PrologFlags & PrologFlagEnum::Contain) {
-        run_prolog_args.callback = [this](pid_t pid, task_id_t job_id) {
-          return this->MigrateProcToCgroupOfJob(pid, job_id);
-        };
-        run_prolog_args.job_id = job_id;
+        if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+          m_prolog_serial_mutex_.Lock();
+          script_lock = true;
+        }
+
+        RunLogHookArgs args{
+          .scripts = g_config.ProLogs,
+          .envs = {},
+          .run_uid = 0,
+          .run_gid = 0,
+          .is_prolog = true,
+      };
+
+        if (g_config.PrologTimeout > 0)
+          args.timeout_sec = g_config.PrologTimeout;
+        else if (g_config.PrologEpilogTimeout > 0)
+          args.timeout_sec = g_config.PrologEpilogTimeout;
+
+        if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+          args.callback = [this](pid_t pid, task_id_t job_id_inner) {
+            return this->MigrateProcToCgroupOfJob(pid, job_id_inner);
+          };
+          args.job_id = job_id;
+        }
+
+        bool ok = util::os::RunPrologOrEpiLog(args);
+
+        if (script_lock)
+          m_prolog_serial_mutex_.Unlock();
+
+        return ok;
+      };
+
+      if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
+        std::thread([this, job_id, run_prolog]() {
+          bool ok = run_prolog(job_id);
+          this->m_prolog_is_end_map_[job_id] = ok;
+          if (!ok)
+            g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
+        }).detach();
+      } else {
+        if (!run_prolog(job_id)) {
+          g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+          return false;
+        }
       }
-      if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
-        if (script_lock) m_prolog_serial_mutex_.Unlock();
-        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-        return false;
-      }
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
-    }
   }
 
   return true;
@@ -783,7 +809,7 @@ CraneErrCode JobManager::ExecuteStepAsync(
   }
 
   for (auto& [job_id, step_ids] : steps) {
-    if (!g_config.ProLogs.empty()) {
+    if (!g_config.ProLogs.empty() && !(g_config.PrologFlags & PrologFlagEnum::Alloc)) {
       bool script_lock = false;
       if (g_config.PrologFlags & PrologFlagEnum::Serial) {
         m_prolog_serial_mutex_.Lock();

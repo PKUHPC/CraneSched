@@ -87,6 +87,9 @@
 // subprocess
 #include <subprocess/subprocess.h>
 
+// parallel-hashmap
+#include <parallel_hashmap/phmap.h>
+
 // Include the header which defines the static log level
 #include "crane/Logger.h"
 
