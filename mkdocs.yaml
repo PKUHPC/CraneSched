@@ -1,7 +1,6 @@
 site_name: CraneSched Documentation
 site_description: Documentation for CraneSched, an HPC and AI Scheduling System.
 site_author: High Performance Computing Platform of Peking University
-site_url: https://cranesched.readthedocs.io/
 
 # Repository
 repo_name: PKUHPC/CraneSched
