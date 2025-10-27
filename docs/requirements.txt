@@ -1,4 +1,5 @@
-mkdocs>=1.5
-mkdocs-material>=9.0
+mkdocs
+mkdocs-material
 pymdown-extensions
 mkdocs-material-extensions
+mkdocs-static-i18n
