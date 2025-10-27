@@ -3084,11 +3084,12 @@ void TaskScheduler::TerminateOrphanedSteps(
       auto& job = job_it->second;
       for (const auto& step_id : step_ids) {
         StepInCtld* step{nullptr};
-        if (step_id == kDaemonStepId) {
-          step = job->DaemonStep();
-
-        } else if (step_id == job->PrimaryStep()->StepId()) {
-          step = job->PrimaryStep();
+        if (auto daemon_step = job->DaemonStep();
+            daemon_step && daemon_step->StepId() == step_id) {
+          step = daemon_step;
+        } else if (auto primary_step = job->PrimaryStep();
+                   primary_step && step_id == primary_step->StepId()) {
+          step = primary_step;
         } else {
           step = job->GetStep(step_id);
         }
