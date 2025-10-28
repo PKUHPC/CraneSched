@@ -192,22 +192,6 @@ void ParseConfig(int argc, char** argv) {
         g_config.PrologEpilogTimeout = config["PrologEpilogTimeout"].as<uint32_t>();
       }
 
-      if (config["PrologFlags"]) {
-        auto prolog_flags = config["PrologFlags"].as<std::string>();
-        for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
-          std::string trimmed(absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
-          if (trimmed == "deferbatch")
-            g_config.PrologFlags |= PrologFlagEnum::DeferBatch;
-        }
-        // judge
-        if (g_config.PrologFlags & PrologFlagEnum::Serial) {
-          if (g_config.PrologFlags & PrologFlagEnum::RunInJob) {
-            CRANE_ERROR("Cannot set RunInJob and Serial flags at the same time.");
-            std::exit(1);
-          }
-        }
-      }
-
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
