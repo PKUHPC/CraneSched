@@ -309,7 +309,7 @@ class ContainerInstance : public ITaskInstance {
 
  private:
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";
-  static constexpr std::string_view kContainerLogFile = "container.log";
+  static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
 
   static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
@@ -349,7 +349,8 @@ class ContainerInstance : public ITaskInstance {
   cri::api::IDMapping m_userns_uid_mapping_;
   cri::api::IDMapping m_userns_gid_mapping_;
 
-  std::filesystem::path m_data_path_;
+  std::filesystem::path m_log_dir_;
+  std::filesystem::path m_log_file_;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -432,8 +433,7 @@ class TaskManager {
 
   // Just like a SIGCHLD sig handler (implictly set by uvw).
   // Will be called in CliClient thread.
-  void HandleCriEvents(
-      std::vector<std::pair<task_id_t, cri::api::ContainerStatus>>&& events) {
+  void HandleCriEvents(std::vector<cri::api::ContainerStatus>&& events) {
     m_cri_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
                                     events.size());
     m_cri_event_handle_->send();
@@ -499,8 +499,7 @@ class TaskManager {
 
   // Handle event stream for ContainerInstance
   std::shared_ptr<uvw::async_handle> m_cri_event_handle_;
-  ConcurrentQueue<std::pair<task_id_t, cri::api::ContainerStatus>>
-      m_cri_event_queue_;
+  ConcurrentQueue<cri::api::ContainerStatus> m_cri_event_queue_;
 
   // Task is already terminated
   std::shared_ptr<uvw::async_handle> m_task_stopped_async_handle_;
