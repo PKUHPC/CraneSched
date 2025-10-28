@@ -48,10 +48,11 @@ inline constexpr std::string_view kCriDefaultPodNamespace = "cranesched";
 inline constexpr std::string_view kCriDefaultLabel = kCriDefaultPodNamespace;
 
 // Use for selecting containers created by CraneSched
-static constexpr std::string_view kCriLabelJobIdKey = "job_id";
-static constexpr std::string_view kCriLabelStepIdKey = "step_id";
-static constexpr std::string_view kCriLabelJobNameKey = "name";
-static constexpr std::string_view kCriLabelUidKey = "uid";
+inline constexpr std::string_view kCriLabelJobIdKey = "job_id";
+inline constexpr std::string_view kCriLabelStepIdKey = "step_id";
+inline constexpr std::string_view kCriLabelJobNameKey = "job_name";
+inline constexpr std::string_view kCriLabelStepNameKey = "step_name";
+inline constexpr std::string_view kCriLabelUidKey = "uid";
 
 inline constexpr std::chrono::seconds kCriDefaultReqTimeout =
     std::chrono::seconds(5);
@@ -79,34 +80,37 @@ class CriClient {
   void Version() const;
   void RuntimeConfig() const;
 
-  // TODO: CraneExpected should be replaced here for richer error info from CRI
-
   // Pod
-  CraneExpected<std::string> RunPodSandbox(api::PodSandboxConfig* config) const;
+  CraneExpectedRich<std::string> RunPodSandbox(
+      api::PodSandboxConfig* config) const;
 
-  CraneExpected<void> StopPodSandbox(const std::string& pod_sandbox_id) const;
+  CraneExpectedRich<void> StopPodSandbox(
+      const std::string& pod_sandbox_id) const;
 
-  CraneExpected<void> RemovePodSandbox(const std::string& pod_sandbox_id) const;
+  CraneExpectedRich<void> RemovePodSandbox(
+      const std::string& pod_sandbox_id) const;
 
   // Containers
-  CraneExpected<std::string> CreateContainer(
+  CraneExpectedRich<std::string> CreateContainer(
       const std::string& pod_id, const api::PodSandboxConfig& pod_config,
       api::ContainerConfig* config) const;
 
-  CraneExpected<void> StartContainer(const std::string& container_id) const;
+  CraneExpectedRich<void> StartContainer(const std::string& container_id) const;
 
-  CraneExpected<void> StopContainer(const std::string& container_id,
-                                    int64_t timeout = 0) const;
+  CraneExpectedRich<void> StopContainer(const std::string& container_id,
+                                        int64_t timeout = 0) const;
 
-  CraneExpected<void> RemoveContainer(const std::string& container_id) const;
+  CraneExpectedRich<void> RemoveContainer(
+      const std::string& container_id) const;
 
-  CraneExpected<std::string> Attach(const std::string& container_id, bool tty,
-                                    bool stdin, bool stdout, bool stderr) const;
+  CraneExpectedRich<std::string> Attach(const std::string& container_id,
+                                        bool tty, bool stdin, bool stdout,
+                                        bool stderr) const;
 
-  CraneExpected<std::string> Exec(const std::string& container_id,
-                                  const std::vector<std::string>& command,
-                                  bool tty, bool stdin, bool stdout,
-                                  bool stderr) const;
+  CraneExpectedRich<std::string> Exec(const std::string& container_id,
+                                      const std::vector<std::string>& command,
+                                      bool tty, bool stdin, bool stdout,
+                                      bool stderr) const;
 
   // Container Event Streaming
 
@@ -118,13 +122,13 @@ class CriClient {
   bool IsEventStreamActive() const;
 
   // Active Container Status Checking
-  CraneExpected<std::vector<api::Container>> ListContainers() const;
+  CraneExpectedRich<std::vector<api::Container>> ListContainers() const;
 
-  CraneExpected<std::vector<api::Container>> ListContainers(
+  CraneExpectedRich<std::vector<api::Container>> ListContainers(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
   // Select exactly one container id by label selector
-  CraneExpected<std::string> SelectContainerId(
+  CraneExpectedRich<std::string> SelectContainerId(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
   // ==== Image Service ====

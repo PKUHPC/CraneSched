@@ -670,9 +670,10 @@ CraneErrCode ContainerInstance::Prepare() {
     return err;
   auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
   if (!pod_id_expt.has_value()) {
-    CRANE_ERROR("Failed to run pod sandbox for container #{}.{}", job_id,
-                step_id);
-    return pod_id_expt.error();
+    const auto& rich_err = pod_id_expt.error();
+    CRANE_ERROR("Failed to run pod sandbox for container #{}: {}", job_id,
+                rich_err.description());
+    return rich_err.code();
   }
   m_pod_id_ = std::move(pod_id_expt.value());
   // TODO: Fix Pod here. Pod should only related to job instead of step.
@@ -685,8 +686,10 @@ CraneErrCode ContainerInstance::Prepare() {
   auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
                                                        &m_container_config_);
   if (!container_id_expt.has_value()) {
-    CRANE_ERROR("Failed to create container for #{}.{}", job_id, step_id);
-    return container_id_expt.error();
+    const auto& rich_err = container_id_expt.error();
+    CRANE_ERROR("Failed to create container for #{}.{}: {}", job_id, step_id,
+                rich_err.description());
+    return rich_err.code();
   }
   m_container_id_ = std::move(container_id_expt.value());
   CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_, job_id,
@@ -699,6 +702,9 @@ CraneErrCode ContainerInstance::Spawn() {
   using cri::kCriLabelJobIdKey;
   using cri::kCriLabelStepIdKey;
   using cri::kCriLabelUidKey;
+
+  job_id_t job_id = m_parent_step_inst_->job_id;
+  step_id_t step_id = m_parent_step_inst_->step_id;
   auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   // Subscribe to container event stream
@@ -716,36 +722,39 @@ CraneErrCode ContainerInstance::Spawn() {
           CRANE_TRACE("Received CRI event: {}", ev.ShortDebugString());
 
           // TODO: Add handler for pod status changes?
-          std::vector<cri::api::ContainerStatus> changes;
-          for (const auto& status : ev.containers_statuses()) {
-            // Filter out containers not belonging to this Supervisor
-            if (!cri::CriClient::ParseAndCompareLabel(
-                    status, std::string(kCriLabelJobIdKey), g_config.JobId))
-              continue;
-
-            if (!cri::CriClient::ParseAndCompareLabel(
-                    status, std::string(kCriLabelStepIdKey), g_config.StepId))
-              continue;
-
-            if (status.state() == cri::api::ContainerState::CONTAINER_EXITED ||
-                status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN)
-              changes.emplace_back(status);
-          }
+          auto changes =
+              ev.containers_statuses() |
+              std::views::filter([](const auto& status) {
+                return cri::CriClient::ParseAndCompareLabel(
+                           status, std::string(kCriLabelJobIdKey),
+                           g_config.JobId) &&
+                       cri::CriClient::ParseAndCompareLabel(
+                           status, std::string(kCriLabelStepIdKey),
+                           g_config.StepId) &&
+                       (status.state() ==
+                            cri::api::ContainerState::CONTAINER_EXITED ||
+                        status.state() ==
+                            cri::api::ContainerState::CONTAINER_UNKNOWN);
+              }) |
+              std::ranges::to<std::vector<cri::api::ContainerStatus>>();
 
           if (!changes.empty()) g_task_mgr->HandleCriEvents(std::move(changes));
         });
 
   auto ret = cri_client->StartContainer(m_container_id_);
   if (!ret.has_value()) {
-    CRANE_ERROR("Failed to start container for task #{}", task_id);
-    return ret.error();
+    const auto& rich_err = ret.error();
+    CRANE_ERROR("Failed to start container for #{}.{}: {}", job_id, step_id,
+                rich_err.description());
+    return rich_err.code();
   }
 
   // chown the log file for user
   {
     if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
               m_parent_step_inst_->pwd.Gid()) != 0) {
-      CRANE_ERROR("Failed to chown container log file for task #{}", task_id);
+      CRANE_ERROR("Failed to chown container log file for #{}.{}", job_id,
+                  step_id);
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
   }
@@ -762,16 +771,18 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   if (!m_container_id_.empty()) {
     auto stop_ret = cri_client->StopContainer(m_container_id_, 10);
     if (!stop_ret.has_value()) {
+      const auto& rich_err = stop_ret.error();
       CRANE_DEBUG("Failed to stop container {}: {}", m_container_id_,
-                  static_cast<int>(stop_ret.error()));
+                  rich_err.description());
       // Continue with cleanup even if stop fails
     }
 
     // Step 2: Remove Container
     auto remove_ret = cri_client->RemoveContainer(m_container_id_);
     if (!remove_ret.has_value()) {
+      const auto& rich_err = remove_ret.error();
       CRANE_DEBUG("Failed to remove container {}: {}", m_container_id_,
-                  static_cast<int>(remove_ret.error()));
+                  rich_err.description());
       // Continue with pod cleanup even if container removal fails
     }
   }
@@ -780,17 +791,19 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   if (!m_pod_id_.empty()) {
     auto stop_pod_ret = cri_client->StopPodSandbox(m_pod_id_);
     if (!stop_pod_ret.has_value()) {
+      const auto& rich_err = stop_pod_ret.error();
       CRANE_DEBUG("Failed to stop pod {}: {}", m_pod_id_,
-                  static_cast<int>(stop_pod_ret.error()));
+                  rich_err.description());
       // Continue with pod removal even if stop fails
     }
 
     // Step 4: Remove Pod
     auto remove_pod_ret = cri_client->RemovePodSandbox(m_pod_id_);
     if (!remove_pod_ret.has_value()) {
+      const auto& rich_err = remove_pod_ret.error();
       CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
-                  static_cast<int>(remove_pod_ret.error()));
-      return CraneErrCode::ERR_SYSTEM_ERR;
+                  rich_err.description());
+      return rich_err.code();
     }
 
     CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
@@ -1639,7 +1652,7 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
     CRANE_DEBUG("[Task #{}] Failed to prepare task", task->task_id);
     TaskFinish_(
         task->task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeFileNotFound,
+        ExitCode::EC_FILE_NOT_FOUND,
         fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
     return err;
   }
@@ -1651,7 +1664,7 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
     TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeSpawnProcessFail,
+                ExitCode::EC_SPAWN_FAILED,
                 fmt::format("Cannot spawn child process in task, code: {}",
                             static_cast<int>(err)));
     return err;
@@ -1789,7 +1802,7 @@ void TaskManager::EvTaskTimerCb_() {
   if (m_step_.IsCalloc()) {
     // For calloc job, we use job id, send TaskFinish_ directly.
     TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+                ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   } else {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
@@ -1808,12 +1821,12 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
+                  ExitCode::EC_SPAWN_FAILED, std::nullopt);
       return;
 
     case CraneErrCode::ERR_CGROUP:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeCgroupError, std::nullopt);
+                  ExitCode::EC_CGROUP_ERR, std::nullopt);
       return;
 
     default:
@@ -1838,7 +1851,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           break;
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
           TaskFinish_(task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                      ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+                      ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
           TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
@@ -1929,7 +1942,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
         TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
-                    ExitCode::kExitCodeTerminated, std::nullopt);
+                    ExitCode::EC_TERMINATED, std::nullopt);
       } else {
         CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
       }
@@ -2005,7 +2018,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
       TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodePermissionDenied,
+                  ExitCode::EC_PERMISSION_DENIED,
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
