@@ -921,7 +921,7 @@ CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
 }
 
 void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(
-    const CranedId& craned_id, bool is_healthy, std::string reason) {
+    const CranedId& craned_id, bool is_healthy, const std::string& reason) {
   if (!craned_meta_map_.Contains(craned_id)) {
     CRANE_ERROR(
         "HealthCheck: unknown craned_id '{}', cannot update drain state.",
