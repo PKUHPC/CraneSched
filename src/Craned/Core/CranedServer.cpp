@@ -383,14 +383,17 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
   };
   auto container_expt = g_cri_client->SelectContainerId(label_selector);
   if (!container_expt) {
+    const auto &rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
-                CraneErrStr(container_expt.error()));
+                rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
-    err->set_description("Container is not found. Possibly initializing?");
+    err->set_description(
+        std::format("Container not found, possibly initializing: {}",
+                    rich_err.description()));
     response->set_ok(false);
     return Status::OK;
   }
@@ -400,11 +403,12 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
       g_cri_client->Attach(container_id, request->tty(), request->stdin(),
                            request->stdout(), request->stderr());
 
-  // TODO: Add more error info in CriClient to optimize here.
   if (!url_expt) {
+    const auto &rich_err = url_expt.error();
+    CRANE_ERROR("Failed to attach to container for #{}: {}", request->task_id(),
+                rich_err.description());
     auto *err = response->mutable_status();
-    err->set_code(CraneErrCode::ERR_CRI_GENERIC);
-    err->set_description("CRI returned an error.");
+    err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;
   }
@@ -458,14 +462,17 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
   };
   auto container_expt = g_cri_client->SelectContainerId(label_selector);
   if (!container_expt) {
+    const auto &rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
-                CraneErrStr(container_expt.error()));
+                rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
-    err->set_description("Container is not found. Possibly initializing?");
+    err->set_description(
+        std::format("Container not found, possibly initializing: {}",
+                    rich_err.description()));
     response->set_ok(false);
     return Status::OK;
   }
@@ -483,11 +490,12 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
                                      request->stdin(), request->stdout(),
                                      request->stderr());
 
-  // TODO: Add more error info in CriClient to optimize here.
   if (!url_expt) {
+    const auto &rich_err = url_expt.error();
+    CRANE_ERROR("Failed to exec in container for #{}: {}", request->task_id(),
+                rich_err.description());
     auto *err = response->mutable_status();
-    err->set_code(CraneErrCode::ERR_CRI_GENERIC);
-    err->set_description("CRI returned an error.");
+    err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;
   }

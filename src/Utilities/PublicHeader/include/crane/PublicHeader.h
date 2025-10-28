@@ -112,15 +112,15 @@ inline constexpr size_t kSystemExitCodeNum =
 inline constexpr size_t kCraneExitCodeBase = kSystemExitCodeNum;
 
 enum ExitCodeEnum : uint16_t {
-  kExitCodeTerminated = kCraneExitCodeBase,
-  kExitCodePermissionDenied,
-  kExitCodeCgroupError,
-  kExitCodeFileNotFound,
-  kExitCodeSpawnProcessFail,
-  kExitCodeExceedTimeLimit,
-  kExitCodeCranedDown,
-  kExitCodeExecutionError,
-  kExitCodeRpcError,
+  EC_TERMINATED = kCraneExitCodeBase,
+  EC_PERMISSION_DENIED,
+  EC_CGROUP_ERR,
+  EC_FILE_NOT_FOUND,
+  EC_SPAWN_FAILED,
+  EC_EXCEED_TIME_LIMIT,
+  EC_CRANED_DOWN,
+  EC_EXEC_ERR,
+  EC_RPC_ERR,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };
@@ -130,7 +130,7 @@ enum ExitCodeEnum : uint16_t {
 namespace Internal {
 // clang-format off
 constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
-    CraneErrStrArr = {
+    kCraneErrStrArr = {
         // 0 - 4
         "Success",
 
@@ -249,8 +249,9 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   return rich_err;
 }
 
-inline std::string_view CraneErrStr(CraneErrCode err) {
-  return Internal::CraneErrStrArr[static_cast<uint16_t>(err)];
+[[deprecated("Use Rich Error")]] inline std::string_view CraneErrStr(
+    CraneErrCode err) {
+  return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
 
 /* ----------- Public definitions for all components */

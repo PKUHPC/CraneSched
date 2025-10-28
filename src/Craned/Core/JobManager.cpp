@@ -872,7 +872,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeCgroupError,
+        ExitCode::EC_CGROUP_ERR,
         fmt::format("Failed to get the allocation for job#{} ", job_id));
     return;
   }
@@ -883,10 +883,9 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (step->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
-    ActivateTaskStatusChangeAsync_(job_id, step_id,
-                                   crane::grpc::TaskStatus::Failed,
-                                   ExitCode::kExitCodeSpawnProcessFail,
-                                   "Container is not enabled in this craned.");
+    ActivateTaskStatusChangeAsync_(
+        job_id, step_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::EC_SPAWN_FAILED, "Container is not enabled in this craned.");
     return;
   }
 
@@ -902,7 +901,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
       ActivateTaskStatusChangeAsync_(
           job_id, step_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodeCgroupError,
+          ExitCode::EC_CGROUP_ERR,
           fmt::format("Failed to get cgroup for job#{} ", job_id));
       return;
     }
@@ -922,7 +921,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   if (err != CraneErrCode::SUCCESS) {
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeSpawnProcessFail,
+        ExitCode::EC_SPAWN_FAILED,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
                     job_id));
   } else {
@@ -1099,7 +1098,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
                 {.job_id = elem.job_id,
                  .step_id = step_id,
                  .new_status = crane::grpc::TaskStatus::Cancelled,
-                 .exit_code = ExitCode::kExitCodeTerminated,
+                 .exit_code = ExitCode::EC_TERMINATED,
                  .reason = "Terminated failed."});
         }
         CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);

@@ -1191,7 +1191,7 @@ void TaskScheduler::ScheduleThread_() {
           failed_job_raw_ptrs.emplace(job.get());
 
           job->SetStatus(crane::grpc::Failed);
-          job->SetExitCode(ExitCode::kExitCodeCgroupError);
+          job->SetExitCode(ExitCode::EC_CGROUP_ERR);
           job->SetEndTime(absl::Now());
         }
         ProcessFinalTasks_(failed_job_raw_ptrs);
@@ -2311,7 +2311,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
         for (auto step_id : step_ids)
           StepStatusChangeAsync(job_id, step_id, craned_id,
                                 crane::grpc::TaskStatus::Cancelled,
-                                ExitCode::kExitCodeTerminated, "");
+                                ExitCode::EC_TERMINATED, "");
       }
       continue;
     }
@@ -2724,8 +2724,6 @@ void TaskScheduler::CommonStepStatusChangeHandler_(
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
-
-  return;
 }
 
 void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
@@ -2888,7 +2886,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
-              crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+              crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
               "CranedDown");
         }
       }
@@ -2938,7 +2936,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             for (const auto& step_id : step_ids)
               StepStatusChangeWithReasonAsync(
                   job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeRpcError, "ExecRpcError");
+                  ExitCode::EC_RPC_ERR, "ExecRpcError");
           }
         }
       } else {
@@ -2951,7 +2949,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           for (const auto& step_id : step_ids)
             StepStatusChangeWithReasonAsync(
                 job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeCranedDown, "CranedDown");
+                ExitCode::EC_CRANED_DOWN, "CranedDown");
         }
       }
       exec_step_latch.count_down();
@@ -3022,7 +3020,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeRpcError, "Rpc failure when free job");
+              ExitCode::EC_RPC_ERR, "Rpc failure when free job");
         }
       }
       free_job_latch.count_down();

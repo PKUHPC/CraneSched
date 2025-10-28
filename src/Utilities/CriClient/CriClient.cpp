@@ -214,7 +214,7 @@ std::optional<std::string> CriClient::PullImage(
   return response.image_ref();
 }
 
-CraneExpected<std::string> CriClient::RunPodSandbox(
+CraneExpectedRich<std::string> CriClient::RunPodSandbox(
     api::PodSandboxConfig* config) const {
   using api::RunPodSandboxRequest;
   using api::RunPodSandboxResponse;
@@ -232,19 +232,22 @@ CraneExpected<std::string> CriClient::RunPodSandbox(
   request.mutable_config()->CopyFrom(*config);
   auto status = m_rs_stub_->RunPodSandbox(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to run pod sandbox: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to run pod sandbox: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   return response.pod_sandbox_id();
 }
 
-CraneExpected<void> CriClient::StopPodSandbox(
+CraneExpectedRich<void> CriClient::StopPodSandbox(
     const std::string& pod_sandbox_id) const {
   using api::StopPodSandboxRequest;
   using api::StopPodSandboxResponse;
 
-  CraneExpected<void> ret;
   StopPodSandboxRequest request{};
   StopPodSandboxResponse response{};
 
@@ -255,19 +258,22 @@ CraneExpected<void> CriClient::StopPodSandbox(
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->StopPodSandbox(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to stop pod sandbox: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to stop pod sandbox '{}': [gRPC:{}] {}", pod_sandbox_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
-  return ret;
+  return {};
 }
 
-CraneExpected<void> CriClient::RemovePodSandbox(
+CraneExpectedRich<void> CriClient::RemovePodSandbox(
     const std::string& pod_sandbox_id) const {
   using api::RemovePodSandboxRequest;
   using api::RemovePodSandboxResponse;
 
-  CraneExpected<void> ret;
   RemovePodSandboxRequest request{};
   RemovePodSandboxResponse response{};
 
@@ -278,14 +284,18 @@ CraneExpected<void> CriClient::RemovePodSandbox(
   request.set_pod_sandbox_id(pod_sandbox_id);
   auto status = m_rs_stub_->RemovePodSandbox(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to remove pod sandbox: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to remove pod sandbox '{}': [gRPC:{}] {}", pod_sandbox_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
-  return ret;
+  return {};
 }
 
-CraneExpected<std::string> CriClient::CreateContainer(
+CraneExpectedRich<std::string> CriClient::CreateContainer(
     const std::string& pod_id, const api::PodSandboxConfig& pod_config,
     api::ContainerConfig* config) const {
   using api::CreateContainerRequest;
@@ -306,19 +316,22 @@ CraneExpected<std::string> CriClient::CreateContainer(
   request.mutable_config()->CopyFrom(*config);
   auto status = m_rs_stub_->CreateContainer(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to create container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to create container in pod '{}': [gRPC:{}] {}", pod_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   return response.container_id();
 }
 
-CraneExpected<void> CriClient::StartContainer(
+CraneExpectedRich<void> CriClient::StartContainer(
     const std::string& container_id) const {
   using api::StartContainerRequest;
   using api::StartContainerResponse;
 
-  CraneExpected<void> ret;
   StartContainerRequest request{};
   StartContainerResponse response{};
 
@@ -329,19 +342,22 @@ CraneExpected<void> CriClient::StartContainer(
   request.set_container_id(container_id);
   auto status = m_rs_stub_->StartContainer(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to start container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to start container '{}': [gRPC:{}] {}", container_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
-  return ret;
+  return {};
 }
 
-CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
-                                             int64_t timeout) const {
+CraneExpectedRich<void> CriClient::StopContainer(
+    const std::string& container_id, int64_t timeout) const {
   using api::StopContainerRequest;
   using api::StopContainerResponse;
 
-  CraneExpected<void> ret;
   StopContainerRequest request{};
   StopContainerResponse response{};
 
@@ -353,19 +369,22 @@ CraneExpected<void> CriClient::StopContainer(const std::string& container_id,
   request.set_timeout(timeout);
   auto status = m_rs_stub_->StopContainer(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to stop container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to stop container '{}': [gRPC:{}] {}", container_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
-  return ret;
+  return {};
 }
 
-CraneExpected<void> CriClient::RemoveContainer(
+CraneExpectedRich<void> CriClient::RemoveContainer(
     const std::string& container_id) const {
   using api::RemoveContainerRequest;
   using api::RemoveContainerResponse;
 
-  CraneExpected<void> ret;
   RemoveContainerRequest request{};
   RemoveContainerResponse response{};
 
@@ -376,16 +395,20 @@ CraneExpected<void> CriClient::RemoveContainer(
   request.set_container_id(container_id);
   auto status = m_rs_stub_->RemoveContainer(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to remove container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to remove container '{}': [gRPC:{}] {}", container_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
-  return ret;
+  return {};
 }
 
-CraneExpected<std::string> CriClient::Attach(const std::string& container_id,
-                                             bool tty, bool stdin, bool stdout,
-                                             bool stderr) const {
+CraneExpectedRich<std::string> CriClient::Attach(
+    const std::string& container_id, bool tty, bool stdin, bool stdout,
+    bool stderr) const {
   using api::AttachRequest;
   using api::AttachResponse;
 
@@ -404,14 +427,18 @@ CraneExpected<std::string> CriClient::Attach(const std::string& container_id,
 
   auto status = m_rs_stub_->Attach(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to attach to container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to attach to container '{}': [gRPC:{}] {}", container_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   return response.url();
 }
 
-CraneExpected<std::string> CriClient::Exec(
+CraneExpectedRich<std::string> CriClient::Exec(
     const std::string& container_id, const std::vector<std::string>& command,
     bool tty, bool stdin, bool stdout, bool stderr) const {
   using api::ExecRequest;
@@ -435,8 +462,12 @@ CraneExpected<std::string> CriClient::Exec(
 
   auto status = m_rs_stub_->Exec(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to exec in container: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to exec in container '{}': [gRPC:{}] {}", container_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   return response.url();
@@ -558,7 +589,8 @@ void CriClient::HandleContainerEvent_(
 
 // ===== Active Container Status Query Implementation =====
 
-CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
+CraneExpectedRich<std::vector<api::Container>> CriClient::ListContainers()
+    const {
   using api::ListContainersRequest;
   using api::ListContainersResponse;
 
@@ -571,8 +603,12 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to list containers: {}", status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to list containers: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   std::vector<api::Container> containers;
@@ -585,7 +621,7 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers() const {
   return containers;
 }
 
-CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
+CraneExpectedRich<std::vector<api::Container>> CriClient::ListContainers(
     const std::unordered_map<std::string, std::string>& label_selector) const {
   using api::ContainerFilter;
   using api::ListContainersRequest;
@@ -607,9 +643,12 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
 
   auto status = m_rs_stub_->ListContainers(&context, request, &response);
   if (!status.ok()) {
-    CRANE_ERROR("Failed to list containers by labels: {}",
-                status.error_message());
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Failed to list containers by labels: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   std::vector<api::Container> containers;
@@ -622,7 +661,7 @@ CraneExpected<std::vector<api::Container>> CriClient::ListContainers(
   return containers;
 }
 
-CraneExpected<std::string> CriClient::SelectContainerId(
+CraneExpectedRich<std::string> CriClient::SelectContainerId(
     const std::unordered_map<std::string, std::string>& label_selector) const {
   auto containers_expt = ListContainers(label_selector);
   if (!containers_expt) {
@@ -631,13 +670,18 @@ CraneExpected<std::string> CriClient::SelectContainerId(
 
   const auto& containers = containers_expt.value();
   if (containers.size() == 0) {
-    CRANE_ERROR("No container found matching labels");
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = "No container found matching labels";
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   if (containers.size() > 1) {
-    CRANE_ERROR("Multiple containers found matching labels");
-    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    std::string error_msg = std::format(
+        "Multiple containers ({}) found matching labels", containers.size());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
   }
 
   return containers.front().id();

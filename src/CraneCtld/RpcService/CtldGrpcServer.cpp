@@ -146,7 +146,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
       for (const auto step_id : steps | std::views::reverse)
         g_task_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
-            crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+            crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.");
     }
   }
