@@ -1717,6 +1717,17 @@ CraneErrCode ProcInstance::Spawn() {
       SetupChildProcCrunX11_();
     }
 
+    if (!g_config.TaskPrologs.empty()) {
+      RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
+                                     .envs = m_env_,
+                                     .run_uid = m_parent_step_inst_->uid,
+                                     .run_gid = m_parent_step_inst_->gid,
+                                     .is_prolog = true};
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) std::abort();
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, 1);
+    }
+
     // Apply environment variables
     InitEnvMap();
     err = SetChildProcEnv_();
@@ -1901,11 +1912,13 @@ TaskManager::TaskManager()
     m_uvw_loop_->run();
   });
 
-
   if (!g_config.Prologs.empty()) {
     CRANE_TRACE("Running Prologs...");
     RunLogHookArgs run_prolog_args{.scripts = g_config.Prologs,
-      .envs = g_config.JobEnv, .run_uid = 0, .run_gid = 0, .is_prolog = true};
+                                   .envs = g_config.JobEnv,
+                                   .run_uid = 0,
+                                   .run_gid = 0,
+                                   .is_prolog = true};
     if (g_config.PrologTimeout > 0)
       run_prolog_args.timeout_sec = g_config.PrologTimeout;
     else if (g_config.PrologEpilogTimeout > 0)
@@ -1924,7 +1937,10 @@ TaskManager::~TaskManager() {
   if (!g_config.Epilogs.empty()) {
     CRANE_TRACE("Running Epilogs...");
     RunLogHookArgs run_epilog_args{.scripts = g_config.Epilogs,
-      .envs = g_config.JobEnv, .run_uid = 0, .run_gid = 0, .is_prolog = false};
+                                   .envs = g_config.JobEnv,
+                                   .run_uid = 0,
+                                   .run_gid = 0,
+                                   .is_prolog = false};
     if (g_config.PrologTimeout > 0)
       run_epilog_args.timeout_sec = g_config.PrologTimeout;
     else if (g_config.PrologEpilogTimeout > 0)
@@ -2251,6 +2267,15 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
+    if (!g_config.TaskEpilogs.empty()) {
+      RunLogHookArgs run_epilog_args{.scripts = g_config.TaskEpilogs,
+                                     .envs = task->GetChildProcessEnv(),
+                                     .run_uid = task->GetParentStep().uid(),
+                                     .run_gid = task->GetParentStep().gid(),
+                                     .is_prolog = false};
+      util::os::RunPrologOrEpiLog(run_epilog_args);
+    }
+
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
@@ -2477,17 +2502,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
-    }
-    RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
-      .envs = {}, .run_uid = 0, .run_gid = 0, .is_prolog = true};
-    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
-      TaskFinish_(
-          task->task_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodePrologFail,
-          fmt::format(
-              "[Job #{}] Failed to run prolog for uid {} of task",
-              m_step_.job_id, m_step_.uid));
-      elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
     }
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {

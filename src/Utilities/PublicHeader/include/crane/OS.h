@@ -52,8 +52,8 @@ struct RunLogHookArgs {
   std::vector<std::string> scripts;
   std::unordered_map<std::string, std::string> envs;
   uint32_t timeout_sec;
-  int run_uid;
-  int run_gid;
+  uid_t run_uid;
+  gid_t run_gid;
   bool is_prolog;
   task_id_t job_id;
   std::function<void(pid_t, task_id_t)> callback;
@@ -109,5 +109,8 @@ absl::Time GetSystemBootTime();
 
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
 
+void ApplyPrologOutputToEnvAndStdout(const std::string& output,
+                                     std::unordered_map<std::string, std::string>* env_map,
+                                     int task_stdout_fd);
 
 }  // namespace util::os

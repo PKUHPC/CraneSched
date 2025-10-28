@@ -32,6 +32,8 @@
 
 #include <future>
 
+#include "re2/re2.h"
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -504,6 +506,30 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
   if (is_failed) return std::nullopt;
 
   return output;
+}
+
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
+  std::istringstream iss(output);
+  std::string line;
+
+  static const LazyRE2 export_re = {
+      R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
+  static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
+  static const LazyRE2 print_re = {R"(^print\s+(.*)$)"};
+
+  while (std::getline(iss, line)) {
+    std::string name, value, to_print;
+    if (RE2::FullMatch(line, *export_re, &name, &value)) {
+      (*env_map)[name] = value;
+    } else if (RE2::FullMatch(line, *unset_re, &name)) {
+      env_map->erase(name);
+    } else if (RE2::FullMatch(line, *print_re, &to_print)) {
+      write(task_stdout_fd, to_print.c_str(), to_print.size());
+      write(task_stdout_fd, "\n", 1);
+    }
+  }
 }
 
 }  // namespace util::os
