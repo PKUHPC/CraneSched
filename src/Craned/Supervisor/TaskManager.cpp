@@ -27,7 +27,9 @@
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
+#include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
+#include "crane/CriClient.h"
 #include "crane/OS.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -602,43 +604,46 @@ std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
 CraneErrCode ContainerInstance::Prepare() {
   const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
 
-  // Generate path and params.
-  m_data_path_ = std::filesystem::path(m_parent_step_inst_->GetStep().cwd()) /
-                 fmt::format(kContainerLogDirPattern, task_id);
+  // For container, there is only one task in a step. So we use step_id and
+  // job_id here.
+  step_id_t step_id = m_parent_step_inst_->step_id;
+  job_id_t job_id = g_config.JobId;
+
+  // Generate log pathes
+  m_log_dir_ = std::filesystem::path(m_parent_step_inst_->GetStep().cwd()) /
+               std::format(kContainerLogDirPattern, job_id);
+  m_log_file_ =
+      m_log_dir_ / std::format(kContainerLogFilePattern, job_id, step_id);
 
   // Create private dir for container task
-  if (std::filesystem::exists(m_data_path_)) {
+  if (std::filesystem::exists(m_log_dir_)) {
     struct stat statbuf{};
-    if (stat(m_data_path_.c_str(), &statbuf) != 0) {
-      CRANE_ERROR("Failed to stat data dir {} for task #{}", m_data_path_,
-                  task_id);
+    if (stat(m_log_dir_.c_str(), &statbuf) != 0) {
+      CRANE_ERROR("Failed to stat log dir {} for container", m_log_dir_);
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     if (statbuf.st_uid != m_parent_step_inst_->pwd.Uid() ||
         statbuf.st_gid != m_parent_step_inst_->pwd.Gid()) {
       CRANE_ERROR(
-          "Data dir {} for task #{} has incorrect owner {}:{}, "
+          "Data dir {} for job #{} has incorrect owner {}:{}, "
           "expected {}:{}",
-          m_data_path_, task_id, statbuf.st_uid, statbuf.st_gid,
+          m_log_dir_, job_id, statbuf.st_uid, statbuf.st_gid,
           m_parent_step_inst_->pwd.Uid(), m_parent_step_inst_->pwd.Gid());
     }
-  } else if (!util::os::CreateFolders(m_data_path_)) {
-    CRANE_ERROR("Failed to create data dir {} for task #{}", m_data_path_,
-                task_id);
+  } else if (!util::os::CreateFolders(m_log_dir_)) {
+    CRANE_ERROR("Failed to create data dir {} for job #{}", m_log_dir_, job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // chown & chmod for the user
-  if (chmod(m_data_path_.c_str(), 0700) != 0) {
-    CRANE_ERROR("Failed to chmod data dir {} for task #{}", m_data_path_,
-                task_id);
+  if (chmod(m_log_dir_.c_str(), 0700) != 0) {
+    CRANE_ERROR("Failed to chmod data dir {} for job #{}", m_log_dir_, job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  if (chown(m_data_path_.c_str(), m_parent_step_inst_->pwd.Uid(),
+  if (chown(m_log_dir_.c_str(), m_parent_step_inst_->pwd.Uid(),
             m_parent_step_inst_->pwd.Gid()) != 0) {
-    CRANE_ERROR("Failed to chown data dir {} for task #{}", m_data_path_,
-                task_id);
+    CRANE_ERROR("Failed to chown data dir {} for job #{}", m_log_dir_, job_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -650,8 +655,8 @@ CraneErrCode ContainerInstance::Prepare() {
       ca_meta.image().pull_policy());
 
   if (!image_id_opt.has_value()) {
-    CRANE_ERROR("Failed to pull image {} for task #{}", ca_meta.image().image(),
-                task_id);
+    CRANE_ERROR("Failed to pull image {} for container #{}.{}",
+                ca_meta.image().image(), job_id, step_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -665,12 +670,14 @@ CraneErrCode ContainerInstance::Prepare() {
     return err;
   auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
   if (!pod_id_expt.has_value()) {
-    CRANE_ERROR("Failed to run pod sandbox for task #{}", task_id);
+    CRANE_ERROR("Failed to run pod sandbox for container #{}.{}", job_id,
+                step_id);
     return pod_id_expt.error();
   }
   m_pod_id_ = std::move(pod_id_expt.value());
-  // FIXME: Fix Pod here.
-  CRANE_DEBUG("Pod {} created for task #{}", m_pod_id_, task_id);
+  // TODO: Fix Pod here. Pod should only related to job instead of step.
+  CRANE_DEBUG("Pod {} created for container #{}.{}", m_pod_id_, job_id,
+              step_id);
 
   // Create the container but not start here
   if (auto err = SetContainerConfig_(); err != CraneErrCode::SUCCESS)
@@ -678,17 +685,19 @@ CraneErrCode ContainerInstance::Prepare() {
   auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
                                                        &m_container_config_);
   if (!container_id_expt.has_value()) {
-    CRANE_ERROR("Failed to create container for task #{}", task_id);
+    CRANE_ERROR("Failed to create container for #{}.{}", job_id, step_id);
     return container_id_expt.error();
   }
   m_container_id_ = std::move(container_id_expt.value());
-  CRANE_DEBUG("Container {} created for task #{}", m_container_id_, task_id);
+  CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_, job_id,
+              step_id);
 
   return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::Spawn() {
   using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelStepIdKey;
   using cri::kCriLabelUidKey;
   auto* cri_client = m_parent_step_inst_->GetCriClient();
 
@@ -707,24 +716,20 @@ CraneErrCode ContainerInstance::Spawn() {
           CRANE_TRACE("Received CRI event: {}", ev.ShortDebugString());
 
           // TODO: Add handler for pod status changes?
-          std::vector<std::pair<task_id_t, cri::api::ContainerStatus>> changes;
+          std::vector<cri::api::ContainerStatus> changes;
           for (const auto& status : ev.containers_statuses()) {
-            const auto& labels = status.labels();
-            auto it = labels.find(kCriLabelJobIdKey);
-            if (it == labels.end()) continue;
-
-            task_id_t task_id{};
-            auto [ptr, ec] =
-                std::from_chars(it->second.data(),
-                                it->second.data() + it->second.size(), task_id);
-            if (ec != std::errc{}) {
-              CRANE_ERROR("Failed to parse job_id label: {}", it->second);
+            // Filter out containers not belonging to this Supervisor
+            if (!cri::CriClient::ParseAndCompareLabel(
+                    status, std::string(kCriLabelJobIdKey), g_config.JobId))
               continue;
-            }
+
+            if (!cri::CriClient::ParseAndCompareLabel(
+                    status, std::string(kCriLabelStepIdKey), g_config.StepId))
+              continue;
 
             if (status.state() == cri::api::ContainerState::CONTAINER_EXITED ||
                 status.state() == cri::api::ContainerState::CONTAINER_UNKNOWN)
-              changes.emplace_back(task_id, status);
+              changes.emplace_back(status);
           }
 
           if (!changes.empty()) g_task_mgr->HandleCriEvents(std::move(changes));
@@ -738,8 +743,7 @@ CraneErrCode ContainerInstance::Spawn() {
 
   // chown the log file for user
   {
-    std::string log_path_str{m_data_path_ / kContainerLogFile};
-    if (chown(log_path_str.c_str(), m_parent_step_inst_->pwd.Uid(),
+    if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
               m_parent_step_inst_->pwd.Gid()) != 0) {
       CRANE_ERROR("Failed to chown container log file for task #{}", task_id);
       return CraneErrCode::ERR_SYSTEM_ERR;
@@ -816,7 +820,7 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
   using cri::kCriLabelJobNameKey;
   using cri::kCriLabelUidKey;
 
-  // FIXME: job_id should be here.
+  // All steps in a job share the same pod.
   job_id_t job_id = GetParentStep().job_id();
   const auto& ca_meta = GetParentStep().container_meta();
 
@@ -851,7 +855,7 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
        {std::string(kCriLabelJobNameKey), job_name}});
 
   // log directory
-  m_pod_config_.set_log_directory(m_data_path_);
+  m_pod_config_.set_log_directory(m_log_dir_);
 
   // TODO: What about the port allocation when multiple containers in a pod?
   for (const auto& port : ca_meta.ports()) {
@@ -895,7 +899,8 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
     if (ca_meta.userns()) {
       if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
           CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to inject fake root config for task #{}", job_id);
+        CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
+                    job_id);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
@@ -904,8 +909,7 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
       sec_ctx->mutable_run_as_user()->set_value(uid);
       sec_ctx->mutable_run_as_group()->set_value(gid);
     } else {
-      CRANE_ERROR("Unsupported identity setting for container task #{}",
-                  job_id);
+      CRANE_ERROR("Unsupported identity setting for pod of job #{}", job_id);
       return CraneErrCode::ERR_INVALID_PARAM;
     }
   } else {
@@ -920,29 +924,33 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
 CraneErrCode ContainerInstance::SetContainerConfig_() {
   using cri::kCriLabelJobIdKey;
   using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelStepIdKey;
   using cri::kCriLabelUidKey;
 
+  // There is only one task in a step. So we use step_id and job_id here.
   job_id_t job_id = GetParentStep().job_id();
+  step_id_t step_id = m_parent_step_inst_->step_id;
+
   const auto& ca_meta = GetParentStep().container_meta();
-  const std::string& job_name = GetParentStep().name();
+  const std::string& step_name = GetParentStep().name();
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
   gid_t gid = m_parent_step_inst_->pwd.Gid();
 
-  // TODO: Using task_id to generate unique name in pod
-  // metadata
+  // Using job_id/step_id to generate unique name in pod metadata
   m_container_config_.mutable_metadata()->set_name(
-      std::format("job-{}", job_id));
+      std::format("job-{}-{}", job_id, step_id));
 
   // labels
   m_container_config_.mutable_labels()->insert(
       {{std::string(kCriLabelUidKey), std::to_string(uid)},
        {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-       {std::string(kCriLabelJobNameKey), job_name}});
+       {std::string(kCriLabelStepIdKey), std::to_string(step_id)},
+       {std::string(kCriLabelJobNameKey), step_name}});
 
   // log_path (a relative path to pod log dir)
-  m_container_config_.set_log_path(kContainerLogFile);
+  m_container_config_.set_log_path(m_log_file_.filename());
 
   // image already checked and pulled.
   m_container_config_.mutable_image()->set_image(m_image_id_);
@@ -974,7 +982,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
       if (InjectFakeRootConfig_(m_parent_step_inst_->pwd,
                                 &m_container_config_) !=
           CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to inject fake root config for task #{}", job_id);
+        CRANE_ERROR("Failed to inject fake root config for #{}.{}", job_id,
+                    step_id);
         return CraneErrCode::ERR_SYSTEM_ERR;
       }
     } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
@@ -984,9 +993,9 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
       sec_ctx->mutable_run_as_group()->set_value(gid);
     } else {
       CRANE_ERROR(
-          "Container task #{} is not allowed to use other identities when not "
+          "Container #{}.{} is not allowed to use other identities when not "
           "using userns",
-          job_id);
+          job_id, step_id);
       return CraneErrCode::ERR_INVALID_PARAM;
     }
   } else {
@@ -1554,7 +1563,6 @@ void TaskManager::ShutdownSupervisor() {
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
-  // NOTE: This could be called in mutiple threads. Operate with care.
   m_task_stopped_queue_.enqueue(task_id);
   m_task_stopped_async_handle_->send();
 }
@@ -1565,7 +1573,13 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                               std::optional<std::string> reason) {
   CRANE_TRACE("[Task #{}] Task status change to {} exit code: {}, reason: {}.",
               task_id, new_status, exit_code, reason.value_or(""));
-  g_runtime_status.Status = crane::grpc::Completing;
+
+  if (g_runtime_status.Status.load() != StepStatus::Completing) {
+    CRANE_INFO("Step completing now, prev status: {}.",
+               g_runtime_status.Status.load());
+    g_runtime_status.Status = StepStatus::Completing;
+  }
+
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
     CRANE_DEBUG("[Task #{}] Task not found.");
@@ -1709,11 +1723,6 @@ void TaskManager::EvCleanSigchldQueueCb_() {
   std::pair<pid_t, int> elem;
 
   while (m_sigchld_queue_.try_dequeue(elem)) {
-    if (g_runtime_status.Status.load() != StepStatus::Completing) {
-      CRANE_INFO("Step completing now, prev status: {}.",
-                 g_runtime_status.Status.load());
-      g_runtime_status.Status = StepStatus::Completing;
-    }
     auto [pid, status] = elem;
     auto it = m_exec_id_task_id_map_.find(pid);
     if (it == m_exec_id_task_id_map_.end()) {
@@ -1755,11 +1764,11 @@ void TaskManager::EvCleanSigchldQueueCb_() {
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {
-  std::pair<task_id_t, cri::api::ContainerStatus> elem;
-  while (m_cri_event_queue_.try_dequeue(elem)) {
+  cri::api::ContainerStatus status;
+  while (m_cri_event_queue_.try_dequeue(status)) {
     // NOTE: a CRI event comes at LEAST once.
-    auto [task_id, status] = elem;
-    auto* t = m_step_.GetTaskInstance(task_id);
+    // For container steps, task_id always equals to 0.
+    auto* t = m_step_.GetTaskInstance(0);
     if (t == nullptr) continue;  // Duplicated event
     auto* task = dynamic_cast<ContainerInstance*>(t);
 
@@ -1767,7 +1776,7 @@ void TaskManager::EvCleanCriEventQueueCb_() {
     CRANE_INFO("Receiving container exited event: {}. Signaled: {}, Value: {}",
                status.id(), exit_info.is_terminated_by_signal, exit_info.value);
 
-    TaskStopAndDoStatusChange(task_id);
+    TaskStopAndDoStatusChange(0);
   }
 }
 
@@ -1980,6 +1989,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
+
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));

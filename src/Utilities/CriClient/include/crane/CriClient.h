@@ -27,11 +27,13 @@
 #include <grpcpp/support/status.h>
 
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 
@@ -47,6 +49,7 @@ inline constexpr std::string_view kCriDefaultLabel = kCriDefaultPodNamespace;
 
 // Use for selecting containers created by CraneSched
 static constexpr std::string_view kCriLabelJobIdKey = "job_id";
+static constexpr std::string_view kCriLabelStepIdKey = "step_id";
 static constexpr std::string_view kCriLabelJobNameKey = "name";
 static constexpr std::string_view kCriLabelUidKey = "uid";
 
@@ -132,6 +135,46 @@ class CriClient {
                                        const std::string& password,
                                        const std::string& server_addr,
                                        const std::string& pull_policy) const;
+
+  // ==== Helpers ====
+  // Parse and compare numeric labels (using std::from_chars)
+  template <typename T>
+    requires requires(const char* first, const char* last, T& value) {
+      { std::from_chars(first, last, value) };
+    }
+  static bool ParseAndCompareLabel(const api::ContainerStatus& status,
+                                   const std::string& key, const T& value) {
+    const auto& labels = status.labels();
+    auto it = labels.find(key);
+    if (it == labels.end()) return false;
+
+    T parsed_value{};
+    auto [ptr, ec] = std::from_chars(
+        it->second.data(), it->second.data() + it->second.size(), parsed_value);
+
+    // Check both parsing success and complete consumption
+    if (ec != std::errc{} || ptr != it->second.data() + it->second.size()) {
+      CRANE_ERROR("Failed to parse {} label '{}': {}", key, it->second,
+                  ec == std::errc{} ? "incomplete parse" : "invalid format");
+      return false;
+    }
+
+    return parsed_value == value;
+  }
+
+  // Parse and compare string labels (direct comparison)
+  template <typename T>
+    requires std::convertible_to<T, std::string_view>
+  bool ParseAndCompareLabel(const api::ContainerStatus& status,
+                            const std::string& key, const T& value) const {
+    const auto& labels = status.labels();
+    auto it = labels.find(key);
+    if (it == labels.end()) return false;
+
+    // Convert value to string_view for comparison
+    std::string_view value_view = value;
+    return it->second == value_view;
+  }
 
  private:
   // Inject labels and metadata for future selection

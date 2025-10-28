@@ -642,4 +642,5 @@ CraneExpected<std::string> CriClient::SelectContainerId(
 
   return containers.front().id();
 }
+
 }  // namespace cri
