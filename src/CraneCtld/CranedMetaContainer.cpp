@@ -920,27 +920,30 @@ CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
   return result;
 }
 
-void CranedMetaContainer::UpdateNodeStateWithConfigCheck_(
-    const CranedId& craned_id, bool is_match) {
+void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(
+    const CranedId& craned_id, bool is_healthy, std::string reason) {
   if (!craned_meta_map_.Contains(craned_id)) {
     CRANE_ERROR(
-        "ConfigMatch check: unknown craned_id '{}', cannot update drain state.",
+        "HealthCheck: unknown craned_id '{}', cannot update drain state.",
         craned_id);
     return;
   }
 
   auto craned_meta = craned_meta_map_[craned_id];
 
-  if (craned_meta->drain &&
-      craned_meta->state_reason == ConfigMatchCheckFailedReason) {
-    craned_meta->drain = !is_match;
-    if (is_match) craned_meta->state_reason.clear();
-  } else if (!craned_meta->drain && !is_match) {
-    craned_meta->drain = true;
-    craned_meta->state_reason = ConfigMatchCheckFailedReason;
+  if (is_healthy) {
+    craned_meta->drain = false;
+    craned_meta->state_reason.clear();
+  } else {
+    if (!craned_meta->drain) {
+      craned_meta->drain = true;
+      craned_meta->state_reason = reason;
+    }
   }
-  CRANE_TRACE("ConfigMatch check: craned_id '{}' drain state changed to {}.",
-              craned_id, craned_meta->drain);
+
+  CRANE_WARN(
+      "Node HealthCheck: craned_id '{}' drain state changed to {}. Reason: {}",
+      craned_id, craned_meta->drain, reason);
 }
 
 CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(

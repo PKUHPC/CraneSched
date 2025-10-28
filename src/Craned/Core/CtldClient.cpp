@@ -1175,7 +1175,7 @@ bool CtldClient::Ping_() {
   return reply.ok();
 }
 
-void CtldClient::CranedReportHealth_(bool is_match) {
+void CtldClient::CranedReportHealth_(bool is_healthy, std::string reason) {
   if (m_stopping_ || !m_stub_) return;
 
   grpc::ClientContext context;
@@ -1185,11 +1185,12 @@ void CtldClient::CranedReportHealth_(bool is_match) {
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   request.set_craned_id(g_config.CranedIdOfThisNode);
-  request.set_matched(is_match);
+  request.set_healthy(is_healthy);
+  request.set_reason(reason);
 
   auto result = m_stub_->CranedReportHealth(&context, request, &reply);
   if (!result.ok()) {
-    CRANE_ERROR("CranedReportHealth_ failed: is_matched={}", is_match);
+    CRANE_ERROR("CranedReportHealth failed: is_healthy={}", is_healthy);
   }
 }
 
@@ -1211,13 +1212,15 @@ void CtldClient::ConfigMatchCheck_() {
   auto node_config = g_config.CranedRes.at(g_config.Hostname);
 
   CRANE_DEBUG("Start ConfigMatch checking....");
+
+  std::string reason = ConfigMatchCheckFailedReason;
   int64_t cpu_count =
       static_cast<int64_t>(node_config->allocatable_res.cpu_count);
-  if (node_real.cpu != cpu_count) {
-    CRANE_DEBUG(
+  if (node_real.cpu < cpu_count) {
+    CRANE_WARN(
         "ConfigMatchCheck fail. config cpu_count: {}, real cpu_count: {}",
         cpu_count, node_real.cpu);
-    CranedReportHealth_(false);
+    CranedReportHealth_(false, reason);
     return;
   }
 
@@ -1226,9 +1229,9 @@ void CtldClient::ConfigMatchCheck_() {
       static_cast<double>(mem_bytes_config) / (1024 * 1024 * 1024);
 
   if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
-    CranedReportHealth_(false);
-    CRANE_DEBUG("ConfigMatchCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
-                mem_gb_config, node_real.memory_gb);
+    CranedReportHealth_(false, reason);
+    CRANE_WARN("ConfigMatchCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
+               mem_gb_config, node_real.memory_gb);
     return;
   }
 
@@ -1236,15 +1239,16 @@ void CtldClient::ConfigMatchCheck_() {
     const auto& device = device_pair.second;
     for (const auto& file_meta : device->device_file_metas) {
       if (!std::filesystem::exists(file_meta.path)) {
-        CRANE_DEBUG("ConfigMatchCheck fail. Invalid path: {}", file_meta.path);
-        CranedReportHealth_(false);
+        CRANE_WARN("ConfigMatchCheck fail. Device file {} not found.",
+                   file_meta.path);
+        CranedReportHealth_(false, reason);
         return;
       }
     }
   }
 
   CRANE_DEBUG("ConfigMatchCheck success.");
-  CranedReportHealth_(true);
+  CranedReportHealth_(true, "Health check passed.");
   return;
 }
 

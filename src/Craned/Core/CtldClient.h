@@ -227,7 +227,7 @@ class CtldClient {
   bool NeedHealthCheck_();
   void SendStatusChanges_();
 
-  void CranedReportHealth_(bool is_match);
+  void CranedReportHealth_(bool is_healthy, std::string reason);
 
   void ConfigMatchCheck_();
 
