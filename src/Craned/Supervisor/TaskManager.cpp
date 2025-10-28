@@ -1854,7 +1854,6 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Terminating a completing task #{}, ignored.",
                   g_config.JobId);
-
       continue;
     }
 

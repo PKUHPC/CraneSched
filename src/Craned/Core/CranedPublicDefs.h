@@ -38,6 +38,7 @@ using ::Craned::Common::CgroupInterface;
 using ::Craned::Common::CgroupManager;
 using ::Craned::Common::EnvMap;
 using RegToken = google::protobuf::Timestamp;
+using StepStatus = crane::grpc::TaskStatus;
 
 enum class CallbackInvokeMode : std::uint8_t { SYNC = 0, ASYNC };
 

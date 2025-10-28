@@ -53,10 +53,8 @@ class CranedStub {
     absl::MutexLock l(&m_lock_);
     bool ret = m_token_.has_value() && m_token_.value() == token;
     if (!ret) {
-      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "Token for {} mismatch, resetting token.",
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Token for {} mismatch.",
                          m_craned_id_);
-      m_token_.reset();
     }
     return ret;
   }
@@ -104,7 +102,7 @@ class CranedStub {
 
   bool Invalid() const {
     return m_disconnected_.load(std::memory_order_acquire) ||
-           !m_registered_.load(std::memory_order_acquire) || m_shutting_down_;
+           !m_registered_.load(std::memory_order_acquire);
   }
 
  private:
@@ -120,7 +118,6 @@ class CranedStub {
   // Set if underlying gRPC is down.
   std::atomic_bool m_disconnected_;
   std::atomic_bool m_registered_{false};
-  std::atomic_bool m_shutting_down_{false};
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
@@ -199,11 +196,11 @@ class CranedKeeper {
   CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
                                         grpc_connectivity_state new_state);
 
+  bool CheckNodeTimeoutAndClean(CqTag *tag);
+
   void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
-
-  void EvCheckTimeoutCb_();
 
   std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
 
@@ -236,10 +233,6 @@ class CranedKeeper {
   std::vector<std::thread> m_cq_thread_vec_;
 
   std::thread m_period_connect_thread_;
-  std::thread m_uvw_thread_;
-
-  std::shared_ptr<uvw::loop> m_uvw_loop_;
-  std::shared_ptr<uvw::timer_handle> m_check_timeout_handle_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };

@@ -196,8 +196,8 @@ class CtldClient {
 
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
-  [[nodiscard]] std::map<job_id_t, std::set<step_id_t>>
-  GetAllFinishStepStatusChangeId();
+  [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
+  GetAllStepStatusChange();
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 

@@ -33,6 +33,8 @@ using step_db_id_t = int64_t;
 // TaskScheduler Constants
 
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+constexpr uint32_t kNodePerRpcWorker = 100;
+constexpr std::size_t kMinRpcWorkerNum = 4;
 
 // Clean TaskHoldTimerQueue when timeout or exceeding batch num
 constexpr uint32_t kTaskHoldTimerTimeoutMs = 500;

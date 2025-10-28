@@ -69,8 +69,8 @@ grpc::Status CtldForInternalServiceImpl::CranedTriggerReverseConn(
     }
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub != nullptr) {
+      stub->SetRegToken(request->token());
       g_thread_pool->detach_task([stub, token = request->token(), craned_id] {
-        stub->SetRegToken(token);
         stub->ConfigureCraned(craned_id, token);
       });
     } else {
@@ -136,6 +136,8 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
              util::JobStepsToString(orphaned_steps));
 
   if (!orphaned_steps.empty()) {
+    g_task_scheduler->TerminateOrphanedSteps(orphaned_steps,
+                                             request->craned_id());
     for (const auto &[job_id, steps] : orphaned_steps) {
       // Reverse order: we should process larger step_id first to avoid warnings
       // abort daemon/primary steps
@@ -145,10 +147,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
             crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
             "Craned re-registered but step lost.");
     }
-    g_thread_pool->detach_task([steps = std::move(orphaned_steps),
-                                craned = request->craned_id()] mutable {
-      g_task_scheduler->TerminateOrphanedSteps(steps, craned);
-    });
   }
 
   stub->SetReady();

@@ -388,26 +388,29 @@ void CtldClient::Init() {
       [](CtldClientStateMachine::ConfigureArg const& arg) {
         // FIXME: step recovery
         auto token = arg.req.token();
-
-        std::map<job_id_t, std::set<step_id_t>> ctld_job_steps_id_map;
+        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
+                           "Configuring action for token {}.",
+                           ProtoTimestampToString(token));
+        std::map<job_id_t, std::map<step_id_t, StepStatus>>
+            ctld_job_steps_id_map;
         for (const auto& [job_id, job_steps] : arg.req.job_steps()) {
-          ctld_job_steps_id_map[job_id] = job_steps.steps() | std::views::keys |
-                                          std::ranges::to<std::set>();
+          for (const auto& [step_id, status] : job_steps.step_status()) {
+            ctld_job_steps_id_map[job_id][step_id] = status;
+            CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                               "[Step #{}.{}] status from Ctld: {}", job_id,
+                               step_id, status);
+          }
         }
         auto ctld_job_ids = ctld_job_steps_id_map | std::views::keys;
-
-        CRANE_LOGGER_DEBUG(g_runtime_status.conn_logger,
-                           "Configuring action for token {}. Steps [{}]",
-                           ProtoTimestampToString(token),
-                           util::JobStepsToString(ctld_job_steps_id_map));
 
         // std::map keys are ordered, so we can use set difference.
         std::map exact_job_steps = g_job_mgr->GetAllocatedJobSteps();
 
-        for (auto status_change_steps =
-                 g_ctld_client->GetAllFinishStepStatusChangeId();
-             auto& [k, v] : status_change_steps) {
-          exact_job_steps[k].insert(v.begin(), v.end());
+        for (auto status_change_steps = g_ctld_client->GetAllStepStatusChange();
+             auto& [job_id, step_status_map] : status_change_steps) {
+          for (auto& [step_id, status] : step_status_map) {
+            exact_job_steps[job_id][step_id] = status;
+          }
         }
         auto craned_job_ids = exact_job_steps | std::views::keys;
         std::set<job_id_t> lost_jobs{};
@@ -425,17 +428,21 @@ void CtldClient::Init() {
 
         std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
         std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
-        std::unordered_map<job_id_t, std::set<step_id_t>> valid_steps{};
+        std::unordered_map<job_id_t, std::set<step_id_t>> valid_job_steps{};
 
         // For lost jobs, all steps are lost
         for (auto job_id : lost_jobs) {
-          lost_steps[job_id].merge(ctld_job_steps_id_map.at(job_id));
+          for (auto step_id :
+               ctld_job_steps_id_map.at(job_id) | std::views::keys)
+            lost_steps[job_id].insert(step_id);
         }
 
         // For valid jobs, do step-level comparison
         for (auto job_id : valid_jobs) {
-          const auto& ctld_steps = ctld_job_steps_id_map.at(job_id);
-          const auto& craned_steps = exact_job_steps.at(job_id);
+          const auto& ctld_steps =
+              ctld_job_steps_id_map.at(job_id) | std::views::keys;
+          const auto& craned_steps =
+              exact_job_steps.at(job_id) | std::views::keys;
           std::ranges::set_difference(
               ctld_steps, craned_steps,
               std::inserter(lost_steps[job_id], lost_steps[job_id].end()));
@@ -445,24 +452,25 @@ void CtldClient::Init() {
                             invalid_steps[job_id].end()));
           std::ranges::set_intersection(
               ctld_steps, craned_steps,
-              std::inserter(valid_steps[job_id], valid_steps[job_id].end()));
+              std::inserter(valid_job_steps[job_id],
+                            valid_job_steps[job_id].end()));
         }
         std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
-        for (const auto& [job_id, steps] : valid_steps) {
+        for (const auto& [job_id, steps] : valid_job_steps) {
           for (const auto& step_id : steps) {
             auto status =
                 arg.req.job_steps().at(job_id).step_status().at(step_id);
-            CRANE_TRACE("[Step #{}.{}] is {}", job_id, step_id, status);
-            if (status == StepStatus::Completing) {
-              if (step_id == kDaemonStepId) {
-                CRANE_TRACE("[Job #{}] is completing", job_id);
-                completing_jobs.insert(job_id);
-              } else {
-                CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
-                completing_steps[job_id].insert(step_id);
-              }
+            auto exact_status = exact_job_steps.at(job_id).at(step_id);
+            CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
+                        step_id, exact_status, status);
+            if (status != exact_status) {
+              CRANE_DEBUG(
+                  "[Step #{}.{}] status inconsistent, craned: {} ,ctld: {} .",
+                  job_id, step_id, exact_status, status);
+              invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
             }
           }
         }
@@ -560,23 +568,14 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
-std::map<job_id_t, std::set<step_id_t>>
-CtldClient::GetAllFinishStepStatusChangeId() {
+std::map<job_id_t, std::map<step_id_t, StepStatus>>
+CtldClient::GetAllStepStatusChange() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
-  std::map<job_id_t, std::set<step_id_t>> finished_steps;
+  std::map<job_id_t, std::map<step_id_t, StepStatus>> step_status_map;
   for (auto& elem : m_step_status_change_list_) {
-    switch (elem.new_status) {
-    case crane::grpc::TaskStatus::Cancelled:
-    case crane::grpc::TaskStatus::Failed:
-    case crane::grpc::TaskStatus::Completed:
-    case crane::grpc::TaskStatus::ExceedTimeLimit:
-      finished_steps[elem.job_id].emplace(elem.step_id);
-      break;
-    default:
-      break;
-    }
+    step_status_map[elem.job_id][elem.step_id] = elem.new_status;
   }
-  return finished_steps;
+  return step_status_map;
 }
 
 bool CtldClient::RequestConfigFromCtld_(RegToken const& token) {

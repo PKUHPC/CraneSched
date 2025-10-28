@@ -918,6 +918,23 @@ class TaskScheduler {
   // If this variable is set to true, all threads must stop in a certain time.
   std::atomic_bool m_thread_stop_{};
 
+  // RPC worker pool for RPC calls with mutex `m_pending_task_map_mtx_` or
+  // `m_running_task_map_mtx_` or `m_task_indexes_mtx_` held. Put there RPCs in
+  // global thread pool can be dangerous is some cases, e.g., deadlock may
+  // happen. So we create a separate thread pool for those RPCs. Consider a
+  // scenario:
+  // There is task `A` (Like CraneStub::ConfigureCraned) in thread pool: Try to
+  // acquire `mutex` and send something via RPC.
+  //
+  // And another thread (like StepStatusChangeThread): Acquired `mutex` and
+  // create task `B` to send something to craned, and a latch is used to wait
+  // for RPCs completion in the thread.
+  //
+  // If too many tasks like `A` are in the thread pool, all threads
+  // may be occupied, then task `B` can never be scheduled, and therefore
+  // the latch will cause a deadlock.
+  std::unique_ptr<BS::thread_pool> m_rpc_worker_pool_;
+
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
@@ -932,9 +949,6 @@ class TaskScheduler {
 
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
-
-  std::thread m_step_exec_thread_;
-  void StepExecThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
@@ -1054,11 +1068,12 @@ class TaskScheduler {
    * @param job the TaskInCtld
    * @param craned_id status change source craned
    * @param context
-   * @return nullopt if job not finish or job finish status
+   * @return nullopt if job not finish or job finish status and exit code
    * */
-  std::optional<crane::grpc::TaskStatus> DaemonStepStatusChangeHandler_(
-      crane::grpc::TaskStatus new_status, TaskInCtld* job,
-      const CranedId& craned_id, StepStatusChangeContext* context);
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t /*exit code*/>>
+  DaemonStepStatusChangeHandler_(crane::grpc::TaskStatus new_status,
+                                 TaskInCtld* job, const CranedId& craned_id,
+                                 StepStatusChangeContext* context);
 
   /**
    *

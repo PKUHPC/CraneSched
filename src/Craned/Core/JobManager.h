@@ -33,7 +33,6 @@ namespace Craned {
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 
 using StepToD = crane::grpc::StepToD;
-using StepStatus = crane::grpc::TaskStatus;
 struct StepInstance {
   job_id_t job_id;
   step_id_t step_id;
@@ -120,7 +119,7 @@ class JobManager {
     return m_job_map_.GetValueExclusivePtr(job_id);
   }
 
-  std::map<job_id_t, std::set<step_id_t>> GetAllocatedJobSteps();
+  std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
 
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 

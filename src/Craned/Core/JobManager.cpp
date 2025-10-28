@@ -780,6 +780,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       if (!stub) {
         CRANE_ERROR("[Step #{}.{}] Failed to find supervisor stub.", job_id,
                     step_id);
+        return;
       }
       auto code = stub->ExecuteStep();
       if (code != CraneErrCode::SUCCESS) {
@@ -1016,14 +1017,19 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   return false;
 }
 
-std::map<job_id_t, std::set<step_id_t>> JobManager::GetAllocatedJobSteps() {
+std::map<job_id_t, std::map<step_id_t, StepStatus>>
+JobManager::GetAllocatedJobSteps() {
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
-  std::map<job_id_t, std::set<step_id_t>> job_steps;
+  std::map<job_id_t, std::map<step_id_t, StepStatus>> job_steps;
   for (auto& [job_id, job] : *job_map_ptr) {
     auto job_ptr = job.GetExclusivePtr();
     absl::MutexLock lk(job_ptr->step_map_mtx.get());
-    job_steps[job_id] =
-        job_ptr->step_map | std::views::keys | std::ranges::to<std::set>();
+    std::map<step_id_t, StepStatus> step_status_map;
+    ;
+    for (auto& [step_id, step] : job_ptr->step_map) {
+      step_status_map[step_id] = step->status;
+    }
+    job_steps[job_id] = std::move(step_status_map);
   }
   return job_steps;
 }

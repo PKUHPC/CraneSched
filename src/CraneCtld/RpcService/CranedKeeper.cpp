@@ -322,32 +322,7 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
 
   m_period_connect_thread_ =
       std::thread(&CranedKeeper::PeriodConnectCranedThreadFunc_, this);
-  m_uvw_loop_ = uvw::loop::create();
-  m_check_timeout_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
-  m_check_timeout_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event &, uvw::timer_handle &) {
-        EvCheckTimeoutCb_();
-        return true;
-      });
-  m_check_timeout_handle_->start(
-      std::chrono::seconds(g_config.CtldConf.CranedTimeout),
-      std::chrono::seconds(g_config.CtldConf.CranedTimeout));
-  m_uvw_thread_ = std::thread([this] {
-    util::SetCurrentThreadName("CrndTimeoutThr");
-    auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
-    idle_handle->on<uvw::idle_event>(
-        [this](const uvw::idle_event &, uvw::idle_handle &h) {
-          if (m_cq_closed_) {
-            h.parent().walk([](auto &&h) { h.close(); });
-            h.parent().stop();
-          }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        });
-    if (idle_handle->start() != 0) {
-      CRANE_ERROR("Failed to start the idle event in CranedKeeper loop.");
-    }
-    m_uvw_loop_->run();
-  });
+
   g_runtime_status.conn_logger = AddLogger(
       "conn", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
 }
@@ -357,7 +332,6 @@ CranedKeeper::~CranedKeeper() {
 
   for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
   if (m_period_connect_thread_.joinable()) m_period_connect_thread_.join();
-  if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 
   CRANE_TRACE("CranedKeeper has been closed.");
 }
@@ -404,24 +378,6 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
     }
 
     if (next_status == grpc::CompletionQueue::TIMEOUT) continue;
-    if (tag->craned->m_shutting_down_) {
-      auto *craned = tag->craned;
-      CRANE_ASSERT(tag->type == CqTag::kEstablishedCraned);
-      if (m_craned_disconnected_cb_) {
-        g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
-          m_craned_disconnected_cb_(craned_id);
-        });
-      }
-      WriterLock lock(&m_connect_craned_mtx_);
-
-      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "Craned {} stub destroyed: timeout.",
-                         craned->m_craned_id_);
-      craned->Fini();
-      m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
-      m_tag_sync_allocator_->delete_object(tag);
-      continue;
-    }
     if (next_status == grpc::CompletionQueue::GOT_EVENT) {
       // If ok is false, the tag timed out.
       // However, we can also check timeout
@@ -448,14 +404,16 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
         if (!m_cq_closed_) {
           // CRANE_TRACE("Registering next tag {} for {}", tag->type,
           //            craned->m_craned_id_);
+          if (CheckNodeTimeoutAndClean(tag)) continue;
 
           auto deadline = std::chrono::system_clock::now();
           if (tag->type == CqTag::kInitializingCraned)
             deadline +=
                 std::chrono::seconds(kCompletionQueueConnectingTimeoutSeconds);
-          else
+          else {
             deadline +=
                 std::chrono::seconds(kCompletionQueueEstablishedTimeoutSeconds);
+          }
 
           craned->m_prev_channel_state_ = new_state;
 
@@ -674,6 +632,33 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   return nullptr;
 }
 
+bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
+  if (tag->type != CqTag::kEstablishedCraned) return false;
+  auto *craned = tag->craned;
+  if (craned->m_last_active_time_.load(std::memory_order_acquire) +
+          std::chrono::seconds(g_config.CtldConf.CranedTimeout) >=
+      std::chrono::steady_clock::now()) {
+    return false;
+  }
+  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                     "Craned {} going to down because timeout",
+                     craned->m_craned_id_);
+  if (m_craned_disconnected_cb_) {
+    g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
+      m_craned_disconnected_cb_(craned_id);
+    });
+  }
+  WriterLock lock(&m_connect_craned_mtx_);
+
+  CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                     "Craned {} stub destroyed: timeout.",
+                     craned->m_craned_id_);
+  craned->Fini();
+  m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+  m_tag_sync_allocator_->delete_object(tag);
+  return true;
+}
+
 uint32_t CranedKeeper::AvailableCranedCount() {
   absl::ReaderMutexLock r_lock(&m_connect_craned_mtx_);
   return m_connected_craned_id_stub_map_.size();
@@ -845,21 +830,6 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-  }
-}
-
-void CranedKeeper::EvCheckTimeoutCb_() {
-  absl::MutexLock lk(&m_connect_craned_mtx_);
-  auto now = std::chrono::steady_clock::now();
-  for (auto &[craned_id, stub] : m_connected_craned_id_stub_map_) {
-    if (stub->m_shutting_down_) continue;
-    if (stub->m_last_active_time_.load(std::memory_order_acquire) +
-            std::chrono::seconds(g_config.CtldConf.CranedTimeout) <
-        now) {
-      stub->m_shutting_down_ = true;
-      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "Craned {} going to down because timeout", craned_id);
-    }
   }
 }
 
