@@ -702,6 +702,19 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       init_req.add_task_epilogs(epilog);
     }
 
+    if (g_config.PrologFlags & PrologFlagEnum::RunInJob) {
+      for (const auto& prolog : g_config.ProLogs) {
+        init_req.add_prologs(prolog);
+      }
+      for (const auto& epilog : g_config.EpiLogs) {
+        init_req.add_epilogs(epilog);
+      }
+    }
+
+    init_req.set_prologtimeout(g_config.PrologTimeout);
+    init_req.set_epilogtimeout(g_config.EpilogTimeout);
+    init_req.set_prologepilogtimeout(g_config.PrologEpilogTimeout);
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",

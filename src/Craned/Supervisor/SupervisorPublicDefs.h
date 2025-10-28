@@ -102,8 +102,13 @@ struct Config {
   std::atomic_int TaskCount;
   std::string CgroupPath;  // resolved cgroup path for OOM monitoring
 
+  std::vector<std::string> Prologs;
+  std::vector<std::string> Epilogs;
   std::vector<std::string> TaskPrologs;
   std::vector<std::string> TaskEpilogs;
+  uint32_t PrologTimeout{0};
+  uint32_t EpilogTimeout{0};
+  uint32_t PrologEpilogTimeout{0};
 };
 
 inline Config g_config;

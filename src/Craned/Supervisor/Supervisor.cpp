@@ -170,6 +170,19 @@ int InitFromStdin(int argc, char** argv) {
     g_config.TaskEpilogs.emplace_back(task_epilog);
   }
 
+  g_config.Prologs.reserve(msg.prologs_size());
+  for (const auto& prolog : msg.prologs()) {
+    g_config.Prologs.emplace_back(prolog);
+  }
+  g_config.Epilogs.reserve(msg.epilogs_size());
+  for (const auto& epilog : msg.epilogs()) {
+    g_config.Epilogs.emplace_back(epilog);
+  }
+
+  g_config.PrologTimeout = msg.prologtimeout();
+  g_config.EpilogTimeout = msg.epilogtimeout();
+  g_config.PrologEpilogTimeout = msg.prologepilogtimeout();
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false,

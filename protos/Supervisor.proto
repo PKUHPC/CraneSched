@@ -91,6 +91,11 @@ message InitSupervisorRequest {
   uint64 max_log_file_num = 27;
   repeated string task_prologs = 28;
   repeated string task_epilogs = 29;
+  repeated string prologs = 30;
+  repeated string epilogs = 31;
+  uint32 PrologTimeout = 32;
+  uint32 EpilogTimeout = 33;
+  uint32 PrologEpilogTimeout = 34;
 }
 
 message SupervisorReady {
