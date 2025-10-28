@@ -2610,6 +2610,9 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
     const std::vector<NodeState*>& nodes_to_sched,
     const absl::flat_hash_map<std::string, std::vector<std::string>>&
         qos_preempt_map) {
+  if (g_config.Preempt.PreemptType == crane::grpc::PreemptType::NONE) {
+    return false;
+  }
   auto it = qos_preempt_map.find(job->qos);
   if (it == qos_preempt_map.end()) {
     return false;
@@ -2832,7 +2835,7 @@ void SchedulerAlgo::NodeSelect(
     qos_preempt_map[job->qos];
   }
 
-  {
+  if (g_config.Preempt.PreemptType == crane::grpc::PreemptType::QOS) {
     auto qos_meta_map = g_account_manager->GetAllQosInfo();
     for (auto& [qos, preempt_qos_vec] : qos_preempt_map) {
       auto it = qos_meta_map->find(qos);
@@ -2962,30 +2965,31 @@ void SchedulerAlgo::NodeSelect(
     }
   }
 
-  absl::flat_hash_map<task_id_t, RnJobInScheduler*> rn_job_id_map;
-  for (auto& job : running_jobs) {
-    rn_job_id_map.emplace(job->job_id, job.get());
-  }
   absl::flat_hash_set<task_id_t> preempting_job_set;
   absl::flat_hash_set<task_id_t> preempting_delayed_job_set;
-  for (auto it = m_preempted_job_map_.begin();
-       it != m_preempted_job_map_.end();) {
-    auto tmp = it;
-    ++it;
-    auto& [preempted_job_id, preempting_job_id] = *tmp;
-    preempting_job_set.insert(preempting_job_id);
-    auto job_it = rn_job_id_map.find(preempting_job_id);
-    if (job_it == rn_job_id_map.end()) {
-      m_preempted_job_map_.erase(tmp);
-    } else {
-      preempting_delayed_job_set.insert(preempting_job_id);
-      job_it->second->end_time = now + absl::Seconds(1);
+  if (g_config.Preempt.PreemptMode != crane::grpc::PreemptMode::OFF) {
+    absl::flat_hash_map<task_id_t, RnJobInScheduler*> rn_job_id_map;
+    for (auto& job : running_jobs) {
+      rn_job_id_map.emplace(job->job_id, job.get());
+    }
+    for (auto it = m_preempted_job_map_.begin();
+         it != m_preempted_job_map_.end();) {
+      auto tmp = it;
+      ++it;
+      auto& [preempted_job_id, preempting_job_id] = *tmp;
+      preempting_job_set.insert(preempting_job_id);
+      auto job_it = rn_job_id_map.find(preempting_job_id);
+      if (job_it == rn_job_id_map.end()) {
+        m_preempted_job_map_.erase(tmp);
+      } else {
+        preempting_delayed_job_set.insert(preempting_job_id);
+        job_it->second->end_time = now + absl::Seconds(1);
+      }
     }
   }
 
   {
     for (const auto& job : running_jobs) {
-      auto it = m_preempted_job_map_.find(job->job_id);
       if (job->end_time <= now) {
         // In case TaskStatusChange is delayed
         job->end_time = now + absl::Seconds(1);
@@ -3049,32 +3053,35 @@ void SchedulerAlgo::NodeSelect(
 
   // Schedule pending tasks
   // TODO: do it in parallel
-  for (const auto& job : job_ptr_vec) {
-    if (preempting_job_set.contains(job->job_id)) {
-      LocalScheduler* scheduler;
-      if (job->reservation.empty()) {
-        auto it = part_scheduler_map.find(job->partition_id);
-        if (it == part_scheduler_map.end()) {
-          job->reason = "Partition Not Found";
-          continue;
+
+  if (g_config.Preempt.PreemptMode != crane::grpc::PreemptMode::OFF) {
+    for (const auto& job : job_ptr_vec) {
+      if (preempting_job_set.contains(job->job_id)) {
+        LocalScheduler* scheduler;
+        if (job->reservation.empty()) {
+          auto it = part_scheduler_map.find(job->partition_id);
+          if (it == part_scheduler_map.end()) {
+            job->reason = "Partition Not Found";
+            continue;
+          }
+          scheduler = &part_scheduler_map[job->partition_id];
+        } else {
+          auto it = resv_scheduler_map.find(job->reservation);
+          if (it == resv_scheduler_map.end()) {
+            job->reason = "Reservation Not Found";
+            continue;
+          }
+          scheduler = &resv_scheduler_map[job->reservation];
         }
-        scheduler = &part_scheduler_map[job->partition_id];
-      } else {
-        auto it = resv_scheduler_map.find(job->reservation);
-        if (it == resv_scheduler_map.end()) {
-          job->reason = "Reservation Not Found";
-          continue;
+        if (preempting_delayed_job_set.contains(job->job_id)) {
+          job->start_time = now + absl::Seconds(1);
+          job->reason = "Waiting for Preemption";
+        } else {
+          job->start_time = now;
         }
-        scheduler = &resv_scheduler_map[job->reservation];
+        job->end_time = job->start_time + job->time_limit;
+        scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
       }
-      if (preempting_delayed_job_set.contains(job->job_id)) {
-        job->start_time = now + absl::Seconds(1);
-        job->reason = "Waiting for Preemption";
-      } else {
-        job->start_time = now;
-      }
-      job->end_time = job->start_time + job->time_limit;
-      scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
     }
   }
 
@@ -3131,7 +3138,7 @@ void SchedulerAlgo::NodeSelect(
       }
       scheduler->UpdateNodeSelectorWithScheduledJob(now, job);
 
-      if (!job->is_scheduled()) {
+      if (job->start_time != now && job->reason.empty()) {
         if (job->reservation.empty()) {
           for (const CranedId& craned_id : job->craned_ids) {
             auto it = craned_id_first_resv_map.find(craned_id);
@@ -3181,7 +3188,16 @@ void SchedulerAlgo::AddPreemptedJobs(
         CRANE_INFO("Preempting running job #{} for job #{}", rn_job->job_id,
                    job->job_id);
         m_preempted_job_map_.emplace(rn_job->job_id, job->job_id);
-        g_task_scheduler->TerminateRunningTask(rn_job->job_id);
+        switch (g_config.Preempt.PreemptMode) {
+        case crane::grpc::PreemptMode::CANCEL:
+          g_task_scheduler->TerminateRunningTask(rn_job->job_id);
+          break;
+        default:
+          CRANE_ERROR(
+              "Unsupported PreemptMode {}",
+              crane::grpc::PreemptMode_Name(g_config.Preempt.PreemptMode));
+          break;
+        }
       }
     }
   }
