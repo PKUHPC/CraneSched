@@ -374,6 +374,8 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
 
   // TODO: After we move CriEventStreaming to Craned, we can get container_id
   // directly.
+  // TODO: Only support single step in job now. Need to support multi-step
+  // later.
   std::unordered_map<std::string, std::string> label_selector{
       {std::string(cri::kCriDefaultLabel), "true"},
       {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
