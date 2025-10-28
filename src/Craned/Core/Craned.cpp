@@ -45,8 +45,8 @@
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
-using Craned::g_config;
 using namespace Craned::Common;
+using Craned::g_config;
 using Craned::JobInD;
 
 CraneErrCode RecoverCgForJobs(
@@ -78,7 +78,7 @@ CraneErrCode RecoverCgForJobs(
     }
 
     for (const auto& [job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
-      if (rn_jobs_from_ctld.find(job_id) != rn_jobs_from_ctld.end()) continue;
+      if (rn_jobs_from_ctld.contains(job_id)) continue;
 
       CRANE_DEBUG("Erase bpf map entry for rn job {} not in Ctld.", job_id);
       for (const auto& key : bpf_key_vec) {
@@ -819,16 +819,17 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   /* Filter valid job/steps (Intersection of job/steps form ctld/supervisor) */
   auto supv_jobs =
       supv_step_ids | std::views::keys | std::ranges::to<std::set<job_id_t>>();
-  auto ctld_joss =
+  auto ctld_jobs =
       ctld_step_ids | std::views::keys | std::ranges::to<std::set<job_id_t>>();
   std::set<job_id_t> lost_jobs;
   std::set<job_id_t> valid_jobs;
-  std::ranges::set_difference(ctld_joss, supv_jobs,
+  std::ranges::set_difference(ctld_jobs, supv_jobs,
                               std::inserter(lost_jobs, lost_jobs.end()));
-  std::ranges::set_intersection(ctld_joss, supv_jobs,
+  std::ranges::set_intersection(ctld_jobs, supv_jobs,
                                 std::inserter(valid_jobs, valid_jobs.end()));
   CRANE_INFO("Job [{}] is lost when craned down. Valid jobs [{}].",
              absl::StrJoin(lost_jobs, ","), absl::StrJoin(valid_jobs, ","));
+
   std::unordered_map<job_id_t, std::set<step_id_t>> lost_steps{};
   std::unordered_map<job_id_t, std::set<step_id_t>> invalid_steps{};
   std::unordered_map<job_id_t, std::set<step_id_t>> valid_steps{};
@@ -861,7 +862,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   step_map.reserve(supv_step_ids.size());
 
   for (const auto& [job_id, job_steps] : valid_steps) {
-    auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
+    const auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
     for (const auto& step_id : job_steps) {
       auto [pid, status] = step_supv_map.at(std::make_pair(job_id, step_id));
       auto step_inst = std::make_unique<StepInstance>(
@@ -869,6 +870,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
   }
+
   std::unordered_map<job_id_t, JobInD> job_map;
   job_map.reserve(valid_jobs.size());
   for (const auto& job_id : valid_jobs) {
