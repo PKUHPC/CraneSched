@@ -386,10 +386,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const ::crane::grpc::QueryJobSummaryRequest *request,
       ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer)
       override;
-  grpc::Status QueryJobSizeSummaryItem(
+  grpc::Status QueryJobSizeSummary(
       ::grpc::ServerContext *context,
-      const ::crane::grpc::QueryJobSizeSummaryItemRequest *request,
-      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply> *writer)
+      const ::crane::grpc::QueryJobSizeSummaryRequest *request,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer)
       override;
 
  private:

@@ -2059,18 +2059,18 @@ grpc::Status CraneCtldServiceImpl::QueryJobSummary(
     ::grpc::ServerContext *context,
     const ::crane::grpc::QueryJobSummaryRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer) {
-  g_db_client->QueryJobSummaryNew(request, writer);
+  g_db_client->QueryJobSummary(request, writer);
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobSizeSummaryItem(
+grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
     ::grpc::ServerContext *context,
-    const ::crane::grpc::QueryJobSizeSummaryItemRequest *request,
-    ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply> *writer) {
+    const ::crane::grpc::QueryJobSizeSummaryRequest *request,
+    ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer) {
   if (request->filter_job_ids().size() > 0) {
     g_db_client->FetchJobSizeSummaryRecords(request, writer);
   } else {
-    g_db_client->QueryJobSizeSummaryNew(request, writer);
+    g_db_client->QueryJobSizeSummary(request, writer);
   }
   return grpc::Status::OK;
 }

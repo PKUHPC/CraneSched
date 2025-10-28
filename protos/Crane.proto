@@ -974,7 +974,7 @@ message QueryJobSummaryReply {
   repeated JobSummaryItem item_list = 1;
 }
 
-message QueryJobSizeSummaryItemRequest {
+message QueryJobSizeSummaryRequest {
   repeated string filter_accounts = 1;
   repeated string filter_users = 2;
   repeated string filter_qoss = 3;
@@ -987,7 +987,7 @@ message QueryJobSizeSummaryItemRequest {
   repeated string filter_nodesname = 10;
 }
 
-message QueryJobSizeSummaryItemReply {
+message QueryJobSizeSummaryReply {
     repeated JobSizeSummaryItem item_list = 1;
 }
 
@@ -1051,7 +1051,7 @@ service CraneCtld {
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
-  rpc QueryJobSizeSummaryItem(QueryJobSizeSummaryItemRequest) returns (stream QueryJobSizeSummaryItemReply);
+  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
 }
 

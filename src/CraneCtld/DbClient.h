@@ -179,42 +179,36 @@ class MongodbClient {
   std::tm GetRoundHourNowTm();
   bool NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
                   RollupType type);
+  bool RollupSummary(const std::string& summary_type, RollupType rollup_type,
+                     const std::string& time_unit);
   bool RollupHourTable();
   bool RollupHourToDay();
   bool RollupDayToMonth();
   void ClusterRollupUsage();
+  void CreateCollectionIndex(mongocxx::collection& coll,
+                             const std::vector<std::string>& fields);
   bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
-  void QueryAndAggJobSizeSummary(
-      const std::string& table, const std::string& time_field,
-      std::time_t range_start, std::time_t range_end,
-      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
-      absl::flat_hash_map<JobSizeSummKey, JobSummAggResult>& agg_map);
-  void QueryAndAggJobSummary(
-      const std::string& table, const std::string& time_field,
-      std::time_t range_start, std::time_t range_end,
-      const crane::grpc::QueryJobSummaryRequest* request,
-      absl::flat_hash_map<JobSummKey, JobSummAggResult>& agg_map);
-  void QueryJobSizeSummary(
-      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
   bool FetchJobSizeSummaryRecords(
-      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
   void QueryJobSummary(
       const crane::grpc::QueryJobSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
-  void QueryJobSummaryNew(
-      const crane::grpc::QueryJobSummaryRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
-  void QueryJobSizeSummaryNew(
-      const crane::grpc::QueryJobSizeSummaryItemRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryItemReply>* stream);
-  bsoncxx::document::value JobSingleMatch(
+  void QueryJobSizeSummary(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+  bsoncxx::document::value JobQueryMatch(
       const std::string& time_field, std::pair<std::time_t, std::time_t> range,
       const crane::grpc::QueryJobSummaryRequest* request);
-  bsoncxx::document::value JobSizeSingleMatch(
+  bsoncxx::document::value JobSizeQueryMatch(
       const std::string& time_field, std::pair<std::time_t, std::time_t> range,
-      const crane::grpc::QueryJobSizeSummaryItemRequest* request);
+      const crane::grpc::QueryJobSizeSummaryRequest* request);
+  template <typename MatchFunc>
+  void AppendUnionWithRanges(
+      mongocxx::pipeline& pipeline, const std::string& coll,
+      const std::vector<std::pair<std::time_t, std::time_t>>& ranges,
+      MatchFunc match_fn, bool first_is_match = true);
+
   void HourJobSummAggregation(std::time_t start, std::time_t end,
                               const std::string& task_collection_name);
   void DayOrMonJobSummAggregation(const std::string& src_coll_str,
