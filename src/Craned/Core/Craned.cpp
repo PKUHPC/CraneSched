@@ -1023,6 +1023,11 @@ void WaitForStopAndDoGvarFini() {
   g_server.reset();
   g_craned_for_pam_server.reset();
 
+  /*
+   * Called in g_server.
+   */
+  g_cri_client.reset();
+
   /* Called from
    * PAM_SERVER, G_SERVER
    * CtldClient: ActionConfigureCb
