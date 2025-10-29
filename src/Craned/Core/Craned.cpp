@@ -457,8 +457,8 @@ void ParseConfig(int argc, char** argv) {
             YamlValueOr<bool>(health_check_config["Cycle"], false);
       }
 
-      g_config.ConfigCheckInterval =
-          YamlValueOr<uint64_t>(config["ConfigCheckInterval"], 30);
+      g_config.NodeHealthCheckInterval =
+          YamlValueOr<uint64_t>(config["NodeHealthCheckInterval"], 30);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();

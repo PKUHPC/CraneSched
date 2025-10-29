@@ -229,7 +229,7 @@ class CtldClient {
 
   void CranedReportHealth_(bool is_healthy, std::string reason);
 
-  void ConfigMatchCheck_();
+  void NodeHealthCheck_();
 
   absl::Mutex m_step_status_change_mtx_;
 

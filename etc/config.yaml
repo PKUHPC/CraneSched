@@ -191,7 +191,7 @@ JobFileAppend: false
 # Set the flag to ignore warnings about config files mismatches.
 IgnoreConfigInconsistency: false
 
-ConfigCheckInterval: 30
+NodeHealthCheckInterval: 30
 
 Supervisor:
   Path: /usr/libexec/csupervisor

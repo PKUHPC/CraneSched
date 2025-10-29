@@ -439,10 +439,10 @@ CtldClient::CtldClient() {
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (m_stopping_ || !m_stub_) return;
         // TODO: should check state?
-        ConfigMatchCheck_();
+        NodeHealthCheck_();
       });
-  if (g_config.ConfigCheckInterval > 0) {
-    auto interval = std::chrono::seconds(g_config.ConfigCheckInterval);
+  if (g_config.NodeHealthCheckInterval > 0) {
+    auto interval = std::chrono::seconds(g_config.NodeHealthCheckInterval);
     m_config_check_timer_->start(interval, interval);
   }
 }
@@ -1194,7 +1194,7 @@ void CtldClient::CranedReportHealth_(bool is_healthy, std::string reason) {
   }
 }
 
-void CtldClient::ConfigMatchCheck_() {
+void CtldClient::NodeHealthCheck_() {
   if (!g_server->ReadyFor(RequestSource::CTLD)) return;
 
   NodeSpecInfo node_real;
@@ -1211,15 +1211,14 @@ void CtldClient::ConfigMatchCheck_() {
 
   auto node_config = g_config.CranedRes.at(g_config.Hostname);
 
-  CRANE_DEBUG("Start ConfigMatch checking....");
+  CRANE_DEBUG("Start node health checking....");
 
-  std::string reason = ConfigMatchCheckFailedReason;
+  std::string reason = NodeHealthCheckFailedReason;
   int64_t cpu_count =
       static_cast<int64_t>(node_config->allocatable_res.cpu_count);
   if (node_real.cpu < cpu_count) {
-    CRANE_WARN(
-        "ConfigMatchCheck fail. config cpu_count: {}, real cpu_count: {}",
-        cpu_count, node_real.cpu);
+    CRANE_WARN("Node health check fail. config cpu_count: {}, real cpu_count: {}",
+               cpu_count, node_real.cpu);
     CranedReportHealth_(false, reason);
     return;
   }
@@ -1230,7 +1229,7 @@ void CtldClient::ConfigMatchCheck_() {
 
   if (std::abs(node_real.memory_gb - mem_gb_config) > kMemoryToleranceGB) {
     CranedReportHealth_(false, reason);
-    CRANE_WARN("ConfigMatchCheck fail. config_mem : {:.3f}, real_mem : {:.3f}",
+    CRANE_WARN("Node health check fail. config_mem : {:.3f}, real_mem : {:.3f}",
                mem_gb_config, node_real.memory_gb);
     return;
   }
@@ -1239,7 +1238,7 @@ void CtldClient::ConfigMatchCheck_() {
     const auto& device = device_pair.second;
     for (const auto& file_meta : device->device_file_metas) {
       if (!std::filesystem::exists(file_meta.path)) {
-        CRANE_WARN("ConfigMatchCheck fail. Device file {} not found.",
+        CRANE_WARN("Node health check fail. Device file {} not found.",
                    file_meta.path);
         CranedReportHealth_(false, reason);
         return;
@@ -1247,8 +1246,8 @@ void CtldClient::ConfigMatchCheck_() {
     }
   }
 
-  CRANE_DEBUG("ConfigMatchCheck success.");
-  CranedReportHealth_(true, "Health check passed.");
+  CRANE_DEBUG("Node health check success.");
+  CranedReportHealth_(true, reason);
   return;
 }
 

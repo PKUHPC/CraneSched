@@ -214,7 +214,7 @@ grpc::Status CtldForInternalServiceImpl::CranedReportHealth(
     grpc::ServerContext *context,
     const crane::grpc::CranedReportHealthRequest *request,
     google::protobuf::Empty *response) {
-  g_meta_container->UpdateNodeStateWithHealthCheck_(
+  g_meta_container->UpdateNodeStateWithNodeHealthCheck(
       request->craned_id(), request->healthy(), request->reason());
 
   return grpc::Status::OK;
