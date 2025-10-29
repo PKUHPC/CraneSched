@@ -434,8 +434,8 @@ CtldClient::CtldClient() {
   });
   m_last_active_time_ = std::chrono::steady_clock::time_point{};
 
-  m_config_check_timer_ = m_uvw_loop_->resource<uvw::timer_handle>();
-  m_config_check_timer_->on<uvw::timer_event>(
+  m_node_health_check_timer_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_node_health_check_timer_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle& h) {
         if (m_stopping_ || !m_stub_) return;
         // TODO: should check state?
@@ -443,7 +443,7 @@ CtldClient::CtldClient() {
       });
   if (g_config.NodeHealthCheckInterval > 0) {
     auto interval = std::chrono::seconds(g_config.NodeHealthCheckInterval);
-    m_config_check_timer_->start(interval, interval);
+    m_node_health_check_timer_->start(interval, interval);
   }
 }
 
@@ -1217,8 +1217,9 @@ void CtldClient::NodeHealthCheck_() {
   int64_t cpu_count =
       static_cast<int64_t>(node_config->allocatable_res.cpu_count);
   if (node_real.cpu < cpu_count) {
-    CRANE_WARN("Node health check fail. config cpu_count: {}, real cpu_count: {}",
-               cpu_count, node_real.cpu);
+    CRANE_WARN(
+        "Node health check fail. config cpu_count: {}, real cpu_count: {}",
+        cpu_count, node_real.cpu);
     CranedReportHealth_(false, reason);
     return;
   }
