@@ -167,8 +167,8 @@ ceff <job_id>
 - Explore advanced scenarios:
 	- [Multi-node parallel job](use_case_multi_node.md)
 	- [GPU-accelerated training](use_case_gpu.md)
-	- [Parameter sweep with job arrays](use_case_param_sweep.md)
-	- [Chained jobs with dependencies](use_case_pipeline.md)
+	<!-- - [Parameter sweep with job arrays](use_case_param_sweep.md) -->
+	<!-- - [Chained jobs with dependencies](use_case_pipeline.md) -->
 - Review the [command reference](../command/cbatch.md) for detailed options
 - Learn about [cluster configuration](../deployment/configuration/config.md)
 - Check [exit codes](exit_code.md) when debugging job failures

@@ -65,8 +65,8 @@ plugins:
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
-            Parameter Sweep with Job Arrays: 参数扫描作业数组
-            Chained Jobs with Dependencies: 带依赖的作业链
+            # Parameter Sweep with Job Arrays: 参数扫描作业数组
+            # Chained Jobs with Dependencies: 带依赖的作业链
             Rocky Linux 9: Rocky Linux 9
             Ubuntu: Ubuntu
             CentOS 7: CentOS 7
@@ -152,5 +152,5 @@ nav:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
         - GPU-Accelerated Training: reference/use_case_gpu.md
-        - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
-        - Chained Jobs with Dependencies: reference/use_case_pipeline.md
+        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
+        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
