@@ -1183,7 +1183,7 @@ void CtldClient::CranedReportHealth_(bool is_healthy, std::string reason) {
   google::protobuf::Empty reply;
 
   context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
   request.set_craned_id(g_config.CranedIdOfThisNode);
   request.set_healthy(is_healthy);
   request.set_reason(reason);
