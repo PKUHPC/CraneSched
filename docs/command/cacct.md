@@ -20,7 +20,7 @@ cacct
 - **Account**: Job account
 - **AllocCPUs**: Number of allocated CPUs
 - **State**: Job state
-- **ExitCode**: Job exit code
+- **ExitCode**: Job exit code (see [Exit Code reference](../reference/exit_code.md))
 
 ## Command Line Options
 
