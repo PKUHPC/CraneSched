@@ -110,24 +110,6 @@ class MongodbClient {
     double total_cpu_time = 0;
     int32_t total_count = 0;
   };
-  struct JobSummKey {
-    std::string account;
-    std::string username;
-    std::string qos;
-    std::string wckey;
-
-    template <typename H>
-    friend H AbslHashValue(H h, const JobSummKey& key) {
-      return H::combine(std::move(h), key.account, key.username, key.qos,
-                        key.wckey);
-    }
-    bool operator==(const JobSummKey& other) const {
-      return account == other.account && username == other.username &&
-             qos == other.qos && wckey == other.wckey;
-      ;
-    }
-  };
-
   struct JobSizeSummKey {
     std::string account;
     std::string wckey;
