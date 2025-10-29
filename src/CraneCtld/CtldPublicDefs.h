@@ -360,8 +360,49 @@ struct BatchMetaInTask {
   std::string error_file_pattern;
 };
 struct TaskInCtld;
-
+struct StepInCtld;
 using StepInteractiveMeta = InteractiveMetaInTask;
+
+struct StepStatusChangeContext {
+  /* ------------------------------ steps ------------------------------ */
+
+  // Step to alloc
+  std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
+      craned_step_alloc_map;
+
+  // Steps will execute on craned
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_step_free_map;
+  // Steps will execute on craned
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_step_exec_map;
+  // Error steps to terminate with orphaned status
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_orphaned_steps{};
+  // Common step to cancel, caused by a finished primary step
+  std::unordered_map<CranedId,
+                     std::unordered_map<job_id_t, std::set<step_id_t>>>
+      craned_cancel_steps{};
+  // Steps will update in embeddedDb
+  std::unordered_set<StepInCtld*> rn_step_raw_ptrs;
+  std::unordered_set<StepInCtld*> step_raw_ptrs;
+  // Carry the ownership of StepInCtld for completed step automatic
+  // destruction.
+  std::unordered_set<std::unique_ptr<StepInCtld>> step_ptrs;
+
+  /* ------------------------------ jobs ------------------------------ */
+
+  std::unordered_map<CranedId, std::vector<job_id_t>> craned_jobs_to_free;
+  // Jobs will update in embedded db
+  std::unordered_set<TaskInCtld*> rn_job_raw_ptrs{};
+  // Carry the ownership of TaskInCtld for automatic destruction.
+  std::unordered_set<std::unique_ptr<TaskInCtld>> job_ptrs;
+  // Ended jobs will transfer from embedded db to mongodb
+  std::unordered_set<TaskInCtld*> job_raw_ptrs;
+};
 
 struct StepInCtld {
   /**
@@ -370,6 +411,7 @@ struct StepInCtld {
    */
   crane::grpc::TaskType type;
 
+  TaskInCtld* job;
   job_id_t job_id;
 
   uid_t uid;
@@ -415,10 +457,8 @@ struct StepInCtld {
   absl::Time m_start_time_;
   absl::Time m_end_time_;
 
-  crane::grpc::TaskStatus m_configure_failed_status_{
-      crane::grpc::TaskStatus::Invalid};
-  crane::grpc::TaskStatus m_finish_failed_status_{
-      crane::grpc::TaskStatus::Invalid};
+  crane::grpc::TaskStatus m_error_status{crane::grpc::TaskStatus::Invalid};
+  uint32_t m_error_exit_code_{0u};
   crane::grpc::TaskStatus m_status_{crane::grpc::TaskStatus::Invalid};
   uint32_t m_exit_code_{};
 
@@ -464,7 +504,7 @@ struct StepInCtld {
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> RunningNodes() const { return m_running_nodes_; }
-  void NodeFinish(const CranedId& node);
+  void StepOnNodeFinish(const CranedId& node);
   bool AllNodesFinished() const { return m_running_nodes_.empty(); }
 
   void SetSubmitTime(absl::Time submit_time);
@@ -474,20 +514,15 @@ struct StepInCtld {
   void SetEndTime(absl::Time end_time);
   absl::Time EndTime() const { return m_end_time_; }
 
-  void SetConfigureFailedStatus(crane::grpc::TaskStatus status);
-  bool ConfigureFailed() const {
-    return m_configure_failed_status_ != crane::grpc::TaskStatus::Invalid;
+  void SetErrorStatus(crane::grpc::TaskStatus failed_status);
+  std::optional<crane::grpc::TaskStatus> PrevErrorStatus() {
+    if (m_error_status == crane::grpc::TaskStatus::Invalid) {
+      return std::nullopt;
+    }
+    return m_error_status;
   }
-  crane::grpc::TaskStatus ConfigureFailedStatus() const {
-    return m_configure_failed_status_;
-  }
-  void SetFinishFailedStatus(crane::grpc::TaskStatus status);
-  bool FinishWithFailedStatus() const {
-    return m_finish_failed_status_ != crane::grpc::TaskStatus::Invalid;
-  }
-  crane::grpc::TaskStatus FinishFailedStatus() const {
-    return m_finish_failed_status_;
-  }
+  void SetErrorExitCode(uint32_t exit_code);
+  uint32_t PrevErrorExitCode() { return m_error_exit_code_; }
   void SetStatus(crane::grpc::TaskStatus new_status);
   crane::grpc::TaskStatus Status() const { return m_status_; }
   void SetExitCode(uint32_t exit_code);
@@ -517,6 +552,11 @@ struct DaemonStepInCtld : StepInCtld {
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t /*exit code*/>>
+  StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
+                   const std::string& reason, const CranedId& craned_id,
+                   StepStatusChangeContext* context);
+
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
 };
@@ -541,10 +581,15 @@ struct CommonStepInCtld : StepInCtld {
   std::string pending_reason;
   ~CommonStepInCtld() override = default;
   void InitPrimaryStepFromJob(const TaskInCtld& job);
+  bool IsPrimaryStep() const noexcept;
   [[nodiscard]] bool SetFieldsByStepToCtld(
       const crane::grpc::StepToCtld& step_to_ctld);
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
+
+  void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
+                        const std::string& reason, const CranedId& craned_id,
+                        StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
 };
@@ -752,6 +797,9 @@ struct TaskInCtld {
   }
 
   CommonStepInCtld* GetStep(step_id_t step) const {
+    if (m_primary_step_ && m_primary_step_->StepId() == step) {
+      return m_primary_step_.get();
+    }
     if (m_steps_.contains(step)) {
       return m_steps_.at(step).get();
     }

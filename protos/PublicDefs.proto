@@ -258,9 +258,9 @@ message RuntimeAttrOfStep {
   google.protobuf.Timestamp start_time = 26;
   google.protobuf.Timestamp end_time = 27;
 
-  TaskStatus configure_failed_status = 30;
-  TaskStatus running_failed_status = 21;
-  TaskStatus status = 32;
+  TaskStatus error_status = 30;
+  TaskStatus status = 31;
+  uint32 error_exit_code = 32;
   uint32 exit_code = 33;
 
   bool held = 35;

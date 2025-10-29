@@ -18,6 +18,8 @@
 
 #include "CtldPublicDefs.h"
 
+#include "EmbeddedDbClient.h"
+
 namespace Ctld {
 
 CranedRemoteMeta::CranedRemoteMeta(
@@ -104,7 +106,7 @@ void StepInCtld::SetRunningNodes(const std::unordered_set<CranedId>& nodes) {
                                                         nodes.end());
 }
 
-void StepInCtld::NodeFinish(const CranedId& node) {
+void StepInCtld::StepOnNodeFinish(const CranedId& node) {
   this->m_running_nodes_.erase(node);
   this->m_runtime_attr_.mutable_running_nodes()->Assign(
       m_running_nodes_.begin(), m_running_nodes_.end());
@@ -126,13 +128,14 @@ void StepInCtld::SetEndTime(absl::Time end_time) {
       ToUnixSeconds(end_time));
 }
 
-void StepInCtld::SetConfigureFailedStatus(crane::grpc::TaskStatus status) {
-  this->m_configure_failed_status_ = status;
-  this->m_runtime_attr_.set_configure_failed_status(status);
+void StepInCtld::SetErrorStatus(crane::grpc::TaskStatus failed_status) {
+  m_error_status = failed_status;
+  this->m_runtime_attr_.set_error_status(failed_status);
 }
-void StepInCtld::SetFinishFailedStatus(crane::grpc::TaskStatus status) {
-  this->m_finish_failed_status_ = status;
-  this->m_runtime_attr_.set_running_failed_status(status);
+
+void StepInCtld::SetErrorExitCode(uint32_t exit_code) {
+  m_error_exit_code_ = exit_code;
+  this->m_runtime_attr_.set_error_exit_code(exit_code);
 }
 
 void StepInCtld::SetStatus(crane::grpc::TaskStatus new_status) {
@@ -155,6 +158,7 @@ void StepInCtld::RecoverFromDb(
   const auto& step_to_ctld = step_in_db.step_to_ctld();
   const auto& runtime_attr = step_in_db.runtime_attr();
   type = step_to_ctld.type();
+  this->job = const_cast<TaskInCtld*>(&job);
   job_id = step_to_ctld.job_id();
   uid = step_to_ctld.uid();
   gids = {step_to_ctld.gid().begin(), step_to_ctld.gid().end()};
@@ -192,8 +196,8 @@ void StepInCtld::RecoverFromDb(
   SetStartTime(absl::FromUnixSeconds(runtime_attr.start_time().seconds()));
   SetEndTime(absl::FromUnixSeconds(runtime_attr.end_time().seconds()));
 
-  SetConfigureFailedStatus(runtime_attr.configure_failed_status());
-  SetFinishFailedStatus(runtime_attr.running_failed_status());
+  SetErrorStatus(runtime_attr.error_status());
+  SetErrorExitCode(runtime_attr.error_exit_code());
   SetStatus(runtime_attr.status());
   SetExitCode(runtime_attr.exit_code());
   SetHeld(runtime_attr.held());
@@ -204,6 +208,7 @@ void StepInCtld::RecoverFromDb(
 
 void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   /*Fields in StepInCtld*/
+  this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
   job_id = job.TaskId();
   uid = job.uid;
@@ -238,8 +243,8 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetStartTime(job.StartTime());
   SetEndTime(job.EndTime());
 
-  SetConfigureFailedStatus(crane::grpc::TaskStatus::Invalid);
-  SetFinishFailedStatus(crane::grpc::TaskStatus::Invalid);
+  SetErrorStatus(crane::grpc::TaskStatus::Invalid);
+  SetErrorExitCode(0u);
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
@@ -321,6 +326,107 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   return step_to_d;
 }
 
+std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>>
+DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
+                                   uint32_t exit_code,
+                                   const std::string& reason,
+                                   const CranedId& craned_id,
+                                   StepStatusChangeContext* context) {
+  bool job_finished{false};
+
+  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
+              job_id, this->StepId(), this->Status(), new_status, craned_id);
+  switch (this->Status()) {
+  case crane::grpc::TaskStatus::Configuring:
+    // Configuring -> Failed / Running
+    this->NodeConfigured(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Running) {
+      this->SetErrorStatus(new_status);
+      this->SetErrorExitCode(exit_code);
+    }
+    if (this->AllNodesConfigured()) {
+      if (this->PrevErrorStatus())
+        job_finished = true;
+      else {
+        CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", job_id,
+                    this->StepId());
+        this->SetStatus(crane::grpc::TaskStatus::Running);
+        this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
+        this->SetErrorExitCode(0u);
+
+        context->rn_step_raw_ptrs.insert(this);
+        std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
+        primary_step->InitPrimaryStepFromJob(*job);
+        // TODO: Aggregate this operation
+        if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
+          this->SetStatus(crane::grpc::TaskStatus::Failed);
+          job_finished = true;
+          CRANE_ERROR("[Job #{}] Failed to append a step to embedded db.",
+                      job->TaskId());
+          context->rn_step_raw_ptrs.erase(this);
+          break;
+        }
+        job->SetPrimaryStep(std::move(primary_step));
+        for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
+          context->craned_step_alloc_map[node_id].emplace_back(
+              job->PrimaryStep()->GetStepToD(node_id));
+        }
+      }
+    }
+    break;
+
+  case crane::grpc::TaskStatus::Running:
+  case crane::grpc::TaskStatus::Completing:
+    // Completing -> Completed / Failed
+
+    this->StepOnNodeFinish(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Completed) {
+      this->SetErrorStatus(new_status);
+      this->SetErrorExitCode(exit_code);
+    }
+    job_finished = this->AllNodesFinished();
+    break;
+
+  default: {
+    CRANE_ASSERT_MSG(
+        false, fmt::format("Invalid step status, current: {}, new status: {}",
+                           StepStatusToString(this->Status()),
+                           StepStatusToString(new_status)));
+    std::unreachable();
+  }
+  }
+
+  if (job_finished) {
+    context->step_raw_ptrs.insert(this);
+    context->step_ptrs.emplace(job->ReleaseDaemonStep());
+    if (this->Status() == crane::grpc::TaskStatus::Configuring) {
+      this->SetStatus(this->PrevErrorStatus().value());
+      this->SetExitCode(this->PrevErrorExitCode());
+      CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", job_id,
+                 this->StepId(), this->Status());
+      // Daemon step failed to configure, terminate all daemon step,
+      for (const auto& node : this->CranedIds()) {
+        if (node == craned_id) continue;
+        context->craned_orphaned_steps[node][job_id].emplace(this->StepId());
+      }
+
+      context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
+      return std::pair{this->Status(), this->ExitCode()};
+    } else {
+      if (std::optional error_status = this->PrevErrorStatus(); error_status) {
+        this->SetStatus(error_status.value());
+        this->SetExitCode(this->PrevErrorExitCode());
+      } else {
+        this->SetStatus(crane::grpc::TaskStatus::Completed);
+      }
+      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
+                 this->StepId(), this->Status());
+      return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
+    }
+  }
+  return std::nullopt;
+}
+
 void DaemonStepInCtld::RecoverFromDb(
     const TaskInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
@@ -333,6 +439,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   // For primary step
 
   /*Fields in StepInCtld*/
+
+  this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
   job_id = job.TaskId();
   uid = job.uid;
@@ -368,8 +476,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   SetStartTime(job.StartTime());
   SetEndTime(job.EndTime());
 
-  SetConfigureFailedStatus(crane::grpc::TaskStatus::Invalid);
-  SetFinishFailedStatus(crane::grpc::TaskStatus::Invalid);
+  SetErrorStatus(crane::grpc::TaskStatus::Invalid);
+  SetErrorExitCode(0u);
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
@@ -414,6 +522,10 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.set_nodelist(job.TaskToCtld().nodelist());
   step.set_container(container);
   *MutableStepToCtld() = std::move(step);
+}
+
+bool CommonStepInCtld::IsPrimaryStep() const noexcept {
+  return step_type == crane::grpc::StepType::PRIMARY;
 }
 
 bool CommonStepInCtld::SetFieldsByStepToCtld(
@@ -468,6 +580,150 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().interactive_meta());
   }
   return step_to_d;
+}
+
+void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
+                                        uint32_t exit_code,
+                                        const std::string& reason,
+                                        const CranedId& craned_id,
+                                        StepStatusChangeContext* context) {
+  /**
+   * Step final status
+   * finished: step configured successfully, got all step execution status
+   * change
+   * configure_failed: step failed to configure, terminate the step
+   * For both status, job finish if primary step.
+   */
+  auto step_id = this->StepId();
+
+  bool step_finished{false};
+  // Step failed to configure, terminate step
+  bool step_configure_failed{false};
+
+  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
+              job_id, step_id, this->Status(), new_status, craned_id);
+  if (this->Status() == crane::grpc::TaskStatus::Configuring) {
+    // Configuring -> Configured / Failed / Cancelled,
+    this->NodeConfigured(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Configured) {
+      this->SetErrorStatus(new_status);
+      this->SetErrorExitCode(exit_code);
+    }
+    if (this->AllNodesConfigured()) {
+      if (this->PrevErrorStatus().has_value()) {
+        // Configuring -> Failed
+        step_configure_failed = true;
+      } else {
+        // Configuring -> Running
+        // All supervisor ready without failure, start execution.
+        CRANE_INFO("[Step #{}.{}] is ready to run.", job_id, step_id);
+        // No need to set to Configured, make it running and process failed
+        // cases by step status change
+        this->SetStatus(crane::grpc::TaskStatus::Running);
+        this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
+        this->SetErrorExitCode(0u);
+
+        // Primary:Update job status when primary step is Running.
+        if (this->IsPrimaryStep()) {
+          job->SetStatus(crane::grpc::TaskStatus::Running);
+          context->rn_job_raw_ptrs.insert(job);
+        }
+
+        // Launch step execution
+        for (auto& node : this->ExecutionNodes()) {
+          context->craned_step_exec_map[node][job_id].insert(step_id);
+        }
+        context->rn_step_raw_ptrs.insert(this);
+      }
+    }
+  } else if (this->Status() == crane::grpc::TaskStatus::Running) {
+    // Running -> Completed / Failed / Cancelled,
+    // Primary: the job is completed.
+
+    this->StepOnNodeFinish(craned_id);
+    if (new_status != crane::grpc::TaskStatus::Completed) {
+      this->SetErrorStatus(new_status);
+      this->SetErrorExitCode(exit_code);
+    }
+    CRANE_DEBUG(
+        "[Step #{}.{}] got a finish status, waiting for {} status change.",
+        job_id, step_id, this->RunningNodes().size());
+    step_finished = this->AllNodesFinished();
+
+  } else {
+    CRANE_ASSERT_MSG(
+        false, fmt::format("Invalid step status, current: {}, new status: {}",
+                           StepStatusToString(Status()),
+                           StepStatusToString(new_status)));
+    std::unreachable();
+  }
+
+  // Step finish: configure failed or execution status change
+  if (step_finished || step_configure_failed) {
+    if (this->Status() == crane::grpc::TaskStatus::Configuring) {
+      CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", job_id, step_id);
+      // CONFIGURE_FAILED
+      this->SetStatus(this->PrevErrorStatus().value());
+      this->SetExitCode(this->PrevErrorExitCode());
+      // Step failed to configure, terminate this step
+      for (const auto& node : this->ExecutionNodes()) {
+        if (node != craned_id)
+          context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
+      }
+
+      if (this->IsPrimaryStep()) {
+        job->DaemonStep()->SetStatus(crane::grpc::Completing);
+        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
+        // Primary step CONFIGURE_FAILED, free daemon step, will send status
+        // change.
+        for (const auto& node : job->DaemonStep()->CranedIds()) {
+          context->craned_jobs_to_free[node].emplace_back(job->TaskId());
+        }
+      }
+    } else {
+      // Step COMPLETED
+      if (this->IsPrimaryStep()) {
+        job->DaemonStep()->SetStatus(crane::grpc::Completing);
+        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
+        // Primary step finish, free daemon step, will send status change.
+        for (const auto& node : job->DaemonStep()->CranedIds()) {
+          context->craned_jobs_to_free[node].emplace_back(job->TaskId());
+        }
+
+        // Cancel all other step with CANCELED status
+        for (const auto& comm_step : job->Steps() | std::views::values) {
+          for (const auto& node : comm_step->ExecutionNodes()) {
+            context->craned_cancel_steps[node][comm_step->job_id].emplace(
+                comm_step->StepId());
+          }
+        }
+      } else {
+        for (const auto& node : this->ExecutionNodes()) {
+          context->craned_step_free_map[node][job_id].insert(step_id);
+        }
+      }
+      if (this->PrevErrorStatus().has_value()) {
+        this->SetStatus(this->PrevErrorStatus().value());
+        this->SetExitCode(this->PrevErrorExitCode());
+      } else {
+        this->SetStatus(crane::grpc::TaskStatus::Completed);
+        this->SetExitCode(exit_code);
+      }
+
+      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id, step_id,
+                 this->Status());
+    }
+
+    context->step_raw_ptrs.insert(this);
+    if (this->IsPrimaryStep()) {
+      job->SetPrimaryStepStatus(this->Status());
+      job->SetPrimaryStepExitCode(exit_code);
+      context->rn_job_raw_ptrs.insert(job);
+      context->step_ptrs.emplace(job->ReleasePrimaryStep());
+    } else {
+      context->step_ptrs.insert(job->EraseStep(step_id));
+    }
+  }
 }
 
 void CommonStepInCtld::RecoverFromDb(

@@ -2292,258 +2292,6 @@ void TaskScheduler::TaskStatusChangeAsyncCb_() {
     m_clean_task_status_change_handle_->send();
 }
 
-std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>>
-TaskScheduler::DaemonStepStatusChangeHandler_(
-    crane::grpc::TaskStatus new_status, TaskInCtld* job,
-    const CranedId& craned_id, StepStatusChangeContext* context) {
-  bool all_node_ready{false};
-  bool job_finished{false};
-  auto* step = job->DaemonStep();
-  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
-              step->job_id, step->StepId(), step->Status(), new_status,
-              craned_id);
-  switch (step->Status()) {
-  case crane::grpc::TaskStatus::Configuring:
-    // Configuring -> Failed / Running
-    step->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Running) {
-      step->SetConfigureFailedStatus(new_status);
-    }
-    if (step->AllNodesConfigured()) {
-      if (step->ConfigureFailed())
-        job_finished = true;
-      else {
-        CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", step->job_id,
-                    step->StepId());
-        step->SetStatus(crane::grpc::TaskStatus::Running);
-
-        context->rn_step_raw_ptrs.insert(step);
-        std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
-        primary_step->InitPrimaryStepFromJob(*job);
-        if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
-          step->SetStatus(crane::grpc::TaskStatus::Failed);
-          job_finished = true;
-          CRANE_ERROR("[Job #{}] Failed to append a step to embedded db.",
-                      job->TaskId());
-          context->rn_step_raw_ptrs.erase(step);
-          break;
-        }
-        job->SetPrimaryStep(std::move(primary_step));
-        for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
-          context->craned_step_alloc_map[node_id].emplace_back(
-              job->PrimaryStep()->GetStepToD(node_id));
-        }
-      }
-    }
-    break;
-
-  case crane::grpc::TaskStatus::Running:
-  case crane::grpc::TaskStatus::Completing:
-    // Completing -> Completed / Failed
-
-    step->NodeFinish(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Completed) {
-      step->SetFinishFailedStatus(new_status);
-    }
-    job_finished = step->AllNodesFinished();
-    break;
-
-  default: {
-    CRANE_ASSERT_MSG(
-        false, fmt::format("Invalid step status, current: {}, new status: {}",
-                           StepStatusToString(step->Status()),
-                           StepStatusToString(new_status)));
-    std::unreachable();
-  }
-  }
-
-  if (job_finished) {
-    context->step_raw_ptrs.insert(step);
-    context->step_ptrs.emplace(job->ReleaseDaemonStep());
-    if (step->ConfigureFailed()) {
-      step->SetStatus(step->ConfigureFailedStatus());
-      CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", step->job_id,
-                 step->StepId(), step->Status());
-      // Daemon step failed to configure, terminate all daemon step,
-      for (const auto& node : step->CranedIds()) {
-        if (node == craned_id) continue;
-        context->craned_orphaned_steps[node][step->job_id].emplace(
-            step->StepId());
-      }
-
-      context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
-      return std::pair{step->Status(), step->ExitCode()};
-    } else {
-      if (step->FinishWithFailedStatus()) {
-        step->SetStatus(step->FinishFailedStatus());
-      } else {
-        step->SetStatus(crane::grpc::TaskStatus::Completed);
-      }
-      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->StepId(), step->Status());
-      return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
-    }
-  }
-  return std::nullopt;
-}
-
-void TaskScheduler::CommonStepStatusChangeHandler_(
-    crane::grpc::TaskStatus new_status, uint32_t exit_code, TaskInCtld* job,
-    step_id_t step_id, const CranedId& craned_id,
-    StepStatusChangeContext* context) {
-  // PrimaryStep
-  bool primary_step =
-      job->PrimaryStep() && step_id == job->PrimaryStep()->StepId();
-  CommonStepInCtld* step{nullptr};
-  if (primary_step) {
-    step = job->PrimaryStep();
-  } else {
-    step = job->GetStep(step_id);
-  }
-  if (!step) {
-    CRANE_ERROR("[Step #{}.{}] not found when StatusChange.", job->TaskId(),
-                step_id);
-    return;
-  }
-
-  /**
-   * Step final status
-   * finished: step configured successfully, got all step execution status
-   * change
-   * configure_failed: step failed to configure, terminate the step
-   * For both status, job finish if primary step.
-   */
-
-  bool step_finished{false};
-  // Step failed to configure, terminate step
-  bool step_configure_failed{false};
-
-  CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
-              step->job_id, step->StepId(), step->Status(), new_status,
-              craned_id);
-  if (step->Status() == crane::grpc::TaskStatus::Configuring) {
-    // Configuring -> Configured / Failed / Cancelled,
-    step->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configured) {
-      step->SetConfigureFailedStatus(new_status);
-    }
-    if (step->AllNodesConfigured()) {
-      if (step->ConfigureFailed()) {
-        // Configuring -> Failed
-        step_configure_failed = true;
-      } else {
-        // Configuring -> Running
-        // All supervisor ready without failure, start execution.
-        CRANE_INFO("[Step #{}.{}] is ready to run.", step->job_id,
-                   step->StepId());
-        // No need to set to Configured, make it running and process failed
-        // cases by step status change
-        step->SetStatus(crane::grpc::TaskStatus::Running);
-
-        // Primary:Update job status when primary step is Running.
-        if (primary_step) {
-          job->SetStatus(crane::grpc::TaskStatus::Running);
-          context->rn_job_raw_ptrs.insert(job);
-        }
-
-        // Launch step execution
-        for (auto& node : step->ExecutionNodes()) {
-          context->craned_step_exec_map[node][step->job_id].insert(
-              step->StepId());
-        }
-        context->rn_step_raw_ptrs.insert(step);
-      }
-    }
-  } else if (step->Status() == crane::grpc::TaskStatus::Running) {
-    // Running -> Completed / Failed / Cancelled,
-    // Primary: the job is completed.
-
-    step->NodeFinish(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Completed) {
-      step->SetFinishFailedStatus(new_status);
-    }
-    CRANE_DEBUG(
-        "[Step #{}.{}] got a finish status, waiting for {} status change.",
-        step->job_id, step->StepId(), step->RunningNodes().size());
-    step_finished = step->AllNodesFinished();
-
-  } else {
-    CRANE_ASSERT_MSG(
-        false, fmt::format("Invalid step status, current: {}, new status: {}",
-                           StepStatusToString(step->Status()),
-                           StepStatusToString(new_status)));
-    std::unreachable();
-  }
-
-  // Step finish: configure failed or execution status change
-  if (step_finished || step_configure_failed) {
-    if (step->ConfigureFailed()) {
-      CRANE_INFO("[Step #{}.{}] CONFIGURE_FAILED.", step->job_id,
-                 step->StepId());
-      // CONFIGURE_FAILED
-      step->SetStatus(step->ConfigureFailedStatus());
-      // Step failed to configure, terminate this step
-      for (const auto& node : step->ExecutionNodes()) {
-        if (node != craned_id)
-          context->craned_orphaned_steps[node][job->TaskId()].emplace(step_id);
-      }
-
-      if (primary_step) {
-        job->DaemonStep()->SetStatus(crane::grpc::Completing);
-        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
-        // Primary step CONFIGURE_FAILED, free daemon step, will send status
-        // change.
-        for (const auto& node : job->DaemonStep()->CranedIds()) {
-          context->craned_jobs_to_free[node].emplace_back(job->TaskId());
-        }
-      }
-    } else {
-      // Step COMPLETED
-      if (primary_step) {
-        job->DaemonStep()->SetStatus(crane::grpc::Completing);
-        context->rn_step_raw_ptrs.emplace(job->DaemonStep());
-        // Primary step finish, free daemon step, will send status change.
-        for (const auto& node : job->DaemonStep()->CranedIds()) {
-          context->craned_jobs_to_free[node].emplace_back(job->TaskId());
-        }
-
-        // Cancel all other step with CANCELED status
-        for (const auto& comm_step : job->Steps() | std::views::values) {
-          for (const auto& node : comm_step->ExecutionNodes()) {
-            context->craned_cancel_steps[node][comm_step->job_id].emplace(
-                comm_step->StepId());
-          }
-        }
-      } else {
-        for (const auto& node : step->ExecutionNodes()) {
-          context->craned_step_free_map[node][step->job_id].insert(
-              step->StepId());
-        }
-      }
-      if (step->FinishWithFailedStatus()) {
-        step->SetStatus(step->FinishFailedStatus());
-      } else {
-        step->SetStatus(crane::grpc::TaskStatus::Completed);
-      }
-
-      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", step->job_id,
-                 step->StepId(), step->Status());
-    }
-
-    context->step_raw_ptrs.insert(step);
-    if (primary_step) {
-      job->SetPrimaryStepStatus(step->Status());
-      job->SetPrimaryStepExitCode(exit_code);
-      context->rn_job_raw_ptrs.insert(job);
-      context->step_ptrs.emplace(job->ReleasePrimaryStep());
-    } else {
-      context->step_ptrs.insert(job->EraseStep(step_id));
-    }
-  }
-
-  return;
-}
-
 void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   size_t approximate_size = m_task_status_change_queue_.size_approx();
 
@@ -2584,18 +2332,27 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         job_finished_status{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
-    if (step_id == kDaemonStepId) {
-      // job finish if all daemon step sent complete status or some daemon step
-      // failed to configure.
-      job_finished_status = DaemonStepStatusChangeHandler_(
-          new_status, task.get(), craned_index, &context);
+    if (task->DaemonStep() && step_id == task->DaemonStep()->StepId()) {
+      CRANE_TRACE(
+          "[Step #{}.{}] Daemon step status change received, status: {}.",
+          task->TaskId(), step_id, new_status);
+      auto* step = task->DaemonStep();
+      job_finished_status = step->StepStatusChange(
+          new_status, exit_code, reason, craned_index, &context);
     } else {
-      CommonStepStatusChangeHandler_(new_status, exit_code, task.get(), step_id,
-                                     craned_index, &context);
+      CommonStepInCtld* step = task->GetStep(step_id);
+      if (step == nullptr) {
+        CRANE_WARN("[Step #{}.{}] Ignoring unknown step in TaskStatusChange.",
+                   task_id, step_id);
+        continue;
+      }
+      CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
+                  task_id, step_id, new_status);
+      step->StepStatusChange(new_status, exit_code, reason, craned_index,
+                             &context);
     }
 
     if (job_finished_status.has_value()) {
-      // Job status set CommonStepStatusChangeHandler_
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         // if (meta.interactive_type == crane::grpc::Crun) {  // Crun
@@ -2665,7 +2422,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       m_running_task_map_.erase(iter);
     }
   }
-  // Maybe put following operations into thread pool.
 
   std::latch alloc_step_latch{
       static_cast<std::ptrdiff_t>(context.craned_step_alloc_map.size())};
