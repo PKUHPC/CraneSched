@@ -104,8 +104,17 @@ echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ### 2.1 安装构建工具
 
 ```bash
-wget https://apt.llvm.org/llvm.sh
-bash ./llvm.sh 19
+apt install build-essential
+apt install libmpfr-dev libgmp3-dev libmpc-dev -y
+wget http://ftp.gnu.org/gnu/gcc/gcc-14.1.0/gcc-14.1.0.tar.gz
+tar -xf gcc-14.1.0.tar.gz
+cd gcc-14.1.0
+
+./contrib/download_prerequisites
+mkdir build && cd build
+../configure --enable-checking=release --enable-languages=c,c++ --disable-multilib
+make -j
+make install
 
 # 对于 ubuntu 20.04
 wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.sh
@@ -159,11 +168,11 @@ cd CraneSched
 mkdir -p build && cd build
 
 # 对于 CGroup v1
-cmake -G Ninja ..
+cmake -G Ninja .. -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
 cmake --build .
 
 # 对于 CGroup v2
-cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true
+cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
 cmake --build .
 ```
 
