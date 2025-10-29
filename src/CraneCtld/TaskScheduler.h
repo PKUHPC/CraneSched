@@ -316,12 +316,33 @@ class SchedulerAlgo {
       }
 
       time_avail_res_map[end].SetToZero();
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Node {} time_avail_res_map initialized:", craned_id);
+        for (const auto& [time, res] : time_avail_res_map) {
+          CRANE_TRACE("  Time: now+{}s, cpu: {}, mem: {}MB",
+                      absl::ToInt64Seconds(time - now),
+                      res.allocatable_res.cpu_count,
+                      res.allocatable_res.memory_bytes);
+        }
+      }
     }
 
     void UpdateResourceInNode(const absl::Time& start_time,
                               const absl::Time& end_time,
                               const ResourceInNode& res,
                               bool is_release = false) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Node {} UpdateResourceInNode: start_time now+{}s, end_time "
+            "now+{}s, cpu: {}, mem: {}MB, is_release: {}",
+            craned_id,
+            absl::ToInt64Seconds(start_time -
+                                 time_avail_res_map.begin()->first),
+            absl::ToInt64Seconds(end_time - time_avail_res_map.begin()->first),
+            res.allocatable_res.cpu_count, res.allocatable_res.memory_bytes,
+            is_release);
+      }
       bool ok;
       auto task_duration_begin_it = time_avail_res_map.upper_bound(start_time);
       if (task_duration_begin_it == time_avail_res_map.end()) {
@@ -431,11 +452,21 @@ class SchedulerAlgo {
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           if (is_release) {
-            inserted_it->second += res;
+            task_duration_end_it->second += res;
           } else {
-            CRANE_ASSERT(res <= inserted_it->second);
-            inserted_it->second -= res;
+            CRANE_ASSERT(res <= task_duration_end_it->second);
+            task_duration_end_it->second -= res;
           }
+        }
+      }
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Node {} time_avail_res_map updated:", craned_id);
+        for (const auto& [time, res] : time_avail_res_map) {
+          CRANE_TRACE(
+              "  Time: now+{}s, cpu: {}, mem: {}MB",
+              absl::ToInt64Seconds(time - time_avail_res_map.begin()->first),
+              res.allocatable_res.cpu_count, res.allocatable_res.memory_bytes);
         }
       }
     }

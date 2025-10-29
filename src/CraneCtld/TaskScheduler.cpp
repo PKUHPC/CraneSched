@@ -18,8 +18,6 @@
 
 #include "TaskScheduler.h"
 
-#include <variant>
-
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedMetaContainer.h"
@@ -3328,6 +3326,9 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
 
   absl::Time earliest_end_time = now + job->time_limit;
 
+  job->craned_ids.clear();
+  job->allocated_res.SetToZero();
+
   for (const auto& node_state :
        m_node_selector_->GetOrderedNodesSet() | std::views::values) {
     const auto& craned_id = node_state->craned_id;
@@ -3414,6 +3415,8 @@ bool SchedulerAlgo::LocalScheduler::GetNodesAndTrySchedule_(
       }
     }
   }
+  job->craned_ids.clear();
+  job->allocated_res.SetToZero();
   return false;
 }
 
@@ -3587,8 +3590,6 @@ bool SchedulerAlgo::LocalScheduler::TryPreempt_(
 bool SchedulerAlgo::LocalScheduler::GetEarliestStartTime_(
     const absl::Time& now, PdJobInScheduler* job,
     const std::vector<NodeState*>& nodes_to_sched) {
-  job->allocated_res.SetToZero();
-
   for (const auto& node_state : nodes_to_sched) {
     ResourceInNode feasible_res;
 
