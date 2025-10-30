@@ -189,6 +189,7 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
   bool result = g_meta_container->UpdateNodeDrainState(request->craned_id(), request->drain(), request->reason());
 
   if (!result) response->set_ok(false);
+  else response->set_ok(true);
 
   return grpc::Status::OK;
 }
