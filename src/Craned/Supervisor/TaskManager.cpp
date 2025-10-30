@@ -470,11 +470,11 @@ CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
                strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  dup2(stdout_fd, 1);  // stdout -> output file
+  if (dup2(stdout_fd, 1) == -1) std::exit(1);  // stdout -> output file
 
   if (stderr_file_path.empty()) {
     // if stderr file is not set, redirect stderr to stdout
-    dup2(stdout_fd, 2);
+    if (dup2(stdout_fd, 2) == -1) std::exit(1);
   } else {
     stderr_fd =
         open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
@@ -483,7 +483,7 @@ CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
                  strerror(errno));
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
-    dup2(stderr_fd, 2);  // stderr -> error file
+    if (dup2(stderr_fd, 2) == -1) std::exit(1);  // stderr -> error file
     close(stderr_fd);
   }
   close(stdout_fd);
@@ -495,9 +495,11 @@ void ITaskInstance::SetupCrunFwdAtChild_() {
   const auto* meta = GetCrunInstanceMeta();
 
   if (!meta->pty) {
-    dup2(meta->stdin_read, STDIN_FILENO);
-    dup2(meta->stdout_write, STDOUT_FILENO);
-    dup2(meta->stdout_write, STDERR_FILENO);
+    if (dup2(meta->stdin_read, STDIN_FILENO) == -1) std::exit(1);
+    if (dup2(meta->stdout_write, STDOUT_FILENO) == -1) std::exit(1);
+    if (dup2(meta->stdout_write, STDERR_FILENO) == -1) std::exit(1);
+    close(meta->stdin_read);
+    close(meta->stdout_write);
   }
 }
 
