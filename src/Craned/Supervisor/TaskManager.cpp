@@ -1719,7 +1719,7 @@ CraneErrCode ProcInstance::Spawn() {
 
     if (!g_config.TaskPrologs.empty()) {
       RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
-                                     .envs = m_env_,
+                                     .envs = GetChildProcessEnv(),
                                      .run_uid = m_parent_step_inst_->uid,
                                      .run_gid = m_parent_step_inst_->gid,
                                      .is_prolog = true};

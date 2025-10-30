@@ -94,6 +94,20 @@ PriorityWeightQoS: 1000000
 
 #JobSubmitLuaScript: /path/to/your/job_submit.lua
 
+
+Prolog: prolog1.sh,prolog2.sh
+PrologTimeout: 60
+# PrologFlags: Alloc  # Alloc, Contain, DeferBatch, NoHold, ForceRequeueOnFail, RunInJob, Serial, X11
+Epilog: epilog1.sh,epilog2.sh
+EpilogTimeout: 60
+PrologEpilogTimeout: 120
+PrologCranectld: prologctld.sh
+EpilogCranectld: epilogctld.sh
+CrunProlog: srun_prolog.sh
+CrunEpilog: srun_epilog.sh
+TaskProlog: task_prolog.sh
+TaskEpilog: task_epilog.sh
+
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
@@ -199,16 +213,3 @@ Container:
     BindfsBinary: /usr/bin/bindfs
     FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
-
-Prolog: prolog1.sh,prolog1.sh
-PrologTimeout: 60
-# PrologFlags: Alloc  # Alloc, Contain, DeferBatch, NoHold, ForceRequeueOnFail, RunInJob, Serial, X11
-Epilog: epilog1.sh,epilog2.sh
-EpilogTimeout: 60
-PrologEpilogTimeout: 120
-PrologCranectld: prologctld.sh
-EpilogCranectld: epilogctld.sh
-SrunProlog: srun_prolog.sh
-SrunEpilog: srun_epilog.sh
-TaskProlog: task_prolog.sh
-TaskEpilog: task_epilog.sh

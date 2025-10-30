@@ -705,6 +705,12 @@ void ParseConfig(int argc, char** argv) {
         util::ParseLogHookPaths(config["Epilog"].as<std::string>(),
                                 kDefaultConfigPath, &g_config.EpiLogs);
 
+      if (config["TaskProlog"])
+        util::ParseLogHookPaths(config["TaskProlog"].as<std::string>(), kDefaultConfigPath, &g_config.TaskPrologs);
+
+      if (config["TaskEpilog"])
+        util::ParseLogHookPaths(config["TaskEpilog"].as<std::string>(), kDefaultConfigPath, &g_config.TaskEpilogs);
+
       if (config["PrologTimeout"])
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
 

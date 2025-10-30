@@ -176,11 +176,12 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
+      // TODO: jude file is exist
       if (config["PrologCranectld"])
         util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(), config_path, &g_config.ProLogs);
 
       if (config["EpilogCranectld"])
-        util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(), config_path, &g_config.ProLogs);
+        util::ParseLogHookPaths(config["EpilogCranectld"].as<std::string>(), config_path, &g_config.EpiLogs);
 
       if (config["PrologTimeout"]) {
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();

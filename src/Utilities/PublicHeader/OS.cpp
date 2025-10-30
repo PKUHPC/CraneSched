@@ -421,13 +421,17 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
+// FIXME: timeout
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
-  bool is_failed = true;
+  bool is_failed = false;
   auto start_time = std::chrono::steady_clock::now();
 
   auto read_stream = [](std::FILE* f) {
     std::string out;
     char buf[4096];
+    if (!f) {
+      return out;
+    }
     while (std::fgets(buf, sizeof(buf), f)) out.append(buf);
     return out;
   };
@@ -449,7 +453,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       CRANE_ERROR("{} subprocess creation failed: {}.", script,
                   strerror(errno));
       if (args.is_prolog) return std::nullopt;
-      is_failed = false;
+      is_failed = true;
       continue;
     }
 
@@ -485,21 +489,21 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
                   read_stream(subprocess_stdout(&subprocess)),
                   read_stream(subprocess_stderr(&subprocess)));
       if (args.is_prolog) return std::nullopt;
-      is_failed = false;
+      is_failed = true;
       continue;
     }
-
-    subprocess_destroy(&subprocess);
 
     if (result != 0) {
       CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
                   result, read_stream(subprocess_stdout(&subprocess)),
                   read_stream(subprocess_stderr(&subprocess)));
       if (args.is_prolog) return std::nullopt;
-      is_failed = false;
+      is_failed = true;
       continue;
     }
     output.append(read_stream(subprocess_stdout(&subprocess)));
+
+    subprocess_destroy(&subprocess);
     CRANE_DEBUG("{} finished successfully.", script);
   }
 
@@ -526,7 +530,7 @@ void ApplyPrologOutputToEnvAndStdout(
     } else if (RE2::FullMatch(line, *unset_re, &name)) {
       env_map->erase(name);
     } else if (RE2::FullMatch(line, *print_re, &to_print)) {
-      write(task_stdout_fd, to_print.c_str(), to_print.size());
+      write(task_stdout_fd, to_print.data(), to_print.size());
       write(task_stdout_fd, "\n", 1);
     }
   }
