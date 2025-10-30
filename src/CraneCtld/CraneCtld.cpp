@@ -176,7 +176,6 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
-      // TODO: jude file is exist
       if (config["PrologCranectld"])
         util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(), config_path, &g_config.ProLogs);
 

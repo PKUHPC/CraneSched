@@ -421,7 +421,6 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-// FIXME: timeout
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
   bool is_failed = false;
   auto start_time = std::chrono::steady_clock::now();
@@ -443,7 +442,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
         std::chrono::steady_clock::now() - start_time);
     if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
       CRANE_ERROR("Total timeout ({}s) reached before running {}.",
-                  args.timeout_sec, script.c_str());
+                  args.timeout_sec, script);
       return std::nullopt;
     }
 
@@ -467,19 +466,14 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed_now =
         std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
-    int remaining_time =
-        args.timeout_sec > 0
-            ? std::max<int>(0, args.timeout_sec - elapsed_now.count())
-            : 0;
+    uint32_t remaining_time = (args.timeout_sec > 0) ? std::max<uint32_t>(0, args.timeout_sec - elapsed_now.count()) : 0;
     bool child_exited = false;
     if (args.timeout_sec == 0) {
       fut.get();
       child_exited = true;
     } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
                std::future_status::ready) {
-      if (fut.get() == pid) {
-        child_exited = true;
-      }
+      child_exited = true;
     }
 
     if (!child_exited) {
