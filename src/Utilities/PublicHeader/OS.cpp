@@ -457,7 +457,10 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     }
 
     pid_t pid = subprocess.child;
-    if (args.callback) args.callback(pid, args.job_id);
+    if (args.callback) {
+      bool result = args.callback(pid, args.job_id);
+      if (!result) return std::nullopt;
+    }
     int result = 0;
     auto fut = std::async(std::launch::async, [pid, &result]() {
       return waitpid(pid, &result, 0);
