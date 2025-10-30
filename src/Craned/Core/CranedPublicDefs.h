@@ -79,6 +79,7 @@ struct Config {
     uint32_t CtldTimeoutSec;
     uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
+    uint32_t NodeHealthCheckInterval;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {

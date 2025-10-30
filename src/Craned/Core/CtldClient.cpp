@@ -441,8 +441,9 @@ CtldClient::CtldClient() {
         // TODO: should check state?
         NodeHealthCheck_();
       });
-  if (g_config.NodeHealthCheckInterval > 0) {
-    auto interval = std::chrono::seconds(g_config.NodeHealthCheckInterval);
+  if (g_config.CranedConf.NodeHealthCheckInterval > 0) {
+    auto interval =
+        std::chrono::seconds(g_config.CranedConf.NodeHealthCheckInterval);
     m_node_health_check_timer_->start(interval, interval);
   }
 }
