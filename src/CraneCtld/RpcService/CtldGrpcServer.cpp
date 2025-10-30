@@ -1182,9 +1182,12 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  std::list<std::string> value_list(request->value_list().begin(),
+                                    request->value_list().end());
+
+  auto modify_res = g_account_manager->ModifyQos(
+      request->uid(), request->name(), request->modify_field(), value_list);
 
   if (modify_res) {
     response->set_ok(true);
