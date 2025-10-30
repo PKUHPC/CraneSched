@@ -984,7 +984,8 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
 
 CraneExpected<void> AccountManager::ModifyQos(
     uint32_t uid, const std::string& name,
-    crane::grpc::ModifyField modify_field, const std::string& value) {
+    crane::grpc::ModifyField modify_field,
+    const std::list<std::string>& value_list) {
   std::string actor_name;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -1029,105 +1030,67 @@ CraneExpected<void> AccountManager::ModifyQos(
     std::unreachable();
   }
 
-  // Handle special fields: preempt (list) and preempt_mode (enum)
-  if (item == Qos::FieldStringOfPreempt()) {
-    // Parse comma-separated QOS names
-    std::list<std::string> preempt_list;
-    if (!value.empty()) {
-      std::istringstream iss(value);
-      std::string qos_name;
-      while (std::getline(iss, qos_name, ',')) {
-        // Trim whitespace
-        qos_name.erase(0, qos_name.find_first_not_of(" \t\n\r"));
-        qos_name.erase(qos_name.find_last_not_of(" \t\n\r") + 1);
+  mongocxx::client_session::with_transaction_cb callback;
 
-        if (!qos_name.empty()) {
-          // Validate QOS exists
-          const Qos* preempt_qos = GetExistedQosInfoNoLock_(qos_name);
-          if (!preempt_qos) {
-            return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
-          }
-          preempt_list.emplace_back(qos_name);
+  if (item == Qos::FieldStringOfPreempt()) {
+    // Preempt: string list
+    for (const auto& qos_name : value_list) {
+      if (!qos_name.empty()) {
+        const Qos* preempt_qos = GetExistedQosInfoNoLock_(qos_name);
+        if (!preempt_qos) {
+          return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
         }
       }
     }
 
-    // Update to database
-    mongocxx::client_session::with_transaction_cb callback =
-        [&](mongocxx::client_session* session) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                       name, item, preempt_list);
-        };
-
-    if (!g_db_client->CommitTransaction(callback))
-      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-
-    // Refresh in-memory QOS
-    Qos qos;
-    g_db_client->SelectQos("name", name, &qos);
-    *m_qos_map_[name] = std::move(qos);
-
-    return {};
-  }
-
-  if (item == Qos::FieldStringOfPreemptMode()) {
-    // Parse preempt mode string to enum
-    int32_t preempt_mode_value;
-    if (value == "OFF") {
-      preempt_mode_value =
-          static_cast<int32_t>(crane::grpc::PreemptMode::OFF);
-    } else if (value == "CANCEL") {
-      preempt_mode_value =
-          static_cast<int32_t>(crane::grpc::PreemptMode::CANCEL);
-    } else {
+    callback = [&](mongocxx::client_session* session) {
+      g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
+                                   item, value_list);
+    };
+  } else {
+    if (value_list.size() != 1) {
       return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
     }
+    const auto& value = *value_list.begin();
 
-    // Update to database
-    mongocxx::client_session::with_transaction_cb callback =
-        [&](mongocxx::client_session* session) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                       name, item, preempt_mode_value);
-        };
+    if (item == Qos::FieldStringOfPreemptMode()) {
+      // Preempt mode: enum value
+      int32_t preempt_mode_value;
+      if (value == "OFF") {
+        preempt_mode_value =
+            static_cast<int32_t>(crane::grpc::PreemptMode::OFF);
+      } else if (value == "CANCEL") {
+        preempt_mode_value =
+            static_cast<int32_t>(crane::grpc::PreemptMode::CANCEL);
+      } else {
+        return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+      }
 
-    if (!g_db_client->CommitTransaction(callback))
-      return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+      callback = [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                     name, item, preempt_mode_value);
+      };
+    } else if (item == Qos::FieldStringOfDescription()) {
+      // Description: string value
+      callback = [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                     name, item, value);
+      };
+    } else {
+      // Numeric fields: convert to int64_t
+      int64_t value_number;
+      bool ok = util::ConvertStringToInt64(value, &value_number);
+      if (!ok) return std::unexpected(CraneErrCode::ERR_CONVERT_TO_INTEGER);
 
-    // Refresh in-memory QOS
-    Qos qos;
-    g_db_client->SelectQos("name", name, &qos);
-    *m_qos_map_[name] = std::move(qos);
+      if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
+          !CheckIfTimeLimitSecIsValid(value_number))
+        return std::unexpected(CraneErrCode::ERR_TIME_LIMIT);
 
-    return {};
-  }
-
-  bool value_is_number{false};
-  int64_t value_number;
-  if (item != Qos::FieldStringOfDescription()) {
-    bool ok = util::ConvertStringToInt64(value, &value_number);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_CONVERT_TO_INTEGER);
-
-    value_is_number = true;
-
-    if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
-        !CheckIfTimeLimitSecIsValid(value_number))
-      return std::unexpected(CraneErrCode::ERR_TIME_LIMIT);
-  }
-
-  mongocxx::client_session::with_transaction_cb callback;
-  if (item == "description") {
-    // Update to database
-    callback = [&](mongocxx::client_session* session) {
-      g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
-                                   item, value);
-    };
-
-  } else {
-    /* uint32 Type Stores data based on long(int64_t) */
-    callback = [&](mongocxx::client_session* session) {
-      g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
-                                   item, value_number);
-    };
+      callback = [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                     name, item, value_number);
+      };
+    }
   }
 
   if (!g_db_client->CommitTransaction(callback))

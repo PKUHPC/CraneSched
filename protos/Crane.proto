@@ -367,8 +367,8 @@ message ModifyUserReply {
 
 message ModifyQosRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;  // modify item field
-  string value = 3;              // new value
+  ModifyField modify_field = 2;    // modify item field
+  repeated string value_list = 3;  // new value
   string name = 4;
 }
 
