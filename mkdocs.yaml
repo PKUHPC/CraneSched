@@ -38,8 +38,6 @@ plugins:
       fallback_to_default: true
       reconfigure_material: true
       reconfigure_search: true
-      default_language: en
-      default_language_only: false
       languages:
         - locale: en
           name: English
