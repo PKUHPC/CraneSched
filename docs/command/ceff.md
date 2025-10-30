@@ -1,50 +1,94 @@
-# ceff 查看作业运行实况
+# ceff - View Job Efficiency Statistics
 
-ceff**用来显示作业运行过程中的实时情况。**
+**ceff displays real-time information about job execution.**
 
-查看任务实时情况：
+View real-time task status:
 
-```Shell
-ceff 作业名,作业名
+```bash
+ceff <job_id[,job_id,...]>
 ```
 
-**ceff运行结果展示**
+**ceff Output Example**
 
 ![ceff](../images/ceff/ceff.png)
 
-**主要输出项**
+## Main Output Fields
 
-- **JobId**: 作业的唯一标识符。
-- **Qos**: 作业运行所在的集群名称。
-- **User/Group**: 提交作业的用户和用户组。
-- **Account**：账户名
-- **State**: 作业的当前状态（例如，COMPLETED、FAILED、CANCELLED 等）。
-- **Cores**: 作业使用的核心数量。
-- **Nodes**: 作业分配的节点数量。
-- **Cores per node**: 每个节点分配的核心数量。
-- **CPU** **Utilized**: 作业实际使用的 CPU 时间。
-- **CPU** **Efficiency**: CPU 使用效率，通常表示为作业实际使用的 CPU 时间占分配的核心墙时间的百分比。
-- **Job Wall-clock time**: 作业的墙钟时间，即作业从开始到结束的总时间。
-- **Memory Utilized**: 作业实际使用的内存量。
-- **Memory Efficiency**: 内存使用效率，通常表示为作业实际使用的内存量占分配内存的百分比。
+- **JobId**: Unique identifier for the job
+- **Qos**: QoS level where the job is running
+- **User/Group**: User and user group that submitted the job
+- **Account**: Account name
+- **State**: Current state of the job (e.g., COMPLETED, FAILED, CANCELLED, etc.)
+- **Cores**: Number of cores used by the job
+- **Nodes**: Number of nodes allocated to the job
+- **Cores per node**: Number of cores allocated per node
+- **CPU Utilized**: Actual CPU time used by the job
+- **CPU Efficiency**: CPU usage efficiency, typically expressed as the percentage of actual CPU time used versus allocated core wall-clock time
+- **Job Wall-clock time**: Wall-clock time of the job, i.e., total time from start to end
+- **Memory Utilized**: Actual memory used by the job
+- **Memory Efficiency**: Memory usage efficiency, typically expressed as the percentage of actual memory used versus allocated memory
 
-#### **主要参数**
+## Main Options
 
-- **-h/--help**: 显示帮助
-- **-C/--config string：**配置文件路径(默认为 "/etc/crane/config.yaml")
-- **--****json** **输出后端返回任务信息**
-- **-v, --version** 显示ceff 的版本
+- **-h/--help**: Display help
+- **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
+- **--json**: Output task information returned by backend in JSON format
+- **-v/--version**: Display ceff version
 
-例：
+## Usage Examples
 
-```SQL
+**Display help:**
+```bash
 ceff -h
 ```
 
 ![ceff](../images/ceff/h.png)
 
-```SQL
-ceff 作业id --json
+**Query job efficiency:**
+```bash
+ceff <job_id>
+```
+
+**Query multiple jobs:**
+```bash
+# Query multiple job IDs separated by commas
+ceff 1234,1235,1236
+```
+
+**JSON output:**
+```bash
+ceff <job_id> --json
 ```
 
 ![ceff](../images/ceff/json.png)
+
+## Understanding Efficiency Metrics
+
+### CPU Efficiency
+
+CPU Efficiency indicates how effectively your job utilized the allocated CPU resources:
+
+- **High efficiency (>80%)**: Job is CPU-intensive and makes good use of allocated cores
+- **Medium efficiency (40-80%)**: Job may have I/O wait times or is not fully parallelized
+- **Low efficiency (<40%)**: Job may be I/O-bound, waiting on resources, or not suitable for parallel execution
+
+### Memory Efficiency
+
+Memory Efficiency shows how much of the allocated memory was actually used:
+
+- **High efficiency (>80%)**: Memory allocation closely matches actual usage
+- **Low efficiency (<40%)**: Consider requesting less memory for future jobs to improve resource utilization
+
+## Use Cases
+
+1. **Post-job Analysis**: Review completed jobs to understand resource utilization
+2. **Resource Optimization**: Identify over- or under-allocated resources for future job submissions
+3. **Troubleshooting**: Investigate why jobs failed or underperformed
+4. **Reporting**: Generate efficiency reports for project or user resource usage
+
+## Related Commands
+
+- [cacct](cacct.md) - Query accounting information for completed jobs
+- [cqueue](cqueue.md) - View active jobs in the queue
+- [cbatch](cbatch.md) - Submit batch jobs
+- [crun](crun.md) - Run interactive jobs

@@ -1,365 +1,597 @@
-# cacctmgr 管理用户/账户信息 #
+# cacctmgr - Account Manager
 
-!!! warning
-    This document is a work in progress and may contain inaccuracies or incomplete information. Please refer to the official documentation for the most accurate and up-to-date details.
+**cacctmgr manages accounts, users, and Quality of Service (QoS) settings in the CraneSched system using SQL-style commands.**
 
-**cacctmgr 可以管理账户/用户信息，包括添加账户/用户、删除账户/用户、查找账户/用户。**
+!!! note
+    This command uses a SQL-style syntax for managing cluster resources. The syntax is: `cacctmgr <ACTION> <ENTITY> [OPTIONS]`
 
-CraneSched作业调度系统中有四个用户角色： 
+## User Roles
 
-- **系统管理员（Admin）**：一般为root用户，可以增删查改任何账户和用户信息
-- **平台管理员（Operator）**：对账户系统具有完全权限
-- **账户调度员（Coordinator）**：对与自身同一账户下的用户以及对自身账户的子账户具有操作权限，包括添加用户
-- **普通用户(None)**： 除了查询功能外不具备其他权限，能够查询与自身同一账户下的信息，不可以修改所有用户和账户信息
+CraneSched has four user privilege levels:
 
-### **主要参数**
+- **Admin (System Administrator)**: Typically the root user, has full permissions to create, read, update, and delete any account or user
+- **Operator (Platform Administrator)**: Has complete permissions over the account system
+- **Coordinator (Account Coordinator)**: Has permissions over users in the same account and child accounts, including adding users
+- **None (Regular User)**: Can only query information within their own account, cannot modify user or account information
 
-- **-h/--help**: 显示帮助
-- **--json** 以 json 格式输出
-- **-C/--config string**： 配置文件路径（默认为"/etc/crane/config.yaml"）
-- **-v/ --version cacctmgr** 命令的版本
+## Command Syntax
 
-### **主要命令**
-
-- **help**：显示帮助
-- **add**: 添加实体（实体包括QoS、账户、用户）
-- **block**：禁用该实体，使其无法使用
-- **delete**：删除实体
-- **modify**：修改实体
-- **show**：显示一类实体的所有记录
-- **unblock**：解除禁用
-- **completion：**自动补全适用于指定 Shell 的脚本
-
-# 1. 添加
-
-## **1.1 添加qos**
-
-### **主要参数**
-
-- **-D/--description string**： qos描述信息
-
-- **-h/--help**： 帮助
-
-- **-c/--max_cpus_per_user uint32**： 默认为10
-
-- **-J/--max_jobs_per_user uint32**
-
-- **-T/--max_time_limit_per_task** **uint**： 以秒为单位的时间（默认3600）
-
-- **-N/--name string**：qos的名称
-
-- **-P/--priority uint32**：默认为1000
-
-  - 例：
-
-  - ```SQL
-    cacctmgr add  qos -N=test-qos -D="test qos"
-    ```
-
-  - ![cacctmgr](../images/cacctmgr/addqos.png)
-
-## 1.**2** **添加账户**
-
-### **主要参数**
-
-- **-Q/--default_qos string**： 账户默认qos
-- **-D/--description string**：账号描述信息
-- **-h/--help**： 帮助
-- **-N/--name string**： 账户的名称
-- **-P/--parent string：**此账户的父账户
-- **-p/--partition strings**： 该账号可以访问的分区列表
-- **-q/--qos_list strings**：账号可以访问的qos列表
-- 例：（添加账户PKU并添加PKU的子账户ComputingCentre）
-
-```SQL
-cacctmgr add account -N=PKU -D=school -p=CPU,GPU -q=test-qos
+```bash
+cacctmgr <ACTION> <ENTITY> [ID] [OPTIONS]
 ```
 
-![cacctmgr](../images/cacctmgr/addaccount.png)
+### Global Options
 
-```SQL
-cacctmgr add account -N=ComputingCentre -D=department -P=PKU
+- **-h, --help**: Display help information
+- **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
+- **-v, --version**: Display cacctmgr version
+- **-J, --json**: Output in JSON format
+- **-f, --force**: Force operation without confirmation
+
+## Actions
+
+- **add**: Create a new account, user, or QoS
+- **delete**: Remove an account, user, or QoS
+- **block**: Block an account or user from using the system
+- **unblock**: Unblock a previously blocked account or user
+- **modify**: Change attributes using SQL-style SET clause
+- **show**: Display information about entities
+- **reset**: Reset user certificate
+
+## Entities
+
+- **account**: User account in the system
+- **user**: Individual user
+- **qos**: Quality of Service settings
+- **transaction**: Transaction log (for show action only)
+
+---
+
+## 1. Account Management
+
+### 1.1 Add Account
+
+**Syntax:**
+```bash
+cacctmgr add account <name> [OPTIONS]
 ```
 
-![cacctmgr](../images/cacctmgr/addaccount2.png)
+**Options:**
+- **Description=<desc>**: Account description
+- **Parent=<parent>**: Parent account name
+- **DefaultQos=<qos>**: Default QoS for the account
+- **Partition=<part1,part2,...>**: Allowed partitions (comma-separated)
+- **QosList=<qos1,qos2,...>**: Allowed QoS list (comma-separated)
+- **Name=<name1,name2,...>**: Batch create multiple accounts (comma-separated)
 
-## 1.**3** **添加用户**
+**Examples:**
 
-系统管理员可以添加任意账户的用户， 账户管理员可以添加同一账号下的新用户。**添加的用户需要先有uid（先使用useradd在linux系统添加该用户）**。
-
-### **主要参数**
-
-- **-A/--account string**： 此用户所属的父账户
-
-- **-c/--coordinate**：设置用户是否为父账号的账户调度员（coordinator）
-
-- **-h/--help**： 帮助
-
-- **-L/--level string**：设置用户权限(none/operator/admin) (默认为 "none")
-
-- **-N/--name string**： 用户的名称
-
-- **-p/--partition strings**： 该用户可以访问的分区列表
-
-  - 例：
-
-  - ```SQL
-    useradd CS
-    ```
-
-  - ```Plaintext
-    cacctmgr add user -N=CS -A=PKU -p=CPU,GPU -L=admin
-    # -p参数指明用户可用分区为CPU和GPU（分区必须同时为父账户PKU的可用分区），分区的allowed_qos_list与default_qos信息不支持指定，默认从父账户PKU中继承
-    ```
-
-  - ![cacctmgr](../images/cacctmgr/adduser.png)
-
-  - ```Plaintext
-    cacctmgr add user -N=lab -A=ComputingCentre
-    # 未指明-p参数，partition与qos信息都从父账户ComputingCentre中继承
-    ```
-
-  - ![cacctmgr](../images/cacctmgr/adduser2.png)
-
-# 2. 删除
-
-## 2.1 **删除用户**
-
-```Plaintext
-cacctmgr delete user -N lab
+Create a simple account:
+```bash
+cacctmgr add account PKU Description="Peking University" Partition=CPU,GPU QosList=normal,high
 ```
 
-![cacctmgr](../images/cacctmgr/deleteuser.png)
-
-## 2.2 **删除账户**
-
-仅系统管理员可以删除账户，删除账户时会检查账户下是否还有子账户或者用户，如果有则不允许删除，防止产生游离的用户，需要将其子账户和用户都设置在新账户下。
-
-```Plaintext
-cacctmgr delete account -N ComputingCentre
+Create a child account:
+```bash
+cacctmgr add account ComputingCentre Description="Computing Center" Parent=PKU
 ```
 
-![cacctmgr](../images/cacctmgr/deleteaccount.png)
-
-## 2**.3 **删除qos
-
-```Plaintext
-cacctmgr delete qos -N test-qos
+Batch create accounts:
+```bash
+cacctmgr add account dept Name=CS,Math,Physics Parent=PKU
 ```
 
-![cacctmgr](../images/cacctmgr/deleteqos.png)
+### 1.2 Delete Account
 
-# 3. 禁用
-
-## 3.1 **阻止用户或账户**
-
-### **主要命令**
-
-- **account**： 阻止账户
-- **user**：阻止账户下的用户
-
-```Plaintext
-cacctmgr block user lab -A=ComputingCentre
+**Syntax:**
+```bash
+cacctmgr delete account <name>
 ```
 
-![cacctmgr](../images/cacctmgr/blockuser.png)
+**Note:** You cannot delete an account that has child accounts or users. Remove them first.
 
-```Plaintext
-cacctmgr block account ComputingCentre
+**Example:**
+```bash
+cacctmgr delete account ComputingCentre
 ```
 
-![cacctmgr](../images/cacctmgr/blockaccount.png)
+### 1.3 Modify Account
 
-# 4. 解禁
-
-## 4.1 解除阻止用户或账户
-
-### **主要命令**
-
-- **account**： 解除阻止账户
-- **user**：解除阻止账户下的用户
-
-```Plaintext
-cacctmgr unblock user lab -A=ComputingCentre
+**Syntax:**
+```bash
+cacctmgr modify account where Name=<account> set <ATTRIBUTE>=<value>
 ```
 
-![cacctmgr](../images/cacctmgr/unlockuser.png)
+**Attributes:**
+- **Description=<desc>**: Set description
+- **DefaultQos=<qos>**: Set default QoS
+- **AllowedPartition=<partitions>**: Set allowed partitions (overwrites)
+- **AllowedPartition+=<partitions>**: Add partitions to allowed list
+- **AllowedPartition-=<partitions>**: Remove partitions from allowed list
+- **AllowedQos=<qos_list>**: Set allowed QoS list (overwrites)
+- **AllowedQos+=<qos_list>**: Add QoS to allowed list
+- **AllowedQos-=<qos_list>**: Remove QoS from allowed list
 
-```Plaintext
-cacctmgr unblock account ComputingCentre
+**Examples:**
+
+Change account description:
+```bash
+cacctmgr modify account where Name=ComputingCentre set Description="HPC Computing Center"
 ```
 
-![cacctmgr](../images/cacctmgr/unlockaccount.png)
-# 5. 查询
-
-## 5.1 **查找用户**
-
-所有用户均可以使用查询功能
-
-```Plaintext
-cacctmgr find user lab
+Add partitions to allowed list:
+```bash
+cacctmgr modify account where Name=PKU set AllowedPartition+=GPU2,GPU3
 ```
 
-![cacctmgr](../images/cacctmgr/finduser.png)
-
-```Plaintext
-cacctmgr find user CS
+Remove partitions from allowed list:
+```bash
+cacctmgr modify account where Name=PKU set AllowedPartition-=GPU
 ```
 
-![cacctmgr](../images/cacctmgr/finduser2.png)
-
-```Bash
-cacctmgr show user
+Set allowed partitions (replace existing):
+```bash
+cacctmgr modify account where Name=PKU set AllowedPartition=CPU,GPU
 ```
 
-![cacctmgr](../images/cacctmgr/showuser.png)
+### 1.4 Show Accounts
 
-## 5.2 **查找账户**
-
-```Plaintext
-cacctmgr find account ComputingCentre
+**Syntax:**
+```bash
+cacctmgr show account [name] [OPTIONS]
 ```
 
-![cacctmgr](../images/cacctmgr/findaccount.png)
+**Options:**
+- **Name=<name1,name2,...>**: Show specific accounts only
 
-```Plaintext
-cacctmgr find account PKU
-```
+**Examples:**
 
-![cacctmgr](../images/cacctmgr/findaccount2.png)
-
-```Bash
+Show all accounts:
+```bash
 cacctmgr show account
 ```
 
-![cacctmgr](../images/cacctmgr/showaccount.png)
-
-## 5.3 **查找qos**
-
-```Plaintext
-cacctmgr find qos test-qos
+Show specific account:
+```bash
+cacctmgr show account PKU
 ```
 
-![cacctmgr](../images/cacctmgr/findqos.png)
+Show multiple accounts:
+```bash
+cacctmgr show account Name=PKU,ComputingCentre
+```
 
-```Bash
+### 1.5 Block/Unblock Account
+
+**Syntax:**
+```bash
+cacctmgr block account <name>
+cacctmgr unblock account <name>
+```
+
+**Examples:**
+
+Block an account:
+```bash
+cacctmgr block account ComputingCentre
+```
+
+Unblock an account:
+```bash
+cacctmgr unblock account ComputingCentre
+```
+
+---
+
+## 2. User Management
+
+### 2.1 Add User
+
+**Syntax:**
+```bash
+cacctmgr add user <name> Account=<account> [OPTIONS]
+```
+
+**Required:**
+- **Account=<account>**: Account the user belongs to (required)
+
+**Options:**
+- **Coordinator=true|false**: Set user as account coordinator
+- **Level=<level>**: User admin level (none/operator/admin, default: none)
+- **Partition=<part1,part2,...>**: Allowed partitions (comma-separated)
+- **Name=<name1,name2,...>**: Batch create multiple users (comma-separated)
+
+**Note:** The user must exist as a Linux system user (create with `useradd` first).
+
+**Examples:**
+
+Create a simple user:
+```bash
+useradd alice
+cacctmgr add user alice Account=PKU
+```
+
+Create user with specific permissions:
+```bash
+useradd bob
+cacctmgr add user bob Account=PKU Level=operator Partition=CPU,GPU
+```
+
+Create user as coordinator:
+```bash
+useradd charlie
+cacctmgr add user charlie Account=PKU Coordinator=true
+```
+
+Batch create users:
+```bash
+useradd user1 && useradd user2 && useradd user3
+cacctmgr add user batch Account=PKU Name=user1,user2,user3
+```
+
+### 2.2 Delete User
+
+**Syntax:**
+```bash
+cacctmgr delete user <name> [Account=<account>]
+```
+
+**Options:**
+- **Account=<account>**: Specify account context (optional)
+- **Name=<name1,name2,...>**: Delete multiple users (comma-separated)
+
+**Special:**
+- If name is `ALL` and `--force` is set, all users from the specified account will be deleted
+
+**Examples:**
+
+Delete a user:
+```bash
+cacctmgr delete user alice
+```
+
+Delete user from specific account:
+```bash
+cacctmgr delete user bob Account=PKU
+```
+
+Delete all users from an account (with force):
+```bash
+cacctmgr delete user ALL Account=PKU --force
+```
+
+### 2.3 Modify User
+
+**Syntax:**
+```bash
+cacctmgr modify user where Name=<user> [Account=<account>] [Partition=<partitions>] set <ATTRIBUTE>=<value>
+```
+
+**Where Clause:**
+- **Name=<user>**: User to modify (required)
+- **Account=<account>**: Account context (optional)
+- **Partition=<partitions>**: Partition context (optional)
+
+**Attributes:**
+- **AdminLevel=<level>**: Set admin level (none/operator/admin)
+- **DefaultAccount=<account>**: Set default account
+- **DefaultQos=<qos>**: Set default QoS
+- **AllowedPartition=<partitions>**: Set allowed partitions (overwrites)
+- **AllowedPartition+=<partitions>**: Add partitions
+- **AllowedPartition-=<partitions>**: Remove partitions
+- **AllowedQos=<qos_list>**: Set allowed QoS (overwrites)
+- **AllowedQos+=<qos_list>**: Add QoS
+- **AllowedQos-=<qos_list>**: Remove QoS
+
+**Examples:**
+
+Change user admin level:
+```bash
+cacctmgr modify user where Name=alice Account=PKU set AdminLevel=operator
+```
+
+Remove partition from user:
+```bash
+cacctmgr modify user where Name=bob set AllowedPartition-=GPU
+```
+
+Add QoS to user:
+```bash
+cacctmgr modify user where Name=charlie set AllowedQos+=high
+```
+
+### 2.4 Show Users
+
+**Syntax:**
+```bash
+cacctmgr show user [name] [OPTIONS]
+```
+
+**Options:**
+- **Accounts=<account>**: Show users of specific account only
+- **Name=<name1,name2,...>**: Show specific users only
+
+**Examples:**
+
+Show all users:
+```bash
+cacctmgr show user
+```
+
+Show specific user:
+```bash
+cacctmgr show user alice
+```
+
+Show users in an account:
+```bash
+cacctmgr show user Accounts=PKU
+```
+
+### 2.5 Block/Unblock User
+
+**Syntax:**
+```bash
+cacctmgr block user <name> Account=<account>
+cacctmgr unblock user <name> Account=<account>
+```
+
+**Required:**
+- **Account=<account>**: Account context is required for user block/unblock
+
+**Examples:**
+
+Block a user:
+```bash
+cacctmgr block user alice Account=PKU
+```
+
+Unblock a user:
+```bash
+cacctmgr unblock user alice Account=PKU
+```
+
+### 2.6 Reset User Certificate
+
+**Syntax:**
+```bash
+cacctmgr reset <name>
+```
+
+**Special:**
+- If name is `all`, all users' certificates will be reset
+
+**Examples:**
+
+Reset single user certificate:
+```bash
+cacctmgr reset alice
+```
+
+Reset all users' certificates:
+```bash
+cacctmgr reset all
+```
+
+---
+
+## 3. QoS Management
+
+### 3.1 Add QoS
+
+**Syntax:**
+```bash
+cacctmgr add qos <name> [OPTIONS]
+```
+
+**Options:**
+- **Description=<desc>**: QoS description
+- **Priority=<priority>**: Priority value (higher = higher priority)
+- **MaxJobsPerUser=<num>**: Maximum concurrent jobs per user
+- **MaxCpusPerUser=<num>**: Maximum CPUs per user
+- **MaxTimeLimitPerTask=<seconds>**: Maximum runtime per task (in seconds)
+- **Name=<name1,name2,...>**: Batch create multiple QoS (comma-separated)
+
+**Examples:**
+
+Create a QoS:
+```bash
+cacctmgr add qos normal Description="Normal QoS" Priority=1000 MaxJobsPerUser=10 MaxCpusPerUser=100
+```
+
+Create high-priority QoS:
+```bash
+cacctmgr add qos high Description="High Priority" Priority=5000 MaxJobsPerUser=20 MaxCpusPerUser=200 MaxTimeLimitPerTask=86400
+```
+
+Batch create QoS:
+```bash
+cacctmgr add qos batch Name=low,medium,high Priority=500
+```
+
+### 3.2 Delete QoS
+
+**Syntax:**
+```bash
+cacctmgr delete qos <name>
+```
+
+**Options:**
+- **Name=<name1,name2,...>**: Delete multiple QoS (comma-separated)
+
+**Example:**
+```bash
+cacctmgr delete qos low
+```
+
+### 3.3 Modify QoS
+
+**Syntax:**
+```bash
+cacctmgr modify qos where Name=<qos> set <ATTRIBUTE>=<value>
+```
+
+**Attributes:**
+- **Description=<desc>**: Set description
+- **MaxCpusPerUser=<num>**: Set max CPUs per user
+- **MaxJobsPerUser=<num>**: Set max jobs per user
+- **MaxTimeLimitPerTask=<seconds>**: Set max time per task (seconds)
+- **Priority=<priority>**: Set priority
+
+**Examples:**
+
+Change QoS priority:
+```bash
+cacctmgr modify qos where Name=normal set Priority=2000
+```
+
+Update resource limits:
+```bash
+cacctmgr modify qos where Name=high set MaxJobsPerUser=50 MaxCpusPerUser=500
+```
+
+### 3.4 Show QoS
+
+**Syntax:**
+```bash
+cacctmgr show qos [name] [OPTIONS]
+```
+
+**Options:**
+- **Name=<name1,name2,...>**: Show specific QoS only
+
+**Examples:**
+
+Show all QoS:
+```bash
 cacctmgr show qos
 ```
 
-![cacctmgr](../images/cacctmgr/showqos.png)
-
-# 6. 修改
-
-## 6.1 **修改账户**
-
-系统管理员可以修改任意信息， 账户管理员可以修改本身账户的信息，但不能更改账户的父账户。
-
-### **主要参数**
-
-- **--add_allowed_partition string**：将新项添加到允许的分区列表
-
-- **--add_allowed_qos_list strings**：将新项添加到允许的qos列表
-
-- **-Q/--default_qos string**： 修改账户默认qos
-
-- **--delete_allowed_partition string**：从允许的分区列表中删除特定项目
-
-- **--delete_allowed_qos_list strings**：从允许的qos列表中删除特定项
-
-- **-D/--description string**：修改账户的描述信息
-
-- **-F/--force**： 强制操作
-
-- **-h/--help**： 帮助
-
-- **-N/--name string**：需要进行修改的账户名称
-
-- **--set_allowed_partition strings**：设置允许的分区列表的内容
-
-- **--set_allowed_qos_list strings**：设置允许的qos列表的内容
-
-  - 例：
-
-  - ```Plaintext
-    cacctmgr modify account -N=ComputingCentre -D="Located in PKU" 
-    ```
-
-  - ![cacctmgr](../images/cacctmgr/modifyaccount.png)
-
-## 6.2 **修改用户**
-
-系统管理员可以修改任意信息， 账户管理员可以修改同账户下用户的信息，但不能更改用户的账户。
-
-### **主要参数**
-
-- **-A/--account string**：设置用户使用的帐号
-
-- **--add_allowed_partition strings**：将新项添加到允许的分区列表
-
-- **--add_allowed_qos_list string**：将新项添加到允许的qos列表
-
-- **-L/--admin_level string**：设置用户管理权限（none/operator/admin）
-
-- **-Q/--default_qos string**： 修改账户默认qos
-
-- **--delete_allowed_partition strings**：从允许的分区列表中删除特定项目
-
-- **--delete_allowed_qos_list string**：从允许的qos列表中删除特定项目
-
-- **-F/--force**： 强制操作
-
-- **-h/--help**： 帮助
-
-- **-N/--name string**：需要进行修改的用户名称
-
-- **-D/--default-account** **string**：修改用户的默认账号
-
-- **-p/--partition string**：被修改的分区，如果不显式设置该参数，默认修改所有分区
-
-- **--set_allowed_partition strings**：设置允许的分区列表的内容
-
-- **--set_allowed_qos_list strings**：设置允许的qos列表的内容
-
-  - 例
-
-    - ```SQL
-      cacctmgr modify user -N=lab -A=ComputingCentre -L=operator --delete-allowed-partition GPU
-      ```
-
-    - ![cacctmgr](../images/cacctmgr/modifyuser.png)
-
-  - ![cacctmgr](../images/cacctmgr/modifyuser2.png)
-
-## 6.3 修改qos
-
-### **主要参数**
-
-- **-D/--description string**：修改qos的描述信息
-- **-h/--help**： 帮助
-- **-c/--max_cpus_per_user uint32**：(默认10)
-- **-J/--max_jobs_per_user uint32**
-- **-T/--max_time_limit_per_task** **uint**：以秒为单位的时间（默认 3600）
-- **-N/--name string**： 需要进行修改的qos名称
-- **-P/--priority uint32**：(默认1000)
-
-# 7**. 显示**
-
-## 7.1 显示**账户树**
-
-系统管理员会显示数据库所有根账户的账户树， 账户管理员和用户会显示本身账户的账户树。
-
-```Plaintext
-cacctmgr show accounts
+Show specific QoS:
+```bash
+cacctmgr show qos normal
 ```
 
-![cacctmgr](../images/cacctmgr/showaccounts.png)
+---
 
-## 7.2 显示用户
+## 4. Transaction Log
 
-系统管理员会显示所有用户， 账户管理员和用户会显示同一账户下的所有用户。
+### 4.1 Show Transaction Log
 
-```Plaintext
-cacctmgr show users
+**Syntax:**
+```bash
+cacctmgr show transaction where [OPTIONS]
 ```
 
-![cacctmgr](../images/cacctmgr/showuser2.png)
+**Where Options:**
+- **Actor=<username>**: Filter by user who performed the action
+- **Target=<target>**: Filter by target entity
+- **Action=<action>**: Filter by action type
+- **Info=<info>**: Filter by additional information
+- **StartTime=<timestamp>**: Filter by start time
+
+**Example:**
+
+Show all transactions:
+```bash
+cacctmgr show transaction
+```
+
+Show transactions by specific user:
+```bash
+cacctmgr show transaction where Actor=admin
+```
+
+Show transactions for a specific account:
+```bash
+cacctmgr show transaction where Target=PKU
+```
+
+---
+
+## Usage Examples
+
+### Complete Workflow Example
+
+```bash
+# 1. Create a QoS policy
+cacctmgr add qos standard Description="Standard Queue" Priority=1000 MaxJobsPerUser=10
+
+# 2. Create root account with partitions and QoS
+cacctmgr add account University Description="University Account" Partition=CPU,GPU QosList=standard
+
+# 3. Create department account under University
+cacctmgr add account CS Description="Computer Science Dept" Parent=University
+
+# 4. Create Linux user
+useradd professor
+
+# 5. Add user to account with coordinator privileges
+cacctmgr add user professor Account=CS Level=operator Coordinator=true
+
+# 6. Create student users
+useradd student1 && useradd student2
+cacctmgr add user batch Account=CS Name=student1,student2
+
+# 7. Limit student1 to CPU partition only
+cacctmgr modify user where Name=student1 Account=CS set AllowedPartition=CPU
+
+# 8. View all users in CS account
+cacctmgr show user Accounts=CS
+
+# 9. Block a user temporarily
+cacctmgr block user student2 Account=CS
+
+# 10. Unblock the user
+cacctmgr unblock user student2 Account=CS
+
+# 11. View transaction history
+cacctmgr show transaction where Actor=professor
+```
+
+### JSON Output Example
+
+Get results in JSON format for scripting:
+```bash
+cacctmgr show account --json
+cacctmgr show user Accounts=PKU --json
+cacctmgr show qos --json
+```
+
+---
+
+## Permission Matrix
+
+| Action | Admin | Operator | Coordinator | User |
+|--------|-------|----------|-------------|------|
+| Add Account | ✓ | ✓ | ✗ | ✗ |
+| Delete Account | ✓ | ✓ | ✗ | ✗ |
+| Modify Account | ✓ | ✓ | Own account | ✗ |
+| Add User | ✓ | ✓ | Same account | ✗ |
+| Delete User | ✓ | ✓ | Same account | ✗ |
+| Modify User | ✓ | ✓ | Same account | ✗ |
+| Add QoS | ✓ | ✓ | ✗ | ✗ |
+| Delete QoS | ✓ | ✓ | ✗ | ✗ |
+| Modify QoS | ✓ | ✓ | ✗ | ✗ |
+| Show (Query) | ✓ | ✓ | ✓ | ✓ (own account) |
+| Block/Unblock | ✓ | ✓ | Same account | ✗ |
+
+---
+
+## Important Notes
+
+1. **Linux User Requirement**: Before adding a user to cacctmgr, the user must exist as a Linux system user (create using `useradd`)
+
+2. **Account Hierarchy**: When deleting accounts, ensure no child accounts or users exist under that account
+
+3. **Inheritance**: Users inherit partition and QoS settings from their parent account unless explicitly overridden
+
+4. **Coordinator Privileges**: Coordinators can manage users within their account but cannot modify their own account's parent
+
+5. **SQL-Style Syntax**: The new syntax uses SQL-like `where` and `set` clauses for modify operations, with `+=` and `-=` operators for list modifications
+
+## See Also
+
+- [cbatch](cbatch.md) - Submit batch jobs
+- [cqueue](cqueue.md) - View job queue
+- [cacct](cacct.md) - View job accounting information

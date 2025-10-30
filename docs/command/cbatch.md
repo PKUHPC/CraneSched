@@ -1,14 +1,16 @@
-# cbatch 提交批处理作业 #
+# cbatch - Submit Batch Job
 
-**cbatch主要是将用户描述整个计算过程的脚本传递给作业调度系统，并为作业分配作业号，等待作业调度系统为其分配资源并执行。**
+**cbatch submits a batch script describing the entire computation process to the job scheduling system, assigns a job ID, and waits for the scheduler to allocate resources and execute it.**
 
-CraneSched系统中必须有用户和账号才能提交作业，添加用户和账户请参考[cacctmgr教程](https://e26ruh1viz.feishu.cn/wiki/wikcn3TaZVHvVsA2Wwk171RVBex)。
+The CraneSched system requires users and accounts before submitting jobs. Please refer to the [cacctmgr tutorial](cacctmgr.md) for adding users and accounts.
 
-首先介绍一个简单的单节点作业的例子:
+## Quick Start
 
-下列作业将申请一个节点，一个CPU核心，并在计算节点上运行hostname并退出
+Here's a simple single-node job example:
 
-~~~bash
+The following job requests one node, one CPU core, and runs `hostname` on the compute node before exiting:
+
+```bash
 #!/bin/bash
 #CBATCH --ntasks-per-node 1
 #CBATCH --nodes 1
@@ -20,167 +22,248 @@ CraneSched系统中必须有用户和账号才能提交作业，添加用户和�
 #CBATCH -J Test_Job
 
 hostname
-~~~
+```
 
-假设上面作业脚本的文件名为cbatch_test.sh，通过cbatch命令提交：
+Assuming the job script is saved as `cbatch_test.sh`, submit it using:
 
-~~~bash
+```bash
 cbatch cbatch_test.sh
-~~~
+```
 
-**cbatch运行结果展示**
+**cbatch Execution Results**
 
 ![cbatch](../images/cbatch/cbatch_run1.png)
 
 ![cbatch](../images/cbatch/cbatch_run2.png)
 
-**主要参数：**
+## Command Line Options
 
-- **-h/--help**: 显示帮助
-- **-A/--account string**：提交作业的账户
-- **-D/--chdir string**：任务工作路径
-- **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
-- **-c/--cpus-per-task** **float**: 每个节点申请的CPU核心数
-- **-e/--error string：**指定脚本错误日志定向路径
-- **-x/--exclude string ：**功能是从分配中排除特定节点（用逗号分隔的列表 ），用于节点分配管控场景，指定不想参与分配的节点。
-  - **--export string ：**作用为传播环境变量，在涉及环境变量传递，让变量在相关任务、作业等执行环境中生效时使用。
-  - **--extra-attr string ：**可设置作业的额外属性（json格式 ），用于给作业附加自定义的属性信息，方便识别、管理等。
-  - **--get-user-env ：**会加载用户的登录环境变量，让作业等执行时能使用用户登录时的环境变量配置。
-  - **--gres string ：**指定每个任务所需的通用资源，格式如 gpu:a100:1（指定使用 1 块 a100 型号 GPU ）或 gpu:1（指定使用 1 块 GPU ，不限具体型号 ），用于 GPU 等资源分配场景。
-- **-J/--job-name string**：作业名
-  - **--json**：以 JSON 格式输出
-  - **--mail-type string：**当特定事件发生时，向用户发送邮件通知，支持的值有：无（NONE）、开始（BEGIN）、结束（END）、失败（FAIL）、达到时间限制（TIMELIMIT）、所有事件（ALL）（默认是无（NONE) ）
-  - **--mail-user string：**通知接收者的邮件地址
-  - **--mem string：**最大实际内存量，支持 GB（G，g）、MB（M，m）、KB（K，k）和字节（B）为单位，默认单位是 MB
-- **-w/--nodelist string ：**要分配给作业的节点（逗号分隔的列表 ）
-- **-N/--nodes uint32 ：**作业要运行的节点数量（格式 N = min[-max] ，默认 1 ）
-  - **--ntasks-per-node uint32 ：**每个节点要调用的任务数量（默认 1 ）
-  - **--open-mode string ：**设置打开输出和错误文件的模式，支持的值：append（追加 ）、truncate（截断 ，默认 ）
-- **-o/ --output** **string** ：脚本标准输出的重定向路径
-- **-p/ --partition string** ：请求的分区
-- **-q/--qos** **string** ：作业使用的服务质量（QoS ）
-  - **--repeat uint32** ：多次提交作业（默认 1 ）
-- **-r/--reservation string ：**使用预留资源
-- **-t /--time string ：**时间限制 ，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示 5 天 1 秒 ）或 "hours:minutes:seconds"（如 10:1:2 表示 10 小时 1 分钟 2 秒 ）
-- **-v /--version ：**cbatch 的版本
-  - **--wrap string ：**将命令字符串包装到 sh 脚本中并提交
+### Resource Specifications
+- **-N, --nodes uint32**: Number of nodes to run the job (default: 1)
+- **-c, --cpus-per-task float**: Number of CPU cores required per task (default: 1)
+- **--ntasks-per-node uint32**: Number of tasks to invoke on each node (default: 1)
+- **--mem string**: Maximum amount of real memory. Supports GB (G, g), MB (M, m), KB (K, k) and Bytes (B), default unit is MB
+- **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
 
-例：
+### Job Information
+- **-J, --job-name string**: Name of the job
+- **-A, --account string**: Account for job submission
+- **-p, --partition string**: Requested partition
+- **-q, --qos string**: Quality of Service (QoS) used for the job
+- **-t, --time string**: Time limit, format: `day-hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days, 1 second) or `hours:minutes:seconds` (e.g., `10:1:2` for 10 hours, 1 minute, 2 seconds)
+- **--comment string**: Comment for the job
 
-```Plain
+### Node Selection
+- **-w, --nodelist string**: Nodes to be allocated to the job (comma separated list)
+- **-x, --exclude string**: Exclude specific nodes from allocation (comma separated list)
+
+### I/O Redirection
+- **-o, --output string**: Redirect script standard output path
+- **-e, --error string**: Redirect script error log path
+- **--open-mode string**: Mode for opening output and error files. Supported values: `append`, `truncate` (default)
+
+### Environment Variables
+- **--get-user-env**: Load user's login environment variables
+- **--export string**: Propagate environment variables
+
+### Scheduling Options
+- **--begin string**: Start time for the job. Format: `YYYY-MM-DDTHH:MM:SS`
+- **--exclusive**: Request exclusive node resources
+- **-H, --hold**: Submit job in held state
+- **-r, --reservation string**: Use reserved resources
+
+### Email Notifications
+- **--mail-type string**: Notify user by mail when certain events occur. Supported values: `NONE`, `BEGIN`, `END`, `FAIL`, `TIMELIMIT`, `ALL` (default: `NONE`)
+- **--mail-user string**: Mail address of notification receiver
+
+### Container Support
+- **--container string**: Path to container image
+- **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
+
+### Miscellaneous
+- **-D, --chdir string**: Working directory of the job
+- **--extra-attr string**: Extra attributes of the job (JSON format)
+- **--repeat uint32**: Submit job multiple times (default: 1)
+- **--wrap string**: Wrap command string in a shell script and submit
+- **--json**: Output in JSON format
+- **-C, --config string**: Path to configuration file (default: `/etc/crane/config.yaml`)
+- **-h, --help**: Display help information
+- **-v, --version**: Display cbatch version
+
+## Usage Examples
+
+### Basic Job Submission
+
+Submit a batch script:
+```bash
 cbatch cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_test.png)
 
-```Plain
+### Help Information
+
+Display help:
+```bash
 cbatch -h
 ```
 ![cbatch](../images/cbatch/cbatch_h.png)
 
-```Plain
+### Specify Account
+
+Submit job with a specific account:
+```bash
 cbatch -A=acct-test cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_A1.png)
 ![cbatch](../images/cbatch/cbatch_A2.png)
 
-```Plain
+### Node Exclusion
+
+Exclude nodes from allocation:
+```bash
 cbatch -x crane01,crane02 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_x1.png)
 ![cbatch](../images/cbatch/cbatch_x2.png)
 
-```Plain
+### Job Name
+
+Specify job name:
+```bash
 cbatch -J testjob01 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_j1.png)
 ![cbatch](../images/cbatch/cbatch_j2.png)
 
-```Plain
+### Node Selection
+
+Request specific nodes:
+```bash
 cbatch -w crane01,crane03 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_w1.png)
 ![cbatch](../images/cbatch/cbatch_w2.png)
 
-```Plain
+### Partition Selection
+
+Submit to specific partition:
+```bash
 cbatch -p GPU cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_p1.png)
 ![cbatch](../images/cbatch/cbatch_p2.png)
 
-```Plain
+### Time Limit
+
+Set time limit:
+```bash
 cbatch -t 00:25:25 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_t1.png)
 ![cbatch](../images/cbatch/cbatch_t2.png)
 
-```C
+### CPU Cores
+
+Request specific number of CPU cores:
+```bash
 cbatch -c 2 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_c1.png)
 ![cbatch](../images/cbatch/cbatch_c2.png)
 ![cbatch](../images/cbatch/cbatch_c3.png)
 
-```C
+### Memory Specification
+
+Specify memory requirements:
+```bash
 cbatch --mem 123M cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_mem1.png)
 ![cbatch](../images/cbatch/cbatch_mem2.png)
 ![cbatch](../images/cbatch/cbatch_mem3.png)
 
-```C
+### Multi-node Jobs
+
+Request multiple nodes with tasks per node:
+```bash
 cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_N1.png)
 ![cbatch](../images/cbatch/cbatch_N2.png)
 ![cbatch](../images/cbatch/cbatch_N3.png)
 
-```Bash
+### Working Directory
+
+Specify working directory:
+```bash
 cbatch -D /path test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_D1.png)
 
-```Bash
+### Error Log
+
+Redirect error output:
+```bash
 cbatch -e error.log test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_e.png)
 
-```Bash
+### Environment Variables
+
+Export all environment variables:
+```bash
 cbatch --export ALL test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_export.png)
 
-```Bash
+### User Environment
+
+Load user's login environment:
+```bash
 cbatch --get-user-env test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_get_user.png)
 
-```Bash
+### Output Redirection
+
+Redirect standard output:
+```bash
 cbatch -o output.out test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_o.png)
 
-```Bash
+### Quality of Service
+
+Specify QoS:
+```bash
 cbatch -q qos_test test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_q.png)
 
-```Bash
+### Repeat Submission
+
+Submit job multiple times:
+```bash
 cbatch --repeat 3 test.sh
 ```
 ![cbatch](../images/cbatch/cbatch_repeat.png)
 
-#### 常用环境变量
+## Environment Variables
 
-| 变量名                 | 说明               |
-| ---------------------- | ------------------ |
-| **CRANE_JOB_NODELIST** | 作业分配的节点列表 |
-| **%j**                 | 作业号             |
+Common environment variables available in batch scripts:
 
-**下面介绍提交一个跨节点多核心的例子：**
+| Variable | Description |
+|----------|-------------|
+| **CRANE_JOB_NODELIST** | List of allocated nodes |
+| **%j** | Job ID (for use in file patterns) |
 
-c下列作业将在三个节点上运行，每个节点使用4个CPU核心。
+## Multi-node Parallel Jobs
 
-```Plaintext
+Here's an example of submitting a multi-node, multi-core job:
+
+The following job runs on three nodes, using 4 CPU cores per node:
+
+```bash
 #!/bin/bash
 #CBATCH -o crane_test%j.out
 #CBATCH -p CPU
@@ -190,12 +273,65 @@ c下列作业将在三个节点上运行，每个节点使用4个CPU核心。
 #CBATCH -c 4
 #CBATCH --time 50:00:00
 
-# 生成作业分配的节点的machinefile
+# Generate machine file from allocated nodes
 echo "$CRANE_JOB_NODELIST" | tr ";" "\n" > crane.hosts
 
-#加载MPI运行环境
+# Load MPI runtime environment
 module load mpich/4.0 
 
-#执行跨节点并行任务
+# Execute cross-node parallel task
 mpirun -n 13 -machinefile crane.hosts helloWorld > log
 ```
+
+## Advanced Features
+
+### Container Support
+
+Submit a job that runs in a container:
+```bash
+cbatch --container /path/to/container.sif my_script.sh
+```
+
+### Delayed Start
+
+Schedule a job to start at a specific time:
+```bash
+cbatch --begin 2024-12-31T23:00:00 my_script.sh
+```
+
+### Held Jobs
+
+Submit a job in held state:
+```bash
+cbatch --hold my_script.sh
+```
+
+Release the held job using `ccontrol release <job_id>`.
+
+### Email Notifications
+
+Receive email notifications:
+```bash
+cbatch --mail-type=ALL --mail-user=user@example.com my_script.sh
+```
+
+### JSON Output
+
+Get submission result in JSON format:
+```bash
+cbatch --json my_script.sh
+```
+
+### Wrap Command
+
+Submit a simple command without creating a script file:
+```bash
+cbatch --wrap "echo Hello && sleep 10 && echo Done"
+```
+
+## See Also
+
+- [cqueue](cqueue.md) - View job queue
+- [ccancel](ccancel.md) - Cancel jobs
+- [cacct](cacct.md) - View job accounting information
+- [ccontrol](ccontrol.md) - Control jobs and system resources

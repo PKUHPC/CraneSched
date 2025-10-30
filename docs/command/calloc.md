@@ -1,100 +1,235 @@
-# calloc 提交交互式任务
+# calloc - Allocate Resources and Create Interactive Shell
 
-calloc 使用命令行指定的参数申请资源，任务启动时，会进入新的用户终端，用户需要自行登陆到计算节点并启动任务。calloc需要在有cfored运行的节点上启动。
+**calloc allocates resources using command-line specified parameters and creates a new interactive shell on the allocated compute nodes.**
 
-calloc 只支持通过命令行指定请求参数，支持的命令行选项：
+calloc must be started on a node where `cfored` is running. When the task starts, it enters a new user terminal where you can directly work on the compute node.
 
-- **-h/--help**: 显示帮助
-- **-A/--account string**：提交作业的账户
-- **-D/--chdir string**：任务工作路径
-- **-C/--config string**：配置文件路径(默认 "/etc/crane/config.yaml")
-- **-c/--cpus-per-task** **float**: 每个节点申请的CPU核心数
-  - **--debug-level string：**可用的调试级别：trace（跟踪）、debug（调试）、info（信息，默认值为 “info” ）
-- **-x/--exclude string：**从分配中排除特定节点（以逗号分隔的列表 ）
-  - **--export string：**传播环境变量 
-  - **--extra-attr string：**作业的额外属性（JSON 格式 ）
-  - **--get-user-env：**加载用户的登录环境变量 
-  - **--gres string：**每个任务所需的通用资源（Gres），格式：“gpu:a100:1” 或 “gpu:1” 
-- **-J/--job-name string：**作业名称 
-  - **--mail-type string：**当特定事件发生时通过邮件通知用户，支持的值：NONE（无）、BEGIN（开始）、END（结束）、FAIL（失败）、TIMELIMIT（达到时间限制）、ALL（所有，默认值为 NONE ） 
-  - **--mail-user string：**通知接收者的邮件地址 
-  - **--mem string：**最大实际内存量，支持 GB（G，g）、MB（M，m）、KB（K，k）和 Bytes（B）为单位，默认单位是 MB 
-- **-w/--nodelist string：**要分配给作业的节点（以逗号分隔的列表 ）
-- **-N/--nodes uint32：**要在其上运行作业的节点数量（默认值为 1 ）
-  - **--ntasks-per-node uint32：**在每个节点上要调用的任务数量（默认值为 1 ）
-- -**p/--partition string**：请求的分区 
-- **-q/ --qos string：**作业使用的服务质量（QoS ） 
-- **-r/ --reservation string：**使用预留资源 
-- **-t/ --time string：**时间限制，格式：“day - hours:minutes:seconds”（如 5 - 0:0:1 表示 5 天 1 秒 ）或 “hours:minutes:seconds”（如 10:1:2 表示 10 小时 1 分钟 2 秒 ） 
-- **-v/ --version**：calloc 命令的版本 
-- 例：
+!!! tip
+    Exiting the calloc shell will terminate the allocation and release the resources.
 
-```Plain
+## Command Line Options
+
+### Resource Specifications
+- **-N, --nodes uint32**: Number of nodes to allocate (default: 1)
+- **-c, --cpus-per-task float**: Number of CPU cores per task (default: 1)
+- **--ntasks-per-node uint32**: Number of tasks per node (default: 1)
+- **--mem string**: Maximum memory per node. Supports GB (G, g), MB (M, m), KB (K, k), and Bytes (B), default unit is MB
+- **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
+
+### Job Information
+- **-J, --job-name string**: Job name
+- **-A, --account string**: Account for job submission
+- **-p, --partition string**: Requested partition
+- **-q, --qos string**: Quality of Service (QoS) for the job
+- **-t, --time string**: Time limit, format: `day-hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days, 1 second) or `hours:minutes:seconds` (e.g., `10:1:2` for 10 hours, 1 minute, 2 seconds)
+- **--comment string**: Job comment
+
+### Node Selection
+- **-w, --nodelist string**: Nodes to allocate (comma-separated list)
+- **-x, --exclude string**: Exclude specific nodes from allocation (comma-separated list)
+
+### Environment Variables
+- **--get-user-env**: Load user's login environment variables
+- **--export string**: Propagate environment variables
+
+### Scheduling Options
+- **--exclusive**: Request exclusive node resources
+- **-H, --hold**: Submit job in held state
+- **-r, --reservation string**: Use reserved resources
+
+### Email Notifications
+- **--mail-type string**: Notify user by mail when certain events occur. Supported values: `NONE`, `BEGIN`, `END`, `FAIL`, `TIMELIMIT`, `ALL` (default: `NONE`)
+- **--mail-user string**: Mail address of notification receiver
+
+### Miscellaneous
+- **-D, --chdir string**: Working directory of the job
+- **--extra-attr string**: Extra attributes of the job (JSON format)
+- **--debug-level string**: Debug level: `trace`, `debug`, `info` (default: `info`)
+- **-C, --config string**: Configuration file path (default: `/etc/crane/config.yaml`)
+- **-h, --help**: Display help information
+- **-v, --version**: Display calloc version
+
+## Usage Examples
+
+### Help Information
+
+Display help:
+```bash
 calloc -h
 ```
-
 ![calloc](../images/calloc/calloc_h.png)
 
-退出calloc新启动的终端将结束任务。
+### Basic Resource Allocation
 
-- 例：在CPU分区，申请两个节点，一个CPU核心，200M内存
-
-```C
-calloc -c 1 --mem 200M -p CPU -N 2 
+Allocate 2 nodes with 1 CPU core and 200M memory in CPU partition:
+```bash
+calloc -c 1 --mem 200M -p CPU -N 2
 ```
 
-运行结果：
+**Result:**
 
 ![calloc](../images/calloc/calloc_c1.png)
-
 ![calloc](../images/calloc/calloc_c2.png)
-- 例：在GPU分区下，申请一个节点，每个节点上运行两个任务，申请节点的候选列表为crane02,crane03，且任务提交在acct-yan账户下
 
-```C
+### Specify Account and Node List
+
+Allocate 1 node in GPU partition with 2 tasks per node, using specific account and node list:
+```bash
 calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
 ```
 
-运行结果：
+**Result:**
 
 ![calloc](../images/calloc/calloc_A1.png)
-
 ![calloc](../images/calloc/calloc_A2.png)
 
-- 例：在CPU分区下，申请200M内存，任务运行最长时间为25分钟25秒，且任务运行在test-qos下
+### Time Limit and QoS
 
-```C
+Allocate resources with time limit and specific QoS:
+```bash
 calloc --mem 200M -p CPU -q test-qos -t 00:25:25
 ```
 
 ![calloc](../images/calloc/calloc_mem1.png)
 ![calloc](../images/calloc/calloc_mem2.png)
 
-```Bash
+### Working Directory
+
+Specify working directory:
+```bash
 calloc -D /path
 ```
 
 ![calloc](../images/calloc/calloc_D.png)
 
-```Bash
+### Debug Level
+
+Set debug level to trace:
+```bash
 calloc --debug-level trace
 ```
 
 ![calloc](../images/calloc/calloc_debug.png)
 
-```Bash
+### Exclude Nodes
+
+Exclude specific nodes from allocation:
+```bash
 calloc -x cranetest02
 ```
 
 ![calloc](../images/calloc/calloc_x.png)
 
-```Bash
+### User Environment
+
+Load user's login environment:
+```bash
 calloc --get-user-env
 ```
 
 ![calloc](../images/calloc/calloc_get_user.png)
 
-```Bash
+### Job Name
+
+Specify job name:
+```bash
 calloc -J job_name
 ```
 
 ![calloc](../images/calloc/calloc_j.png)
+
+## Advanced Features
+
+### Exclusive Nodes
+
+Request exclusive access to nodes:
+```bash
+calloc --exclusive -N 2 -p CPU
+```
+
+### Held Job
+
+Submit job in held state (requires manual release):
+```bash
+calloc --hold -N 1 -p GPU
+```
+
+Release the job later using `ccontrol release <job_id>`.
+
+### Use Reservation
+
+Allocate resources from a reservation:
+```bash
+calloc -r my_reservation -N 2
+```
+
+### Email Notifications
+
+Receive email notifications for job events:
+```bash
+calloc --mail-type=ALL --mail-user=user@example.com -N 1 -p CPU
+```
+
+### GPU Allocation
+
+Allocate GPU resources:
+```bash
+calloc --gres=gpu:a100:2 -N 1 -p GPU
+```
+
+## Interactive Usage
+
+Once calloc allocates resources, you'll be placed in a new shell on the allocated compute node(s). You can:
+
+1. **Run commands directly** on the compute nodes
+2. **Access all allocated nodes** via SSH
+3. **Use environment variable** `CRANE_JOB_NODELIST` to see allocated nodes
+4. **Run parallel tasks** across allocated nodes
+
+**Example session:**
+```bash
+# Start allocation
+$ calloc -N 2 -c 4 -p CPU
+
+# Now in the allocated shell
+$ hostname
+crane01
+
+$ echo $CRANE_JOB_NODELIST
+crane01;crane02
+
+# Run commands on all nodes
+$ for node in crane01 crane02; do ssh $node hostname; done
+crane01
+crane02
+
+# Exit to release resources
+$ exit
+```
+
+## Important Notes
+
+1. **cfored Requirement**: calloc must be run on a node where `cfored` is running
+
+2. **Resource Release**: Exiting the calloc shell will automatically terminate the job and release all allocated resources
+
+3. **Interactive Nature**: Unlike `cbatch`, calloc provides an interactive shell for immediate work
+
+4. **Node Access**: You have SSH access to all allocated nodes during the allocation
+
+5. **Nested Execution**: You can run `crun` within a calloc allocation to inherit its resources
+
+## Comparison with Other Commands
+
+| Command | Type | Usage |
+|---------|------|-------|
+| **calloc** | Interactive allocation | Get a shell on compute nodes |
+| **crun** | Interactive execution | Run a specific program interactively |
+| **cbatch** | Batch submission | Submit a script for later execution |
+
+## See Also
+
+- [crun](crun.md) - Run interactive tasks
+- [cbatch](cbatch.md) - Submit batch jobs
+- [cqueue](cqueue.md) - View job queue
+- [ccancel](ccancel.md) - Cancel jobs

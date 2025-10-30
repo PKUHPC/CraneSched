@@ -1,171 +1,276 @@
-# cacct 查看作业信息
+# cacct - View Job Accounting Information
 
-**cacct可以查看队列中的作业信息。**
+**cacct displays accounting information for jobs in the cluster.**
 
-查看集群中所有队列的作业信息（包括所有状态），默认输出100条信息。
+View all job information in the cluster (all states), displaying up to 100 entries by default.
 
-```Bash
+```bash
 cacct
 ```
 
-**cacct运行结果展示**
+**cacct Execution Results**
 
-![cacctmgr](../images/cacct/cacct.png)
+![cacct](../images/cacct/cacct.png)
 
-**主要输出项**
+## Output Fields
 
-- **TaskId**：作业号
-- **TaskName**: 作业名
-- **Partition**：作业所在分区
-- **Account**：作业所属账户
-- **AllocCPUs**：作业分配的CPU数量
-- **State**：作业状态
-- **ExitCode**：作业状态码
+- **TaskId**: Job ID
+- **TaskName**: Job name
+- **Partition**: Job partition
+- **Account**: Job account
+- **AllocCPUs**: Number of allocated CPUs
+- **State**: Job state
+- **ExitCode**: Job exit code (see [Exit Code reference](../reference/exit_code.md))
 
-#### **主要参数**
+## Command Line Options
 
-- **-A/--account string**：指定查询作业的所属账户，指定多个账户时用逗号隔开
-- **-C/--config string：**配置文件路径(默认为 "/etc/crane/config.yaml")
-- **-E/--end-time string**：指定查询该时间之前结束的作业，例：cacct -E=~2023-03-14T10:00:00
-- **-o/--format string：**指定输出格式。由百分号（%）后接一个字符或字符串标识。 在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符或字符串（不区分大小写）：
-  - **%a/%Account：** 显示作业关联的账户
-  - **%c/%AllocCpus：**显示作业已分配的 CPU 数量
-  - **%e/%CpuPerNode：**显示作业每个节点请求的 CPU 数量
-  - **%h/%ElapsedTime：**显示作业自启动以来的已用时间
-  - **%j/%JobId：**显示作业 ID
-  - **%k/%Comment：**显示作业的备注
-  - **%l/%NodeList：**显示作业正在运行的节点列表
-  - **%m/%TimeLimit：**显示作业的时间限制
-  - **%n/%MemPerNode：**显示作业每个节点请求的内存量
-  - **%N/%NodeNum：**显示作业请求的节点数量
-  - **%n/%Name：**显示作业名称
-  - **%P/%Partition：**显示作业运行所在的分区
-  - **%p/%Priority：**显示作业的优先级
-  - **%Q/%QOS**：显示作业的服务质量（QoS）级别
-  - **%R/%Reason：**显示作业挂起的原因
-  - **%r/%ReqNodes：**显示作业请求的节点
-  - **%S/%StartTime：**显示作业的开始时间
-  - **%s/%SubmitTime：**显示作业的提交时间
-  - **%t/%State：**显示作业的当前状态
-  - **%T/%JobType：**显示作业类型
-  - **%u/%Uid**：**显示作业的 UID
-  - **%U/%User：**显示提交作业的用户
-  - **%x/%ExcludeNodes：**显示作业排除的节点
-  - 每个格式标识符或字符串可用宽度说明符修改（如 "%.5j" ）。 若指定宽度，则会被格式化为至少达到该宽度。 若格式无效或无法识别，程序会报错并终止。 
-    - **例：--format "%.5j %.20n %t"** 会输出作业 ID（最小宽度 5）、名称（最小宽度 20）和状态。
-- **-F/-full**：显示完整信息
-- **-h/--help**: 显示帮助
-- **-j/--job string**：指定查询作业号，指定多个作业号时用逗号隔开。如 -j=2,3,4
-  - **--json**：json格式输出命令执行结果
-- **-m/--max-lines** **uint32**：指定输出结果的最大条数。如-m=500表示最多输出500行查询结果
-- **-n/ --name string**：指定查询作业名，指定多个作业名时用逗号隔开
-- **-N/--no header**：输出隐藏表头
-- **-p/--partition string**：指定要查看的分区，多个分区名用逗号隔开，默认为全部
-- **-q/--qos string**：指定要查看的Qos，多个Qos用逗号隔开，默认为全部
-- **-S/--start-time string**：筛选开始时间在特定时间段内的作业，可使用闭区间（时间格式：2024-01-02T15:04:05~2024-01-11T11:12:41 ）或半开区间（时间格式：2024-01-02T15:04:05~ 或 ~2024-01-11T11:12:41 ）
-- **-t/--state string**：指定要查看的作业状态，支持的状态：pending(p)（挂起 ）、running(r)（运行中 ）、completed(c)（已完成 ）、failed(f)（失败 ）、cancelled(x)（已取消 ）、time-limit-exceeded(t)（超时 ）、all（所有 ）。（默认 “all” ）
-- **-s/--submit-time string**：筛选提交时间在特定时间段内的作业，可使用闭区间（时间格式：2024-01-02T15:04:05~2024-01-11T11:12:41 ）或半开区间（时间格式：2024-01-02T15:04:05~ 或 ~2024-01-11T11:12:41 ）
-- **-u/--user string**：指定查询某个用户的作业，指定多个用户时用逗号隔开
-- **-v/--version：**查询版本号
-- 例：
+### Filtering Options
+- **-j, --job string**: Specify job IDs to query, multiple IDs separated by commas (e.g., `-j=2,3,4`)
+- **-n, --name string**: Specify job names to query, multiple names separated by commas
+- **-u, --user string**: Specify user(s) whose jobs to query, multiple users separated by commas
+- **-A, --account string**: Specify account(s) to query, multiple accounts separated by commas
+- **-p, --partition string**: Specify partition(s) to view, multiple partitions separated by commas (default: all)
+- **-q, --qos string**: Specify QoS to view, multiple QoS separated by commas (default: all)
 
-```SQL
+### Time Range Filtering
+- **-s, --submit-time string**: Filter jobs by submission time range. Supports closed interval (format: `2024-01-02T15:04:05~2024-01-11T11:12:41`) or half-open interval (format: `2024-01-02T15:04:05~` or `~2024-01-11T11:12:41`)
+- **-S, --start-time string**: Filter jobs by start time range. Same format as submit-time
+- **-E, --end-time string**: Filter jobs by end time. Format: `~2023-03-14T10:00:00` for jobs ending before the specified time
+
+### State Filtering
+- **-t, --state string**: Specify job state(s) to view. Supported states:
+  - `pending` or `p`: Pending jobs
+  - `running` or `r`: Running jobs
+  - `completed` or `c`: Completed jobs
+  - `failed` or `f`: Failed jobs
+  - `cancelled` or `x`: Cancelled jobs
+  - `time-limit-exceeded` or `t`: Jobs that exceeded time limit
+  - `all`: All states (default)
+
+### Output Formatting
+- **-o, --format string**: Specify output format using format specifiers starting with `%`. A width specifier can be added between `%` and the format character using a dot (`.`) and number. Supported format specifiers (case-insensitive):
+  - **%a / %Account**: Display job account
+  - **%c / %AllocCpus**: Display allocated CPU count
+  - **%e / %ExitCode**: Display job exit code (special format: exitcode[:signal])
+  - **%h / %ElapsedTime**: Display elapsed time since job start
+  - **%j / %JobId**: Display job ID
+  - **%k / %Comment**: Display job comment
+  - **%l / %NodeList**: Display list of nodes running the job
+  - **%m / %TimeLimit**: Display job time limit
+  - **%n / %MemPerNode**: Display requested memory per node
+  - **%N / %NodeNum**: Display number of requested nodes
+  - **%n / %Name**: Display job name
+  - **%P / %Partition**: Display job partition
+  - **%p / %Priority**: Display job priority
+  - **%Q / %QOS**: Display Quality of Service (QoS) level
+  - **%R / %Reason**: Display reason for job pending
+  - **%r / %ReqNodes**: Display requested nodes
+  - **%S / %StartTime**: Display job start time
+  - **%s / %SubmitTime**: Display job submission time
+  - **%t / %State**: Display current job state
+  - **%T / %JobType**: Display job type
+  - **%u / %Uid**: Display job UID
+  - **%U / %User**: Display user who submitted the job
+  - **%x / %ExcludeNodes**: Display excluded nodes
+  - Width specification: `%.5j` (right-aligned, min width 5) or `%5j` (left-aligned, min width 5)
+  - Example: `--format "%.5j %.20n %t"` outputs job ID (min width 5), name (min width 20), and state
+
+### Display Options
+- **-F, --full**: Display full information (no field truncation)
+- **-N, --no-header**: Hide table header in output
+- **-m, --max-lines uint32**: Specify maximum number of output lines (e.g., `-m=500` for max 500 lines)
+- **--json**: Output in JSON format
+
+### Miscellaneous
+- **-C, --config string**: Path to configuration file (default: `/etc/crane/config.yaml`)
+- **-h, --help**: Display help information
+- **-v, --version**: Display version number
+
+## Usage Examples
+
+### Basic Query
+
+View all jobs:
+```bash
 cacct
 ```
+![cacct](../images/cacct/cacct.png)
 
-![cacctmgr](../images/cacct/cacct.png)
+### Help Information
 
-```SQL
+Display help:
+```bash
 cacct -h
 ```
+![cacct](../images/cacct/h.png)
 
-![cacctmgr](../images/cacct/h.png)
+### Hide Header
 
-```SQL
+Output without header:
+```bash
 cacct -N
 ```
+![cacct](../images/cacct/N.png)
 
-![cacctmgr](../images/cacct/N.png)
+### Time Range Filtering
 
-```SQL
+Filter by start time range:
+```bash
 cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
+![cacct](../images/cacct/S.png)
 
-![cacctmgr](../images/cacct/S.png)
-
-```SQL
+Filter by end time range:
+```bash
 cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
+![cacct](../images/cacct/E.png)
 
-![cacctmgr](../images/cacct/E.png)
+### Job ID Filtering
 
-```SQL
+Query specific job IDs:
+```bash
 cacct -j=30618,30619,30620
 ```
+![cacct](../images/cacct/j.png)
 
-![cacctmgr](../images/cacct/j.png)
+### User Filtering
 
-```SQL
+Query jobs by user:
+```bash
 cacct -u=cranetest
 ```
+![cacct](../images/cacct/u.png)
 
-![cacctmgr](../images/cacct/u.png)
+### Account Filtering
 
-```SQL
+Query jobs by account:
+```bash
 cacct -A=CraneTest
 ```
+![cacct](../images/cacct/A.png)
 
-![cacctmgr](../images/cacct/A.png)
+### Limit Output Lines
 
-```SQL
+Limit to 10 lines:
+```bash
 cacct -m=10
 ```
+![cacct](../images/cacct/m.png)
 
-![cacctmgr](../images/cacct/m.png)
+### Partition Filtering
 
-```C
+Query jobs in specific partition:
+```bash
 cacct -p GPU
 ```
+![cacct](../images/cacct/p.png)
 
-![cacctmgr](../images/cacct/p.png)
+### Job Name Filtering
 
-```C
+Query by job name:
+```bash
 cacct -n=Test_Job
 ```
+![cacct](../images/cacct/nt.png)
 
-![cacctmgr](../images/cacct/nt.png)
+### Custom Format
 
-```SQL
+Specify custom output format:
+```bash
 cacct -o="%j %.10n %P %a %t"
 ```
+![cacct](../images/cacct/o.png)
 
-![cacctmgr](../images/cacct/o.png)
-```Bash
+### Combined Filters
+
+Combine account and max-lines:
+```bash
 cacct -A ROOT -m 10
 ```
+![cacct](../images/cacct/am.png)
 
-![cacctmgr](../images/cacct/am.png)
-
-```Bash
+Multiple filters with full output:
+```bash
 cacct -m 10 -j 783925,783889 -t=c -F
 ```
+![cacct](../images/cacct/mj.png)
 
-![cacctmgr](../images/cacct/mj.png)
-
-```Bash
+Query by name:
+```bash
 cacct -n test
 ```
+![cacct](../images/cacct/ntest.png)
 
-![cacctmgr](../images/cacct/ntest.png)
-
-
-```Bash
+Query by QoS:
+```bash
 cacct -q test_qos
 ```
+![cacct](../images/cacct/qt.png)
 
-![cacctmgr](../images/cacct/qt.png)
-```Bash
+Complex combined query:
+```bash
 cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T110:00:00 -p CPU -t c
 ```
+![cacct](../images/cacct/me.png)
 
-![cacctmgr](../images/cacct/me.png)
+## Advanced Features
+
+### JSON Output
+
+Get results in JSON format for parsing:
+```bash
+cacct --json -j 12345
+```
+
+### Time Range Queries
+
+Query jobs submitted in a specific time range:
+```bash
+cacct -s=2024-01-01T00:00:00~2024-01-31T23:59:59
+```
+
+Query jobs that started after a specific time:
+```bash
+cacct -S=2024-01-15T00:00:00~
+```
+
+Query jobs that ended before a specific time:
+```bash
+cacct -E=~2024-01-31T23:59:59
+```
+
+### State Filtering Examples
+
+View only completed jobs:
+```bash
+cacct -t completed
+```
+
+View failed and cancelled jobs:
+```bash
+cacct -t failed,cancelled
+```
+
+View jobs that exceeded time limit:
+```bash
+cacct -t time-limit-exceeded
+```
+
+### Format Specification Details
+
+The format string supports width control:
+- `%5j` - Left-aligned, minimum width 5
+- `%.5j` - Right-aligned, minimum width 5
+
+Example with multiple width specifications:
+```bash
+cacct -o="%.8j %20n %-10P %.15U %t"
+```
+
+## See Also
+
+- [cqueue](cqueue.md) - View job queue (current/pending jobs)
+- [cbatch](cbatch.md) - Submit batch jobs
+- [ccancel](ccancel.md) - Cancel jobs
+- [ceff](ceff.md) - View job efficiency statistics

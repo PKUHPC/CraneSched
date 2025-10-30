@@ -1,0 +1,30 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Markdown files should always use LF
+*.md text eol=lf
+
+# YAML files should always use LF
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Shell scripts should always use LF
+*.sh text eol=lf
+
+# CMake files should always use LF
+CMakeLists.txt text eol=lf
+*.cmake text eol=lf
+
+# C/C++ source files should always use LF
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.cc text eol=lf
+*.cxx text eol=lf
+
+# Protocol buffer files should always use LF
+*.proto text eol=lf
+
+# Python files should always use LF
+*.py text eol=lf
