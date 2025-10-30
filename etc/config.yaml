@@ -86,6 +86,20 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
 
+
+Prolog: prolog1.sh,prolog2.sh
+PrologTimeout: 60
+# PrologFlags: Alloc  # Alloc, Contain, DeferBatch, NoHold, ForceRequeueOnFail, RunInJob, Serial, X11
+Epilog: epilog1.sh,epilog2.sh
+EpilogTimeout: 60
+PrologEpilogTimeout: 120
+PrologCranectld: prologctld.sh
+EpilogCranectld: epilogctld.sh
+CrunProlog: srun_prolog.sh
+CrunEpilog: srun_epilog.sh
+TaskProlog: task_prolog.sh
+TaskEpilog: task_epilog.sh
+
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
@@ -174,17 +188,3 @@ Container:
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
-
-
-Prolog: prolog1.sh,prolog1.sh
-PrologTimeout: 60
-# PrologFlags: Alloc  # Alloc, Contain, DeferBatch, NoHold, ForceRequeueOnFail, RunInJob, Serial, X11
-Epilog: epilog1.sh,epilog2.sh
-EpilogTimeout: 60
-PrologEpilogTimeout: 120
-PrologCranectld: prologctld.sh
-EpilogCranectld: epilogctld.sh
-SrunProlog: srun_prolog.sh
-SrunEpilog: srun_epilog.sh
-TaskProlog: task_prolog.sh
-TaskEpilog: task_epilog.sh
