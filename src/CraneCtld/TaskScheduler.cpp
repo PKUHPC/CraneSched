@@ -3747,7 +3747,7 @@ void MultiFactorPriority::CalculateFactorBound_(
 
   for (const auto& job : running_jobs) {
     double service_val = 0;
-    if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+    if (bound.cpus_alloc_max > bound.cpus_alloc_min)
       service_val +=
           1.0 * (job->allocated_res_view.CpuCount() - bound.cpus_alloc_min) /
           (bound.cpus_alloc_max - bound.cpus_alloc_min);
@@ -3757,13 +3757,13 @@ void MultiFactorPriority::CalculateFactorBound_(
       // be ruled out in calculation. We must avoid that.
       service_val += 1.0;
 
-    if (bound.node_num_max != bound.node_num_min)
+    if (bound.node_num_max > bound.node_num_min)
       service_val += 1.0 * (job->node_num - bound.node_num_min) /
                      (bound.node_num_max - bound.node_num_min);
     else
       service_val += 1.0;
 
-    if (bound.mem_alloc_max != bound.mem_alloc_min)
+    if (bound.mem_alloc_max > bound.mem_alloc_min)
       service_val +=
           1.0 *
           static_cast<double>(job->allocated_res_view.MemoryBytes() -
@@ -3805,28 +3805,28 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
   double fair_share_factor{0};
 
   // age_factor
-  if (bound.age_max != bound.age_min)
+  if (bound.age_max > bound.age_min)
     age_factor = 1.0 * static_cast<double>(job_age - bound.age_min) /
                  static_cast<double>(bound.age_max - bound.age_min);
 
   // qos_factor
-  if (bound.qos_priority_min != bound.qos_priority_max)
+  if (bound.qos_priority_min > bound.qos_priority_max)
     qos_factor = 1.0 * (job_qos_priority - bound.qos_priority_min) /
                  (bound.qos_priority_max - bound.qos_priority_min);
 
   // partition_factor
-  if (bound.part_priority_max != bound.part_priority_min)
+  if (bound.part_priority_max > bound.part_priority_min)
     partition_factor = 1.0 * (job_part_priority - bound.part_priority_min) /
                        (bound.part_priority_max - bound.part_priority_min);
 
   // job_size_factor
-  if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+  if (bound.cpus_alloc_max > bound.cpus_alloc_min)
     job_size_factor += 1.0 * (job_cpus_alloc - bound.cpus_alloc_min) /
                        (bound.cpus_alloc_max - bound.cpus_alloc_min);
-  if (bound.node_num_max != bound.node_num_min)
+  if (bound.node_num_max > bound.node_num_min)
     job_size_factor += 1.0 * (job_nodes_alloc - bound.node_num_min) /
                        (bound.node_num_max - bound.node_num_min);
-  if (bound.mem_alloc_max != bound.mem_alloc_min)
+  if (bound.mem_alloc_max > bound.mem_alloc_min)
     job_size_factor +=
         1.0 * static_cast<double>(job_mem_alloc - bound.mem_alloc_min) /
         static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
@@ -3836,7 +3836,7 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
     job_size_factor /= 3.0;
 
   // fair_share_factor
-  if (bound.service_val_max != bound.service_val_min)
+  if (bound.service_val_max > bound.service_val_min)
     fair_share_factor =
         1.0 - (job_service_val - bound.service_val_min) /
                   (bound.service_val_max - bound.service_val_min);
