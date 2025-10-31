@@ -243,12 +243,12 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
         }
 
         RunLogHookArgs args{
-          .scripts = g_config.ProLogs,
-          .envs = {},
-          .run_uid = 0,
-          .run_gid = 0,
-          .is_prolog = true,
-      };
+            .scripts = g_config.ProLogs,
+            .envs = {},
+            .run_uid = 0,
+            .run_gid = 0,
+            .is_prolog = true,
+        };
 
         if (g_config.PrologTimeout > 0)
           args.timeout_sec = g_config.PrologTimeout;
@@ -264,8 +264,7 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
 
         auto ok = util::os::RunPrologOrEpiLog(args);
 
-        if (script_lock)
-          m_prolog_serial_mutex_.Unlock();
+        if (script_lock) m_prolog_serial_mutex_.Unlock();
 
         return ok ? true : false;
       };
