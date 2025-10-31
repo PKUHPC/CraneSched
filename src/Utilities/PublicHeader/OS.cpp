@@ -423,19 +423,20 @@ absl::Time GetSystemBootTime() {
 
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
   bool is_failed = false;
-  auto start_time = std::chrono::steady_clock::now();
 
-  auto read_stream = [](std::FILE* f) {
+  auto read_stream = [](int fd) {
     std::string out;
     char buf[4096];
-    if (!f) {
-      return out;
+    ssize_t bytes_read;
+    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
+      out.append(buf, bytes_read);
     }
-    while (std::fgets(buf, sizeof(buf), f)) out.append(buf);
     return out;
   };
 
   std::string output;
+
+  auto start_time = std::chrono::steady_clock::now();
 
   for (const auto& script : args.scripts) {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -446,9 +447,17 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       return std::nullopt;
     }
 
-    subprocess_s subprocess{};
-    std::vector<const char*> argv = {script.c_str(), nullptr};
-    if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
+    int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
+    if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1 || pipe(sync_pipe) == -1) {
+      CRANE_ERROR("{} pipe creation failed: {}", script, strerror(errno));
+      if (args.is_prolog) return std::nullopt;
+      is_failed = true;
+      continue;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
       CRANE_ERROR("{} subprocess creation failed: {}.", script,
                   strerror(errno));
       if (args.is_prolog) return std::nullopt;
@@ -456,52 +465,91 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       continue;
     }
 
-    pid_t pid = subprocess.child;
-    if (args.callback) {
-      bool result = args.callback(pid, args.job_id);
-      if (!result) return std::nullopt;
-    }
-    int result = 0;
-    auto fut = std::async(std::launch::async, [pid, &result]() {
-      return waitpid(pid, &result, 0);
-    });
+    if (pid > 0) {
+      if (args.callback) {
+        bool result = args.callback(pid, args.job_id);
+        if (!result) {
+          CRANE_ERROR("subprocess callback failed");
+          return std::nullopt;
+        }
+      }
 
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed_now =
-        std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
-    uint32_t remaining_time = (args.timeout_sec > 0) ? std::max<uint32_t>(0, args.timeout_sec - elapsed_now.count()) : 0;
-    bool child_exited = false;
-    if (args.timeout_sec == 0) {
-      fut.get();
-      child_exited = true;
-    } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
-               std::future_status::ready) {
-      child_exited = true;
-    }
+      close(stdout_pipe[1]);
+      close(stderr_pipe[1]);
+      int status = 0;
+      auto fut = std::async(std::launch::async, [pid, &status]() {
+        return waitpid(pid, &status, 0);
+      });
 
-    if (!child_exited) {
-      kill(pid, SIGKILL);
-      waitpid(pid, &result, 0);
-      CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
-                  read_stream(subprocess_stdout(&subprocess)),
-                  read_stream(subprocess_stderr(&subprocess)));
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
-      continue;
-    }
+      write(sync_pipe[1], "x", 1);
+      close(sync_pipe[0]);
+      close(sync_pipe[1]);
 
-    if (result != 0) {
-      CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
-                  result, read_stream(subprocess_stdout(&subprocess)),
-                  read_stream(subprocess_stderr(&subprocess)));
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
-      continue;
-    }
-    output.append(read_stream(subprocess_stdout(&subprocess)));
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed_now =
+          std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+      uint32_t remaining_time =
+          (args.timeout_sec > 0)
+              ? std::max<uint32_t>(0, args.timeout_sec - elapsed_now.count())
+              : 0;
+      bool child_exited = false;
 
-    subprocess_destroy(&subprocess);
-    CRANE_DEBUG("{} finished successfully.", script);
+      if (args.timeout_sec == 0) {
+        fut.get();
+        child_exited = true;
+      } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
+                 std::future_status::ready) {
+        child_exited = true;
+      }
+
+      if (!child_exited) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
+                  read_stream(stdout_pipe[0]),
+                  read_stream(stderr_pipe[0]));
+        if (args.is_prolog) return std::nullopt;
+        is_failed = true;
+        continue;
+      }
+
+      if (status != 0) {
+        CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
+                  status, read_stream(stdout_pipe[0]),
+                  read_stream(stderr_pipe[0]));
+        if (args.is_prolog) return std::nullopt;
+        is_failed = true;
+        continue;
+      }
+
+      output.append(read_stream(stdout_pipe[0]));
+
+      CRANE_DEBUG("{} finished successfully.", script);
+
+    } else { // child proc
+      close(stdout_pipe[0]);
+      close(stderr_pipe[0]);
+      dup2(stdout_pipe[1], STDOUT_FILENO);
+      dup2(stderr_pipe[1], STDERR_FILENO);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[1]);
+
+      for (const auto& [name, value] : args.envs)
+        if (setenv(name.c_str(), value.c_str(), 1))
+          fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
+                     name, value);
+
+      char buf;
+      read(sync_pipe[0], &buf, 1);
+      close(sync_pipe[1]);
+      close(sync_pipe[0]);
+
+
+      std::vector<const char*> argv = {script.c_str(), nullptr};
+      execvp(argv[0], const_cast<char* const*>(argv.data()));
+      fmt::print(stderr, "[Subprocess] execvp() failed: %s\n", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
   }
 
   if (is_failed) return std::nullopt;
