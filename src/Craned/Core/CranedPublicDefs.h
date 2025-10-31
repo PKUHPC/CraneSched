@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <filesystem>
-
 #include "PreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -49,8 +47,13 @@ struct CallbackWrapper {
   bool consume;
 };
 
-struct TaskStatusChangeQueueElem {
-  task_id_t step_id{};
+inline std::string GetStepIdStr(const crane::grpc::StepToD& step) {
+  return fmt::format("{}.{}", step.job_id(), step.step_id());
+}
+
+struct StepStatusChangeQueueElem {
+  job_id_t job_id;
+  step_id_t step_id;
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
@@ -94,11 +97,8 @@ struct Config {
   struct ContainerConfig {
     bool Enabled{false};
     std::filesystem::path TempDir;
-    std::string RuntimeBin;
-    std::string RuntimeState;
-    std::string RuntimeRun;
-    std::string RuntimeKill;
-    std::string RuntimeDelete;
+    std::filesystem::path RuntimeEndpoint;
+    std::filesystem::path ImageEndpoint;
   };
   ContainerConfig Container;
 
@@ -132,6 +132,7 @@ struct Config {
   std::filesystem::path CranedForPamUnixSockPath;
 
   bool CranedForeground{};
+  bool BindCpu{};
 
   std::string Hostname;
   CranedId CranedIdOfThisNode;

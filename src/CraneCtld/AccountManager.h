@@ -141,7 +141,7 @@ class AccountManager {
 
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
-                                const std::string& value);
+                                const std::list<std::string>& value);
 
   CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
                                    bool block);

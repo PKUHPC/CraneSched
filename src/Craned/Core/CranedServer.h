@@ -36,12 +36,8 @@ using grpc::Status;
 
 using crane::grpc::Craned;
 
-enum class RequestSource : std::int8_t {
-  CTLD = 0,
-  PAM = 1,
-  SUPERVISOR = 2,
-  INVALID
-};
+enum class RequestSource : std::int8_t { CTLD = 0, PAM, SUPERVISOR, INVALID };
+
 enum class CranedStatus : std::int8_t {
   INITIALIZING = 0,
   RUNNING,
@@ -82,19 +78,21 @@ class CranedServiceImpl : public Craned::Service {
       const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
       crane::grpc::QuerySshStepEnvVariablesReply *response) override;
 
-  grpc::Status CreateCgroupForJobs(
-      grpc::ServerContext *context,
-      const crane::grpc::CreateCgroupForJobsRequest *request,
-      crane::grpc::CreateCgroupForJobsReply *response) override;
+  grpc::Status AllocJobs(grpc::ServerContext *context,
+                         const crane::grpc::AllocJobsRequest *request,
+                         crane::grpc::AllocJobsReply *response) override;
+
+  grpc::Status FreeJobs(grpc::ServerContext *context,
+                        const crane::grpc::FreeJobsRequest *request,
+                        crane::grpc::FreeJobsReply *response) override;
+
+  grpc::Status AllocSteps(grpc::ServerContext *context,
+                          const crane::grpc::AllocStepsRequest *request,
+                          crane::grpc::AllocStepsReply *response) override;
 
   grpc::Status FreeSteps(grpc::ServerContext *context,
                          const crane::grpc::FreeStepsRequest *request,
                          crane::grpc::FreeStepsReply *response) override;
-
-  grpc::Status ReleaseCgroupForJobs(
-      grpc::ServerContext *context,
-      const crane::grpc::ReleaseCgroupForJobsRequest *request,
-      crane::grpc::ReleaseCgroupForJobsReply *response) override;
 
   grpc::Status ChangeJobTimeLimit(
       grpc::ServerContext *context,
@@ -105,6 +103,16 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::StepStatusChangeRequest *request,
       crane::grpc::StepStatusChangeReply *response) override;
+
+  grpc::Status AttachInContainerTask(
+      grpc::ServerContext *context,
+      const crane::grpc::AttachInContainerTaskRequest *request,
+      crane::grpc::AttachInContainerTaskReply *response) override;
+
+  grpc::Status ExecInContainerTask(
+      grpc::ServerContext *context,
+      const crane::grpc::ExecInContainerTaskRequest *request,
+      crane::grpc::ExecInContainerTaskReply *response) override;
 };
 
 class CranedServer {
@@ -160,7 +168,8 @@ class CranedServer {
       return false;
     if (m_status_ == CranedStatus::RECONFIGURING)
       // Only PAM can send requests during recovery or stopping.
-      return request_source == RequestSource::PAM;
+      return request_source == RequestSource::PAM ||
+             request_source == RequestSource::SUPERVISOR;
 
     return true;
   }

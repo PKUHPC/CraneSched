@@ -49,14 +49,15 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 constexpr const char* kLogPattern =
     "[%^%L%$ %C-%m-%d %H:%M:%S.%e %s:%#][%n] %v";
 
-constexpr step_id_t kDaemonStepId = 0;
-
 inline const char* const kDefaultHost = "0.0.0.0";
 
-inline const char* kCtldDefaultPort = "10011";
-inline const char* kCranedDefaultPort = "10010";
-inline const char* kCforedDefaultPort = "10012";
-inline const char* kCtldForInternalDefaultPort = "10013";
+constexpr step_id_t kDaemonStepId = 0;
+constexpr step_id_t kPrimaryStepId = 1;
+
+inline const char* const kCtldDefaultPort = "10011";
+inline const char* const kCranedDefaultPort = "10010";
+inline const char* const kCforedDefaultPort = "10012";
+inline const char* const kCtldForInternalDefaultPort = "10013";
 
 inline const char* const kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* const kDefaultDbConfigPath = "/etc/crane/database.yaml";
@@ -111,15 +112,15 @@ inline constexpr size_t kSystemExitCodeNum =
 inline constexpr size_t kCraneExitCodeBase = kSystemExitCodeNum;
 
 enum ExitCodeEnum : uint16_t {
-  kExitCodeTerminated = kCraneExitCodeBase,
-  kExitCodePermissionDenied,
-  kExitCodeCgroupError,
-  kExitCodeFileNotFound,
-  kExitCodeSpawnProcessFail,
-  kExitCodeExceedTimeLimit,
-  kExitCodeCranedDown,
-  kExitCodeExecutionError,
-  kExitCodeRpcError,
+  EC_TERMINATED = kCraneExitCodeBase,
+  EC_PERMISSION_DENIED,
+  EC_CGROUP_ERR,
+  EC_FILE_NOT_FOUND,
+  EC_SPAWN_FAILED,
+  EC_EXCEED_TIME_LIMIT,
+  EC_CRANED_DOWN,
+  EC_EXEC_ERR,
+  EC_RPC_ERR,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };
@@ -129,7 +130,7 @@ enum ExitCodeEnum : uint16_t {
 namespace Internal {
 // clang-format off
 constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
-    CraneErrStrArr = {
+    kCraneErrStrArr = {
         // 0 - 4
         "Success",
 
@@ -248,8 +249,9 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   return rich_err;
 }
 
-inline std::string_view CraneErrStr(CraneErrCode err) {
-  return Internal::CraneErrStrArr[static_cast<uint16_t>(err)];
+[[deprecated("Use Rich Error")]] inline std::string_view CraneErrStr(
+    CraneErrCode err) {
+  return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
 
 /* ----------- Public definitions for all components */

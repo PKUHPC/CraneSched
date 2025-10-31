@@ -29,8 +29,8 @@ namespace Craned::Supervisor {
 using Common::CgroupManager;
 using Common::EnvMap;
 
-using StepToSupv = crane::grpc::TaskToD;
-
+using StepToSupv = crane::grpc::StepToD;
+using StepStatus = crane::grpc::TaskStatus;
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
@@ -50,14 +50,12 @@ struct Config {
     TlsCertConfig TlsConfig;
   };
   CforedListenConf CforedListenConf;
+
   struct ContainerConfig {
     bool Enabled{false};
     std::filesystem::path TempDir;
-    std::string RuntimeBin;
-    std::string RuntimeState;
-    std::string RuntimeRun;
-    std::string RuntimeKill;
-    std::string RuntimeDelete;
+    std::filesystem::path RuntimeEndpoint;
+    std::filesystem::path ImageEndpoint;
   };
   ContainerConfig Container;
 
@@ -82,7 +80,7 @@ struct Config {
 
   std::filesystem::path SupervisorUnixSockPath;
 
-  task_id_t JobId;
+  job_id_t JobId;
   EnvMap JobEnv;
   step_id_t StepId;
   StepToSupv StepSpec;
@@ -91,6 +89,15 @@ struct Config {
 };
 
 inline Config g_config;
+
+struct RuntimeStatus {
+  std::atomic<StepStatus> Status{StepStatus::Configuring};
+  [[nodiscard]] bool CanStepOperate() const noexcept {
+    return Status == StepStatus::Running;
+  }
+};
+
+inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

@@ -114,6 +114,9 @@ enum TaskStatus {
   ExceedTimeLimit = 4;
   Cancelled = 5;
   OutOfMemory = 6;
+  Configuring = 7;
+  Configured = 8;
+  Completing = 9;
 
   Invalid = 15;
 }
@@ -121,6 +124,7 @@ enum TaskStatus {
 enum TaskType {
   Interactive = 0;
   Batch = 1;
+  Container = 2;
 }
 
 enum InteractiveTaskType {
@@ -153,9 +157,10 @@ message TaskToCtld {
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
+    ContainerTaskAdditionalMeta container_meta = 23;
   }
 
-  string extra_attr = 23;
+  string extra_attr = 30;
 
   string cmd_line = 31;
   string cwd = 32;  // Current working directory
@@ -163,13 +168,12 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
 
   string reservation = 36;
   bool exclusive = 37;
 
   bool hold = 38;
-  google.protobuf.Timestamp begin_time = 39;
+  google.protobuf.Timestamp begin_time = 39; 
 }
 
 message TaskInEmbeddedDb {
@@ -196,57 +200,147 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 allocated_res = 19;
   double cached_priority = 20;
+
+  TaskStatus primary_step_status = 21;
+  uint32 primary_step_exit_code = 22;
+}
+
+message StepToCtld {
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+  // account, qos from job
+  uint32 job_id = 2;
+  ResourceView req_resources = 3;
+  TaskType type = 5;
+  uint32 uid = 6;  // Only for authorization
+  string name = 7;
+
+  uint32 node_num = 9;
+  uint32 ntasks_per_node = 10;
+  double cpus_per_task = 11;
+
+  bool requeue_if_failed = 12;
+  bool get_user_env = 13;
+
+  repeated uint32 gid = 14;
+
+  oneof payload {
+    BatchTaskAdditionalMeta batch_meta = 21;
+    InteractiveTaskAdditionalMeta interactive_meta = 22;
+    ContainerTaskAdditionalMeta container_meta = 23;
+  }
+
+  string extra_attr = 30;
+
+  string cmd_line = 31;
+  string cwd = 32;  // Current working directory
+  map<string, string> env = 33;
+
+  string excludes = 34;
+  string nodelist = 35;
+  string container = 26;
+}
+
+message RuntimeAttrOfStep {
+  // Fields that won't change after this step is accepted.
+  uint32 step_id = 1;
+  int64 step_db_id = 2;
+  StepType step_type = 3;
+
+  // Fields that will change after this step is accepted.
+  int32 requeue_count = 11;
+  ResourceV2 allocated_res = 12;
+
+  repeated string craned_ids = 15;
+  repeated string execution_nodes = 16;
+  repeated string configuring_nodes = 17;
+  repeated string running_nodes = 18;
+
+  google.protobuf.Timestamp submit_time = 25;
+  google.protobuf.Timestamp start_time = 26;
+  google.protobuf.Timestamp end_time = 27;
+
+  TaskStatus configure_failed_status = 30;
+  TaskStatus running_failed_status = 21;
+  TaskStatus status = 32;
+  uint32 exit_code = 33;
+
+  bool held = 35;
+}
+
+message StepNextIdInEmbeddedDb {
+  map<uint32, uint32> job_id_next_step_id_map = 1;
+}
+
+message StepInEmbeddedDb {
+  RuntimeAttrOfStep runtime_attr = 1;
+  StepToCtld step_to_ctld = 2;
 }
 
 message JobToD {
   uint32 job_id = 1;
   uint32 uid = 2;
-  ResourceInNode res = 3;
+  ResourceInNode res = 4;
+
+  string partition = 5;
+  string account = 6;
+  string qos = 7;
+  StepToD daemon_step = 8;
 }
 
-message TaskToD {
-  uint32 task_id = 1;
-  TaskType type = 2;
-  uint32 partition_id = 3;
+enum StepType {
+  INVALID = 0;
+  DAEMON = 1;
+  PRIMARY = 2;
+  COMMON = 3;
+}
 
-  ResourceInNode resources = 4;
+message StepToD {
+  uint32 job_id = 1;
+  uint32 step_id = 2;
+  ResourceInNode res = 3;
+  TaskType type = 4;
+  StepType step_type = 5;
+
+  uint32 uid = 6;
+  repeated uint32 gid = 7;
+
+  // For execution step
+  optional BatchTaskAdditionalMeta batch_meta = 9;
+  optional InteractiveTaskAdditionalMeta interactive_meta = 10;
+  optional ContainerTaskAdditionalMeta container_meta = 11;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
-  google.protobuf.Duration time_limit = 6;
+  google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
+  google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
+  google.protobuf.Duration time_limit = 16;
 
-  string partition = 8;
-  uint32 uid = 9;
-  uint32 gid = 10;
+  map<string, string> env = 17;
+  string cwd = 18;
+  string name = 19;
 
-  oneof payload {
-    BatchTaskAdditionalMeta batch_meta = 11;
-    InteractiveTaskAdditionalMeta interactive_meta = 12;
-  }
-
-  map<string, string> env = 13;
-  string cwd = 14;
-
-  repeated string allocated_nodes = 15;
-
-  string name = 16;
-  string account = 17;
-  string qos = 18;
-
-  repeated string excludes = 19;
   repeated string nodelist = 20;
 
-  uint32 node_num = 21;
-  uint32 ntasks_per_node = 22;
-  double cpus_per_task = 23;
+  uint32 node_num = 22;
+  uint32 ntasks_per_node = 23;
+  double cpus_per_task = 24;
 
-  bool get_user_env = 24;
-  string container = 25;
+  bool get_user_env = 25;
 
   // Not used now.
   string extra_attr = 29;
+}
+
+message JobStepsToD {
+  JobToD job = 1;
+  map<uint32, StepToD> steps = 2;
+  map<uint32, TaskStatus> step_status = 3;
+}
+
+message JobStepIds {
+  repeated uint32 steps = 1;
 }
 
 message BatchTaskAdditionalMeta {
@@ -280,6 +374,39 @@ message InteractiveTaskAdditionalMeta {
   optional uint32 input_task_id = 8;
 }
 
+message ContainerTaskAdditionalMeta {
+  message ImageInfo {
+    string image = 1;
+    string username = 2;
+    string password = 3;
+    string server_address = 4;
+    string pull_policy = 5;
+  }
+
+  string name = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+
+  ImageInfo image = 6;
+
+  string command = 11;
+  repeated string args = 12;
+  string workdir = 13;
+  map<string, string> env = 14;  // env in container
+
+  bool detached = 15;
+  bool tty = 16;
+  bool stdin = 17;
+  bool stdin_once = 18;
+
+  bool userns = 21;
+  uint32 run_as_user = 22;
+  uint32 run_as_group = 23;
+
+  map<string, string> mounts = 24;
+  map<int32, int32> ports = 25;
+}
+
 message TaskInfo {
   // Static task information
   TaskType type = 1;
@@ -308,8 +435,11 @@ message TaskInfo {
   string extra_attr = 21;
   string reservation = 22;
 
-  string container = 23;
-  /* 24-29 Reserved */
+  // This is only used when querying Container tasks.
+  // For other types of tasks, this field is ignored.
+  optional ContainerTaskAdditionalMeta container_meta = 23;
+
+  /* 26-29 Reserved */
 
   // Dynamic task information
   bool held = 30;
@@ -329,6 +459,53 @@ message TaskInfo {
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   bool exclusive = 39;
+  ResourceView allocated_res_view = 40;
+}
+
+message StepInfo {
+  // Static step information
+  TaskType type = 1;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string name = 4;
+
+  uint32 uid = 5;
+  repeated uint32 gid = 6;
+
+  google.protobuf.Duration time_limit = 7;
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+  google.protobuf.Timestamp submit_time = 10;
+
+  uint32 node_num = 12;
+  string cmd_line = 13;
+  string cwd = 14;
+  ResourceView req_res_view = 17;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
+
+  string extra_attr = 21;
+
+  string container = 23;
+  /* 24-29 Reserved */
+
+  // Dynamic step information
+  bool held = 30;
+  TaskStatus status = 31;
+
+  uint32 exit_code = 33;
+  uint32 priority = 34;
+  oneof pending_reason_or_craned_list {
+    string pending_reason = 35;
+    string craned_list = 36;
+  }
+
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
+  google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
   ResourceView allocated_res_view = 40;
 }
 
@@ -502,6 +679,10 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+
+  ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
+  ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
 }
 
 enum EntityType {
@@ -513,6 +694,19 @@ enum OperationType {
   Overwrite = 0;
   Add = 1;
   Delete = 2;
+}
+
+enum PreemptType {
+  NONE = 0;
+  QOS = 1;
+  PARTITION = 2;
+}
+
+enum PreemptMode {
+  OFF = 0;
+  CANCEL = 1;
+  REQUEUE = 2;
+  SUSPEND = 3;
 }
 
 enum ModifyField {
@@ -530,6 +724,8 @@ enum ModifyField {
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  Preempt = 34;
+  ModifyPreemptMode = 35;
 }
 
 message AccountInfo {
@@ -583,6 +779,8 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+  repeated string preempt = 7;
+  PreemptMode preempt_mode = 8;
 }
 
 message TimeInterval {
@@ -609,7 +807,10 @@ message CranedRemoteMeta {
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
-  repeated uint32 lost_tasks = 6;
+  message Steps {
+    repeated uint32 steps = 1;
+  }
+  map<uint32, Steps> lost_steps = 6;
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;

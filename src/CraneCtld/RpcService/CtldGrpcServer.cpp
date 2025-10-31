@@ -18,6 +18,8 @@
 
 #include "CtldGrpcServer.h"
 
+#include <grpcpp/support/status.h>
+
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
@@ -38,13 +40,9 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
-  // TODO: Set reason here.
-  g_task_scheduler->TaskStatusChangeAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code());
+  g_task_scheduler->StepStatusChangeAsync(
+      request->job_id(), request->step_id(), request->craned_id(),
+      request->new_status(), request->exit_code(), request->reason());
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -120,26 +118,40 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
     return grpc::Status::OK;
   }
 
-  // Some job allocation lost
-  std::set<task_id_t> orphaned_job_ids;
+  std::unordered_map<job_id_t, std::set<step_id_t>> orphaned_steps;
+
+  // Some job or step lost, terminate them with orphaned status
   if (!request->remote_meta().lost_jobs().empty()) {
     CRANE_INFO("Craned {} lost job allocation:[{}].", request->craned_id(),
                absl::StrJoin(request->remote_meta().lost_jobs(), ","));
+    for (const auto &job_id : request->remote_meta().lost_jobs()) {
+      orphaned_steps[job_id].emplace(kDaemonStepId);
+    }
   }
-  orphaned_job_ids.insert(request->remote_meta().lost_jobs().begin(),
-                          request->remote_meta().lost_jobs().end());
-  if (!request->remote_meta().lost_tasks().empty()) {
-    CRANE_INFO("Craned {} lost executing task:[{}].", request->craned_id(),
-               absl::StrJoin(request->remote_meta().lost_tasks(), ","));
-  }
-  orphaned_job_ids.insert(request->remote_meta().lost_tasks().begin(),
-                          request->remote_meta().lost_tasks().end());
 
-  if (!orphaned_job_ids.empty())
-    g_thread_pool->detach_task(
-        [jobs = std::move(orphaned_job_ids), craned = request->craned_id()] {
-          g_task_scheduler->TerminateOrphanedJobs(jobs, craned);
-        });
+  if (!request->remote_meta().lost_steps().empty()) {
+    for (const auto &[job_id, steps] : request->remote_meta().lost_steps()) {
+      orphaned_steps[job_id].insert(steps.steps().begin(), steps.steps().end());
+    }
+  }
+  CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
+             util::JobStepsToString(orphaned_steps));
+
+  if (!orphaned_steps.empty()) {
+    for (const auto &[job_id, steps] : orphaned_steps) {
+      // Reverse order: we should process larger step_id first to avoid warnings
+      // abort daemon/primary steps
+      for (const auto step_id : steps | std::views::reverse)
+        g_task_scheduler->StepStatusChangeWithReasonAsync(
+            job_id, step_id, request->craned_id(),
+            crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
+            "Craned re-registered but step lost.");
+    }
+    g_thread_pool->detach_task([steps = std::move(orphaned_steps),
+                                craned = request->craned_id()] mutable {
+      g_task_scheduler->TerminateOrphanedSteps(steps, craned);
+    });
+  }
 
   stub->SetReady();
   g_meta_container->CranedUp(request->craned_id(), request->remote_meta());
@@ -244,7 +256,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_task_res_allocated =
               [writer_weak_ptr](task_id_t task_id,
                                 std::string const &allocated_craned_regex,
-                                std::list<std::string> const &craned_ids) {
+                                std::vector<std::string> const &craned_ids) {
                 if (auto writer = writer_weak_ptr.lock(); writer)
                   writer->WriteTaskResAllocReply(
                       task_id,
@@ -315,15 +327,15 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
-          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
+          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.job_id());
           if (g_task_scheduler->TerminatePendingOrRunningIaTask(
-                  payload.task_id()) != CraneErrCode::SUCCESS)
-            stream_writer->WriteTaskCompletionAckReply(payload.task_id());
+                  payload.job_id()) != CraneErrCode::SUCCESS)
+            stream_writer->WriteTaskCompletionAckReply(payload.job_id());
           else {
             CRANE_TRACE(
                 "Termination of task #{} succeeded. "
                 "Leave TaskCompletionAck to TaskStatusChange.",
-                payload.task_id());
+                payload.job_id());
           }
         } break;
 
@@ -376,6 +388,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
@@ -406,6 +426,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->add_task_id_list(0);
+    response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
 
   std::vector<CraneExpected<std::future<task_id_t>>> results;
 
@@ -916,6 +944,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.preempt.assign(qos_info->preempt().begin(), qos_info->preempt().end());
+  qos.preempt_mode = qos_info->preempt_mode();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -1152,9 +1182,12 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  std::list<std::string> value_list(request->value_list().begin(),
+                                    request->value_list().end());
+
+  auto modify_res = g_account_manager->ModifyQos(
+      request->uid(), request->name(), request->modify_field(), value_list);
 
   if (modify_res) {
     response->set_ok(true);
@@ -1300,7 +1333,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         user_info->set_account(account);
       }
       user_info->set_admin_level(
-          (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+          static_cast<crane::grpc::UserInfo_AdminLevel>(user.admin_level));
       user_info->set_blocked(item.blocked);
 
       auto *partition_qos_list =
@@ -1378,6 +1411,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->mutable_preempt()->Assign(qos.preempt.begin(), qos.preempt.end());
+    qos_info->set_preempt_mode(qos.preempt_mode);
   }
 
   return grpc::Status::OK;
@@ -1891,6 +1926,98 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::AttachInContainerTaskRequest *request,
+    crane::grpc::AttachInContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot attach both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be attached");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->AttachInContainerTask(*request);
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecInContainerTaskRequest *request,
+    crane::grpc::ExecInContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->command_size() == 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Command cannot be empty");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot exec with both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be enabled");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->ExecInContainerTask(*request);
+
+  return grpc::Status::OK;
+}
+
 std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
     const grpc::ServerContext *context, uint32_t uid) {
   if (!g_config.ListenConf.TlsConfig.Enabled) return std::nullopt;
@@ -1910,7 +2037,7 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   if (cn_parts.empty() || cn_parts[0].empty()) return "Certificate is invalid";
 
   try {
-    uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
+    auto parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
     if (parsed_uid != uid) return "Uid mismatch";
   } catch (const std::invalid_argument &) {
     return "Certificate contains an invalid UID";

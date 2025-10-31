@@ -524,6 +524,13 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
 
   bool ok = AllocatableResourceAllocator::Allocate(
       resource_in_node.allocatable_res, cg_unique_ptr.get());
+  if (ok) {
+    ok &= cg_unique_ptr->SetCpuBind(
+        std::views::iota(0u,
+                         static_cast<uint32_t>(std::ceil(static_cast<double>(
+                             resource_in_node.allocatable_res.cpu_count)))) |
+        std::ranges::to<std::unordered_set<uint32_t>>());
+  }
   if (ok)
     ok &= DedicatedResourceAllocator::Allocate(resource_in_node.dedicated_res,
                                                cg_unique_ptr.get());
@@ -754,10 +761,12 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
                   ec.message());
       return false;
     }
+
     auto events_file =
         std::filesystem::path(cg_path) / CgConstant::kMemoryEventsFileV2;
     std::ifstream ifs(events_file);
     if (!ifs.is_open()) return false;
+
     std::string key;
     uint64_t val;
     while (ifs >> key >> val) {
@@ -786,6 +795,7 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   auto v1_file = memory_cgroup_path / CgConstant::kMemoryOomControlFileV1;
   std::ifstream ifs(v1_file);
   if (!ifs.is_open()) return false;
+
   std::string line;
   while (std::getline(ifs, line)) {
     std::istringstream iss(line);
@@ -1015,6 +1025,27 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::CPU_CONTROLLER,
       CgConstant::ControllerFile::CPU_SHARES, share);
+}
+
+bool CgroupV1::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v1, cpuset controller is separate
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v1");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  // Convert cpu_set to comma-separated string (e.g., "0,1,2,5")
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER,
+      CgConstant::ControllerFile::CPUSET_CPUS, cpu_list);
 }
 
 /*
@@ -1298,6 +1329,26 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::CPU_CONTROLLER_V2,
       CgConstant::ControllerFile::CPU_WEIGHT_V2, share);
+}
+
+bool CgroupV2::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v2, cpuset.cpus is under the cpuset controller
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v2");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER_V2,
+      CgConstant::ControllerFile::CPUSET_CPUS_V2, cpu_list);
 }
 
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {

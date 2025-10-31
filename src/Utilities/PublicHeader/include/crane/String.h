@@ -50,6 +50,9 @@ T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
 using CertPair = std::pair<std::string,   // CN
                            std::string>;  // serial number
 
+uint32_t Crc32Of(std::string_view data, uint32_t seed = 0);
+uint32_t Adler32Of(std::string_view data, uint32_t seed = 1);
+
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
@@ -95,9 +98,11 @@ std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
 std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
-std::string GenerateCommaSeparatedString(const int val);
+std::string GenerateCommaSeparatedString(int val);
 
 uint32_t CalcConfigCRC32(const YAML::Node &config);
+
+std::string SlugDns1123(std::string_view s, size_t max_len);
 
 std::expected<CertPair, std::string> ParseCertificate(
     const std::string &cert_pem);
@@ -136,8 +141,14 @@ auto FlattenMapView(const Map &m) {
 }
 
 std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
-std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step);
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
+
+std::string StepToDIdString(const crane::grpc::StepToD &step_to_d);
+template <typename Range>
+std::string StepToDRangeIdString(const Range &step_to_d_range) {
+  return absl::StrJoin(step_to_d_range | std::views::transform(StepToDIdString),
+                       ",");
+}
 
 template <typename Map>
 std::string JobStepsToString(const Map &m) {
@@ -165,9 +176,9 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         // 5 - 9
         "Cancelled",
         "OutOfMemory",
-        "Invalid",
-        "Invalid",
-        "Invalid",
+        "Configuring",
+        "Configured",
+        "Completing",
         // 10 - 14
         "Invalid",
         "Invalid",

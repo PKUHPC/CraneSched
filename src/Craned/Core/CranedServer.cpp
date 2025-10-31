@@ -20,11 +20,16 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <unordered_map>
+
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
+#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/CriClient.h"
+#include "crane/String.h"
 
 namespace Craned {
 
@@ -44,21 +49,17 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
     crane::grpc::ExecuteStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-
-    for (auto const &step_to_d : request->tasks())
-      response->add_failed_task_id_list(step_to_d.task_id());
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
-              request->tasks_size());
-
-  CraneErrCode err;
-  for (auto const &step_to_d : request->tasks()) {
-    err = g_job_mgr->ExecuteStepAsync(step_to_d);
-    if (err != CraneErrCode::SUCCESS)
-      response->add_failed_task_id_list(step_to_d.task_id());
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
+
+  CRANE_INFO("Receive ExecuteSteps for steps [{}]",
+             util::JobStepsToString(job_steps_map));
+  g_job_mgr->ExecuteStepAsync(std::move(job_steps_map));
 
   return Status::OK;
 }
@@ -70,14 +71,19 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  CRANE_TRACE("Receive TerminateSteps for steps {}",
-              absl::StrJoin(request->task_id_list(), ","));
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
+  }
+  CRANE_TRACE("Receive TerminateSteps for steps [{}]",
+              util::JobStepsToString(job_steps_map));
 
-  for (step_id_t id : request->task_id_list())
-    g_job_mgr->TerminateStepAsync(id);
+  for (const auto [job_id, steps] : job_steps_map)
+    for (const auto step_id : steps)
+      g_job_mgr->TerminateStepAsync(job_id, step_id);
   response->set_ok(true);
 
   return Status::OK;
@@ -90,10 +96,19 @@ grpc::Status CranedServiceImpl::TerminateOrphanedStep(
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_reason("CranedServer is not ready");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
-  for (task_id_t job_id : request->task_id_list())
-    g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id);
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
+  }
+  CRANE_TRACE("Receive TerminateOrphanedStep for steps [{}]",
+              util::JobStepsToString(job_steps_map));
+
+  for (const auto [job_id, steps] : job_steps_map)
+    for (const auto step_id : steps)
+      g_job_mgr->MarkStepAsOrphanedAndTerminateAsync(job_id, step_id);
+
   response->set_ok(true);
 
   return Status::OK;
@@ -106,7 +121,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
     response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   CRANE_TRACE("Receive QueryStepFromPort RPC from {}: port: {}",
@@ -184,7 +199,7 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
                        "Job ID always has value when RE2 matches.");
 
       response->set_ok(true);
-      response->set_task_id(job_id_opt.value());
+      response->set_job_id(job_id_opt.value());
       return Status::OK;
     }
 
@@ -209,19 +224,17 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::CreateCgroupForJobs(
-    grpc::ServerContext *context,
-    const crane::grpc::CreateCgroupForJobsRequest *request,
-    crane::grpc::CreateCgroupForJobsReply *response) {
+grpc::Status CranedServiceImpl::AllocJobs(
+    grpc::ServerContext *context, const crane::grpc::AllocJobsRequest *request,
+    crane::grpc::AllocJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   std::vector<JobInD> jobs;
-  for (const auto &job_to_d : request->job_list()) {
-    CRANE_TRACE("Allocating job #{}, uid {}", job_to_d.job_id(),
-                job_to_d.uid());
+  for (const auto &job_to_d : request->jobs()) {
+    CRANE_INFO("Allocating job #{}, uid {}", job_to_d.job_id(), job_to_d.uid());
     jobs.emplace_back(job_to_d);
   }
 
@@ -233,48 +246,50 @@ grpc::Status CranedServiceImpl::CreateCgroupForJobs(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::AllocSteps(
+    grpc::ServerContext *context, const crane::grpc::AllocStepsRequest *request,
+    crane::grpc::AllocStepsReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  g_job_mgr->AllocSteps(request->steps() | std::ranges::to<std::vector>());
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::FreeSteps(
     grpc::ServerContext *context, const crane::grpc::FreeStepsRequest *request,
     crane::grpc::FreeStepsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  CRANE_TRACE("Receive FreeSteps RPC for [{}].",
-              absl::StrJoin(request->job_id_list(), ","));
-
-  std::latch latch(request->job_id_list().size());
-  for (job_id_t job_id : request->job_id_list()) {
-    g_thread_pool->detach_task([&latch, job_id] {
-      auto stub = g_supervisor_keeper->GetStub(job_id);
-      if (!stub) {
-        CRANE_ERROR("[Job #{}.{}]Failed to get stub.", job_id, 0);
-      } else {
-        stub->ShutdownSupervisor();
-      }
-      g_supervisor_keeper->RemoveSupervisor(job_id);
-      latch.count_down();
-    });
+  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
+  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+    job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
-  latch.wait();
+  CRANE_TRACE("Receive FreeSteps RPC for [{}]",
+              util::JobStepsToString(job_steps_map));
+  g_job_mgr->FreeSteps(std::move(job_steps_map));
 
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ReleaseCgroupForJobs(
-    grpc::ServerContext *context,
-    const crane::grpc::ReleaseCgroupForJobsRequest *request,
-    crane::grpc::ReleaseCgroupForJobsReply *response) {
+grpc::Status CranedServiceImpl::FreeJobs(
+    grpc::ServerContext *context, const crane::grpc::FreeJobsRequest *request,
+    crane::grpc::FreeJobsReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  CRANE_TRACE("Receive ReleaseCgroupForTasks RPC for [{}]",
-              absl::StrJoin(request->task_id_list(), ","));
+  CRANE_TRACE("Receive FreeJobs RPC for Job [{}]",
+              absl::StrJoin(request->job_id_list(), ","));
+
   g_job_mgr->FreeJobs(
-      std::set(request->task_id_list().begin(), request->task_id_list().end()));
+      std::set(request->job_id_list().begin(), request->job_id_list().end()));
 
   return Status::OK;
 }
@@ -283,15 +298,15 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
     crane::grpc::QuerySshStepEnvVariablesReply *response) {
+  response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
-  auto stub = g_supervisor_keeper->GetStub(request->task_id());
+
+  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kDaemonStepId);
   if (!stub) {
     CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
-    response->set_ok(false);
     return Status::OK;
   }
 
@@ -300,8 +315,7 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
     response->set_ok(true);
-  } else
-    response->set_ok(false);
+  }
 
   return Status::OK;
 }
@@ -310,14 +324,184 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     grpc::ServerContext *context,
     const crane::grpc::ChangeJobTimeLimitRequest *request,
     crane::grpc::ChangeJobTimeLimitReply *response) {
+  response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
-  bool ok = g_job_mgr->ChangeJobTimeLimitAsync(
-      request->task_id(), absl::Seconds(request->time_limit_seconds()));
-  response->set_ok(ok);
+
+  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
+    return Status::OK;
+  }
+
+  auto err =
+      stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
+                request->task_id(), kPrimaryStepId);
+    return Status::OK;
+  }
+  response->set_ok(true);
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::AttachInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::AttachInContainerTaskRequest *request,
+    crane::grpc::AttachInContainerTaskReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("CranedServer is not ready.");
+    response->set_ok(false);
+    return {grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  if (!g_config.Container.Enabled || g_cri_client == nullptr) {
+    // Should never happen.
+    CRANE_ERROR(
+        "AttachInContainerTask request received but Container is not enabled.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+    err->set_description("Container feature is not enabled.");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  // TODO: After we move CriEventStreaming to Craned, we can get container_id
+  // directly.
+  // TODO: Only support single step in job now. Need to support multi-step
+  // later.
+  std::unordered_map<std::string, std::string> label_selector{
+      {std::string(cri::kCriDefaultLabel), "true"},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
+      {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
+  };
+  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  if (!container_expt) {
+    const auto &rich_err = container_expt.error();
+    CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
+                rich_err.description());
+
+    // NOTE: This could because the container is creating/starting.
+    // The caller should retry later. Fix this after we add CONFIGURING state.
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+    err->set_description(
+        std::format("Container not found, possibly initializing: {}",
+                    rich_err.description()));
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  const auto &container_id = container_expt.value();
+  auto url_expt =
+      g_cri_client->Attach(container_id, request->tty(), request->stdin(),
+                           request->stdout(), request->stderr());
+
+  if (!url_expt) {
+    const auto &rich_err = url_expt.error();
+    CRANE_ERROR("Failed to attach to container for #{}: {}", request->task_id(),
+                rich_err.description());
+    auto *err = response->mutable_status();
+    err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  response->set_ok(true);
+  response->set_url(url_expt.value());
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ExecInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecInContainerTaskRequest *request,
+    crane::grpc::ExecInContainerTaskReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_DEBUG("CranedServer is not ready.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("CranedServer is not ready.");
+    response->set_ok(false);
+    return {grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
+  }
+
+  if (!g_config.Container.Enabled || g_cri_client == nullptr) {
+    // Should never happen.
+    CRANE_ERROR(
+        "ExecInContainerTask request received but Container is not enabled.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+    err->set_description("Container feature is not enabled.");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  // Validate command
+  if (request->command_size() == 0) {
+    CRANE_ERROR("ExecInContainerTask request has empty command.");
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Command cannot be empty.");
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  // TODO: After we move CriEventStreaming to Craned, we can get container_id
+  // directly.
+  std::unordered_map<std::string, std::string> label_selector{
+      {std::string(cri::kCriDefaultLabel), "true"},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
+      {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
+  };
+  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  if (!container_expt) {
+    const auto &rich_err = container_expt.error();
+    CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
+                rich_err.description());
+
+    // NOTE: This could because the container is creating/starting.
+    // The caller should retry later. Fix this after we add CONFIGURING state.
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+    err->set_description(
+        std::format("Container not found, possibly initializing: {}",
+                    rich_err.description()));
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  const auto &container_id = container_expt.value();
+
+  // Convert command from protobuf to vector
+  std::vector<std::string> command;
+  command.reserve(request->command_size());
+  for (const auto &cmd : request->command()) {
+    command.push_back(cmd);
+  }
+
+  auto url_expt = g_cri_client->Exec(container_id, command, request->tty(),
+                                     request->stdin(), request->stdout(),
+                                     request->stderr());
+
+  if (!url_expt) {
+    const auto &rich_err = url_expt.error();
+    CRANE_ERROR("Failed to exec in container for #{}: {}", request->task_id(),
+                rich_err.description());
+    auto *err = response->mutable_status();
+    err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  response->set_ok(true);
+  response->set_url(url_expt.value());
 
   return Status::OK;
 }
@@ -329,11 +513,11 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
     CRANE_DEBUG("CranedServer is not ready.");
     response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+    return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
-  g_job_mgr->StepStopAndDoStatusChangeAsync(
-      request->task_id(), request->new_status(), request->exit_code(),
-      request->reason());
+  g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
+                                   request->new_status(), request->exit_code(),
+                                   request->reason());
   response->set_ok(true);
   return Status::OK;
 }

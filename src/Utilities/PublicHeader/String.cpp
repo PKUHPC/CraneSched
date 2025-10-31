@@ -22,11 +22,25 @@
 #include <absl/strings/strip.h>
 #include <pthread.h>
 
-#include <regex>
+#include <cstddef>
 
 #include "crane/Logger.h"
 
 namespace util {
+
+uint32_t Crc32Of(std::string_view data, uint32_t seed) {
+  uLong c = crc32(seed, Z_NULL, 0);
+  return static_cast<uint32_t>(
+      crc32(c, reinterpret_cast<const Bytef *>(data.data()),
+            static_cast<uInt>(data.size())));
+}
+
+uint32_t Adler32Of(std::string_view data, uint32_t seed) {
+  uLong a = adler32(seed, Z_NULL, 0);
+  return static_cast<uint32_t>(
+      adler32(a, reinterpret_cast<const Bytef *>(data.data()),
+              static_cast<uInt>(data.size())));
+}
 
 std::string ReadFileIntoString(std::filesystem::path const &p) {
   std::ifstream file(p, std::ios::in | std::ios::binary);
@@ -169,7 +183,7 @@ bool ParseHostList(const std::string &host_str,
     return false;
   }
 
-  static const LazyRE2 regex = {R"(.*\[(.*)\](\..*)*$)"};
+  static const LazyRE2 regex(R"(.*\[(.*)\](\..*)*$)");
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
     if (str_s == "") continue;
@@ -415,11 +429,33 @@ std::string GenerateCommaSeparatedString(const int val) {
 }
 
 uint32_t CalcConfigCRC32(const YAML::Node &config) {
-  std::string normalized = YAML::Dump(config);
-  uint32_t crc =
-      crc32(0, reinterpret_cast<const unsigned char *>(normalized.data()),
-            normalized.size());
-  return crc;
+  return Crc32Of(YAML::Dump(config));
+}
+
+std::string SlugDns1123(std::string_view s, size_t max_len) {
+  if (max_len < 1) return "";
+
+  static const re2::RE2 non_dns_regex("[^a-z0-9-]+");
+  static const re2::RE2 edge_dash_regex("^-+|-+$");
+
+  std::string str(s);
+  absl::AsciiStrToLower(&str);
+
+  // Replace any run of non [a-z0-9-] characters with single '-'
+  // (also collapses consecutive invalid chars into one '-').
+  re2::RE2::GlobalReplace(&str, non_dns_regex, "-");
+
+  // Trim leading and trailing '-'
+  re2::RE2::GlobalReplace(&str, edge_dash_regex, "");
+
+  if (str.empty()) str = "x";
+  if (str.size() > max_len) {
+    str.resize(max_len);
+    re2::RE2::GlobalReplace(&str, "-+$", "");
+    if (str.empty()) str = "x";
+  }
+
+  return str;
 }
 
 std::expected<CertPair, std::string> ParseCertificate(
@@ -476,12 +512,12 @@ std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id) {
   return fmt::format("{}.{}", job_id, step_id);
 }
 
-std::string StepIdTupleToString(const std::tuple<job_id_t, step_id_t> &step) {
-  return StepIdsToString(std::get<0>(step), std::get<1>(step));
-}
-
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step) {
   return StepIdsToString(step.first, step.second);
+}
+
+std::string StepToDIdString(const crane::grpc::StepToD &step_to_d) {
+  return StepIdsToString(step_to_d.job_id(), step_to_d.step_id());
 }
 
 std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
