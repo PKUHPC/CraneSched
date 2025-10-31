@@ -593,6 +593,7 @@ void ParseConfig(int argc, char** argv) {
 
         g_config.CranedForeground =
             YamlValueOr<bool>(config["CranedForeground"], false);
+        g_config.BindCpu = YamlValueOr<bool>(config["BindCpu"], false);
 
         if (config["Container"]) {
           const auto& container_config = config["Container"];
@@ -945,22 +946,48 @@ void GlobalVariableInit() {
   using CgConstant::Controller;
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
   if (CgroupManager::GetCgroupVersion() ==
-          CgConstant::CgroupVersion::CGROUP_V1 &&
-      (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER) ||
-       !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER) ||
-       !CgroupManager::IsMounted(Controller::DEVICES_CONTROLLER) ||
-       !CgroupManager::IsMounted(Controller::BLOCK_CONTROLLER))) {
-    CRANE_ERROR(
-        "Failed to initialize cpu,memory,devices,block cgroups controller.");
-    std::exit(1);
+      CgConstant::CgroupVersion::CGROUP_V1) {
+    if (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER)) {
+      CRANE_ERROR("CPU cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (!CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER)) {
+      CRANE_ERROR("Memory cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (!CgroupManager::IsMounted(Controller::DEVICES_CONTROLLER)) {
+      CRANE_ERROR("Devices cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (g_config.BindCpu &&
+        !CgroupManager::IsMounted(Controller::CPUSET_CONTROLLER)) {
+      CRANE_ERROR("Cpuset cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (!CgroupManager::IsMounted(Controller::BLOCK_CONTROLLER)) {
+      CRANE_ERROR("Block I/O cgroup controller is not mounted.");
+      std::exit(1);
+    }
   }
   if (CgroupManager::GetCgroupVersion() ==
-          CgConstant::CgroupVersion::CGROUP_V2 &&
-      (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER_V2) ||
-       !CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER_V2) ||
-       !CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2))) {
-    CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
-    std::exit(1);
+      CgConstant::CgroupVersion::CGROUP_V2) {
+    if (!CgroupManager::IsMounted(Controller::CPU_CONTROLLER_V2)) {
+      CRANE_ERROR("CPU cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (!CgroupManager::IsMounted(Controller::MEMORY_CONTROLLER_V2)) {
+      CRANE_ERROR("Memory cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (!CgroupManager::IsMounted(Controller::IO_CONTROLLER_V2)) {
+      CRANE_ERROR("IO cgroup controller is not mounted.");
+      std::exit(1);
+    }
+    if (g_config.BindCpu &&
+        !CgroupManager::IsMounted(Controller::CPUSET_CONTROLLER_V2)) {
+      CRANE_ERROR("Cpuset cgroup controller is not mounted.");
+      std::exit(1);
+    }
   }
 
   // If Container is enabled, connect to CRI runtime.

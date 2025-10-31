@@ -132,6 +132,7 @@ struct Config {
   std::filesystem::path CranedForPamUnixSockPath;
 
   bool CranedForeground{};
+  bool BindCpu{};
 
   std::string Hostname;
   CranedId CranedIdOfThisNode;
