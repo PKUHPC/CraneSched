@@ -12,10 +12,8 @@ repo_url: https://github.com/PKUHPC/CraneSched
 # Copyright
 copyright: Copyright &copy; 2022 - 2025 PKUHPC
 
-# 文档目录配置
 docs_dir: docs
 
-# 主题配置
 theme:
   name: material
   features:
@@ -48,7 +46,6 @@ theme:
   logo: images/logo.png
   favicon: images/logo.png
 
-# 插件配置
 plugins:
   - search
   - i18n:
@@ -95,7 +92,6 @@ plugins:
           build: true
           site_name: "CraneSched Documentation"
 
-# Markdown 扩展
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -124,7 +120,6 @@ markdown_extensions:
   - pymdownx.arithmatex:
       generic: true
 
-# 导航配置
 nav:
   - Home: index.md
   - Deployment:
