@@ -159,5 +159,5 @@ nav:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
         - GPU-Accelerated Training: reference/use_case_gpu.md
-        # - Parameter Sweep with Job Arrays: reference/use_case_job_array.md
-        # - Chained Jobs with Dependencies: reference/use_case_job_chain.md
+        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
+        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
