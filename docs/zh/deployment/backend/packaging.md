@@ -185,7 +185,7 @@ sudo dpkg -i CraneSched-*-craned.deb
     **使用直接安装（`cmake --install`）时：**
     - 二进制文件安装到 `/usr/local/bin/`（默认 `CMAKE_INSTALL_PREFIX`）
     - 监督器安装到 `/usr/local/libexec/`
-    - 示例：`/usr/local/bin/craned`、`/usr/local/libexec/csupervisor`
+    - 示例：`/usr/local/bin/craned`、`/usr/local/libexec/csupervisor`，你可能需要修改 `config.yaml` 中supervsior的path
     - 您可以使用 `cmake --install --prefix=/custom/path` 自定义此设置
 
 ### 安装后操作
