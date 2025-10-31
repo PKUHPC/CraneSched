@@ -10,7 +10,7 @@ cqueue
 
 **cqueue Output Example**
 
-![cqueue](../images/cqueue/cqueue.png)
+![cqueue](../../images/cqueue/cqueue.png)
 
 ## Main Output Fields
 
@@ -112,91 +112,91 @@ cqueue --format "ID:%8j | Name:%.15n | State:%t"
 ```bash
 cqueue -h
 ```
-![cqueue](../images/cqueue/cqueue_h.png)
+![cqueue](../../images/cqueue/cqueue_h.png)
 
 **Hide table header:**
 ```bash
 cqueue -N
 ```
-![cqueue](../images/cqueue/cqueue_N.png)
+![cqueue](../../images/cqueue/cqueue_N.png)
 
 **Show start times:**
 ```bash
 cqueue -S
 ```
-![cqueue](../images/cqueue/cqueue_S.png)
+![cqueue](../../images/cqueue/cqueue_S.png)
 
 **Query specific jobs:**
 ```bash
 cqueue -j 30674,30675
 ```
-![cqueue](../images/cqueue/cqueue_j.png)
+![cqueue](../../images/cqueue/cqueue_j.png)
 
 **Filter by state (pending jobs):**
 ```bash
 cqueue -t Pending
 ```
-![cqueue](../images/cqueue/cqueue_t.png)
+![cqueue](../../images/cqueue/cqueue_t.png)
 
 **Filter by state (running jobs, shorthand):**
 ```bash
 cqueue -t r
 ```
-![cqueue](../images/cqueue/cqueue_tr.png)
+![cqueue](../../images/cqueue/cqueue_tr.png)
 
 **Query jobs for specific user:**
 ```bash
 cqueue -u cranetest
 ```
-![cqueue](../images/cqueue/cqueue_u.png)
+![cqueue](../../images/cqueue/cqueue_u.png)
 
 **Query jobs for specific account:**
 ```bash
 cqueue -A CraneTest
 ```
-![cqueue](../images/cqueue/cqueue_A.png)
+![cqueue](../../images/cqueue/cqueue_A.png)
 
 **Auto-refresh every 3 seconds:**
 ```bash
 cqueue -i 3
 ```
-![cqueue](../images/cqueue/cqueue_i.png)
+![cqueue](../../images/cqueue/cqueue_i.png)
 
 **Filter by partition:**
 ```bash
 cqueue -p CPU
 ```
-![cqueue](../images/cqueue/cqueue_p.png)
+![cqueue](../../images/cqueue/cqueue_p.png)
 
 **Limit output to 3 lines:**
 ```bash
 cqueue -m 3
 ```
-![cqueue](../images/cqueue/cqueue_m.png)
+![cqueue](../../images/cqueue/cqueue_m.png)
 
 **Custom format output:**
 ```bash
 cqueue -o="%n %u %.5j %.5t %.3T %.5T"
 ```
-![cqueue](../images/cqueue/cqueue_o.png)
+![cqueue](../../images/cqueue/cqueue_o.png)
 
 **Filter by job name:**
 ```bash
 cqueue -n test
 ```
-![cqueue](../images/cqueue/cqueue_n1.png)
+![cqueue](../../images/cqueue/cqueue_n1.png)
 
 **Filter by QoS:**
 ```bash
 cqueue -q test_qos
 ```
-![cqueue](../images/cqueue/cqueue_q.png)
+![cqueue](../../images/cqueue/cqueue_q.png)
 
 **Show only current user's jobs:**
 ```bash
 cqueue --self
 ```
-![cqueue](../images/cqueue/cqueue_self.png)
+![cqueue](../../images/cqueue/cqueue_self.png)
 
 **JSON output:**
 ```bash

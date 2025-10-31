@@ -10,7 +10,7 @@ cacct
 
 **cacct 运行结果展示**
 
-![cacct](../images/cacct/cacct.png)
+![cacct](../../images/cacct/cacct.png)
 
 ## 输出字段
 
@@ -94,7 +94,7 @@ cacct
 ```bash
 cacct
 ```
-![cacct](../images/cacct/cacct.png)
+![cacct](../../images/cacct/cacct.png)
 
 ### 帮助信息
 
@@ -102,7 +102,7 @@ cacct
 ```bash
 cacct -h
 ```
-![cacct](../images/cacct/h.png)
+![cacct](../../images/cacct/h.png)
 
 ### 隐藏表头
 
@@ -110,7 +110,7 @@ cacct -h
 ```bash
 cacct -N
 ```
-![cacct](../images/cacct/N.png)
+![cacct](../../images/cacct/N.png)
 
 ### 时间范围过滤
 
@@ -118,13 +118,13 @@ cacct -N
 ```bash
 cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
-![cacct](../images/cacct/S.png)
+![cacct](../../images/cacct/S.png)
 
 按结束时间范围过滤：
 ```bash
 cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
-![cacct](../images/cacct/E.png)
+![cacct](../../images/cacct/E.png)
 
 ### 作业号过滤
 
@@ -132,7 +132,7 @@ cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```bash
 cacct -j=30618,30619,30620
 ```
-![cacct](../images/cacct/j.png)
+![cacct](../../images/cacct/j.png)
 
 ### 用户过滤
 
@@ -140,7 +140,7 @@ cacct -j=30618,30619,30620
 ```bash
 cacct -u=cranetest
 ```
-![cacct](../images/cacct/u.png)
+![cacct](../../images/cacct/u.png)
 
 ### 账户过滤
 
@@ -148,7 +148,7 @@ cacct -u=cranetest
 ```bash
 cacct -A=CraneTest
 ```
-![cacct](../images/cacct/A.png)
+![cacct](../../images/cacct/A.png)
 
 ### 限制输出行数
 
@@ -156,7 +156,7 @@ cacct -A=CraneTest
 ```bash
 cacct -m=10
 ```
-![cacct](../images/cacct/m.png)
+![cacct](../../images/cacct/m.png)
 
 ### 分区过滤
 
@@ -164,7 +164,7 @@ cacct -m=10
 ```bash
 cacct -p GPU
 ```
-![cacct](../images/cacct/p.png)
+![cacct](../../images/cacct/p.png)
 
 ### 作业名过滤
 
@@ -172,7 +172,7 @@ cacct -p GPU
 ```bash
 cacct -n=Test_Job
 ```
-![cacct](../images/cacct/nt.png)
+![cacct](../../images/cacct/nt.png)
 
 ### 自定义格式
 
@@ -180,7 +180,7 @@ cacct -n=Test_Job
 ```bash
 cacct -o="%j %.10n %P %a %t"
 ```
-![cacct](../images/cacct/o.png)
+![cacct](../../images/cacct/o.png)
 
 ### 组合过滤
 
@@ -188,31 +188,31 @@ cacct -o="%j %.10n %P %a %t"
 ```bash
 cacct -A ROOT -m 10
 ```
-![cacct](../images/cacct/am.png)
+![cacct](../../images/cacct/am.png)
 
 多个过滤器与完整输出：
 ```bash
 cacct -m 10 -j 783925,783889 -t=c -F
 ```
-![cacct](../images/cacct/mj.png)
+![cacct](../../images/cacct/mj.png)
 
 按名称查询：
 ```bash
 cacct -n test
 ```
-![cacct](../images/cacct/ntest.png)
+![cacct](../../images/cacct/ntest.png)
 
 按 QoS 查询：
 ```bash
 cacct -q test_qos
 ```
-![cacct](../images/cacct/qt.png)
+![cacct](../../images/cacct/qt.png)
 
 复杂组合查询：
 ```bash
 cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T110:00:00 -p CPU -t c
 ```
-![cacct](../images/cacct/me.png)
+![cacct](../../images/cacct/me.png)
 
 ## 高级功能
 

@@ -55,7 +55,7 @@ ccontrol show node
 ccontrol show node crane01
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_shownode2.png)
+![ccontrol](../../images/ccontrol/ccontrol_shownode2.png)
 
 #### 显示分区
 
@@ -75,7 +75,7 @@ ccontrol show partition
 ccontrol show partition CPU
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_showp2.png)
+![ccontrol](../../images/ccontrol/ccontrol_showp2.png)
 
 #### 显示作业
 
@@ -95,7 +95,7 @@ ccontrol show job
 ccontrol show job 12345
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_showjob2.png)
+![ccontrol](../../images/ccontrol/ccontrol_showjob2.png)
 
 #### 显示预留
 
@@ -115,7 +115,7 @@ ccontrol show reservation
 ccontrol show reservation my_reservation
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_showreservation.png)
+![ccontrol](../../images/ccontrol/ccontrol_showreservation.png)
 
 ### Update 命令
 
@@ -143,7 +143,7 @@ ccontrol update nodename=crane01 state=drain reason="维护"
 ccontrol update nodename=crane01 state=resume
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatens.png)
+![ccontrol](../../images/ccontrol/ccontrol_updatens.png)
 
 #### 更新作业
 
@@ -176,7 +176,7 @@ ccontrol update jobid=11 priority=1 timelimit=01:00:00 comment="高优先级作�
 ccontrol update jobid=11 mailuser=user@example.com mailtype=END
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatejp.png)
+![ccontrol](../../images/ccontrol/ccontrol_updatejp.png)
 
 #### 更新分区
 
@@ -202,7 +202,7 @@ ccontrol update partition=GPU accounts=research,staff
 ccontrol update partition=CPU deniedaccounts=guest
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_updatepa.png)
+![ccontrol](../../images/ccontrol/ccontrol_updatepa.png)
 
 ### Hold 和 Release 命令
 
@@ -227,7 +227,7 @@ ccontrol hold 1
 ccontrol hold 1 timelimit=01:00:00
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_hold1t.png)
+![ccontrol](../../images/ccontrol/ccontrol_hold1t.png)
 
 #### 释放作业
 
@@ -242,7 +242,7 @@ ccontrol release <作业ID>
 ccontrol release 1
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_release_1.png)
+![ccontrol](../../images/ccontrol/ccontrol_release_1.png)
 
 ### Create 和 Delete 命令
 
@@ -273,7 +273,7 @@ ccontrol create reservation my_reservation startTime=2024-12-01T10:00:00 duratio
 ccontrol create reservation test_reservation startTime=2024-12-01T14:00:00 duration=02:00:00 partition=GPU nodeCnt=2 account=staff user=alice
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_create.png)
+![ccontrol](../../images/ccontrol/ccontrol_create.png)
 
 #### 删除预留
 
@@ -288,7 +288,7 @@ ccontrol delete reservation <名称>
 ccontrol delete reservation my_reservation
 ```
 
-![ccontrol](../images/ccontrol/ccontrol_delete.png)
+![ccontrol](../../images/ccontrol/ccontrol_delete.png)
 
 ## JSON 输出
 

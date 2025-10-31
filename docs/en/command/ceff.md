@@ -10,7 +10,7 @@ ceff <job_id[,job_id,...]>
 
 **ceff Output Example**
 
-![ceff](../images/ceff/ceff.png)
+![ceff](../../images/ceff/ceff.png)
 
 ## Main Output Fields
 
@@ -42,7 +42,7 @@ ceff <job_id[,job_id,...]>
 ceff -h
 ```
 
-![ceff](../images/ceff/h.png)
+![ceff](../../images/ceff/h.png)
 
 **Query job efficiency:**
 ```bash
@@ -60,7 +60,7 @@ ceff 1234,1235,1236
 ceff <job_id> --json
 ```
 
-![ceff](../images/ceff/json.png)
+![ceff](../../images/ceff/json.png)
 
 ## Understanding Efficiency Metrics
 

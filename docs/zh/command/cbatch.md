@@ -32,9 +32,9 @@ cbatch cbatch_test.sh
 
 **cbatch 运行结果展示**
 
-![cbatch](../images/cbatch/cbatch_run1.png)
+![cbatch](../../images/cbatch/cbatch_run1.png)
 
-![cbatch](../images/cbatch/cbatch_run2.png)
+![cbatch](../../images/cbatch/cbatch_run2.png)
 
 ## 命令行选项
 
@@ -98,7 +98,7 @@ cbatch cbatch_test.sh
 ```bash
 cbatch cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_test.png)
+![cbatch](../../images/cbatch/cbatch_test.png)
 
 ### 帮助信息
 
@@ -106,7 +106,7 @@ cbatch cbatch_test.sh
 ```bash
 cbatch -h
 ```
-![cbatch](../images/cbatch/cbatch_h.png)
+![cbatch](../../images/cbatch/cbatch_h.png)
 
 ### 指定账户
 
@@ -114,8 +114,8 @@ cbatch -h
 ```bash
 cbatch -A=acct-test cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_A1.png)
-![cbatch](../images/cbatch/cbatch_A2.png)
+![cbatch](../../images/cbatch/cbatch_A1.png)
+![cbatch](../../images/cbatch/cbatch_A2.png)
 
 ### 节点排除
 
@@ -123,8 +123,8 @@ cbatch -A=acct-test cbatch_test.sh
 ```bash
 cbatch -x crane01,crane02 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_x1.png)
-![cbatch](../images/cbatch/cbatch_x2.png)
+![cbatch](../../images/cbatch/cbatch_x1.png)
+![cbatch](../../images/cbatch/cbatch_x2.png)
 
 ### 作业名称
 
@@ -132,8 +132,8 @@ cbatch -x crane01,crane02 cbatch_test.sh
 ```bash
 cbatch -J testjob01 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_j1.png)
-![cbatch](../images/cbatch/cbatch_j2.png)
+![cbatch](../../images/cbatch/cbatch_j1.png)
+![cbatch](../../images/cbatch/cbatch_j2.png)
 
 ### 节点选择
 
@@ -141,8 +141,8 @@ cbatch -J testjob01 cbatch_test.sh
 ```bash
 cbatch -w crane01,crane03 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_w1.png)
-![cbatch](../images/cbatch/cbatch_w2.png)
+![cbatch](../../images/cbatch/cbatch_w1.png)
+![cbatch](../../images/cbatch/cbatch_w2.png)
 
 ### 分区选择
 
@@ -150,8 +150,8 @@ cbatch -w crane01,crane03 cbatch_test.sh
 ```bash
 cbatch -p GPU cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_p1.png)
-![cbatch](../images/cbatch/cbatch_p2.png)
+![cbatch](../../images/cbatch/cbatch_p1.png)
+![cbatch](../../images/cbatch/cbatch_p2.png)
 
 ### 时间限制
 
@@ -159,8 +159,8 @@ cbatch -p GPU cbatch_test.sh
 ```bash
 cbatch -t 00:25:25 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_t1.png)
-![cbatch](../images/cbatch/cbatch_t2.png)
+![cbatch](../../images/cbatch/cbatch_t1.png)
+![cbatch](../../images/cbatch/cbatch_t2.png)
 
 ### CPU 核心
 
@@ -168,9 +168,9 @@ cbatch -t 00:25:25 cbatch_test.sh
 ```bash
 cbatch -c 2 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_c1.png)
-![cbatch](../images/cbatch/cbatch_c2.png)
-![cbatch](../images/cbatch/cbatch_c3.png)
+![cbatch](../../images/cbatch/cbatch_c1.png)
+![cbatch](../../images/cbatch/cbatch_c2.png)
+![cbatch](../../images/cbatch/cbatch_c3.png)
 
 ### 内存规格
 
@@ -178,9 +178,9 @@ cbatch -c 2 cbatch_test.sh
 ```bash
 cbatch --mem 123M cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_mem1.png)
-![cbatch](../images/cbatch/cbatch_mem2.png)
-![cbatch](../images/cbatch/cbatch_mem3.png)
+![cbatch](../../images/cbatch/cbatch_mem1.png)
+![cbatch](../../images/cbatch/cbatch_mem2.png)
+![cbatch](../../images/cbatch/cbatch_mem3.png)
 
 ### 多节点作业
 
@@ -188,9 +188,9 @@ cbatch --mem 123M cbatch_test.sh
 ```bash
 cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_N1.png)
-![cbatch](../images/cbatch/cbatch_N2.png)
-![cbatch](../images/cbatch/cbatch_N3.png)
+![cbatch](../../images/cbatch/cbatch_N1.png)
+![cbatch](../../images/cbatch/cbatch_N2.png)
+![cbatch](../../images/cbatch/cbatch_N3.png)
 
 ### 工作目录
 
@@ -198,7 +198,7 @@ cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```bash
 cbatch -D /path test.sh
 ```
-![cbatch](../images/cbatch/cbatch_D1.png)
+![cbatch](../../images/cbatch/cbatch_D1.png)
 
 ### 错误日志
 
@@ -206,7 +206,7 @@ cbatch -D /path test.sh
 ```bash
 cbatch -e error.log test.sh
 ```
-![cbatch](../images/cbatch/cbatch_e.png)
+![cbatch](../../images/cbatch/cbatch_e.png)
 
 ### 环境变量
 
@@ -214,7 +214,7 @@ cbatch -e error.log test.sh
 ```bash
 cbatch --export ALL test.sh
 ```
-![cbatch](../images/cbatch/cbatch_export.png)
+![cbatch](../../images/cbatch/cbatch_export.png)
 
 ### 用户环境
 
@@ -222,7 +222,7 @@ cbatch --export ALL test.sh
 ```bash
 cbatch --get-user-env test.sh
 ```
-![cbatch](../images/cbatch/cbatch_get_user.png)
+![cbatch](../../images/cbatch/cbatch_get_user.png)
 
 ### 输出重定向
 
@@ -230,7 +230,7 @@ cbatch --get-user-env test.sh
 ```bash
 cbatch -o output.out test.sh
 ```
-![cbatch](../images/cbatch/cbatch_o.png)
+![cbatch](../../images/cbatch/cbatch_o.png)
 
 ### 服务质量
 
@@ -238,7 +238,7 @@ cbatch -o output.out test.sh
 ```bash
 cbatch -q qos_test test.sh
 ```
-![cbatch](../images/cbatch/cbatch_q.png)
+![cbatch](../../images/cbatch/cbatch_q.png)
 
 ### 重复提交
 
@@ -246,7 +246,7 @@ cbatch -q qos_test test.sh
 ```bash
 cbatch --repeat 3 test.sh
 ```
-![cbatch](../images/cbatch/cbatch_repeat.png)
+![cbatch](../../images/cbatch/cbatch_repeat.png)
 
 ## 环境变量
 

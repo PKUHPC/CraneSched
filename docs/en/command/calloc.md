@@ -57,7 +57,7 @@ Display help:
 ```bash
 calloc -h
 ```
-![calloc](../images/calloc/calloc_h.png)
+![calloc](../../images/calloc/calloc_h.png)
 
 ### Basic Resource Allocation
 
@@ -68,8 +68,8 @@ calloc -c 1 --mem 200M -p CPU -N 2
 
 **Result:**
 
-![calloc](../images/calloc/calloc_c1.png)
-![calloc](../images/calloc/calloc_c2.png)
+![calloc](../../images/calloc/calloc_c1.png)
+![calloc](../../images/calloc/calloc_c2.png)
 
 ### Specify Account and Node List
 
@@ -80,8 +80,8 @@ calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
 
 **Result:**
 
-![calloc](../images/calloc/calloc_A1.png)
-![calloc](../images/calloc/calloc_A2.png)
+![calloc](../../images/calloc/calloc_A1.png)
+![calloc](../../images/calloc/calloc_A2.png)
 
 ### Time Limit and QoS
 
@@ -90,8 +90,8 @@ Allocate resources with time limit and specific QoS:
 calloc --mem 200M -p CPU -q test-qos -t 00:25:25
 ```
 
-![calloc](../images/calloc/calloc_mem1.png)
-![calloc](../images/calloc/calloc_mem2.png)
+![calloc](../../images/calloc/calloc_mem1.png)
+![calloc](../../images/calloc/calloc_mem2.png)
 
 ### Working Directory
 
@@ -100,7 +100,7 @@ Specify working directory:
 calloc -D /path
 ```
 
-![calloc](../images/calloc/calloc_D.png)
+![calloc](../../images/calloc/calloc_D.png)
 
 ### Debug Level
 
@@ -109,7 +109,7 @@ Set debug level to trace:
 calloc --debug-level trace
 ```
 
-![calloc](../images/calloc/calloc_debug.png)
+![calloc](../../images/calloc/calloc_debug.png)
 
 ### Exclude Nodes
 
@@ -118,7 +118,7 @@ Exclude specific nodes from allocation:
 calloc -x cranetest02
 ```
 
-![calloc](../images/calloc/calloc_x.png)
+![calloc](../../images/calloc/calloc_x.png)
 
 ### User Environment
 
@@ -127,7 +127,7 @@ Load user's login environment:
 calloc --get-user-env
 ```
 
-![calloc](../images/calloc/calloc_get_user.png)
+![calloc](../../images/calloc/calloc_get_user.png)
 
 ### Job Name
 
@@ -136,7 +136,7 @@ Specify job name:
 calloc -J job_name
 ```
 
-![calloc](../images/calloc/calloc_j.png)
+![calloc](../../images/calloc/calloc_j.png)
 
 ## Advanced Features
 

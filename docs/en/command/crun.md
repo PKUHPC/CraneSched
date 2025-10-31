@@ -46,7 +46,7 @@ Request 2 nodes, 1 CPU core, 200M memory in CPU partition, and run bash:
 crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_c.png)
+![crun](../../images/crun/crun_c.png)
 
 **Exclude specific nodes:**
 
@@ -55,7 +55,7 @@ Request 1 node, exclude crane01 and crane02, set job name to testjob, time limit
 crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_N1.png)
+![crun](../../images/crun/crun_N1.png)
 
 **Specify node list:**
 
@@ -64,13 +64,13 @@ Request 1 node and 200M memory in GPU partition, nodes must be chosen from crane
 crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_N2.png)
+![crun](../../images/crun/crun_N2.png)
 
 **Nested execution within calloc:**
 
 crun can also be started nested within a calloc task and will automatically inherit all resources from the calloc task. No need to specify parameters other than the program to run:
 
-![crun](../images/crun/crun_N3.png)
+![crun](../../images/crun/crun_N3.png)
 
 **Advanced options:**
 
@@ -79,21 +79,21 @@ crun can also be started nested within a calloc task and will automatically inhe
 crun -A ROOT -J test_crun -x cranetest03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_A.png)
+![crun](../../images/crun/crun_A.png)
 
 ```bash
 # With working directory and debug level
 crun -D /path --debug-level trace --export ALL /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_D.png)
+![crun](../../images/crun/crun_D.png)
 
 ```bash
 # Run on specific node
 crun -w cranetest04 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_w.png)
+![crun](../../images/crun/crun_w.png)
 
 **X11 forwarding:**
 
@@ -102,7 +102,7 @@ crun -w cranetest04 /usr/bin/bash
 crun --x11 xclock
 ```
 
-![crun](../images/crun/crun_clock.png)
+![crun](../../images/crun/crun_clock.png)
 
 ## Passing Arguments to Programs
 

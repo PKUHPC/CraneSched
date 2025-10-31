@@ -32,9 +32,9 @@ cbatch cbatch_test.sh
 
 **cbatch Execution Results**
 
-![cbatch](../images/cbatch/cbatch_run1.png)
+![cbatch](../../images/cbatch/cbatch_run1.png)
 
-![cbatch](../images/cbatch/cbatch_run2.png)
+![cbatch](../../images/cbatch/cbatch_run2.png)
 
 ## Command Line Options
 
@@ -98,7 +98,7 @@ Submit a batch script:
 ```bash
 cbatch cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_test.png)
+![cbatch](../../images/cbatch/cbatch_test.png)
 
 ### Help Information
 
@@ -106,7 +106,7 @@ Display help:
 ```bash
 cbatch -h
 ```
-![cbatch](../images/cbatch/cbatch_h.png)
+![cbatch](../../images/cbatch/cbatch_h.png)
 
 ### Specify Account
 
@@ -114,8 +114,8 @@ Submit job with a specific account:
 ```bash
 cbatch -A=acct-test cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_A1.png)
-![cbatch](../images/cbatch/cbatch_A2.png)
+![cbatch](../../images/cbatch/cbatch_A1.png)
+![cbatch](../../images/cbatch/cbatch_A2.png)
 
 ### Node Exclusion
 
@@ -123,8 +123,8 @@ Exclude nodes from allocation:
 ```bash
 cbatch -x crane01,crane02 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_x1.png)
-![cbatch](../images/cbatch/cbatch_x2.png)
+![cbatch](../../images/cbatch/cbatch_x1.png)
+![cbatch](../../images/cbatch/cbatch_x2.png)
 
 ### Job Name
 
@@ -132,8 +132,8 @@ Specify job name:
 ```bash
 cbatch -J testjob01 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_j1.png)
-![cbatch](../images/cbatch/cbatch_j2.png)
+![cbatch](../../images/cbatch/cbatch_j1.png)
+![cbatch](../../images/cbatch/cbatch_j2.png)
 
 ### Node Selection
 
@@ -141,8 +141,8 @@ Request specific nodes:
 ```bash
 cbatch -w crane01,crane03 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_w1.png)
-![cbatch](../images/cbatch/cbatch_w2.png)
+![cbatch](../../images/cbatch/cbatch_w1.png)
+![cbatch](../../images/cbatch/cbatch_w2.png)
 
 ### Partition Selection
 
@@ -150,8 +150,8 @@ Submit to specific partition:
 ```bash
 cbatch -p GPU cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_p1.png)
-![cbatch](../images/cbatch/cbatch_p2.png)
+![cbatch](../../images/cbatch/cbatch_p1.png)
+![cbatch](../../images/cbatch/cbatch_p2.png)
 
 ### Time Limit
 
@@ -159,8 +159,8 @@ Set time limit:
 ```bash
 cbatch -t 00:25:25 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_t1.png)
-![cbatch](../images/cbatch/cbatch_t2.png)
+![cbatch](../../images/cbatch/cbatch_t1.png)
+![cbatch](../../images/cbatch/cbatch_t2.png)
 
 ### CPU Cores
 
@@ -168,9 +168,9 @@ Request specific number of CPU cores:
 ```bash
 cbatch -c 2 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_c1.png)
-![cbatch](../images/cbatch/cbatch_c2.png)
-![cbatch](../images/cbatch/cbatch_c3.png)
+![cbatch](../../images/cbatch/cbatch_c1.png)
+![cbatch](../../images/cbatch/cbatch_c2.png)
+![cbatch](../../images/cbatch/cbatch_c3.png)
 
 ### Memory Specification
 
@@ -178,9 +178,9 @@ Specify memory requirements:
 ```bash
 cbatch --mem 123M cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_mem1.png)
-![cbatch](../images/cbatch/cbatch_mem2.png)
-![cbatch](../images/cbatch/cbatch_mem3.png)
+![cbatch](../../images/cbatch/cbatch_mem1.png)
+![cbatch](../../images/cbatch/cbatch_mem2.png)
+![cbatch](../../images/cbatch/cbatch_mem3.png)
 
 ### Multi-node Jobs
 
@@ -188,9 +188,9 @@ Request multiple nodes with tasks per node:
 ```bash
 cbatch -N 2 --ntasks-per-node 2 cbatch_test.sh
 ```
-![cbatch](../images/cbatch/cbatch_N1.png)
-![cbatch](../images/cbatch/cbatch_N2.png)
-![cbatch](../images/cbatch/cbatch_N3.png)
+![cbatch](../../images/cbatch/cbatch_N1.png)
+![cbatch](../../images/cbatch/cbatch_N2.png)
+![cbatch](../../images/cbatch/cbatch_N3.png)
 
 ### Working Directory
 
@@ -198,7 +198,7 @@ Specify working directory:
 ```bash
 cbatch -D /path test.sh
 ```
-![cbatch](../images/cbatch/cbatch_D1.png)
+![cbatch](../../images/cbatch/cbatch_D1.png)
 
 ### Error Log
 
@@ -206,7 +206,7 @@ Redirect error output:
 ```bash
 cbatch -e error.log test.sh
 ```
-![cbatch](../images/cbatch/cbatch_e.png)
+![cbatch](../../images/cbatch/cbatch_e.png)
 
 ### Environment Variables
 
@@ -214,7 +214,7 @@ Export all environment variables:
 ```bash
 cbatch --export ALL test.sh
 ```
-![cbatch](../images/cbatch/cbatch_export.png)
+![cbatch](../../images/cbatch/cbatch_export.png)
 
 ### User Environment
 
@@ -222,7 +222,7 @@ Load user's login environment:
 ```bash
 cbatch --get-user-env test.sh
 ```
-![cbatch](../images/cbatch/cbatch_get_user.png)
+![cbatch](../../images/cbatch/cbatch_get_user.png)
 
 ### Output Redirection
 
@@ -230,7 +230,7 @@ Redirect standard output:
 ```bash
 cbatch -o output.out test.sh
 ```
-![cbatch](../images/cbatch/cbatch_o.png)
+![cbatch](../../images/cbatch/cbatch_o.png)
 
 ### Quality of Service
 
@@ -238,7 +238,7 @@ Specify QoS:
 ```bash
 cbatch -q qos_test test.sh
 ```
-![cbatch](../images/cbatch/cbatch_q.png)
+![cbatch](../../images/cbatch/cbatch_q.png)
 
 ### Repeat Submission
 
@@ -246,7 +246,7 @@ Submit job multiple times:
 ```bash
 cbatch --repeat 3 test.sh
 ```
-![cbatch](../images/cbatch/cbatch_repeat.png)
+![cbatch](../../images/cbatch/cbatch_repeat.png)
 
 ## Environment Variables
 

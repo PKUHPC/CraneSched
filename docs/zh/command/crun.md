@@ -46,7 +46,7 @@ crun只支持通过命令行指定请求参数，支持的命令行选项：
 crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_c.png)
+![crun](../../images/crun/crun_c.png)
 
 **排除特定节点：**
 
@@ -55,7 +55,7 @@ crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
 crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_N1.png)
+![crun](../../images/crun/crun_N1.png)
 
 **指定节点列表：**
 
@@ -64,13 +64,13 @@ crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
 crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_N2.png)
+![crun](../../images/crun/crun_N2.png)
 
 **在calloc任务内嵌套启动：**
 
 crun还可以在calloc任务内嵌套启动，将自动继承calloc任务的所有资源。不需要指定除需要运行的程序外其他参数：
 
-![crun](../images/crun/crun_N3.png)
+![crun](../../images/crun/crun_N3.png)
 
 **高级选项：**
 
@@ -79,21 +79,21 @@ crun还可以在calloc任务内嵌套启动，将自动继承calloc任务的所�
 crun -A ROOT -J test_crun -x cranetest03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_A.png)
+![crun](../../images/crun/crun_A.png)
 
 ```bash
 # 带工作目录和调试级别
 crun -D /path --debug-level trace --export ALL /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_D.png)
+![crun](../../images/crun/crun_D.png)
 
 ```bash
 # 在特定节点上运行
 crun -w cranetest04 /usr/bin/bash
 ```
 
-![crun](../images/crun/crun_w.png)
+![crun](../../images/crun/crun_w.png)
 
 **X11转发：**
 
@@ -102,7 +102,7 @@ crun -w cranetest04 /usr/bin/bash
 crun --x11 xclock
 ```
 
-![crun](../images/crun/crun_clock.png)
+![crun](../../images/crun/crun_clock.png)
 
 ## 向程序传递参数
 

@@ -9,7 +9,7 @@ cinfo
 
 **cinfo Output Example**
 
-![cinfo](../images/cinfo/cinfo_running.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 ## Main Output Fields
 
@@ -69,61 +69,61 @@ cinfo --format "%.5partition %.6a %s"
 ```bash
 cinfo
 ```
-![cinfo](../images/cinfo/cinfo_running.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 **Display help:**
 ```bash
 cinfo -h
 ```
-![cinfo](../images/cinfo/cinfo_h.png)
+![cinfo](../../images/cinfo/cinfo_h.png)
 
 **Hide table header:**
 ```bash
 cinfo -N
 ```
-![cinfo](../images/cinfo/cinfo_n.png)
+![cinfo](../../images/cinfo/cinfo_n.png)
 
 **Show only non-responding nodes:**
 ```bash
 cinfo -d
 ```
-![cinfo](../images/cinfo/cinfo_d.png)
+![cinfo](../../images/cinfo/cinfo_d.png)
 
 **Auto-refresh every 3 seconds:**
 ```bash
 cinfo -i 3
 ```
-![cinfo](../images/cinfo/cinfo_i3.png)
+![cinfo](../../images/cinfo/cinfo_i3.png)
 
 **Display specific nodes:**
 ```bash
 cinfo -n crane01,crane02,crane03
 ```
-![cinfo](../images/cinfo/cinfo_n123.png)
+![cinfo](../../images/cinfo/cinfo_n123.png)
 
 **Display specific partitions:**
 ```bash
 cinfo -p GPU,CPU
 ```
-![cinfo](../images/cinfo/cinfo_p.png)
+![cinfo](../../images/cinfo/cinfo_p.png)
 
 **Show only responding nodes:**
 ```bash
 cinfo -r
 ```
-![cinfo](../images/cinfo/cinfo_r.png)
+![cinfo](../../images/cinfo/cinfo_r.png)
 
 **Filter by node state:**
 ```bash
 cinfo -t IDLE
 ```
-![cinfo](../images/cinfo/cinfo_t.png)
+![cinfo](../../images/cinfo/cinfo_t.png)
 
 **Display version:**
 ```bash
 cinfo -v
 ```
-![cinfo](../images/cinfo/cinfo_v.png)
+![cinfo](../../images/cinfo/cinfo_v.png)
 
 **JSON output:**
 ```bash

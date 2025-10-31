@@ -49,9 +49,9 @@ ccancel 30686
 
 **运行结果：**
 
-![ccancel](../images/ccancel/ccancel_1.png)
-![ccancel](../images/ccancel/ccancel_2.png)
-![ccancel](../images/ccancel/ccancel_3.png)
+![ccancel](../../images/ccancel/ccancel_1.png)
+![ccancel](../../images/ccancel/ccancel_2.png)
+![ccancel](../../images/ccancel/ccancel_3.png)
 
 取消多个作业：
 ```bash
@@ -67,9 +67,9 @@ ccancel -n test1
 
 **运行结果：**
 
-![ccancel](../images/ccancel/ccancel_n1.png)
-![ccancel](../images/ccancel/ccancel_n2.png)
-![ccancel](../images/ccancel/ccancel_n3.png)
+![ccancel](../../images/ccancel/ccancel_n1.png)
+![ccancel](../../images/ccancel/ccancel_n2.png)
+![ccancel](../../images/ccancel/ccancel_n3.png)
 
 ### 按分区取消
 
@@ -80,9 +80,9 @@ ccancel -p GPU
 
 **运行结果：**
 
-![ccancel](../images/ccancel/ccancel_p1.png)
-![ccancel](../images/ccancel/ccancel_p2.png)
-![ccancel](../images/ccancel/ccancel_p3.png)
+![ccancel](../../images/ccancel/ccancel_p1.png)
+![ccancel](../../images/ccancel/ccancel_p2.png)
+![ccancel](../../images/ccancel/ccancel_p3.png)
 
 ### 按节点取消
 
@@ -91,7 +91,7 @@ ccancel -p GPU
 ccancel -w crane02
 ```
 
-![ccancel](../images/ccancel/ccancel_w.png)
+![ccancel](../../images/ccancel/ccancel_w.png)
 
 ### 按状态取消
 
@@ -100,7 +100,7 @@ ccancel -w crane02
 ccancel -t Pending
 ```
 
-![ccancel](../images/ccancel/ccancel_t.png)
+![ccancel](../../images/ccancel/ccancel_t.png)
 
 取消所有正在运行的作业：
 ```bash
@@ -119,7 +119,7 @@ ccancel -t All
 ccancel -A PKU
 ```
 
-![ccancel](../images/ccancel/ccancel_A.png)
+![ccancel](../../images/ccancel/ccancel_A.png)
 
 ### 按用户取消
 
@@ -128,7 +128,7 @@ ccancel -A PKU
 ccancel -u ROOT
 ```
 
-![ccancel](../images/ccancel/ccancel_u.png)
+![ccancel](../../images/ccancel/ccancel_u.png)
 
 ### 组合过滤器
 
@@ -161,7 +161,7 @@ ccancel -p GPU -t Pending --json
 
 ## 示例概览
 
-![ccancel](../images/ccancel/ccancel.png)
+![ccancel](../../images/ccancel/ccancel.png)
 
 ## 取消后的行为
 

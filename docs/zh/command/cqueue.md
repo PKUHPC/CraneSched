@@ -10,7 +10,7 @@ cqueue
 
 **cqueue运行结果展示**
 
-![cqueue](../images/cqueue/cqueue.png)
+![cqueue](../../images/cqueue/cqueue.png)
 
 ## 主要输出项
 
@@ -112,91 +112,91 @@ cqueue --format "ID:%8j | Name:%.15n | State:%t"
 ```bash
 cqueue -h
 ```
-![cqueue](../images/cqueue/cqueue_h.png)
+![cqueue](../../images/cqueue/cqueue_h.png)
 
 **隐藏表头：**
 ```bash
 cqueue -N
 ```
-![cqueue](../images/cqueue/cqueue_N.png)
+![cqueue](../../images/cqueue/cqueue_N.png)
 
 **显示开始时间：**
 ```bash
 cqueue -S
 ```
-![cqueue](../images/cqueue/cqueue_S.png)
+![cqueue](../../images/cqueue/cqueue_S.png)
 
 **查询特定作业：**
 ```bash
 cqueue -j 30674,30675
 ```
-![cqueue](../images/cqueue/cqueue_j.png)
+![cqueue](../../images/cqueue/cqueue_j.png)
 
 **按状态过滤（挂起的作业）：**
 ```bash
 cqueue -t Pending
 ```
-![cqueue](../images/cqueue/cqueue_t.png)
+![cqueue](../../images/cqueue/cqueue_t.png)
 
 **按状态过滤（运行中的作业，简写）：**
 ```bash
 cqueue -t r
 ```
-![cqueue](../images/cqueue/cqueue_tr.png)
+![cqueue](../../images/cqueue/cqueue_tr.png)
 
 **查询特定用户的作业：**
 ```bash
 cqueue -u cranetest
 ```
-![cqueue](../images/cqueue/cqueue_u.png)
+![cqueue](../../images/cqueue/cqueue_u.png)
 
 **查询特定账户的作业：**
 ```bash
 cqueue -A CraneTest
 ```
-![cqueue](../images/cqueue/cqueue_A.png)
+![cqueue](../../images/cqueue/cqueue_A.png)
 
 **每3秒自动刷新：**
 ```bash
 cqueue -i 3
 ```
-![cqueue](../images/cqueue/cqueue_i.png)
+![cqueue](../../images/cqueue/cqueue_i.png)
 
 **按分区过滤：**
 ```bash
 cqueue -p CPU
 ```
-![cqueue](../images/cqueue/cqueue_p.png)
+![cqueue](../../images/cqueue/cqueue_p.png)
 
 **限制输出为3行：**
 ```bash
 cqueue -m 3
 ```
-![cqueue](../images/cqueue/cqueue_m.png)
+![cqueue](../../images/cqueue/cqueue_m.png)
 
 **自定义格式输出：**
 ```bash
 cqueue -o="%n %u %.5j %.5t %.3T %.5T"
 ```
-![cqueue](../images/cqueue/cqueue_o.png)
+![cqueue](../../images/cqueue/cqueue_o.png)
 
 **按作业名过滤：**
 ```bash
 cqueue -n test
 ```
-![cqueue](../images/cqueue/cqueue_n1.png)
+![cqueue](../../images/cqueue/cqueue_n1.png)
 
 **按QoS过滤：**
 ```bash
 cqueue -q test_qos
 ```
-![cqueue](../images/cqueue/cqueue_q.png)
+![cqueue](../../images/cqueue/cqueue_q.png)
 
 **仅显示当前用户的作业：**
 ```bash
 cqueue --self
 ```
-![cqueue](../images/cqueue/cqueue_self.png)
+![cqueue](../../images/cqueue/cqueue_self.png)
 
 **JSON输出：**
 ```bash

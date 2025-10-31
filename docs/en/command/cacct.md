@@ -94,7 +94,7 @@ View all jobs:
 ```bash
 cacct
 ```
-![cacct](../images/cacct/cacct.png)
+![cacct](../../images/cacct/cacct.png)
 
 ### Help Information
 
@@ -102,7 +102,7 @@ Display help:
 ```bash
 cacct -h
 ```
-![cacct](../images/cacct/h.png)
+![cacct](../../images/cacct/h.png)
 
 ### Hide Header
 
@@ -110,7 +110,7 @@ Output without header:
 ```bash
 cacct -N
 ```
-![cacct](../images/cacct/N.png)
+![cacct](../../images/cacct/N.png)
 
 ### Time Range Filtering
 
@@ -118,13 +118,13 @@ Filter by start time range:
 ```bash
 cacct -S=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
-![cacct](../images/cacct/S.png)
+![cacct](../../images/cacct/S.png)
 
 Filter by end time range:
 ```bash
 cacct -E=2024-07-22T10:00:00~2024-07-24T10:00:00
 ```
-![cacct](../images/cacct/E.png)
+![cacct](../../images/cacct/E.png)
 
 ### Job ID Filtering
 
@@ -132,7 +132,7 @@ Query specific job IDs:
 ```bash
 cacct -j=30618,30619,30620
 ```
-![cacct](../images/cacct/j.png)
+![cacct](../../images/cacct/j.png)
 
 ### User Filtering
 
@@ -140,7 +140,7 @@ Query jobs by user:
 ```bash
 cacct -u=cranetest
 ```
-![cacct](../images/cacct/u.png)
+![cacct](../../images/cacct/u.png)
 
 ### Account Filtering
 
@@ -148,7 +148,7 @@ Query jobs by account:
 ```bash
 cacct -A=CraneTest
 ```
-![cacct](../images/cacct/A.png)
+![cacct](../../images/cacct/A.png)
 
 ### Limit Output Lines
 
@@ -156,7 +156,7 @@ Limit to 10 lines:
 ```bash
 cacct -m=10
 ```
-![cacct](../images/cacct/m.png)
+![cacct](../../images/cacct/m.png)
 
 ### Partition Filtering
 
@@ -164,7 +164,7 @@ Query jobs in specific partition:
 ```bash
 cacct -p GPU
 ```
-![cacct](../images/cacct/p.png)
+![cacct](../../images/cacct/p.png)
 
 ### Job Name Filtering
 
@@ -172,7 +172,7 @@ Query by job name:
 ```bash
 cacct -n=Test_Job
 ```
-![cacct](../images/cacct/nt.png)
+![cacct](../../images/cacct/nt.png)
 
 ### Custom Format
 
@@ -180,7 +180,7 @@ Specify custom output format:
 ```bash
 cacct -o="%j %.10n %P %a %t"
 ```
-![cacct](../images/cacct/o.png)
+![cacct](../../images/cacct/o.png)
 
 ### Combined Filters
 
@@ -188,31 +188,31 @@ Combine account and max-lines:
 ```bash
 cacct -A ROOT -m 10
 ```
-![cacct](../images/cacct/am.png)
+![cacct](../../images/cacct/am.png)
 
 Multiple filters with full output:
 ```bash
 cacct -m 10 -j 783925,783889 -t=c -F
 ```
-![cacct](../images/cacct/mj.png)
+![cacct](../../images/cacct/mj.png)
 
 Query by name:
 ```bash
 cacct -n test
 ```
-![cacct](../images/cacct/ntest.png)
+![cacct](../../images/cacct/ntest.png)
 
 Query by QoS:
 ```bash
 cacct -q test_qos
 ```
-![cacct](../images/cacct/qt.png)
+![cacct](../../images/cacct/qt.png)
 
 Complex combined query:
 ```bash
 cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T110:00:00 -p CPU -t c
 ```
-![cacct](../images/cacct/me.png)
+![cacct](../../images/cacct/me.png)
 
 ## Advanced Features
 

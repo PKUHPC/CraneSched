@@ -9,7 +9,7 @@ cinfo
 
 **cinfo运行结果展示**
 
-![cinfo](../images/cinfo/cinfo_running.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 ## 主要输出项
 
@@ -69,61 +69,61 @@ cinfo --format "%.5partition %.6a %s"
 ```bash
 cinfo
 ```
-![cinfo](../images/cinfo/cinfo_running.png)
+![cinfo](../../images/cinfo/cinfo_running.png)
 
 **显示帮助：**
 ```bash
 cinfo -h
 ```
-![cinfo](../images/cinfo/cinfo_h.png)
+![cinfo](../../images/cinfo/cinfo_h.png)
 
 **隐藏表头：**
 ```bash
 cinfo -N
 ```
-![cinfo](../images/cinfo/cinfo_n.png)
+![cinfo](../../images/cinfo/cinfo_n.png)
 
 **仅显示无响应节点：**
 ```bash
 cinfo -d
 ```
-![cinfo](../images/cinfo/cinfo_d.png)
+![cinfo](../../images/cinfo/cinfo_d.png)
 
 **每3秒自动刷新：**
 ```bash
 cinfo -i 3
 ```
-![cinfo](../images/cinfo/cinfo_i3.png)
+![cinfo](../../images/cinfo/cinfo_i3.png)
 
 **显示特定节点：**
 ```bash
 cinfo -n crane01,crane02,crane03
 ```
-![cinfo](../images/cinfo/cinfo_n123.png)
+![cinfo](../../images/cinfo/cinfo_n123.png)
 
 **显示特定分区：**
 ```bash
 cinfo -p GPU,CPU
 ```
-![cinfo](../images/cinfo/cinfo_p.png)
+![cinfo](../../images/cinfo/cinfo_p.png)
 
 **仅显示有响应节点：**
 ```bash
 cinfo -r
 ```
-![cinfo](../images/cinfo/cinfo_r.png)
+![cinfo](../../images/cinfo/cinfo_r.png)
 
 **按节点状态过滤：**
 ```bash
 cinfo -t IDLE
 ```
-![cinfo](../images/cinfo/cinfo_t.png)
+![cinfo](../../images/cinfo/cinfo_t.png)
 
 **显示版本：**
 ```bash
 cinfo -v
 ```
-![cinfo](../images/cinfo/cinfo_v.png)
+![cinfo](../../images/cinfo/cinfo_v.png)
 
 **JSON输出：**
 ```bash

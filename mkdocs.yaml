@@ -3,6 +3,8 @@ site_description: Documentation for CraneSched, an HPC and AI Scheduling System.
 site_author: High Performance Computing Platform of Peking University
 site_url: https://cranesched.readthedocs.io/
 
+use_directory_urls: false
+
 # Repository
 repo_name: PKUHPC/CraneSched
 repo_url: https://github.com/PKUHPC/CraneSched
@@ -10,9 +12,12 @@ repo_url: https://github.com/PKUHPC/CraneSched
 # Copyright
 copyright: Copyright &copy; 2022 - 2025 PKUHPC
 
+# 文档目录配置
+docs_dir: docs
+
+# 主题配置
 theme:
   name: material
-  language: en
   features:
     - navigation.tabs
     - navigation.sections
@@ -25,25 +30,32 @@ theme:
     - content.code.annotate
     - navigation.footer
     - navigation.tracking
+  palette:
+    - media: "(prefers-color-scheme)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
   logo: images/logo.png
   favicon: images/logo.png
 
+# 插件配置
 plugins:
-  - search:
-      lang:
-        - en
-        - zh
+  - search
   - i18n:
-      docs_structure: suffix
-      fallback_to_default: true
-      reconfigure_material: true
-      reconfigure_search: true
+      default_language: en
       default_language_only: false
+      docs_structure: folder
       languages:
-        - locale: en
-          name: English
-          build: true
-          default: true
         - locale: zh
           name: 中文
           build: true
@@ -77,7 +89,13 @@ plugins:
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
             Plugins: 插件
+        - locale: en
+          name: English
+          default: true
+          build: true
+          site_name: "CraneSched Documentation"
 
+# Markdown 扩展
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -94,8 +112,10 @@ markdown_extensions:
   - md_in_html
   - pymdownx.details
   - pymdownx.superfences
-  - pymdownx.tabbed
-  - pymdownx.tasklist
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - pymdownx.caret
   - pymdownx.smartsymbols
   - pymdownx.emoji:
@@ -104,6 +124,7 @@ markdown_extensions:
   - pymdownx.arithmatex:
       generic: true
 
+# 导航配置
 nav:
   - Home: index.md
   - Deployment:
@@ -143,5 +164,5 @@ nav:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
         - GPU-Accelerated Training: reference/use_case_gpu.md
-        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
-        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
+        # - Parameter Sweep with Job Arrays: reference/use_case_job_array.md
+        # - Chained Jobs with Dependencies: reference/use_case_job_chain.md

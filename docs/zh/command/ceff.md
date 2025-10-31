@@ -10,7 +10,7 @@ ceff <作业ID[,作业ID,...]>
 
 **ceff运行结果展示**
 
-![ceff](../images/ceff/ceff.png)
+![ceff](../../images/ceff/ceff.png)
 
 ## 主要输出项
 
@@ -42,7 +42,7 @@ ceff <作业ID[,作业ID,...]>
 ceff -h
 ```
 
-![ceff](../images/ceff/h.png)
+![ceff](../../images/ceff/h.png)
 
 **查询作业效率：**
 ```bash
@@ -60,7 +60,7 @@ ceff 1234,1235,1236
 ceff <作业ID> --json
 ```
 
-![ceff](../images/ceff/json.png)
+![ceff](../../images/ceff/json.png)
 
 ## 理解效率指标
 

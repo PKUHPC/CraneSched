@@ -49,9 +49,9 @@ ccancel 30686
 
 **Result:**
 
-![ccancel](../images/ccancel/ccancel_1.png)
-![ccancel](../images/ccancel/ccancel_2.png)
-![ccancel](../images/ccancel/ccancel_3.png)
+![ccancel](../../images/ccancel/ccancel_1.png)
+![ccancel](../../images/ccancel/ccancel_2.png)
+![ccancel](../../images/ccancel/ccancel_3.png)
 
 Cancel multiple jobs:
 ```bash
@@ -67,9 +67,9 @@ ccancel -n test1
 
 **Result:**
 
-![ccancel](../images/ccancel/ccancel_n1.png)
-![ccancel](../images/ccancel/ccancel_n2.png)
-![ccancel](../images/ccancel/ccancel_n3.png)
+![ccancel](../../images/ccancel/ccancel_n1.png)
+![ccancel](../../images/ccancel/ccancel_n2.png)
+![ccancel](../../images/ccancel/ccancel_n3.png)
 
 ### Cancel by Partition
 
@@ -80,9 +80,9 @@ ccancel -p GPU
 
 **Result:**
 
-![ccancel](../images/ccancel/ccancel_p1.png)
-![ccancel](../images/ccancel/ccancel_p2.png)
-![ccancel](../images/ccancel/ccancel_p3.png)
+![ccancel](../../images/ccancel/ccancel_p1.png)
+![ccancel](../../images/ccancel/ccancel_p2.png)
+![ccancel](../../images/ccancel/ccancel_p3.png)
 
 ### Cancel by Node
 
@@ -91,7 +91,7 @@ Cancel all jobs running on crane02:
 ccancel -w crane02
 ```
 
-![ccancel](../images/ccancel/ccancel_w.png)
+![ccancel](../../images/ccancel/ccancel_w.png)
 
 ### Cancel by State
 
@@ -100,7 +100,7 @@ Cancel all pending jobs:
 ccancel -t Pending
 ```
 
-![ccancel](../images/ccancel/ccancel_t.png)
+![ccancel](../../images/ccancel/ccancel_t.png)
 
 Cancel all running jobs:
 ```bash
@@ -119,7 +119,7 @@ Cancel all jobs under PKU account:
 ccancel -A PKU
 ```
 
-![ccancel](../images/ccancel/ccancel_A.png)
+![ccancel](../../images/ccancel/ccancel_A.png)
 
 ### Cancel by User
 
@@ -128,7 +128,7 @@ Cancel all jobs submitted by user ROOT:
 ccancel -u ROOT
 ```
 
-![ccancel](../images/ccancel/ccancel_u.png)
+![ccancel](../../images/ccancel/ccancel_u.png)
 
 ### Combined Filters
 
@@ -161,7 +161,7 @@ ccancel -p GPU -t Pending --json
 
 ## Examples Overview
 
-![ccancel](../images/ccancel/ccancel.png)
+![ccancel](../../images/ccancel/ccancel.png)
 
 ## Behavior After Cancellation
 

@@ -57,7 +57,7 @@ calloc 必须在运行 `cfored` 的节点上启动。当任务启动时，会进
 ```bash
 calloc -h
 ```
-![calloc](../images/calloc/calloc_h.png)
+![calloc](../../images/calloc/calloc_h.png)
 
 ### 基本资源分配
 
@@ -68,8 +68,8 @@ calloc -c 1 --mem 200M -p CPU -N 2
 
 **运行结果：**
 
-![calloc](../images/calloc/calloc_c1.png)
-![calloc](../images/calloc/calloc_c2.png)
+![calloc](../../images/calloc/calloc_c1.png)
+![calloc](../../images/calloc/calloc_c2.png)
 
 ### 指定账户和节点列表
 
@@ -80,8 +80,8 @@ calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
 
 **运行结果：**
 
-![calloc](../images/calloc/calloc_A1.png)
-![calloc](../images/calloc/calloc_A2.png)
+![calloc](../../images/calloc/calloc_A1.png)
+![calloc](../../images/calloc/calloc_A2.png)
 
 ### 时间限制和 QoS
 
@@ -90,8 +90,8 @@ calloc -A acct-test --ntasks-per-node 2 -w crane02,crane03 -p GPU -N 1
 calloc --mem 200M -p CPU -q test-qos -t 00:25:25
 ```
 
-![calloc](../images/calloc/calloc_mem1.png)
-![calloc](../images/calloc/calloc_mem2.png)
+![calloc](../../images/calloc/calloc_mem1.png)
+![calloc](../../images/calloc/calloc_mem2.png)
 
 ### 工作目录
 
@@ -100,7 +100,7 @@ calloc --mem 200M -p CPU -q test-qos -t 00:25:25
 calloc -D /path
 ```
 
-![calloc](../images/calloc/calloc_D.png)
+![calloc](../../images/calloc/calloc_D.png)
 
 ### 调试级别
 
@@ -109,7 +109,7 @@ calloc -D /path
 calloc --debug-level trace
 ```
 
-![calloc](../images/calloc/calloc_debug.png)
+![calloc](../../images/calloc/calloc_debug.png)
 
 ### 排除节点
 
@@ -118,7 +118,7 @@ calloc --debug-level trace
 calloc -x cranetest02
 ```
 
-![calloc](../images/calloc/calloc_x.png)
+![calloc](../../images/calloc/calloc_x.png)
 
 ### 用户环境
 
@@ -127,7 +127,7 @@ calloc -x cranetest02
 calloc --get-user-env
 ```
 
-![calloc](../images/calloc/calloc_get_user.png)
+![calloc](../../images/calloc/calloc_get_user.png)
 
 ### 作业名称
 
@@ -136,7 +136,7 @@ calloc --get-user-env
 calloc -J job_name
 ```
 
-![calloc](../images/calloc/calloc_j.png)
+![calloc](../../images/calloc/calloc_j.png)
 
 ## 高级功能
 
