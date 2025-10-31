@@ -38,6 +38,7 @@ plugins:
       fallback_to_default: true
       reconfigure_material: true
       reconfigure_search: true
+      default_language_only: false
       languages:
         - locale: en
           name: English
@@ -46,6 +47,7 @@ plugins:
         - locale: zh
           name: 中文
           build: true
+          site_name: "CraneSched 文档"
           nav_translations:
             Home: 首页
             Deployment: 部署指南
