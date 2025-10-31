@@ -2121,13 +2121,14 @@ void TaskScheduler::CleanCancelQueueCb_() {
         elem);
   }
 
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
   for (auto&& [craned_id, steps] : running_task_craned_id_map) {
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       for (auto [job_id, step_ids] : steps) {
         for (auto step_id : step_ids)
           StepStatusChangeAsync(job_id, step_id, craned_id,
                                 crane::grpc::TaskStatus::Cancelled,
-                                ExitCode::kExitCodeTerminated, "");
+                                ExitCode::kExitCodeTerminated, "", now);
       }
       continue;
     }
@@ -2269,17 +2270,17 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   } while (false);
 }
 
-void TaskScheduler::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                                          const CranedId& craned_index,
-                                          crane::grpc::TaskStatus new_status,
-                                          uint32_t exit_code,
-                                          std::string reason) {
+void TaskScheduler::StepStatusChangeAsync(
+    job_id_t job_id, step_id_t step_id, const CranedId& craned_index,
+    crane::grpc::TaskStatus new_status, uint32_t exit_code, std::string reason,
+    google::protobuf::Timestamp timestamp) {
   m_task_status_change_queue_.enqueue({.job_id = job_id,
                                        .step_id = step_id,
                                        .exit_code = exit_code,
                                        .new_status = new_status,
                                        .craned_index = craned_index,
-                                       .reason = reason});
+                                       .reason = reason,
+                                       .timestamp = timestamp});
   m_task_status_change_async_handle_->send();
 }
 
@@ -2318,7 +2319,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   for (const auto& [task_id, step_id, exit_code, new_status, craned_index,
-                    reason] : args) {
+                    reason, timestamp] : args) {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
@@ -2386,7 +2387,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
-      task->SetEndTime(absl::Now());
+      task->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
+                       absl::Nanoseconds(timestamp.nanos()));
 
       for (CranedId const& craned_id : task->CranedIds()) {
         auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
@@ -2457,11 +2459,12 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                     }),
                 ","),
             craned_id);
+        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
               crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
-              "CranedDown");
+              "CranedDown", now);
         }
       }
       alloc_step_latch.count_down();
@@ -2498,7 +2501,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_rpc_worker_pool_->detach_task([this, &exec_step_latch, craned_id,
                                      &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
+      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         CraneExpected failed_steps =
@@ -2510,7 +2513,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             for (const auto& step_id : step_ids)
               StepStatusChangeWithReasonAsync(
                   job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeRpcError, "ExecRpcError");
+                  ExitCode::kExitCodeRpcError, "ExecRpcError", now);
           }
         }
       } else {
@@ -2523,7 +2526,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           for (const auto& step_id : step_ids)
             StepStatusChangeWithReasonAsync(
                 job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeCranedDown, "CranedDown");
+                ExitCode::kExitCodeCranedDown, "CranedDown", now);
         }
       }
       exec_step_latch.count_down();
@@ -2591,10 +2594,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           success = true;
       }
       if (!success) {
+        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeRpcError, "Rpc failure when free job");
+              ExitCode::kExitCodeRpcError, "Rpc failure when free job", now);
         }
       }
       free_job_latch.count_down();
@@ -3632,7 +3636,8 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
     for (task_id_t task_id : task_ids)
       StepStatusChangeAsync(task_id, kDaemonStepId, craned_id,
                             crane::grpc::TaskStatus::Failed, exit_code,
-                            "Terminated");
+                            "Terminated",
+                            google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);

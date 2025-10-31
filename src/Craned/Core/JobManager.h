@@ -137,7 +137,8 @@ class JobManager {
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              crane::grpc::TaskStatus new_status,
                              uint32_t exit_code,
-                             std::optional<std::string> reason);
+                             std::optional<std::string> reason,
+                             google::protobuf::Timestamp timestamp);
 
   // Wait internal libuv base loop to exit...
   void Wait();
@@ -213,7 +214,8 @@ class JobManager {
   void ActivateTaskStatusChangeAsync_(job_id_t job_id, step_id_t step_id,
                                       crane::grpc::TaskStatus new_status,
                                       uint32_t exit_code,
-                                      std::optional<std::string> reason);
+                                      std::optional<std::string> reason,
+                                      google::protobuf::Timestamp timestamp);
 
   /**
    * Send a signal to the process group of pid. For kill uninitialized

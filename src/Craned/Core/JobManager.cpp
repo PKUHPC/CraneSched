@@ -888,7 +888,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get the allocation for job#{} ", job_id));
+        fmt::format("Failed to get the allocation for job#{} ", job_id),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
     return;
   }
   auto* job = job_ptr.get();
@@ -901,7 +902,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       ActivateTaskStatusChangeAsync_(
           job_id, step_id, crane::grpc::TaskStatus::Failed,
           ExitCode::kExitCodeSpawnProcessFail,
-          "Container is not enabled in this craned.");
+          "Container is not enabled in this craned.",
+          google::protobuf::util::TimeUtil::GetCurrentTime());
       return;
     }
   }
@@ -917,7 +919,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       ActivateTaskStatusChangeAsync_(
           job_id, step_id, crane::grpc::TaskStatus::Failed,
           ExitCode::kExitCodeCgroupError,
-          fmt::format("Failed to get cgroup for job#{} ", job_id));
+          fmt::format("Failed to get cgroup for job#{} ", job_id),
+          google::protobuf::util::TimeUtil::GetCurrentTime());
       return;
     }
   }
@@ -936,7 +939,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         job_id, step_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
         fmt::format("Cannot spawn a new process inside the instance of job #{}",
-                    job_id));
+                    job_id),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
     // process. Now we put the child pid into index maps. SIGCHLD sent just
@@ -978,11 +982,13 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
 
 void JobManager::ActivateTaskStatusChangeAsync_(
     job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
-    uint32_t exit_code, std::optional<std::string> reason) {
+    uint32_t exit_code, std::optional<std::string> reason,
+    google::protobuf::Timestamp timestamp) {
   StepStatusChangeQueueElem status_change{.job_id = job_id,
                                           .step_id = step_id,
                                           .new_status = new_status,
-                                          .exit_code = exit_code};
+                                          .exit_code = exit_code,
+                                          .timestamp = timestamp};
   if (reason.has_value()) status_change.reason = std::move(reason);
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
@@ -1223,11 +1229,12 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
-                                       std::optional<std::string> reason) {
+                                       std::optional<std::string> reason,
+                                       google::protobuf::Timestamp timestamp) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,
-                                 std::move(reason));
+                                 std::move(reason), timestamp);
 }
 
 }  // namespace Craned

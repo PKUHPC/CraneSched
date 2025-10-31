@@ -40,6 +40,7 @@ class CranedClient {
     crane::grpc::TaskStatus new_status{};
     uint32_t exit_code{};
     std::optional<std::string> reason;
+    google::protobuf::Timestamp timestamp{};
   };
   absl::Mutex m_mutex_;
   std::list<StepStatusChangeQueueElem> m_task_status_change_queue_

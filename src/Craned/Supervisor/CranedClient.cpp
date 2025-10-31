@@ -46,9 +46,11 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
 void CranedClient::StepStatusChangeAsync(crane::grpc::TaskStatus new_status,
                                          uint32_t exit_code,
                                          std::optional<std::string> reason) {
-  StepStatusChangeQueueElem elem{.new_status = new_status,
-                                 .exit_code = exit_code,
-                                 .reason = std::move(reason)};
+  StepStatusChangeQueueElem elem{
+      .new_status = new_status,
+      .exit_code = exit_code,
+      .reason = std::move(reason),
+      .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
   absl::MutexLock lock(&m_mutex_);
   m_task_status_change_queue_.push_back(std::move(elem));
 }
@@ -93,6 +95,7 @@ void CranedClient::AsyncSendThread_() {
         request.set_step_id(g_config.StepId);
         request.set_new_status(elem.new_status);
         request.set_exit_code(elem.exit_code);
+        *request.mutable_timestamp() = elem.timestamp;
         if (elem.reason.has_value()) request.set_reason(elem.reason.value());
 
         status = m_stub_->StepStatusChange(&context, request, &reply);

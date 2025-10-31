@@ -60,6 +60,7 @@ struct StepStatusChangeQueueElem {
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
+  google::protobuf::Timestamp timestamp;
 };
 
 struct TaskInfoOfUid {

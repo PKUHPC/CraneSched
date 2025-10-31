@@ -31,7 +31,8 @@ enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
   TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM
+  TERMINATION_BY_OOM,
+  TERMINATION_BY_CFORED_CONN_FAILURE
 };
 
 class ITaskInstance;
@@ -180,14 +181,10 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
-  // FIXME: Remove this in future.
-  // Before we distinguish TaskToD/SpecToSuper and JobSpec,
-  // it's hard to remove this function.
-  [[deprecated]] virtual EnvMap GetChildProcessEnv() const;
+  virtual EnvMap GetChildProcessEnv() const;
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -353,7 +350,7 @@ class TaskManager {
 
   std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
-  void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
+  void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
   void Shutdown() { m_supervisor_exit_ = true; }
 

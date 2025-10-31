@@ -351,7 +351,7 @@ grpc::Status CranedServiceImpl::StepStatusChange(
   }
   g_job_mgr->StepStatusChangeAsync(request->job_id(), request->step_id(),
                                    request->new_status(), request->exit_code(),
-                                   request->reason());
+                                   request->reason(), request->timestamp());
   response->set_ok(true);
   return Status::OK;
 }

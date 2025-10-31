@@ -1657,11 +1657,10 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
 }
 
 void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
-                                     bool terminated_by_user) {
+                                     TerminatedBy terminated_by) {
   TaskTerminateQueueElem elem;
   elem.mark_as_orphaned = mark_as_orphaned;
-  elem.termination_reason =
-      terminated_by_user ? TerminatedBy::CANCELLED_BY_USER : TerminatedBy::NONE;
+  elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
@@ -1977,6 +1976,8 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       return;
     }
 
+    // Single threaded here, it is always safe to ask TaskManager to
+    // operate (Like terminate due to cfored conn err for crun task) any task.
     LaunchExecution_(task);
     if (!task->GetPid()) {
       CRANE_WARN("[task #{}] Failed to launch process.", task->task_id);

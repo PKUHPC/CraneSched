@@ -465,6 +465,10 @@ void CtldClient::Init() {
             auto exact_status = exact_job_steps.at(job_id).at(step_id);
             CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
                         step_id, exact_status, status);
+            // TODO: Craned status must be the real status of the step, maybe we
+            // can send a step status change in craned status to kick step
+            // status change in Ctld. Then we will not lose step whose status
+            // changed during craned and ctld connection failure.
             if (status != exact_status) {
               CRANE_DEBUG(
                   "[Step #{}.{}] status inconsistent, craned: {} ,ctld: {} .",
@@ -753,6 +757,7 @@ void CtldClient::SendStatusChanges_() {
     request.set_step_id(status_change.step_id);
     request.set_new_status(status_change.new_status);
     request.set_exit_code(status_change.exit_code);
+    *request.mutable_timestamp() = status_change.timestamp;
     if (status_change.reason.has_value())
       request.set_reason(status_change.reason.value());
 

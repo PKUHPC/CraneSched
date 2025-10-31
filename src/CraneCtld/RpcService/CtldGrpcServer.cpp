@@ -40,7 +40,8 @@ grpc::Status CtldForInternalServiceImpl::StepStatusChange(
 
   g_task_scheduler->StepStatusChangeAsync(
       request->job_id(), request->step_id(), request->craned_id(),
-      request->new_status(), request->exit_code(), request->reason());
+      request->new_status(), request->exit_code(), request->reason(),
+      request->timestamp());
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -136,6 +137,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
              util::JobStepsToString(orphaned_steps));
 
   if (!orphaned_steps.empty()) {
+    auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
     g_task_scheduler->TerminateOrphanedSteps(orphaned_steps,
                                              request->craned_id());
     for (const auto &[job_id, steps] : orphaned_steps) {
@@ -145,7 +147,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
         g_task_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
             crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
-            "Craned re-registered but step lost.");
+            "Craned re-registered but step lost.", now);
     }
   }
 

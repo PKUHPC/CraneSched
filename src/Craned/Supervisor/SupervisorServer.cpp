@@ -84,7 +84,9 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
     const crane::grpc::supervisor::TerminateTaskRequest* request,
     crane::grpc::supervisor::TerminateTaskReply* response) {
   g_task_mgr->TerminateTaskAsync(request->mark_orphaned(),
-                                 request->terminated_by_user());
+                                 request->terminated_by_user()
+                                     ? TerminatedBy::CANCELLED_BY_USER
+                                     : TerminatedBy::NONE);
   response->set_ok(true);
   return Status::OK;
 }

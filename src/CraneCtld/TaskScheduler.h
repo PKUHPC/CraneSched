@@ -773,16 +773,18 @@ class TaskScheduler {
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
                                        uint32_t exit_code,
-                                       std::optional<std::string>&& reason) {
+                                       std::optional<std::string>&& reason,
+                                       google::protobuf::Timestamp timestamp) {
     // TODO: Add reason implementation here!
     StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""));
+                          reason.value_or(""), timestamp);
   }
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
                              const CranedId& craned_index,
                              crane::grpc::TaskStatus new_status,
-                             uint32_t exit_code, std::string reason);
+                             uint32_t exit_code, std::string reason,
+                             google::protobuf::Timestamp timestamp);
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
@@ -1015,6 +1017,7 @@ class TaskScheduler {
     crane::grpc::TaskStatus new_status;
     CranedId craned_index;
     std::string reason;
+    google::protobuf::Timestamp timestamp;
   };
 
   ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
