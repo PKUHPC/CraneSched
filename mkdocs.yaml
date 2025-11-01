@@ -49,19 +49,8 @@ theme:
 plugins:
   - search
   - i18n:
-      docs_structure: suffix
-      fallback_to_default: true
-      reconfigure_material: true
-      reconfigure_search: true
-      default_language: en
-      default_language_only: false
+      docs_structure: folder
       languages:
-        - locale: en
-          name: English
-          default: true
-          build: true
-          link: /
-          site_name: "CraneSched Documentation"
         - locale: zh
           name: 中文
           build: true
@@ -95,6 +84,12 @@ plugins:
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
             Plugins: 插件
+        - locale: en
+          name: English
+          default: true
+          build: true
+          link: /
+          site_name: "CraneSched Documentation"
 
 markdown_extensions:
   - pymdownx.highlight:
