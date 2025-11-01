@@ -49,9 +49,12 @@ theme:
 plugins:
   - search
   - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
       default_language: en
       default_language_only: false
-      docs_structure: folder
       languages:
         - locale: zh
           name: 中文
@@ -90,6 +93,7 @@ plugins:
           name: English
           default: true
           build: true
+          link: /
           site_name: "CraneSched Documentation"
 
 markdown_extensions:
