@@ -56,6 +56,12 @@ plugins:
       default_language: en
       default_language_only: false
       languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+          link: /
+          site_name: "CraneSched Documentation"
         - locale: zh
           name: 中文
           build: true
@@ -89,12 +95,6 @@ plugins:
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
             Plugins: 插件
-        - locale: en
-          name: English
-          default: true
-          build: true
-          link: /
-          site_name: "CraneSched Documentation"
 
 markdown_extensions:
   - pymdownx.highlight:
