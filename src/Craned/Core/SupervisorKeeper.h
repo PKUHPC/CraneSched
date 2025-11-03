@@ -29,9 +29,10 @@ namespace Craned {
 
 class SupervisorStub {
  public:
-  CraneErrCode ExecuteTask();
+  CraneErrCode ExecuteStep();
   CraneExpected<EnvMap> QueryStepEnv();
-  CraneExpected<std::pair<task_id_t, pid_t>> CheckStatus();
+  CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
+  CheckStatus();
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
@@ -62,17 +63,20 @@ class SupervisorKeeper {
    * scanning fails, supervisors are unreachable, or task status queries fail
    * with specific error codes.
    */
-  CraneExpected<std::unordered_map<task_id_t, pid_t>> InitAndGetRecoveredMap();
+  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                                    std::pair<pid_t, StepStatus>>>
+  InitAndGetRecoveredMap();
 
-  void AddSupervisor(task_id_t task_id);
-  void RemoveSupervisor(task_id_t task_id);
+  void AddSupervisor(job_id_t job_id, step_id_t step_id);
+  void RemoveSupervisor(job_id_t job_id, step_id_t step_id);
 
-  std::shared_ptr<SupervisorStub> GetStub(task_id_t task_id);
+  std::shared_ptr<SupervisorStub> GetStub(job_id_t job_id, step_id_t step_id);
 
-  std::set<task_id_t> GetRunningSteps();
+  std::set<std::pair<job_id_t, step_id_t>> GetRunningSteps();
 
  private:
-  absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorStub>>
+  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                      std::shared_ptr<SupervisorStub>>
       m_supervisor_map_;
   absl::Mutex m_mutex_;
 };

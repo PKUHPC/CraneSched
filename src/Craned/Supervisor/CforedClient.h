@@ -69,16 +69,17 @@ class CforedClient {
 
   uint16_t InitUvX11FwdHandler(task_id_t task_id);
 
-  bool TaskOutputFinish(task_id_t task_id);
   bool TaskProcessStop(task_id_t task_id);
   void TaskEnd(task_id_t task_id);
 
   const std::string& CforedName() const { return m_cfored_name_; }
 
  private:
+  bool TaskOutputFinishNoLock_(task_id_t task_id);
   uint16_t SetupX11forwarding_();
 
   static bool WriteStringToFd_(const std::string& msg, int fd, bool close_fd);
+
   struct CreateStdoutFwdQueueElem {
     TaskFwdMeta meta;
     std::promise<bool> promise;
@@ -96,6 +97,9 @@ class CforedClient {
   std::shared_ptr<uvw::async_handle>
       m_clean_x11_fwd_handler_queue_async_handle_;
   void CleanX11FwdHandlerQueueCb_();
+  ConcurrentQueue<task_id_t> m_stop_task_io_queue_;
+  std::shared_ptr<uvw::async_handle> m_clean_stop_task_io_queue_async_handle_;
+  void CleanStopTaskIOQueueCb_();
 
   void AsyncSendRecvThread_();
 
@@ -123,7 +127,8 @@ class CforedClient {
   std::thread m_ev_thread_;
 
   std::string m_cfored_name_;
-  std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map;
+  std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map
+      ABSL_GUARDED_BY(m_mtx_);
 
   std::shared_ptr<grpc::Channel> m_cfored_channel_;
   std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;
