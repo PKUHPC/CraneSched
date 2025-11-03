@@ -16,6 +16,7 @@ docs_dir: docs
 
 theme:
   name: material
+  language: zh
   features:
     - navigation.tabs
     - navigation.sections
@@ -34,13 +35,13 @@ theme:
       accent: indigo
       toggle:
         icon: material/brightness-7
-        name: Switch to dark mode
+        name: 切换至深色模式
     - scheme: slate
       primary: indigo
       accent: indigo
       toggle:
         icon: material/brightness-4
-        name: Switch to light mode
+        name: 切换至浅色模式
   logo: images/logo.png
   favicon: images/logo.png
 
@@ -56,6 +57,8 @@ plugins:
           build: true
           link: /
           site_name: "CraneSched 文档"
+          theme:
+            language: zh
           nav_translations:
             Home: 首页
             Deployment: 部署指南
@@ -89,6 +92,21 @@ plugins:
           name: English
           build: true
           site_name: "CraneSched Documentation"
+          theme:
+            language: en
+            palette:
+              - scheme: default
+                primary: indigo
+                accent: indigo
+                toggle:
+                  icon: material/brightness-7
+                  name: Switch to dark mode
+              - scheme: slate
+                primary: indigo
+                accent: indigo
+                toggle:
+                  icon: material/brightness-4
+                  name: Switch to light mode
 
 markdown_extensions:
   - pymdownx.highlight:
