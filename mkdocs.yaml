@@ -29,19 +29,17 @@ theme:
     - navigation.footer
     - navigation.tracking
   palette:
-    - media: "(prefers-color-scheme)"
-      scheme: default
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/brightness-auto
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: default
       primary: indigo
       accent: indigo
       toggle:
         icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
         name: Switch to light mode
   logo: images/logo.png
   favicon: images/logo.png
