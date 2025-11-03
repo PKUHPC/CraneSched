@@ -31,8 +31,6 @@
 #include <pwd.h>
 #include <sys/wait.h>
 
-#include <subprocess/subprocess.h>
-
 #include "crane/Logger.h"
 
 struct SystemRelInfo {
