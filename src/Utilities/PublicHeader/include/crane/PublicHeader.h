@@ -240,8 +240,7 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 75 - 79
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
-        "Invalid username",
-        "Invalid job id"
+        "Invalid username"
     };
 // clang-format on
 }  // namespace Internal

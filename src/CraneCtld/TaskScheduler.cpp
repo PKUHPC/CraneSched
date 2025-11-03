@@ -340,7 +340,7 @@ bool TaskScheduler::Init() {
       if (step_status == crane::grpc::TaskStatus::Pending) {
         // Not support to recover pending step now. All pending steps are crun
         // which can not recover now.
-        step.reset();
+        delete step;
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }

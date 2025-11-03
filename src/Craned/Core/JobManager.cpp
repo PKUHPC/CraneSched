@@ -990,11 +990,11 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
     }
     auto* step = job_ptr->step_map.at(status_change.step_id).get();
     step->status = status_change.new_status;
+    CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
+                status_change.job_id, status_change.step_id,
+                status_change.new_status);
+    g_ctld_client->StepStatusChangeAsync(std::move(status_change));
   }
-  CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
-              status_change.job_id, status_change.step_id,
-              status_change.new_status);
-  g_ctld_client->StepStatusChangeAsync(std::move(status_change));
 }
 
 void JobManager::ActivateTaskStatusChangeAsync_(
