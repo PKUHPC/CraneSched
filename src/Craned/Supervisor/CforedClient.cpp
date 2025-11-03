@@ -44,6 +44,13 @@ CforedClient::CforedClient() {
         CleanX11FwdHandlerQueueCb_();
       });
 
+  m_clean_stop_task_io_queue_async_handle_ =
+      m_loop_->resource<uvw::async_handle>();
+  m_clean_stop_task_io_queue_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanStopTaskIOQueueCb_();
+      });
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       m_loop_->resource<uvw::idle_handle>();
 
@@ -228,25 +235,9 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
     auto& meta = elem.meta;
     auto stdout_read = meta.stdout_read;
     auto task_id = meta.task_id;
-    auto on_finish = [this, task_id, fd = stdout_read] {
-      auto it = m_fwd_meta_map.find(task_id);
-      if (it != m_fwd_meta_map.end()) {
-        auto& output_handle = it->second.out_handle;
-        if (!it->second.pty && output_handle.pipe) output_handle.pipe->close();
-        if (it->second.pty && output_handle.tty) output_handle.tty->close();
-        output_handle.pipe.reset();
-        output_handle.tty.reset();
-      }
-
-      close(fd);
-
-      CRANE_DEBUG("[Task #{}] Finished its output.", task_id);
-
-      bool ok_to_free = this->TaskOutputFinish(task_id);
-      if (ok_to_free) {
-        CRANE_DEBUG("[Task #{}] It's ok to unregister.", task_id);
-        this->TaskEnd(task_id);
-      }
+    auto on_finish = [this, task_id] {
+      m_stop_task_io_queue_.enqueue(task_id);
+      m_clean_stop_task_io_queue_async_handle_->send();
     };
     std::shared_ptr<uvw::pipe_handle> ph;
     std::shared_ptr<uvw::tty_handle> th;
@@ -357,6 +348,31 @@ void CforedClient::CleanX11FwdHandlerQueueCb_() {
     CRANE_INFO("Setup X11 forwarding");
     elem.promise.set_value(SetupX11forwarding_());
   }
+}
+
+void CforedClient::CleanStopTaskIOQueueCb_() {
+  task_id_t task_id;
+  while (m_stop_task_io_queue_.try_dequeue(task_id)) {
+    absl::MutexLock lock(&m_mtx_);
+    auto it = m_fwd_meta_map.find(task_id);
+    if (it != m_fwd_meta_map.end()) {
+      auto& output_handle = it->second.out_handle;
+      if (!it->second.pty && output_handle.pipe) output_handle.pipe->close();
+      if (it->second.pty && output_handle.tty) output_handle.tty->close();
+      output_handle.pipe.reset();
+      output_handle.tty.reset();
+    }
+
+    close(it->second.stdout_read);
+
+    CRANE_DEBUG("[Task #{}] Finished its output.", task_id);
+
+    bool ok_to_free = this->TaskOutputFinishNoLock_(task_id);
+    if (ok_to_free) {
+      CRANE_DEBUG("[Task #{}] It's ok to unregister.", task_id);
+      this->TaskEnd(task_id);
+    }
+  };
 }
 
 void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
@@ -523,6 +539,14 @@ void CforedClient::AsyncSendRecvThread_() {
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
       CRANE_ERROR("Cfored connection failed.");
+      absl::MutexLock lock(&m_mtx_);
+      for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+        m_stop_task_io_queue_.enqueue(task_id);
+      }
+      m_clean_stop_task_io_queue_async_handle_->send();
+      CRANE_ERROR("Terminating all task due to cfored connection failure.");
+      g_task_mgr->TerminateTaskAsync(
+          false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
       state = State::End;
     }
 
@@ -536,7 +560,7 @@ void CforedClient::AsyncSendRecvThread_() {
       request.set_type(StreamTaskIORequest::SUPERVISOR_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
-      request.mutable_payload_register_req()->set_task_id(g_config.JobId);
+      request.mutable_payload_register_req()->set_job_id(g_config.JobId);
       request.mutable_payload_register_req()->set_step_id(g_config.StepId);
 
       write_pending.store(true, std::memory_order::release);
@@ -668,8 +692,7 @@ void CforedClient::AsyncSendRecvThread_() {
   }
 }
 
-bool CforedClient::TaskOutputFinish(task_id_t task_id) {
-  absl::MutexLock lock(&m_mtx_);
+bool CforedClient::TaskOutputFinishNoLock_(task_id_t task_id) {
   m_fwd_meta_map[task_id].output_stopped = true;
   return m_fwd_meta_map[task_id].proc_stopped;
 };
@@ -681,6 +704,7 @@ bool CforedClient::TaskProcessStop(task_id_t task_id) {
 }
 
 void CforedClient::TaskEnd(task_id_t task_id) {
+  // FIXME: erase meta_map for task here!
   g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 

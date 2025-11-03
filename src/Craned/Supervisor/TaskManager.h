@@ -31,7 +31,8 @@ enum class TerminatedBy : uint8_t {
   NONE = 0,
   CANCELLED_BY_USER,
   TERMINATION_BY_TIMEOUT,
-  TERMINATION_BY_OOM
+  TERMINATION_BY_OOM,
+  TERMINATION_BY_CFORED_CONN_FAILURE
 };
 
 class ITaskInstance;
@@ -46,7 +47,7 @@ class StepInstance {
   std::vector<task_id_t> task_ids;
 
   uid_t uid;
-  gid_t gid;
+  std::vector<gid_t> gids;
 
   std::string container;
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
@@ -62,11 +63,12 @@ class StepInstance {
   StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
-        job_id(step.task_id()),
-        step_id(0),
-        task_ids({}),
+        job_id(step.job_id()),
+        step_id(step.step_id()),
+        // TODO: Set task_id here
+        task_ids({0}),
         uid(step.uid()),
-        gid(step.gid()),
+        gids(step.gid().begin(), step.gid().end()),
         container(step.container()) {
     interactive_type =
         step.type() == crane::grpc::TaskType::Interactive
@@ -79,9 +81,10 @@ class StepInstance {
   };
   ~StepInstance() = default;
 
-  bool IsBatch() const noexcept;
-  bool IsCrun() const noexcept;
-  bool IsCalloc() const noexcept;
+  [[nodiscard]] bool IsBatch() const noexcept;
+  [[nodiscard]] bool IsCrun() const noexcept;
+  [[nodiscard]] bool IsCalloc() const noexcept;
+  [[nodiscard]] bool IsDaemon() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -115,7 +118,7 @@ class StepInstance {
   bool AllTaskFinished() const;
 
  private:
-  crane::grpc::TaskToD m_step_to_supv_;
+  crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
@@ -159,7 +162,8 @@ class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
       : m_parent_step_inst_(step_inst),
-        task_id(step_inst->GetStep().task_id()) {}
+        // TODO: use task id instead
+        task_id(0) {}
   virtual ~ITaskInstance();
 
   ITaskInstance(const ITaskInstance&) = delete;
@@ -177,14 +181,10 @@ class ITaskInstance {
     return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
   }
 
-  void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
 
-  // FIXME: Remove this in future.
-  // Before we distinguish TaskToD/SpecToSuper and JobSpec,
-  // it's hard to remove this function.
-  [[deprecated]] virtual EnvMap GetChildProcessEnv() const;
+  virtual EnvMap GetChildProcessEnv() const;
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -337,10 +337,8 @@ class TaskManager {
     }
   }
 
-  void ActivateTaskStatusChange_(task_id_t task_id,
-                                 crane::grpc::TaskStatus new_status,
-                                 uint32_t exit_code,
-                                 std::optional<std::string> reason);
+  void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
+                   uint32_t exit_code, std::optional<std::string> reason);
   void LaunchExecution_(ITaskInstance* task);
   // NOLINTEND(readability-identifier-naming)
 
@@ -352,7 +350,7 @@ class TaskManager {
 
   std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
-  void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
+  void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
   void Shutdown() { m_supervisor_exit_ = true; }
 
@@ -398,9 +396,11 @@ class TaskManager {
   ConcurrentQueue<task_id_t> m_task_stop_queue_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_terminate_task_timer_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
 
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
+  std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
@@ -410,7 +410,7 @@ class TaskManager {
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
 
-  std::atomic_bool m_supervisor_exit_{false};
+  std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
   StepInstance m_step_;

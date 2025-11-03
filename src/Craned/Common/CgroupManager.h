@@ -526,7 +526,9 @@ class CgroupManager {
   // NOTE: These methods produce cgroup str w/o proper prefix.
   // Use CreateOrOpen_() to generate cgroup name with prefix.
   static std::string CgroupStrByJobId(job_id_t job_id);
-  static std::string CgroupStrByStepId(job_id_t job_id, step_id_t step_id);
+  static std::string CgroupStrByStepId(
+      job_id_t job_id, step_id_t step_id,
+      bool system = false /* system = true is only for supervisor itself. */);
   static std::string CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
                                        task_id_t task_id);
 
@@ -572,10 +574,6 @@ class CgroupManager {
   }
 
   static CraneExpected<CgroupStrParsedIds> GetIdsByPid(pid_t pid);
-
-  // Resolve actual cgroup fs path (memory controller path for v1, unified
-  // path for v2) for a pid inside crane hierarchy.
-  static std::optional<std::string> ResolveCgroupPathForPid(pid_t pid);
 
   // Read OOM related counters from a cgroup path. For cgroup v2, both
   // oom_kill and oom are read from memory.events. For cgroup v1, only

@@ -506,6 +506,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     m_variable_db_ = std::make_unique<UnqliteDb>();
     m_fixed_db_ = std::make_unique<UnqliteDb>();
     m_resv_db_ = std::make_unique<UnqliteDb>();
+
+    m_step_var_db_ = std::make_unique<UnqliteDb>();
+    m_step_fixed_db_ = std::make_unique<UnqliteDb>();
 #else
     CRANE_ERROR(
         "Select unqlite as the embedded db but it's not been compiled.");
@@ -517,6 +520,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     m_variable_db_ = std::make_unique<BerkeleyDb>();
     m_fixed_db_ = std::make_unique<BerkeleyDb>();
     m_resv_db_ = std::make_unique<BerkeleyDb>();
+
+    m_step_var_db_ = std::make_unique<BerkeleyDb>();
+    m_step_fixed_db_ = std::make_unique<BerkeleyDb>();
 #else
     CRANE_ERROR(
         "Select Berkeley DB as the embedded db but it's not been compiled.");
@@ -536,16 +542,30 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   result = m_resv_db_->Init(db_path + "resv");
   if (!result) return false;
 
+  result = m_step_var_db_->Init(db_path + "step_var");
+  if (!result) return false;
+  result = m_step_fixed_db_->Init(db_path + "step_fix");
+  if (!result) return false;
+
   bool ok;
 
   // There is no race during Init stage.
   // No lock is needed.
-  ok = FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(0, s_next_task_id_str_,
-                                                      &s_next_task_id_, 1u);
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, m_variable_db_.get(), s_next_task_id_str_, &s_next_task_id_, 1u);
   if (!ok) return false;
 
-  ok = FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(0, s_next_task_db_id_str_,
-                                                      &s_next_task_db_id_, 1L);
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, m_variable_db_.get(), s_next_task_db_id_str_, &s_next_task_db_id_, 1L);
+  if (!ok) return false;
+
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, m_step_var_db_.get(), s_next_step_db_id_str_, &s_next_step_db_id_, 1L);
+  if (!ok) return false;
+
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, m_step_var_db_.get(), s_next_step_id_str_, &s_next_step_id_map_,
+      crane::grpc::StepNextIdInEmbeddedDb{});
   if (!ok) return false;
 
   return true;
@@ -602,6 +622,9 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
           snapshot->pending_queue.emplace(id, std::move(task));
           break;
         case crane::grpc::Running:
+        case crane::grpc::Configured:
+        case crane::grpc::Configuring:
+        case crane::grpc::Completing:
           snapshot->running_queue.emplace(id, std::move(task));
           break;
         default:
@@ -615,6 +638,79 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
     CRANE_ERROR("Failed to restore fixed data into queues!");
     return false;
   }
+
+  return true;
+}
+
+bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
+  using TaskStatus = crane::grpc::TaskStatus;
+  using RuntimeAttr = crane::grpc::RuntimeAttrOfStep;
+
+  std::expected<void, DbErrorCode> result;
+  std::unordered_map<db_id_t, RuntimeAttr> db_id_runtime_attr_map;
+
+  result = m_step_var_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        // Skip if not RuntimeAttr
+        if (!IsVariableDbStepDataEntry_(key)) return true;
+
+        step_db_id_t id = ExtractStepDbIdFromEntry_(key);
+
+        RuntimeAttr runtime_attr;
+        runtime_attr.ParseFromArray(value.data(), value.size());
+
+        db_id_runtime_attr_map.emplace(id, std::move(runtime_attr));
+
+        // Record all task_id here and don't delete any key,
+        // so true is returned.
+        return true;
+      });
+
+  if (!result) {
+    CRANE_ERROR("Failed to restore the variable data of steps");
+    return false;
+  }
+
+  result = m_step_fixed_db_->IterateAllKv([&](std::string&& key,
+                                              std::vector<uint8_t>&& value) {
+    step_db_id_t id = ExtractStepDbIdFromEntry_(key);
+
+    // Delete incomplete task fixed data,
+    // where fixed data are stored but variable data are missing.
+    auto runtime_attr_it = db_id_runtime_attr_map.find(id);
+    if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
+
+    TaskStatus status = runtime_attr_it->second.status();
+
+    // Assemble TaskInEmbeddedDb here.
+    StepInEmbeddedDb step;
+    *step.mutable_runtime_attr() = std::move(runtime_attr_it->second);
+    step.mutable_step_to_ctld()->ParseFromArray(value.data(), value.size());
+
+    snapshot->steps[step.step_to_ctld().job_id()].push_back(std::move(step));
+    // Dispatch to different queues by status.
+    return true;
+  });
+
+  if (!result) {
+    CRANE_ERROR("Failed to restore fixed data of steps!");
+    return false;
+  }
+  CRANE_INFO(
+      "Restored [{}] steps from embedded db.",
+      absl::StrJoin(snapshot->steps | std::views::transform([](auto kv) {
+                      auto& [job_id, steps] = kv;
+                      return steps |
+                             std::views::transform(
+                                 [job_id](const StepInEmbeddedDb& step_in_db) {
+                                   return std::make_pair(
+                                       job_id,
+                                       step_in_db.runtime_attr().step_id());
+                                 });
+                    }) | std::views::join |
+                        std::views::transform(util::StepIdPairToString) |
+                        std::ranges::to<std::vector>(),
+                    ","));
 
   return true;
 }
@@ -713,7 +809,8 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   return true;
 }
 
-bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
+bool EmbeddedDbClient::PurgeEndedTasks(
+    const std::unordered_map<job_id_t, task_db_id_t>& job_ids) {
   // To ensure consistency of both fixed data db and variable data db under
   // failure, we must ensure that:
   // 1. when inserting task data, fixed data db is written before variable db;
@@ -723,7 +820,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   std::expected<void, DbErrorCode> res;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids) {
+  for (const auto& id : job_ids | std::views::values) {
     res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
     if (!res) {
       CRANE_ERROR(
@@ -735,7 +832,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids) {
+  for (const auto& id : job_ids | std::views::values) {
     res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
     if (!res) {
       CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
@@ -744,6 +841,132 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
     }
   }
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
+
+  absl::MutexLock lock_ids(&s_step_id_mtx_);
+  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+  for (const auto& job_id : job_ids | std::views::keys) {
+    next_step_id_map.erase(job_id);
+  }
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
+  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
+  res = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                         &db_next_step_id_map);
+  if (!res) {
+    CRANE_ERROR("Failed to store next_step_id_map.");
+    return false;
+  }
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  return true;
+}
+
+bool EmbeddedDbClient::AppendSteps(const std::vector<StepInCtld*>& steps) {
+  txn_id_t txn_id;
+  std::expected<void, DbErrorCode> result;
+
+  // Note: In current implementation, this function is called by only
+  // one single thread and the lock here is actually useless.
+  // However, it costs little and prevents race condition,
+  // so we just leave it here.
+  absl::MutexLock lock_ids(&s_step_id_mtx_);
+
+  db_id_t step_db_id{s_next_step_db_id_};
+  auto next_step_id_map{s_next_step_id_map_.job_id_next_step_id_map()};
+
+  if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
+
+  for (const auto& step : steps) {
+    if (!next_step_id_map.contains(step->job_id)) {
+      next_step_id_map[step->job_id] = 0;
+    }
+    step->SetStepId(next_step_id_map[step->job_id]++);
+    step->SetStepDbId(step_db_id++);
+
+    result = StoreTypeIntoDb_(m_step_fixed_db_.get(), txn_id,
+                              GetStepFixedDbEntryName_(step->StepDbId()),
+                              &step->StepToCtld());
+    if (!result) {
+      CRANE_ERROR(
+          "Failed to store the fixed data of step id: {} / step db id: {}.",
+          step->StepId(), step->StepDbId());
+
+      // Just drop this batch if any of them failed.
+      return false;
+    }
+  }
+
+  if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
+
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+
+  for (const auto& step : steps) {
+    result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                              GetStepVariableDbEntryName_(step->StepDbId()),
+                              &step->RuntimeAttr());
+    if (!result) {
+      CRANE_ERROR(
+          "Failed to store the variable data of "
+          "step id: {} / step db id: {}.",
+          step->StepId(), step->StepDbId());
+      return false;
+    }
+  }
+  crane::grpc::StepNextIdInEmbeddedDb db_next_step_id_map;
+  *db_next_step_id_map.mutable_job_id_next_step_id_map() = next_step_id_map;
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id, s_next_step_id_str_,
+                            &db_next_step_id_map);
+  if (!result) {
+    CRANE_ERROR("Failed to store next_step_id.");
+    return false;
+  }
+
+  result = StoreTypeIntoDb_(m_step_var_db_.get(), txn_id,
+                            s_next_step_db_id_str_, &step_db_id);
+  if (!result) {
+    CRANE_ERROR("Failed to store next_step_db_id.");
+    return false;
+  }
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  s_next_step_id_map_ = db_next_step_id_map;
+  s_next_step_db_id_ = step_db_id;
+
+  return true;
+}
+
+bool EmbeddedDbClient::PurgeEndedSteps(
+    const std::vector<step_db_id_t>& db_ids) {
+  // To ensure consistency of both fixed data db and variable data db under
+  // failure, we must ensure that:
+  // 1. when inserting step data, fixed data db is written before variable db;
+  // 2. when erasing step data, fixed data db is erased after variable db;
+
+  txn_id_t txn_id;
+  std::expected<void, DbErrorCode> res;
+
+  if (!BeginDbTransaction_(m_step_var_db_.get(), &txn_id)) return false;
+  for (const auto& id : db_ids) {
+    res = m_step_var_db_->Delete(txn_id, GetStepVariableDbEntryName_(id));
+    if (!res) {
+      CRANE_ERROR(
+          "Failed to delete embedded variable data entry. Error code: {}",
+          int(res.error()));
+      return false;
+    }
+  }
+  if (!CommitDbTransaction_(m_step_var_db_.get(), txn_id)) return false;
+
+  if (!BeginDbTransaction_(m_step_fixed_db_.get(), &txn_id)) return false;
+  for (const auto& id : db_ids) {
+    res = m_step_fixed_db_->Delete(txn_id, GetStepFixedDbEntryName_(id));
+    if (!res) {
+      CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
+                  int(res.error()));
+      return false;
+    }
+  }
+  if (!CommitDbTransaction_(m_step_fixed_db_.get(), txn_id)) return false;
 
   return true;
 }

@@ -111,13 +111,19 @@ class MongodbClient {
   bool InsertRecoveredJob(
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
-  bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
+  bool InsertJobs(const std::unordered_set<TaskInCtld*>& tasks);
 
   bool FetchJobRecords(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response,
                        size_t limit);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
+
+  /* ----- Method of operating the step table ----------- */
+  bool InsertRecoveredStep(
+      crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
+  bool InsertSteps(const std::unordered_set<StepInCtld*>& steps);
+  bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
@@ -280,6 +286,10 @@ class MongodbClient {
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
+
+  document StepInCtldToDocument_(StepInCtld* step);
+  document StepInEmbeddedDbToDocument_(
+      crane::grpc::StepInEmbeddedDb const& step);
 
   DeviceMap BsonToDeviceMap(const bsoncxx::document::view& doc);
 
