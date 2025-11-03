@@ -56,7 +56,7 @@ plugins:
           default: true
           build: true
           link: /
-          site_name: "CraneSched 文档"
+          site_name: "鹤思文档"
           theme:
             language: zh
           nav_translations:
