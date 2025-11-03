@@ -30,7 +30,7 @@ int LicensesManager::Init(
     licenses_map.insert({lic_id, License(lic_id, count, 0, count)});
   }
 
-  licenses_map_.InitFromMap(std::move(licenses_map));
+  m_licenses_map_.InitFromMap(std::move(licenses_map));
 
   return 0;
 }
@@ -40,7 +40,7 @@ void LicensesManager::GetLicensesInfo(
     crane::grpc::QueryLicensesInfoReply* response) {
   auto* list = response->mutable_license_info_list();
 
-  auto licenses_map = licenses_map_.GetMapConstSharedPtr();
+  auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
 
   if (request->license_name_list().empty()) {
     for (const auto& [lic_index, lic_ptr] : *licenses_map) {
@@ -70,7 +70,7 @@ bool LicensesManager::CheckLicenseCountSufficient(
     bool is_license_or,
     std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
   actual_licenses->clear();
-  auto licenses_map = licenses_map_.GetMapConstSharedPtr();
+  auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
   if (is_license_or) {
     for (const auto& [lic_id, count] : lic_id_to_count_map) {
       if (licenses_map->contains(lic_id)) {
@@ -96,7 +96,7 @@ bool LicensesManager::CheckLicenseCountSufficient(
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map,
     bool is_license_or) {
-  auto licenses_map = licenses_map_.GetMapConstSharedPtr();
+  auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
 
   if (is_license_or) {
     for (const auto& [lic_id, count] : lic_id_to_count_map) {
@@ -122,7 +122,7 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
 void LicensesManager::MallocLicenseResource(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   for (auto& [lic_id, count] : lic_id_to_count_map) {
-    auto lic = licenses_map_[lic_id];
+    auto lic = m_licenses_map_[lic_id];
     lic->used += count;
     lic->free -= count;
   }
@@ -131,7 +131,7 @@ void LicensesManager::MallocLicenseResource(
 void LicensesManager::FreeLicenseResource(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   for (auto& [lic_id, count] : lic_id_to_count_map) {
-    auto lic = licenses_map_[lic_id];
+    auto lic = m_licenses_map_[lic_id];
     lic->used -= count;
     lic->free += count;
   }
