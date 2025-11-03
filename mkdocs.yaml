@@ -48,6 +48,7 @@ plugins:
   - search
   - i18n:
       docs_structure: folder
+      default_language: zh
       languages:
         - locale: zh
           name: 中文
