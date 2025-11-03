@@ -60,7 +60,7 @@ class LicensesManager {
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
  private:
-  LicensesAtomicMap licenses_map_;
+  LicensesAtomicMap m_licenses_map_;
 };
 
 }  // namespace Ctld
