@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Usage: $0 mode(1:acct_table | 2:qos_table | 3:task_table | 4:user_table | 5:all | 6:acct_table+qos_table+user_table)"
+echo "Usage: $0 mode(1:acct_table | 2:qos_table | 3:task_table | 4:user_table | 5:all | 6:acct_table+qos_table+user_table| 7:hour_table+day_table+month_table |8: summary_table)"
 
 if [ "$#" -ne 1 ]; then
   echo "Parameter error: please input mode num!"

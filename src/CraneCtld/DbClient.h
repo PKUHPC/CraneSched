@@ -106,7 +106,7 @@ class MongodbClient {
 
   enum class RollupType : std::uint8_t { HOUR, HOUR_TO_DAY, DAY_TO_MONTH };
 
-  struct JobSummAggResult {
+  struct JobSizeSummAggResult {
     double total_cpu_time = 0;
     int32_t total_count = 0;
   };
@@ -155,6 +155,7 @@ class MongodbClient {
   bool InsertQos(const Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
+  bool InitTableIndexes();
   bool UpdateSummaryLastSuccessTimeSec(const std::string& type,
                                        int64_t last_success_sec);
   bool GetSummaryLastSuccessTimeTm(const std::string& type, std::tm& tm_last);
@@ -163,9 +164,7 @@ class MongodbClient {
                   RollupType type);
   bool RollupSummary(const std::string& summary_type, RollupType rollup_type,
                      const std::string& time_unit);
-  bool RollupHourTable();
-  bool RollupHourToDay();
-  bool RollupDayToMonth();
+
   void ClusterRollupUsage();
   void CreateCollectionIndex(mongocxx::collection& coll,
                              const std::vector<std::string>& fields);

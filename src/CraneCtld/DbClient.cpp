@@ -1904,6 +1904,10 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
     auto filter = bsoncxx::builder::stream::document{}
                   << "_id" << type << bsoncxx::builder::stream::finalize;
 
+    // Build the update document:
+    // - $max: only update last_success_time if last_success_sec is greater than
+    // the current value
+    // - $set: always update update_time to the current timestamp
     auto update = bsoncxx::builder::stream::document{}
                   << "$max" << bsoncxx::builder::stream::open_document
                   << "last_success_time" << last_success_sec
@@ -1912,8 +1916,10 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
                   << update_sec << bsoncxx::builder::stream::close_document
                   << bsoncxx::builder::stream::finalize;
 
+    // Execute the update operation with upsert=true (insert if not exists)
     auto result = summary_coll.update_one(
         filter.view(), update.view(), mongocxx::options::update{}.upsert(true));
+
     return true;
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_,
@@ -1925,7 +1931,7 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
 
 bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
                                                 std::tm& tm_last) {
-  // Default time
+  // Set default time
   std::tm default_time = {};
   default_time.tm_year = 2024 - 1900;
   default_time.tm_mon = 9 - 1;
@@ -1943,8 +1949,9 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
       if (it != doc.end() && it->type() == bsoncxx::type::k_int64) {
         int64_t last_sec = it->get_int64().value;
         auto tt = static_cast<std::time_t>(last_sec);
-        std::tm tm_tmp = {};
-        localtime_r(&tt, &tm_last);
+        localtime_r(&tt, &tm_last);  // Fill tm_last with local time
+      } else {
+        tm_last = default_time;
       }
     } else {
       tm_last = default_time;
@@ -1953,17 +1960,19 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(
         m_logger_,
-        fmt::format("GetSummaryLastSuccessTimeTm failed: {}, type={}, coll={}",
-                    e.what(), type, m_summary_time_collection_name_));
+        fmt::format(
+            "Get summary lastSuccess time  failed: {}, type={}, coll={}",
+            e.what(), type, m_summary_time_collection_name_));
+    tm_last = default_time;
+    return false;
   }
-
-  return false;
 }
 
 std::tm MongodbClient::GetRoundHourNowTm() {
   std::time_t now =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-  std::tm tm_now = *std::localtime(&now);
+  std::tm tm_now{};
+  localtime_r(&now, &tm_now);
   tm_now.tm_min = 0;
   tm_now.tm_sec = 0;
   return tm_now;
@@ -2020,7 +2029,7 @@ bool MongodbClient::RollupSummary(const std::string& summary_type,
   auto t0 = std::chrono::steady_clock::now();
   bool success = AggregateJobSummary(rollup_type, last_sec, now_sec);
   if (!success) {
-    CRANE_ERROR("Aggregate Job Summary ({}) failed! Window: {} -> {}",
+    CRANE_ERROR("Aggregate job summary ({}) failed! Window: {} -> {}",
                 summary_type, util::FormatTime(last_sec),
                 util::FormatTime(now_sec));
   }
@@ -2031,58 +2040,56 @@ bool MongodbClient::RollupSummary(const std::string& summary_type,
   return success;
 }
 
-bool MongodbClient::RollupHourTable() {
-  return RollupSummary("hour", RollupType::HOUR, "hour");
-}
-
-bool MongodbClient::RollupHourToDay() {
-  return RollupSummary("hour_to_day", RollupType::HOUR_TO_DAY, "day");
-}
-
-bool MongodbClient::RollupDayToMonth() {
-  return RollupSummary("day_to_month", RollupType::DAY_TO_MONTH, "month");
-}
-
 void MongodbClient::ClusterRollupUsage() {
   std::lock_guard<std::mutex> lock(rollup_mutex_);
 
   auto start_total = std::chrono::steady_clock::now();
   auto start = std::chrono::steady_clock::now();
-  RollupHourTable();
+  RollupSummary("hour", RollupType::HOUR, "hour");
   auto end = std::chrono::steady_clock::now();
   auto dur1 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
                   .count();
   CRANE_INFO("RollupHourTable used {} ms", dur1);
 
   start = std::chrono::steady_clock::now();
-  RollupHourToDay();
+  RollupSummary("hour_to_day", RollupType::HOUR_TO_DAY, "day");
   end = std::chrono::steady_clock::now();
   auto dur2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
                   .count();
-  CRANE_INFO("RollupHourToDay used {} ms", dur2);
+  CRANE_INFO("Rollup hour to day used {} ms", dur2);
 
   start = std::chrono::steady_clock::now();
-  RollupDayToMonth();
+  RollupSummary("day_to_month", RollupType::DAY_TO_MONTH, "month");
   end = std::chrono::steady_clock::now();
   auto dur3 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
                   .count();
-  CRANE_INFO("RollupDayToMonth used {} ms", dur3);
+  CRANE_INFO("Rollup day to month used {} ms", dur3);
 
   auto end_total = std::chrono::steady_clock::now();
   auto total = std::chrono::duration_cast<std::chrono::milliseconds>(
                    end_total - start_total)
                    .count();
-  CRANE_INFO("ClusterRollupUsage total used {} ms", total);
+  CRANE_INFO("Rollup cluster usage total used {} ms", total);
 }
 
 void MongodbClient::CreateCollectionIndex(
     mongocxx::collection& coll, const std::vector<std::string>& fields) {
   try {
-    auto index_builder = bsoncxx::builder::stream::document{};
+    bsoncxx::builder::stream::document index_builder;
     for (const auto& field : fields) {
-      index_builder << field << 1;
+      index_builder << field << 1;  // 1 for ascending order
     }
-    coll.create_index(index_builder << bsoncxx::builder::stream::finalize);
+
+    // Generate a readable index name
+    std::string idx_name;
+    for (size_t i = 0; i < fields.size(); ++i) {
+      if (i > 0) idx_name += "_";
+      idx_name += fields[i] + "_1";
+    }
+
+    mongocxx::options::index index_options;
+    index_options.name(idx_name);
+    coll.create_index(index_builder.view(), index_options);
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, "Create index error for collection {}: {}",
                        coll.name(), e.what());
@@ -2091,39 +2098,6 @@ void MongodbClient::CreateCollectionIndex(
 
 bool MongodbClient::AggregateJobSummary(RollupType type, std::time_t start,
                                         std::time_t end) {
-  try {
-    std::string collection_name;
-    std::vector<std::vector<std::string>> index_fields_list;
-
-    if (type == RollupType::HOUR) {
-      collection_name = m_hour_job_summary_collection_name_;
-      index_fields_list.push_back({"hour"});
-      index_fields_list.push_back({"hour", "account", "username", "qos", "wckey", "cpu_alloc", "partition_name", "nodesname"});
-      {
-        std::string raw_collection_name = m_task_collection_name_;
-        std::vector<std::string> raw_index_fields = {"time_end"};
-        auto raw_table = (*GetClient_())[m_db_name_][raw_collection_name];
-        CreateCollectionIndex(raw_table, raw_index_fields);
-      }
-    } else if (type == RollupType::HOUR_TO_DAY) {
-      collection_name = m_day_job_summary_collection_name_;
-      index_fields_list.push_back({"day"});
-      index_fields_list.push_back({"day", "account", "username", "qos", "wckey", "cpu_alloc", "partition_name", "nodesname"});
-    } else if (type == RollupType::DAY_TO_MONTH) {
-      collection_name = m_month_job_summary_collection_name_;
-      index_fields_list.push_back({"month"});
-      index_fields_list.push_back({"month", "account", "username", "qos", "wckey", "cpu_alloc", "partition_name", "nodesname"});
-    }
-
-    auto job_summ_table = (*GetClient_())[m_db_name_][collection_name];
-    for (const auto& fields : index_fields_list) {
-      CreateCollectionIndex(job_summ_table, fields);
-    }
-
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
-  }
-
   // Perform aggregation based on type
   if (type == RollupType::HOUR) {
     HourJobSummAggregation(start, end, m_task_collection_name_);
@@ -2143,7 +2117,8 @@ bool MongodbClient::AggregateJobSummary(RollupType type, std::time_t start,
 void MongodbClient::HourJobSummAggregation(
     std::time_t start, std::time_t end,
     const std::string& task_collection_name) {
-  std::tm tm_start = *std::localtime(&start);
+  std::tm tm_start{};
+  localtime_r(&start, &tm_start);
   tm_start.tm_min = 0;
   tm_start.tm_sec = 0;
   std::time_t cur_start = std::mktime(&tm_start);
@@ -2210,7 +2185,6 @@ void MongodbClient::HourJobSummAggregation(
                      << "account" << "$account"
                      << "username" << "$username"
                      << "qos" << "$qos"
-                     << "node" << "$qos"
                      << "wckey" << "$wckey"
                      << "cpu_alloc" << "$cpu_alloc"
                      << "partition_name" << "$partition_name"
@@ -2251,7 +2225,6 @@ void MongodbClient::HourJobSummAggregation(
       // Force execution of the aggregation pipeline (including $merge/$out) by
       // iterating the cursor. No need to process the documents.
       for (auto&& doc : cursor) {}
-
       cur_start = cur_end;
       cur_end += 3600;
     }
@@ -2350,9 +2323,9 @@ void MongodbClient::DayOrMonJobSummAggregation(
                      << "into" << dst_coll_str << "whenMatched" << "replace"
                      << "whenNotMatched" << "insert"
                      << bsoncxx::builder::stream::finalize);
-      src_coll.aggregate(pipeline);
-
       auto cursor = src_coll.aggregate(pipeline);
+      // Force execution of the aggregation pipeline (including $merge/$out) by
+      // iterating the cursor. No need to process the documents.
       for (auto&& doc : cursor) {}
       // Advance window
       if (period_field == "day") {
@@ -2408,7 +2381,7 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
   if (request->has_filter_end_time()) {
     int64_t end_time_sec = request->filter_end_time().seconds();
     filter.append(kvp("time_end", [&](sub_document time_end_doc) {
-      time_end_doc.append(kvp("$gte", end_time_sec));
+      time_end_doc.append(kvp("$lte", end_time_sec));
     }));
   }
 
@@ -2431,6 +2404,17 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
         user_array.append(user);
       }
       user_doc.append(kvp("$in", user_array));
+    }));
+  }
+
+  bool has_qos_constraint = !request->filter_qoss().empty();
+  if (has_qos_constraint) {
+    filter.append(kvp("qos", [&request](sub_document qos_doc) {
+      array qos_array;
+      for (const auto& qos : request->filter_qoss()) {
+        qos_array.append(qos);
+      }
+      qos_doc.append(kvp("$in", qos_array));
     }));
   }
 
@@ -2467,10 +2451,22 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
     }));
   }
 
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view());
-  absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
+  bool has_wckeys_constraint = !request->filter_wckeys().empty();
+  if (has_wckeys_constraint) {
+    filter.append(kvp("wckey", [&request](sub_document wckey_doc) {
+      array wckey_array;
+      for (const auto& wckey : request->filter_wckeys()) {
+        wckey_array.append(wckey);
+      }
+      wckey_doc.append(kvp("$in", wckey_array));
+    }));
+  }
+
+  absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult> agg_map;
   try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].find(
+            filter.view());
     for (auto view : cursor) {
       std::string acc = view["account"].get_string().value.data();
       std::string wk =
@@ -2478,9 +2474,23 @@ bool MongodbClient::FetchJobSizeSummaryRecords(
       uint32_t cpu_alloc =
           static_cast<uint32_t>(view["cpus_alloc"].get_double().value *
                                 view["nodes_alloc"].get_int32().value);
-      double total_cpu_time = (view["time_end"].get_int64().value -
-                               view["time_start"].get_int64().value) *
-                              cpu_alloc;
+      int64_t time_start = 0;
+      int64_t time_end = 0;
+      auto time_start_elem = view["time_start"];
+      auto time_end_elem = view["time_end"];
+      if (time_start_elem) {
+        if (time_start_elem.type() == bsoncxx::type::k_int64)
+          time_start = time_start_elem.get_int64().value;
+        else if (time_start_elem.type() == bsoncxx::type::k_int32)
+          time_start = time_start_elem.get_int32().value;
+      }
+      if (time_end_elem) {
+        if (time_end_elem.type() == bsoncxx::type::k_int64)
+          time_end = time_end_elem.get_int64().value;
+        else if (time_end_elem.type() == bsoncxx::type::k_int32)
+          time_end = time_end_elem.get_int32().value;
+      }
+      double total_cpu_time = (time_end - time_start) * cpu_alloc;
       if (grouping_list.empty()) {
         agg_map[{acc, wk, cpu_alloc}].total_cpu_time += total_cpu_time;
         agg_map[{acc, wk, cpu_alloc}].total_count += 1;
@@ -2890,7 +2900,7 @@ void MongodbClient::QueryJobSizeSummary(
         stream->Write(reply);
       }
     } else {
-      absl::flat_hash_map<JobSizeSummKey, JobSummAggResult> agg_map;
+      absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult> agg_map;
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
         std::string acc = std::string(id["account"].get_string().value);
@@ -2962,7 +2972,48 @@ uint64_t MongodbClient::MillisecondsToNextHour() {
   return static_cast<uint64_t>(ms);
 }
 
+bool MongodbClient::InitTableIndexes() {
+  try {
+    // Create index for the raw task table
+    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    CreateCollectionIndex(raw_table, {"time_end"});
+
+    // Create indexes for the hour summary table
+    auto hour_coll =
+        (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+    CreateCollectionIndex(hour_coll, {"hour"});
+    CreateCollectionIndex(
+        hour_coll, {"hour", "account", "username", "qos", "wckey", "cpu_alloc",
+                    "partition_name", "nodesname"});
+
+    // Create indexes for the day summary table
+    auto day_coll =
+        (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+    CreateCollectionIndex(day_coll, {"day"});
+    CreateCollectionIndex(
+        day_coll, {"day", "account", "username", "qos", "wckey", "cpu_alloc",
+                   "partition_name", "nodesname"});
+
+    // Create indexes for the month summary table
+    auto month_coll =
+        (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+    CreateCollectionIndex(month_coll, {"month"});
+    CreateCollectionIndex(month_coll,
+                          {"month", "account", "username", "qos", "wckey",
+                           "cpu_alloc", "partition_name", "nodesname"});
+
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
+    return false;
+  }
+}
+
 bool MongodbClient::Init() {
+  if (!InitTableIndexes()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
+    return false;
+  }
   std::shared_ptr<uvw::loop> loop = uvw::loop::create();
   auto mongodb_task_timer_handle = loop->resource<uvw::timer_handle>();
 
