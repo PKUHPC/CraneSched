@@ -757,6 +757,12 @@ void TaskScheduler::ScheduleThread_() {
           job->pending_reason = "BeginTime";
           continue;
         }
+
+        if (!g_licenses_manager->CheckLicenseCountSufficient(job->licenses_count)) {
+          job->pending_reason = "Licenses";
+          continue;
+        }
+
         pending_jobs.emplace_back(
             std::make_unique<PdJobInScheduler>(job.get()));
       }
@@ -905,6 +911,8 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->MallocResourceFromResv(
                 job->reservation, job->TaskId(), job->AllocatedRes());
           }
+          if (!job->licenses_count.empty())
+            g_licenses_manager->MallocLicenseResource(job->licenses_count);
 
           if (job->ShouldLaunchOnAllNodes()) {
             for (auto const& craned_id : job->CranedIds())
@@ -1192,7 +1200,7 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->FreeResourceFromResv(job->reservation,
                                                    job->TaskId());
           g_account_meta_container->FreeQosResource(*job);
-          if (!task->licenses_count.empty())
+          if (!job->licenses_count.empty())
             g_licenses_manager->FreeLicenseResource(job->licenses_count);
         }
 
@@ -3450,12 +3458,6 @@ void SchedulerAlgo::NodeSelect(
       }
       scheduler = &resv_scheduler_map[job->reservation];
     }
-    //bool issuff =
-    //    g_licenses_manager->CheckLicenseCountSufficient(job->licenses_count);
-    //if (!issuff) {
-    //  job->reason = "Licenses";
-    //  continue;
-    //}
 
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
 
@@ -3673,7 +3675,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!g_config.lic_id_to_count_map.empty()) {
     auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
         task->TaskToCtld().licenses_count(),
-        task->TaskToCtld().is_licenses_or());
+        task->TaskToCtld().is_licenses_or(), &task->licenses_count);
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());
