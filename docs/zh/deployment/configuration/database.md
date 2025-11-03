@@ -1,6 +1,6 @@
 # 数据库配置
 
-本指南介绍如何为 CraneSched 安装和配置 MongoDB。
+本指南介绍如何为鹤思安装和配置 MongoDB。
 
 !!! info
     MongoDB 仅在**控制节点**上需要。计算节点不需要 MongoDB。
@@ -130,7 +130,7 @@ rs.initiate(config)
 quit
 ```
 
-## 3. 配置 CraneSched 数据库连接
+## 3. 配置鹤思数据库连接
 
 **仅在控制节点**上创建 `/etc/crane/database.yaml`：
 

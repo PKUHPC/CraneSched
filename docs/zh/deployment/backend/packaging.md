@@ -1,17 +1,17 @@
 # 打包指南
 
-本指南介绍如何为 CraneSched 构建和安装 RPM 和 DEB 软件包。
+本指南介绍如何为鹤思构建和安装 RPM 和 DEB 软件包。
 
 ## 概述
 
-CraneSched 使用 CPack 生成软件包以便于分发和安装。构建系统支持创建 RPM（用于基于 Red Hat 的系统）和 DEB（用于基于 Debian 的系统）软件包。
+鹤思使用 CPack 生成软件包以便于分发和安装。构建系统支持创建 RPM（用于基于 Red Hat 的系统）和 DEB（用于基于 Debian 的系统）软件包。
 
 ### 软件包组件
 
 !!! tip
     前端组件不包含在这些软件包中。有关前端安装，请参阅[前端部署指南](../frontend/frontend.md)。
 
-CraneSched 分为两个主要软件包组件：
+鹤思分为两个主要软件包组件:
 
 - **cranectld** - 控制守护进程软件包（用于控制节点）
 - **craned** - 执行守护进程软件包（用于计算节点）
@@ -27,7 +27,7 @@ CraneSched 分为两个主要软件包组件：
 
 在构建软件包之前，请确保您具备：
 
-1. **已构建 CraneSched** - 完成 [Rocky Linux 9](./Rocky9.md) 或 [CentOS 7](./CentOS7.md) 指南中描述的构建过程
+1. **已构建鹤思** - 完成 [Rocky Linux 9](./Rocky9.md) 或 [CentOS 7](./CentOS7.md) 指南中描述的构建过程
 2. **CMake 3.24+** - 软件包生成所需
 3. **RPM 工具**（用于 RPM 软件包）：
    ```bash

@@ -1,6 +1,6 @@
 # 集群配置
 
-本指南说明如何通过 `/etc/crane/config.yaml` 文件配置 CraneSched，以设置集群拓扑、分区和调度策略。
+本指南说明如何通过 `/etc/crane/config.yaml` 文件配置鹤思，以设置集群拓扑、分区和调度策略。
 
 !!! info
     配置文件在所有节点（控制节点和计算节点）上必须**完全相同**。任何更改都需要重启受影响的服务。
@@ -48,7 +48,7 @@ ClusterName: my_cluster
 # 数据库配置文件路径
 DbConfigPath: /etc/crane/database.yaml
 
-# CraneSched 数据和日志的基础目录
+# 鹤思数据和日志的基础目录
 CraneBaseDir: /var/crane/
 ```
 

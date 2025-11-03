@@ -26,7 +26,7 @@
     - 通常在提交交互式作业的登录节点上运行。由 systemd 作为 `cfored.service` 管理。
 
 - `cplugind`（插件守护进程）：
-    - 加载和管理插件（mail、monitor、energy、event 等）并向 CraneSched 组件公开插件服务。
+    - 加载和管理插件（mail、monitor、energy、event 等）并向鹤思组件公开插件服务。
     - 必须在需要插件功能的节点上运行。插件 `.so` 文件和插件配置在 `/etc/crane/config.yaml` 中注册。
 
 ## 1. 安装 Golang

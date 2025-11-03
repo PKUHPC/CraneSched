@@ -1,7 +1,7 @@
 # CentOS 7 部署指南
 
 !!! warning
-    本指南适用于 **CentOS 7**，该系统已达到**生命周期终止（EOL）**。CraneSched 的未来更新依赖于现代编译器，因此本教程**可能无法按预期工作**，且不再保证得到维护。
+    本指南适用于 **CentOS 7**，该系统已达到**生命周期终止（EOL）**。鹤思的未来更新依赖于现代编译器，因此本教程**可能无法按预期工作**，且不再保证得到维护。
 
 ## 1. 配置构建环境
 
@@ -90,7 +90,7 @@ make install
 
 ## 4. 安装工具链
 
-CraneSched 需要以下工具链版本：
+鹤思需要以下工具链版本:
 
 * CMake ≥ 3.24
 * libstdc++ ≥ 11
@@ -107,7 +107,7 @@ cmake --version
 
 ### 4.2 GCC 14
 
-CraneSched 需要 **libstdc++ ≥ 11**。CentOS 7 上的默认 GCC 4.8 太旧，因此我们需要从源码构建并安装 GCC 14。
+鹤思需要 **libstdc++ ≥ 11**。CentOS 7 上的默认 GCC 4.8 太旧，因此我们需要从源码构建并安装 GCC 14。
 
 ```bash
 yum install -y tar bzip2
@@ -146,7 +146,7 @@ ninja install
 !!! info
     如果您希望使用 RPM 软件包，请参阅[打包指南](packaging.md)获取说明。
 
-对于多节点部署 CraneSched，请按照[多节点部署指南](../configuration/multi-node.md)。
+对于多节点部署鹤思，请按照[多节点部署指南](../configuration/multi-node.md)。
 
 ## 6. 安装和配置 MongoDB
 

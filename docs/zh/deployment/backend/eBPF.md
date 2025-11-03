@@ -1,6 +1,6 @@
 # 在 cgroup v2 上使用 eBPF 支持 GRES
 
-在 cgroup v2 上使用 GRES（通用资源，例如 GPU）时，CraneSched 依赖 eBPF 来强制执行设备级 GRES 限制。
+在 cgroup v2 上使用 GRES（通用资源，例如 GPU）时，鹤思依赖 eBPF 来强制执行设备级 GRES 限制。
 
 本指南将指导您在计算节点上设置 eBPF。
 
@@ -72,9 +72,9 @@ make install
 
 ## 2. 使用 eBPF 支持构建
 
-CraneSched 可以使用 GCC 或 Clang 构建。但是，要使用 eBPF 功能，您必须使用 Clang 19 或更高版本。
+鹤思可以使用 GCC 或 Clang 构建。但是，要使用 eBPF 功能，您必须使用 Clang 19 或更高版本。
 
-构建 CraneSched 时，请确保 Clang 19 已正确安装并且**在您的 PATH 中可用**，并使用以下 CMake 选项构建：
+构建鹤思时，请确保 Clang 19 已正确安装并且**在您的 PATH 中可用**，并使用以下 CMake 选项构建：
 
 ```
 -DCRANE_ENABLE_CGROUP_V2=ON

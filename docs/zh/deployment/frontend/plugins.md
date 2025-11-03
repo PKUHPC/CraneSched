@@ -2,14 +2,14 @@
 
 ## 概述
 
-CraneSched 插件系统是模块化的，默认情况下处于禁用状态。必须在每个节点上运行 `cplugind` 守护进程才能启用插件功能。插件和 `cplugind` 版本严格耦合，必须一起更新。
+鹤思插件系统是模块化的，默认情况下处于禁用状态。必须在每个节点上运行 `cplugind` 守护进程才能启用插件功能。插件和 `cplugind` 版本严格耦合，必须一起更新。
 
 !!! info
     插件是可选的。如果您不需要任何插件功能，可以跳过本指南。
 
 ### 插件架构
 
-每个 CraneSched 插件包括：
+每个鹤思插件包括:
 
 - **共享库**（`.so` 文件）：插件实现
 - **插件配置**（`.yaml` 文件，可选）：特定于插件的设置
@@ -19,14 +19,14 @@ CraneSched 插件系统是模块化的，默认情况下处于禁用状态。必
 理解两种类型的配置文件之间的区别至关重要：
 
 **全局配置** (`/etc/crane/config.yaml`)
-: CraneSched 的主配置文件，包含 CLI、后端、cfored 和 cplugind 的设置。插件路径在此处注册。
+: 鹤思的主配置文件，包含 CLI、后端、cfored 和 cplugind 的设置。插件路径在此处注册。
 
 **插件配置**（例如 `monitor.yaml`）
 : 单个插件设置。可以位于任何可读位置，在全局配置中指定绝对路径。
 
 ### 可用插件
 
-CraneSched 目前提供以下插件：
+鹤思目前提供以下插件:
 
 | 插件 | 描述 |
 |------|------|
@@ -52,7 +52,7 @@ systemctl start cplugind
 
 ```yaml
 Plugin:
-  # 在 CraneSched 中切换插件模块
+  # 在鹤思中切换插件模块
   Enabled: true
   # 相对于 CraneBaseDir 的套接字路径
   PlugindSockPath: "cplugind/cplugind.sock"
@@ -135,7 +135,7 @@ Plugins:
 
 ## Mail 插件
 
-mail 插件从 CraneSched 控制节点（cranectld）通过电子邮件发送作业通知。
+mail 插件从鹤思控制节点（cranectld）通过电子邮件发送作业通知。
 
 ### 系统邮件配置
 

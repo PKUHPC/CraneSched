@@ -35,7 +35,7 @@ crun只支持通过命令行指定请求参数，支持的命令行选项：
 - **-t/--time string**: 时间限制，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示5天1秒）或 "hours:minutes:seconds"（如 10:1:2 表示10小时1分钟2秒）
 - **-v/--version**: crun的版本
 - **--x11**: 启用X11支持，默认值为false。如果未配合 --x11-forwarding 使用，则直接使用X11（不安全）
-- **--x11-forwarding**: 由CraneSched启用X11转发（安全），默认值为false
+- **--x11-forwarding**: 由鹤思启用X11转发（安全），默认值为false
 
 ## 使用示例
 

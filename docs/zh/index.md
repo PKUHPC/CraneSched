@@ -3,7 +3,7 @@ hide:
   - navigation
 ---
 
-# CraneSched
+# 鹤思
 
 <p class="lead">面向高性能计算和人工智能工作负载的分布式调度系统 — 专为性能、规模和简单性而构建。</p>
 
@@ -11,7 +11,7 @@ hide:
 
 ---
 
-## 为什么选择 CraneSched?
+## 为什么选择鹤思?
 
 <div class="grid cards" markdown>
 
@@ -95,9 +95,9 @@ hide:
 
 ## 架构
 
-![CraneSched 架构](images/Architecture.png)
+![鹤思架构](images/Architecture.png)
 
-CraneSched 引入了资源管理器以同时支持 HPC 和 AI 工作负载：
+鹤思引入了资源管理器以同时支持 HPC 和 AI 工作负载:
 
 - HPC 作业：Cgroup 管理器分配资源并提供基于 cgroup 的隔离。
 - AI 作业：容器管理器使用 Kubernetes 进行资源分配和容器生命周期管理。
@@ -122,4 +122,4 @@ CraneSched 引入了资源管理器以同时支持 HPC 和 AI 工作负载：
 
 ## 许可证
 
-CraneSched 采用 AGPLv3 和商业许可证双重许可。有关商业许可，请查看 `LICENSE` 文件或联系 mayinping@pku.edu.cn。
+鹤思采用 AGPLv3 和商业许可证双重许可。有关商业许可，请查看 `LICENSE` 文件或联系 mayinping@pku.edu.cn。

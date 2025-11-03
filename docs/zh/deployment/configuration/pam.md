@@ -1,6 +1,6 @@
 # PAM 模块配置
 
-本指南说明如何配置 CraneSched PAM 模块以控制用户对计算节点的访问。
+本指南说明如何配置鹤思 PAM 模块以控制用户对计算节点的访问。
 
 !!! warning
     - 仅在**集群完全部署并运行后**配置 PAM。
@@ -15,7 +15,7 @@ PAM 模块（`pam_crane.so`）确保只有具有活动作业的用户才能登�
 
 ### 1. 复制 PAM 模块
 
-构建 CraneSched 后，将 PAM 模块复制到系统库：
+构建鹤思后，将 PAM 模块复制到系统库：
 
 ```bash
 cp build/src/Misc/Pam/pam_crane.so /usr/lib64/security/

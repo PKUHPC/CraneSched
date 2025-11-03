@@ -51,7 +51,9 @@ plugins:
       languages:
         - locale: zh
           name: 中文
+          default: true
           build: true
+          link: /
           site_name: "CraneSched 文档"
           nav_translations:
             Home: 首页
@@ -84,9 +86,7 @@ plugins:
             Plugins: 插件
         - locale: en
           name: English
-          default: true
           build: true
-          link: /
           site_name: "CraneSched Documentation"
 
 markdown_extensions:

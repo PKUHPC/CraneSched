@@ -61,7 +61,7 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ### 1.5 选择 CGroup 版本（可选）
 
 Rocky 9 默认使用 **CGroup v2**。
-CraneSched 默认使用 **CGroup v1**。
+鹤思默认使用 **CGroup v1**。
 
 如果您希望启用 CGroup v2 支持，需要[额外配置](eBPF.md)，
 或者您可以将系统切换为使用 CGroup v1。
@@ -145,11 +145,11 @@ MongoDB 仅在**控制节点**上需要。
 
 请按照[数据库配置指南](../configuration/database.md)获取详细说明。
 
-## 5. 安装和配置 CraneSched
+## 5. 安装和配置鹤思
 
 ### 5.1 构建和安装
 
-1. 配置和构建 CraneSched：
+1. 配置和构建鹤思:
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
@@ -167,12 +167,12 @@ cmake --build .
 2. 安装构建的二进制文件：
 
 !!! tip
-    我们建议使用 RPM 软件包部署 CraneSched。有关安装说明，请参阅[打包指南](packaging.md)。
+    我们建议使用 RPM 软件包部署鹤思。有关安装说明，请参阅[打包指南](packaging.md)。
 ```bash
 cmake --install .
 ```
 
-对于多节点部署 CraneSched，请按照[多节点部署指南](../configuration/multi-node.md)。
+对于多节点部署鹤思，请按照[多节点部署指南](../configuration/multi-node.md)。
 
 ### 5.2 配置 PAM 模块
 
@@ -184,7 +184,7 @@ PAM 模块配置是可选的，但建议用于生产集群以控制用户访问�
 
 有关集群配置详细信息，请参阅[集群配置指南](../configuration/config.md)。
 
-## 6. 启动 CraneSched
+## 6. 启动鹤思
 
 手动运行（前台）：
 
