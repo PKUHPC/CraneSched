@@ -1355,7 +1355,7 @@ CraneErrCode ProcInstance::Spawn() {
       RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
                                      .envs = GetChildProcessEnv(),
                                      .run_uid = m_parent_step_inst_->uid,
-                                     .run_gid = m_parent_step_inst_->gid,
+                                     .run_gid = m_parent_step_inst_->gids[0],
                                      .is_prolog = true};
       auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
       if (!result) std::abort();
@@ -1845,7 +1845,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
       RunLogHookArgs run_epilog_args{.scripts = g_config.TaskEpilogs,
                                      .envs = task->GetChildProcessEnv(),
                                      .run_uid = task->GetParentStep().uid(),
-                                     .run_gid = task->GetParentStep().gid(),
+                                     .run_gid = task->GetParentStep().gid()[0],
                                      .is_prolog = false};
       util::os::RunPrologOrEpiLog(run_epilog_args);
     }
