@@ -33,6 +33,7 @@
 
 namespace Craned {
 using Common::kStepRequestCheckIntervalMs;
+using namespace std::chrono_literals;
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
     : job_id(step_to_d.job_id()),
       step_id(step_to_d.step_id()),
@@ -114,8 +115,8 @@ JobManager::JobManager() {
       [this](const uvw::timer_event&, uvw::timer_handle& handle) {
         EvCheckSupervisorRunning_();
       });
-  m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0},
-                                          std::chrono::milliseconds{500});
+  m_check_supervisor_timer_handle_->start(std::chrono::milliseconds{0ms},
+                                          std::chrono::milliseconds{500ms});
 
   // gRPC Alloc step Event
   m_grpc_alloc_step_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -768,11 +769,29 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
   while (m_grpc_execute_step_queue_.try_dequeue(elem)) {
     // Once ExecuteTask RPC is processed, the Execution goes into m_job_map_.
     auto& [job_id, step_id, ok_prom] = elem;
-    if (!m_job_map_.Contains(job_id)) {
-      CRANE_ERROR("[Job #{}.{}]Failed to find allocation", job_id, step_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+    auto job = m_job_map_.GetValueExclusivePtr(job_id);
+
+    if (!job) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id,
+                  step_id);
+      elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
+    absl::MutexLock lk(job->step_map_mtx.get());
+    auto step_it = job->step_map.find(step_id);
+    if (step_it == job->step_map.end()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
+                  step_id);
+      elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
+      continue;
+    }
+    if (step_it->second->status != StepStatus::Configured) {
+      CRANE_WARN(
+          "[Step #{}.{}] Step status is not 'Configured' when executing step, "
+          "current status: {}.",
+          job_id, step_id, static_cast<int>(step_it->second->status));
+    }
+    step_it->second->status = StepStatus::Running;
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
     g_thread_pool->detach_task([job_id, step_id] {
@@ -857,7 +876,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
 
         cgroup->KillAllProcesses();
         ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
       }
       cgroup->Destroy();
 
@@ -956,28 +975,26 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
 void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   StepStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    if (status_change.new_status == StepStatus::Running) {
-      auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
-      if (!job_ptr) {
-        CRANE_DEBUG("[Job #{}] Job allocation not found for StepStatusChange.",
-                    status_change.job_id);
-        continue;
-      }
-      absl::MutexLock lk(job_ptr->step_map_mtx.get());
-      if (!job_ptr->step_map.contains(status_change.step_id)) {
-        CRANE_ERROR(
-            "[Step #{}.{}] Step allocation not found for StepStatusChange.",
-            status_change.job_id, status_change.step_id);
-        continue;
-      }
-      auto* step = job_ptr->step_map.at(status_change.step_id).get();
-      step->status = status_change.new_status;
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
+    if (!job_ptr) {
+      CRANE_DEBUG("[Job #{}] Job allocation not found for StepStatusChange.",
+                  status_change.job_id);
+      continue;
     }
-    CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
-                status_change.job_id, status_change.step_id,
-                status_change.new_status);
-    g_ctld_client->StepStatusChangeAsync(std::move(status_change));
+    absl::MutexLock lk(job_ptr->step_map_mtx.get());
+    if (!job_ptr->step_map.contains(status_change.step_id)) {
+      CRANE_ERROR(
+          "[Step #{}.{}] Step allocation not found for StepStatusChange.",
+          status_change.job_id, status_change.step_id);
+      continue;
+    }
+    auto* step = job_ptr->step_map.at(status_change.step_id).get();
+    step->status = status_change.new_status;
   }
+  CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
+              status_change.job_id, status_change.step_id,
+              status_change.new_status);
+  g_ctld_client->StepStatusChangeAsync(std::move(status_change));
 }
 
 void JobManager::ActivateTaskStatusChangeAsync_(

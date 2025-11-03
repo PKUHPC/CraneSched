@@ -337,6 +337,13 @@ bool TaskScheduler::Init() {
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
+      if (step_status == crane::grpc::TaskStatus::Pending) {
+        // Not support to recover pending step now. All pending steps are crun
+        // which can not recover now.
+        step.reset();
+        invalid_steps[job_id].emplace_back(std::move(step_info));
+        continue;
+      }
       if (step_type == crane::grpc::StepType::DAEMON) {
         std::unique_ptr<DaemonStepInCtld> step_ptr(
             dynamic_cast<DaemonStepInCtld*>(step));
