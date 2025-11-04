@@ -185,7 +185,7 @@ Contains files for compute nodes:
     **When using direct installation (`cmake --install`):**
     - Binaries are installed to `/usr/local/bin/` (default `CMAKE_INSTALL_PREFIX`)
     - Supervisor is installed to `/usr/local/libexec/`
-    - Examples: `/usr/local/bin/craned`, `/usr/local/libexec/csupervisor`
+    - Examples: `/usr/local/bin/craned`, `/usr/local/libexec/csupervisor`, you may need to change supervisor path in config.yaml
     - You can customize this with `cmake --install --prefix=/custom/path`
 
 ### Post-Installation Actions
