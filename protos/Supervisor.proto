@@ -48,6 +48,8 @@ message InitSupervisorRequest {
     string run_cmd = 4;
     string kill_cmd = 5;
     string delete_cmd = 6;
+    string pause_cmd = 7;
+    string resume_cmd = 8;
   }
   ContainerConfig container_config = 15;
 
@@ -122,6 +124,20 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message SuspendJobRequest {}
+
+message SuspendJobReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ResumeJobRequest {}
+
+message ResumeJobReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message ShutdownSupervisorRequest {}
 
 message ShutdownSupervisorReply {}
@@ -132,5 +148,7 @@ service Supervisor {
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc SuspendJob(SuspendJobRequest) returns (SuspendJobReply);
+  rpc ResumeJob(ResumeJobRequest) returns (ResumeJobReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }

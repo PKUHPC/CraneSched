@@ -85,6 +85,60 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::SuspendJobs(
+    grpc::ServerContext* context,
+    const crane::grpc::SuspendJobsRequest* request,
+    crane::grpc::SuspendJobsReply* response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> reasons;
+
+  for (job_id_t id : request->job_id_list()) {
+    CraneErrCode err = g_job_mgr->SuspendStep(id);
+    if (err != CraneErrCode::SUCCESS) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("job {}: {}", id, CraneErrStr(err)));
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) response->set_reason(absl::StrJoin(reasons, "; "));
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::ResumeJobs(
+    grpc::ServerContext* context,
+    const crane::grpc::ResumeJobsRequest* request,
+    crane::grpc::ResumeJobsReply* response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+
+  bool all_ok = true;
+  std::vector<std::string> reasons;
+
+  for (job_id_t id : request->job_id_list()) {
+    CraneErrCode err = g_job_mgr->ResumeStep(id);
+    if (err != CraneErrCode::SUCCESS) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("job {}: {}", id, CraneErrStr(err)));
+    }
+  }
+
+  response->set_ok(all_ok);
+  if (!all_ok) response->set_reason(absl::StrJoin(reasons, "; "));
+
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::TerminateOrphanedStep(
     grpc::ServerContext *context,
     const crane::grpc::TerminateOrphanedStepRequest *request,

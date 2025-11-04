@@ -106,6 +106,8 @@ struct Config {
     std::string RuntimeRun;
     std::string RuntimeKill;
     std::string RuntimeDelete;
+    std::string RuntimePause;
+    std::string RuntimeResume;
   };
   ContainerConfig Container;
 

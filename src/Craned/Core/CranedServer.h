@@ -72,6 +72,14 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::TerminateOrphanedStepRequest *request,
       crane::grpc::TerminateOrphanedStepReply *response) override;
 
+  grpc::Status SuspendJobs(grpc::ServerContext* context,
+                           const crane::grpc::SuspendJobsRequest* request,
+                           crane::grpc::SuspendJobsReply* response) override;
+
+  grpc::Status ResumeJobs(grpc::ServerContext* context,
+                          const crane::grpc::ResumeJobsRequest* request,
+                          crane::grpc::ResumeJobsReply* response) override;
+
   grpc::Status QueryStepFromPort(
       grpc::ServerContext *context,
       const crane::grpc::QueryStepFromPortRequest *request,

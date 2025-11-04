@@ -19,6 +19,8 @@
 #pragma once
 #include <sched.h>
 
+#include <string_view>
+
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
@@ -54,6 +56,7 @@ class StepInstance {
   bool pty;
   bool x11;
   bool x11_fwd;
+  crane::grpc::TaskStatus status{crane::grpc::TaskStatus::Running};
 
   std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
@@ -190,6 +193,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Suspend();
+  virtual CraneErrCode Resume();
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
@@ -261,6 +266,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid,
@@ -270,6 +277,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
   std::string ParseOCICmdPattern_(const std::string& cmd) const;
+  CraneErrCode ExecuteContainerCommand_(const std::string& cmd_template,
+                                        std::string_view action) const;
 
   std::filesystem::path m_bundle_path_;
   std::filesystem::path m_temp_path_;
@@ -352,6 +361,10 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  std::future<CraneErrCode> SuspendJobAsync();
+
+  std::future<CraneErrCode> ResumeJobAsync();
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -373,6 +386,11 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  struct TaskSignalQueueElem {
+    enum class Action { Suspend, Resume } action;
+    std::promise<CraneErrCode> prom;
+  };
+
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
   void EvCleanSigchldQueueCb_();
@@ -381,9 +399,13 @@ class TaskManager {
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanTaskSignalQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+
+  CraneErrCode SuspendRunningTasks_();
+  CraneErrCode ResumeSuspendedTasks_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -402,6 +424,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_task_signal_async_handle_;
+  ConcurrentQueue<TaskSignalQueueElem> m_task_signal_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

@@ -267,6 +267,64 @@ CraneErrCode CranedStub::FreeSteps(
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode CranedStub::SuspendJobs(const std::vector<job_id_t>& job_ids) {
+  using crane::grpc::SuspendJobsReply;
+  using crane::grpc::SuspendJobsRequest;
+
+  ClientContext context;
+  Status status;
+  SuspendJobsRequest request;
+  SuspendJobsReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  request.mutable_job_id_list()->Assign(job_ids.begin(), job_ids.end());
+
+  status = m_stub_->SuspendJobs(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("SuspendJobs RPC for Node {} failed: {}", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_WARN("SuspendJobs RPC for Node {} declined: {}", m_craned_id_,
+             reply.reason());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+CraneErrCode CranedStub::ResumeJobs(const std::vector<job_id_t>& job_ids) {
+  using crane::grpc::ResumeJobsReply;
+  using crane::grpc::ResumeJobsRequest;
+
+  ClientContext context;
+  Status status;
+  ResumeJobsRequest request;
+  ResumeJobsReply reply;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
+  request.mutable_job_id_list()->Assign(job_ids.begin(), job_ids.end());
+
+  status = m_stub_->ResumeJobs(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("ResumeJobs RPC for Node {} failed: {}", m_craned_id_,
+                status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+  UpdateLastActiveTime();
+
+  if (reply.ok()) return CraneErrCode::SUCCESS;
+
+  CRANE_WARN("ResumeJobs RPC for Node {} declined: {}", m_craned_id_,
+             reply.reason());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
 CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
                                             uint64_t seconds) {
   using crane::grpc::ChangeJobTimeLimitReply;

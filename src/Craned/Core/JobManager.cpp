@@ -1160,6 +1160,54 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
   }
 }
 
+CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
+  auto job_instance = m_job_map_.GetValueExclusivePtr(step_id);
+  if (!job_instance || job_instance->step_map.empty()) {
+    CRANE_DEBUG("Suspend request for nonexistent task #{}", step_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto* step_inst = job_instance->step_map.begin()->second.get();
+  if (step_inst->suspended) {
+    CRANE_TRACE("Task #{} already suspended", step_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  auto stub = g_supervisor_keeper->GetStub(step_id);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found when suspending", step_id);
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  CraneErrCode err = stub->SuspendJob();
+  if (err == CraneErrCode::SUCCESS) step_inst->suspended = true;
+  return err;
+}
+
+CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
+  auto job_instance = m_job_map_.GetValueExclusivePtr(step_id);
+  if (!job_instance || job_instance->step_map.empty()) {
+    CRANE_DEBUG("Resume request for nonexistent task #{}", step_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto* step_inst = job_instance->step_map.begin()->second.get();
+  if (!step_inst->suspended) {
+    CRANE_TRACE("Task #{} is not suspended", step_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  auto stub = g_supervisor_keeper->GetStub(step_id);
+  if (!stub) {
+    CRANE_ERROR("Supervisor for task #{} not found when resuming", step_id);
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+
+  CraneErrCode err = stub->ResumeJob();
+  if (err == CraneErrCode::SUCCESS) step_inst->suspended = false;
+  return err;
+}
+
 void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
   StepTerminateQueueElem elem{.job_id = job_id,
                               .step_id = step_id,

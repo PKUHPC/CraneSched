@@ -39,6 +39,7 @@ struct StepInstance {
   pid_t supv_pid;
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
+  bool suspended{false};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
   StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
@@ -124,6 +125,10 @@ class JobManager {
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
   void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
+
+  CraneErrCode SuspendStep(task_id_t task_id);
+
+  CraneErrCode ResumeStep(task_id_t task_id);
 
   /**
    *
