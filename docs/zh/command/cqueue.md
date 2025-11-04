@@ -24,11 +24,13 @@ cqueue
 - **TimeLimit**：作业时间限制
 - **Nodes**：作业所分配节点数
 - **NodeList**： 作业运行的节点名
+- **Deadline**： 作业的截止时间
 
 ## 主要参数
 
 - **-A/--account string**：指定查询作业所属账户，指定多个账户时用逗号隔开
 - **-C/--config string**：配置文件路径（默认"/etc/crane/config.yaml"）
+- **--deadline** **string**：显示作业的截止时间
 - **-F/--full**: 显示完整的内容，如果未指定，默认每项输出30个字符
 - **-h/--help**: 显示帮助
 - **-i/--iterate uint**：指定间隔秒数刷新查询结果。如 `-i=3` 表示每隔三秒输出一次查询结果
@@ -62,6 +64,7 @@ cqueue
 | %a | Account | 作业关联的账户 |
 | %c | AllocCpus | 作业已分配的CPU数量 |
 | %C | ReqCpus | 作业请求的总CPU数量 |
+| %deadline | Deadline | 作业的截止时间 |
 | %e | ElapsedTime | 作业启动以来的已用时间 |
 | %h | Held | 作业的暂挂状态 |
 | %j | JobID | 作业ID |

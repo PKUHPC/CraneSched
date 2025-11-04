@@ -16,6 +16,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **--mem string**: Maximum memory per node. Supports GB (G, g), MB (M, m), KB (K, k), and Bytes (B), default unit is MB
 - **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
 
+
 ### Job Information
 - **-J, --job-name string**: Job name
 - **-A, --account string**: Account for job submission
@@ -23,6 +24,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **-q, --qos string**: Quality of Service (QoS) for the job
 - **-t, --time string**: Time limit, format: `day-hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days, 1 second) or `hours:minutes:seconds` (e.g., `10:1:2` for 10 hours, 1 minute, 2 seconds)
 - **--comment string**: Job comment
+- **--deadline string**：Deadline setted per task
 
 ### Node Selection
 - **-w, --nodelist string**: Nodes to allocate (comma-separated list)

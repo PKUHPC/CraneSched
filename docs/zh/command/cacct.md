@@ -51,6 +51,7 @@ cacct
 - **-o, --format string**: 指定输出格式。由百分号（%）后接一个字符或字符串标识。在 % 和格式字符/字符串之间用点（.）和数字，可指定字段的最小宽度。支持的格式标识符（不区分大小写）：
   - **%a / %Account**: 显示作业关联的账户
   - **%c / %AllocCpus**: 显示作业已分配的 CPU 数量
+  - **%deadline/%Deadline**: 显示作业的截止时间
   - **%e / %ExitCode**: 显示作业退出码（特殊格式：exitcode[:signal]）
   - **%h / %ElapsedTime**: 显示作业自启动以来的已用时间
   - **%j / %JobId**: 显示作业 ID
@@ -80,6 +81,7 @@ cacct
 - **-N, --no-header**: 输出时隐藏表头
 - **-m, --max-lines uint32**: 指定输出结果的最大条数（如 `-m=500` 表示最多输出 500 行）
 - **--json**: 以 JSON 格式输出
+- **--deadline string**: 显示作业的截止时间
 
 ### 其他选项
 - **-C, --config string**: 配置文件路径（默认：`/etc/crane/config.yaml`）

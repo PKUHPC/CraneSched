@@ -51,6 +51,13 @@ cbatch cbatch_test.sh
 - **-p, --partition string**: 请求的分区
 - **-q, --qos string**: 作业使用的服务质量（QoS）
 - **-t, --time string**: 时间限制，格式：`day-hours:minutes:seconds`（如 `5-0:0:1` 表示 5 天 1 秒）或 `hours:minutes:seconds`（如 `10:1:2` 表示 10 小时 1 分钟 2 秒）
+- **--deadline string**: 作业的截止时间, 格式：
+    - `now + <count> <units>(无时默认为秒数)`
+    - `HH:MM[:SS]`
+    - `MM/DD[/YY]`
+    - `MMDD[YY]`
+    - `YYYY-MM-DD[THH:MM[:SS]]`
+    - `midnight/noon/teatime/elevenses/fika`
 - **--comment string**: 作业注释
 
 ### 节点选择

@@ -150,7 +150,7 @@ ccontrol update nodename=crane01 state=resume
 Modify job attributes including priority, time limit, comment, and email settings.
 
 ```bash
-ccontrol update jobid=<job_id> [priority=<priority>] [timelimit=<timelimit>] [comment=<comment>] [mailuser=<email>] [mailtype=<type>]
+ccontrol update jobid=<job_id> [priority=<priority>] [timelimit=<timelimit>] [comment=<comment>] [mailuser=<email>] [mailtype=<type>] [deadline=<deadline>]
 ```
 
 **Parameters:**
@@ -160,6 +160,7 @@ ccontrol update jobid=<job_id> [priority=<priority>] [timelimit=<timelimit>] [co
 - **comment** (optional): New comment string for the job
 - **mailuser** (optional): Email address for notifications
 - **mailtype** (optional): Type of email notifications (NONE, BEGIN, END, FAIL, TIMELIMIT, ALL)
+- **deadline** (optional)：Deadline time(various time formats)
 
 **Examples:**
 ```bash
