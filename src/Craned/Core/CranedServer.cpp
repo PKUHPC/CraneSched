@@ -53,7 +53,7 @@ grpc::Status CranedServiceImpl::ExecuteSteps(
   }
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
-  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+  for (const auto& [job_id, steps] : request->job_step_ids_map()) {
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
 
@@ -75,7 +75,7 @@ grpc::Status CranedServiceImpl::TerminateSteps(
   }
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
-  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+  for (const auto& [job_id, steps] : request->job_step_ids_map()) {
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
   CRANE_TRACE("Receive TerminateSteps for steps [{}]",
@@ -152,7 +152,7 @@ grpc::Status CranedServiceImpl::TerminateOrphanedStep(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
-  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+  for (const auto& [job_id, steps] : request->job_step_ids_map()) {
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
   CRANE_TRACE("Receive TerminateOrphanedStep for steps [{}]",
@@ -278,15 +278,15 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
 }
 
 grpc::Status CranedServiceImpl::AllocJobs(
-    grpc::ServerContext *context, const crane::grpc::AllocJobsRequest *request,
-    crane::grpc::AllocJobsReply *response) {
+    grpc::ServerContext* context, const crane::grpc::AllocJobsRequest* request,
+    crane::grpc::AllocJobsReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
   std::vector<JobInD> jobs;
-  for (const auto &job_to_d : request->jobs()) {
+  for (const auto& job_to_d : request->jobs()) {
     CRANE_INFO("Allocating job #{}, uid {}", job_to_d.job_id(), job_to_d.uid());
     jobs.emplace_back(job_to_d);
   }
@@ -300,8 +300,8 @@ grpc::Status CranedServiceImpl::AllocJobs(
 }
 
 grpc::Status CranedServiceImpl::AllocSteps(
-    grpc::ServerContext *context, const crane::grpc::AllocStepsRequest *request,
-    crane::grpc::AllocStepsReply *response) {
+    grpc::ServerContext* context, const crane::grpc::AllocStepsRequest* request,
+    crane::grpc::AllocStepsReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -320,7 +320,7 @@ grpc::Status CranedServiceImpl::FreeSteps(
   }
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_steps_map;
-  for (const auto &[job_id, steps] : request->job_step_ids_map()) {
+  for (const auto& [job_id, steps] : request->job_step_ids_map()) {
     job_steps_map[job_id].insert(steps.steps().begin(), steps.steps().end());
   }
   CRANE_TRACE("Receive FreeSteps RPC for [{}]",
@@ -331,8 +331,8 @@ grpc::Status CranedServiceImpl::FreeSteps(
 }
 
 grpc::Status CranedServiceImpl::FreeJobs(
-    grpc::ServerContext *context, const crane::grpc::FreeJobsRequest *request,
-    crane::grpc::FreeJobsReply *response) {
+    grpc::ServerContext* context, const crane::grpc::FreeJobsRequest* request,
+    crane::grpc::FreeJobsReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -348,9 +348,9 @@ grpc::Status CranedServiceImpl::FreeJobs(
 }
 
 grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
-    grpc::ServerContext *context,
-    const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
-    crane::grpc::QuerySshStepEnvVariablesReply *response) {
+    grpc::ServerContext* context,
+    const ::crane::grpc::QuerySshStepEnvVariablesRequest* request,
+    crane::grpc::QuerySshStepEnvVariablesReply* response) {
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::PAM)) {
     CRANE_ERROR("CranedServer is not ready.");
@@ -374,9 +374,9 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
 }
 
 grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
-    grpc::ServerContext *context,
-    const crane::grpc::ChangeJobTimeLimitRequest *request,
-    crane::grpc::ChangeJobTimeLimitReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::ChangeJobTimeLimitRequest* request,
+    crane::grpc::ChangeJobTimeLimitReply* response) {
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");

@@ -68,7 +68,7 @@ void CranedStub::ConfigureCraned(const CranedId& craned_id,
 }
 
 CraneErrCode CranedStub::TerminateSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
   using crane::grpc::TerminateStepsReply;
   using crane::grpc::TerminateStepsRequest;
 
@@ -79,9 +79,9 @@ CraneErrCode CranedStub::TerminateSteps(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  auto &job_step_map = *request.mutable_job_step_ids_map();
+  auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  for (const auto &[job_id, step_ids] : steps) {
+  for (const auto& [job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
@@ -99,7 +99,7 @@ CraneErrCode CranedStub::TerminateSteps(
 }
 
 CraneErrCode CranedStub::TerminateOrphanedSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
   using crane::grpc::TerminateOrphanedStepReply;
   using crane::grpc::TerminateOrphanedStepRequest;
 
@@ -110,9 +110,9 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  auto &job_step_map = *request.mutable_job_step_ids_map();
+  auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  for (const auto &[job_id, step_ids] : steps) {
+  for (const auto& [job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
@@ -133,7 +133,7 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
 }
 
 CraneErrCode CranedStub::AllocJobs(
-    const std::vector<crane::grpc::JobToD> &jobs) {
+    const std::vector<crane::grpc::JobToD>& jobs) {
   using crane::grpc::AllocJobsReply;
   using crane::grpc::AllocJobsRequest;
 
@@ -145,7 +145,7 @@ CraneErrCode CranedStub::AllocJobs(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (auto &&job : jobs) {
+  for (auto&& job : jobs) {
     *request.add_jobs() = job;
   }
 
@@ -161,7 +161,7 @@ CraneErrCode CranedStub::AllocJobs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
+CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t>& task) {
   using crane::grpc::FreeJobsReply;
   using crane::grpc::FreeJobsRequest;
 
@@ -188,7 +188,7 @@ CraneErrCode CranedStub::FreeJobs(const std::vector<task_id_t> &task) {
 }
 
 CraneErrCode CranedStub::AllocSteps(
-    const std::vector<crane::grpc::StepToD> &steps) {
+    const std::vector<crane::grpc::StepToD>& steps) {
   using crane::grpc::AllocStepsReply;
   using crane::grpc::AllocStepsRequest;
   AllocStepsRequest request;
@@ -196,7 +196,7 @@ CraneErrCode CranedStub::AllocSteps(
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
-  for (auto &step : steps) *request.add_steps() = step;
+  for (auto& step : steps) *request.add_steps() = step;
   Status status = m_stub_->AllocSteps(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG("AllocSteps RPC for Node {} returned with status not ok: {}",
@@ -209,7 +209,7 @@ CraneErrCode CranedStub::AllocSteps(
 
 CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>>
 CranedStub::ExecuteSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
   using crane::grpc::ExecuteStepsReply;
   using crane::grpc::ExecuteStepsRequest;
   ExecuteStepsRequest request;
@@ -218,9 +218,9 @@ CranedStub::ExecuteSteps(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  auto &job_step_map = *request.mutable_job_step_ids_map();
+  auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  for (const auto &[job_id, step_ids] : steps) {
+  for (const auto& [job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
@@ -236,7 +236,7 @@ CranedStub::ExecuteSteps(
     return {};
   }
   std::unordered_map<job_id_t, std::set<step_id_t>> failed_job_step_ids_map;
-  for (const auto &[job_id, step_ids] : reply.failed_job_step_ids_map()) {
+  for (const auto& [job_id, step_ids] : reply.failed_job_step_ids_map()) {
     failed_job_step_ids_map[job_id].insert(step_ids.steps().begin(),
                                            step_ids.steps().end());
   }
@@ -244,7 +244,7 @@ CranedStub::ExecuteSteps(
 }
 
 CraneErrCode CranedStub::FreeSteps(
-    const std::unordered_map<job_id_t, std::set<step_id_t>> &steps) {
+    const std::unordered_map<job_id_t, std::set<step_id_t>>& steps) {
   using crane::grpc::FreeStepsReply;
   using crane::grpc::FreeStepsRequest;
   FreeStepsRequest request;
@@ -252,9 +252,9 @@ CraneErrCode CranedStub::FreeSteps(
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
-  auto &job_step_map = *request.mutable_job_step_ids_map();
+  auto& job_step_map = *request.mutable_job_step_ids_map();
 
-  for (const auto &[job_id, step_ids] : steps) {
+  for (const auto& [job_id, step_ids] : steps) {
     job_step_map[job_id].mutable_steps()->Assign(step_ids.begin(),
                                                  step_ids.end());
   }
@@ -688,9 +688,9 @@ CranedKeeper::CqTag* CranedKeeper::EstablishedCranedStateMachine_(
   return nullptr;
 }
 
-bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag *tag) {
+bool CranedKeeper::CheckNodeTimeoutAndClean(CqTag* tag) {
   if (tag->type != CqTag::kEstablishedCraned) return false;
-  auto *craned = tag->craned;
+  auto* craned = tag->craned;
   if (craned->m_last_active_time_.load(std::memory_order_acquire) +
           std::chrono::seconds(g_config.CtldConf.CranedTimeout) >=
       std::chrono::steady_clock::now()) {
@@ -843,8 +843,8 @@ void CranedKeeper::ConnectCranedNode_(const CranedId& craned_id,
       &m_cq_vec_[thread_id], tag);
 }
 
-void CranedKeeper::CranedChannelConnFailNoLock_(CranedStub *stub) {
-  CranedKeeper *craned_keeper = stub->m_craned_keeper_;
+void CranedKeeper::CranedChannelConnFailNoLock_(CranedStub* stub) {
+  CranedKeeper* craned_keeper = stub->m_craned_keeper_;
   craned_keeper->m_connect_craned_mtx_.AssertHeld();
   util::lock_guard guard(craned_keeper->m_unavail_craned_set_mtx_);
   craned_keeper->m_channel_count_.fetch_sub(1);
