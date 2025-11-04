@@ -241,7 +241,7 @@ message StepToCtld {
   string excludes = 34;
   string nodelist = 35;
   string container = 26;
-  google.protobuf.Timestamp deadline_time = 36; 
+  google.protobuf.Timestamp deadline_time = 36;
 }
 
 message RuntimeAttrOfStep {
@@ -319,7 +319,6 @@ message StepToD {
   google.protobuf.Timestamp start_time = 14;   // Currently Only used in CraneCtld
   google.protobuf.Timestamp submit_time = 15;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 16;
-  
 
   map<string, string> env = 17;
   string cwd = 18;
@@ -336,7 +335,6 @@ message StepToD {
 
   // Not used now.
   string extra_attr = 29;
-  
 }
 
 message JobStepsToD {
@@ -484,7 +482,7 @@ message StepInfo {
   google.protobuf.Timestamp end_time = 9;
   google.protobuf.Timestamp submit_time = 10;
   google.protobuf.Timestamp deadline_time = 11;
-  
+
   uint32 node_num = 12;
   string cmd_line = 13;
   string cwd = 14;
