@@ -39,7 +39,6 @@ struct StepInstance {
   pid_t supv_pid;
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
-  bool suspended{false};
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   // For step recovery
   StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,

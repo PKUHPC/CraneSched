@@ -1185,7 +1185,7 @@ CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
   }
 
   auto* step_inst = job_instance->step_map.begin()->second.get();
-  if (step_inst->suspended) {
+  if (step_inst->status == StepStatus::Suspended) {
     CRANE_TRACE("Task #{} already suspended", step_id);
     return CraneErrCode::ERR_INVALID_PARAM;
   }
@@ -1197,7 +1197,7 @@ CraneErrCode JobManager::SuspendStep(step_id_t step_id) {
   }
 
   CraneErrCode err = stub->SuspendJob();
-  if (err == CraneErrCode::SUCCESS) step_inst->suspended = true;
+  if (err == CraneErrCode::SUCCESS) step_inst->status = StepStatus::Suspended;
   return err;
 }
 
@@ -1209,7 +1209,7 @@ CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
   }
 
   auto* step_inst = job_instance->step_map.begin()->second.get();
-  if (!step_inst->suspended) {
+  if (step_inst->status != StepStatus::Suspended) {
     CRANE_TRACE("Task #{} is not suspended", step_id);
     return CraneErrCode::ERR_INVALID_PARAM;
   }
@@ -1221,7 +1221,7 @@ CraneErrCode JobManager::ResumeStep(step_id_t step_id) {
   }
 
   CraneErrCode err = stub->ResumeJob();
-  if (err == CraneErrCode::SUCCESS) step_inst->suspended = false;
+  if (err == CraneErrCode::SUCCESS) step_inst->status = StepStatus::Running;
   return err;
 }
 
