@@ -233,6 +233,14 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 70 - 74
         "Supervisor error",
         "Service shutting down",
+        "The user failed to issue the certificate, please contact the administrator for assistance",
+        "The certificate has already been issued to the user. If the certificate is lost and needs to be reissued, please contact the administrator for assistance",
+        "Revocation of the certificate failed, Please check the logs",
+
+        // 75 - 79
+        "User information does not match, unable to submit the task.",
+        "You need to set --force for this operation.",
+        "Invalid username"
     };
 // clang-format on
 }  // namespace Internal
