@@ -166,10 +166,10 @@ ceff <job_id>
 
 - 浏览高级场景：
 
-    - [多节点并行作业](use_case_multi_node.zh.md)
-    - [GPU 加速训练](use_case_gpu.zh.md)
-    <!-- - [参数扫描（作业数组）](use_case_param_sweep.zh.md) -->
-    <!-- - [带依赖的作业链](use_case_pipeline.zh.md) -->
+    - [多节点并行作业](use_case_multi_node.md)
+    - [GPU 加速训练](use_case_gpu.md)
+    <!-- - [参数扫描（作业数组）](use_case_param_sweep.md) -->
+    <!-- - [带依赖的作业链](use_case_pipeline.md) -->
     
 - 查看[命令参考](../command/cbatch.md)获取详细参数
 - 了解[集群配置](../deployment/configuration/config.md)

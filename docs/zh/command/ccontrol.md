@@ -350,8 +350,8 @@ ccontrol delete reservation maint_window
 
 ## 相关命令
 
-- [cinfo](cinfo.zh.md) - 查看集群资源状态
-- [cqueue](cqueue.zh.md) - 查看作业队列
-- [cacctmgr](cacctmgr.zh.md) - 管理账户和用户
-- [cbatch](cbatch.zh.md) - 提交批处理作业
-- [ccancel](ccancel.zh.md) - 取消作业
+- [cinfo](cinfo.md) - 查看集群资源状态
+- [cqueue](cqueue.md) - 查看作业队列
+- [cacctmgr](cacctmgr.md) - 管理账户和用户
+- [cbatch](cbatch.md) - 提交批处理作业
+- [ccancel](ccancel.md) - 取消作业

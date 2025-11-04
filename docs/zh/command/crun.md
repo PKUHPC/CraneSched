@@ -175,7 +175,7 @@ crun -i none /usr/bin/bash
 
 ## 相关命令
 
-- [calloc](calloc.zh.md) - 分配资源供交互式使用
-- [cbatch](cbatch.zh.md) - 提交批处理作业
-- [ccancel](ccancel.zh.md) - 取消作业
-- [cqueue](cqueue.zh.md) - 查看作业队列
+- [calloc](calloc.md) - 分配资源供交互式使用
+- [cbatch](cbatch.md) - 提交批处理作业
+- [ccancel](ccancel.md) - 取消作业
+- [cqueue](cqueue.md) - 查看作业队列

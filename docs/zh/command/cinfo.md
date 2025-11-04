@@ -149,6 +149,6 @@ cinfo -t down
 
 ## 相关命令
 
-- [cqueue](cqueue.zh.md) - 查看作业队列
-- [ccontrol](ccontrol.zh.md) - 控制集群资源
-- [cacctmgr](cacctmgr.zh.md) - 管理账户和分区
+- [cqueue](cqueue.md) - 查看作业队列
+- [ccontrol](ccontrol.md) - 控制集群资源
+- [cacctmgr](cacctmgr.md) - 管理账户和分区
