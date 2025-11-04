@@ -56,11 +56,8 @@ TaskScheduler::~TaskScheduler() {
   if (m_task_status_change_thread_.joinable())
     m_task_status_change_thread_.join();
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
-<<<<<<< HEAD
   m_rpc_worker_pool_->wait();
   m_rpc_worker_pool_.reset();
-=======
->>>>>>> 5ae032ad (use mongodb func)
 }
 
 bool TaskScheduler::Init() {
@@ -571,7 +568,6 @@ bool TaskScheduler::Init() {
 
   return true;
 }
-
 
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {

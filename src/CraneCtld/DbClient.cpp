@@ -2546,7 +2546,7 @@ bsoncxx::document::value MongodbClient::JobSizeQueryMatch(
   // account
   if (request && request->filter_accounts_size() > 0) {
     bsoncxx::builder::basic::array arr;
-    for (const auto& acc : request->filter_accounts()) arr.append(acc);
+    for (const auto& account : request->filter_accounts()) arr.append(account);
     match_doc.append(bsoncxx::builder::basic::kvp(
         "account", bsoncxx::builder::basic::make_document(
                        bsoncxx::builder::basic::kvp("$in", arr))));
@@ -2611,15 +2611,15 @@ bsoncxx::document::value MongodbClient::JobQueryMatch(
                           "$lt", static_cast<int64_t>(range.second)))));
 
   // account
-  if (request && request->filter_accounts_size() > 0) {
+  if (request->filter_accounts_size() > 0) {
     bsoncxx::builder::basic::array arr;
-    for (const auto& acc : request->filter_accounts()) arr.append(acc);
+    for (const auto& account : request->filter_accounts()) arr.append(account);
     match_doc.append(bsoncxx::builder::basic::kvp(
         "account", bsoncxx::builder::basic::make_document(
                        bsoncxx::builder::basic::kvp("$in", arr))));
   }
   // username
-  if (request && request->filter_users_size() > 0) {
+  if (request->filter_users_size() > 0) {
     bsoncxx::builder::basic::array arr;
     for (const auto& user : request->filter_users()) arr.append(user);
     match_doc.append(bsoncxx::builder::basic::kvp(
@@ -2627,7 +2627,7 @@ bsoncxx::document::value MongodbClient::JobQueryMatch(
                         bsoncxx::builder::basic::kvp("$in", arr))));
   }
   // qos
-  if (request && request->filter_qoss_size() > 0) {
+  if (request->filter_qoss_size() > 0) {
     bsoncxx::builder::basic::array arr;
     for (const auto& qos : request->filter_qoss()) arr.append(qos);
     match_doc.append(bsoncxx::builder::basic::kvp(
@@ -2635,7 +2635,7 @@ bsoncxx::document::value MongodbClient::JobQueryMatch(
                    bsoncxx::builder::basic::kvp("$in", arr))));
   }
   // wckey
-  if (request && request->filter_wckeys_size() > 0) {
+  if (request->filter_wckeys_size() > 0) {
     bsoncxx::builder::basic::array arr;
     for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
     match_doc.append(bsoncxx::builder::basic::kvp(
@@ -2668,6 +2668,61 @@ void MongodbClient::AppendUnionWithRanges(
   }
 }
 
+uint32_t MongodbClient::GetCpuAlloc(const bsoncxx::document::view& doc) {
+  auto elem = doc["cpu_alloc"];
+  if (!elem) return 0;
+  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<uint32_t>(elem.get_int64().value);
+  if (elem.type() == bsoncxx::type::k_double)
+    return static_cast<uint32_t>(elem.get_double().value);
+  return 0;
+}
+
+double MongodbClient::GetTotalCpuTime(const bsoncxx::document::view& doc) {
+  auto elem = doc["total_cpu_time"];
+  if (!elem) return 0.0;
+  if (elem.type() == bsoncxx::type::k_double) return elem.get_double().value;
+  if (elem.type() == bsoncxx::type::k_int32)
+    return static_cast<double>(elem.get_int32().value);
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<double>(elem.get_int64().value);
+  return 0.0;
+}
+
+int MongodbClient::GetTotalCount(const bsoncxx::document::view& doc) {
+  auto elem = doc["total_count"];
+  if (!elem) return 0;
+  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<int>(elem.get_int64().value);
+  return 0;
+}
+
+void MongodbClient::WriteReply(
+    const absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult>& agg_map,
+    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
+    int max_data_size) {
+  crane::grpc::QueryJobSizeSummaryReply reply;
+  for (const auto& agg_val : agg_map) {
+    crane::grpc::JobSizeSummaryItem item;
+    item.set_cluster(g_config.CraneClusterName);
+    item.set_account(agg_val.first.account);
+    item.set_wckey(agg_val.first.wckey);
+    item.set_cpu_alloc(agg_val.first.cpu_alloc);
+    item.set_total_cpu_time(agg_val.second.total_cpu_time);
+    item.set_total_count(agg_val.second.total_count);
+    reply.add_item_list()->CopyFrom(item);
+    if (reply.item_list_size() >= max_data_size) {
+      stream->Write(reply);
+      reply.clear_item_list();
+    }
+  }
+  if (reply.item_list_size() > 0) {
+    stream->Write(reply);
+  }
+}
+
 void MongodbClient::QueryJobSummary(
     const crane::grpc::QueryJobSummaryRequest* request,
     grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream) {
@@ -2684,8 +2739,9 @@ void MongodbClient::QueryJobSummary(
   auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
 
   // Directly classify ranges
-  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges, day_ranges,
-      month_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
   for (const auto& r : ranges) {
     if (r.type == "hour")
       hour_ranges.emplace_back(r.start, r.end);
@@ -2758,11 +2814,10 @@ void MongodbClient::QueryJobSummary(
       item.set_username(std::string(id["username"].get_string().value));
       item.set_qos(std::string(id["qos"].get_string().value));
       item.set_wckey(std::string(id["wckey"].get_string().value));
-      item.set_total_cpu_time(doc["total_cpu_time"].get_double().value);
       item.set_total_count(doc["total_count"].get_int32().value);
+      item.set_total_cpu_time(GetTotalCpuTime(doc));
 
       reply.add_item_list()->CopyFrom(item);
-
       if (reply.item_list_size() >= max_data_size) {
         stream->Write(reply);
         reply.clear_item_list();
@@ -2788,8 +2843,9 @@ void MongodbClient::QueryJobSizeSummary(
   auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
 
   // Directly classify ranges
-  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges, day_ranges,
-      month_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
   for (const auto& r : ranges) {
     if (r.type == "hour")
       hour_ranges.emplace_back(r.start, r.end);
@@ -2868,86 +2924,36 @@ void MongodbClient::QueryJobSizeSummary(
     agg_opts.allow_disk_use(true);
     auto cursor = entry_table->aggregate(pipeline, agg_opts);
     if (grouping_list.empty()) {
-      crane::grpc::QueryJobSizeSummaryReply reply;
+      absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult> agg_map;
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
-        crane::grpc::JobSizeSummaryItem item;
-        item.set_cluster(g_config.CraneClusterName);
-        item.set_account(std::string(id["account"].get_string().value));
-        item.set_wckey(std::string(id["wckey"].get_string().value));
-        uint32_t cpu_alloc = 0;
-        auto cpu_alloc_elem = id["cpu_alloc"];
-        if (cpu_alloc_elem) {
-          if (cpu_alloc_elem.type() == bsoncxx::type::k_int32)
-            cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int32().value);
-          else if (cpu_alloc_elem.type() == bsoncxx::type::k_int64)
-            cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int64().value);
-          else if (cpu_alloc_elem.type() == bsoncxx::type::k_double)
-            cpu_alloc =
-                static_cast<uint32_t>(cpu_alloc_elem.get_double().value);
-        }
-        item.set_cpu_alloc(cpu_alloc);
-        item.set_total_cpu_time(doc["total_cpu_time"].get_double().value);
-        item.set_total_count(doc["total_count"].get_int32().value);
-
-        reply.add_item_list()->CopyFrom(item);
-        if (reply.item_list_size() >= max_data_size) {
-          stream->Write(reply);
-          reply.clear_item_list();
-        }
+        JobSizeSummKey key{
+            .account = std::string(id["account"].get_string().value),
+            .wckey = std::string(id["wckey"].get_string().value),
+            .cpu_alloc = GetCpuAlloc(id)};
+        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
+        agg_map[key].total_count += GetTotalCount(doc);
       }
-      if (reply.item_list_size() > 0) {
-        stream->Write(reply);
-      }
+      WriteReply(agg_map, stream, max_data_size);
     } else {
       absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult> agg_map;
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
-        std::string acc = std::string(id["account"].get_string().value);
-        std::string wk = std::string(id["wckey"].get_string().value);
-        uint32_t cpu_alloc = 0;
-        auto cpu_alloc_elem = id["cpu_alloc"];
-        if (cpu_alloc_elem) {
-          if (cpu_alloc_elem.type() == bsoncxx::type::k_int32)
-            cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int32().value);
-          else if (cpu_alloc_elem.type() == bsoncxx::type::k_int64)
-            cpu_alloc = static_cast<uint32_t>(cpu_alloc_elem.get_int64().value);
-          else if (cpu_alloc_elem.type() == bsoncxx::type::k_double)
-            cpu_alloc =
-                static_cast<uint32_t>(cpu_alloc_elem.get_double().value);
-        }
-
+        uint32_t cpu_alloc = GetCpuAlloc(id);
         int group_index = 0;
         for (const auto group : grouping_list) {
-          if (cpu_alloc < group) {
-            break;
-          }
+          if (cpu_alloc < group) break;
           group_index++;
         }
         uint32_t bucket = grouping_list[group_index - 1];
-        agg_map[{acc, wk, bucket}].total_cpu_time +=
-            doc["total_cpu_time"].get_double().value;
-        agg_map[{acc, wk, bucket}].total_count +=
-            doc["total_count"].get_int32().value;
+        JobSizeSummKey key{
+            .account = std::string(id["account"].get_string().value),
+            .wckey = std::string(id["wckey"].get_string().value),
+            .cpu_alloc = bucket};
+        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
+        agg_map[key].total_count += GetTotalCount(doc);
       }
-      crane::grpc::QueryJobSizeSummaryReply reply;
-      for (const auto& kv : agg_map) {
-        crane::grpc::JobSizeSummaryItem item;
-        item.set_cluster(g_config.CraneClusterName);
-        item.set_account(kv.first.account);
-        item.set_wckey(kv.first.wckey);
-        item.set_cpu_alloc(kv.first.cpu_alloc);
-        item.set_total_cpu_time(kv.second.total_cpu_time);
-        item.set_total_count(kv.second.total_count);
-        reply.add_item_list()->CopyFrom(item);
-        if (reply.item_list_size() >= max_data_size) {
-          stream->Write(reply);
-          reply.clear_item_list();
-        }
-      }
-      if (reply.item_list_size() > 0) {
-        stream->Write(reply);
-      }
+      WriteReply(agg_map, stream, max_data_size);
     }
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -3019,7 +3025,7 @@ bool MongodbClient::Init() {
 
   mongodb_task_timer_handle->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        // ClusterRollupUsage();
+        ClusterRollupUsage();
       });
 
   uint64_t first_delay_ms = MillisecondsToNextHour();

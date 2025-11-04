@@ -200,7 +200,13 @@ class MongodbClient {
                                   std::time_t period_end);
   void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
   uint64_t MillisecondsToNextHour();
-
+  uint32_t GetCpuAlloc(const bsoncxx::document::view& doc);
+  double GetTotalCpuTime(const bsoncxx::document::view& doc);
+  int GetTotalCount(const bsoncxx::document::view& doc);
+  void WriteReply(
+      const absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult>& agg_map,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
+      int max_data_size);
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
