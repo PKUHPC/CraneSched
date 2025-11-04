@@ -1,7 +1,9 @@
-site_name: CraneSched Documentation
+site_name: 鹤思文档
 site_description: Documentation for CraneSched, an HPC and AI Scheduling System.
 site_author: High Performance Computing Platform of Peking University
 site_url: https://cranesched.readthedocs.io/
+
+use_directory_urls: false
 
 # Repository
 repo_name: PKUHPC/CraneSched
@@ -10,9 +12,11 @@ repo_url: https://github.com/PKUHPC/CraneSched
 # Copyright
 copyright: Copyright &copy; 2022 - 2025 PKUHPC
 
+docs_dir: docs
+
 theme:
   name: material
-  language: en
+  language: zh
   features:
     - navigation.tabs
     - navigation.sections
@@ -25,27 +29,36 @@ theme:
     - content.code.annotate
     - navigation.footer
     - navigation.tracking
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切换至深色模式
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切换至浅色模式
   logo: images/logo.png
   favicon: images/logo.png
 
 plugins:
-  - search:
-      lang:
-        - en
-        - zh
+  - search
   - i18n:
-      docs_structure: suffix
-      fallback_to_default: true
-      reconfigure_material: true
-      reconfigure_search: true
+      docs_structure: folder
+      default_language: zh
       languages:
-        - locale: en
-          name: English
-          build: true
-          default: true
         - locale: zh
           name: 中文
+          default: true
           build: true
+          link: /
+          site_name: "鹤思文档"
+          theme:
+            language: zh
           nav_translations:
             Home: 首页
             Deployment: 部署指南
@@ -75,6 +88,25 @@ plugins:
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
             Plugins: 插件
+        - locale: en
+          name: English
+          build: true
+          site_name: "CraneSched Documentation"
+          theme:
+            language: en
+            palette:
+              - scheme: default
+                primary: indigo
+                accent: indigo
+                toggle:
+                  icon: material/brightness-7
+                  name: Switch to dark mode
+              - scheme: slate
+                primary: indigo
+                accent: indigo
+                toggle:
+                  icon: material/brightness-4
+                  name: Switch to light mode
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -92,8 +124,10 @@ markdown_extensions:
   - md_in_html
   - pymdownx.details
   - pymdownx.superfences
-  - pymdownx.tabbed
-  - pymdownx.tasklist
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - pymdownx.caret
   - pymdownx.smartsymbols
   - pymdownx.emoji:
@@ -101,15 +135,6 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
-
-extra:
-  alternate:
-    - name: English
-      link: ./en/
-      lang: en
-    - name: 中文
-      link: ./zh/
-      lang: zh
 
 nav:
   - Home: index.md
@@ -152,3 +177,4 @@ nav:
         - GPU-Accelerated Training: reference/use_case_gpu.md
         # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
         # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
+        
