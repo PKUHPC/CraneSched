@@ -36,7 +36,7 @@ enum class TerminatedBy : uint8_t {
   CANCELLED_BY_USER,
   TERMINATION_BY_TIMEOUT,
   TERMINATION_BY_OOM,
-  TERMINATION_BY_CFORED_CONN_FAILURE
+  TERMINATION_BY_CFORED_CONN_FAILURE,
   TERMINATION_BY_DEADLINE
 };
 
@@ -102,6 +102,7 @@ class StepInstance {
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
   // Cfored client in step
+  StepToSupv& GetMutableStep() { return m_step_to_supv_; }
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(
@@ -527,7 +528,8 @@ class TaskManager {
       m_change_task_time_constraint_async_handle_;
   ConcurrentQueue<ChangeTaskTimeConstraintQueueElem>
       m_task_time_constraint_change_queue_;
-  std::shared_ptr<uvw::timer_handle> m_change_task_time_constraint_timer_handle_;
+  std::shared_ptr<uvw::timer_handle>
+      m_change_task_time_constraint_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

@@ -1798,18 +1798,12 @@ void TaskManager::EvTaskTimerCb_(bool is_deadline) {
                                   ? TerminatedBy::TERMINATION_BY_DEADLINE
                                   : TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
+  } else if (is_deadline) {
+    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::Deadline,
+                ExitCode::EC_REACHED_DEADLINE, std::nullopt);
   } else {
-    // For calloc job, we use job id, send TaskFinish_ directly.
-  }
-    if (is_deadline) {
-      TaskFinish_(
-          m_step_.job_id, crane::grpc::TaskStatus::Deadline,
-          ExitCode::EC_REACHED_DEADLINE, std::nullopt);
-    } else {
-      TaskFinish_(
-          m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-          ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
-    }
+    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   }
 }
 
@@ -1912,17 +1906,26 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   std::vector<TaskTerminateQueueElem> not_ready_elems;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
-    // TODO: Replace job id with task id.
-    CRANE_TRACE("Receive TerminateRunningTask Request for {}.", g_config.JobId);
+    CRANE_TRACE(
+        "Receive TerminateRunningTask Request from internal queue. "
+        "Task id: {}",
+        g_config.JobId);
+    bool is_must_terinate = false;
+    if (elem.termination_reason == TerminatedBy::TERMINATION_BY_DEADLINE) {
+      is_must_terinate == true;
+    }
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
-    if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
+
+    if (!is_must_terinate && !elem.mark_as_orphaned &&
+        !g_runtime_status.CanStepOperate()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
 
-    if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
+    if (!is_must_terinate && !elem.mark_as_orphaned &&
+        m_step_.AllTaskFinished()) {
       CRANE_DEBUG("Terminating a completing task #{}, ignored.",
                   g_config.JobId);
       continue;
@@ -1974,8 +1977,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 void TaskManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
   absl::Time now = absl::Now();
 
-  ChangeTaskTimeLimitQueueElem elem;
-  std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
+  ChangeTaskTimeConstraintQueueElem elem;
+  std::vector<ChangeTaskTimeConstraintQueueElem> not_ready_elems;
   while (m_task_time_constraint_change_queue_.try_dequeue(elem)) {
     if (!g_runtime_status.CanStepOperate()) {
       not_ready_elems.emplace_back(std::move(elem));
@@ -2021,7 +2024,7 @@ void TaskManager::EvCleanChangeTaskTimeConstraintQueueCb_() {
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
   for (auto& not_ready_elem : not_ready_elems) {
-    m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
+    m_task_time_constraint_change_queue_.enqueue(std::move(not_ready_elem));
   }
 }
 

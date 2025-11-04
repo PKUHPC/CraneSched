@@ -255,6 +255,7 @@ void StepInCtld::RecoverFromDb(
   requested_node_res_view =
       static_cast<ResourceView>(step_to_ctld.req_resources());
   node_num = step_to_ctld.node_num();
+  deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
 
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
@@ -548,6 +549,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
+  deadline_time = job.deadline_time;
 
   if (job.IsContainer())
     container_meta = std::get<ContainerMetaInTask>(job.meta);
@@ -663,6 +665,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+  step_to_d.mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(this->deadline_time));
 
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = step_to_d.mutable_batch_meta();
@@ -1016,7 +1020,6 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   }
 
   exclusive = val.exclusive();
-
 
   if (val.has_deadline_time()) {
     deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());

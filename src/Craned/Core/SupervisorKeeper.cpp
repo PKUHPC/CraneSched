@@ -106,7 +106,7 @@ CraneErrCode SupervisorStub::ChangeTaskTimeConstraint(
   auto ok = m_stub_->ChangeTaskTimeConstraint(&context, request, &reply);
   if (ok.ok() && reply.ok()) return CraneErrCode::SUCCESS;
 
-  CRANE_WARN("ChangeTaskTimeLimit failed: reply {},{}", reply.ok(),
+  CRANE_WARN("ChangeTaskTimeConstraint failed: reply {},{}", reply.ok(),
              ok.error_message());
   return CraneErrCode::ERR_RPC_FAILURE;
 }

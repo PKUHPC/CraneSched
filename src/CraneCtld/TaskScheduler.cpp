@@ -58,8 +58,6 @@ TaskScheduler::~TaskScheduler() {
   if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
   if (m_job_deadline_timer_thread_.joinable())
     m_job_deadline_timer_thread_.join();
-  if (m_task_deadline_timer_thread_.joinable())
-    m_task_deadline_timer_thread_.join();
   m_rpc_worker_pool_->wait();
   m_rpc_worker_pool_.reset();
 }
@@ -1450,14 +1448,14 @@ CraneErrCode TaskScheduler::ChangeTaskTimeConstraint(
           }
 
           if (time_limit_seconds) {
-            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+            g_meta_container->GetResvMetaPtr(task->reservation)->end_time =
                 std::min(task->StartTime() +
                              absl::Seconds(time_limit_seconds.value()),
                          task->deadline_time);
           }
 
           if (absl_deadline_time) {
-            reservation_meta->logical_part.rn_task_res_map[task_id].end_time =
+            g_meta_container->GetResvMetaPtr(task->reservation)->end_time =
                 std::min(task->StartTime() + task->time_limit,
                          absl_deadline_time.value());
           }

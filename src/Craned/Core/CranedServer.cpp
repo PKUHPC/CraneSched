@@ -355,6 +355,7 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     return Status::OK;
   }
   response->set_ok(true);
+  return Status::OK;
 }
 
 grpc::Status CranedServiceImpl::AttachInContainerTask(
