@@ -1702,6 +1702,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
@@ -2067,7 +2068,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
     const ::crane::grpc::QueryJobSizeSummaryRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer) {
   if (request->filter_job_ids().size() > 0) {
-    g_db_client->FetchJobSizeSummaryRecords(request, writer);
+    g_db_client->QueryJobSizeSummaryByJobIds(request, writer);
   } else {
     g_db_client->QueryJobSizeSummary(request, writer);
   }

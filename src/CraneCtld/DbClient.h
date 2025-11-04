@@ -106,24 +106,24 @@ class MongodbClient {
 
   enum class RollupType : std::uint8_t { HOUR, HOUR_TO_DAY, DAY_TO_MONTH };
 
-  struct JobSizeSummAggResult {
-    double total_cpu_time = 0;
-    int32_t total_count = 0;
-  };
-  struct JobSizeSummKey {
+  struct JobSizeSummaryKey {
     std::string account;
     std::string wckey;
     uint32_t cpu_alloc;
 
     template <typename H>
-    friend H AbslHashValue(H h, const JobSizeSummKey& key) {
+    friend H AbslHashValue(H h, const JobSizeSummaryKey& key) {
       return H::combine(std::move(h), key.account, key.wckey, key.cpu_alloc);
     }
-    bool operator==(const JobSizeSummKey& other) const {
+    bool operator==(const JobSizeSummaryKey& other) const {
       return account == other.account && wckey == other.wckey &&
              cpu_alloc == other.cpu_alloc;
-      ;
     }
+  };
+
+  struct JobSizeSummaryResult {
+    double total_cpu_time = 0;
+    int32_t total_count = 0;
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
@@ -169,7 +169,7 @@ class MongodbClient {
   void CreateCollectionIndex(mongocxx::collection& coll,
                              const std::vector<std::string>& fields);
   bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
-  bool FetchJobSizeSummaryRecords(
+  bool QueryJobSizeSummaryByJobIds(
       const crane::grpc::QueryJobSizeSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
   void QueryJobSummary(
@@ -190,21 +190,22 @@ class MongodbClient {
       const std::vector<std::pair<std::time_t, std::time_t>>& ranges,
       MatchFunc match_fn, bool first_is_match = true);
 
-  void HourJobSummAggregation(std::time_t start, std::time_t end,
-                              const std::string& task_collection_name);
-  void DayOrMonJobSummAggregation(const std::string& src_coll_str,
-                                  const std::string& dst_coll_str,
-                                  const std::string& src_time_field,
-                                  const std::string& period_field,
-                                  std::time_t period_start,
-                                  std::time_t period_end);
+  void AggregateJobSummaryByHour(std::time_t start, std::time_t end,
+                                 const std::string& task_collection_name);
+  void AggregateJobSummaryByDayOrMonth(const std::string& src_coll_str,
+                                       const std::string& dst_coll_str,
+                                       const std::string& src_time_field,
+                                       const std::string& period_field,
+                                       std::time_t period_start,
+                                       std::time_t period_end);
   void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
   uint64_t MillisecondsToNextHour();
   uint32_t GetCpuAlloc(const bsoncxx::document::view& doc);
   double GetTotalCpuTime(const bsoncxx::document::view& doc);
   int GetTotalCount(const bsoncxx::document::view& doc);
   void WriteReply(
-      const absl::flat_hash_map<JobSizeSummKey, JobSizeSummAggResult>& agg_map,
+      const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>&
+          agg_map,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
       int max_data_size);
   template <typename T>
@@ -381,6 +382,8 @@ class MongodbClient {
   const std::string m_month_job_summary_collection_name_{
       "month_job_summary_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
+  static constexpr int kMaxJobSummaryBatchSize =
+      5000;  // Maximum number of items per gRPC streaming batch
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
@@ -389,7 +392,7 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
-  std::mutex rollup_mutex_;
+  std::mutex cluster_rollup_mutex_;
   std::thread m_mongodb_sum_thread_;
 
  private:

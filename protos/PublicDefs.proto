@@ -837,14 +837,6 @@ message AccountUserSummaryItem {
   int64 total_count = 6;
 }
 
-enum CpuLevel {
-    CPU_LEVEL_0_49      = 0;
-    CPU_LEVEL_50_249    = 1;
-    CPU_LEVEL_250_499   = 2;
-    CPU_LEVEL_500_999   = 3;
-    CPU_LEVEL_1000_PLUS = 4;
-}
-
 message JobSummaryItem {
   string cluster = 1;
   string account = 2;
