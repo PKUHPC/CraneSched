@@ -71,27 +71,27 @@ class CranedStub {
     m_token_.reset();
   }
 
-  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
+  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD>& jobs);
 
-  CraneErrCode FreeJobs(const std::vector<task_id_t> &task);
+  CraneErrCode FreeJobs(const std::vector<task_id_t>& task);
 
-  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
+  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD>& steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode FreeSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode SuspendJobs(const std::vector<job_id_t>& job_ids);
 
   CraneErrCode ResumeJobs(const std::vector<job_id_t>& job_ids);
 
   CraneErrCode TerminateSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode TerminateOrphanedSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
@@ -200,13 +200,13 @@ class CranedKeeper {
   CqTag* EstablishedCranedStateMachine_(CranedStub* craned,
                                         grpc_connectivity_state new_state);
 
-  bool CheckNodeTimeoutAndClean(CqTag *tag);
+  bool CheckNodeTimeoutAndClean(CqTag* tag);
 
   void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
 
-  std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
+  std::function<void(CranedId, const RegToken&)> m_craned_connected_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.
