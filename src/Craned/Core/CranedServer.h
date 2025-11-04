@@ -94,7 +94,6 @@ class CranedServiceImpl : public Craned::Service {
                          const crane::grpc::FreeStepsRequest *request,
                          crane::grpc::FreeStepsReply *response) override;
 
-
   grpc::Status ChangeJobTimeConstraint(
       grpc::ServerContext *context,
       const crane::grpc::ChangeJobTimeConstraintRequest *request,

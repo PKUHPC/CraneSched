@@ -324,7 +324,7 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     grpc::ServerContext *context,
     const crane::grpc::ChangeJobTimeConstraintRequest *request,
     crane::grpc::ChangeJobTimeConstraintReply *response) {
-      response->set_ok(false);
+  response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
@@ -340,15 +340,12 @@ grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
           ? std::optional<int64_t>(request->deadline_time())
           : std::nullopt;
 
-
   auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
   if (!stub) {
     CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
     return Status::OK;
   }
-
-  auto err =
-      stub->ChangeTaskTimeConstraint(time_limit_seconds,deadline_time);
+  auto err = stub->ChangeTaskTimeConstraint(time_limit_seconds, deadline_time);
   if (err != CraneErrCode::SUCCESS) {
     CRANE_ERROR("[Step #{}.{}] Failed to change task time constraint",
                 request->task_id(), kPrimaryStepId);
