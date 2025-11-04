@@ -143,6 +143,7 @@ apt install -y \
     libpam-dev \
     zlib1g-dev \
     libaio-dev \
+    libsystemd-dev \
     pkg-config \
     ninja \
     libelf-dev \
