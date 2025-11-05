@@ -17,20 +17,12 @@ on:
       - release/*
   workflow_dispatch:
     inputs:
-      backend_branch:
-        description: 'Branch of Backend to use'
+      backend_ref:
+        description: 'Backend ref to use (branch name, tag, or commit SHA)'
         required: false
         default: ''
-      backend_commit:
-        description: 'Commit SHA of Backend to use (takes precedence over backend_branch)'
-        required: false
-        default: ''
-      frontend_branch:
-        description: 'Branch of FrontEnd to use'
-        required: false
-        default: ''
-      frontend_commit:
-        description: 'Commit SHA of FrontEnd to use (takes precedence over frontend_branch)'
+      frontend_ref:
+        description: 'FrontEnd ref to use (branch name, tag, or commit SHA)'
         required: false
         default: ''
       cache_buster:
@@ -79,23 +71,17 @@ jobs:
           
           # Determine backend ref
           BACKEND_REF=""
-          if [ -n "${{ github.event.inputs.backend_commit || '' }}" ]; then
-            BACKEND_REF="${{ github.event.inputs.backend_commit }}"
-            echo "Using backend commit: $BACKEND_REF"
-          elif [ -n "${{ github.event.inputs.backend_branch || '' }}" ]; then
-            BACKEND_REF="${{ github.event.inputs.backend_branch }}"
-            echo "Using backend branch: $BACKEND_REF"
+          if [ -n "${{ github.event.inputs.backend_ref || '' }}" ]; then
+            BACKEND_REF="${{ github.event.inputs.backend_ref }}"
+            echo "Using backend ref: $BACKEND_REF"
           fi
           # If empty, actions/checkout will use the default ref
           
           # Determine frontend ref
           FRONTEND_REF="$DEFAULT_BRANCH"
-          if [ -n "${{ github.event.inputs.frontend_commit || '' }}" ]; then
-            FRONTEND_REF="${{ github.event.inputs.frontend_commit }}"
-            echo "Using frontend commit: $FRONTEND_REF"
-          elif [ -n "${{ github.event.inputs.frontend_branch || '' }}" ]; then
-            FRONTEND_REF="${{ github.event.inputs.frontend_branch }}"
-            echo "Using frontend branch: $FRONTEND_REF"
+          if [ -n "${{ github.event.inputs.frontend_ref || '' }}" ]; then
+            FRONTEND_REF="${{ github.event.inputs.frontend_ref }}"
+            echo "Using frontend ref: $FRONTEND_REF"
           elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             CANDIDATE="${GITHUB_HEAD_REF}"
             echo "Checking if FrontEnd has branch: $CANDIDATE"
