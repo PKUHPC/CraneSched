@@ -265,6 +265,31 @@ CraneCtldForeground: false
 CranedForeground: false
 ```
 
+
+### Supervisor 配置
+
+Supervisor 是鹤思的作业执行管理组件,负责在计算节点上监控和控制作业进程。
+
+```yaml
+Supervisor:
+  # Supervisor 可执行文件路径
+  Path: /usr/libexec/csupervisor
+  
+  # Supervisor 日志级别: trace, debug, info, warn, error
+  DebugLevel: trace
+  
+  # 日志目录(相对于 CraneBaseDir)
+  LogDir: supervisor
+```
+
+**Supervisor 参数:**
+
+- **Path**: Supervisor 可执行文件的完整路径。默认路径为 `/usr/libexec/csupervisor`,通常在安装时已正确设置。
+- **DebugLevel**: 控制 Supervisor 日志的详细程度。可选值包括 `trace`(最详细)、`debug`、`info`、`warn`、`error`(最简略)。生产环境建议使用 `info` 或 `warn`。
+- **LogDir**: Supervisor 日志文件的存储目录,相对于 `CraneBaseDir` 配置项。日志文件对于诊断作业执行问题很有帮助。
+
+!!! tip
+    在排查作业执行问题时,可以临时将 `DebugLevel` 设置为 `debug` 或 `trace` 以获取更详细的日志信息。
 ## 容器支持
 
 CraneSched 支持通过 CRI（容器运行时接口）在容器中运行作业：
