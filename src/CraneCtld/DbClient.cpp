@@ -1894,7 +1894,20 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
-bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
+inline std::string MongodbClient::RollupTypeToString(RollupType rollup_type) {
+  switch (rollup_type) {
+  case RollupType::HOUR:
+    return "hour";
+  case RollupType::DAY:
+    return "day";
+  case RollupType::MONTH:
+    return "month";
+  default:
+    return "unknown";
+  }
+}
+
+bool MongodbClient::UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
                                                     int64_t last_success_sec) {
   try {
     auto summary_coll =
@@ -1902,7 +1915,8 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
     auto update_sec = static_cast<int64_t>(std::time(nullptr));
 
     auto filter = bsoncxx::builder::stream::document{}
-                  << "_id" << type << bsoncxx::builder::stream::finalize;
+                  << "_id" << RollupTypeToString(rollup_type)
+                  << bsoncxx::builder::stream::finalize;
 
     // Build the update document:
     // - $max: only update last_success_time if last_success_sec is greater than
@@ -1923,25 +1937,26 @@ bool MongodbClient::UpdateSummaryLastSuccessTimeSec(const std::string& type,
     return true;
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_,
-                       "UpdateSummaryLastSuccessTimeSec failed: {}, type={}",
-                       e.what(), type);
+                       "Update summary last success time failed: {}, type={}",
+                       e.what(), RollupTypeToString(rollup_type));
     return false;
   }
 }
 
-bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
+bool MongodbClient::GetSummaryLastSuccessTimeTm(RollupType rollup_type,
                                                 std::tm& tm_last) {
   // Set default time
   std::tm default_time = {};
-  default_time.tm_year = 2024 - 1900;
-  default_time.tm_mon = 9 - 1;
+  default_time.tm_year = 2023 - 1900;
+  default_time.tm_mon = 1 - 1;
   default_time.tm_mday = 1;
 
   try {
     auto summary_coll =
         (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
     auto filter = bsoncxx::builder::stream::document{}
-                  << "_id" << type << bsoncxx::builder::stream::finalize;
+                  << "_id" << RollupTypeToString(rollup_type)
+                  << bsoncxx::builder::stream::finalize;
     auto doc_opt = summary_coll.find_one(filter.view());
     if (doc_opt) {
       auto doc = doc_opt->view();
@@ -1961,76 +1976,66 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(const std::string& type,
     CRANE_LOGGER_ERROR(
         m_logger_,
         fmt::format(
-            "Get summary last success time  failed: {}, type={}, coll={}",
-            e.what(), type, m_summary_time_collection_name_));
+            "Get summary last success time failed: {}, type={}, coll={}",
+            e.what(), RollupTypeToString(rollup_type),
+            m_summary_time_collection_name_));
     tm_last = default_time;
     return false;
   }
 }
 
-std::tm MongodbClient::GetRoundHourNowTm() {
+bool MongodbClient::NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
+                               RollupType rollup_type) {
+  if (tm_now.tm_year > tm_last.tm_year) return true;
+  if (tm_now.tm_year < tm_last.tm_year) return false;
+
+  switch (rollup_type) {
+  case RollupType::HOUR:
+    if (tm_now.tm_yday > tm_last.tm_yday) return true;
+    if (tm_now.tm_yday < tm_last.tm_yday) return false;
+    return tm_now.tm_hour > tm_last.tm_hour;
+  case RollupType::DAY:
+    return tm_now.tm_yday > tm_last.tm_yday;
+  case RollupType::MONTH:
+    return tm_now.tm_mon > tm_last.tm_mon;
+  default:
+    return false;
+  }
+}
+
+bool MongodbClient::RollupSummary(RollupType rollup_type) {
+  std::tm tm_last{};
+  if (!GetSummaryLastSuccessTimeTm(rollup_type, tm_last)) {
+    CRANE_ERROR("Get summary last success time type {} error",
+                RollupTypeToString(rollup_type));
+    return false;
+  }
   std::time_t now =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   std::tm tm_now{};
   localtime_r(&now, &tm_now);
   tm_now.tm_min = 0;
   tm_now.tm_sec = 0;
-  return tm_now;
-}
-
-bool MongodbClient::NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
-                               RollupType type) {
-  // Compare year first
-  if (tm_now.tm_year > tm_last.tm_year) return true;
-  if (tm_now.tm_year < tm_last.tm_year) return false;
-
-  switch (type) {
-  case RollupType::HOUR:
-    if (tm_now.tm_yday > tm_last.tm_yday) return true;
-    if (tm_now.tm_yday < tm_last.tm_yday) return false;
-    return tm_now.tm_hour > tm_last.tm_hour;
-
-  case RollupType::HOUR_TO_DAY:
-    return tm_now.tm_yday > tm_last.tm_yday;
-
-  case RollupType::DAY_TO_MONTH:
-    return tm_now.tm_mon > tm_last.tm_mon;
-
-  default:
-    return false;
-  }
-}
-
-bool MongodbClient::RollupSummary(const std::string& summary_type,
-                                  RollupType rollup_type,
-                                  const std::string& time_unit) {
-  std::tm tm_last{};
-  if (!GetSummaryLastSuccessTimeTm(summary_type, tm_last)) {
-    CRANE_ERROR("Get summary last success time type {} error", summary_type);
-    return false;
-  }
-
-  std::tm tm_now = GetRoundHourNowTm();
 
   if (!NeedRollup(tm_last, tm_now, rollup_type)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
     CRANE_INFO("Less than 1 {} since last aggregation, skip. {} -> {}",
-               time_unit, util::FormatTime(last_sec),
+               RollupTypeToString(rollup_type), util::FormatTime(last_sec),
                util::FormatTime(now_sec));
     return false;
   }
 
   auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
   auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-  CRANE_INFO("Aggregating {} from {} to {}", time_unit,
+  CRANE_INFO("Aggregating {} from {} to {}", RollupTypeToString(rollup_type),
              util::FormatTime(last_sec), util::FormatTime(now_sec));
 
   auto t0 = std::chrono::steady_clock::now();
   bool success = AggregateJobSummary(rollup_type, last_sec, now_sec);
   if (!success) {
     CRANE_ERROR("Aggregate job summary ({}) failed! Window: {} -> {}",
-                summary_type, util::FormatTime(last_sec),
+                RollupTypeToString(rollup_type), util::FormatTime(last_sec),
                 util::FormatTime(now_sec));
   }
   auto t1 = std::chrono::steady_clock::now();
@@ -2045,34 +2050,31 @@ void MongodbClient::ClusterRollupUsage() {
 
   auto start_total = std::chrono::steady_clock::now();
   auto start = std::chrono::steady_clock::now();
-  RollupSummary("hour", RollupType::HOUR, "hour");
+  RollupSummary(RollupType::HOUR);
   auto end = std::chrono::steady_clock::now();
-  auto dur_hour =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count();
-  CRANE_INFO("Rollup hour table used {} ms", dur_hour);
+  CRANE_INFO("Rollup hour table used {} ms",
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                 .count());
 
   start = std::chrono::steady_clock::now();
-  RollupSummary("hour_to_day", RollupType::HOUR_TO_DAY, "day");
+  RollupSummary(RollupType::DAY);
   end = std::chrono::steady_clock::now();
-  auto dur_day =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count();
-  CRANE_INFO("Rollup hour to day table used {} ms", dur_day);
+  CRANE_INFO("Rollup day table used {} ms",
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                 .count());
 
   start = std::chrono::steady_clock::now();
-  RollupSummary("day_to_month", RollupType::DAY_TO_MONTH, "month");
+  RollupSummary(RollupType::MONTH);
   end = std::chrono::steady_clock::now();
-  auto dur_month =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count();
-  CRANE_INFO("Rollup day to month table used {} ms", dur_month);
+  CRANE_INFO("Rollup month table used {} ms",
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                 .count());
 
   auto end_total = std::chrono::steady_clock::now();
-  auto total = std::chrono::duration_cast<std::chrono::milliseconds>(
-                   end_total - start_total)
-                   .count();
-  CRANE_INFO("Rollup cluster usage total used {} ms", total);
+  CRANE_INFO("Rollup cluster usage total used {} ms",
+             std::chrono::duration_cast<std::chrono::milliseconds>(end_total -
+                                                                   start_total)
+                 .count());
 }
 
 void MongodbClient::CreateCollectionIndex(
@@ -2099,21 +2101,17 @@ void MongodbClient::CreateCollectionIndex(
   }
 }
 
-bool MongodbClient::AggregateJobSummary(RollupType type, std::time_t start,
-                                        std::time_t end) {
-  // Perform aggregation based on type
-  if (type == RollupType::HOUR) {
+bool MongodbClient::AggregateJobSummary(RollupType rollup_type,
+                                        std::time_t start, std::time_t end) {
+  if (rollup_type == RollupType::HOUR) {
     AggregateJobSummaryByHour(start, end, m_task_collection_name_);
-  } else if (type == RollupType::HOUR_TO_DAY) {
-    AggregateJobSummaryByDayOrMonth(m_hour_job_summary_collection_name_,
-                                    m_day_job_summary_collection_name_, "hour",
-                                    "day", start, end);
-  } else if (type == RollupType::DAY_TO_MONTH) {
-    AggregateJobSummaryByDayOrMonth(m_day_job_summary_collection_name_,
-                                    m_month_job_summary_collection_name_, "day",
-                                    "month", start, end);
+  } else if (rollup_type == RollupType::DAY) {
+    AggregateJobSummaryByDayOrMonth(RollupType::HOUR, RollupType::DAY, start,
+                                    end);
+  } else if (rollup_type == RollupType::MONTH) {
+    AggregateJobSummaryByDayOrMonth(RollupType::DAY, RollupType::MONTH, start,
+                                    end);
   }
-
   return true;
 }
 
@@ -2159,7 +2157,7 @@ void MongodbClient::AggregateJobSummaryByHour(
       pipeline.add_fields(bsoncxx::builder::stream::document{}
                           << "wckey" << bsoncxx::builder::stream::open_document
                           << "$ifNull" << bsoncxx::builder::stream::open_array
-                          << "$wckey" << "_default_"
+                          << "$wckey" << ""
                           << bsoncxx::builder::stream::close_array
                           << bsoncxx::builder::stream::close_document
                           << bsoncxx::builder::stream::finalize);
@@ -2232,24 +2230,42 @@ void MongodbClient::AggregateJobSummaryByHour(
       cur_end += 3600;
     }
   } catch (const std::exception& e) {
-    UpdateSummaryLastSuccessTimeSec("hour", cur_end);
+    UpdateSummaryLastSuccessTimeSec(RollupType::HOUR, cur_start);
     CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour error: {}",
                        e.what());
   }
 
-  UpdateSummaryLastSuccessTimeSec("hour", cur_end);
+  UpdateSummaryLastSuccessTimeSec(RollupType::HOUR, cur_start);
 }
 
-void MongodbClient::AggregateJobSummaryByDayOrMonth(
-    const std::string& src_coll_str, const std::string& dst_coll_str,
-    const std::string& src_time_field, const std::string& period_field,
-    std::time_t period_start, std::time_t period_end) {
+void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
+                                                    RollupType dst_type,
+                                                    std::time_t period_start,
+                                                    std::time_t period_end) {
+  std::string src_coll_str;
+  std::string dst_coll_str;
+  if (src_type == RollupType::HOUR && dst_type == RollupType::DAY) {
+    src_coll_str = m_hour_job_summary_collection_name_;
+    dst_coll_str = m_day_job_summary_collection_name_;
+  } else if (src_type == RollupType::DAY && dst_type == RollupType::MONTH) {
+    src_coll_str = m_day_job_summary_collection_name_;
+    dst_coll_str = m_month_job_summary_collection_name_;
+  } else {
+    CRANE_ERROR("Unsupported rollup: {} to {}", RollupTypeToString(src_type),
+                RollupTypeToString(dst_type));
+    return;
+  }
+
+  std::string src_time_field = RollupTypeToString(src_type);
+  std::string period_field = RollupTypeToString(dst_type);
+
   std::time_t cur_start;
   std::time_t cur_end = period_end;
   std::tm tm_end = {};
   std::tm tm_start = {};
+
   try {
-    if (period_field == "day") {
+    if (dst_type == RollupType::DAY) {
       localtime_r(&period_start, &tm_start);
       tm_start.tm_hour = 0;
       tm_start.tm_min = 0;
@@ -2262,7 +2278,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
       tm_end.tm_hour = 0;
       tm_end.tm_mday++;
       cur_end = std::mktime(&tm_end);
-    } else if (period_field == "month") {
+    } else if (dst_type == RollupType::MONTH) {
       localtime_r(&period_start, &tm_start);
       tm_start.tm_mday = 1;
       tm_start.tm_hour = 0;
@@ -2278,6 +2294,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
       tm_end.tm_mon++;
       cur_end = std::mktime(&tm_end);
     }
+
     auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
     while (cur_end <= period_end) {
       std::string group_period_field_ref = "$" + period_field;
@@ -2289,9 +2306,11 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
                      << static_cast<int64_t>(cur_end)
                      << bsoncxx::builder::stream::close_document
                      << bsoncxx::builder::stream::finalize);
+
       pipeline.add_fields(bsoncxx::builder::stream::document{}
                           << period_field << static_cast<int64_t>(cur_start)
                           << bsoncxx::builder::stream::finalize);
+
       pipeline.group(
           bsoncxx::builder::stream::document{}
           << "_id" << bsoncxx::builder::stream::open_document << period_field
@@ -2299,7 +2318,8 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
           << "$account"
           << "username" << "$username" << "qos" << "$qos" << "wckey" << "$wckey"
           << "cpu_alloc" << "$cpu_alloc" << "partition_name"
-          << "$partition_name" << "nodesname" << "$nodesname"
+          << "$partition_name"
+          << "nodesname" << "$nodesname"
           << bsoncxx::builder::stream::close_document << "total_cpu_time"
           << bsoncxx::builder::stream::open_document << "$sum"
           << "$total_cpu_time" << bsoncxx::builder::stream::close_document
@@ -2327,12 +2347,12 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
                      << "into" << dst_coll_str << "whenMatched" << "replace"
                      << "whenNotMatched" << "insert"
                      << bsoncxx::builder::stream::finalize);
+
       auto cursor = src_coll.aggregate(pipeline);
-      // Force execution of the aggregation pipeline (including $merge/$out) by
-      // iterating the cursor. No need to process the documents.
       for (auto&& doc : cursor) {}
+
       // Advance window
-      if (period_field == "day") {
+      if (dst_type == RollupType::DAY) {
         cur_start = cur_end;
         localtime_r(&cur_end, &tm_end);
         tm_end.tm_sec = 0;
@@ -2340,7 +2360,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
         tm_end.tm_hour = 0;
         tm_end.tm_mday++;
         cur_end = std::mktime(&tm_end);
-      } else if (period_field == "month") {
+      } else if (dst_type == RollupType::MONTH) {
         cur_start = cur_end;
         localtime_r(&cur_end, &tm_end);
         tm_end.tm_sec = 0;
@@ -2353,19 +2373,11 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(
-        m_logger_, "[mongodb] AggregateJobSummaryByDayOrMonth exception: {}",
+        m_logger_, "[mongodb] Aggregate job day or month summary exception: {}",
         e.what());
-    if (period_field == "day") {
-      UpdateSummaryLastSuccessTimeSec("hour_to_day", cur_end);
-    } else if (period_field == "month") {
-      UpdateSummaryLastSuccessTimeSec("day_to_month", cur_end);
-    }
+    UpdateSummaryLastSuccessTimeSec(dst_type, cur_start);
   }
-  if (period_field == "day") {
-    UpdateSummaryLastSuccessTimeSec("hour_to_day", cur_end);
-  } else if (period_field == "month") {
-    UpdateSummaryLastSuccessTimeSec("day_to_month", cur_end);
-  }
+  UpdateSummaryLastSuccessTimeSec(dst_type, cur_start);
 }
 
 bool MongodbClient::QueryJobSizeSummaryByJobIds(

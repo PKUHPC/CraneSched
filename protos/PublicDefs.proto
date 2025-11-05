@@ -828,15 +828,6 @@ message LicenseInfo {
   uint32 free = 4;
 }
 
-message AccountUserSummaryItem {
-  string cluster = 1;
-  string account = 2;
-  string username = 3;
-  string qos = 4;
-  double total_cpu_time = 5;
-  int64 total_count = 6;
-}
-
 message JobSummaryItem {
   string cluster = 1;
   string account = 2;
