@@ -852,39 +852,6 @@ CraneErrCode JobManager::ExecuteStepAsync(
   }
 
   for (auto& [job_id, step_ids] : steps) {
-    if (!g_config.ProLogs.empty() &&
-     !(g_config.PrologFlags & PrologFlagEnum::Alloc)) {
-      auto job = m_job_map_[job_id];
-      if (!job) {
-        CRANE_ERROR("[job #{}] without job allocation.",
-                    job_id);
-        return CraneErrCode::ERR_CGROUP;
-      }
-      CRANE_DEBUG("#{}: Running prologs....", job_id);
-      bool script_lock = false;
-      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
-
-      RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
-                                     .envs = job->GetJobEnvMap(),
-                                     .run_uid = 0,
-                                     .run_gid = 0,
-                                     .is_prolog = true};
-      if (g_config.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologTimeout;
-      else if (g_config.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
-
-      if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
-        if (script_lock) m_prolog_serial_mutex_.Unlock();
-        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-        return CraneErrCode::ERR_PROLOG;
-      }
-
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
-     }
     for (auto step_id : step_ids) {
       auto job = m_job_map_[job_id];
       if (!job) {
@@ -1062,6 +1029,40 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     return;
   }
   auto* job = job_ptr.get();
+
+  if (!g_config.ProLogs.empty() &&
+ ((g_config.PrologFlags & PrologFlagEnum::Alloc) == 0) && !job->is_prolog_run) {
+    CRANE_DEBUG("#{}: Running prologs....", job_id);
+    job->is_prolog_run = true;
+    bool script_lock = false;
+    if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+      m_prolog_serial_mutex_.Lock();
+      script_lock = true;
+    }
+
+    RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
+                                   .envs = job->GetJobEnvMap(),
+                                   .run_uid = 0,
+                                   .run_gid = 0,
+                                   .is_prolog = true};
+    if (g_config.PrologTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.PrologTimeout;
+    else if (g_config.PrologEpilogTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+
+    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
+      g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+      ActivateTaskStatusChangeAsync_(
+        job_id, step_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodePrologFail,
+        fmt::format("Failed to get the allocation for job#{} ", job_id),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+      return ;
+    }
+
+    if (script_lock) m_prolog_serial_mutex_.Unlock();
+ }
 
   // Check if the step is acceptable.
   // We keep this container check here in case we support enabling/disabling

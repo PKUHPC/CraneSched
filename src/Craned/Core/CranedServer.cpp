@@ -236,7 +236,6 @@ grpc::Status CranedServiceImpl::AllocJobs(
     jobs.emplace_back(job_to_d);
   }
 
-  // TODO: Each job has one result
   bool ok = g_job_mgr->AllocJobs(std::move(jobs));
   if (!ok) {
     CRANE_ERROR("Failed to alloc some jobs.");
