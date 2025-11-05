@@ -23,6 +23,7 @@
 
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
+#include "crane/PluginClient.h"
 
 namespace Ctld {
 
