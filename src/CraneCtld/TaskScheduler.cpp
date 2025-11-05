@@ -3721,6 +3721,15 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_req, bound.node_num_min);
     bound.node_num_max = std::max(nodes_req, bound.node_num_max);
 
+    uint64_t job_mem_req = job->requested_node_res_view.MemoryBytes();
+    bound.mem_alloc_min = std::min(job_mem_req, bound.mem_alloc_min);
+    bound.mem_alloc_max = std::max(job_mem_req, bound.mem_alloc_max);
+
+    double job_cpus_req =
+        static_cast<double>(job->requested_node_res_view.CpuCount());
+    bound.cpus_alloc_min = std::min(job_cpus_req, bound.cpus_alloc_min);
+    bound.cpus_alloc_max = std::max(job_cpus_req, bound.cpus_alloc_max);
+
     uint32_t qos_priority = job->qos_priority;
     bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
     bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
