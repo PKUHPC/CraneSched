@@ -944,6 +944,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.preempt.assign(qos_info->preempt().begin(), qos_info->preempt().end());
+  qos.preempt_mode = qos_info->preempt_mode();
 
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
@@ -1180,9 +1182,12 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+
+  std::list<std::string> value_list(request->value_list().begin(),
+                                    request->value_list().end());
+
+  auto modify_res = g_account_manager->ModifyQos(
+      request->uid(), request->name(), request->modify_field(), value_list);
 
   if (modify_res) {
     response->set_ok(true);
@@ -1406,6 +1411,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
     qos_info->set_max_time_limit_per_task(
         absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    qos_info->mutable_preempt()->Assign(qos.preempt.begin(), qos.preempt.end());
+    qos_info->set_preempt_mode(qos.preempt_mode);
   }
 
   return grpc::Status::OK;
