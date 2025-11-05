@@ -135,7 +135,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: CraneSched
-          ref: ${{ env.BACKEND_REF != '' && env.BACKEND_REF || github.ref }}
+          ref: ${{ env.BACKEND_REF || github.ref }}
 
       # Checkout frontend repository at unified ref
       - name: Checkout frontend
