@@ -975,21 +975,17 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
 void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   StepStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
-    if (!job_ptr) {
-      CRANE_DEBUG("[Job #{}] Job allocation not found for StepStatusChange.",
-                  status_change.job_id);
-      continue;
+    {
+      auto job_ptr = m_job_map_.GetValueExclusivePtr(status_change.job_id);
+      if (job_ptr) {
+        absl::MutexLock lk(job_ptr->step_map_mtx.get());
+        if (auto step_it = job_ptr->step_map.find(status_change.step_id);
+            step_it != job_ptr->step_map.end()) {
+          step_it->second->status = status_change.new_status;
+        }
+      }
     }
-    absl::MutexLock lk(job_ptr->step_map_mtx.get());
-    if (!job_ptr->step_map.contains(status_change.step_id)) {
-      CRANE_ERROR(
-          "[Step #{}.{}] Step allocation not found for StepStatusChange.",
-          status_change.job_id, status_change.step_id);
-      continue;
-    }
-    auto* step = job_ptr->step_map.at(status_change.step_id).get();
-    step->status = status_change.new_status;
+
     CRANE_TRACE("[Step #{}.{}] StepStatusChange status: {}.",
                 status_change.job_id, status_change.step_id,
                 status_change.new_status);
