@@ -110,11 +110,19 @@ void StepInstance::AddTaskInstance(task_id_t task_id,
 }
 
 ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) {
-  return m_task_map_.at(task_id).get();
+  auto it = m_task_map_.find(task_id);
+  if (it == m_task_map_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
 }
 
 const ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) const {
-  return m_task_map_.at(task_id).get();
+  auto it = m_task_map_.find(task_id);
+  if (it == m_task_map_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
 }
 
 std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
@@ -2145,6 +2153,13 @@ void TaskManager::EvCleanTaskSignalQueueCb_() {
 
 CraneErrCode TaskManager::SuspendRunningTasks_() {
   CRANE_DEBUG("Suspending all running tasks");
+
+  // Daemon steps don't have actual task instances to suspend
+  if (m_step_.IsDaemon()) {
+    CRANE_DEBUG("Daemon step cannot be suspended, skipping.");
+    return CraneErrCode::ERR_INVALID_OP;
+  }
+
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   for (const auto& task_id : m_step_.task_ids) {
@@ -2166,6 +2181,13 @@ CraneErrCode TaskManager::SuspendRunningTasks_() {
 
 CraneErrCode TaskManager::ResumeSuspendedTasks_() {
   CRANE_DEBUG("Resuming all suspended tasks");
+
+  // Daemon steps don't have actual task instances to resume
+  if (m_step_.IsDaemon()) {
+    CRANE_DEBUG("Daemon step cannot be resumed, skipping.");
+    return CraneErrCode::ERR_INVALID_OP;
+  }
+
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   for (const auto& task_id : m_step_.task_ids) {
