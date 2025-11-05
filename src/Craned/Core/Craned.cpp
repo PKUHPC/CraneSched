@@ -189,6 +189,8 @@ void ParseConfig(int argc, char** argv) {
   options.add_options()
       ("f,config-file", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("P,plugin-config", "Path to Plugin configuration file",
+       cxxopts::value<std::string>()->default_value(kDefaultPluginConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
       ("s,server-address", "CraneCtld address, format: <IP>:<port>",
@@ -238,6 +240,8 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
+  std::string plugin_config_path =
+      parsed_args["plugin-config"].as<std::string>();
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
@@ -625,16 +629,6 @@ void ParseConfig(int argc, char** argv) {
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
           }
         }
-
-        if (config["Plugin"]) {
-          const auto& plugin_config = config["Plugin"];
-          g_config.Plugin.Enabled =
-              YamlValueOr<bool>(plugin_config["Enabled"], false);
-          g_config.Plugin.PlugindSockPath = fmt::format(
-              "unix://{}", g_config.CraneBaseDir /
-                               YamlValueOr(plugin_config["PlugindSockPath"],
-                                           kDefaultPlugindUnixSockPath));
-        }
       }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
@@ -644,6 +638,32 @@ void ParseConfig(int argc, char** argv) {
   } else {
     CRANE_CRITICAL("Config file '{}' not existed", config_path);
     std::exit(1);
+  }
+
+  // Load plugin configuration from separate plugin.yaml file
+  if (std::filesystem::exists(plugin_config_path)) {
+    try {
+      using util::YamlValueOr;
+      YAML::Node plugin_config = YAML::LoadFile(plugin_config_path);
+
+      if (plugin_config["Enabled"])
+        g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
+
+      g_config.Plugin.PlugindSockPath =
+          fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                      YamlValueOr(plugin_config["PlugindSockPath"],
+                                  kDefaultPlugindUnixSockPath));
+
+      CRANE_INFO("Plugin config loaded from {}", plugin_config_path);
+    } catch (YAML::BadFile& e) {
+      CRANE_WARN("Can't open plugin config file {}: {}. Plugin disabled.",
+                 plugin_config_path, e.what());
+      g_config.Plugin.Enabled = false;
+    }
+  } else {
+    CRANE_INFO("Plugin config file '{}' not found. Plugin disabled.",
+               plugin_config_path);
+    g_config.Plugin.Enabled = false;
   }
 
   if (parsed_args.count("listen")) {
