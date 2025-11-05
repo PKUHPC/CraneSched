@@ -3817,7 +3817,7 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
                  static_cast<double>(bound.age_max - bound.age_min);
 
   // qos_factor
-  if (bound.qos_priority_min > bound.qos_priority_max)
+  if (bound.qos_priority_max > bound.qos_priority_min)
     qos_factor = 1.0 * (job_qos_priority - bound.qos_priority_min) /
                  (bound.qos_priority_max - bound.qos_priority_min);
 
