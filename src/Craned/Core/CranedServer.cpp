@@ -116,6 +116,12 @@ grpc::Status CranedServiceImpl::SuspendJobs(
 
     // Suspend all steps of this job
     for (const auto& [step_id, status] : it->second) {
+      // Skip daemon step (step_id == 0) as it has no actual tasks to suspend
+      if (step_id == 0) {
+        CRANE_DEBUG("Skipping daemon step {}:0", job_id);
+        continue;
+      }
+
       auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
       if (!stub) {
         all_ok = false;
@@ -167,6 +173,12 @@ grpc::Status CranedServiceImpl::ResumeJobs(
 
     // Resume all steps of this job
     for (const auto& [step_id, status] : it->second) {
+      // Skip daemon step (step_id == 0) as it has no actual tasks to resume
+      if (step_id == 0) {
+        CRANE_DEBUG("Skipping daemon step {}:0", job_id);
+        continue;
+      }
+
       auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
       if (!stub) {
         all_ok = false;
