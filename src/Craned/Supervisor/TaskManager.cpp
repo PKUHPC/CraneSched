@@ -2155,9 +2155,10 @@ CraneErrCode TaskManager::SuspendRunningTasks_() {
   CRANE_DEBUG("Suspending all running tasks");
 
   // Daemon steps don't have actual task instances to suspend
+  // Note: This should not be reached as daemon steps are filtered at RPC level
   if (m_step_.IsDaemon()) {
-    CRANE_DEBUG("Daemon step cannot be suspended, skipping.");
-    return CraneErrCode::ERR_GENERIC_FAILURE;
+    CRANE_DEBUG("Daemon step has no tasks to suspend, skipping.");
+    return CraneErrCode::SUCCESS;
   }
 
   CraneErrCode result = CraneErrCode::SUCCESS;
@@ -2183,9 +2184,10 @@ CraneErrCode TaskManager::ResumeSuspendedTasks_() {
   CRANE_DEBUG("Resuming all suspended tasks");
 
   // Daemon steps don't have actual task instances to resume
+  // Note: This should not be reached as daemon steps are filtered at RPC level
   if (m_step_.IsDaemon()) {
-    CRANE_DEBUG("Daemon step cannot be resumed, skipping.");
-    return CraneErrCode::ERR_GENERIC_FAILURE;
+    CRANE_DEBUG("Daemon step has no tasks to resume, skipping.");
+    return CraneErrCode::SUCCESS;
   }
 
   CraneErrCode result = CraneErrCode::SUCCESS;
