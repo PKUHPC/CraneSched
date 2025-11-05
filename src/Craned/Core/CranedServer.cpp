@@ -98,20 +98,36 @@ grpc::Status CranedServiceImpl::SuspendJobs(
   bool all_ok = true;
   std::vector<std::string> reasons;
 
+  // Get all allocated job steps
+  auto job_steps = g_job_mgr->GetAllocatedJobSteps();
+
   for (job_id_t job_id : request->job_id_list()) {
-    auto stub = g_supervisor_keeper->GetStub(job_id);
-    if (!stub) {
+    // Find steps for this job
+    auto it = job_steps.find(job_id);
+    if (it == job_steps.end()) {
       all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: Supervisor not found", job_id));
+      reasons.emplace_back(fmt::format("job {}: Job not found", job_id));
       continue;
     }
 
-    CraneErrCode err = stub->SuspendJob();
-    if (err != CraneErrCode::SUCCESS) {
-      all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: {}", job_id, CraneErrStr(err)));
-    } else {
-      CRANE_DEBUG("Job {} suspended successfully", job_id);
+    // Suspend all steps of this job
+    for (const auto& [step_id, status] : it->second) {
+      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
+      if (!stub) {
+        all_ok = false;
+        reasons.emplace_back(
+            fmt::format("job {}:{}: Supervisor not found", job_id, step_id));
+        continue;
+      }
+
+      CraneErrCode err = stub->SuspendJob();
+      if (err != CraneErrCode::SUCCESS) {
+        all_ok = false;
+        reasons.emplace_back(
+            fmt::format("job {}:{}: {}", job_id, step_id, CraneErrStr(err)));
+      } else {
+        CRANE_DEBUG("Job {}:{} suspended successfully", job_id, step_id);
+      }
     }
   }
 
@@ -133,20 +149,36 @@ grpc::Status CranedServiceImpl::ResumeJobs(
   bool all_ok = true;
   std::vector<std::string> reasons;
 
+  // Get all allocated job steps
+  auto job_steps = g_job_mgr->GetAllocatedJobSteps();
+
   for (job_id_t job_id : request->job_id_list()) {
-    auto stub = g_supervisor_keeper->GetStub(job_id);
-    if (!stub) {
+    // Find steps for this job
+    auto it = job_steps.find(job_id);
+    if (it == job_steps.end()) {
       all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: Supervisor not found", job_id));
+      reasons.emplace_back(fmt::format("job {}: Job not found", job_id));
       continue;
     }
 
-    CraneErrCode err = stub->ResumeJob();
-    if (err != CraneErrCode::SUCCESS) {
-      all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: {}", job_id, CraneErrStr(err)));
-    } else {
-      CRANE_DEBUG("Job {} resumed successfully", job_id);
+    // Resume all steps of this job
+    for (const auto& [step_id, status] : it->second) {
+      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
+      if (!stub) {
+        all_ok = false;
+        reasons.emplace_back(
+            fmt::format("job {}:{}: Supervisor not found", job_id, step_id));
+        continue;
+      }
+
+      CraneErrCode err = stub->ResumeJob();
+      if (err != CraneErrCode::SUCCESS) {
+        all_ok = false;
+        reasons.emplace_back(
+            fmt::format("job {}:{}: {}", job_id, step_id, CraneErrStr(err)));
+      } else {
+        CRANE_DEBUG("Job {}:{} resumed successfully", job_id, step_id);
+      }
     }
   }
 

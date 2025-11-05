@@ -756,7 +756,7 @@ void CranedKeeper::PutNodeIntoUnavailSet(const std::string& crane_id,
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const& craned_id,
-                                      RegToken token) {
+                                      const RegToken& token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;

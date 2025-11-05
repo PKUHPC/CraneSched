@@ -194,6 +194,7 @@ class CranedKeeper {
   static void CranedChannelConnectFail_(CranedStub* stub);
 
   void ConnectCranedNode_(const CranedId& craned_id, const RegToken& token);
+  void CranedChannelConnFailNoLock_(CranedStub* stub);
 
   CqTag* InitCranedStateMachine_(CranedStub* craned,
                                  grpc_connectivity_state new_state);
