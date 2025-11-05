@@ -59,7 +59,9 @@ Craned:
   PingInterval: 15
   # register operation timeout in seconds
   CraneCtldTimeout: 5
-
+  # Set the interval for node health check.
+  # 0 means the health check is disabled.
+  NodeHealthCheckInterval: 0
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -141,6 +143,8 @@ JobFileAppend: false
 
 # Set the flag to ignore warnings about config files mismatches.
 IgnoreConfigInconsistency: false
+
+
 
 Supervisor:
   Path: /usr/libexec/csupervisor

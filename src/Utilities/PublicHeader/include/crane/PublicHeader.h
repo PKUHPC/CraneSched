@@ -68,6 +68,10 @@ inline const char* const kHostFilePath = "/etc/hosts";
 inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
+inline constexpr double kMemoryToleranceGB = 0.01;
+
+inline const char* const NodeHealthCheckFailedReason =
+    "Node failed health check";
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 

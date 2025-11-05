@@ -79,6 +79,7 @@ struct Config {
   struct CranedConfig {
     uint32_t PingIntervalSec;
     uint32_t CtldTimeoutSec;
+    uint32_t NodeHealthCheckInterval;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {

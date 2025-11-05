@@ -206,6 +206,11 @@ class CtldForInternalServiceImpl final
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
+  grpc::Status CranedReportHealth(
+      grpc::ServerContext *context,
+      const crane::grpc::CranedReportHealthRequest *request,
+      google::protobuf::Empty *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };
