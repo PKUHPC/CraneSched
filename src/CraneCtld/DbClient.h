@@ -104,7 +104,7 @@ class MongodbClient {
     QOS = 2,
   };
 
-  enum class RollupType : std::uint8_t { HOUR, HOUR_TO_DAY, DAY_TO_MONTH };
+  enum class RollupType : std::uint8_t { HOUR, DAY, MONTH };
 
   struct JobSizeSummaryKey {
     std::string account;
@@ -156,14 +156,13 @@ class MongodbClient {
 
   bool DeleteEntity(EntityType type, const std::string& name);
   bool InitTableIndexes();
-  bool UpdateSummaryLastSuccessTimeSec(const std::string& type,
+  inline std::string RollupTypeToString(RollupType rollup_type);
+  bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
                                        int64_t last_success_sec);
-  bool GetSummaryLastSuccessTimeTm(const std::string& type, std::tm& tm_last);
-  std::tm GetRoundHourNowTm();
+  bool GetSummaryLastSuccessTimeTm(RollupType rollup_type, std::tm& tm_last);
   bool NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
-                  RollupType type);
-  bool RollupSummary(const std::string& summary_type, RollupType rollup_type,
-                     const std::string& time_unit);
+                  RollupType rollup_type);
+  bool RollupSummary(RollupType rollup_type);
 
   void ClusterRollupUsage();
   void CreateCollectionIndex(mongocxx::collection& coll,
@@ -192,10 +191,7 @@ class MongodbClient {
 
   void AggregateJobSummaryByHour(std::time_t start, std::time_t end,
                                  const std::string& task_collection_name);
-  void AggregateJobSummaryByDayOrMonth(const std::string& src_coll_str,
-                                       const std::string& dst_coll_str,
-                                       const std::string& src_time_field,
-                                       const std::string& period_field,
+  void AggregateJobSummaryByDayOrMonth(RollupType src_type, RollupType dst_type,
                                        std::time_t period_start,
                                        std::time_t period_end);
   void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
