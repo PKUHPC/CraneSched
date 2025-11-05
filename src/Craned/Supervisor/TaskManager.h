@@ -19,8 +19,6 @@
 #pragma once
 #include <sched.h>
 
-#include <string_view>
-
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
@@ -47,32 +45,32 @@ class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   PasswordEntry pwd;
+
   bool orphaned{false};
-  job_id_t job_id;
-  step_id_t step_id;
+
+  job_id_t job_id{};
+  step_id_t step_id{};
   std::vector<task_id_t> task_ids;
 
-  uid_t uid;
+  uid_t uid{};
   std::vector<gid_t> gids;
 
   // TODO: Move these into ProcInstance
   std::optional<crane::grpc::InteractiveTaskType> interactive_type;
-  bool pty;
-  bool x11;
-  bool x11_fwd;
+  bool x11{};
+  bool x11_fwd{};
+  bool pty{};
 
   std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
 
-  StepInstance() = default;
   explicit StepInstance(const StepToSupv& step)
       : m_step_to_supv_(step),
         job_id(step.job_id()),
         step_id(step.step_id()),
-        // TODO: Set task_id here
-        task_ids({0}),
+        task_ids({0}),  // TODO: Set task_id here
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
@@ -84,6 +82,12 @@ class StepInstance {
     x11_fwd = interactive_type.has_value() &&
               step.interactive_meta().x11_meta().enable_forwarding();
   };
+
+  StepInstance(const StepInstance&) = delete;
+  StepInstance(StepInstance&&) = delete;
+  StepInstance& operator=(const StepInstance&) = delete;
+  StepInstance& operator=(StepInstance&&) = delete;
+
   ~StepInstance() = default;
 
   [[nodiscard]] bool IsContainer() const noexcept;
@@ -171,8 +175,6 @@ struct BatchInstanceMeta : TaskInstanceMeta {
 struct CrunInstanceMeta : TaskInstanceMeta {
   ~CrunInstanceMeta() override = default;
 
-  bool pty{false};
-
   int stdin_write;
   int stdout_write;
   int stdin_read;
@@ -195,7 +197,8 @@ class ITaskInstance {
  public:
   explicit ITaskInstance(StepInstance* step_inst)
       : m_parent_step_inst_(step_inst) {}
-  virtual ~ITaskInstance();
+
+  virtual ~ITaskInstance() = default;
 
   ITaskInstance(const ITaskInstance&) = delete;
   ITaskInstance(ITaskInstance&&) = delete;
@@ -203,18 +206,13 @@ class ITaskInstance {
   ITaskInstance& operator=(ITaskInstance&&) = delete;
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
+  // Helper methods shared by all task instances
   StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
     return m_parent_step_inst_->GetStep();
   }
 
-  CrunInstanceMeta* GetCrunInstanceMeta() const {
-    return dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
-  }
-
   [[nodiscard]] const TaskExitInfo& GetExitInfo() const { return m_exit_info_; }
-
-  virtual EnvMap GetChildProcessEnv() const;
 
   // Interfaces must be implemented.
   virtual CraneErrCode Prepare() = 0;
@@ -224,64 +222,17 @@ class ITaskInstance {
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
 
+  // Set environment variables for the task instance. Can be overridden.
+  virtual void InitEnvMap();
+
   task_id_t task_id{};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
  protected:
-  // TODO: Move these into ProcInstance
-  CrunInstanceMeta* GetCrunMeta() const {
-    return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
-  };
-
-  // Helper methods
-  // NOLINTBEGIN(readability-identifier-naming)
-  CraneErrCode SetupCrunX11_();
-
-  // Return error before fork.
-  virtual CraneExpected<pid_t> ForkCrunAndInitMeta_();
-
-  virtual bool SetupCrunFwdAtParent_(uint16_t* x11_port);
-
-  virtual void ResetChildProcSigHandler_();
-
-  virtual CraneErrCode SetChildProcessProperty_();
-
-  virtual CraneErrCode SetChildProcessBatchFd_();
-
-  virtual void SetupCrunFwdAtChild_();
-
-  virtual void SetupChildProcessCrunX11_();
-
-  virtual CraneErrCode SetChildProcessEnv_() const;
-
-  virtual std::vector<std::string> GetChildProcessExecArgv_() const;
-
-  /* Perform file name substitutions
-   * %j - Job ID
-   * %u - Username
-   * %x - Job name
-   */
-  std::string ParseFilePathPattern_(const std::string& pattern,
-                                    const std::string& cwd) const;
-
-  // NOLINTEND(readability-identifier-naming)
-  // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-
   StepInstance* m_parent_step_inst_;
-
-  // TODO: Move this into ProcessInstance
-  std::unique_ptr<TaskInstanceMeta> m_meta_{nullptr};
   TaskExitInfo m_exit_info_{};
-
   EnvMap m_env_;
-  std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
-
-  // NOTE: This is not used currently.
-  // As we are using `bash -c` to launch process, all arguments can be passed in
-  // m_executable_.
-  std::vector<std::string> m_arguments_;
-  // NOLINTEND(misc-non-private-member-variables-in-classes)
 };
 
 class ContainerInstance : public ITaskInstance {
@@ -305,6 +256,8 @@ class ContainerInstance : public ITaskInstance {
     if (m_container_id_.empty()) return std::nullopt;
     return m_container_id_;
   }
+
+  void InitEnvMap() override;
 
   const TaskExitInfo& HandleContainerExited(
       const cri::api::ContainerStatus& status);
@@ -358,7 +311,8 @@ class ContainerInstance : public ITaskInstance {
 class ProcInstance : public ITaskInstance {
  public:
   explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
-  ~ProcInstance() override = default;
+
+  ~ProcInstance() override;
 
   ProcInstance(const ProcInstance&) = delete;
   ProcInstance(ProcInstance&&) = delete;
@@ -371,14 +325,56 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Kill(int signum) override;
   CraneErrCode Cleanup() override;
 
+  void InitEnvMap() override;
+
   std::optional<TaskExecId> GetExecId() const override {
     if (m_pid_ == 0) return std::nullopt;
     return m_pid_;
   }
+
   std::optional<const TaskExitInfo> HandleSigchld(pid_t pid, int status);
 
  private:
+  // Methods related to Crun only
+
+  // NOTE: If called before meta is set, will give nullptr.
+  CrunInstanceMeta* GetCrunMeta_() const {
+    return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
+  };
+
+  CraneExpected<pid_t> ForkCrunAndInitMeta_();
+
+  bool SetupCrunFwdAtParent_(uint16_t* x11_port);
+  void SetupCrunFwdAtChild_();
+
+  CraneErrCode PrepareXauthFiles_();
+  void SetupChildProcCrunX11_();
+
+  // Methods related to Batch only
+  CraneErrCode SetChildProcBatchFd_();
+
+  // Methods shared by Batch/Crun
+  void ResetChildProcSigHandler_();
+
+  CraneErrCode SetChildProcProperty_();
+
+  CraneErrCode SetChildProcEnv_() const;
+
+  std::vector<std::string> GetChildProcExecArgv_() const;
+
+  /* Perform file name substitutions
+   * %j - Job ID
+   * %u - Username
+   * %x - Job name
+   */
+  std::string ParseFilePathPattern_(const std::string& pattern,
+                                    const std::string& cwd) const;
+
+  std::unique_ptr<TaskInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
+
+  std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
+  std::vector<std::string> m_arguments_;  // NOTE: Not used currently.
 };
 
 class TaskManager {
