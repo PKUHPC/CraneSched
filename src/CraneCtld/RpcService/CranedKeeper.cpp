@@ -826,7 +826,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const& craned_id,
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
   craned->m_craned_id_ = craned_id;
-  craned->m_clean_up_cb_ = CranedChannelConnFailNoLock_;
+  craned->m_clean_up_cb_ = &CranedKeeper::CranedChannelConnFailNoLock_;
 
   CqTag* tag = m_tag_sync_allocator_->new_object<CqTag>(
       CqTag{CqTag::kInitializingCraned, craned});
