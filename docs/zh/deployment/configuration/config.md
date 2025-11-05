@@ -265,6 +265,35 @@ CraneCtldForeground: false
 CranedForeground: false
 ```
 
+## 容器支持
+
+CraneSched 支持通过 CRI（容器运行时接口）在容器中运行作业：
+
+```yaml
+Container:
+  # 启用容器支持（实验性）
+  Enabled: false
+  
+  # 容器数据临时目录（相对于 CraneBaseDir）
+  TempDir: supervisor/containers/
+  
+  # 容器运行时套接字路径
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  
+  # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
+  ImageEndpoint: /run/containerd/containerd.sock
+```
+
+!!! info "实验性功能"
+    容器支持目前处于实验阶段。详细的设置说明请参阅[容器支持配置](container.md)指南。
+
+**要求：**
+
+- 在计算节点上安装兼容 CRI 的运行时（containerd 或 CRI-O）
+- 具有适当权限可访问运行时套接字
+- 容器镜像可用或可从仓库访问
+
+
 ## 应用更改
 
 修改配置后：

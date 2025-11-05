@@ -86,7 +86,6 @@ plugins:
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
-            Container Support: 容器支持
             Plugins: 插件
         - locale: en
           name: English
@@ -154,7 +153,6 @@ nav:
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
-      - Container Support: deployment/configuration/container.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
