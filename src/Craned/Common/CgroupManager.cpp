@@ -283,7 +283,7 @@ std::string CgroupManager::CgroupStrByJobId(job_id_t job_id) {
 std::string CgroupManager::CgroupStrByStepId(job_id_t job_id, step_id_t step_id,
                                              bool system) {
   std::string_view suffix = system ? "system" : "user";
-  return std::format("{}/{}/{}", CgroupStrByJobId(job_id),
+  return std::format("{}/{}{}/{}", CgroupStrByJobId(job_id),
                      CgConstant::kStepCgNamePrefix, step_id, suffix);
 }
 
