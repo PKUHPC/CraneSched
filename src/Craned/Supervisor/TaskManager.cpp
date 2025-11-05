@@ -609,35 +609,24 @@ CraneErrCode ContainerInstance::Prepare() {
   m_log_file_ =
       m_log_dir_ / std::format(kContainerLogFilePattern, job_id, step_id);
 
-  // Create private dir for container task
-  if (std::filesystem::exists(m_log_dir_)) {
-    struct stat statbuf{};
-    if (stat(m_log_dir_.c_str(), &statbuf) != 0) {
-      CRANE_ERROR("Failed to stat log dir {} for container", m_log_dir_);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-
-    if (statbuf.st_uid != m_parent_step_inst_->pwd.Uid() ||
-        statbuf.st_gid != m_parent_step_inst_->pwd.Gid()) {
-      CRANE_ERROR(
-          "Data dir {} for job #{} has incorrect owner {}:{}, "
-          "expected {}:{}",
-          m_log_dir_, job_id, statbuf.st_uid, statbuf.st_gid,
-          m_parent_step_inst_->pwd.Uid(), m_parent_step_inst_->pwd.Gid());
-    }
-  } else if (!util::os::CreateFolders(m_log_dir_)) {
-    CRANE_ERROR("Failed to create data dir {} for job #{}", m_log_dir_, job_id);
+  // Create private directory for container task
+  if (!util::os::CreateFoldersForFileEx(m_log_file_,
+                                        m_parent_step_inst_->pwd.Uid(),
+                                        m_parent_step_inst_->pwd.Gid(), 0700)) {
+    CRANE_ERROR("Failed to create log directory {} for container #{}.{}",
+                m_log_file_, job_id, step_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // chown & chmod for the user
-  if (chmod(m_log_dir_.c_str(), 0700) != 0) {
-    CRANE_ERROR("Failed to chmod data dir {} for job #{}", m_log_dir_, job_id);
+  // Create the log file and chmod/chown it
+  std::ofstream(m_log_file_).close();
+  if (chmod(m_log_file_.c_str(), 0600) != 0) {
+    CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  if (chown(m_log_dir_.c_str(), m_parent_step_inst_->pwd.Uid(),
+  if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
             m_parent_step_inst_->pwd.Gid()) != 0) {
-    CRANE_ERROR("Failed to chown data dir {} for job #{}", m_log_dir_, job_id);
+    CRANE_ERROR("Failed to chown log file {}", m_log_file_);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
@@ -739,16 +728,6 @@ CraneErrCode ContainerInstance::Spawn() {
     CRANE_ERROR("Failed to start container for #{}.{}: {}", job_id, step_id,
                 rich_err.description());
     return rich_err.code();
-  }
-
-  // chown the log file for user
-  {
-    if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
-              m_parent_step_inst_->pwd.Gid()) != 0) {
-      CRANE_ERROR("Failed to chown container log file for #{}.{}", job_id,
-                  step_id);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
   }
 
   return CraneErrCode::SUCCESS;
