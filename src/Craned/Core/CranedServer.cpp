@@ -98,11 +98,20 @@ grpc::Status CranedServiceImpl::SuspendJobs(
   bool all_ok = true;
   std::vector<std::string> reasons;
 
-  for (job_id_t id : request->job_id_list()) {
-    CraneErrCode err = g_job_mgr->SuspendStep(id);
+  for (job_id_t job_id : request->job_id_list()) {
+    auto stub = g_supervisor_keeper->GetStub(job_id);
+    if (!stub) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("job {}: Supervisor not found", job_id));
+      continue;
+    }
+
+    CraneErrCode err = stub->SuspendJob();
     if (err != CraneErrCode::SUCCESS) {
       all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: {}", id, CraneErrStr(err)));
+      reasons.emplace_back(fmt::format("job {}: {}", job_id, CraneErrStr(err)));
+    } else {
+      CRANE_DEBUG("Job {} suspended successfully", job_id);
     }
   }
 
@@ -124,11 +133,20 @@ grpc::Status CranedServiceImpl::ResumeJobs(
   bool all_ok = true;
   std::vector<std::string> reasons;
 
-  for (job_id_t id : request->job_id_list()) {
-    CraneErrCode err = g_job_mgr->ResumeStep(id);
+  for (job_id_t job_id : request->job_id_list()) {
+    auto stub = g_supervisor_keeper->GetStub(job_id);
+    if (!stub) {
+      all_ok = false;
+      reasons.emplace_back(fmt::format("job {}: Supervisor not found", job_id));
+      continue;
+    }
+
+    CraneErrCode err = stub->ResumeJob();
     if (err != CraneErrCode::SUCCESS) {
       all_ok = false;
-      reasons.emplace_back(fmt::format("job {}: {}", id, CraneErrStr(err)));
+      reasons.emplace_back(fmt::format("job {}: {}", job_id, CraneErrStr(err)));
+    } else {
+      CRANE_DEBUG("Job {} resumed successfully", job_id);
     }
   }
 

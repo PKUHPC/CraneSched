@@ -125,10 +125,6 @@ class JobManager {
 
   void MarkStepAsOrphanedAndTerminateAsync(job_id_t job_id, step_id_t step_id);
 
-  CraneErrCode SuspendStep(task_id_t task_id);
-
-  CraneErrCode ResumeStep(task_id_t task_id);
-
   /**
    *
    * @param jobs completing jobs to clean up

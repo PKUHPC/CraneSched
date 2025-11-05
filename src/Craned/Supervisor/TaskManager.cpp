@@ -597,6 +597,36 @@ std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
   return argv;
 }
 
+CraneErrCode ITaskInstance::Suspend() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Suspending process {} with SIGSTOP", m_pid_);
+    // Send SIGSTOP to the whole process group
+    int err = kill(-m_pid_, SIGSTOP);
+    if (err == 0) {
+      return CraneErrCode::SUCCESS;
+    } else {
+      CRANE_ERROR("Failed to suspend process {}: {}", m_pid_, strerror(errno));
+      return CraneErrCode::ERR_GENERIC_FAILURE;
+    }
+  }
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
+CraneErrCode ITaskInstance::Resume() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Resuming process {} with SIGCONT", m_pid_);
+    // Send SIGCONT to the whole process group
+    int err = kill(-m_pid_, SIGCONT);
+    if (err == 0) {
+      return CraneErrCode::SUCCESS;
+    } else {
+      CRANE_ERROR("Failed to resume process {}: {}", m_pid_, strerror(errno));
+      return CraneErrCode::ERR_GENERIC_FAILURE;
+    }
+  }
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
 std::string ContainerInstance::ParseOCICmdPattern_(
     const std::string& cmd) const {
   auto& pwd = m_parent_step_inst_->pwd;
@@ -1063,6 +1093,129 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   return CraneErrCode::ERR_NON_EXISTENT;
 }
 
+CraneErrCode ContainerInstance::Suspend() {
+  using json = nlohmann::json;
+  if (m_pid_ != 0) {
+    int rc = 0;
+    std::array<char, 256> buffer{};
+    std::string cmd, ret, status;
+    json jret;
+
+    // Check the state of the container
+    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
+                                                  pclose);
+    if (!pipe) {
+      CRANE_TRACE(
+          "[Subprocess] Error in getting container status for suspend: popen() "
+          "failed.");
+      goto ProcessSuspend;
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+           nullptr) {
+      ret += buffer.data();
+    }
+
+    jret = json::parse(std::move(ret), nullptr, false);
+    if (jret.is_discarded() || !jret.contains("status") ||
+        !jret["status"].is_string()) {
+      CRANE_TRACE(
+          "[Subprocess] Error in parsing container status for suspend: {}",
+          cmd);
+      goto ProcessSuspend;
+    }
+
+    status = std::move(jret["status"]);
+    if (status == "running") {
+      // Suspend the container using OCI runtime pause command
+      if (!g_config.Container.RuntimePause.empty()) {
+        cmd = ParseOCICmdPattern_(g_config.Container.RuntimePause);
+        rc = system(cmd.c_str());
+        if (rc == 0) {
+          CRANE_DEBUG("Container for task #{} suspended successfully", task_id);
+          return CraneErrCode::SUCCESS;
+        } else {
+          CRANE_WARN(
+              "[Subprocess] Failed to suspend container for task #{}: error in "
+              "{}",
+              task_id, cmd);
+        }
+      }
+    } else {
+      CRANE_WARN("[Subprocess] Container not in running state for suspend: {}",
+                 status);
+    }
+
+  ProcessSuspend:
+    // Fall back to process group suspend
+    return ITaskInstance::Suspend();
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
+CraneErrCode ContainerInstance::Resume() {
+  using json = nlohmann::json;
+  if (m_pid_ != 0) {
+    int rc = 0;
+    std::array<char, 256> buffer{};
+    std::string cmd, ret, status;
+    json jret;
+
+    // Check the state of the container
+    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
+                                                  pclose);
+    if (!pipe) {
+      CRANE_TRACE(
+          "[Subprocess] Error in getting container status for resume: popen() "
+          "failed.");
+      goto ProcessResume;
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+           nullptr) {
+      ret += buffer.data();
+    }
+
+    jret = json::parse(std::move(ret), nullptr, false);
+    if (jret.is_discarded() || !jret.contains("status") ||
+        !jret["status"].is_string()) {
+      CRANE_TRACE(
+          "[Subprocess] Error in parsing container status for resume: {}", cmd);
+      goto ProcessResume;
+    }
+
+    status = std::move(jret["status"]);
+    if (status == "paused") {
+      // Resume the container using OCI runtime resume command
+      if (!g_config.Container.RuntimeResume.empty()) {
+        cmd = ParseOCICmdPattern_(g_config.Container.RuntimeResume);
+        rc = system(cmd.c_str());
+        if (rc == 0) {
+          CRANE_DEBUG("Container for task #{} resumed successfully", task_id);
+          return CraneErrCode::SUCCESS;
+        } else {
+          CRANE_WARN(
+              "[Subprocess] Failed to resume container for task #{}: error in "
+              "{}",
+              task_id, cmd);
+        }
+      }
+    } else {
+      CRANE_WARN("[Subprocess] Container not in paused state for resume: {}",
+                 status);
+    }
+
+  ProcessResume:
+    // Fall back to process group resume
+    return ITaskInstance::Resume();
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
 CraneErrCode ContainerInstance::Cleanup() {
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     if (!m_temp_path_.empty())
@@ -1498,6 +1651,12 @@ TaskManager::TaskManager()
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
 
+  m_task_signal_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_signal_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTaskSignalQueueCb_();
+      });
+
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
@@ -1663,6 +1822,34 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+std::future<CraneErrCode> TaskManager::SuspendJobAsync() {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Suspend;
+  elem.prom = std::move(promise);
+
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+
+  return future;
+}
+
+std::future<CraneErrCode> TaskManager::ResumeJobAsync() {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Resume;
+  elem.prom = std::move(promise);
+
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+
+  return future;
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1936,6 +2123,65 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   for (auto& not_ready_elem : not_ready_elems) {
     m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
   }
+}
+
+void TaskManager::EvCleanTaskSignalQueueCb_() {
+  TaskSignalQueueElem elem;
+  while (m_task_signal_queue_.try_dequeue(elem)) {
+    CraneErrCode err;
+    switch (elem.action) {
+    case TaskSignalQueueElem::Action::Suspend:
+      err = SuspendRunningTasks_();
+      break;
+    case TaskSignalQueueElem::Action::Resume:
+      err = ResumeSuspendedTasks_();
+      break;
+    default:
+      err = CraneErrCode::ERR_INVALID_PARAM;
+    }
+    elem.prom.set_value(err);
+  }
+}
+
+CraneErrCode TaskManager::SuspendRunningTasks_() {
+  CRANE_DEBUG("Suspending all running tasks");
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  for (const auto& task_id : m_step_.task_ids) {
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task) {
+      CraneErrCode err = task->Suspend();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to suspend task #{}: {}", task_id,
+                    CraneErrStr(err));
+        result = err;
+      } else {
+        CRANE_DEBUG("Task #{} suspended successfully", task_id);
+      }
+    }
+  }
+
+  return result;
+}
+
+CraneErrCode TaskManager::ResumeSuspendedTasks_() {
+  CRANE_DEBUG("Resuming all suspended tasks");
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  for (const auto& task_id : m_step_.task_ids) {
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task) {
+      CraneErrCode err = task->Resume();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to resume task #{}: {}", task_id, CraneErrStr(err));
+        result = err;
+      } else {
+        CRANE_DEBUG("Task #{} resumed successfully", task_id);
+      }
+    }
+  }
+
+  return result;
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {
