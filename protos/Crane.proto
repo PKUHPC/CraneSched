@@ -507,6 +507,7 @@ message QueryTasksInfoRequest {
   TimeInterval filter_end_time_interval = 11;
   repeated TaskType filter_task_types = 12;
   repeated string filter_licenses = 13;
+  repeated string filter_nodes_name = 14;
 
   bool option_include_completed_tasks = 15;
 }

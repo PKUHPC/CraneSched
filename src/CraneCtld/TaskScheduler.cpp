@@ -3013,6 +3013,20 @@ void TaskScheduler::QueryTasksInRam(
   auto task_rng_filter_task_type = [&](auto& it) {
     TaskInCtld& task = *it.second;
     return no_task_types_constraint || req_task_types.contains(task.type);
+  }
+
+  bool no_nodes_name_constraint = request->filter_nodes_name().empty();
+  std::unordered_set<std::string> req_nodes_name(
+      request->filter_nodes_name().begin(), request->filter_nodes_name().end());
+  auto task_rng_filter_nodes_name = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    if (no_nodes_name_constraint) return true;
+    for (const auto& node : task.RuntimeAttr().craned_ids()) {
+      if (req_nodes_name.contains(node)) {
+        return true;
+      }
+    }
+    return false;
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
@@ -3033,6 +3047,8 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_qos) |
                       ranges::views::filter(task_rng_filter_task_type) |
                       ranges::views::filter(task_rng_filter_licenses) |
+                      ranges::views::filter(task_rng_filter_nodes_name) |
+                      ranges::views::filter(task_rng_filter_nodes_name) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
