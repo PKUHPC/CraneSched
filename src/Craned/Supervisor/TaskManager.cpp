@@ -2157,7 +2157,7 @@ CraneErrCode TaskManager::SuspendRunningTasks_() {
   // Daemon steps don't have actual task instances to suspend
   if (m_step_.IsDaemon()) {
     CRANE_DEBUG("Daemon step cannot be suspended, skipping.");
-    return CraneErrCode::ERR_INVALID_OP;
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   CraneErrCode result = CraneErrCode::SUCCESS;
@@ -2185,7 +2185,7 @@ CraneErrCode TaskManager::ResumeSuspendedTasks_() {
   // Daemon steps don't have actual task instances to resume
   if (m_step_.IsDaemon()) {
     CRANE_DEBUG("Daemon step cannot be resumed, skipping.");
-    return CraneErrCode::ERR_INVALID_OP;
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   CraneErrCode result = CraneErrCode::SUCCESS;
