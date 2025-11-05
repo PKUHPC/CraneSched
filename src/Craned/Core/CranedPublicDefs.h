@@ -109,6 +109,15 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct HealthCheckConfig {
+    enum NodeStateEnum { IDLE, ALLOC, MIXED, ANY, NONDRAINED_IDLE };
+    std::string Program;
+    uint64_t Interval{0};
+    NodeStateEnum NodeState;
+    bool Cycle;
+  };
+  HealthCheckConfig HealthCheck;
+
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
