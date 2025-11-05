@@ -461,6 +461,19 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE)
 
+# Install plugin.yaml for both cranectld and craned (644)
+install(FILES ${CMAKE_SOURCE_DIR}/etc/plugin.yaml
+        DESTINATION /etc/crane/
+        RENAME plugin.yaml.sample
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
+install(FILES ${CMAKE_SOURCE_DIR}/etc/plugin.yaml
+        DESTINATION /etc/crane/
+        RENAME plugin.yaml.sample
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
 # Install PAM config
 install(TARGETS pam_crane
         DESTINATION /usr/lib64/security/
