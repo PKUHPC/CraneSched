@@ -338,6 +338,10 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
+  // Only query documents with complete job information
+  // Documents created by InsertSteps only have task_id and steps array
+  filter.append(kvp("has_job_info", true));
+
   mongocxx::options::find option;
   option = option.limit(limit);
 
@@ -356,7 +360,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container      has_job_info
 
   try {
     for (auto view : cursor) {
@@ -1299,10 +1303,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container     has_job_info
 
   // clang-format off
-  std::array<std::string, 38> fields{
+  std::array<std::string, 39> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1317,8 +1321,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
-    // 35 - 39
-    "mem_alloc", "device_map", "container",
+    // 35 - 38
+    "mem_alloc", "device_map", "container", "has_job_info",
   };
   // clang-format on
 
@@ -1329,7 +1333,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::string>                      /*35-39*/
+             int64_t, DeviceMap, std::string, bool>                /*35-38*/
       values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1361,9 +1365,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.type(), task_to_ctld.extra_attr(),
              task_to_ctld.reservation(), task_to_ctld.exclusive(),
              allocated_res_view.CpuCount(),
-             // 35-39
+             // 35-38
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             allocated_res_view.GetDeviceMap(), task_to_ctld.container()};
+             allocated_res_view.GetDeviceMap(), task_to_ctld.container(),
+             true  // has_job_info: mark this document contains complete job info
+      };
 
   return DocumentConstructor_(fields, values);
 }
@@ -1387,10 +1393,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     container
+  // 35 mem_alloc     device_map     container      has_job_info
 
   // clang-format off
-  std::array<std::string, 38> fields{
+  std::array<std::string, 39> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1405,8 +1411,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
-      // 35 - 39
-      "mem_alloc", "device_map", "container",
+      // 35 - 38
+      "mem_alloc", "device_map", "container", "has_job_info",
   };
   // clang-format on
 
@@ -1417,7 +1423,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t, DeviceMap, std::string>                      /*35-39*/
+             int64_t, DeviceMap, std::string, bool>                /*35-38*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1441,9 +1447,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->type, task->extra_attr, task->reservation,
              task->TaskToCtld().exclusive(),
              task->allocated_res_view.CpuCount(),
-             // 35-39
+             // 35-38
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             task->allocated_res_view.GetDeviceMap(), task->container};
+             task->allocated_res_view.GetDeviceMap(), task->container,
+             true  // has_job_info: mark this document contains complete job info
+      };
   return DocumentConstructor_(fields, values);
 }
 
