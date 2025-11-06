@@ -32,7 +32,7 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
-#include "Lua/JobSubmitLua.h"
+#include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
