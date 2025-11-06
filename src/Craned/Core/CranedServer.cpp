@@ -338,16 +338,15 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
                 step_id);
     return Status::OK;
   }
-    auto err =
-        stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Step #{}.{}] Failed to change time limit: {}.", job_id,
-                  step_id, CraneErrStr(err));
-    } else {
-      response->set_ok(true);
-    }
-    return Status::OK;
-
+  auto err =
+      stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("[Step #{}.{}] Failed to change time limit: {}.", job_id,
+                step_id, CraneErrStr(err));
+  } else {
+    response->set_ok(true);
+  }
+  return Status::OK;
 }
 
 grpc::Status CranedServiceImpl::AttachInContainerTask(
