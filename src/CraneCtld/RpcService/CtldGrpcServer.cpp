@@ -360,11 +360,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           std::expected<task_id_t, std::string> result;
           auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
-          if (!lua_result) {
-            if (lua_result.error().description().empty()) {
-              result = std::unexpected(CraneErrStr(lua_result.error().code()));
-            } else {
-              result = std::unexpected(lua_result.error().description());
+          if (lua_result) {
+            auto rich_err = lua_result.value().get();
+            if (rich_err.code() != CraneErrCode::SUCCESS) {
+              if (rich_err.description().empty()) {
+                result = std::unexpected(CraneErrStr(rich_err.code()));
+              } else {
+                result = std::unexpected(rich_err.description());
+              }
             }
           }
 
@@ -477,11 +480,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
   auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
-  if (!lua_result) {
-    response->set_ok(false);
-    response->set_code(lua_result.error().code());
-    response->set_reason(lua_result.error().description());
-    return grpc::Status::OK;
+  if (lua_result) {
+    auto rich_err = lua_result.value().get();
+    if (rich_err.code() != CraneErrCode::SUCCESS) {
+      response->set_ok(false);
+      response->set_code(rich_err.code());
+      response->set_reason(rich_err.description());
+      return grpc::Status::OK;
+    }
   }
 
   auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
@@ -653,19 +659,24 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   }
 
   std::list<task_id_t> task_ids;
-
+  std::list<std::pair<task_id_t, std::future<CraneRichError>>> futures;
   for (const auto task_id : request->task_ids()) {
-    auto lua_result = g_task_scheduler->JobModifyLuaCheck(task_id);
-    if (!lua_result) {
+    auto fut = g_task_scheduler->JobModifyLuaCheck(task_id);
+    if (fut)
+      futures.emplace_back(task_id, std::move(fut.value()));
+  }
+
+  for (auto& [task_id, fut] : futures) {
+    auto rich_err = fut.get();
+    if (rich_err.code() != CraneErrCode::SUCCESS) {
       response->add_not_modified_tasks(task_id);
-      if (lua_result.error().description().empty())
-        response->add_not_modified_reasons(
-            CraneErrStr(lua_result.error().code()));
+      if (rich_err.description().empty())
+        response->add_not_modified_reasons(CraneErrStr(rich_err.code()));
       else
-        response->add_not_modified_reasons(lua_result.error().description());
-      continue;
+        response->add_not_modified_reasons(rich_err.description());
+    } else {
+      task_ids.emplace_back(task_id);
     }
-    task_ids.emplace_back(task_id);
   }
 
   CraneErrCode err;

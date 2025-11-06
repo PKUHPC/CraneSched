@@ -22,11 +22,8 @@
 #  include <lua.hpp>
 #endif
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
-#include <queue>
-
+#include <BS_thread_pool.hpp>
 #include "crane/Logger.h"
 
 namespace crane {
@@ -77,80 +74,54 @@ class LuaEnvironment {
 };
 #endif
 
-template <typename T>
 class LuaPool {
- public:
-  class Handle {
-   public:
-    Handle(LuaPool* pool, std::unique_ptr<T> obj)
-        : m_pool_(pool), m_lua_(std::move(obj)) {}
-
-    Handle(Handle&& other) noexcept
-        : m_pool_(other.m_pool_), m_lua_(std::move(other.m_lua_)) {
-      other.m_pool_ = nullptr;
+  public:
+    LuaPool() {
+      m_thread_pool_ = std::make_unique<BS::thread_pool>(
+        std::thread::hardware_concurrency(),
+        [] { util::SetCurrentThreadName("LuaThreadPool"); });
     }
 
-    Handle& operator=(Handle&& other) noexcept {
-      if (this != &other) {
-        m_pool_ = other.m_pool_;
-        m_lua_ = std::move(other.m_lua_);
-        other.m_pool_ = nullptr;
-      }
-      return *this;
+  std::future<CraneExpectedRich<void>> ExecuteLuaScript(
+    const std::string& lua_script) {
+      auto promise = std::make_shared<std::promise<CraneExpectedRich<void>>>();
+      std::future<CraneExpectedRich<void>> fut = promise->get_future();
+
+      m_thread_pool_->detach_task([lua_script, promise]() {
+        CraneExpectedRich<void> result;
+        auto lua_env = std::make_unique<crane::LuaEnvironment>();
+        if (!lua_env->Init(lua_script))
+          result = std::unexpected(FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to init lua environment"));
+
+        if (!lua_env->LoadLuaScript({}))
+          result =  std::unexpected(FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to load lua script"));
+
+        promise->set_value(result);
+      });
+
+      return fut;
     }
 
-    T* operator->() const { return m_lua_.get(); }
-    T& operator*() const { return *m_lua_; }
-    T* get() const { return m_lua_.get(); }
+  template <typename Callback, typename... Args>
+std::future<CraneRichError> ExecuteLuaScript(Callback&& callback, Args&&... args) {
+    auto promise = std::make_shared<std::promise<CraneRichError>>();
+    std::future<CraneRichError> fut = promise->get_future();
+    auto packed_args = std::forward_as_tuple(std::forward<Args>(args)...);
 
-    ~Handle() {
-      if ((m_pool_ != nullptr) && m_lua_) m_pool_->Release_(std::move(m_lua_));
-    }
-    Handle(const Handle&) = delete;
-    Handle& operator=(const Handle&) = delete;
+    m_thread_pool_->detach_task([callback = std::forward<Callback>(callback),
+                                packed_args = std::move(packed_args), promise]() {
+      CraneRichError result;
 
-   private:
-    LuaPool* m_pool_;
-    std::unique_ptr<T> m_lua_;
-  };
+      result = std::apply(callback, packed_args);
 
-  LuaPool() = default;
+      promise->set_value(result);
+    });
 
-  bool Init(size_t pool_size, const std::string& lua_script) {
-#ifdef HAVE_LUA
-    for (size_t i = 0; i < pool_size; ++i) {
-      auto lua = std::make_unique<T>();
-      if (!lua->Init(lua_script)) {
-        CRANE_ERROR("Lua env init failed");
-        return false;
-      }
-      m_pool_.push(std::move(lua));
-    }
-    return true;
-#endif
-
-    return false;
-  }
-
-  Handle Acquire() {
-    std::unique_lock<std::mutex> lock(m_mutex_);
-    m_cv_.wait(lock, [this] { return !m_pool_.empty(); });
-    auto obj = std::move(m_pool_.front());
-    m_pool_.pop();
-    return Handle(this, std::move(obj));
+    return fut;
   }
 
  private:
-  void Release_(std::unique_ptr<T> obj) {
-    {
-      std::unique_lock<std::mutex> lock(m_mutex_);
-      m_pool_.push(std::move(obj));
-    }
-    m_cv_.notify_one();
-  }
-  std::mutex m_mutex_;
-  std::queue<std::unique_ptr<T>> m_pool_;
-  std::condition_variable m_cv_;
+  std::unique_ptr<BS::thread_pool> m_thread_pool_;
 };
 
 }  // namespace crane

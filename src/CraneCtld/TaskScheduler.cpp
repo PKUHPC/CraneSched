@@ -1560,40 +1560,29 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpectedRich<void> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
-  if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
-  auto handle = g_lua_pool->Acquire();
-  if (handle.get() == nullptr)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
-                      "Failed to acquire Lua interpreter handle."));
-
-  return handle->JobSubmit(task);
+std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
+  if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
+  return g_lua_pool->ExecuteLuaScript(JobSubmitLua::JobSubmit, task, g_config.JobSubmitLuaScript);
 }
 
-CraneExpectedRich<void> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {
-  if (g_config.JobSubmitLuaScript.empty()) return CraneExpectedRich<void>{};
-  auto handle = g_lua_pool->Acquire();
-  if (handle.get() == nullptr)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_SYSTEM_ERR,
-                      "Failed to acquire Lua interpreter handle."));
+std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {
+  if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
 
   {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     auto pd_iter = m_pending_task_map_.find(task_id);
     if (pd_iter != m_pending_task_map_.end())
-      return handle->JobModify(*pd_iter->second);
+      return g_lua_pool->ExecuteLuaScript(JobSubmitLua::JobModify, *pd_iter->second, g_config.JobSubmitLuaScript);
   }
 
   {
     LockGuard running_guard(&m_running_task_map_mtx_);
     auto rn_iter = m_running_task_map_.find(task_id);
     if (rn_iter != m_running_task_map_.end())
-      return handle->JobModify(*rn_iter->second);
+      return g_lua_pool->ExecuteLuaScript(JobSubmitLua::JobModify, *rn_iter->second, g_config.JobSubmitLuaScript);
   }
 
-  return CraneExpectedRich<void>{};
+  return std::nullopt;
 }
 
 CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
