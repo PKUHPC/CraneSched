@@ -154,7 +154,6 @@ nav:
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
-      - Container Support: deployment/configuration/container.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
