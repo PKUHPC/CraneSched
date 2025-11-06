@@ -989,6 +989,10 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
     sec_ctx->mutable_run_as_group()->set_value(ca_meta.run_as_group());
   }
 
+  // workdir
+  if (!ca_meta.workdir().empty())
+    m_container_config_.set_working_dir(ca_meta.workdir());
+
   // command and args
   if (!ca_meta.command().empty())
     m_container_config_.mutable_command()->Add()->assign(ca_meta.command());
