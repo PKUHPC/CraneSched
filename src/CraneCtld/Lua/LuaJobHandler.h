@@ -29,18 +29,20 @@
 
 namespace Ctld {
 
-class JobSubmitLua {
+class LuaJobHandler {
  public:
-  explicit JobSubmitLua() = default;
-  ~JobSubmitLua() = default;
+  explicit LuaJobHandler() = default;
+  ~LuaJobHandler() = default;
 
-  JobSubmitLua(const JobSubmitLua&) = delete;
-  JobSubmitLua& operator=(const JobSubmitLua&) = delete;
-  JobSubmitLua(JobSubmitLua&&) = delete;
-  JobSubmitLua& operator=(JobSubmitLua&&) = delete;
+  LuaJobHandler(const LuaJobHandler&) = delete;
+  LuaJobHandler& operator=(const LuaJobHandler&) = delete;
+  LuaJobHandler(LuaJobHandler&&) = delete;
+  LuaJobHandler& operator=(LuaJobHandler&&) = delete;
 
-  static CraneRichError JobSubmit(TaskInCtld& task_in_ctld, const std::string& lua_script);
-  static CraneRichError JobModify(TaskInCtld& task_in_ctld, const std::string& lua_script);
+  static CraneRichError JobSubmit(TaskInCtld& task_in_ctld,
+                                  const std::string& lua_script);
+  static CraneRichError JobModify(TaskInCtld& task_in_ctld,
+                                  const std::string& lua_script);
 
  private:
 #ifdef HAVE_LUA
@@ -48,13 +50,13 @@ class JobSubmitLua {
   static const luaL_Reg kCraneFunctions[];
   static const char* kReqFxns[];
 
-  static int GetQosPriority_(lua_State* lua_state);
+  static int GetQosPriorityCb_(lua_State* lua_state);
 
-  static int GetJobEnvFieldName_(lua_State* lua_state);
-  static int GetJobReqFieldName_(lua_State* lua_state);
-  static int SetJobEnvField_(lua_State* lua_state);
-  static int SetJobReqField_(lua_State* lua_state);
-  static int GetPartRecFieldName_(lua_State* lua_state);
+  static int GetJobEnvFieldNameCb_(lua_State* lua_state);
+  static int GetJobReqFieldNameCb_(lua_State* lua_state);
+  static int SetJobEnvFieldCb_(lua_State* lua_state);
+  static int SetJobReqFieldCb_(lua_State* lua_state);
+  static int GetPartRecFieldNameCb_(lua_State* lua_state);
   static int GetJobEnvField_(const TaskInCtld& job_desc, const char* name,
                              lua_State* lua_state);
   static int GetJobReqField_(const TaskInCtld& job_desc, const char* name,
@@ -62,12 +64,20 @@ class JobSubmitLua {
   static int GetPartRecField_(const crane::grpc::PartitionInfo& partition_meta,
                               const char* name, lua_State* lua_state);
 
-  static void UpdateJobGloable_(const crane::LuaEnvironment& lua_env, crane::grpc::QueryTasksInfoReply* task_info_reply);
-  static void UpdateJobResvGloable_(const crane::LuaEnvironment& lua_env, crane::grpc::QueryReservationInfoReply* resv_info_reply);
-  static void PushJobDesc_(TaskInCtld* task, const crane::LuaEnvironment& lua_env);
-  static void PushPartitionList_(const crane::LuaEnvironment& lua_env, const std::string& user_name,
-                          const std::string& account, crane::grpc::QueryPartitionInfoReply* partition_info_reply);
-  static void PushJobRec_(const crane::LuaEnvironment& lua_env, crane::grpc::TaskInfo* task);
+  static void UpdateJobGloable_(
+      const crane::LuaEnvironment& lua_env,
+      crane::grpc::QueryTasksInfoReply* task_info_reply);
+  static void UpdateJobResvGloable_(
+      const crane::LuaEnvironment& lua_env,
+      crane::grpc::QueryReservationInfoReply* resv_info_reply);
+  static void PushJobDesc_(TaskInCtld* task,
+                           const crane::LuaEnvironment& lua_env);
+  static void PushPartitionList_(
+      const crane::LuaEnvironment& lua_env, const std::string& user_name,
+      const std::string& account,
+      crane::grpc::QueryPartitionInfoReply* partition_info_reply);
+  static void PushJobRec_(const crane::LuaEnvironment& lua_env,
+                          crane::grpc::TaskInfo* task);
   static int GetJobReqFieldIndex_(lua_State* lua_state);
   static int JobRecFieldIndex_(lua_State* lua_state);
   static int PartitionRecFieldIndex_(lua_State* lua_state);

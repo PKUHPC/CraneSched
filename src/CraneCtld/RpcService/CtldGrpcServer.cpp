@@ -25,7 +25,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
-#include "Lua/JobSubmitLua.h"
+#include "Lua/LuaJobHandler.h"
 #include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/PluginClient.h"

@@ -19,8 +19,8 @@ add_executable(cranectld
         Security/VaultClient.cpp
         Security/VaultClient.h
 
-        Lua/JobSubmitLua.cpp
-        Lua/JobSubmitLua.h
+        Lua/LuaJobHandler.cpp
+        Lua/LuaJobHandler.h
 
         RpcService/CranedKeeper.h
         RpcService/CranedKeeper.cpp
