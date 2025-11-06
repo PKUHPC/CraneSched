@@ -20,6 +20,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         fpm
         yaml-cpp
         Subid::subid
+        bs_thread_pool
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
 )
 

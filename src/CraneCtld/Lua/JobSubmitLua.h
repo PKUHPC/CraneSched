@@ -39,9 +39,8 @@ class JobSubmitLua {
   JobSubmitLua(JobSubmitLua&&) = delete;
   JobSubmitLua& operator=(JobSubmitLua&&) = delete;
 
-  bool Init(const std::string& lua_script);
-  CraneExpectedRich<void> JobSubmit(TaskInCtld& task_in_ctld);
-  CraneExpectedRich<void> JobModify(TaskInCtld& task_in_ctld);
+  static CraneRichError JobSubmit(TaskInCtld& task_in_ctld, const std::string& lua_script);
+  static CraneRichError JobModify(TaskInCtld& task_in_ctld, const std::string& lua_script);
 
  private:
 #ifdef HAVE_LUA
@@ -63,12 +62,12 @@ class JobSubmitLua {
   static int GetPartRecField_(const crane::grpc::PartitionInfo& partition_meta,
                               const char* name, lua_State* lua_state);
 
-  void UpdateJobGloable_();
-  void UpdateJobResvGloable_();
-  void PushJobDesc_(TaskInCtld* task);
-  void PushPartitionList_(const std::string& user_name,
-                          const std::string& account);
-  void PushJobRec(crane::grpc::TaskInfo* task);
+  static void UpdateJobGloable_(const crane::LuaEnvironment& lua_env, crane::grpc::QueryTasksInfoReply* task_info_reply);
+  static void UpdateJobResvGloable_(const crane::LuaEnvironment& lua_env, crane::grpc::QueryReservationInfoReply* resv_info_reply);
+  static void PushJobDesc_(TaskInCtld* task, const crane::LuaEnvironment& lua_env);
+  static void PushPartitionList_(const crane::LuaEnvironment& lua_env, const std::string& user_name,
+                          const std::string& account, crane::grpc::QueryPartitionInfoReply* partition_info_reply);
+  static void PushJobRec_(const crane::LuaEnvironment& lua_env, crane::grpc::TaskInfo* task);
   static int GetJobReqFieldIndex_(lua_State* lua_state);
   static int JobRecFieldIndex_(lua_State* lua_state);
   static int PartitionRecFieldIndex_(lua_State* lua_state);
@@ -81,14 +80,9 @@ class JobSubmitLua {
                         const char* name);
 
   static void PushResourceView_(lua_State* L, const ResourceView& res);
-
-  std::unique_ptr<crane::LuaEnvironment> m_lua_env_;
-  crane::grpc::QueryTasksInfoReply m_task_info_reply_;
-  crane::grpc::QueryReservationInfoReply m_resv_info_reply_;
-  crane::grpc::QueryPartitionInfoReply m_partition_info_reply_;
 #endif
 };
 
 }  // namespace Ctld
 
-inline std::unique_ptr<crane::LuaPool<Ctld::JobSubmitLua>> g_lua_pool;
+inline std::unique_ptr<crane::LuaPool> g_lua_pool;
