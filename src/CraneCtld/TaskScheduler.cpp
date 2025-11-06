@@ -3010,10 +3010,11 @@ void TaskScheduler::QueryTasksInRam(
   bool no_task_types_constraint = request->filter_task_types().empty();
   std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
                                          request->filter_task_types().end());
-  auto task_rng_filter_task_type = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_task_types_constraint || req_task_types.contains(task.type);
-  }
+  auto task_rng_filter_task_type =
+      [&](auto& it) {
+        TaskInCtld& task = *it.second;
+        return no_task_types_constraint || req_task_types.contains(task.type);
+      }
 
   bool no_nodename_list_constraint = request->filter_nodename_list().empty();
   std::unordered_set<std::string> req_nodename_list(
