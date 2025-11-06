@@ -82,19 +82,19 @@ class LuaPool {
         [] { util::SetCurrentThreadName("LuaThreadPool"); });
     }
 
-  std::future<CraneExpectedRich<void>> ExecuteLuaScript(
+  std::future<CraneRichError> ExecuteLuaScript(
     const std::string& lua_script) {
-      auto promise = std::make_shared<std::promise<CraneExpectedRich<void>>>();
-      std::future<CraneExpectedRich<void>> fut = promise->get_future();
+      auto promise = std::make_shared<std::promise<CraneRichError>>();
+      std::future<CraneRichError> fut = promise->get_future();
 
       m_thread_pool_->detach_task([lua_script, promise]() {
-        CraneExpectedRich<void> result;
+        CraneRichError result;
         auto lua_env = std::make_unique<crane::LuaEnvironment>();
         if (!lua_env->Init(lua_script))
-          result = std::unexpected(FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to init lua environment"));
+          result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to init lua environment");
 
         if (!lua_env->LoadLuaScript({}))
-          result =  std::unexpected(FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to load lua script"));
+          result =  FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to load lua script");
 
         promise->set_value(result);
       });
