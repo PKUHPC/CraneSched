@@ -215,7 +215,8 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   auto cb_step_cancel =
       [writer_weak_ptr](StepInteractiveMeta::StepCancelArgs const &args) {
         auto &[job_id, step_id] = args;
-        CRANE_TRACE("Sending TaskCancelRequest in task_cancel", job_id);
+        CRANE_TRACE("[Step #{}.{}] Sending TaskCancelRequest in task_cancel",
+                    job_id, step_id);
         if (auto writer = writer_weak_ptr.lock(); writer)
           writer->WriteTaskCancelRequest(job_id, step_id);
       };

@@ -718,7 +718,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
 
   {
     std::list<std::string> included_list{};
-    util::ParseHostList(step_to_ctld.excludes(), &included_list);
+    util::ParseHostList(step_to_ctld.nodelist(), &included_list);
     included_nodes = included_list | std::ranges::to<std::unordered_set>();
   }
 
@@ -872,7 +872,7 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   // Step finish: configure failed or execution status change
   if (step_finished || step_configure_failed) {
     if (this->ia_meta.has_value()) {
-      auto meta = this->ia_meta.value();
+      auto& meta = this->ia_meta.value();
       if (!meta.has_been_cancelled_on_front_end) {
         meta.has_been_cancelled_on_front_end = true;
         meta.cb_step_cancel({.job_id = job_id, .step_id = step_id});
