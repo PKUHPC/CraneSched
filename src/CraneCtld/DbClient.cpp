@@ -341,15 +341,16 @@ bool MongodbClient::FetchJobRecords(
     }));
   }
 
-  bool has_nodenames_constraint = !request->filter_nodes_name().empty();
-  if (has_nodenames_constraint) {
-    filter.append(kvp("nodesname", [&request](sub_document nodename_list_doc) {
-      array nodename_list_array;
-      for (const auto& nodename : request->filter_nodes_name()) {
-        nodename_list_array.append(nodename);
-      }
-      nodename_list_doc.append(kvp("$in", nodename_list_array));
-    }));
+  bool has_nodename_list_constraint = !request->filter_nodename_list().empty();
+  if (has_nodename_list_constraint) {
+    filter.append(
+        kvp("nodename_list", [&request](sub_document nodename_list_doc) {
+          array nodename_list_array;
+          for (const auto& nodename : request->filter_nodename_list()) {
+            nodename_list_array.append(nodename);
+          }
+          nodename_list_doc.append(kvp("$in", nodename_list_array));
+        }));
   }
 
   // Only query documents with complete job information
@@ -385,7 +386,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
+  // 35 mem_alloc     device_map     meta_container      has_job_info  nodename_list
 
   try {
     for (auto view : cursor) {
@@ -1563,9 +1564,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  bsoncxx::builder::basic::array craned_nodesname_arr;
-  for (const auto& name : runtime_attr.craned_ids()) {
-    craned_nodesname_arr.append(name);
+  bsoncxx::builder::basic::array nodename_list_array;
+  for (const auto& nodename : runtime_attr.craned_ids()) {
+    nodename_list_array.append(nodename);
   }
 
   // 0  task_id       task_db_id     mod_time       deleted       account
@@ -1576,7 +1577,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     container     has_job_info  licenses_alloc
-  // 40 nodesname
+  // 40 nodename_list
 
   // clang-format off
   std::array<std::string, 40> fields{
@@ -1597,7 +1598,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
     // 40 - 44
-    "nodesname"
+    "nodename_list"
   };
   // clang-format on
 
@@ -1649,7 +1650,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
-                 bsoncxx::array::value{craned_nodesname_arr.view()};
+                 bsoncxx::array::value{nodename_list_array.view()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1672,9 +1673,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  bsoncxx::builder::basic::array craned_nodesname_arr;
-  for (const auto& name : task->CranedIds()) {
-    craned_nodesname_arr.append(name);
+  bsoncxx::builder::basic::array nodename_list_array;
+  for (const auto& nodename : task->CranedIds()) {
+    nodename_list_array.append(nodename);
   }
 
   // 0  task_id       task_db_id     mod_time       deleted       account
@@ -1685,7 +1686,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_container      has_job_info licenses_alloc
-  // 40 nodesname
+  // 40 nodename_list
 
   // clang-format off
   std::array<std::string, 40> fields{
@@ -1706,7 +1707,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
       // 40 - 44
-      "nodesname"
+      "nodename_list"
   };
   // clang-format on
 
@@ -1749,7 +1750,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              task->licenses_count, 
              // 40-44
-            bsoncxx::array::value{craned_nodesname_arr.view()};
+            bsoncxx::array::value{nodename_list_array.view()};
   return DocumentConstructor_(fields, values);
 }
 
