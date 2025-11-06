@@ -136,6 +136,7 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
+    shadow-utils-subid-devel \
     automake
 ```
 
