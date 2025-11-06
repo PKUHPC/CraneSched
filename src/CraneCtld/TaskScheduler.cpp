@@ -2959,26 +2959,20 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
-<<<<<<< HEAD
   bool no_task_types_constraint = request->filter_task_types().empty();
   std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
                                          request->filter_task_types().end());
-  auto task_rng_filter_task_type = [&](auto& it) {
-    TaskInCtld& task = *it.second;
-    return no_task_types_constraint || req_task_types.contains(task.type);
-  }
+  auto task_rng_filter_task_type =
+      [&](auto& it) {
+        TaskInCtld& task = *it.second;
+        return no_task_types_constraint || req_task_types.contains(task.type);
+      }
 
-  bool no_nodes_name_constraint = request->filter_nodes_name().empty();
-  std::unordered_set<std::string> req_nodes_name(
-      request->filter_nodes_name().begin(), request->filter_nodes_name().end());
-  auto task_rng_filter_nodes_name = [&](auto& it) {
-=======
   bool no_nodename_list_constraint = request->filter_nodename_list().empty();
   std::unordered_set<std::string> req_nodename_list(
       request->filter_nodename_list().begin(),
       request->filter_nodename_list().end());
   auto task_rng_filter_nodename_list = [&](auto& it) {
->>>>>>> c7c83af8 (opt code)
     TaskInCtld& task = *it.second;
     if (no_nodename_list_constraint) return true;
     for (const auto& nodename : task.RuntimeAttr().craned_ids()) {
