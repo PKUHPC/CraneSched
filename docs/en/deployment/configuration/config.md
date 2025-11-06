@@ -265,6 +265,61 @@ CraneCtldForeground: false
 CranedForeground: false
 ```
 
+
+### Supervisor Configuration
+
+Supervisor is CraneSched's job execution management component, responsible for controlling job steps on compute nodes.
+
+```yaml
+Supervisor:
+  # Path to supervisor executable
+  Path: /usr/libexec/csupervisor
+  
+  # Supervisor log level: trace, debug, info, warn, error
+  DebugLevel: trace
+  
+  # Log directory (relative to CraneBaseDir)
+  LogDir: supervisor
+```
+
+**Supervisor Parameters:**
+
+- **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
+- **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
+- **LogDir**: Directory for supervisor log files, relative to the `CraneBaseDir` setting. Log files are helpful for diagnosing job execution issues.
+
+!!! tip
+    When troubleshooting job execution problems, you can temporarily set `DebugLevel` to `debug` or `trace` for more detailed log information.
+
+## Container Support
+
+CraneSched supports running jobs in containers through CRI (Container Runtime Interface):
+
+```yaml
+Container:
+  # Enable container support (experimental)
+  Enabled: false
+  
+  # Temporary directory for container data (relative to CraneBaseDir)
+  TempDir: supervisor/containers/
+  
+  # Path to container runtime socket
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  
+  # Path to image service socket (usually same as RuntimeEndpoint)
+  ImageEndpoint: /run/containerd/containerd.sock
+```
+
+!!! info "Experimental Feature"
+    Container support is currently experimental. There may be limitations and problems.
+
+**Requirements:**
+
+- CRI-compatible runtime (containerd or CRI-O) installed on compute nodes
+- Runtime socket accessible with appropriate permissions
+- Container images available or accessible from registries
+
+
 ## Applying Changes
 
 After modifying the configuration:
