@@ -541,71 +541,52 @@ std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
-int TimeStr2Mins(std::string_view input) {
-  // Trim whitespace
-  auto ltrim = [](std::string_view sv) {
-    size_t i = 0;
-    while (i < sv.size() && std::isspace(static_cast<unsigned char>(sv[i])))
-      ++i;
-    return sv.substr(i);
-  };
-  auto rtrim = [](std::string_view sv) {
-    size_t i = sv.size();
-    while (i > 0 && std::isspace(static_cast<unsigned char>(sv[i - 1]))) --i;
-    return sv.substr(0, i);
-  };
-  input = ltrim(rtrim(input));
+int TimeStr2Mins(absl::string_view input) {
+  input = absl::StripAsciiWhitespace(input);
 
-  // Case-insensitive compare
-  auto iequals = [](std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-      if (std::tolower(static_cast<unsigned char>(a[i])) !=
-          std::tolower(static_cast<unsigned char>(b[i])))
-        return false;
-    return true;
-  };
-
-  if (input.empty()) return -1;
-  if (iequals(input, "-1") || iequals(input, "INFINITE") ||
-      iequals(input, "UNLIMITED"))
+  if (input.empty() ||
+      absl::EqualsIgnoreCase(input, "-1") ||
+      absl::EqualsIgnoreCase(input, "INFINITE") ||
+      absl::EqualsIgnoreCase(input, "UNLIMITED")) {
     return -1;
+      }
 
-  // Check valid characters (digits, ':', '-', whitespace)
-  if (!std::all_of(input.begin(), input.end(), [](char c) {
-        return std::isdigit(static_cast<unsigned char>(c)) || c == ':' ||
-               c == '-' || std::isspace(static_cast<unsigned char>(c));
-      }))
-    return -1;
-
-  int days = 0, hours = 0, minutes = 0, seconds = 0;
-  auto dash_pos = input.find('-');
-  if (dash_pos != std::string_view::npos) {
-    // Format: days-hours:minutes:seconds
-    std::string day_part(input.substr(0, dash_pos));
-    std::string rest_part(input.substr(dash_pos + 1));
-    std::replace(rest_part.begin(), rest_part.end(), ':', ' ');
-    std::istringstream iss_day(day_part);
-    iss_day >> days;
-    std::istringstream iss_rest(rest_part);
-    iss_rest >> hours >> minutes >> seconds;
-  } else {
-    // Format: hours:minutes:seconds, minutes:seconds, or minutes
-    int colon_count = std::count(input.begin(), input.end(), ':');
-    std::string temp(input);
-    std::replace(temp.begin(), temp.end(), ':', ' ');
-    std::istringstream iss(temp);
-    if (colon_count == 2) {
-      iss >> hours >> minutes >> seconds;
-    } else if (colon_count == 1) {
-      iss >> minutes >> seconds;
-    } else {
-      iss >> minutes;
+  for (char c : input) {
+    if (!(absl::ascii_isdigit(c) || c == ':' || c == '-' || absl::ascii_isspace(c))) {
+      return -1;
     }
   }
-  int total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
-  int total_minutes = (total_seconds + 59) / 60;  // round up
-  return total_minutes;
+
+  int days = 0, hours = 0, mins = 0, secs = 0;
+  std::vector<absl::string_view> parts;
+
+  size_t dash_pos = input.find('-');
+  absl::string_view time_part = input;
+  if (dash_pos != absl::string_view::npos) {
+    absl::string_view day_str = input.substr(0, dash_pos);
+    if (!absl::SimpleAtoi(absl::StripAsciiWhitespace(day_str), &days)) return -1;
+    time_part = input.substr(dash_pos + 1);
+  }
+
+  for (auto p : absl::StrSplit(time_part, ':')) {
+    parts.push_back(absl::StripAsciiWhitespace(p));
+  }
+
+  if (parts.size() > 3 || parts.empty()) return -1;
+
+  auto parse = [](absl::string_view sv, int& out) {
+    return absl::SimpleAtoi(sv, &out);
+  };
+
+  if (parts.size() == 3) {
+    if (!parse(parts[0], hours) || !parse(parts[1], mins) || !parse(parts[2], secs)) return -1;
+  } else if (parts.size() == 2) {
+    if (!parse(parts[0], mins) || !parse(parts[1], secs)) return -1;
+  } else if (parts.size() == 1) {
+    if (!parse(parts[0], mins)) return -1;
+  }
+
+  return (days * 1440) + hours * 60 + mins + (secs > 0 ? 1 : 0);
 }
 
 }  // namespace util
