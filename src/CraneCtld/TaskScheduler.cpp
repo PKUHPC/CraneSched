@@ -1269,11 +1269,14 @@ void TaskScheduler::ScheduleThread_() {
 void TaskScheduler::StepScheduleThread_() {
   util::SetCurrentThreadName("StepSchedThread");
   while (!m_thread_stop_) {
-    absl::MutexLock running_lk(&m_running_task_map_mtx_);
-    absl::MutexLock step_lk(&m_step_num_mutex_);
-    for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
-      // TODO: schedule here
+    {
+      absl::MutexLock running_lk(&m_running_task_map_mtx_);
+      absl::MutexLock step_lk(&m_step_num_mutex_);
+      for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
+        // TODO: schedule here
+      }
     }
+    std::this_thread::sleep_for(100ms);
   }
 }
 
@@ -1570,64 +1573,76 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     filter_uname = entry.Username();
   }
 
-  auto rng_filter_state = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_state = [&](TaskInCtld* task) {
     return request.filter_state() == crane::grpc::Invalid ||
            task->Status() == request.filter_state();
   };
 
-  auto rng_filter_partition = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_partition = [&](TaskInCtld* task) {
     return request.filter_partition().empty() ||
            task->partition_id == request.filter_partition();
   };
 
-  auto rng_filter_account = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_account = [&](TaskInCtld* task) {
     return request.filter_account().empty() ||
            task->account == request.filter_account();
   };
 
-  auto rng_filter_task_name = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_task_name = [&](TaskInCtld* task) {
     return request.filter_task_name().empty() ||
            task->name == request.filter_task_name();
   };
 
-  auto rng_filter_user_name = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_user_name = [&](TaskInCtld* task) {
     return filter_uname.empty() || task->Username() == filter_uname;
   };
 
+  ranges::any_view<TaskInCtld*, ranges::category::forward> pd_input_rng;
+  ranges::any_view<TaskInCtld*, ranges::category::forward> rn_input_rng;
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> filter_ids;
   for (auto& [job_id, step_ids] : request.filter_ids()) {
     filter_ids[job_id].insert(step_ids.steps().begin(), step_ids.steps().end());
   }
-  auto rng_filer_task_ids = [&](auto& it) {
-    auto* task = it.second.get();
-    if (request.filter_ids().empty()) return true;
+  if (filter_ids.empty()) {
+    auto get_raw_ptr = [](auto& ptr) { return ptr.get(); };
+    pd_input_rng = m_pending_task_map_ | ranges::views::values |
+                   ranges::views::transform(get_raw_ptr);
+    rn_input_rng = m_running_task_map_ | ranges::views::values |
+                   ranges::views::transform(get_raw_ptr);
+  } else {
+    auto filter_nullptr = [](auto task_ptr) { return task_ptr != nullptr; };
+    pd_input_rng =
+        filter_ids |
+        ranges::views::transform([this, &reply](auto& it) -> TaskInCtld* {
+          job_id_t job_id = it.first;
+          auto pd_it = m_pending_task_map_.find(job_id);
+          if (pd_it != m_pending_task_map_.end()) {
+            return pd_it->second.get();
+          }
+          (*reply.mutable_not_cancelled_job_steps())[job_id].set_reason(
+              "Not found");
+          return nullptr;
+        }) |
+        ranges::views::filter(filter_nullptr);
 
-    auto iter = filter_ids.find(task->TaskId());
-    if (iter == filter_ids.end()) {
-      auto& not_found_jobs = *reply.mutable_not_cancelled_job_steps();
-      not_found_jobs[task->TaskId()];
-      return false;
-    } else if (task->Status() == crane::grpc::TaskStatus::Pending)
-      for (auto step_id : iter->second) {
-        auto& not_cancelled_job_steps =
-            (*reply.mutable_not_cancelled_job_steps())[task->TaskId()];
-        not_cancelled_job_steps.mutable_step_ids()->Add(step_id);
-        not_cancelled_job_steps.mutable_step_reasons()->Add(
-            "Invalid Step For Pending Job");
-      }
-
-    return true;
-  };
+    rn_input_rng =
+        filter_ids |
+        ranges::views::transform([this, &reply](auto& it) -> TaskInCtld* {
+          job_id_t job_id = it.first;
+          auto rn_it = m_running_task_map_.find(job_id);
+          if (rn_it != m_running_task_map_.end()) {
+            return rn_it->second.get();
+          }
+          (*reply.mutable_not_cancelled_job_steps())[job_id].set_reason(
+              "Not found");
+          return nullptr;
+        }) |
+        ranges::views::filter(filter_nullptr);
+  }
 
   std::unordered_set<std::string> filter_nodes_set(
       std::begin(request.filter_nodes()), std::end(request.filter_nodes()));
-  auto rng_filter_nodes = [&](auto& it) {
-    auto* task = it.second.get();
+  auto rng_filter_nodes = [&](TaskInCtld* task) {
     if (request.filter_nodes().empty()) return true;
 
     for (const auto& node : task->CranedIds())
@@ -1636,10 +1651,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     return false;
   };
 
-  auto rng_get_job_id = [&](auto& it) {
-    auto* task = it.second.get();
-    return task->TaskId();
-  };
+  auto rng_get_job_id = [&](TaskInCtld* task) { return task->TaskId(); };
 
   auto fn_cancel_pending_task = [&](auto task_id) {
     CRANE_TRACE("Cancelling pending task #{}", task_id);
@@ -1665,8 +1677,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     }
   };
 
-  auto fn_cancel_running_task = [&](auto& it) {
-    TaskInCtld* task = it.second.get();
+  auto fn_cancel_running_task = [&](TaskInCtld* task) {
     task_id_t task_id = task->TaskId();
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
@@ -1686,7 +1697,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           if (!step) {
             auto& not_found_jobs = *reply.mutable_not_cancelled_job_steps();
             not_found_jobs[task_id].mutable_step_ids()->Add(step_id);
-            not_found_jobs[task_id].mutable_step_reasons()->Add("Invalid Step");
+            not_found_jobs[task_id].mutable_step_reasons()->Add(
+                "Step not found");
           } else {
             cancel_steps.push_back(static_cast<CommonStepInCtld*>(step));
           }
@@ -1718,11 +1730,10 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
                         ranges::views::filter(rng_filter_account) |
                         ranges::views::filter(rng_filter_user_name) |
                         ranges::views::filter(rng_filter_task_name) |
-                        ranges::views::filter(rng_filer_task_ids) |
                         ranges::views::filter(rng_filter_nodes);
 
-  auto pending_task_id_rng = m_pending_task_map_ | joined_filters |
-                             ranges::views::transform(rng_get_job_id);
+  auto pending_task_id_rng =
+      pd_input_rng | joined_filters | ranges::views::transform(rng_get_job_id);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -1732,7 +1743,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   // pending_task_rng.
   ranges::for_each(pending_task_id_rng, fn_cancel_pending_task);
 
-  auto running_task_rng = m_running_task_map_ | joined_filters;
+  auto running_task_rng = rn_input_rng | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
 
   return reply;
@@ -2597,7 +2608,7 @@ void TaskScheduler::SubmitStepTimerCb_() {
 
 void TaskScheduler::SubmitStepAsyncCb_() {
   if (m_submit_step_queue_.size_approx() >= kSubmitTaskBatchNum)
-    m_clean_submit_queue_handle_->send();
+    m_clean_step_submit_queue_handle_->send();
 }
 
 void TaskScheduler::CleanStepSubmitQueueCb_() {
@@ -2615,6 +2626,7 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
   auto actual_size =
       m_submit_step_queue_.try_dequeue_bulk(elems.begin(), approximate_size);
   if (actual_size == 0) return;
+  elems.resize(actual_size);
 
   // The order of element inside the bulk is reverse.
   for (uint32_t i = 0; i < elems.size(); i++) {
