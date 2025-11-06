@@ -937,7 +937,7 @@ void Cgroup::Destroy() {
     int err;
     if ((err = cgroup_delete_cgroup_ext(
              m_cgroup_,
-             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+             CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION))) {
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
     }
@@ -998,7 +998,8 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
 bool CgroupV1::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
   // For cgroup v1, cpuset controller is separate
   if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
-    CRANE_WARN("CPUSET controller is not mounted, cannot set CPU binding for v1");
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v1");
     return false;
   }
 
@@ -1301,7 +1302,8 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
 bool CgroupV2::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
   // For cgroup v2, cpuset.cpus is under the cpuset controller
   if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
-    CRANE_WARN("CPUSET controller is not mounted, cannot set CPU binding for v2");
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v2");
     return false;
   }
 
@@ -1400,8 +1402,9 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     // No need to attach ebpf prog twice.
     if (!m_bpf_attached_) {
       if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
-                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
-        CRANE_ERROR("Failed to attach BPF program");
+                          cgroup_fd, BPF_CGROUP_DEVICE,
+                          BPF_F_ALLOW_MULTI) < 0) {
+        CRANE_ERROR("Failed to attach BPF program: {}", strerror(errno));
         close(cgroup_fd);
         return false;
       }

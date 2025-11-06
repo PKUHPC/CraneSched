@@ -247,7 +247,7 @@ void StartServer() {
         Craned::Supervisor::StepStatus::Running;
   } else {
     ::Craned::Supervisor::g_runtime_status.Status =
-        Craned::Supervisor::StepStatus::Configured;
+        Craned::Supervisor::StepStatus::Starting;
   }
 
   g_craned_client->StepStatusChangeAsync(

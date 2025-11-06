@@ -15,12 +15,22 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "SupervisorKeeper.h"
+#include "SupervisorManager.h"
 
 #include <protos/Supervisor.grpc.pb.h>
 
 namespace Craned {
 using grpc::ClientContext;
+
+SupervisorStub::SupervisorStub(job_id_t job_id, step_id_t step_id) {
+  auto sock_path = fmt::format("unix://{}/step_{}.{}.sock",
+                               kDefaultSupervisorUnixSockDir, job_id, step_id);
+  InitChannelAndStub_(sock_path);
+}
+
+SupervisorStub::SupervisorStub(const std::string& endpoint) {
+  InitChannelAndStub_(endpoint);
+}
 
 CraneErrCode SupervisorStub::ExecuteStep() {
   ClientContext context;
@@ -114,15 +124,15 @@ CraneErrCode SupervisorStub::ShutdownSupervisor() {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-void SupervisorStub::InitChannelAndStub(const std::string& endpoint) {
+void SupervisorStub::InitChannelAndStub_(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = crane::grpc::supervisor::Supervisor::NewStub(m_channel_);
 }
 
 CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                  std::pair<pid_t, StepStatus>>>
-SupervisorKeeper::InitAndGetRecoveredMap() {
+                                  SupervisorManager::SupervisorRecoverInfo>>
+SupervisorManager::InitAndGetRecoveredMap() {
   static constexpr LazyRE2 supervisor_sock_pattern(
       R"(step_(\d+)\.(\d+)\.sock$)");
   try {
@@ -140,16 +150,15 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
         files.emplace_back(it.path());
     }
 
-    absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                        std::pair<pid_t, StepStatus>>
+    absl::flat_hash_map<std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>
         supervisor_status_map;
     supervisor_status_map.reserve(files.size());
     std::latch latch(files.size());
+    absl::Mutex mtx;
     for (const auto& file : files) {
-      g_thread_pool->detach_task([this, file, &latch, &supervisor_status_map] {
+      g_thread_pool->detach_task([file, &latch, &mtx, &supervisor_status_map] {
         auto sock_path = fmt::format("unix://{}", file.string());
-        std::shared_ptr stub = std::make_shared<SupervisorStub>();
-        stub->InitChannelAndStub(sock_path);
+        std::shared_ptr stub = std::make_shared<SupervisorStub>(sock_path);
 
         CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
             supv_ids = stub->CheckStatus();
@@ -163,11 +172,9 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
         auto [job_id, step_id, pid, status] = supv_ids.value();
         CRANE_DEBUG("[Step #{}.{}] Supervisor socket {} recovered, pid: {}",
                     job_id, step_id, file.string(), pid);
-
-        absl::WriterMutexLock lk(&m_mutex_);
-        m_supervisor_map_.emplace(std::make_pair(job_id, step_id), stub);
+        absl::MutexLock lock(&mtx);
         supervisor_status_map.emplace(std::make_pair(job_id, step_id),
-                                      std::make_pair(pid, status));
+                                      SupervisorRecoverInfo{pid, status, stub});
 
         latch.count_down();
       });
@@ -180,52 +187,6 @@ SupervisorKeeper::InitAndGetRecoveredMap() {
     CRANE_ERROR("An error occurred when recovering supervisor: {}", e.what());
     return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
-}
-
-void SupervisorKeeper::AddSupervisor(job_id_t job_id, step_id_t step_id) {
-  auto sock_path = fmt::format("unix://{}/step_{}.{}.sock",
-                               kDefaultSupervisorUnixSockDir, job_id, step_id);
-
-  std::shared_ptr stub = std::make_shared<SupervisorStub>();
-  stub->InitChannelAndStub(sock_path);
-
-  absl::WriterMutexLock lk(&m_mutex_);
-  if (auto it = m_supervisor_map_.find({job_id, step_id});
-      it != m_supervisor_map_.end()) {
-    CRANE_ERROR("[Step #{}.{}] Duplicate supervisor", job_id, step_id);
-    return;
-  }
-
-  m_supervisor_map_.emplace(std::make_pair(job_id, step_id), stub);
-}
-
-void SupervisorKeeper::RemoveSupervisor(job_id_t job_id, step_id_t step_id) {
-  absl::WriterMutexLock lk(&m_mutex_);
-  if (auto it = m_supervisor_map_.find({job_id, step_id});
-      it != m_supervisor_map_.end()) {
-    CRANE_TRACE("[Step #{}.{}] Removing supervisor", job_id, step_id);
-    m_supervisor_map_.erase(it);
-  } else {
-    CRANE_ERROR("[Step #{}.{}] Try to remove non-existent supervisor", job_id,
-                step_id);
-  }
-}
-
-std::shared_ptr<SupervisorStub> SupervisorKeeper::GetStub(job_id_t job_id,
-                                                          step_id_t step_id) {
-  absl::ReaderMutexLock lk(&m_mutex_);
-  if (auto it = m_supervisor_map_.find({job_id, step_id});
-      it != m_supervisor_map_.end()) {
-    return it->second;
-  }
-
-  return nullptr;
-}
-
-std::set<std::pair<job_id_t, step_id_t>> SupervisorKeeper::GetRunningSteps() {
-  absl::ReaderMutexLock lk(&m_mutex_);
-  return m_supervisor_map_ | std::views::keys |
-         std::ranges::to<std::set<std::pair<job_id_t, step_id_t>>>();
 }
 
 }  // namespace Craned

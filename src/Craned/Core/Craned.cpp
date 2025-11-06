@@ -39,7 +39,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorManager.h"
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -793,13 +793,14 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
               util::JobStepsToString(ctld_step_ids));
 
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    std::pair<pid_t, Craned::StepStatus>>>
-      steps = g_supervisor_keeper->InitAndGetRecoveredMap();
+  CraneExpected<
+      absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                          Craned::SupervisorManager::SupervisorRecoverInfo>>
+      steps = Craned::SupervisorManager::InitAndGetRecoveredMap();
 
   // JobId,supervisor pid
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      std::pair<pid_t, Craned::StepStatus>>
+                      Craned::SupervisorManager::SupervisorRecoverInfo>
       step_supv_map;
   if (steps.has_value()) step_supv_map = steps.value();
 
@@ -862,9 +863,10 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   for (const auto& [job_id, job_steps] : valid_steps) {
     const auto& proto_job_steps = config_from_ctld.job_steps().at(job_id);
     for (const auto& step_id : job_steps) {
-      auto [pid, status] = step_supv_map.at(std::make_pair(job_id, step_id));
+      auto& [pid, status, stub] =
+          step_supv_map.at(std::make_pair(job_id, step_id));
       auto step_inst = std::make_unique<StepInstance>(
-          proto_job_steps.steps().at(step_id), pid, status);
+          proto_job_steps.steps().at(step_id), pid, status, stub);
       step_map.emplace(std::make_pair(job_id, step_id), std::move(step_inst));
     }
   }
@@ -877,6 +879,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
 
   /******************* Recover job cgroup info *******************/
+  // TODO: Step cg recovery
   RecoverCgForJobs(job_map);
 
   /******************* Handle step status inconsistency *******************/
@@ -889,7 +892,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     auto [job_id, step_id] = ids;
     auto ctld_status =
         config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
-    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).second;
+    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).status;
     CRANE_TRACE("[Step #{}.{}] Ctld status: {}, supervisor reported: {}",
                 job_id, step_id, ctld_status, supv_status);
 
@@ -904,7 +907,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       }
       continue;
     }
-    if (supv_status == StepStatus::Configured) {
+    if (supv_status == StepStatus::Starting) {
       CRANE_ASSERT(!step->IsDaemonStep());
       // For configured but not running step, remove this, ctld will consider it
       // failed
@@ -923,13 +926,12 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
   for (auto [job_id, step_ids] : failed_steps) {
     for (auto step_id : step_ids) {
-      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-      if (stub) {
-        auto err = stub->TerminateTask(true, false);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("[Supervisor] Failed to terminate task #{}.{}", job_id,
-                      step_id);
-        }
+      auto& stub =
+          step_supv_map.at(std::make_pair(job_id, step_id)).supervisor_stub;
+      auto err = stub->TerminateTask(true, false);
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("[Supervisor] Failed to terminate task #{}.{}", job_id,
+                    step_id);
       }
       step_map.erase({job_id, step_id});
     }
@@ -938,7 +940,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
   for (const auto& [job_id, step_ids] : invalid_steps)
     for (auto step_id : step_ids)
-      g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
+      step_supv_map.erase(std::make_pair(job_id, step_id));
 
   if (!invalid_steps.empty()) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
@@ -961,8 +963,6 @@ void GlobalVariableInit() {
   // It is always ok to create thread pool first.
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
-  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
   using CgConstant::Controller;
   CgroupManager::Init(StrToLogLevel(g_config.CranedDebugLevel).value());
@@ -1025,7 +1025,7 @@ void GlobalVariableInit() {
       std::make_unique<Craned::CranedForPamServer>(g_config.ListenConf);
 
   // Make sure all grpc server is ready to receive requests.
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  std::this_thread::sleep_for(1000ms);
 }
 
 void WaitForStopAndDoGvarFini() {
@@ -1066,12 +1066,6 @@ void WaitForStopAndDoGvarFini() {
   g_ctld_client.reset();
   // After ctld client destroyed, it is ok to destroy ctld client state machine
   g_ctld_client_sm.reset();
-
-  /*
-   * Called from G_SERVER, JobMgr
-   * CtldClient: ActionConfigureCb
-   */
-  g_supervisor_keeper.reset();
 
   g_thread_pool.reset();
 

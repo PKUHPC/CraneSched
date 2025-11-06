@@ -699,9 +699,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
-    // Configuring -> Configured / Failed / Cancelled,
+    // Configuring -> Starting / Failed / Cancelled,
     this->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configured) {
+    if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }

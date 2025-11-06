@@ -24,41 +24,15 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "StepInstance.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
-#include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
 
 constexpr int kMaxSupervisorCheckRetryCount = 10;
 
 using StepToD = crane::grpc::StepToD;
-
-struct StepInstance {
-  job_id_t job_id;
-  step_id_t step_id;
-
-  pid_t supv_pid;
-
-  crane::grpc::StepToD step_to_d;
-  StepStatus status{StepStatus::Invalid};
-  // TODO: Move supervisor stub to here.
-  explicit StepInstance(const crane::grpc::StepToD& step_to_d);
-  explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
-                        StepStatus status);  // Step recovery
-
-  [[nodiscard]] bool IsDaemonStep() const noexcept {
-    return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
-  }
-
-  [[nodiscard]] bool IsContainer() const noexcept {
-    return step_to_d.has_container_meta();
-  }
-
-  [[nodiscard]] std::string StepIdString() const noexcept {
-    return std::format("{}.{}", job_id, step_id);
-  }
-};
 
 // Job allocation info, where allocation = job spec + execution info
 struct JobInD {
@@ -81,9 +55,9 @@ struct JobInD {
 
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
+  crane::grpc::TaskStatus status{crane::grpc::TaskStatus::Configuring};
 
-  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
-  CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
@@ -125,9 +99,14 @@ class JobManager {
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
+  CraneExpected<void> ChangeStepTimelimit(job_id_t job_id, step_id_t step_id,
+                                          int64_t new_timelimit_sec);
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
+
+  CraneExpected<EnvMap> QuerySshStepEnvVariables(job_id_t job_id,
+                                                 step_id_t step_id);
 
   auto QueryJob(job_id_t job_id) {
     return m_job_map_.GetValueExclusivePtr(job_id);
@@ -213,8 +192,6 @@ class JobManager {
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> step);
 
-  CraneErrCode SpawnSupervisor_(JobInD* job, StepInstance* step);
-
   /**
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
@@ -230,18 +207,6 @@ class JobManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason,
                                       google::protobuf::Timestamp timestamp);
-
-  /**
-   * Send a signal to the process group of pid. For kill uninitialized
-   * Supervisor only.
-   * This function ASSUMES that ALL processes belongs to the
-   * process group with the PGID set to the PID of the first process in this
-   * TaskExecutionInstance.
-   * @param signum the value of signal.
-   * @return if the signal is sent successfully, kOk is returned.
-   * otherwise, kGenericFailure is returned.
-   */
-  static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
   JobMap m_job_map_;

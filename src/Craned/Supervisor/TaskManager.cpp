@@ -36,7 +36,7 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
-
+using namespace std::chrono_literals;
 using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
@@ -180,6 +180,49 @@ bool StepInstance::EvaluateOomOnExit() {
       "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
       cgroup_path, baseline_oom_kill_count, oom_kill);
   return oom_kill > baseline_oom_kill_count;
+}
+
+CraneErrCode ITaskInstance::Prepare() {
+  // TODO: Use task res.
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+                                       task_id),
+      m_parent_step_inst_->GetStep().res(), false);
+  if (!cg_expt.has_value()) {
+    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+               g_config.JobId, g_config.StepId, task_id,
+               static_cast<int>(cg_expt.error()));
+    return cg_expt.error();
+  }
+  m_task_cg = std::move(cg_expt.value());
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ITaskInstance::Cleanup() {
+  if (m_task_cg) {
+    int cnt = 0;
+
+    while (true) {
+      if (m_task_cg->Empty()) break;
+
+      if (cnt >= 5) {
+        CRANE_ERROR(
+            "Couldn't kill the processes in cgroup {} after {} times. "
+            "Skipping it.",
+            m_task_cg->CgroupName(), cnt);
+        break;
+      }
+
+      m_task_cg->KillAllProcesses();
+      ++cnt;
+      std::this_thread::sleep_for(100ms);
+    }
+    // TODO: Plugin support step cgroup destroy hooks.
+    m_task_cg->Destroy();
+
+    m_task_cg.reset();
+  }
+  return CraneErrCode::SUCCESS;
 }
 
 void ITaskInstance::InitEnvMap() {
@@ -596,6 +639,8 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
 
   // For container, there is only one task in a step. So we use step_id and
@@ -784,9 +829,11 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 }
 
 CraneErrCode ContainerInstance::Cleanup() {
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
   // For container tasks, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove pod and container.
-  CraneErrCode err = Kill(0);
+  err = Kill(0);
   return err;
 }
 
@@ -1106,6 +1153,8 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   // Write script content into file
   auto sh_path =
       g_config.CraneScriptDir / fmt::format("Crane-{}.sh", g_config.JobId);
@@ -1391,6 +1440,8 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
     if (!path.empty())
