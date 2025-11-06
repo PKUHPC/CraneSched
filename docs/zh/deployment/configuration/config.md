@@ -268,7 +268,7 @@ CranedForeground: false
 
 ### Supervisor 配置
 
-Supervisor 是鹤思的作业执行管理组件,负责在计算节点上监控和控制作业进程。
+Supervisor 是鹤思的作业执行管理组件,负责在计算节点上监控和控制作业步骤（step）。
 
 ```yaml
 Supervisor:
@@ -290,6 +290,7 @@ Supervisor:
 
 !!! tip
     在排查作业执行问题时,可以临时将 `DebugLevel` 设置为 `debug` 或 `trace` 以获取更详细的日志信息。
+
 ## 容器支持
 
 CraneSched 支持通过 CRI（容器运行时接口）在容器中运行作业：
@@ -310,13 +311,14 @@ Container:
 ```
 
 !!! info "实验性功能"
-    容器支持目前处于实验阶段。详细的设置说明请参阅[容器支持配置](container.md)指南。
+    容器支持目前处于实验阶段，可能存在限制和问题。
+
 
 **要求：**
 
 - 在计算节点上安装兼容 CRI 的运行时（containerd 或 CRI-O）
 - 具有适当权限可访问运行时套接字
-- 容器镜像可用或可从仓库访问
+- 容器镜像可用或可从 Registry 访问
 
 
 ## 应用更改

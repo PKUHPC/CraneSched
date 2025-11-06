@@ -268,7 +268,7 @@ CranedForeground: false
 
 ### Supervisor Configuration
 
-Supervisor is CraneSched's job execution management component, responsible for monitoring and controlling job processes on compute nodes.
+Supervisor is CraneSched's job execution management component, responsible for controlling job steps on compute nodes.
 
 ```yaml
 Supervisor:
@@ -284,7 +284,7 @@ Supervisor:
 
 **Supervisor Parameters:**
 
-- **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, which is typically set correctly during installation.
+- **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
 - **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
 - **LogDir**: Directory for supervisor log files, relative to the `CraneBaseDir` setting. Log files are helpful for diagnosing job execution issues.
 
@@ -311,7 +311,7 @@ Container:
 ```
 
 !!! info "Experimental Feature"
-    Container support is currently experimental. See the [Container Support Configuration](container.md) guide for detailed setup instructions.
+    Container support is currently experimental. There may be limitations and problems.
 
 **Requirements:**
 
