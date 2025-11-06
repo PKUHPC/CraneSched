@@ -23,12 +23,12 @@
 
 #include <protos/Supervisor.grpc.pb.h>
 
-#include "JobManager.h"
-#include "crane/AtomicHashMap.h"
 namespace Craned {
 
 class SupervisorStub {
  public:
+  SupervisorStub(job_id_t job_id, step_id_t step_id);
+  SupervisorStub(const std::string& endpoint);
   CraneErrCode ExecuteStep();
   CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
@@ -38,48 +38,28 @@ class SupervisorStub {
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
   CraneErrCode ShutdownSupervisor();
 
-  void InitChannelAndStub(const std::string& endpoint);
-
  private:
+  void InitChannelAndStub_(const std::string& endpoint);
   std::shared_ptr<grpc::Channel> m_channel_;
 
   std::unique_ptr<crane::grpc::supervisor::Supervisor::Stub> m_stub_;
 };
 
-class SupervisorKeeper {
+class SupervisorManager {
  public:
-  SupervisorKeeper() = default;
-  ~SupervisorKeeper() = default;
-
-  SupervisorKeeper(const SupervisorKeeper&) = delete;
-  SupervisorKeeper& operator=(const SupervisorKeeper&) = delete;
-
-  SupervisorKeeper(SupervisorKeeper&&) = delete;
-  SupervisorKeeper& operator=(SupervisorKeeper&&) = delete;
-
+  struct SupervisorRecoverInfo {
+    pid_t pid;
+    StepStatus status;
+    std::shared_ptr<SupervisorStub> supervisor_stub;
+  };
   /**
    * @brief Query all existing supervisor for task they hold.
    * @return job_id and pid from supervisors. Error when socket file
    * scanning fails, supervisors are unreachable, or task status queries fail
    * with specific error codes.
    */
-  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                                    std::pair<pid_t, StepStatus>>>
+  [[nodiscard]] static CraneExpected<absl::flat_hash_map<
+      std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>>
   InitAndGetRecoveredMap();
-
-  void AddSupervisor(job_id_t job_id, step_id_t step_id);
-  void RemoveSupervisor(job_id_t job_id, step_id_t step_id);
-
-  std::shared_ptr<SupervisorStub> GetStub(job_id_t job_id, step_id_t step_id);
-
-  std::set<std::pair<job_id_t, step_id_t>> GetRunningSteps();
-
- private:
-  absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      std::shared_ptr<SupervisorStub>>
-      m_supervisor_map_;
-  absl::Mutex m_mutex_;
 };
 }  // namespace Craned
-
-inline std::unique_ptr<Craned::SupervisorKeeper> g_supervisor_keeper;

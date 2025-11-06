@@ -937,7 +937,7 @@ void Cgroup::Destroy() {
     int err;
     if ((err = cgroup_delete_cgroup_ext(
              m_cgroup_,
-             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+             CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION))) {
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
     }
