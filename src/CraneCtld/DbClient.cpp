@@ -1003,8 +1003,9 @@ void MongodbClient::DocumentAppendItem_<ResourceInNode>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<>(document& doc, const std::string& key,
-                                          const ResourceV2& value) {
+void MongodbClient::DocumentAppendItem_<ResourceV2>(document& doc,
+                                                    const std::string& key,
+                                                    const ResourceV2& value) {
   document node_res_doc{};
   for (const auto& [node, res] : value.EachNodeResMap()) {
     DocumentAppendItem_(node_res_doc, node, res);
