@@ -16,13 +16,16 @@ Each CraneSched plugin consists of:
 
 ### Configuration Files
 
-Understanding the distinction between two types of configuration files is crucial:
+Understanding the distinction between three types of configuration files is crucial:
 
 **Global Configuration** (`/etc/crane/config.yaml`)
-: CraneSched's main configuration file containing settings for CLIs, backend, cfored, and cplugind. Plugin paths are registered here.
+: CraneSched's main configuration file containing settings for CLIs, backend, and cfored.
 
-**Plugin Configuration** (e.g., `monitor.yaml`)
-: Individual plugin settings. Can be located anywhere readable, with the absolute path specified in the global configuration.
+**Plugin Global Configuration** (`/etc/crane/plugin.yaml`)
+: Plugin system configuration containing cplugind settings and the list of plugins to load. Plugin paths are registered here.
+
+**Individual Plugin Configuration** (e.g., `monitor.yaml`)
+: Individual plugin settings. Can be located anywhere readable, with the absolute path specified in the plugin global configuration.
 
 ### Available Plugins
 
@@ -48,27 +51,36 @@ systemctl start cplugind
 
 ## Enabling Plugins
 
-Edit the global configuration file `/etc/crane/config.yaml`:
+Edit the plugin configuration file `/etc/crane/plugin.yaml`:
 
 ```yaml
-Plugin:
-  # Toggle the plugin module in CraneSched
-  Enabled: true
-  # Socket path relative to CraneBaseDir
-  PlugindSockPath: "cplugind/cplugind.sock"
-  # Debug level: trace, debug, or info (use info in production)
-  PlugindDebugLevel: "info"
-  # Plugins to load
-  Plugins:
-    - Name: "monitor"
-      Path: "/path/to/monitor.so"
-      Config: "/path/to/monitor.yaml"
+# Toggle the plugin module in CraneSched
+Enabled: true
+
+# Socket path relative to CraneBaseDir
+PlugindSockPath: "cplugind/cplugind.sock"
+
+# Debug level: trace, debug, or info (use info in production)
+PlugindDebugLevel: "info"
+
+# Network listening settings (optional)
+PlugindListenAddress: "127.0.0.1"
+PlugindListenPort: "10018"
+
+# Plugins to load
+Plugins:
+  - Name: "monitor"
+    Path: "/path/to/monitor.so"
+    Config: "/path/to/monitor.yaml"
 ```
 
 ### Configuration Options
 
 - **Enabled**: Controls whether CraneCtld/Craned uses the plugin system
+- **PlugindSockPath**: Socket path relative to CraneBaseDir for communication between daemons and cplugind
 - **PlugindDebugLevel**: Log level (trace/debug/info; recommended: info for production)
+- **PlugindListenAddress**: Network address for cplugind to listen (optional)
+- **PlugindListenPort**: Network port for cplugind to listen (optional)
 - **Plugins**: List of plugins to load on this node
   - **Name**: Plugin identifier (any string)
   - **Path**: Absolute path to the `.so` file
@@ -122,9 +134,10 @@ BufferSize: 32
 
 **Note**: For cgroup v2, update paths accordingly.
 
-2. **Register plugin in global configuration** (`/etc/crane/config.yaml`):
+2. **Register plugin in plugin configuration** (`/etc/crane/plugin.yaml`):
 
 ```yaml
+Enabled: true
 Plugins:
   - Name: "monitor"
     Path: "/path/to/build/plugin/monitor.so"
@@ -177,7 +190,7 @@ SenderAddr: example@example.com
 SubjectOnly: false
 ```
 
-2. **Register plugin** in `/etc/crane/config.yaml` (similar to monitor plugin).
+2. **Register plugin** in `/etc/crane/plugin.yaml` (similar to monitor plugin).
 
 ### Using Email Notifications
 
@@ -228,7 +241,8 @@ cbatch --mail-type=ALL --mail-user=user@example.com test.job
 
 ## Troubleshooting
 
-- Verify `Enabled: true` in `/etc/crane/config.yaml`
+- Verify `Enabled: true` in `/etc/crane/plugin.yaml`
 - Check that `cplugind` is running: `systemctl status cplugind`
 - Ensure `.so` file paths are absolute and readable
 - Check `cplugind` logs for errors
+- If `/etc/crane/plugin.yaml` doesn't exist, the plugin system will be automatically disabled
