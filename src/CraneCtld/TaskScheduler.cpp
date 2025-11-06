@@ -2959,6 +2959,7 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
+<<<<<<< HEAD
   bool no_task_types_constraint = request->filter_task_types().empty();
   std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
                                          request->filter_task_types().end());
@@ -2971,10 +2972,17 @@ void TaskScheduler::QueryTasksInRam(
   std::unordered_set<std::string> req_nodes_name(
       request->filter_nodes_name().begin(), request->filter_nodes_name().end());
   auto task_rng_filter_nodes_name = [&](auto& it) {
+=======
+  bool no_nodename_list_constraint = request->filter_nodename_list().empty();
+  std::unordered_set<std::string> req_nodename_list(
+      request->filter_nodename_list().begin(),
+      request->filter_nodename_list().end());
+  auto task_rng_filter_nodename_list = [&](auto& it) {
+>>>>>>> c7c83af8 (opt code)
     TaskInCtld& task = *it.second;
-    if (no_nodes_name_constraint) return true;
-    for (const auto& node : task.RuntimeAttr().craned_ids()) {
-      if (req_nodes_name.contains(node)) {
+    if (no_nodename_list_constraint) return true;
+    for (const auto& nodename : task.RuntimeAttr().craned_ids()) {
+      if (req_nodename_list.contains(nodename)) {
         return true;
       }
     }
@@ -2998,7 +3006,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
                       ranges::views::filter(task_rng_filter_task_type) |
-                      ranges::views::filter(task_rng_filter_nodes_name) |
+                      ranges::views::filter(task_rng_filter_nodename_list) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
