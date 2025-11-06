@@ -897,7 +897,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
         });
 
     if (job_info_list->size() > limit)
-      job_info_list->DeleteSubrange(limit, job_info_list->size());
+      job_info_list->DeleteSubrange(limit, job_info_list->size() - limit);
   };
 
   if (job_info_map.size() >= num_limit ||

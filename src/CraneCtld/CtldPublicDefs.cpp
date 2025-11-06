@@ -727,9 +727,9 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
     util::ParseHostList(step_to_ctld.excludes(), &excluded_list);
     excluded_nodes = excluded_list | std::ranges::to<std::unordered_set>();
   }
-
-  container_meta =
-      static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
+  if (step_to_ctld.type() == crane::grpc::TaskType::Container)
+    container_meta =
+        static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
 
   SetStepType(crane::grpc::StepType::COMMON);
 
@@ -922,12 +922,35 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           context->craned_jobs_to_free[node].emplace_back(job->TaskId());
         }
 
+        std::unordered_set<step_id_t> pd_steps;
         // Cancel all other step with CANCELED status
         for (const auto& comm_step : job->Steps() | std::views::values) {
+          if (comm_step->Status() == crane::grpc::TaskStatus::Pending) {
+            comm_step->SetStatus(crane::grpc::Cancelled);
+            comm_step->SetEndTime(absl::Now());
+            auto& meta = comm_step->ia_meta.value();
+            if (!meta.has_been_cancelled_on_front_end) {
+              meta.has_been_cancelled_on_front_end = true;
+              meta.cb_step_cancel({.job_id = comm_step->job_id,
+                                   .step_id = comm_step->StepId()});
+            }
+            // Send Completion Ack to frontend now.
+            meta.cb_step_completed({.job_id = comm_step->job_id,
+                                    .step_id = comm_step->StepId(),
+                                    .send_completion_ack = true,
+                                    .cfored_name = meta.cfored_name});
+            pd_steps.insert(comm_step->StepId());
+            continue;
+          }
           for (const auto& node : comm_step->ExecutionNodes()) {
             context->craned_cancel_steps[node][comm_step->job_id].emplace(
                 comm_step->StepId());
           }
+        }
+        for (const auto& pd_step_id : pd_steps) {
+          auto pd_step = job->EraseStep(pd_step_id);
+          context->step_raw_ptrs.insert(pd_step.get());
+          context->step_ptrs.insert(std::move(pd_step));
         }
       } else {
         for (const auto& node : this->ExecutionNodes()) {
