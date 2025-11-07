@@ -1022,7 +1022,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       !(g_config.PrologFlags & PrologFlagEnum::RunInJob) &&
       !job->is_prolog_run) {
     job->is_prolog_run = true;
-    auto run_prolog = [this](task_id_t job_id, EnvMap env_map) -> bool {
+    auto run_prolog = [this, job](task_id_t job_id, EnvMap env_map) -> bool {
       bool script_lock = false;
 
       if (g_config.PrologFlags & PrologFlagEnum::Serial) {
@@ -1043,12 +1043,10 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       else if (g_config.PrologEpilogTimeout > 0)
         args.timeout_sec = g_config.PrologEpilogTimeout;
 
-      // FIXME: dead lock
       if (g_config.PrologFlags & PrologFlagEnum::Contain) {
-        args.callback = [this](pid_t pid, job_id_t job_id_inner) {
-          return this->MigrateProcToCgroupOfJob(pid, job_id_inner);
+        args.callback = [this, job](pid_t pid) {
+          return job->cgroup->MigrateProcIn(pid);
         };
-        args.job_id = job_id;
       }
 
       auto ok = util::os::RunPrologOrEpiLog(args);

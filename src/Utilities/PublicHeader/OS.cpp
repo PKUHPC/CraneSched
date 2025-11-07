@@ -468,7 +468,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 
     if (pid > 0) {
       if (args.callback) {
-        bool result = args.callback(pid, args.job_id);
+        bool result = args.callback(pid);
         if (!result) {
           CRANE_ERROR("subprocess callback failed");
           return std::nullopt;

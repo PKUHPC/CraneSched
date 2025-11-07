@@ -53,8 +53,7 @@ struct RunLogHookArgs {
   uid_t run_uid;
   gid_t run_gid;
   bool is_prolog;
-  task_id_t job_id;
-  std::function<bool(pid_t, task_id_t)> callback;
+  std::function<bool(pid_t)> callback;
 };
 
 namespace util::os {
