@@ -383,6 +383,8 @@ bool MongodbClient::FetchJobRecords(
         // incomplete record, skip.
         if (!has_db_job_info) continue;
         crane::grpc::TaskInfo job_info;
+        job_info.set_type(
+            static_cast<crane::grpc::TaskType>(view["type"].get_int32().value));
         job_info.set_task_id(job_id);
 
         job_info.set_node_num(view["nodes_alloc"].get_int32().value);

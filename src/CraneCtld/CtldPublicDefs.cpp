@@ -567,6 +567,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetExitCode(this->PrevErrorExitCode());
       } else {
         this->SetStatus(crane::grpc::TaskStatus::Completed);
+        this->SetExitCode(0U);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
                  this->StepId(), this->Status());
@@ -925,6 +926,7 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         std::unordered_set<step_id_t> pd_steps;
         // Cancel all other step with CANCELED status
         for (const auto& comm_step : job->Steps() | std::views::values) {
+          // All pending steps are crun
           if (comm_step->Status() == crane::grpc::TaskStatus::Pending) {
             comm_step->SetStatus(crane::grpc::Cancelled);
             comm_step->SetEndTime(absl::Now());
