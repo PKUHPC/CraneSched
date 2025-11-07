@@ -1148,10 +1148,7 @@ void TaskScheduler::ScheduleThread_() {
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
         for (auto& job : jobs_to_run) {
           g_thread_pool->detach_task([&]() {
-            // update node state =  POWER_UP/CONFIGURING
-          g_meta_container->UpdateNodeConfigureState(job->executing_craned_ids,
-                                                     true);
-          // run prolog script
+          // run prolog ctld script
           RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
                                          .envs = job->env,
                                          .run_uid = 0,
@@ -1165,9 +1162,6 @@ void TaskScheduler::ScheduleThread_() {
           CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s", job->TaskId(),
                       run_prolog_args.run_uid, run_prolog_args.timeout_sec);
           auto run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
-          // update node state to ready
-          g_meta_container->UpdateNodeConfigureState(job->executing_craned_ids,
-                                                     false);
           if (!run_prolog_result) {
             thread_pool_mtx.Lock();
             failed_task_id_set.emplace(job->TaskId());

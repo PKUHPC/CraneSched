@@ -268,57 +268,58 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
     }
   }
 
-  for (auto& job : jobs) {
-    task_id_t job_id = job.job_id;
-    if (!g_config.ProLogs.empty() &&
-        g_config.PrologFlags & PrologFlagEnum::Alloc &&
-        !(g_config.PrologFlags & PrologFlagEnum::RunInJob)) {
-      CRANE_DEBUG("#{} Running Prolog In AllocJobs.", job.job_id);
-      auto run_prolog = [this](task_id_t job_id) -> bool {
-        bool script_lock = false;
+  // force the script to be executed at job allocation
+  if (!g_config.ProLogs.empty() && g_config.PrologFlags & PrologFlagEnum::Alloc
+    && !(g_config.PrologFlags & PrologFlagEnum::RunInJob)) {
+    auto run_prolog = [this](task_id_t job_id, EnvMap env_map) -> bool {
+      bool script_lock = false;
 
-        if (g_config.PrologFlags & PrologFlagEnum::Serial) {
-          m_prolog_serial_mutex_.Lock();
-          script_lock = true;
-        }
+      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+        m_prolog_serial_mutex_.Lock();
+        script_lock = true;
+      }
 
-        RunLogHookArgs args{
-            .scripts = g_config.ProLogs,
-            .envs = {},
-            .run_uid = 0,
-            .run_gid = 0,
-            .is_prolog = true,
+      RunLogHookArgs args{
+        .scripts = g_config.ProLogs,
+        .envs = env_map,
+        .run_uid = 0,
+        .run_gid = 0,
+        .is_prolog = true,
+    };
+
+      if (g_config.PrologTimeout > 0)
+        args.timeout_sec = g_config.PrologTimeout;
+      else if (g_config.PrologEpilogTimeout > 0)
+        args.timeout_sec = g_config.PrologEpilogTimeout;
+
+      if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+        args.callback = [this](pid_t pid, task_id_t job_id_inner) {
+          return this->MigrateProcToCgroupOfJob(pid, job_id_inner);
         };
+        args.job_id = job_id;
+      }
 
-        if (g_config.PrologTimeout > 0)
-          args.timeout_sec = g_config.PrologTimeout;
-        else if (g_config.PrologEpilogTimeout > 0)
-          args.timeout_sec = g_config.PrologEpilogTimeout;
+      auto ok = util::os::RunPrologOrEpiLog(args);
 
-        if (g_config.PrologFlags & PrologFlagEnum::Contain) {
-          args.callback = [this](pid_t pid, task_id_t job_id_inner) {
-            return this->MigrateProcToCgroupOfJob(pid, job_id_inner);
-          };
-          args.job_id = job_id;
-        }
+      if (script_lock) m_prolog_serial_mutex_.Unlock();
 
-        auto ok = util::os::RunPrologOrEpiLog(args);
+      return ok ? true : false;
+    };
 
-        if (script_lock) m_prolog_serial_mutex_.Unlock();
-
-        return ok ? true : false;
-      };
-
+    for (auto& job : jobs) {
+      task_id_t job_id = job.job_id;
+      CRANE_DEBUG("#{} Running Prolog In AllocJobs.", job_id);
       if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
-        g_thread_pool->detach_task([this, job_id, run_prolog]() {
-          bool ok = run_prolog(job_id);
+        EnvMap env_map = job.GetJobEnvMap();
+        g_thread_pool->detach_task([this, job_id, run_prolog, env_map]() {
+          bool ok = run_prolog(job_id, env_map);
           this->m_prolog_is_end_map_[job_id] = ok;
           if (!ok) {
             g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
           }
         });
       } else {
-        if (!run_prolog(job_id)) {
+        if (!run_prolog(job_id, job.GetJobEnvMap())) {
           g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
           return false;
         }
@@ -1030,6 +1031,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
   auto* job = job_ptr.get();
 
+  // First job or job step initiation
   if (!g_config.ProLogs.empty() &&
       ((g_config.PrologFlags & PrologFlagEnum::Alloc) == 0) &&
       !job->is_prolog_run) {
@@ -1057,7 +1059,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       ActivateTaskStatusChangeAsync_(
           job_id, step_id, crane::grpc::TaskStatus::Failed,
           ExitCode::EC_PROLOG_ERR,
-          fmt::format("Failed to get the allocation for job#{} ", job_id),
+          fmt::format("Failed to run prolog for job#{} ", job_id),
           google::protobuf::util::TimeUtil::GetCurrentTime());
       return;
     }
