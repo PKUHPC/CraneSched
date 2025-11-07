@@ -18,7 +18,6 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         fpm
         yaml-cpp
         Subid::subid
-        subprocess
 )
 
 # This trimmed version is used for PAM module
