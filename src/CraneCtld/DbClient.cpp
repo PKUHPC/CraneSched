@@ -374,7 +374,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
+  // 35 mem_alloc     device_map     meta_container has_job_info  nodename_list
 
   try {
     for (auto view : cursor) {
@@ -1532,9 +1532,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  bsoncxx::builder::basic::array craned_nodesname_arr;
+  bsoncxx::builder::basic::array nodename_list_array;
   for (const auto& name : runtime_attr.craned_ids()) {
-    craned_nodesname_arr.append(name);
+    nodename_list_array.append(name);
   }
 
   // 0  task_id       task_db_id     mod_time       deleted       account
@@ -1544,10 +1544,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     meta_container has_job_info  nodesname
+  // 35 mem_alloc     device_map     meta_container has_job_info  nodename_list
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1563,7 +1563,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-    "mem_alloc", "device_map", "meta_container", "has_job_info" ,"nodesname"
+    "mem_alloc", "device_map", "meta_container", "has_job_info" ,"nodename_list"
   };
   // clang-format on
 
@@ -1611,7 +1611,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), container_meta,
              true, /* Mark the document having complete job info */
-             bsoncxx::array::value{craned_nodesname_arr.view()}};
+             bsoncxx::array::value{nodename_list_array.view()}};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1634,9 +1634,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
-  bsoncxx::builder::basic::array craned_nodesname_arr;
+  bsoncxx::builder::basic::array nodename_list_array;
   for (const auto& name : task->CranedIds()) {
-    craned_nodesname_arr.append(name);
+    nodename_list_array.append(name);
   }
 
   // 0  task_id       task_db_id     mod_time       deleted       account
@@ -1646,10 +1646,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container  has_job_info  nodesname
+  // 35 mem_alloc     device_map     meta_container  has_job_info  nodename_list
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1665,7 +1665,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_container", "has_job_info" , "nodesname"
+      "mem_alloc", "device_map", "meta_container", "has_job_info" , "nodename_list"
   };
   // clang-format on
 
@@ -1677,7 +1677,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::string, bsoncxx::array::value>               /*38-39*/
+             bool, bsoncxx::array::value>                            /*38-39*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1705,7 +1705,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), container_meta,
              true, /* Mark the document having complete job info */
-             bsoncxx::array::value{craned_nodesname_arr.view()}};
+             bsoncxx::array::value{nodename_list_array.view()}};
 
   return DocumentConstructor_(fields, values);
 }
@@ -2158,7 +2158,7 @@ void MongodbClient::AggregateJobSummaryByHour(
                      << "wckey" << "$wckey"
                      << "cpu_alloc" << "$cpu_alloc"
                      << "partition_name" << "$partition_name"
-                     << "nodesname" << "$nodesname"
+                     << "nodename_list" << "$nodename_list"
                      << bsoncxx::builder::stream::close_document
                      << "total_cpu_time"
                      << bsoncxx::builder::stream::open_document << "$sum"
@@ -2178,7 +2178,7 @@ void MongodbClient::AggregateJobSummaryByHour(
                             << "wckey" << "$_id.wckey"
                             << "cpu_alloc" << "$_id.cpu_alloc"
                             << "partition_name" << "$_id.partition_name"
-                            << "nodesname" << "$_id.nodesname"
+                            << "nodename_list" << "$_id.nodename_list"
                             << "total_cpu_time" << "$total_cpu_time"
                             << "total_count" << "$total_count"
                             << bsoncxx::builder::stream::close_document
@@ -2288,7 +2288,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
           << "username" << "$username" << "qos" << "$qos" << "wckey" << "$wckey"
           << "cpu_alloc" << "$cpu_alloc" << "partition_name"
           << "$partition_name"
-          << "nodesname" << "$nodesname"
+          << "nodename_list" << "$nodename_list"
           << bsoncxx::builder::stream::close_document << "total_cpu_time"
           << bsoncxx::builder::stream::open_document << "$sum"
           << "$total_cpu_time" << bsoncxx::builder::stream::close_document
@@ -2306,7 +2306,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
                             << "wckey" << "$_id.wckey"
                             << "cpu_alloc" << "$_id.cpu_alloc"
                             << "partition_name" << "$_id.partition_name"
-                            << "nodesname" << "$_id.nodesname"
+                            << "nodename_list" << "$_id.nodename_list"
                             << "total_cpu_time" << "$total_cpu_time"
                             << "total_count" << "$total_count"
                             << bsoncxx::builder::stream::close_document
@@ -2424,15 +2424,16 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
     }));
   }
 
-  bool has_nodenames_constraint = !request->filter_nodesname().empty();
-  if (has_nodenames_constraint) {
-    filter.append(kvp("nodesname", [&request](sub_document nodename_list_doc) {
-      array nodename_list_array;
-      for (const auto& nodename : request->filter_nodesname()) {
-        nodename_list_array.append(nodename);
-      }
-      nodename_list_doc.append(kvp("$in", nodename_list_array));
-    }));
+  bool has_nodename_list_constraint = !request->filter_nodename_list().empty();
+  if (has_nodename_list_constraint) {
+    filter.append(
+        kvp("nodename_list", [&request](sub_document nodename_list_doc) {
+          array nodename_list_array;
+          for (const auto& nodename : request->filter_nodename_list()) {
+            nodename_list_array.append(nodename);
+          }
+          nodename_list_doc.append(kvp("$in", nodename_list_array));
+        }));
   }
 
   bool has_wckeys_constraint = !request->filter_wckeys().empty();
@@ -2458,22 +2459,8 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
       uint32_t cpu_alloc =
           static_cast<uint32_t>(view["cpus_alloc"].get_double().value *
                                 view["nodes_alloc"].get_int32().value);
-      int64_t time_start = 0;
-      int64_t time_end = 0;
-      auto time_start_elem = view["time_start"];
-      auto time_end_elem = view["time_end"];
-      if (time_start_elem) {
-        if (time_start_elem.type() == bsoncxx::type::k_int64)
-          time_start = time_start_elem.get_int64().value;
-        else if (time_start_elem.type() == bsoncxx::type::k_int32)
-          time_start = time_start_elem.get_int32().value;
-      }
-      if (time_end_elem) {
-        if (time_end_elem.type() == bsoncxx::type::k_int64)
-          time_end = time_end_elem.get_int64().value;
-        else if (time_end_elem.type() == bsoncxx::type::k_int32)
-          time_end = time_end_elem.get_int32().value;
-      }
+      int64_t time_start = view["time_start"].get_int64().value;
+      int64_t time_end = view["time_end"].get_int64().value;
       double total_cpu_time = (time_end - time_start) * cpu_alloc;
       if (grouping_list.empty()) {
         agg_map[{acc, wk, cpu_alloc}].total_cpu_time += total_cpu_time;
@@ -2506,7 +2493,7 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_item_list()->CopyFrom(item);
-    if (reply.item_list_size() >= kMaxJobSummaryBatchSize) {
+    if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
       stream->Write(reply);
       reply.clear_item_list();
     }
@@ -2616,14 +2603,14 @@ bsoncxx::document::value MongodbClient::JobSizeQueryMatch(
                               bsoncxx::builder::basic::kvp("$in", arr))));
   }
 
-  // nodesname
-  if (request && request->filter_nodesname_size() > 0) {
+  // nodename_list
+  if (request && request->filter_nodename_list_size() > 0) {
     bsoncxx::builder::basic::array arr;
-    for (const auto& nodename : request->filter_nodesname())
+    for (const auto& nodename : request->filter_nodename_list())
       arr.append(nodename);
     match_doc.append(bsoncxx::builder::basic::kvp(
-        "nodesname", bsoncxx::builder::basic::make_document(
-                         bsoncxx::builder::basic::kvp("$in", arr))));
+        "nodename_list", bsoncxx::builder::basic::make_document(
+                             bsoncxx::builder::basic::kvp("$in", arr))));
   }
 
   return match_doc.extract();
@@ -2796,11 +2783,11 @@ void MongodbClient::QueryJobSummary(
       item.set_username(std::string(id["username"].get_string().value));
       item.set_qos(std::string(id["qos"].get_string().value));
       item.set_wckey(std::string(id["wckey"].get_string().value));
-      item.set_total_count(doc["total_count"].get_int32().value);
+      item.set_total_count(GetTotalCount(doc));
       item.set_total_cpu_time(GetTotalCpuTime(doc));
 
       reply.add_item_list()->CopyFrom(item);
-      if (reply.item_list_size() >= kMaxJobSummaryBatchSize) {
+      if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
         stream->Write(reply);
         reply.clear_item_list();
       }
@@ -2915,7 +2902,7 @@ void MongodbClient::QueryJobSizeSummary(
         agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
         agg_map[key].total_count += GetTotalCount(doc);
       }
-      WriteReply(agg_map, stream, kMaxJobSummaryBatchSize);
+      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
     } else {
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
@@ -2933,7 +2920,7 @@ void MongodbClient::QueryJobSizeSummary(
         agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
         agg_map[key].total_count += GetTotalCount(doc);
       }
-      WriteReply(agg_map, stream, kMaxJobSummaryBatchSize);
+      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
     }
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -2979,7 +2966,7 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(hour_coll, {"hour"});
     CreateCollectionIndex(
         hour_coll, {"hour", "account", "username", "qos", "wckey", "cpu_alloc",
-                    "partition_name", "nodesname"});
+                    "partition_name", "nodename_list"});
 
     // Create indexes for the day summary table
     auto day_coll =
@@ -2987,7 +2974,7 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(day_coll, {"day"});
     CreateCollectionIndex(
         day_coll, {"day", "account", "username", "qos", "wckey", "cpu_alloc",
-                   "partition_name", "nodesname"});
+                   "partition_name", "nodename_list"});
 
     // Create indexes for the month summary table
     auto month_coll =
@@ -2995,7 +2982,7 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(month_coll, {"month"});
     CreateCollectionIndex(month_coll,
                           {"month", "account", "username", "qos", "wckey",
-                           "cpu_alloc", "partition_name", "nodesname"});
+                           "cpu_alloc", "partition_name", "nodename_list"});
 
     return true;
   } catch (const std::exception& e) {
