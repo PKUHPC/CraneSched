@@ -950,24 +950,47 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
+message AttachInContainerTaskRequest {
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  bool stdin = 6;
+  bool tty = 7;
+  bool stdout = 8;
+  bool stderr = 9;
+}
+
+message AttachInContainerTaskReply {
+  bool ok = 1;
+  RichError status = 2;
+  string url = 3;
+}
+
+message ExecInContainerTaskRequest {
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  repeated string command = 3;
+
+  bool stdin = 6;
+  bool tty = 7;
+  bool stdout = 8;
+  bool stderr = 9;
+}
+
+message ExecInContainerTaskReply {
+  bool ok = 1;
+  RichError status = 2;
+  string url = 3;
+}
+
 message QueryJobSummaryRequest {
   repeated string filter_accounts = 1;
   repeated string filter_users = 2;
   repeated string filter_qoss = 3;
-  google.protobuf.Timestamp filter_start_time = 4;
-  google.protobuf.Timestamp filter_end_time = 5;
-}
-
-message QueryAccountUserQosSummaryItemReply {
-  repeated AccountUserQosSummaryItem items = 1;
-}
-
-message QueryAccountUserWckeySummaryItemRequest {
-  repeated string filter_accounts = 1;
-  repeated string filter_users = 2;
-  repeated string filter_wckeys = 3;
-  google.protobuf.Timestamp filter_start_time = 4;
-  google.protobuf.Timestamp filter_end_time = 5;
+  repeated string filter_wckeys = 4;
+  google.protobuf.Timestamp filter_start_time = 5;
+  google.protobuf.Timestamp filter_end_time = 6;
 }
 
 message QueryJobSummaryReply {
@@ -984,7 +1007,7 @@ message QueryJobSizeSummaryRequest {
   google.protobuf.Timestamp filter_end_time = 7;
   repeated uint32 filter_job_ids = 8;
   repeated string filter_partitions = 9;
-  repeated string filter_nodesname = 10;
+  repeated string filter_nodename_list = 10;
 }
 
 message QueryJobSizeSummaryReply {
@@ -1053,6 +1076,9 @@ service CraneCtld {
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
   rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
+    /* RPCS called from ccon */
+  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
+  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
 }
 
 service CeffQueryService {

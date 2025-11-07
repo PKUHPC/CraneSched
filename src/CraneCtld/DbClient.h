@@ -156,6 +156,9 @@ class MongodbClient {
 
   bool DeleteEntity(EntityType type, const std::string& name);
   bool InitTableIndexes();
+  void CreateCollectionIndex(mongocxx::collection& coll,
+                             const std::vector<std::string>& fields);
+  bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
   inline std::string RollupTypeToString(RollupType rollup_type);
   bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
                                        int64_t last_success_sec);
@@ -163,39 +166,7 @@ class MongodbClient {
   bool NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
                   RollupType rollup_type);
   bool RollupSummary(RollupType rollup_type);
-
   void ClusterRollupUsage();
-  void CreateCollectionIndex(mongocxx::collection& coll,
-                             const std::vector<std::string>& fields);
-  bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
-  bool QueryJobSizeSummaryByJobIds(
-      const crane::grpc::QueryJobSizeSummaryRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
-  void QueryJobSummary(
-      const crane::grpc::QueryJobSummaryRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
-  void QueryJobSizeSummary(
-      const crane::grpc::QueryJobSizeSummaryRequest* request,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
-  bsoncxx::document::value JobQueryMatch(
-      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
-      const crane::grpc::QueryJobSummaryRequest* request);
-  bsoncxx::document::value JobSizeQueryMatch(
-      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
-      const crane::grpc::QueryJobSizeSummaryRequest* request);
-  template <typename MatchFunc>
-  void AppendUnionWithRanges(
-      mongocxx::pipeline& pipeline, const std::string& coll,
-      const std::vector<std::pair<std::time_t, std::time_t>>& ranges,
-      MatchFunc match_fn, bool first_is_match = true);
-
-  void AggregateJobSummaryByHour(std::time_t start, std::time_t end,
-                                 const std::string& task_collection_name);
-  void AggregateJobSummaryByDayOrMonth(RollupType src_type, RollupType dst_type,
-                                       std::time_t period_start,
-                                       std::time_t period_end);
-  void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
-  uint64_t MillisecondsToNextHour();
   uint32_t GetCpuAlloc(const bsoncxx::document::view& doc);
   double GetTotalCpuTime(const bsoncxx::document::view& doc);
   int GetTotalCount(const bsoncxx::document::view& doc);
@@ -204,6 +175,33 @@ class MongodbClient {
           agg_map,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
       int max_data_size);
+  bool QueryJobSizeSummaryByJobIds(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+  bsoncxx::document::value JobQueryMatch(
+      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+      const crane::grpc::QueryJobSummaryRequest* request);
+  void QueryJobSummary(
+      const crane::grpc::QueryJobSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
+  bsoncxx::document::value JobSizeQueryMatch(
+      const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+      const crane::grpc::QueryJobSizeSummaryRequest* request);
+  void QueryJobSizeSummary(
+      const crane::grpc::QueryJobSizeSummaryRequest* request,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
+  template <typename MatchFunc>
+  void AppendUnionWithRanges(
+      mongocxx::pipeline& pipeline, const std::string& coll,
+      const std::vector<std::pair<std::time_t, std::time_t>>& ranges,
+      MatchFunc match_fn, bool first_is_match = true);
+  void AggregateJobSummaryByHour(std::time_t start, std::time_t end,
+                                 const std::string& task_collection_name);
+  void AggregateJobSummaryByDayOrMonth(RollupType src_type, RollupType dst_type,
+                                       std::time_t period_start,
+                                       std::time_t period_end);
+  void MongoDbSumaryTh_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  uint64_t MillisecondsToNextHour();
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
@@ -378,7 +376,7 @@ class MongodbClient {
   const std::string m_month_job_summary_collection_name_{
       "month_job_summary_table"};
   const std::string m_summary_time_collection_name_{"summary_time_table"};
-  static constexpr int kMaxJobSummaryBatchSize =
+  static constexpr int MaxJobSummaryBatchSize =
       5000;  // Maximum number of items per gRPC streaming batch
   std::shared_ptr<spdlog::logger> m_logger_;
 
