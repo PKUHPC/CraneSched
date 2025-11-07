@@ -110,7 +110,12 @@ void LicensesManager::MallocLicenseResource(
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
     lic->used += count;
-    lic->free -= count;
+    if (lic->free < count) {
+      CRANE_ERROR("MallocLicenseResource: license [{}] requested={}, free={}, will set free=0", lic_id, count, lic->free);
+      lic->free = 0;
+    } else {
+      lic->free -= count;
+    }
   }
 }
 
@@ -119,6 +124,12 @@ void LicensesManager::FreeLicenseResource(
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
     lic->used -= count;
+    if (lic->used < count) {
+      CRANE_ERROR("FreeLicenseResource: license [{}] used < freeing count ({} < {}), will set used=0", lic_id, lic->used + count, count);
+      lic->used = 0;
+    } else {
+      lic->free -= count;
+    }
     lic->free += count;
   }
 }
