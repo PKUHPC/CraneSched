@@ -688,8 +688,6 @@ void ParseConfig(int argc, char** argv) {
             g_config.PrologFlags |= PrologFlagEnum::Alloc;
           if (trimmed == "contain")
             g_config.PrologFlags |= PrologFlagEnum::Contain;
-          if (trimmed == "deferbatch")
-            g_config.PrologFlags |= PrologFlagEnum::DeferBatch;
           if (trimmed == "nohold")
             g_config.PrologFlags |= PrologFlagEnum::NoHold;
           if (trimmed == "forcerequeueonfail")
@@ -699,14 +697,9 @@ void ParseConfig(int argc, char** argv) {
             g_config.PrologFlags |= PrologFlagEnum::RunInJob;
           if (trimmed == "serial")
             g_config.PrologFlags |= PrologFlagEnum::Serial;
-          if (trimmed == "x11")
-            g_config.PrologFlags |= PrologFlagEnum::X11;
         }
         // judge
         if (g_config.PrologFlags & PrologFlagEnum::Contain) {
-          g_config.PrologFlags |= PrologFlagEnum::Alloc;
-        }
-        if (g_config.PrologFlags & PrologFlagEnum::DeferBatch) {
           g_config.PrologFlags |= PrologFlagEnum::Alloc;
         }
         if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
@@ -727,10 +720,6 @@ void ParseConfig(int argc, char** argv) {
             CRANE_ERROR("Cannot set RunInJob and Serial flags at the same time.");
             std::exit(1);
           }
-        }
-        if (g_config.PrologFlags & PrologFlagEnum::X11) {
-          g_config.PrologFlags |= PrologFlagEnum::Alloc;
-          g_config.PrologFlags |= PrologFlagEnum::Contain;
         }
       }
 
