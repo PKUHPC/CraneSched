@@ -1717,9 +1717,12 @@ CraneErrCode ProcInstance::Spawn() {
       SetupChildProcCrunX11_();
     }
 
+    // Apply environment variables
+    InitEnvMap();
+
     if (!g_config.TaskPrologs.empty()) {
       RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
-                                     .envs = GetChildProcessEnv(),
+                                     .envs = m_env_,
                                      .run_uid = m_parent_step_inst_->uid,
                                      .run_gid = m_parent_step_inst_->gids[0],
                                      .is_prolog = true};
@@ -1728,8 +1731,6 @@ CraneErrCode ProcInstance::Spawn() {
       util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, 1);
     }
 
-    // Apply environment variables
-    InitEnvMap();
     err = SetChildProcEnv_();
     if (err != CraneErrCode::SUCCESS) {
       fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
@@ -2269,7 +2270,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     if (!g_config.TaskEpilogs.empty()) {
       RunLogHookArgs run_epilog_args{.scripts = g_config.TaskEpilogs,
-                                     .envs = task->GetChildProcessEnv(),
+                                     .envs = std::unordered_map{task->GetParentStep().env().begin(), task->GetParentStep().env().end()},
                                      .run_uid = task->GetParentStep().uid(),
                                      .run_gid = task->GetParentStep().gid()[0],
                                      .is_prolog = false};

@@ -32,6 +32,7 @@
 
 #include <future>
 
+#include "absl/strings/str_split.h"
 #include "re2/re2.h"
 
 #if defined(__linux__) || defined(__unix__)
@@ -560,15 +561,12 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,
     std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
-  std::istringstream iss(output);
-  std::string line;
-
   static const LazyRE2 export_re = {
-      R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
+    R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
   static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
   static const LazyRE2 print_re = {R"(^print\s+(.*)$)"};
 
-  while (std::getline(iss, line)) {
+  for (std::string_view line : absl::StrSplit(output, '\n')) {
     std::string name, value, to_print;
     if (RE2::FullMatch(line, *export_re, &name, &value)) {
       (*env_map)[name] = value;

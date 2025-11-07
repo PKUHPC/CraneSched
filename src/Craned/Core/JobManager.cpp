@@ -283,12 +283,12 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
         }
 
         RunLogHookArgs args{
-          .scripts = g_config.ProLogs,
-          .envs = {},
-          .run_uid = 0,
-          .run_gid = 0,
-          .is_prolog = true,
-      };
+            .scripts = g_config.ProLogs,
+            .envs = {},
+            .run_uid = 0,
+            .run_gid = 0,
+            .is_prolog = true,
+        };
 
         if (g_config.PrologTimeout > 0)
           args.timeout_sec = g_config.PrologTimeout;
@@ -323,7 +323,8 @@ bool JobManager::AllocJobs(std::vector<JobInD>&& jobs) {
           return false;
         }
       }
-        }
+    }
+  }
 
   return true;
 }
@@ -575,15 +576,14 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
   step_id_t step_id = step->step_id;
 
   if (!g_config.ProLogs.empty() &&
-     g_config.PrologFlags & PrologFlagEnum::NoHold) {
+      g_config.PrologFlags & PrologFlagEnum::NoHold) {
     bool result = false;
     auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(3);
 
     while (std::chrono::steady_clock::now() < timeout) {
       m_prolog_is_end_map_.if_contains(
-          job_id, [&](std::pair<const job_id_t, bool>& pair) {
-            result = pair.second;
-          });
+          job_id,
+          [&](std::pair<const job_id_t, bool>& pair) { result = pair.second; });
 
       if (result) {
         break;
@@ -596,7 +596,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       CRANE_ERROR("[Job #{}]: Prolog is not finished.", job_id);
       return CraneErrCode::ERR_PROLOG;
     }
-     }
+  }
 
   std::array<int, 2> supervisor_craned_pipe{};
   std::array<int, 2> craned_supervisor_pipe{};
@@ -1031,7 +1031,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_ptr.get();
 
   if (!g_config.ProLogs.empty() &&
- ((g_config.PrologFlags & PrologFlagEnum::Alloc) == 0) && !job->is_prolog_run) {
+      ((g_config.PrologFlags & PrologFlagEnum::Alloc) == 0) &&
+      !job->is_prolog_run) {
     CRANE_DEBUG("#{}: Running prologs....", job_id);
     job->is_prolog_run = true;
     bool script_lock = false;
@@ -1054,15 +1055,15 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       if (script_lock) m_prolog_serial_mutex_.Unlock();
       g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
       ActivateTaskStatusChangeAsync_(
-        job_id, step_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodePrologFail,
-        fmt::format("Failed to get the allocation for job#{} ", job_id),
-        google::protobuf::util::TimeUtil::GetCurrentTime());
-      return ;
+          job_id, step_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::EC_PROLOG_ERR,
+          fmt::format("Failed to get the allocation for job#{} ", job_id),
+          google::protobuf::util::TimeUtil::GetCurrentTime());
+      return;
     }
 
     if (script_lock) m_prolog_serial_mutex_.Unlock();
- }
+  }
 
   // Check if the step is acceptable.
   // We keep this container check here in case we support enabling/disabling
@@ -1436,7 +1437,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       CRANE_DEBUG("[Job #{}] is already completing, ignore clean up.", job_id);
       continue;
     }
-    if (!g_config.EpiLogs.empty() && !(g_config.PrologFlags & PrologFlagEnum::RunInJob)) {
+    if (!g_config.EpiLogs.empty() &&
+        !(g_config.PrologFlags & PrologFlagEnum::RunInJob)) {
       EnvMap env_map = job.GetJobEnvMap();
       g_thread_pool->detach_task([this, job_id, env_map]() {
         CRANE_DEBUG("Running epilogs...");
