@@ -132,7 +132,7 @@ CraneErrCode CranedStub::TerminateOrphanedSteps(
     return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
-CraneErrCode CranedStub::AllocJobs(
+std::list<job_id_t> CranedStub::AllocJobs(
     const std::vector<crane::grpc::JobToD> &jobs) {
   using crane::grpc::AllocJobsReply;
   using crane::grpc::AllocJobsRequest;

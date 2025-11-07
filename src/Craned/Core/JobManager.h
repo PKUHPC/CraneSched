@@ -308,13 +308,6 @@ class JobManager {
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
 
-  using PrologIsEndMap = phmap::parallel_flat_hash_map<
-    job_id_t,
-    bool, phmap::priv::hash_default_hash<job_id_t>,
-    phmap::priv::hash_default_eq<job_id_t>,
-    std::allocator<std::pair<const job_id_t, bool>>, 4,
-    std::shared_mutex>;
-  PrologIsEndMap m_prolog_is_end_map_; // when prolog flags set NoHold
   util::mutex m_prolog_serial_mutex_; // when prolog flags set Serial
 
 
