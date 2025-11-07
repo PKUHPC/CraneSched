@@ -3020,12 +3020,10 @@ void TaskScheduler::QueryTasksInRam(
       request->filter_nodename_list().begin(),
       request->filter_nodename_list().end());
   auto task_rng_filter_nodename_list = [&](auto& it) {
-    TaskInCtld& task = *it.second;
     if (no_nodename_list_constraint) return true;
+    TaskInCtld& task = *it.second;
     for (const auto& nodename : task.RuntimeAttr().craned_ids()) {
-      if (req_nodename_list.contains(nodename)) {
-        return true;
-      }
+      if (req_nodename_list.contains(nodename)) return true;
     }
     return false;
   };
