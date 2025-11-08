@@ -30,9 +30,7 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <algorithm>
 #include <array>
-#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CgroupManager.h"
@@ -42,6 +40,7 @@
 #include "DeviceManager.h"
 #include "JobManager.h"
 #include "SupervisorKeeper.h"
+#include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -190,6 +189,8 @@ void ParseConfig(int argc, char** argv) {
   options.add_options()
       ("f,config-file", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("P,plugin-config", "Path to Plugin configuration file",
+       cxxopts::value<std::string>()->default_value(kDefaultPluginConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
       ("s,server-address", "CraneCtld address, format: <IP>:<port>",
@@ -239,6 +240,8 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config-file"].as<std::string>();
+  std::string plugin_config_path =
+      parsed_args["plugin-config"].as<std::string>();
   std::unordered_map<std::string,
                      std::vector<Craned::Common::DeviceMetaInConfig>>
       each_node_device;
@@ -606,56 +609,25 @@ void ParseConfig(int argc, char** argv) {
                 g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
                                                     kDefaultContainerTempDir);
 
-            if (container_config["RuntimeBin"]) {
-              g_config.Container.RuntimeBin =
-                  container_config["RuntimeBin"].as<std::string>();
+            if (container_config["RuntimeEndpoint"]) {
+              g_config.Container.RuntimeEndpoint =
+                  container_config["RuntimeEndpoint"].as<std::string>();
             } else {
-              CRANE_ERROR("RuntimeBin is not configured.");
+              CRANE_ERROR("RuntimeEndpoint is not configured.");
               std::exit(1);
             }
 
-            if (container_config["RuntimeState"]) {
-              g_config.Container.RuntimeState =
-                  container_config["RuntimeState"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeState is not configured.");
-              std::exit(1);
-            }
+            // In most cases, ImageEndpoint is the same as RuntimeEndpoint.
+            g_config.Container.ImageEndpoint =
+                YamlValueOr(container_config["ImageEndpoint"],
+                            g_config.Container.RuntimeEndpoint.string());
 
-            if (container_config["RuntimeKill"]) {
-              g_config.Container.RuntimeKill =
-                  container_config["RuntimeKill"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeKill is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeDelete"]) {
-              g_config.Container.RuntimeDelete =
-                  container_config["RuntimeDelete"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeDelete is not configured.");
-              std::exit(1);
-            }
-
-            if (container_config["RuntimeRun"]) {
-              g_config.Container.RuntimeRun =
-                  container_config["RuntimeRun"].as<std::string>();
-            } else {
-              CRANE_ERROR("RuntimeRun is not configured.");
-              std::exit(1);
-            }
+            // Prepend unix protocol
+            g_config.Container.RuntimeEndpoint =
+                fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
+            g_config.Container.ImageEndpoint =
+                fmt::format("unix://{}", g_config.Container.ImageEndpoint);
           }
-        }
-
-        if (config["Plugin"]) {
-          const auto& plugin_config = config["Plugin"];
-          g_config.Plugin.Enabled =
-              YamlValueOr<bool>(plugin_config["Enabled"], false);
-          g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          YamlValueOr(plugin_config["PlugindSockPath"],
-                                      kDefaultPlugindUnixSockPath));
         }
       }
     } catch (YAML::BadFile& e) {
@@ -666,6 +638,32 @@ void ParseConfig(int argc, char** argv) {
   } else {
     CRANE_CRITICAL("Config file '{}' not existed", config_path);
     std::exit(1);
+  }
+
+  // Load plugin configuration from separate plugin.yaml file
+  if (std::filesystem::exists(plugin_config_path)) {
+    try {
+      using util::YamlValueOr;
+      YAML::Node plugin_config = YAML::LoadFile(plugin_config_path);
+
+      if (plugin_config["Enabled"])
+        g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
+
+      g_config.Plugin.PlugindSockPath =
+          fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                      YamlValueOr(plugin_config["PlugindSockPath"],
+                                  kDefaultPlugindUnixSockPath));
+
+      CRANE_INFO("Plugin config loaded from {}", plugin_config_path);
+    } catch (YAML::BadFile& e) {
+      CRANE_WARN("Can't open plugin config file {}: {}. Plugin disabled.",
+                 plugin_config_path, e.what());
+      g_config.Plugin.Enabled = false;
+    }
+  } else {
+    CRANE_INFO("Plugin config file '{}' not found. Plugin disabled.",
+               plugin_config_path);
+    g_config.Plugin.Enabled = false;
   }
 
   if (parsed_args.count("listen")) {
@@ -897,7 +895,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 
     // For ctld completing step, cleanup
     if (ctld_status == StepStatus::Completing) {
-      if (step->IsDaemon()) {
+      if (step->IsDaemonStep()) {
         CRANE_TRACE("[Job #{}] is completing", job_id);
         completing_jobs.insert(job_id);
       } else {
@@ -907,7 +905,7 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       continue;
     }
     if (supv_status == StepStatus::Configured) {
-      CRANE_ASSERT(!step->IsDaemon());
+      CRANE_ASSERT(!step->IsDaemonStep());
       // For configured but not running step, remove this, ctld will consider it
       // failed
       failed_steps[job_id].insert(step_id);
@@ -987,6 +985,13 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
+  // If Container is enabled, connect to CRI runtime.
+  if (g_config.Container.Enabled) {
+    g_cri_client = std::make_unique<cri::CriClient>();
+    g_cri_client->InitChannelAndStub(g_config.Container.RuntimeEndpoint,
+                                     g_config.Container.ImageEndpoint);
+  }
+
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
@@ -1039,6 +1044,11 @@ void WaitForStopAndDoGvarFini() {
 
   g_server.reset();
   g_craned_for_pam_server.reset();
+
+  /*
+   * Called in g_server.
+   */
+  g_cri_client.reset();
 
   /* Called from
    * PAM_SERVER, G_SERVER

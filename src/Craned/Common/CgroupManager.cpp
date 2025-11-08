@@ -283,7 +283,7 @@ std::string CgroupManager::CgroupStrByJobId(job_id_t job_id) {
 std::string CgroupManager::CgroupStrByStepId(job_id_t job_id, step_id_t step_id,
                                              bool system) {
   std::string_view suffix = system ? "system" : "user";
-  return std::format("{}/{}/{}", CgroupStrByJobId(job_id),
+  return std::format("{}/{}{}/{}", CgroupStrByJobId(job_id),
                      CgConstant::kStepCgNamePrefix, step_id, suffix);
 }
 
@@ -729,10 +729,12 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
                   ec.message());
       return false;
     }
+
     auto events_file =
         std::filesystem::path(cg_path) / CgConstant::kMemoryEventsFileV2;
     std::ifstream ifs(events_file);
     if (!ifs.is_open()) return false;
+
     std::string key;
     uint64_t val;
     while (ifs >> key >> val) {
@@ -761,6 +763,7 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   auto v1_file = memory_cgroup_path / CgConstant::kMemoryOomControlFileV1;
   std::ifstream ifs(v1_file);
   if (!ifs.is_open()) return false;
+
   std::string line;
   while (std::getline(ifs, line)) {
     std::istringstream iss(line);

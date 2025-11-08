@@ -147,6 +147,7 @@ apt install -y \
     pkg-config \
     ninja \
     libelf-dev \
+    libsubid-dev \
     bcc \
     linux-headers-$(uname -r)
 ```

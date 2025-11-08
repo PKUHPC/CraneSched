@@ -32,7 +32,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
     m_db_ = nullptr;
     CRANE_ERROR("Failed to open unqlite db file {}: {}", m_db_path_,
                 GetInternalErrorStr_());
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 
   // Unqlite does not roll back and clear WAL after crashing.
@@ -43,7 +43,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
     m_db_ = nullptr;
     CRANE_ERROR("Failed to rollback the undone transaction: {}",
                 GetInternalErrorStr_());
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 
   return {};
@@ -58,7 +58,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Close() {
 
     if (rc != UNQLITE_OK) {
       CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
-      return std::unexpected(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::OTHER);
     }
   }
 
@@ -81,7 +81,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Store(txn_id_t txn_id,
     CRANE_ERROR("Failed to store key {} into db: {}", key,
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 }
 
@@ -101,12 +101,12 @@ std::expected<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
       std::this_thread::yield();
       continue;
     }
-    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::kNotFound);
+    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::NOT_FOUND);
 
     CRANE_ERROR("Failed to get value size for key {}: {}", key,
                 GetInternalErrorStr_());
     unqlite_rollback(m_db_);
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 
   if (*len == 0) {
@@ -114,7 +114,7 @@ std::expected<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
     return {0};
   } else if (*len < n_bytes) {
     *len = n_bytes;
-    return std::unexpected(DbErrorCode::kBufferSmall);
+    return std::unexpected(DbErrorCode::BUFFER_SMALL);
   }
 
   return {n_bytes};
@@ -130,13 +130,13 @@ std::expected<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
       std::this_thread::yield();
       continue;
     }
-    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::kNotFound);
+    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::NOT_FOUND);
 
     CRANE_ERROR("Failed to delete key {} from db: {}", key,
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
 
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 }
 
@@ -150,7 +150,7 @@ std::expected<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
       continue;
     }
     CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
-    return std::unexpected(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 }
 
@@ -166,7 +166,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
       continue;
     }
     CRANE_ERROR("Failed to commit: {}", GetInternalErrorStr_());
-    return std::unexpected(kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 }
 
@@ -182,7 +182,7 @@ std::expected<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
       continue;
     }
     CRANE_ERROR("Failed to abort: {}", GetInternalErrorStr_());
-    return std::unexpected(kOther);
+    return std::unexpected(DbErrorCode::OTHER);
   }
 }
 
@@ -190,7 +190,7 @@ std::expected<void, DbErrorCode> UnqliteDb::IterateAllKv(KvIterFunc func) {
   int rc;
   unqlite_kv_cursor* cursor;
   rc = unqlite_kv_cursor_init(m_db_, &cursor);
-  if (rc != UNQLITE_OK) return std::unexpected(kOther);
+  if (rc != UNQLITE_OK) return std::unexpected(DbErrorCode::OTHER);
 
   for (unqlite_kv_cursor_first_entry(cursor);
        unqlite_kv_cursor_valid_entry(cursor);

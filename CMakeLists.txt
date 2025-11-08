@@ -341,6 +341,13 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+find_package(Subid REQUIRED)
+if (Subid_FOUND)
+    message(STATUS "Subid found. Include: ${SUBID_INCLUDE_DIRS}; Libs: ${SUBID_LIBRARIES}")
+else ()
+    message(FATAL_ERROR "Subid library was not found.")
+endif ()
+
 if (CRANE_ENABLE_BPF)
     find_package(BPF 1.4.6 REQUIRED)
 endif ()
@@ -453,6 +460,19 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         RENAME database.yaml.sample
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE)
+
+# Install plugin.yaml for both cranectld and craned (644)
+install(FILES ${CMAKE_SOURCE_DIR}/etc/plugin.yaml
+        DESTINATION /etc/crane/
+        RENAME plugin.yaml.sample
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
+install(FILES ${CMAKE_SOURCE_DIR}/etc/plugin.yaml
+        DESTINATION /etc/crane/
+        RENAME plugin.yaml.sample
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install PAM config
 install(TARGETS pam_crane

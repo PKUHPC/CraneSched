@@ -1,0 +1,23 @@
+# Plugin Configuration for CraneSched
+# This file contains all plugin-related settings
+
+# Toggle the plugin module in CraneSched
+Enabled: false
+
+# Socket path relative to CraneBaseDir
+PlugindSockPath: "cplugind/cplugind.sock"
+
+# Debug level of Plugind
+PlugindDebugLevel: "trace"
+
+# Network listening address
+PlugindListenAddress: "127.0.0.1"
+
+# Network listening port
+PlugindListenPort: "10018"
+
+# Plugins to be loaded in Plugind
+Plugins:
+  - Name: "dummy"
+    Path: "/path/to/dummy.so"
+    Config: "/path/to/dummy.yaml"
