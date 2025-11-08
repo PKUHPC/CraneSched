@@ -1604,6 +1604,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   for (auto& [job_id, step_ids] : request.filter_ids()) {
     filter_ids[job_id].insert(step_ids.steps().begin(), step_ids.steps().end());
   }
+  auto not_found_jobs =
+      filter_ids | std::views::keys | std::ranges::to<std::unordered_set>();
   if (filter_ids.empty()) {
     auto get_raw_ptr = [](auto& ptr) { return ptr.get(); };
     pd_input_rng = m_pending_task_map_ | ranges::views::values |
@@ -1612,33 +1614,33 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
                    ranges::views::transform(get_raw_ptr);
   } else {
     auto filter_nullptr = [](auto task_ptr) { return task_ptr != nullptr; };
-    pd_input_rng =
-        filter_ids |
-        ranges::views::transform([this, &reply](auto& it) -> TaskInCtld* {
-          job_id_t job_id = it.first;
-          auto pd_it = m_pending_task_map_.find(job_id);
-          if (pd_it != m_pending_task_map_.end()) {
-            return pd_it->second.get();
-          }
-          (*reply.mutable_not_cancelled_job_steps())[job_id].set_reason(
-              "Not found");
-          return nullptr;
-        }) |
-        ranges::views::filter(filter_nullptr);
+    pd_input_rng = filter_ids |
+                   ranges::views::transform(
+                       [this, &not_found_jobs](auto& it) -> TaskInCtld* {
+                         job_id_t job_id = it.first;
+                         auto pd_it = m_pending_task_map_.find(job_id);
+                         if (pd_it != m_pending_task_map_.end()) {
+                           // Pending jobs have no steps, we just consider job
+                           // existence here
+                           not_found_jobs.erase(job_id);
+                           return pd_it->second.get();
+                         }
+                         return nullptr;
+                       }) |
+                   ranges::views::filter(filter_nullptr);
 
-    rn_input_rng =
-        filter_ids |
-        ranges::views::transform([this, &reply](auto& it) -> TaskInCtld* {
-          job_id_t job_id = it.first;
-          auto rn_it = m_running_task_map_.find(job_id);
-          if (rn_it != m_running_task_map_.end()) {
-            return rn_it->second.get();
-          }
-          (*reply.mutable_not_cancelled_job_steps())[job_id].set_reason(
-              "Not found");
-          return nullptr;
-        }) |
-        ranges::views::filter(filter_nullptr);
+    rn_input_rng = filter_ids |
+                   ranges::views::transform(
+                       [this, &not_found_jobs](auto& it) -> TaskInCtld* {
+                         job_id_t job_id = it.first;
+                         auto rn_it = m_running_task_map_.find(job_id);
+                         if (rn_it != m_running_task_map_.end()) {
+                           not_found_jobs.erase(job_id);
+                           return rn_it->second.get();
+                         }
+                         return nullptr;
+                       }) |
+                   ranges::views::filter(filter_nullptr);
   }
 
   std::unordered_set<std::string> filter_nodes_set(
@@ -1658,7 +1660,10 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     CRANE_TRACE("Cancelling pending task #{}", task_id);
 
     auto it = m_pending_task_map_.find(task_id);
-    CRANE_ASSERT(it != m_pending_task_map_.end());
+    if (it == m_pending_task_map_.end()) {
+      CRANE_ERROR("Can not find pending job #{} to cancel", task_id);
+      return;
+    }
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, it->second->Username(), false);
@@ -1668,7 +1673,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       not_cancelled_job.set_reason("Permission Denied");
     } else {
       auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
-      cancelled_job_steps[task_id];
+      cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
 
       m_cancel_task_queue_.enqueue(
           CancelPendingTaskQueueElem{std::move(it->second)});
@@ -1691,14 +1696,16 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       not_cancelled_job.set_reason("Permission Denied");
     } else {
       std::vector<CommonStepInCtld*> cancel_steps;
+      // User specified job and step ids to cancel
       if (filter_ids.contains(task_id) && !filter_ids[task_id].empty()) {
         // cancel step
         for (step_id_t step_id : filter_ids[task_id]) {
           StepInCtld* step = task->GetStep(step_id);
           if (!step) {
-            auto& not_found_jobs = *reply.mutable_not_cancelled_job_steps();
-            not_found_jobs[task_id].mutable_step_ids()->Add(step_id);
-            not_found_jobs[task_id].mutable_step_reasons()->Add(
+            auto& not_found_job_steps =
+                *reply.mutable_not_cancelled_job_steps();
+            not_found_job_steps[task_id].mutable_step_ids()->Add(step_id);
+            not_found_job_steps[task_id].mutable_step_reasons()->Add(
                 "Step not found");
           } else {
             cancel_steps.push_back(static_cast<CommonStepInCtld*>(step));
@@ -1706,7 +1713,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         }
 
       } else {
-        // cancel job
+        // User cancel jobs with node/name... filter
         cancel_steps.push_back(task->PrimaryStep());
       }
       for (CommonStepInCtld* step : cancel_steps) {
@@ -1746,7 +1753,10 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto running_task_rng = rn_input_rng | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
-
+  for (auto job_id : not_found_jobs) {
+    auto& not_found_job_steps = *reply.mutable_not_cancelled_job_steps();
+    not_found_job_steps[job_id].set_reason("Job not found");
+  }
   return reply;
 }
 
