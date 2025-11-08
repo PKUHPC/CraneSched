@@ -1534,6 +1534,17 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
 }
 
 CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
+  if (step->StepType() == crane::grpc::StepType::DAEMON) {
+    for (CranedId const& craned_id : step->ExecutionNodes()) {
+      m_cancel_task_queue_.enqueue(
+          CancelRunningTaskQueueElem{.job_id = step->job_id,
+                                     .step_id = step->StepId(),
+                                     .craned_id = craned_id});
+      m_cancel_task_async_handle_->send();
+    }
+    return CraneErrCode::SUCCESS;
+  }
+
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -1692,9 +1703,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           (*reply.mutable_not_cancelled_job_steps())[task_id];
       not_cancelled_job.set_reason("Permission Denied");
     } else {
-      std::vector<CommonStepInCtld*> cancel_steps;
       // User specified job and step ids to cancel
       if (filter_ids.contains(task_id) && !filter_ids[task_id].empty()) {
+        std::vector<CommonStepInCtld*> cancel_steps;
         // cancel step
         for (step_id_t step_id : filter_ids[task_id]) {
           StepInCtld* step = task->GetStep(step_id);
@@ -1709,24 +1720,32 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           }
         }
 
+        for (CommonStepInCtld* step : cancel_steps) {
+          if (step->type == crane::grpc::Interactive) {
+            auto& meta = step->ia_meta.value();
+            if (!meta.has_been_cancelled_on_front_end) {
+              meta.has_been_cancelled_on_front_end = true;
+              meta.cb_step_cancel({step->job_id, step->StepId()});
+            }
+          } else {
+            TerminateRunningStepNoLock_(step);
+          }
+          auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
+          auto& job_steps = cancelled_job_steps[task_id];
+          job_steps.add_steps(step->StepId());
+        }
       } else {
         // User cancel jobs with node/name... filter
-        cancel_steps.push_back(task->PrimaryStep());
-      }
-      for (CommonStepInCtld* step : cancel_steps) {
-        if (step->type == crane::grpc::Interactive) {
-          auto& meta = step->ia_meta.value();
-          if (!meta.has_been_cancelled_on_front_end) {
-            meta.has_been_cancelled_on_front_end = true;
-            meta.cb_step_cancel({step->job_id, step->StepId()});
-          }
-        } else {
-          TerminateRunningStepNoLock_(step);
+        auto daemon_step = task->DaemonStep();
+        if (!daemon_step) {
+          CRANE_ERROR(
+              "[Job #{}] Daemon step not found when cancelling running job",
+              task_id);
+          return;
         }
+        TerminateRunningStepNoLock_(daemon_step);
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
-        auto& job_steps = cancelled_job_steps[task_id];
-        if (step->StepType() != crane::grpc::StepType::PRIMARY)
-          job_steps.add_steps(step->StepId());
+        cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
       }
     }
   };
