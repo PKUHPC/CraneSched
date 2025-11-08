@@ -3825,7 +3825,8 @@ void SchedulerAlgo::AddPreemptedJobs(
   }
 }
 
-void TaskScheduler::ProcessFinalTasks_(const std::unordered_set<TaskInCtld*>& tasks) {
+void TaskScheduler::ProcessFinalTasks_(
+    const std::unordered_set<TaskInCtld*>& tasks) {
   PersistAndTransferTasksToMongodb_(tasks);
   CallPluginHookForFinalTasks_(tasks);
 }

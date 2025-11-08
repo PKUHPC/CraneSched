@@ -173,7 +173,7 @@ message TaskToCtld {
   bool exclusive = 37;
 
   bool hold = 38;
-  google.protobuf.Timestamp begin_time = 39; 
+  google.protobuf.Timestamp begin_time = 39;
 }
 
 message TaskInEmbeddedDb {
