@@ -1656,14 +1656,11 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto rng_get_job_id = [&](TaskInCtld* task) { return task->TaskId(); };
 
-  auto fn_cancel_pending_task = [&](auto task_id) {
+  auto fn_cancel_pending_task = [&](job_id_t task_id) {
     CRANE_TRACE("Cancelling pending task #{}", task_id);
 
     auto it = m_pending_task_map_.find(task_id);
-    if (it == m_pending_task_map_.end()) {
-      CRANE_ERROR("Can not find pending job #{} to cancel", task_id);
-      return;
-    }
+    CRANE_ASSERT(it != m_pending_task_map_.end());
 
     auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, it->second->Username(), false);
@@ -1749,7 +1746,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   // Evaluate immediately. fn_cancel_pending_task will change the contents
   // of m_pending_task_map_ and invalidate the end() of
   // pending_task_rng.
-  ranges::for_each(pending_task_id_rng, fn_cancel_pending_task);
+  ranges::for_each(pending_task_id_rng | ranges::to<std::vector<job_id_t>>(),
+                   fn_cancel_pending_task);
 
   auto running_task_rng = rn_input_rng | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
