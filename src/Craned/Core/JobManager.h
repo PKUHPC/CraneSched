@@ -23,7 +23,6 @@
 
 #include <grp.h>
 
-#include "CgroupManager.h"
 #include "StepInstance.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -122,7 +121,12 @@ class JobManager {
    *
    * @param jobs completing jobs to clean up
    * @param steps completing step to clean up, for daemon steps will send
-   * ShutdownSupervisor
+   * ShutdownSupervisor RPC.
+   *
+   * If a job and its steps are both provided, the ownership of its steps submit
+   * in `steps` is in step_map.
+   * If step is not provided with its job, the step is erased from its job's
+   * step_map.
    */
   void CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                std::vector<StepInstance*>&& steps);

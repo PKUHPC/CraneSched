@@ -177,7 +177,7 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         "Cancelled",
         "OutOfMemory",
         "Configuring",
-        "Configured",
+        "Starting",
         "Completing",
         // 10 - 14
         "Invalid",

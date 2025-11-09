@@ -56,11 +56,7 @@ grpc::Status SupervisorServiceImpl::CheckStatus(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::CheckStatusRequest* request,
     crane::grpc::supervisor::CheckStatusReply* response) {
-  response->set_job_id(g_config.JobId);
-  response->set_step_id(g_config.StepId);
-  response->set_supervisor_pid(getpid());
-  response->set_status(g_runtime_status.Status);
-  response->set_ok(true);
+  g_task_mgr->CheckStatusAsync(response);
   return Status::OK;
 }
 
@@ -96,7 +92,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
   CRANE_INFO("Grpc shutdown request received.");
-  g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
+  g_task_mgr->ShutdownSupervisorAsync();
   return Status::OK;
 }
 

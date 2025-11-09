@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "Supervisor.grpc.pb.h"
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -62,6 +63,7 @@ class StepInstance {
   bool pty{};
 
   std::string cgroup_path;  // resolved cgroup path
+
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
@@ -98,7 +100,12 @@ class StepInstance {
 
   [[nodiscard]] bool IsDaemonStep() const noexcept;
 
-  const StepToSupv& GetStep() const { return m_step_to_supv_; }
+  [[nodiscard]] StepStatus GetStatus() const noexcept { return m_status_; }
+  [[nodiscard]] bool IsRunning() const noexcept {
+    return m_status_ == StepStatus::Running;
+  }
+
+  const StepToSupv& GetStep() const noexcept { return m_step_to_supv_; }
 
   // Cfored client in step
   void InitCforedClient() {
@@ -148,11 +155,14 @@ class StepInstance {
 
   EnvMap GetStepProcessEnv() const;
 
+  void GotNewStatus(StepStatus new_status);
+
   // OOM monitoring methods
   void InitOomBaseline();
   bool EvaluateOomOnExit();
 
  private:
+  StepStatus m_status_{StepStatus::Invalid};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
@@ -389,8 +399,12 @@ class TaskManager {
   TaskManager& operator=(const TaskManager&) = delete;
   TaskManager& operator=(TaskManager&&) = delete;
 
+  void SupervisorFinishInit();
+
   void Wait();
-  void ShutdownSupervisor();
+  void ShutdownSupervisorAsync(
+      crane::grpc::TaskStatus new_status = StepStatus::Completed,
+      uint32_t exit_code = 0, std::string reason = "");
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
@@ -448,6 +462,8 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -469,6 +485,9 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  void EvSupervisorFinishInitCb_();
+  void EvShutdownSupervisorCb_();
+
   // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
@@ -487,8 +506,14 @@ class TaskManager {
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+  void EvGrpcCheckStatusCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
+
+  std::shared_ptr<uvw::async_handle> m_supervisor_finish_init_handle_;
+  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
+      m_shutdown_status_queue_;
+  std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -519,6 +544,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_grpc_query_step_env_async_handle_;
   ConcurrentQueue<std::promise<CraneExpected<EnvMap>>>
       m_grpc_query_step_env_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_check_status_async_handle_;
+  ConcurrentQueue<std::promise<StepStatus>> m_grpc_check_status_queue_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;

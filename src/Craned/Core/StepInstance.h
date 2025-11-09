@@ -21,7 +21,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "CgroupManager.h"
 #include "SupervisorManager.h"
 
 namespace Craned {
@@ -46,6 +45,7 @@ struct StepInstance {
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
                         StepStatus status,
                         std::shared_ptr<SupervisorStub> supervisor_stub);
+  ~StepInstance() = default;
   void CleanUp();
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
@@ -54,6 +54,10 @@ struct StepInstance {
 
   [[nodiscard]] bool IsContainer() const noexcept {
     return step_to_d.has_container_meta();
+  }
+
+  [[nodiscard]] bool IsRunning() const noexcept {
+    return status == StepStatus::Running;
   }
 
   [[nodiscard]] std::string StepIdString() const noexcept {

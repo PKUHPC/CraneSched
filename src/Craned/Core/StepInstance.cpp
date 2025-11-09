@@ -347,7 +347,7 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
   case StepStatus::Pending:
   case StepStatus::Invalid: {
     CRANE_ERROR("[Step #{}.{}] Invalid new status received: {}, ignored.",
-                job_id, step_id, static_cast<int>(new_status));
+                job_id, step_id, new_status);
     return;
   }
 
@@ -357,13 +357,13 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
         CRANE_WARN(
             "[Step {}.{}] Daemon step status is not 'Configuring' when "
             "receiving new status 'Running', current status: {}.",
-            job_id, step_id, static_cast<int>(this->status));
+            job_id, step_id, this->status);
     } else {
       if (status != StepStatus::Starting)
         CRANE_WARN(
             "[Step {}.{}] Step status is not 'Starting' when receiving new "
             "status 'Running', current status: {}.",
-            job_id, step_id, static_cast<int>(this->status));
+            job_id, step_id, this->status);
     }
     break;
   }
@@ -372,13 +372,13 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
       CRANE_WARN(
           "[Step {}.{}] Daemon step got invalid status 'Starting' current "
           "status: {}.",
-          job_id, step_id, static_cast<int>(this->status));
+          job_id, step_id, this->status);
     } else {
       if (status != StepStatus::Configuring)
         CRANE_WARN(
             "[Step {}.{}] Step status is not 'Configuring' when "
             "receiving new status 'Starting', current status: {}.",
-            job_id, step_id, static_cast<int>(this->status));
+            job_id, step_id, this->status);
     }
     break;
   }
@@ -388,7 +388,7 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
       CRANE_WARN(
           "[Step {}.{}] Step status is not 'Running' when receiving new "
           "status 'Completing', current status: {}.",
-          job_id, step_id, static_cast<int>(this->status));
+          job_id, step_id, this->status);
     break;
   }
   // Finished status
@@ -403,8 +403,7 @@ void StepInstance::GotNewStatus(const StepStatus& new_status) {
           "[Step {}.{}] Step status is not "
           "Running/Completing/Starting/Configuring when receiving new finished "
           "status {}, current status: {}.",
-          job_id, step_id, static_cast<int>(new_status),
-          static_cast<int>(this->status));
+          job_id, step_id, new_status, this->status);
     }
     break;
   }

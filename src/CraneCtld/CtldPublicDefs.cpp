@@ -508,9 +508,14 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetExitCode(this->PrevErrorExitCode());
       } else {
         this->SetStatus(crane::grpc::TaskStatus::Completed);
+        this->SetExitCode(0U);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
                  this->StepId(), this->Status());
+      // Daemon step terminated by user before primary step created
+      if (job->PrimaryStepStatus() == crane::grpc::TaskStatus::Invalid) {
+        return std::pair{this->Status(), this->ExitCode()};
+      }
       return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
     }
   }

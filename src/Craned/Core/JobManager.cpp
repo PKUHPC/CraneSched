@@ -353,11 +353,11 @@ bool JobManager::EvCheckSupervisorRunning_() {
       auto& job = m_completing_job_.at(step->job_id);
       if (!job.step_map.contains(step->step_id)) {
         // The step is considered completing before the job considered
-        // completing, already remove form step map.
-        steps_to_clean.emplace_back(std::move(step));
+        // completing, already removed form step map.
+        steps_to_clean.emplace_back(step);
         continue;
       }
-      steps_to_clean.emplace_back(std::move(job.step_map.at(step->step_id)));
+      steps_to_clean.emplace_back(job.step_map.at(step->step_id).release());
       job.step_map.erase(step->step_id);
       if (job.step_map.empty()) {
         jobs_to_clean.emplace_back(std::move(job));
@@ -367,12 +367,13 @@ bool JobManager::EvCheckSupervisorRunning_() {
   }
 
   if (!steps_to_clean.empty()) {
-    CRANE_TRACE(
-        "Supervisor for Step [{}] found to be exited",
-        absl::StrJoin(steps_to_clean | std::views::transform([](auto& step) {
-                        return std::make_pair(step->job_id, step->step_id);
-                      }) | std::views::transform(util::StepIdPairToString),
-                      ","));
+    CRANE_TRACE("Supervisor for Step [{}] found to be exited",
+                absl::StrJoin(steps_to_clean |
+                                  std::views::transform(
+                                      [](std::unique_ptr<StepInstance>& step) {
+                                        return step->StepIdString();
+                                      }),
+                              ","));
     FreeStepAllocation_(std::move(steps_to_clean));
     if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
   }
@@ -822,6 +823,7 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
   StepTerminateQueueElem elem;
+  std::vector<StepTerminateQueueElem> not_ready_elems;
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
 
@@ -834,6 +836,10 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     std::vector<StepInstance*> steps_to_clean;
     std::vector<JobInD> job_to_clean;
     {
+      CRANE_INFO(
+          "[Step #{}.{}] Terminating step, orphaned:{} terminated_by_user:{}.",
+          elem.job_id, elem.step_id, elem.mark_as_orphaned,
+          elem.terminated_by_user);
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
@@ -849,6 +855,15 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
                     elem.job_id, elem.step_id);
 
+        continue;
+      }
+      auto& step = job_instance->step_map.at(elem.step_id);
+      if (!step->IsRunning()) {
+        not_ready_elems.emplace_back(std::move(elem));
+        CRANE_DEBUG(
+            "[Step #{}.{}] Step not running, current: {}, cannot terminate "
+            "now.",
+            elem.job_id, elem.step_id, step->status);
         continue;
       }
 
@@ -874,48 +889,45 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
                 {.job_id = elem.job_id,
                  .step_id = step_id,
                  .new_status = crane::grpc::TaskStatus::Cancelled,
-                 .exit_code = ExitCode::EC_TERMINATED,
-                 .reason = "Terminated failed."});
+                 .exit_code = 0U,
+                 .reason = "Termination failed."});
         }
         CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);
       }
 
       if (elem.mark_as_orphaned) {
-        for (auto step_id : terminate_step_ids) {
-          CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
-                      step_id);
-          auto it = job_instance->step_map.find(step_id);
-          auto* step = it->second.release();
-          steps_to_clean.push_back(step);
-          job_instance->step_map.erase(it);
-        }
-      }
-      if (terminate_job) {
-        bool job_empty{false};
-        {
-          if (!map_ptr->contains(elem.job_id)) {
-            CRANE_ERROR(
-                "Job #{} not found when trying to remove orphaned step.",
-                elem.job_id);
-          }
-          auto job_ptr = map_ptr->at(elem.job_id).RawPtr();
-          job_empty = job_ptr->step_map.empty();
-        }
-        if (job_empty) {
+        if (terminate_job) {
           auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
           auto job_opt = FreeJobInfoNoLock_(elem.job_id, map_ptr, uid_map_ptr);
           if (job_opt.has_value()) {
             job_to_clean.emplace_back(std::move(job_opt.value()));
+            for (auto& [step_id, step] : job_instance->step_map) {
+              CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
+                          step_id);
+              auto* step_ptr = step.get();
+              steps_to_clean.push_back(step_ptr);
+            }
           } else {
-            CRANE_DEBUG(
-                "Job #{} not found when trying to remove orphaned step.",
-                elem.job_id);
+            CRANE_DEBUG("Trying to terminate a not existed job #{}.",
+                        elem.job_id);
+          }
+        } else {
+          for (auto step_id : terminate_step_ids) {
+            CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
+                        step_id);
+            auto it = job_instance->step_map.find(step_id);
+            auto* step = it->second.release();
+            steps_to_clean.push_back(step);
+            job_instance->step_map.erase(it);
           }
         }
       }
     }
     CleanUpJobAndStepsAsync(std::move(job_to_clean), std::move(steps_to_clean));
   }
+  m_step_terminate_queue_.enqueue_bulk(
+      std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
+  not_ready_elems.clear();
 }
 
 void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
@@ -955,6 +967,10 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Failed to shutdown supervisor.",
                     step->job_id, step->step_id);
+        g_job_mgr->StepStatusChangeAsync(
+            step->job_id, step->step_id, crane::grpc::TaskStatus::Failed,
+            ExitCode::EC_RPC_ERR, "Failed to shutdown supervisor.",
+            google::protobuf::util::TimeUtil::GetCurrentTime());
       }
 
       shutdown_step_latch.count_down();

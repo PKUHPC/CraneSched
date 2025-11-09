@@ -90,14 +90,6 @@ struct Config {
 
 inline Config g_config;
 
-struct RuntimeStatus {
-  std::atomic<StepStatus> Status{StepStatus::Configuring};
-  [[nodiscard]] bool CanStepOperate() const noexcept {
-    return Status == StepStatus::Running;
-  }
-};
-
-inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

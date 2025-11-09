@@ -2315,22 +2315,23 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
   auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
   for (auto&& [craned_id, steps] : running_task_craned_id_map) {
-    if (!g_meta_container->CheckCranedOnline(craned_id)) {
-      for (auto [job_id, step_ids] : steps) {
-        for (auto step_id : step_ids)
-          StepStatusChangeAsync(job_id, step_id, craned_id,
-                                crane::grpc::TaskStatus::Cancelled,
-                                ExitCode::EC_TERMINATED, "", now);
-      }
-      continue;
-    }
-    g_thread_pool->detach_task([id = craned_id, steps_to_cancel = steps]() {
-      CRANE_TRACE("Craned {} is going to cancel [{}].", id,
-                  util::JobStepsToString(steps_to_cancel));
-      auto stub = g_craned_keeper->GetCranedStub(id);
+    g_thread_pool->detach_task(
+        [now, id = craned_id, steps_to_cancel = steps]() {
+          CRANE_TRACE("Craned {} is going to cancel [{}].", id,
+                      util::JobStepsToString(steps_to_cancel));
+          auto stub = g_craned_keeper->GetCranedStub(id);
 
-      if (stub && !stub->Invalid()) stub->TerminateSteps(steps_to_cancel);
-    });
+          if (stub && !stub->Invalid())
+            stub->TerminateSteps(steps_to_cancel);
+          else {
+            for (auto [job_id, step_ids] : steps_to_cancel) {
+              for (auto step_id : step_ids)
+                g_task_scheduler->StepStatusChangeAsync(
+                    job_id, step_id, id, crane::grpc::TaskStatus::Cancelled,
+                    ExitCode::EC_TERMINATED, "", now);
+            }
+          }
+        });
   }
 
   if (pending_task_ptr_vec.empty()) return;

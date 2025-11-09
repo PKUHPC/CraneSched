@@ -111,6 +111,83 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   return env_map;
 }
 
+void StepInstance::GotNewStatus(StepStatus new_status) {
+  switch (new_status) {
+  case StepStatus::Configuring:
+  case StepStatus::Pending:
+  case StepStatus::Invalid: {
+    CRANE_ERROR("[Step #{}.{}] Invalid new status received: {}, ignored.",
+                job_id, step_id, new_status);
+    return;
+  }
+
+  case StepStatus::Running: {
+    if (this->IsDaemonStep()) {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Daemon step status is not 'Configuring' when "
+            "receiving new status 'Running', current status: {}.",
+            job_id, step_id, m_status_);
+    } else {
+      if (m_status_ != StepStatus::Starting)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Starting' when receiving new "
+            "status 'Running', current status: {}.",
+            job_id, step_id, m_status_);
+    }
+    break;
+  }
+  case StepStatus::Starting: {
+    if (this->IsDaemonStep()) {
+      CRANE_WARN(
+          "[Step {}.{}] Daemon step got invalid status 'Starting' current "
+          "status: {}.",
+          job_id, step_id, m_status_);
+      return;
+    } else {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Configuring' when "
+            "receiving new status 'Starting', current status: {}.",
+            job_id, step_id, m_status_);
+    }
+    break;
+  }
+
+  case StepStatus::Completing: {
+    if (m_status_ != StepStatus::Running)
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not 'Running' when receiving new "
+          "status 'Completing', current status: {}.",
+          job_id, step_id, m_status_);
+    break;
+  }
+  // Finished status
+  case StepStatus::ExceedTimeLimit:
+  case StepStatus::OutOfMemory:
+  case StepStatus::Cancelled:
+  case StepStatus::Failed:
+  case StepStatus::Completed: {
+    if (m_status_ != StepStatus::Running &&
+        m_status_ != StepStatus::Completing &&
+        m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, m_status_);
+    }
+    break;
+  }
+  default: {
+    std::unreachable();
+  }
+  }
+
+  m_status_ = new_status;
+}
+
 void StepInstance::AddTaskInstance(task_id_t task_id,
                                    std::unique_ptr<ITaskInstance>&& task) {
   m_task_map_.emplace(task_id, std::move(task));
@@ -1477,6 +1554,18 @@ TaskManager::TaskManager()
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec) {
   m_uvw_loop_ = uvw::loop::create();
 
+  m_supervisor_finish_init_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_supervisor_finish_init_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvSupervisorFinishInitCb_();
+      });
+
+  m_shutdown_supervisor_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_shutdown_supervisor_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvShutdownSupervisorCb_();
+      });
+
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) {
@@ -1556,6 +1645,13 @@ TaskManager::TaskManager()
         EvGrpcQueryStepEnvCb_();
       });
 
+  m_grpc_check_status_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_check_status_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcCheckStatusCb_();
+      });
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -1579,26 +1675,21 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
+void TaskManager::SupervisorFinishInit() {
+  m_supervisor_finish_init_handle_->send();
+}
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::ShutdownSupervisor() {
+void TaskManager::ShutdownSupervisorAsync(crane::grpc::TaskStatus new_status,
+                                          uint32_t exit_code,
+                                          std::string reason) {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemonStep()) {
-    CRANE_DEBUG("Sending a completed status as daemon step.");
-    g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
-                                           0, "");
-    g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
-  }
-
-  // Explicitly release CriClient
-  m_step_.StopCriClient();
-
-  g_craned_client->Shutdown();
-  g_server->Shutdown();
-
-  this->Shutdown();
+  m_shutdown_status_queue_.enqueue(
+      std::make_tuple(new_status, exit_code, std::move(reason)));
+  m_shutdown_supervisor_handle_->send();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
@@ -1612,12 +1703,6 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                               std::optional<std::string> reason) {
   CRANE_TRACE("[Task #{}] Task status change to {} exit code: {}, reason: {}.",
               task_id, new_status, exit_code, reason.value_or(""));
-
-  if (g_runtime_status.Status.load() != StepStatus::Completing) {
-    CRANE_INFO("Step completing now, prev status: {}.",
-               g_runtime_status.Status.load());
-    g_runtime_status.Status = StepStatus::Completing;
-  }
 
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
@@ -1636,13 +1721,14 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
+    m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     m_step_.StopCforedClient();
     if (!orphaned) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     }
-    ShutdownSupervisor();
+    ShutdownSupervisorAsync();
   }
 }
 
@@ -1727,6 +1813,53 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+void TaskManager::CheckStatusAsync(
+    crane::grpc::supervisor::CheckStatusReply* response) {
+  std::promise<StepStatus> status_promise;
+  auto status_future = status_promise.get_future();
+  m_grpc_check_status_queue_.enqueue(std::move(status_promise));
+  m_grpc_check_status_async_handle_->send();
+  response->set_job_id(g_config.JobId);
+  response->set_step_id(g_config.StepId);
+  response->set_supervisor_pid(getpid());
+  response->set_status(status_future.get());
+  response->set_ok(true);
+}
+
+void TaskManager::EvSupervisorFinishInitCb_() {
+  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
+    m_step_.GotNewStatus(StepStatus::Running);
+  } else {
+    m_step_.GotNewStatus(StepStatus::Starting);
+  }
+
+  g_craned_client->StepStatusChangeAsync(m_step_.GetStatus(), 0, std::nullopt);
+}
+
+void TaskManager::EvShutdownSupervisorCb_() {
+  std::tuple<crane::grpc::TaskStatus, uint32_t, std::string> final_status;
+  bool got_final_status = false;
+  do {
+    got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
+    if (!got_final_status) continue;
+    auto& [status, exit_code, reason] = final_status;
+    if (m_step_.IsDaemonStep()) {
+      CRANE_DEBUG("Sending a {} status as daemon step.", status);
+      m_step_.GotNewStatus(status);
+      if (!m_step_.orphaned)
+        g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
+    }
+
+    // Explicitly release CriClient
+    m_step_.StopCriClient();
+
+    g_craned_client->Shutdown();
+    g_server->Shutdown();
+
+    this->Shutdown();
+  } while (!got_final_status);
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1925,15 +2058,14 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     CRANE_TRACE("Receive TerminateRunningTask Request for {}.", g_config.JobId);
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
-    if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
+    if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
-
-    if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Terminating a completing task #{}, ignored.",
-                  g_config.JobId);
+    if (m_step_.IsDaemonStep()) {
+      if (elem.mark_as_orphaned)
+        g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
@@ -1941,7 +2073,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
-      g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
+      g_task_mgr->ShutdownSupervisorAsync();
       continue;
     }
 
@@ -1983,7 +2115,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
   std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (!g_runtime_status.CanStepOperate()) {
+    if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Task is not ready to change time limit, will check next time.");
@@ -2026,8 +2158,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
-
-    g_runtime_status.Status = StepStatus::Running;
+    m_step_.GotNewStatus(StepStatus::Running);
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
     auto* task = m_step_.GetTaskInstance(task_id);
@@ -2082,4 +2213,12 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
     elem.set_value(m_step_.GetStepProcessEnv());
   }
 }
+
+void TaskManager::EvGrpcCheckStatusCb_() {
+  std::promise<StepStatus> elem;
+  while (m_grpc_check_status_queue_.try_dequeue(elem)) {
+    elem.set_value(m_step_.GetStatus());
+  }
+}
+
 }  // namespace Craned::Supervisor
