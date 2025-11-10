@@ -189,9 +189,11 @@ TLS:
   DomainSuffix: crane.local
 ```
 
-### GPU 配置
+### Gres配置
 
-使用设备控制定义 GPU 资源：
+> 设备资源相关配置
+
+定义 GPU、NPU 和其他加速器等通用资源：
 
 ```yaml
 Nodes:
@@ -209,6 +211,32 @@ Nodes:
         # 运行时的环境注入器
         EnvInjector: nvidia
 ```
+
+**Gres 参数：**
+
+- **name**：一般是资源类型如：`GPU`，`NPU`等
+- **type**：一般是资源型号如：`A100`，`3090`等
+- **DeviceFileRegex**: 资源对应的 /dev 目录下的设备文件，适用于一个物理设备对应一个设备文件的资源，**每个文件对应系统内的一个 Gres 资源**，支持 Regex 格式。常见设备对应设备文件。如 Nvidia、AMD、海光 DCU、昇腾等。
+- **DeviceFileList**：适用于**一个物理设备对应多个 /dev 目录下设备文件的 Gres 资源**，每一组文件对应系统内的一个 Gres 资源，支持 Regex 格式。
+
+DeviceFileRegex与DeviceFileList二选一，以上设备文件必须存在，**否则 Craned 启动时将报错退出**
+
+- **EnvInjector**: 设备需要注入的环境变量
+
+  -  可选值：对应环境变量
+
+  - `nvidia`：`CUDA_VISIABLE_DEVICES`
+  - `hip`：`HIP_VISIABLE_DEVICES`
+  - `ascend`：`ASCEND_RT_VISIBLE_DEVICES`
+
+- 常见厂商设备文件路径及相关配置
+
+  - | 厂商        | 设备文件路径            | EnvInjector |
+    | :---------- | :---------------------- | :---------- |
+    | Nvidia      | /dev/nvidia0 ...        | nvidia      |
+    | AMD/海光DCU | /dev/dri/renderer128... | hip         |
+    | 昇腾        | /dev/davinci0 ...       | ascend      |
+    | 天数智芯    | /dev/iluvatar0 ...      | nvidia      |
 
 ### 队列限制
 
