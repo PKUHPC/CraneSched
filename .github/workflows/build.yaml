@@ -350,8 +350,9 @@ jobs:
           retention-days: 3
           if-no-files-found: error
       
-      # Upload RPM/DEB to private repository
+      # Upload RPM/DEB to private repository (only on miss)
       - name: Upload to private repository
+        if: steps.local_cache.outputs.hit != 'true'
         env: 
           NEXUS_URL: ${{ secrets.CCREPO_URL }}
           NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
