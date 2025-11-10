@@ -2678,7 +2678,7 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
         step.reset();
         continue;
       }
-      err = CheckStepValidity();
+      err = CheckStepValidity(step.get());
       if (err.error()) {
         elems[pos].second.set_value(std::unexpected{err.error()});
         step.reset();
