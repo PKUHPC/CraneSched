@@ -327,7 +327,7 @@ bool TaskScheduler::Init() {
       if (auto err_expt = AcquireStepAttributes(step.get());
           !err_expt.has_value()) {
         CRANE_ERROR(
-            "[Step #{}{}] AcquireStepAttributes failed: {}, step dropped!",
+            "[Step #{}.{}] AcquireStepAttributes failed: {}, step dropped!",
             job_id, step_id, CraneErrStr(err_expt.error()));
         step.reset();
         invalid_steps[job_id].emplace_back(std::move(step_info));
@@ -337,7 +337,7 @@ bool TaskScheduler::Init() {
 
       if (auto err_expt = CheckStepValidity(step.get());
           !err_expt.has_value()) {
-        CRANE_ERROR("[Step #{}{}] CheckStepValidity failed: {}, step dropped!",
+        CRANE_ERROR("[Step #{}.{}] CheckStepValidity failed: {}, step dropped!",
                     job_id, step_id, CraneErrStr(err_expt.error()));
         step.reset();
         invalid_steps[job_id].emplace_back(std::move(step_info));
@@ -364,8 +364,8 @@ bool TaskScheduler::Init() {
         job->SetPrimaryStep(std::unique_ptr<CommonStepInCtld>(
             static_cast<CommonStepInCtld*>(step.release())));
       } else {
-        CRANE_INFO("Common step {} recovered for job #{}", job->TaskId(),
-                   step->StepId());
+        CRANE_INFO("Common step {} recovered for job #{}", step->StepId(),
+                   job->TaskId());
         job->AddStep(std::unique_ptr<CommonStepInCtld>(
             static_cast<CommonStepInCtld*>(step.release())));
       }
@@ -2672,6 +2672,18 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
     auto it = m_running_task_map_.find(step->job_id);
     if (it != m_running_task_map_.end()) {
       step->job = it->second.get();
+      auto err = AcquireStepAttributes(step.get());
+      if (err.error()) {
+        elems[pos].second.set_value(std::unexpected{err.error()});
+        step.reset();
+        continue;
+      }
+      err = CheckStepValidity();
+      if (err.error()) {
+        elems[pos].second.set_value(std::unexpected{err.error()});
+        step.reset();
+        continue;
+      }
       valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
     } else {
       elems[pos].second.set_value(

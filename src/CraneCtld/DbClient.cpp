@@ -460,7 +460,9 @@ bool MongodbClient::FetchJobRecords(
       } else {
         job_info_ptr = &in_mem_job_it->second;
       }
-      for (const auto& elem : view["steps"].get_array().value) {
+      auto steps_elem = view["steps"];
+      if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      for (const auto& elem : steps_elem.get_array().value) {
         auto* step_info = job_info_ptr->add_step_info_list();
         ViewToStepInfo_(elem.get_document().value, step_info);
         step_info->set_job_id(job_id);
