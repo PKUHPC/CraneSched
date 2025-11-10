@@ -2001,12 +2001,12 @@ bool MongodbClient::NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
   }
 }
 
-bool MongodbClient::RollupSummary(RollupType rollup_type) {
+void MongodbClient::RollupSummary(RollupType rollup_type) {
   std::tm tm_last{};
   if (!GetSummaryLastSuccessTimeTm(rollup_type, tm_last)) {
     CRANE_ERROR("Get summary last success time type {} error",
                 RollupTypeToString(rollup_type));
-    return false;
+    return;
   }
   std::time_t now =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -2018,29 +2018,26 @@ bool MongodbClient::RollupSummary(RollupType rollup_type) {
   if (!NeedRollup(tm_last, tm_now, rollup_type)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-    CRANE_INFO("Less than 1 {} since last aggregation, skip. {} -> {}",
-               RollupTypeToString(rollup_type), util::FormatTime(last_sec),
-               util::FormatTime(now_sec));
-    return false;
+    CRANE_TRACE("Less than 1 {} since last aggregation, skip. {} -> {}",
+                RollupTypeToString(rollup_type), util::FormatTime(last_sec),
+                util::FormatTime(now_sec));
+    return;
   }
 
   auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
   auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-  CRANE_INFO("Aggregating {} from {} to {}", RollupTypeToString(rollup_type),
-             util::FormatTime(last_sec), util::FormatTime(now_sec));
+  CRANE_TRACE("Aggregating {} from {} to {}", RollupTypeToString(rollup_type),
+              util::FormatTime(last_sec), util::FormatTime(now_sec));
 
-  auto t0 = std::chrono::steady_clock::now();
-  bool success = AggregateJobSummary(rollup_type, last_sec, now_sec);
-  if (!success) {
-    CRANE_ERROR("Aggregate job summary ({}) failed! Window: {} -> {}",
-                RollupTypeToString(rollup_type), util::FormatTime(last_sec),
-                util::FormatTime(now_sec));
+  if (rollup_type == RollupType::HOUR) {
+    AggregateJobSummaryByHour(last_sec, now_sec, m_task_collection_name_);
+  } else if (rollup_type == RollupType::DAY) {
+    AggregateJobSummaryByDayOrMonth(RollupType::HOUR, RollupType::DAY, last_sec,
+                                    now_sec);
+  } else if (rollup_type == RollupType::MONTH) {
+    AggregateJobSummaryByDayOrMonth(RollupType::DAY, RollupType::MONTH,
+                                    last_sec, now_sec);
   }
-  auto t1 = std::chrono::steady_clock::now();
-  int64_t agg_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-
-  return success;
 }
 
 void MongodbClient::ClusterRollupUsage() {
@@ -2050,29 +2047,29 @@ void MongodbClient::ClusterRollupUsage() {
   auto start = std::chrono::steady_clock::now();
   RollupSummary(RollupType::HOUR);
   auto end = std::chrono::steady_clock::now();
-  CRANE_INFO("Rollup hour table used {} ms",
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-                 .count());
+  CRANE_TRACE("Rollup hour table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
 
   start = std::chrono::steady_clock::now();
   RollupSummary(RollupType::DAY);
   end = std::chrono::steady_clock::now();
-  CRANE_INFO("Rollup day table used {} ms",
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-                 .count());
+  CRANE_TRACE("Rollup day table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
 
   start = std::chrono::steady_clock::now();
   RollupSummary(RollupType::MONTH);
   end = std::chrono::steady_clock::now();
-  CRANE_INFO("Rollup month table used {} ms",
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-                 .count());
+  CRANE_TRACE("Rollup month table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
 
   auto end_total = std::chrono::steady_clock::now();
-  CRANE_INFO("Rollup cluster usage total used {} ms",
-             std::chrono::duration_cast<std::chrono::milliseconds>(end_total -
-                                                                   start_total)
-                 .count());
+  CRANE_TRACE("Rollup cluster usage total used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end_total -
+                                                                    start_total)
+                  .count());
 }
 
 void MongodbClient::CreateCollectionIndex(
@@ -2097,20 +2094,6 @@ void MongodbClient::CreateCollectionIndex(
     CRANE_LOGGER_ERROR(m_logger_, "Create index error for collection {}: {}",
                        coll.name(), e.what());
   }
-}
-
-bool MongodbClient::AggregateJobSummary(RollupType rollup_type,
-                                        std::time_t start, std::time_t end) {
-  if (rollup_type == RollupType::HOUR) {
-    AggregateJobSummaryByHour(start, end, m_task_collection_name_);
-  } else if (rollup_type == RollupType::DAY) {
-    AggregateJobSummaryByDayOrMonth(RollupType::HOUR, RollupType::DAY, start,
-                                    end);
-  } else if (rollup_type == RollupType::MONTH) {
-    AggregateJobSummaryByDayOrMonth(RollupType::DAY, RollupType::MONTH, start,
-                                    end);
-  }
-  return true;
 }
 
 void MongodbClient::AggregateJobSummaryByHour(
@@ -2145,7 +2128,7 @@ void MongodbClient::AggregateJobSummaryByHour(
 
       pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "cpu_alloc" << bsoncxx::builder::stream::open_document
+          << "cpus_alloc" << bsoncxx::builder::stream::open_document
           << "$multiply" << bsoncxx::builder::stream::open_array
           << "$nodes_alloc"
           << "$cpus_alloc" << bsoncxx::builder::stream::close_array
@@ -2164,7 +2147,7 @@ void MongodbClient::AggregateJobSummaryByHour(
       // time_start)
       pipeline.add_fields(
           bsoncxx::builder::stream::document{}
-          << "cpu_time" << bsoncxx::builder::stream::open_document
+          << "cpus_time" << bsoncxx::builder::stream::open_document
           << "$multiply" << bsoncxx::builder::stream::open_array
           << "$nodes_alloc"
           << "$cpus_alloc" << bsoncxx::builder::stream::open_document
@@ -2175,7 +2158,7 @@ void MongodbClient::AggregateJobSummaryByHour(
           << bsoncxx::builder::stream::close_document
           << bsoncxx::builder::stream::finalize);
 
-      // Group jobs by hour, account, username, qos, wckey, cpu_alloc,
+      // Group jobs by hour, account, username, qos, wckey, cpus_alloc,
       // partition_name and calculate total CPU time and total job count for
       // each group
       pipeline.group(bsoncxx::builder::stream::document{}
@@ -2185,13 +2168,13 @@ void MongodbClient::AggregateJobSummaryByHour(
                      << "username" << "$username"
                      << "qos" << "$qos"
                      << "wckey" << "$wckey"
-                     << "cpu_alloc" << "$cpu_alloc"
+                     << "cpus_alloc" << "$cpus_alloc"
                      << "partition_name" << "$partition_name"
                      << "nodename_list" << "$nodename_list"
                      << bsoncxx::builder::stream::close_document
                      << "total_cpu_time"
                      << bsoncxx::builder::stream::open_document << "$sum"
-                     << "$cpu_time" << bsoncxx::builder::stream::close_document
+                     << "$cpus_time" << bsoncxx::builder::stream::close_document
                      << "total_count" << bsoncxx::builder::stream::open_document
                      << "$sum" << 1 << bsoncxx::builder::stream::close_document
                      << bsoncxx::builder::stream::finalize);
@@ -2205,7 +2188,7 @@ void MongodbClient::AggregateJobSummaryByHour(
                             << "username" << "$_id.username"
                             << "qos" << "$_id.qos"
                             << "wckey" << "$_id.wckey"
-                            << "cpu_alloc" << "$_id.cpu_alloc"
+                            << "cpus_alloc" << "$_id.cpus_alloc"
                             << "partition_name" << "$_id.partition_name"
                             << "nodename_list" << "$_id.nodename_list"
                             << "total_cpu_time" << "$total_cpu_time"
@@ -2315,7 +2298,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
           << bsoncxx::types::b_string{group_period_field_ref} << "account"
           << "$account"
           << "username" << "$username" << "qos" << "$qos" << "wckey" << "$wckey"
-          << "cpu_alloc" << "$cpu_alloc" << "partition_name"
+          << "cpus_alloc" << "$cpus_alloc" << "partition_name"
           << "$partition_name"
           << "nodename_list" << "$nodename_list"
           << bsoncxx::builder::stream::close_document << "total_cpu_time"
@@ -2333,7 +2316,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
                             << "username" << "$_id.username"
                             << "qos" << "$_id.qos"
                             << "wckey" << "$_id.wckey"
-                            << "cpu_alloc" << "$_id.cpu_alloc"
+                            << "cpus_alloc" << "$_id.cpus_alloc"
                             << "partition_name" << "$_id.partition_name"
                             << "nodename_list" << "$_id.nodename_list"
                             << "total_cpu_time" << "$total_cpu_time"
@@ -2485,19 +2468,19 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
       std::string acc = std::string(view["account"].get_string().value);
       std::string wk =
           view["wckey"] ? std::string(view["wckey"].get_string().value) : "";
-      uint32_t cpu_alloc =
+      uint32_t cpus_alloc =
           static_cast<uint32_t>(view["cpus_alloc"].get_double().value *
                                 view["nodes_alloc"].get_int32().value);
       int64_t time_start = view["time_start"].get_int64().value;
       int64_t time_end = view["time_end"].get_int64().value;
-      double total_cpu_time = (time_end - time_start) * cpu_alloc;
+      double total_cpu_time = (time_end - time_start) * cpus_alloc;
       if (grouping_list.empty()) {
-        agg_map[{acc, wk, cpu_alloc}].total_cpu_time += total_cpu_time;
-        agg_map[{acc, wk, cpu_alloc}].total_count += 1;
+        agg_map[{acc, wk, cpus_alloc}].total_cpu_time += total_cpu_time;
+        agg_map[{acc, wk, cpus_alloc}].total_count += 1;
       } else {
         int group_index = 0;
         for (const auto group : grouping_list) {
-          if (cpu_alloc < group) {
+          if (cpus_alloc < group) {
             break;
           }
           group_index++;
@@ -2518,7 +2501,7 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
     item.set_cluster(g_config.CraneClusterName);
     item.set_account(kv.first.account);
     item.set_wckey(kv.first.wckey);
-    item.set_cpu_alloc(kv.first.cpu_alloc);
+    item.set_cpus_alloc(kv.first.cpus_alloc);
     item.set_total_cpu_time(kv.second.total_cpu_time);
     item.set_total_count(kv.second.total_count);
     reply.add_item_list()->CopyFrom(item);
@@ -2668,8 +2651,8 @@ void MongodbClient::AppendUnionWithRanges(
   }
 }
 
-uint32_t MongodbClient::GetCpuAlloc(const bsoncxx::document::view& doc) {
-  auto elem = doc["cpu_alloc"];
+uint32_t MongodbClient::GetCpusAlloc(const bsoncxx::document::view& doc) {
+  auto elem = doc["cpus_alloc"];
   if (!elem) return 0;
   if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
   if (elem.type() == bsoncxx::type::k_int64)
@@ -2709,7 +2692,7 @@ void MongodbClient::WriteReply(
     item.set_cluster(g_config.CraneClusterName);
     item.set_account(agg_val.first.account);
     item.set_wckey(agg_val.first.wckey);
-    item.set_cpu_alloc(agg_val.first.cpu_alloc);
+    item.set_cpus_alloc(agg_val.first.cpus_alloc);
     item.set_total_cpu_time(agg_val.second.total_cpu_time);
     item.set_total_count(agg_val.second.total_count);
     reply.add_item_list()->CopyFrom(item);
@@ -2908,7 +2891,7 @@ void MongodbClient::QueryJobSizeSummary(
           "account": "$account",
           "username": "$username",
           "wckey": "$wckey",
-          "cpu_alloc": "$cpu_alloc"
+          "cpus_alloc": "$cpus_alloc"
         },
         "total_cpu_time": { "$sum": "$total_cpu_time" },
         "total_count": { "$sum": "$total_count" }
@@ -2927,7 +2910,7 @@ void MongodbClient::QueryJobSizeSummary(
         JobSizeSummaryKey key{
             .account = std::string(id["account"].get_string().value),
             .wckey = std::string(id["wckey"].get_string().value),
-            .cpu_alloc = GetCpuAlloc(id)};
+            .cpus_alloc = GetCpusAlloc(id)};
         agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
         agg_map[key].total_count += GetTotalCount(doc);
       }
@@ -2935,17 +2918,17 @@ void MongodbClient::QueryJobSizeSummary(
     } else {
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
-        uint32_t cpu_alloc = GetCpuAlloc(id);
+        uint32_t cpus_alloc = GetCpusAlloc(id);
         int group_index = 0;
         for (const auto group : grouping_list) {
-          if (cpu_alloc < group) break;
+          if (cpus_alloc < group) break;
           group_index++;
         }
         uint32_t bucket = grouping_list[group_index - 1];
         JobSizeSummaryKey key{
             .account = std::string(id["account"].get_string().value),
             .wckey = std::string(id["wckey"].get_string().value),
-            .cpu_alloc = bucket};
+            .cpus_alloc = bucket};
         agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
         agg_map[key].total_count += GetTotalCount(doc);
       }
@@ -2994,7 +2977,7 @@ bool MongodbClient::InitTableIndexes() {
         (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
     CreateCollectionIndex(hour_coll, {"hour"});
     CreateCollectionIndex(
-        hour_coll, {"hour", "account", "username", "qos", "wckey", "cpu_alloc",
+        hour_coll, {"hour", "account", "username", "qos", "wckey", "cpus_alloc",
                     "partition_name", "nodename_list"});
 
     // Create indexes for the day summary table
@@ -3002,7 +2985,7 @@ bool MongodbClient::InitTableIndexes() {
         (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
     CreateCollectionIndex(day_coll, {"day"});
     CreateCollectionIndex(
-        day_coll, {"day", "account", "username", "qos", "wckey", "cpu_alloc",
+        day_coll, {"day", "account", "username", "qos", "wckey", "cpus_alloc",
                    "partition_name", "nodename_list"});
 
     // Create indexes for the month summary table
@@ -3011,7 +2994,7 @@ bool MongodbClient::InitTableIndexes() {
     CreateCollectionIndex(month_coll, {"month"});
     CreateCollectionIndex(month_coll,
                           {"month", "account", "username", "qos", "wckey",
-                           "cpu_alloc", "partition_name", "nodename_list"});
+                           "cpus_alloc", "partition_name", "nodename_list"});
 
     return true;
   } catch (const std::exception& e) {

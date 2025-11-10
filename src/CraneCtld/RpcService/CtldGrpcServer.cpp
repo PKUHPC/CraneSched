@@ -1702,7 +1702,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-  g_db_client->ClusterRollupUsage();
+
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }

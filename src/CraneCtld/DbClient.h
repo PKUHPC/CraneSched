@@ -109,15 +109,15 @@ class MongodbClient {
   struct JobSizeSummaryKey {
     std::string account;
     std::string wckey;
-    uint32_t cpu_alloc;
+    uint32_t cpus_alloc;
 
     template <typename H>
     friend H AbslHashValue(H h, const JobSizeSummaryKey& key) {
-      return H::combine(std::move(h), key.account, key.wckey, key.cpu_alloc);
+      return H::combine(std::move(h), key.account, key.wckey, key.cpus_alloc);
     }
     bool operator==(const JobSizeSummaryKey& other) const {
       return account == other.account && wckey == other.wckey &&
-             cpu_alloc == other.cpu_alloc;
+             cpus_alloc == other.cpus_alloc;
     }
   };
 
@@ -158,16 +158,15 @@ class MongodbClient {
   bool InitTableIndexes();
   void CreateCollectionIndex(mongocxx::collection& coll,
                              const std::vector<std::string>& fields);
-  bool AggregateJobSummary(RollupType type, std::time_t start, std::time_t end);
   inline std::string RollupTypeToString(RollupType rollup_type);
   bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
                                        int64_t last_success_sec);
   bool GetSummaryLastSuccessTimeTm(RollupType rollup_type, std::tm& tm_last);
   bool NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
                   RollupType rollup_type);
-  bool RollupSummary(RollupType rollup_type);
+  void RollupSummary(RollupType rollup_type);
   void ClusterRollupUsage();
-  uint32_t GetCpuAlloc(const bsoncxx::document::view& doc);
+  uint32_t GetCpusAlloc(const bsoncxx::document::view& doc);
   double GetTotalCpuTime(const bsoncxx::document::view& doc);
   int GetTotalCount(const bsoncxx::document::view& doc);
   void WriteReply(
