@@ -21,11 +21,11 @@
     - 面向用户的命令行实用程序，用于作业提交、查询队列和作业状态、账务和作业控制。
     - 设计为轻量级并分发到用户登录节点。它们与控制节点（`cranectld`）通信。
 
-- `cfored`（交互式作业的 frontend daemon）：
+- `cfored`（交互式作业守护进程）：
     - 为交互式作业提供支持（由 `crun`、`calloc` 使用）。
     - 通常在提交交互式作业的登录节点上运行。由 systemd 作为 `cfored.service` 管理。
 
-- `cplugind`（plugin daemon）：
+- `cplugind`（插件守护进程）：
     - 加载和管理插件（mail、monitor、energy、event 等）并向鹤思组件公开插件服务。
     - 必须在需要插件功能的节点上运行。插件 `.so` 文件和插件配置在 `/etc/crane/config.yaml` 中注册。
 

@@ -40,7 +40,7 @@
 
 ## 安装 cplugind
 
-`cplugind` daemon 是 CraneSched-FrontEnd 仓库的一部分。有关安装说明，请参阅[前端部署指南](../backend/Rocky9.md)。
+`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。有关安装说明，请参阅[前端部署指南](frontend.md)。
 
 手动启动 `cplugind` 或通过 systemd：
 

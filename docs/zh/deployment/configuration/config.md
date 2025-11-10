@@ -121,7 +121,7 @@ DefaultPartition: CPU
 - **name**：分区标识符
 - **nodes**：属于此分区的节点范围
 - **priority**：值越高优先级越高（影响调度）
-- **DefaultMemPerCpu**：每个 CPU 的默认内存（MB）（0 = 让 scheduler 决定）
+- **DefaultMemPerCpu**：每个 CPU 的默认内存（MB）（0 = 让调度器决定）
 - **MaxMemPerCpu**：每个 CPU 的最大内存（MB）（0 = 无限制）
 
 ### 调度策略

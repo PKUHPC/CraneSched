@@ -97,7 +97,7 @@ hide:
 
 ![鹤思架构](images/Architecture.png)
 
-鹤思引入了 Resource Manager 以同时支持 HPC 和 AI 工作负载:
+鹤思引入了资源管理器以同时支持 HPC 和 AI 工作负载:
 
 - HPC 作业：Cgroup Manager 分配资源并提供基于 cgroup 的隔离。
 - AI 作业：Container Manager 使用 Kubernetes 进行资源分配和容器生命周期管理。

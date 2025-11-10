@@ -13,8 +13,8 @@
 
 鹤思分为两个主要软件包组件:
 
-- **cranectld** - 控制 daemon 软件包（用于控制节点）
-- **craned** - 执行 daemon 软件包（用于计算节点）
+- **cranectld** - 控制守护进程软件包（用于控制节点）
+- **craned** - 计算节点守护进程软件包（用于计算节点）
 
 每个软件包包括：
 
@@ -144,7 +144,7 @@ sudo dpkg -i CraneSched-*-craned.deb
 包含控制节点的文件：
 
 ```
-/usr/bin/cranectld                          # 控制 daemon 二进制文件
+/usr/bin/cranectld                          # 控制守护进程二进制文件
 /usr/lib/systemd/system/cranectld.service   # Systemd 服务文件
 /etc/crane/config.yaml.sample               # 集群配置模板
 /etc/crane/database.yaml.sample             # 数据库配置模板
@@ -167,8 +167,8 @@ sudo dpkg -i CraneSched-*-craned.deb
 包含计算节点的文件：
 
 ```
-/usr/bin/craned                             # 执行 daemon 二进制文件
-/usr/libexec/csupervisor                    # 每步执行 supervisor
+/usr/bin/craned                             # 计算节点守护进程二进制文件
+/usr/libexec/csupervisor                    # 作业步骤守护进程
 /usr/lib/systemd/system/craned.service      # Systemd 服务文件
 /etc/crane/config.yaml.sample               # 集群配置模板
 /usr/lib64/security/pam_crane.so            # PAM 身份验证模块
