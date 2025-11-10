@@ -372,6 +372,7 @@ jobs:
           UPLOAD_MODE: "RPM"  # Currently only upload RPMs in this workflow
 
         run: |
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
           ./script/upload.sh
 
   test:
@@ -382,9 +383,6 @@ jobs:
         shell: bash -leo pipefail {0}
     env:
       TEST_FAILED: false
-      SCRIPT_PATH: /opt/actions-runner-external/script
-      CACHE_PATH: /opt/actions-runner-external/cache
-      LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
       BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
       FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
 
