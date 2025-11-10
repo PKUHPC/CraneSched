@@ -23,7 +23,6 @@
 #include <unordered_map>
 
 #include "CgroupManager.h"
-#include "CranedForPamServer.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
@@ -192,7 +191,8 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   do {
     auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
     if (pid_to_ids_expt.has_value()) {
-      auto [job_id_opt, step_id_opt, task_id_opt] = pid_to_ids_expt.value();
+      auto [job_id_opt, step_id_opt, system_flag, task_id_opt] =
+          pid_to_ids_expt.value();
 
       // FIXME: Use step_id_opt after multi-step is supported.
       CRANE_ASSERT_MSG(job_id_opt.has_value(),

@@ -109,6 +109,11 @@ inline constexpr std::string kJobCgNamePrefix = "job_";
 inline constexpr std::string kStepCgNamePrefix = "step_";
 inline constexpr std::string kTaskCgNamePrefix = "task_";
 
+constexpr int KParsedJobIdIdx = 0;
+constexpr int KParsedStepIdIdx = 1;
+constexpr int KParsedSystemFlagIdx = 2;
+constexpr int KParsedTaskIdIdx = 3;
+
 // Common cgroup filename constants
 // cgroup v2 memory events file used to read OOM and OOM_KILL counters
 inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
@@ -487,7 +492,7 @@ class CgroupV2 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource);
+  bool RecoverFromResInNode(const crane::grpc::ResourceInNode &resource);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -522,7 +527,7 @@ class DedicatedResourceAllocator {
 
 using CgroupStrParsedIds =
     std::tuple<std::optional<job_id_t>, std::optional<step_id_t>,
-               std::optional<task_id_t>>;
+               bool /*true if system step*/, std::optional<task_id_t>>;
 
 class CgroupManager {
  public:
@@ -544,6 +549,7 @@ class CgroupManager {
       bool system = false /* system = true is only for supervisor itself. */);
   static std::string CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
                                        task_id_t task_id);
+  static std::string CgroupStrByParsedIds(const CgroupStrParsedIds &ids);
 
   /**
    * @brief Destroy cgroups which CraneCtld doesn't have records of
@@ -600,14 +606,15 @@ class CgroupManager {
       const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
-  static std::set<job_id_t> GetJobIdsFromCgroupV1_(
+  static std::set<CgroupStrParsedIds> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<job_id_t> GetJobIdsFromCgroupV2_(
+  static std::set<CgroupStrParsedIds> GetJobIdsFromCgroupV2_(
       const std::filesystem::path &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
-  static CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
+  static CraneExpected<
+      absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2_(const std::filesystem::path &root_cgroup_path);
 #endif
 
@@ -623,8 +630,8 @@ class CgroupManager {
                                    bool required, bool has_cgroup,
                                    bool &changed_cgroup);
 
-  static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
-      const std::filesystem::path &root_cgroup_path);
+  static std::unordered_map<ino_t, CgroupStrParsedIds>
+  GetCgInoJobIdMapCgroupV2_(const std::filesystem::path &root_cgroup_path);
 
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 

@@ -293,6 +293,20 @@ std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
                      CgConstant::kTaskCgNamePrefix, task_id);
 }
 
+std::string CgroupManager::CgroupStrByParsedIds(const CgroupStrParsedIds &ids) {
+  auto [job_id_opt, step_id_opt, system_flag, task_id_opt] = ids;
+  CRANE_ASSERT(job_id_opt.has_value());
+  if (!step_id_opt.has_value()) {
+    return CgroupStrByJobId(job_id_opt.value());
+  } else if (task_id_opt.has_value()) {
+    return CgroupStrByTaskId(job_id_opt.value(), step_id_opt.value(),
+                             task_id_opt.value());
+  } else {
+    return CgroupStrByStepId(job_id_opt.value(), step_id_opt.value(),
+                             system_flag);
+  }
+}
+
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
     const std::string &cgroup_str) {
   // Pattern now includes optional system/user suffix for step:
@@ -302,10 +316,18 @@ CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
       CgConstant::kJobCgNamePrefix, CgConstant::kStepCgNamePrefix,
       CgConstant::kTaskCgNamePrefix);
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-
+  std::optional<job_id_t> job_id;
+  std::optional<step_id_t> step_id;
+  std::optional<task_id_t> task_id;
+  std::optional<std::string> system_or_user;
   CgroupStrParsedIds parsed_ids{};
-  if (RE2::FullMatch(cgroup_str, *cg_pattern, &std::get<0>(parsed_ids),
-                     &std::get<1>(parsed_ids), &std::get<2>(parsed_ids))) {
+  if (RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id,
+                     &system_or_user, &task_id)) {
+    std::get<CgConstant::KParsedJobIdIdx>(parsed_ids) = job_id;
+    std::get<CgConstant::KParsedStepIdIdx>(parsed_ids) = step_id;
+    std::get<CgConstant::KParsedSystemFlagIdx>(parsed_ids) =
+        system_or_user.has_value() && system_or_user.value() == "system";
+    std::get<CgConstant::KParsedTaskIdIdx>(parsed_ids) = task_id;
     return parsed_ids;
   }
 
@@ -497,7 +519,7 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
       return cg_unique_ptr;
     }
     auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromCgSpec(resource);
+    cg_v2_ptr->RecoverFromResInNode(resource);
 #endif
 
     return cg_unique_ptr;
@@ -508,7 +530,8 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     // FIXME: Refactor related plugin interface and replace here.
     auto ids = ParseIdsFromCgroupStr_(cgroup_str);
     g_plugin_client->CreateCgroupHookAsync(
-        std::get<0>(ids).value_or(0), cg_unique_ptr->CgroupName(), resource);
+        std::get<CgConstant::KParsedJobIdIdx>(ids).value_or(0),
+        cg_unique_ptr->CgroupName(), resource);
   }
   ResourceInNode resource_in_node(resource);
   if (min_mem != 0) {
@@ -536,11 +559,11 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
   return std::unexpected(CraneErrCode::ERR_CGROUP);
 }
 
-std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
+std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
-  std::set<job_id_t> job_ids;
+  std::set<CgroupStrParsedIds> ids;
 
   const char *controller_str =
       CgConstant::GetControllerStringView(controller).data();
@@ -553,51 +576,52 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
       auto parsed_ids = ParseIdsFromCgroupStr_(info.path);
-      auto job_id_opt = std::get<0>(parsed_ids);
-      if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
+      auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
+      if (job_id_opt.has_value()) ids.emplace(parsed_ids);
     }
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
   }
 
   if (handle != nullptr) cgroup_walk_tree_end(&handle);
-  return job_ids;
+  return ids;
 }
 
-std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
+std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV2_(
     const std::filesystem::path &root_cgroup_path) {
-  std::set<job_id_t> job_ids;
+  std::set<CgroupStrParsedIds> ids;
 
   // If the directory not existed, return an empty set.
-  if (!std::filesystem::exists(root_cgroup_path)) return job_ids;
+  if (!std::filesystem::exists(root_cgroup_path)) return ids;
 
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id_opt = std::get<0>(parsed_ids);
-        if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
+        auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
+        if (job_id_opt.has_value()) ids.emplace(parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
-  return job_ids;
+  return ids;
 }
 
-std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
+std::unordered_map<ino_t, CgroupStrParsedIds>
+CgroupManager::GetCgInoJobIdMapCgroupV2_(
     const std::filesystem::path &root_cgroup_path) {
-  std::unordered_map<ino_t, job_id_t> cg_job_id_map;
+  std::unordered_map<ino_t, CgroupStrParsedIds> cg_id_map;
 
   // If the directory not existed, return an empty map.
-  if (!std::filesystem::exists(root_cgroup_path)) return cg_job_id_map;
+  if (!std::filesystem::exists(root_cgroup_path)) return cg_id_map;
 
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id_opt = std::get<0>(parsed_ids);
+        auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
         if (!job_id_opt.has_value()) continue;
 
         struct stat cg_stat{};
@@ -607,29 +631,29 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
           continue;
         }
 
-        cg_job_id_map.emplace(cg_stat.st_ino, job_id_opt.value());
+        cg_id_map.emplace(cg_stat.st_ino, parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
-  return cg_job_id_map;
+  return cg_id_map;
 }
 
 #ifdef CRANE_ENABLE_BPF
 
-CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
+CraneExpected<absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>>>
 CgroupManager::GetJobBpfMapCgroupsV2_(
     const std::filesystem::path &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
-      GetCgJobIdMapCgroupV2_(root_cgroup_path);
+      GetCgInoJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
       return std::unexpected(CraneErrCode::ERR_EBPF);
   }
 
-  std::unordered_map<task_id_t, std::vector<BpfKey>> results;
+  absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>> results;
 
   auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
     // Skip log level record.
@@ -689,7 +713,7 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
     std::string line;
     while (std::getline(infile, line)) {
       auto parsed_ids = ParseIdsFromCgroupStr_(line);
-      auto job_id_opt = std::get<0>(parsed_ids);
+      auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
 
       // if job_id found, entry is valid.
       if (job_id_opt.has_value()) return parsed_ids;
@@ -703,7 +727,7 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
     }
 
     auto parsed_ids = ParseIdsFromCgroupStr_(line);
-    auto job_id_opt = std::get<0>(parsed_ids);
+    auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
 
     // If job_id found, entry is valid.
     if (job_id_opt.has_value()) return parsed_ids;
@@ -1424,7 +1448,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
+bool CgroupV2::RecoverFromResInNode(
+    const crane::grpc::ResourceInNode &resource) {
   if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
