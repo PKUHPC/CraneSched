@@ -98,8 +98,6 @@ jobs:
 
   build:
     needs: prepare
-    # Skip draft PRs
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [ "self-hosted", "CraneSched" ]
 
     env:
@@ -370,6 +368,8 @@ jobs:
 
           PACKAGE_DIR: ./output
           CONTINUE_ON_ERROR: true
+
+          UPLOAD_MODE: "RPM"  # Currently only upload RPMs in this workflow
 
         run: |
           ./script/upload.sh
