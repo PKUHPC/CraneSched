@@ -224,19 +224,18 @@ DeviceFileRegex与DeviceFileList二选一，以上设备文件必须存在，**�
 - **EnvInjector**: 设备需要注入的环境变量
 
   -  可选值：对应环境变量
-
   - `nvidia`：`CUDA_VISIABLE_DEVICES`
   - `hip`：`HIP_VISIABLE_DEVICES`
   - `ascend`：`ASCEND_RT_VISIBLE_DEVICES`
 
 - 常见厂商设备文件路径及相关配置
 
-  - | 厂商        | 设备文件路径            | EnvInjector |
-    | :---------- | :---------------------- | :---------- |
-    | Nvidia      | /dev/nvidia0 ...        | nvidia      |
-    | AMD/海光DCU | /dev/dri/renderer128... | hip         |
-    | 昇腾        | /dev/davinci0 ...       | ascend      |
-    | 天数智芯    | /dev/iluvatar0 ...      | nvidia      |
+| 厂商        | 设备文件路径            | EnvInjector |
+| :---------- | :---------------------- | :---------- |
+| Nvidia      | /dev/nvidia0 ...        | nvidia      |
+| AMD/海光DCU | /dev/dri/renderer128... | hip         |
+| 昇腾        | /dev/davinci0 ...       | ascend      |
+| 天数智芯    | /dev/iluvatar0 ...      | nvidia      |
 
 ### 队列限制
 
