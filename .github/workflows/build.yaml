@@ -349,6 +349,29 @@ jobs:
           path: meta.json
           retention-days: 3
           if-no-files-found: error
+      
+      # Upload RPM/DEB to private repository
+      - name: Upload to private repository
+        env: 
+          NEXUS_URL: ${{ secrets.CCREPO_URL }}
+          NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
+
+          VERSION: ${{ github.ref_name }}
+
+          RPM_REPO_NAME="crane"
+          RPM_ARCH="x86_64"
+          RPM_DISTRO="8"
+
+          DEB_REPO_NAME="cranedeb"
+          DEB_ARCH="amd64"
+          DEB_DISTRO="bullseye"
+
+          PACKAGE_DIR: ./output
+          CONTINUE_ON_ERROR: true
+
+        run: |
+          ./script/upload.sh
 
   test:
     needs: [ prepare, build ]
