@@ -205,8 +205,8 @@ cqueue --json
 
 ## 相关命令
 
-- [cbatch](cbatch.zh.md) - 提交批处理作业
-- [crun](crun.zh.md) - 运行交互式作业
-- [calloc](calloc.zh.md) - 分配资源
-- [ccancel](ccancel.zh.md) - 取消作业
-- [cacct](cacct.zh.md) - 查询已完成作业
+- [cbatch](cbatch.md) - 提交批处理作业
+- [crun](crun.md) - 运行交互式作业
+- [calloc](calloc.md) - 分配资源
+- [ccancel](ccancel.md) - 取消作业
+- [cacct](cacct.md) - 查询已完成作业

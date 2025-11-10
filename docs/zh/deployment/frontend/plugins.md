@@ -2,10 +2,10 @@
 
 ## 概述
 
-鹤思插件系统是模块化的，默认情况下处于禁用状态。必须在每个节点上运行 `cplugind` 守护进程才能启用插件功能。插件和 `cplugind` 版本严格耦合，必须一起更新。
+鹤思插件系统是模块化的，默认情况下处于禁用状态。必须在每个节点上运行 `cplugind` daemon 才能启用插件功能。插件和 `cplugind` 版本严格耦合，必须一起更新。
 
 !!! info
-    插件是可选的。如果您不需要任何插件功能，可以跳过本指南。
+    插件是可选的。如果您不需要任何插件功能,可以跳过本指南。
 
 ### 插件架构
 
@@ -40,7 +40,7 @@
 
 ## 安装 cplugind
 
-`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。有关安装说明，请参阅[前端部署指南](../backend/Rocky9.md)。
+`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。有关安装说明，请参阅[前端部署指南](frontend.md)。
 
 手动启动 `cplugind` 或通过 systemd：
 
@@ -77,7 +77,7 @@ Plugins:
 ### 配置选项
 
 - **Enabled**：控制 CraneCtld/Craned 是否使用插件系统
-- **PlugindSockPath**：相对于 CraneBaseDir 的套接字路径，用于守护进程与 cplugind 之间的通信
+- **PlugindSockPath**：相对于 CraneBaseDir 的套接字路径，用于 daemon 与 cplugind 之间的通信
 - **PlugindDebugLevel**：日志级别（trace/debug/info；推荐：生产环境使用 info）
 - **PlugindListenAddress**：cplugind 监听的网络地址（可选）
 - **PlugindListenPort**：cplugind 监听的网络端口（可选）
