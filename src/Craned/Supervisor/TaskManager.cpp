@@ -1798,12 +1798,6 @@ void TaskManager::EvTaskTimerCb_(bool is_deadline) {
                                   ? TerminatedBy::TERMINATION_BY_DEADLINE
                                   : TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
-  } else if (is_deadline) {
-    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::Deadline,
-                ExitCode::EC_REACHED_DEADLINE, std::nullopt);
-  } else {
-    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   }
 }
 

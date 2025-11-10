@@ -100,9 +100,9 @@ class StepInstance {
   [[nodiscard]] bool IsDaemonStep() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
-
-  // Cfored client in step
   StepToSupv& GetMutableStep() { return m_step_to_supv_; }
+  
+  // Cfored client in step 
   void InitCforedClient() {
     m_cfored_client_ = std::make_unique<CforedClient>();
     m_cfored_client_->InitChannelAndStub(
@@ -407,26 +407,15 @@ class TaskManager {
     m_step_.termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(int64_t secs,bool is_deadline) {
+  void AddTerminationTimer_(int64_t secs, bool is_deadline) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this,is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
+        [this, is_deadline](const uvw::timer_event&, uvw::timer_handle& h) {
           EvTaskTimerCb_(is_deadline);
         });
     termination_handle->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
     m_step_.termination_timer = termination_handle;
-  }
-
-  void AddDeadlineTerminationTimer_(int64_t secs) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
-          EvDeadlineTaskTimerCb_();
-        });
-    termination_handel->start(std::chrono::seconds(secs),
-                              std::chrono::seconds(0));
-    m_step_.termination_timer = termination_handel;
   }
 
   void DelTerminationTimer_() {

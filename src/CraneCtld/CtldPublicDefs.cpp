@@ -615,7 +615,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-
+  step.mutable_deadline_time()->set_seconds(
+      absl::ToUnixSeconds(deadline_time));
   *MutableStepToCtld() = std::move(step);
 }
 
