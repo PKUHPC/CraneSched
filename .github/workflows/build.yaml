@@ -360,13 +360,13 @@ jobs:
 
           VERSION: ${{ github.ref_name }}
 
-          RPM_REPO_NAME="crane"
-          RPM_ARCH="x86_64"
-          RPM_DISTRO="8"
+          RPM_REPO_NAME: "crane"
+          RPM_ARCH: "x86_64"
+          RPM_DISTRO: "8"
 
-          DEB_REPO_NAME="cranedeb"
-          DEB_ARCH="amd64"
-          DEB_DISTRO="bullseye"
+          DEB_REPO_NAME: "cranedeb"
+          DEB_ARCH: "amd64"
+          DEB_DISTRO: "bullseye"
 
           PACKAGE_DIR: ./output
           CONTINUE_ON_ERROR: true
