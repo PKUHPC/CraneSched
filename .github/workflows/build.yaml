@@ -351,7 +351,7 @@ jobs:
           if-no-files-found: error
       
       # Upload RPM/DEB to private repository (only on miss)
-      - name: Upload to private repository
+      - name: Upload to private repository (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
         env: 
           NEXUS_URL: ${{ secrets.CCREPO_URL }}
@@ -441,7 +441,7 @@ jobs:
       # Fallback: download large bundle artifact only if local cache missed
       - name: Download bundle (fallback)
         if: steps.local_first.outputs.hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ needs.build.outputs.output_bundle_artifact }}  # build-output
           path: .
