@@ -293,7 +293,7 @@ Supervisor:
 
 ## 容器支持
 
-CraneSched 支持通过 CRI（容器运行时接口）在容器中运行作业：
+鹤思支持通过 CRI（容器运行时接口）在容器中运行作业：
 
 ```yaml
 Container:
