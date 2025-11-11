@@ -263,10 +263,6 @@ int LuaJobHandler::SetJobReqFieldCb_(lua_State* lua_state) {
     const char* value_str = luaL_checkstring(lua_state, 3);
     job_desc->cwd = value_str;
   }
-  if (name == "container") {
-    const char* value_str = luaL_checkstring(lua_state, 3);
-    job_desc->container = value_str;
-  }
   if (name == "reservation") {
     const char* value_str = luaL_checkstring(lua_state, 3);
     job_desc->reservation = value_str;
@@ -409,10 +405,6 @@ int LuaJobHandler::GetJobReqField_(const TaskInCtld& job_desc, const char* name,
            lua_pushstring(L, kv.second.c_str());
            lua_settable(L, -3);
          }
-       }},
-      {"container",
-       [](lua_State* L, const TaskInCtld& t) {
-         lua_pushstring(L, t.container.data());
        }},
       {"reservation",
        [](lua_State* L, const TaskInCtld& t) {
@@ -834,10 +826,6 @@ int LuaJobHandler::LuaJobRecordField_(lua_State* lua_state,
                   {"reservation",
                    [](lua_State* L, const crane::grpc::TaskInfo* j) {
          lua_pushstring(L, j->reservation().data());
-                   }},
-                  {"container",
-                   [](lua_State* L, const crane::grpc::TaskInfo* j) {
-         lua_pushstring(L, j->container().data());
                    }},
                   {"held", [](lua_State* L,
                               const crane::grpc::TaskInfo*
