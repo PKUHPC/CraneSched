@@ -23,8 +23,7 @@
 
 namespace Ctld {
 
-CraneRichError LuaJobHandler::JobSubmit(TaskInCtld& task,
-                                        const std::string& lua_script) {
+CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script, TaskInCtld* task) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   auto lua_env = std::make_unique<crane::LuaEnvironment>();
@@ -55,10 +54,10 @@ CraneRichError LuaJobHandler::JobSubmit(TaskInCtld& task,
 
   UpdateJobGloable_(*lua_env, &task_info_reply);
   UpdateJobResvGloable_(*lua_env, &resv_info_reply);
-  PushJobDesc_(&task, *lua_env);
-  PushPartitionList_(*lua_env, task.Username(), task.account,
+  PushJobDesc_(task, *lua_env);
+  PushPartitionList_(*lua_env, task->Username(), task->account,
                      &partition_info_reply);
-  lua_pushnumber(lua_env->GetLuaState(), task.uid);
+  lua_pushnumber(lua_env->GetLuaState(), task->uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
   if (lua_pcall(lua_env->GetLuaState(), 3, 1, 0) != 0) {
@@ -85,12 +84,11 @@ CraneRichError LuaJobHandler::JobSubmit(TaskInCtld& task,
   return result;
 }
 
-CraneRichError LuaJobHandler::JobModify(TaskInCtld& task_in_ctld,
-                                        const std::string& lua_script) {
+CraneRichError LuaJobHandler::JobModify(const std::string& lua_script, TaskInCtld* task_in_ctld) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   crane::grpc::TaskInfo task_info;
-  task_in_ctld.SetFieldsOfTaskInfo(&task_info);
+  task_in_ctld->SetFieldsOfTaskInfo(&task_info);
 
   auto lua_env = std::make_unique<crane::LuaEnvironment>();
   if (!lua_env->Init(lua_script))
@@ -121,11 +119,11 @@ CraneRichError LuaJobHandler::JobModify(TaskInCtld& task_in_ctld,
   // UpdateJobGloable_();
   UpdateJobResvGloable_(*lua_env, &resv_info_reply);
 
-  PushJobDesc_(&task_in_ctld, *lua_env);
+  PushJobDesc_(task_in_ctld, *lua_env);
   PushJobRec_(*lua_env, &task_info);
-  PushPartitionList_(*lua_env, task_in_ctld.Username(), task_in_ctld.account,
+  PushPartitionList_(*lua_env, task_in_ctld->Username(), task_in_ctld->account,
                      &partition_info_reply);
-  lua_pushnumber(lua_env->GetLuaState(), task_in_ctld.uid);
+  lua_pushnumber(lua_env->GetLuaState(), task_in_ctld->uid);
 
   int rc = CraneErrCode::ERR_LUA_FAILED;
   if (lua_pcall(lua_env->GetLuaState(), 4, 1, 0) != 0 != 0) {

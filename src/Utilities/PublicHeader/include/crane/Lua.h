@@ -106,7 +106,7 @@ class LuaPool {
 std::future<CraneRichError> ExecuteLuaScript(Callback&& callback, Args&&... args) {
     auto promise = std::make_shared<std::promise<CraneRichError>>();
     std::future<CraneRichError> fut = promise->get_future();
-    auto packed_args = std::forward_as_tuple(std::forward<Args>(args)...);
+      auto packed_args = std::tuple<Args...>(args...);
 
     m_thread_pool_->detach_task([callback = std::forward<Callback>(callback),
                                 packed_args = std::move(packed_args), promise]() {
