@@ -98,8 +98,6 @@ jobs:
 
   build:
     needs: prepare
-    # Skip draft PRs
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: [ "self-hosted", "CraneSched" ]
 
     env:
@@ -349,6 +347,33 @@ jobs:
           path: meta.json
           retention-days: 3
           if-no-files-found: error
+      
+      # Upload RPM/DEB to private repository (only on miss)
+      - name: Upload to private repository (only on miss)
+        if: steps.local_cache.outputs.hit != 'true'
+        env: 
+          NEXUS_URL: ${{ secrets.CCREPO_URL }}
+          NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
+
+          VERSION: ${{ github.ref_name }}
+
+          RPM_REPO_NAME: "crane"
+          RPM_ARCH: "x86_64"
+          RPM_DISTRO: "8"
+
+          DEB_REPO_NAME: "cranedeb"
+          DEB_ARCH: "amd64"
+          DEB_DISTRO: "bullseye"
+
+          PACKAGE_DIR: ./output
+          CONTINUE_ON_ERROR: true
+
+          UPLOAD_MODE: "RPM"  # Currently only upload RPMs in this workflow
+
+        run: |
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+          ./script/upload.sh
 
   test:
     needs: [ prepare, build ]
@@ -358,9 +383,6 @@ jobs:
         shell: bash -leo pipefail {0}
     env:
       TEST_FAILED: false
-      SCRIPT_PATH: /opt/actions-runner-external/script
-      CACHE_PATH: /opt/actions-runner-external/cache
-      LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
       BACKEND_REF: ${{ needs.prepare.outputs.backend_ref }}
       FRONTEND_REF: ${{ needs.prepare.outputs.frontend_ref }}
 
@@ -417,7 +439,7 @@ jobs:
       # Fallback: download large bundle artifact only if local cache missed
       - name: Download bundle (fallback)
         if: steps.local_first.outputs.hit != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ needs.build.outputs.output_bundle_artifact }}  # build-output
           path: .
