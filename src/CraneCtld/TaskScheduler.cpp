@@ -1560,9 +1560,9 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   return CraneErrCode::SUCCESS;
 }
 
-std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(TaskInCtld& task) {
+std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(TaskInCtld* task) {
   if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
-  return g_lua_pool->ExecuteLuaScript(LuaJobHandler::JobSubmit, g_config.JobSubmitLuaScript, &task);
+  return g_lua_pool->ExecuteLuaScript(LuaJobHandler::JobSubmit, g_config.JobSubmitLuaScript, task);
 }
 
 std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {

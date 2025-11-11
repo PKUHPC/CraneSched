@@ -22,8 +22,9 @@
 #  include <lua.hpp>
 #endif
 
-#include <memory>
 #include <BS_thread_pool.hpp>
+#include <memory>
+
 #include "crane/Logger.h"
 
 namespace crane {
@@ -75,41 +76,44 @@ class LuaEnvironment {
 #endif
 
 class LuaPool {
-  public:
-    LuaPool() {
-      m_thread_pool_ = std::make_unique<BS::thread_pool>(
+ public:
+  LuaPool() {
+    m_thread_pool_ = std::make_unique<BS::thread_pool>(
         std::thread::hardware_concurrency(),
         [] { util::SetCurrentThreadName("LuaThreadPool"); });
-    }
+  }
 
-  std::future<CraneRichError> ExecuteLuaScript(
-    const std::string& lua_script) {
-      auto promise = std::make_shared<std::promise<CraneRichError>>();
-      std::future<CraneRichError> fut = promise->get_future();
-
-      m_thread_pool_->detach_task([lua_script, promise]() {
-        CraneRichError result;
-        auto lua_env = std::make_unique<crane::LuaEnvironment>();
-        if (!lua_env->Init(lua_script))
-          result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to init lua environment");
-
-        if (!lua_env->LoadLuaScript({}))
-          result =  FormatRichErr(CraneErrCode::ERR_LUA_FAILED, "Failed to load lua script");
-
-        promise->set_value(result);
-      });
-
-      return fut;
-    }
-
-  template <typename Callback, typename... Args>
-std::future<CraneRichError> ExecuteLuaScript(Callback&& callback, Args&&... args) {
+  std::future<CraneRichError> ExecuteLuaScript(const std::string& lua_script) {
     auto promise = std::make_shared<std::promise<CraneRichError>>();
     std::future<CraneRichError> fut = promise->get_future();
-      auto packed_args = std::tuple<Args...>(args...);
+
+    m_thread_pool_->detach_task([lua_script, promise]() {
+      CraneRichError result;
+      auto lua_env = std::make_unique<crane::LuaEnvironment>();
+      if (!lua_env->Init(lua_script))
+        result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
+                               "Failed to init lua environment");
+
+      if (!lua_env->LoadLuaScript({}))
+        result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
+                               "Failed to load lua script");
+
+      promise->set_value(result);
+    });
+
+    return fut;
+  }
+
+  template <typename Callback, typename... Args>
+  std::future<CraneRichError> ExecuteLuaScript(Callback&& callback,
+                                               Args&&... args) {
+    auto promise = std::make_shared<std::promise<CraneRichError>>();
+    std::future<CraneRichError> fut = promise->get_future();
+    auto packed_args = std::make_tuple(std::forward<Args>(args)...);
 
     m_thread_pool_->detach_task([callback = std::forward<Callback>(callback),
-                                packed_args = std::move(packed_args), promise]() {
+                                 packed_args = std::move(packed_args),
+                                 promise]() {
       CraneRichError result;
 
       result = std::apply(callback, packed_args);
