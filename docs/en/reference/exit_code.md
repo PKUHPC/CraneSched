@@ -5,6 +5,24 @@ For example, in `0:15`, the **first code** (`0`) is the **primary code**, and th
 
 ---
 
+## Task-Level Exit Code Reporting (for crun Jobs)
+
+For interactive crun jobs with multiple tasks (using `--ntasks-per-node > 1`), the system provides detailed exit code information when any task fails:
+
+**Information Provided:**
+- **Task ID**: Identifies which specific task failed
+- **Exit Code**: The actual exit code (0-255) or signal number  
+- **Signal Status**: Indicates if the task was terminated by a signal
+
+**When Triggered:**
+- Automatically triggered when any task in a crun job exits with non-zero exit code
+- Reports exit codes for ALL tasks in the job, not just failed ones
+- Helps users quickly identify problematic tasks in multi-task jobs
+
+This granular reporting enables more effective debugging and diagnosis of multi-task job failures.
+
+---
+
 ## Primary Code
 
 Value of 0-255 for Program `exit` return value

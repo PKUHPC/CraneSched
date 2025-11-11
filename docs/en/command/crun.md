@@ -173,6 +173,37 @@ crun -i all /usr/bin/bash
 crun -i none /usr/bin/bash
 ```
 
+## Exit Code Reporting
+
+When running multi-task crun jobs (with `--ntasks-per-node > 1`), if any task fails, crun will receive detailed exit code information for ALL tasks in the job. This helps diagnose which specific tasks failed and why.
+
+**Key Features:**
+- Automatic reporting when any task fails (exit code ≠ 0)
+- Includes exit code for every task in the job
+- Shows whether task was terminated by signal
+- Helps identify problematic tasks in multi-task jobs
+
+**Information Provided:**
+- **Task ID**: Identifies which specific task in the job
+- **Exit Code**: The actual exit code (0-255) or signal number
+- **Signal Status**: Indicates if the task was terminated by a signal
+
+**Example Scenario:**
+```bash
+# Submit a job with 4 tasks per node
+crun -N 1 --ntasks-per-node 4 -c 1 /path/to/test_script.sh
+```
+
+If some tasks fail, you'll receive detailed information:
+```
+Task #0: exit code 0 (success)
+Task #1: exit code 1 (failure)
+Task #2: exit code 0 (success)  
+Task #3: exit code 139 (terminated by signal 11 - SIGSEGV)
+```
+
+This granular reporting enables quick identification of which tasks failed and helps in debugging multi-task job issues.
+
 ## Related Commands
 
 - [calloc](calloc.md) - Allocate resources for interactive use
