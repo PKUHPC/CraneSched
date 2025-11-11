@@ -126,7 +126,6 @@ enum PrologFlagEnum : std::uint8_t {
   ForceRequeueOnFail  = 1 << 4, // 0001 0000 = 16
   RunInJob            = 1 << 5, // 0010 0000 = 32
   Serial              = 1 << 6, // 0100 0000 = 64
-  X11                 = 1 << 7  // 1000 0000 = 128
 };
 
 namespace ExitCode {

@@ -97,7 +97,6 @@ PriorityWeightQoS: 1000000
 
 Prolog: prolog1.sh,prolog2.sh
 PrologTimeout: 60
-# not used: DeferBatch, X11
 # TODO: ForceRequeueOnFail
 # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
 Epilog: epilog1.sh,epilog2.sh

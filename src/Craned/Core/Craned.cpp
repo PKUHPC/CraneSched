@@ -745,9 +745,8 @@ void ParseConfig(int argc, char** argv) {
         }
         if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
           g_config.PrologFlags |= PrologFlagEnum::Alloc;
-          if (g_config.PrologFlags & PrologFlagEnum::Contain ||
-            g_config.PrologFlags & PrologFlagEnum::X11) {
-            CRANE_ERROR("Cannot set NoHold, Contain, and X11 flags at the same time.");
+          if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+            CRANE_ERROR("Cannot set NoHold, Contain flags at the same time.");
             std::exit(1);
           }
         }
