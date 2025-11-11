@@ -586,11 +586,10 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   std::list<std::pair<task_id_t, std::future<CraneRichError>>> futures;
   for (const auto task_id : request->task_ids()) {
     auto fut = g_task_scheduler->JobModifyLuaCheck(task_id);
-    if (fut)
-      futures.emplace_back(task_id, std::move(fut.value()));
+    if (fut) futures.emplace_back(task_id, std::move(fut.value()));
   }
 
-  for (auto& [task_id, fut] : futures) {
+  for (auto &[task_id, fut] : futures) {
     auto rich_err = fut.get();
     if (rich_err.code() != CraneErrCode::SUCCESS) {
       response->add_not_modified_tasks(task_id);

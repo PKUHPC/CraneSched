@@ -23,7 +23,8 @@
 
 namespace Ctld {
 
-CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script, TaskInCtld* task) {
+CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
+                                        TaskInCtld* task) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   auto lua_env = std::make_unique<crane::LuaEnvironment>();
@@ -84,7 +85,8 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script, TaskInCtl
   return result;
 }
 
-CraneRichError LuaJobHandler::JobModify(const std::string& lua_script, TaskInCtld* task_in_ctld) {
+CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
+                                        TaskInCtld* task_in_ctld) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
   crane::grpc::TaskInfo task_info;
