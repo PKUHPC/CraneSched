@@ -364,7 +364,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           step->ia_meta = std::move(meta);
 
           std::expected<task_id_t, std::string> result;
-          auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
+          auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
           if (lua_result) {
             auto rich_err = lua_result.value().get();
             if (rich_err.code() != CraneErrCode::SUCCESS) {
@@ -484,7 +484,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
-  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(*task);
+  auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
   if (lua_result) {
     auto rich_err = lua_result.value().get();
     if (rich_err.code() != CraneErrCode::SUCCESS) {

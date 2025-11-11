@@ -779,7 +779,7 @@ class TaskScheduler {
   CraneErrCode ChangeTaskExtraAttrs(task_id_t task_id,
                                     const std::string& new_extra_attr);
 
-  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(TaskInCtld& task);
+  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(TaskInCtld* task);
 
   std::optional<std::future<CraneRichError>> JobModifyLuaCheck(task_id_t task_id);
 
