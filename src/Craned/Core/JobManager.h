@@ -308,8 +308,7 @@ class JobManager {
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
 
-  util::mutex m_prolog_serial_mutex_; // when prolog flags set Serial
-
+  util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial
 
   std::thread m_uvw_thread_;
 };

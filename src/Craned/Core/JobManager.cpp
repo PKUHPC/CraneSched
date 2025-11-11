@@ -1065,24 +1065,25 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
     if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
       EnvMap env_map = job->GetJobEnvMap();
-      g_thread_pool->detach_task([this, job_id, step_id, run_prolog, env_map]() {
+      g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
+                                  env_map]() {
         if (!run_prolog(job_id, env_map)) {
           g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
           ActivateTaskStatusChangeAsync_(
-          job_id, step_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::EC_PROLOG_ERR,
-          fmt::format("Failed to run prolog for job#{} ", job_id),
-          google::protobuf::util::TimeUtil::GetCurrentTime());
+              job_id, step_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::EC_PROLOG_ERR,
+              fmt::format("Failed to run prolog for job#{} ", job_id),
+              google::protobuf::util::TimeUtil::GetCurrentTime());
         }
       });
     } else {
       if (!run_prolog(job_id, job->GetJobEnvMap())) {
         g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
         ActivateTaskStatusChangeAsync_(
-          job_id, step_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::EC_PROLOG_ERR,
-          fmt::format("Failed to run prolog for job#{} ", job_id),
-          google::protobuf::util::TimeUtil::GetCurrentTime());
+            job_id, step_id, crane::grpc::TaskStatus::Failed,
+            ExitCode::EC_PROLOG_ERR,
+            fmt::format("Failed to run prolog for job#{} ", job_id),
+            google::protobuf::util::TimeUtil::GetCurrentTime());
         return;
       }
     }

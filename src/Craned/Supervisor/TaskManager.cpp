@@ -2269,11 +2269,13 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
     if (!g_config.TaskEpilogs.empty()) {
-      RunLogHookArgs run_epilog_args{.scripts = g_config.TaskEpilogs,
-                                     .envs = std::unordered_map{task->GetParentStep().env().begin(), task->GetParentStep().env().end()},
-                                     .run_uid = task->GetParentStep().uid(),
-                                     .run_gid = task->GetParentStep().gid()[0],
-                                     .is_prolog = false};
+      RunLogHookArgs run_epilog_args{
+          .scripts = g_config.TaskEpilogs,
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .is_prolog = false};
       util::os::RunPrologOrEpiLog(run_epilog_args);
     }
 

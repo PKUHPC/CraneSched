@@ -601,17 +601,22 @@ int TimeStr2Mins(absl::string_view input) {
   return (days * 1440) + hours * 60 + mins + (secs > 0 ? 1 : 0);
 }
 
-void ParseLogHookPaths(const std::string& log_hook_config, const std::string& config_file_path, std::vector<std::string>* result) {
+void ParseLogHookPaths(const std::string &log_hook_config,
+                       const std::string &config_file_path,
+                       std::vector<std::string> *result) {
   auto path_list = absl::StrSplit(log_hook_config, ",");
-  for (const auto& path : path_list) {
+  for (const auto &path : path_list) {
     if (path.empty()) continue;
     bool is_absolute = path[0] == '/';
     if (is_absolute) {
       result->emplace_back(absl::StripAsciiWhitespace(path));
       continue;
     }
-    std::string real_path = std::filesystem::path(config_file_path).parent_path() / absl::StripAsciiWhitespace(path);
-    if (real_path.find('*') != std::string::npos || real_path.find('?') != std::string::npos) {
+    std::string real_path =
+        std::filesystem::path(config_file_path).parent_path() /
+        absl::StripAsciiWhitespace(path);
+    if (real_path.find('*') != std::string::npos ||
+        real_path.find('?') != std::string::npos) {
       glob_t globbuf;
       if (glob(real_path.c_str(), 0, nullptr, &globbuf) == 0) {
         for (size_t i = 0; i < globbuf.gl_pathc; ++i) {

@@ -732,9 +732,8 @@ void CtldClient::UpdateNodeDrainState(bool is_drain,
   request.set_drain(is_drain);
   request.set_reason(reason);
 
-  auto status = m_stub_->UpdateNodeDrainState(&context, request,&reply);
-  if (!status.ok() || !reply.ok())
-    CRANE_DEBUG("UpdateNodeDrainState failed");
+  auto status = m_stub_->UpdateNodeDrainState(&context, request, &reply);
+  if (!status.ok() || !reply.ok()) CRANE_DEBUG("UpdateNodeDrainState failed");
 }
 
 std::map<job_id_t, std::map<step_id_t, StepStatus>>

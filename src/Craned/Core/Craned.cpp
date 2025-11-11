@@ -706,10 +706,12 @@ void ParseConfig(int argc, char** argv) {
                                 kDefaultConfigPath, &g_config.EpiLogs);
 
       if (config["TaskProlog"])
-        util::ParseLogHookPaths(config["TaskProlog"].as<std::string>(), kDefaultConfigPath, &g_config.TaskPrologs);
+        util::ParseLogHookPaths(config["TaskProlog"].as<std::string>(),
+                                kDefaultConfigPath, &g_config.TaskPrologs);
 
       if (config["TaskEpilog"])
-        util::ParseLogHookPaths(config["TaskEpilog"].as<std::string>(), kDefaultConfigPath, &g_config.TaskEpilogs);
+        util::ParseLogHookPaths(config["TaskEpilog"].as<std::string>(),
+                                kDefaultConfigPath, &g_config.TaskEpilogs);
 
       if (config["PrologTimeout"])
         g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
@@ -724,16 +726,15 @@ void ParseConfig(int argc, char** argv) {
       if (config["PrologFlags"]) {
         auto prolog_flags = config["PrologFlags"].as<std::string>();
         for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
-          std::string trimmed(absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
-          if (trimmed == "alloc")
-            g_config.PrologFlags |= PrologFlagEnum::Alloc;
+          std::string trimmed(
+              absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
+          if (trimmed == "alloc") g_config.PrologFlags |= PrologFlagEnum::Alloc;
           if (trimmed == "contain")
             g_config.PrologFlags |= PrologFlagEnum::Contain;
           if (trimmed == "nohold")
             g_config.PrologFlags |= PrologFlagEnum::NoHold;
           if (trimmed == "forcerequeueonfail")
-            g_config.PrologFlags |=
-                ForceRequeueOnFail;
+            g_config.PrologFlags |= ForceRequeueOnFail;
           if (trimmed == "runinjob")
             g_config.PrologFlags |= PrologFlagEnum::RunInJob;
           if (trimmed == "serial")
@@ -757,7 +758,8 @@ void ParseConfig(int argc, char** argv) {
           g_config.PrologFlags |= PrologFlagEnum::Alloc;
           g_config.PrologFlags |= PrologFlagEnum::Contain;
           if (g_config.PrologFlags & PrologFlagEnum::Serial) {
-            CRANE_ERROR("Cannot set RunInJob and Serial flags at the same time.");
+            CRANE_ERROR(
+                "Cannot set RunInJob and Serial flags at the same time.");
             std::exit(1);
           }
         }

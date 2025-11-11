@@ -449,7 +449,8 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     }
 
     int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
-    if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1 || pipe(sync_pipe) == -1) {
+    if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1 ||
+        pipe(sync_pipe) == -1) {
       CRANE_ERROR("{} pipe creation failed: {}", script, strerror(errno));
       if (args.is_prolog) return std::nullopt;
       is_failed = true;
@@ -507,8 +508,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
         CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
-                  read_stream(stdout_pipe[0]),
-                  read_stream(stderr_pipe[0]));
+                    read_stream(stdout_pipe[0]), read_stream(stderr_pipe[0]));
         if (args.is_prolog) return std::nullopt;
         is_failed = true;
         continue;
@@ -516,8 +516,8 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 
       if (status != 0) {
         CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
-                  status, read_stream(stdout_pipe[0]),
-                  read_stream(stderr_pipe[0]));
+                    status, read_stream(stdout_pipe[0]),
+                    read_stream(stderr_pipe[0]));
         if (args.is_prolog) return std::nullopt;
         is_failed = true;
         continue;
@@ -527,7 +527,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 
       CRANE_DEBUG("{} finished successfully.", script);
 
-    } else { // child proc
+    } else {  // child proc
       close(stdout_pipe[0]);
       close(stderr_pipe[0]);
       dup2(stdout_pipe[1], STDOUT_FILENO);
@@ -537,14 +537,14 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 
       for (const auto& [name, value] : args.envs)
         if (setenv(name.c_str(), value.c_str(), 1))
-          fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
-                     name, value);
+          fmt::print(stderr,
+                     "[Subprocess] Warning: setenv() for {}={} failed.\n", name,
+                     value);
 
       char buf;
       read(sync_pipe[0], &buf, 1);
       close(sync_pipe[1]);
       close(sync_pipe[0]);
-
 
       std::vector<const char*> argv = {script.c_str(), nullptr};
       execvp(argv[0], const_cast<char* const*>(argv.data()));
@@ -562,7 +562,7 @@ void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,
     std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
   static const LazyRE2 export_re = {
-    R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
+      R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
   static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
   static const LazyRE2 print_re = {R"(^print\s+(.*)$)"};
 

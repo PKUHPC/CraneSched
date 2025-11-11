@@ -856,11 +856,11 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 }
 
 bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
-                                               bool is_drain, const std::string& reason) {
+                                               bool is_drain,
+                                               const std::string& reason) {
   if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR(
-        "unknown craned_id '{}', cannot update drain state.",
-        craned_id);
+    CRANE_ERROR("unknown craned_id '{}', cannot update drain state.",
+                craned_id);
     return false;
   }
 

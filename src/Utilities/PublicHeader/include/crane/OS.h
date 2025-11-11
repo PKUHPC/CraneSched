@@ -20,16 +20,15 @@
 
 #include <absl/time/time.h>
 #include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <filesystem>
 #include <set>
 #include <string>
-
-#include <grp.h>
-#include <pwd.h>
-#include <sys/wait.h>
 
 #include "crane/Logger.h"
 
@@ -106,8 +105,8 @@ absl::Time GetSystemBootTime();
 
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
 
-void ApplyPrologOutputToEnvAndStdout(const std::string& output,
-                                     std::unordered_map<std::string, std::string>* env_map,
-                                     int task_stdout_fd);
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd);
 
 }  // namespace util::os

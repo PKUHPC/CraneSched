@@ -1148,32 +1148,36 @@ void TaskScheduler::ScheduleThread_() {
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
         for (auto& job : jobs_to_run) {
           g_thread_pool->detach_task([&]() {
-          // run prolog ctld script
-          RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
-                                         .envs = job->env,
-                                         .run_uid = 0,
-                                         .run_gid = 0,
-                                         .is_prolog = true};
-          if (g_config.PrologTimeout) {
-            run_prolog_args.timeout_sec = g_config.PrologTimeout;
-          } else {
-            run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
-          }
-          CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s", job->TaskId(),
-                      run_prolog_args.run_uid, run_prolog_args.timeout_sec);
-          auto run_prolog_result = util::os::RunPrologOrEpiLog(run_prolog_args);
-          if (!run_prolog_result) {
-            thread_pool_mtx.Lock();
-            failed_task_id_set.emplace(job->TaskId());
-            thread_pool_mtx.Unlock();
-          }
-          prolog_bl.DecrementCount();
+            // run prolog ctld script
+            RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
+                                           .envs = job->env,
+                                           .run_uid = 0,
+                                           .run_gid = 0,
+                                           .is_prolog = true};
+            if (g_config.PrologTimeout) {
+              run_prolog_args.timeout_sec = g_config.PrologTimeout;
+            } else {
+              run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+            }
+            CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
+                        job->TaskId(), run_prolog_args.run_uid,
+                        run_prolog_args.timeout_sec);
+            auto run_prolog_result =
+                util::os::RunPrologOrEpiLog(run_prolog_args);
+            if (!run_prolog_result) {
+              thread_pool_mtx.Lock();
+              failed_task_id_set.emplace(job->TaskId());
+              thread_pool_mtx.Unlock();
+            }
+            prolog_bl.DecrementCount();
           });
         }
         prolog_bl.Wait();
         end = std::chrono::steady_clock::now();
-        CRANE_TRACE("PrologCtld running costed {} ms",
-          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count());
+        CRANE_TRACE(
+            "PrologCtld running costed {} ms",
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                .count());
       }
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
