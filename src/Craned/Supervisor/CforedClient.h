@@ -25,6 +25,9 @@
 
 namespace Craned::Supervisor {
 
+// Forward declarations
+struct TaskExitInfo;
+
 class CforedClient {
   struct X11FdInfo {
     int fd;
@@ -71,6 +74,9 @@ class CforedClient {
 
   bool TaskProcessStop(task_id_t task_id);
   void TaskEnd(task_id_t task_id);
+
+  void SendTaskExitCodeNotification(
+      const std::unordered_map<task_id_t, TaskExitInfo>& exit_codes);
 
   const std::string& CforedName() const { return m_cfored_name_; }
 

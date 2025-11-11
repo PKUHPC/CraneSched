@@ -760,6 +760,7 @@ message StreamCrunReply {
     TASK_IO_FORWARD = 4;
     TASK_IO_FORWARD_READY = 5;
     TASK_X11_FORWARD = 6;
+    TASK_EXIT_CODE_NOTIFICATION = 7;
   }
 
   message TaskIdReply {
@@ -792,6 +793,15 @@ message StreamCrunReply {
     bytes msg = 1;
   }
 
+  message TaskExitCodeNotification {
+    message TaskExitInfo {
+      uint32 task_id = 1;
+      uint32 exit_code = 2;
+      bool is_terminated_by_signal = 3;
+    }
+    repeated TaskExitInfo task_exit_infos = 1;
+  }
+
   CforedCrunReplyType type = 1;
 
   oneof payload {
@@ -802,6 +812,7 @@ message StreamCrunReply {
     TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
     TaskIOForwardReply payload_task_io_forward_reply = 7;
     TaskX11ForwardReply payload_task_x11_forward_reply = 8;
+    TaskExitCodeNotification payload_task_exit_code_notification = 9;
   }
 }
 
@@ -811,6 +822,7 @@ message StreamTaskIORequest {
     TASK_OUTPUT = 1;
     SUPERVISOR_UNREGISTER = 2;
     TASK_X11_OUTPUT = 3;
+    TASK_EXIT_CODE_NOTIFICATION = 4;
   }
 
   message SupervisorRegisterReq {
@@ -829,6 +841,15 @@ message StreamTaskIORequest {
     bytes msg = 1;
   }
 
+  message TaskExitCodeNotificationReq {
+    message TaskExitInfo {
+      uint32 task_id = 1;
+      uint32 exit_code = 2;
+      bool is_terminated_by_signal = 3;
+    }
+    repeated TaskExitInfo task_exit_infos = 1;
+  }
+
   SupervisorRequestType type = 1;
 
   oneof payload {
@@ -836,6 +857,7 @@ message StreamTaskIORequest {
     TaskOutputReq payload_task_output_req = 3;
     SupervisorUnRegisterReq payload_unregister_req = 4;
     TaskX11OutputReq payload_task_x11_output_req = 5;
+    TaskExitCodeNotificationReq payload_task_exit_code_notification_req = 6;
   }
 }
 

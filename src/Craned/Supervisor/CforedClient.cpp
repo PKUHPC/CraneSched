@@ -708,6 +708,39 @@ void CforedClient::TaskEnd(task_id_t task_id) {
   g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 
+void CforedClient::SendTaskExitCodeNotification(
+    const std::unordered_map<task_id_t, TaskExitInfo>& exit_codes) {
+  CRANE_INFO("Sending task exit code notification with {} tasks",
+             exit_codes.size());
+
+  StreamTaskIORequest request;
+  request.set_type(
+      StreamTaskIORequest::SupervisorRequestType::TASK_EXIT_CODE_NOTIFICATION);
+
+  auto* notification_req =
+      request.mutable_payload_task_exit_code_notification_req();
+
+  for (const auto& [task_id, exit_info] : exit_codes) {
+    auto* task_exit_info = notification_req->add_task_exit_infos();
+    task_exit_info->set_task_id(task_id);
+    task_exit_info->set_exit_code(exit_info.value);
+    task_exit_info->set_is_terminated_by_signal(
+        exit_info.is_terminated_by_signal);
+  }
+
+  // Serialize and send the message
+  std::string serialized_msg;
+  google::protobuf::io::StringOutputStream string_output_stream(
+      &serialized_msg);
+  google::protobuf::io::CodedOutputStream coded_output_stream(
+      &string_output_stream);
+  google::protobuf::util::SerializeDelimitedToCodedStream(request,
+                                                          &coded_output_stream);
+  coded_output_stream.Trim();
+
+  TaskOutPutForward(serialized_msg);
+}
+
 void CforedClient::TaskOutPutForward(const std::string& msg) {
   CRANE_TRACE("Receive TaskOutputForward len: {}.", msg.size());
   m_output_queue_.enqueue(msg);

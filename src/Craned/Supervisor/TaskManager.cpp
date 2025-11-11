@@ -129,6 +129,28 @@ std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
 
 bool StepInstance::AllTaskFinished() const { return m_task_map_.empty(); }
 
+void StepInstance::RecordTaskExitCode(task_id_t task_id,
+                                      const TaskExitInfo& exit_info) {
+  std::lock_guard<std::mutex> lock(m_task_exit_codes_mtx_);
+  m_task_exit_codes_[task_id] = exit_info;
+}
+
+bool StepInstance::HasAnyTaskFailed() const {
+  std::lock_guard<std::mutex> lock(m_task_exit_codes_mtx_);
+  for (const auto& [task_id, exit_info] : m_task_exit_codes_) {
+    if (exit_info.value != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::unordered_map<task_id_t, TaskExitInfo>
+StepInstance::GetAllTaskExitCodes() const {
+  std::lock_guard<std::mutex> lock(m_task_exit_codes_mtx_);
+  return m_task_exit_codes_;
+}
+
 void StepInstance::InitOomBaseline() {
   // Use cgroup path passed from Craned
   if (g_config.CgroupPath.empty()) {
@@ -1728,7 +1750,19 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     CRANE_INFO("Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}", pid,
                exit_info->is_terminated_by_signal, exit_info->value);
 
+    // Record the task exit code for crun jobs
     if (m_step_.IsCrun()) {
+      m_step_.RecordTaskExitCode(task_id, exit_info.value());
+      
+      // Check if any task failed and we should send exit code notification
+      if (exit_info->value != 0) {
+        // Send notification to crun with all task exit codes
+        auto all_exit_codes = m_step_.GetAllTaskExitCodes();
+        if (!all_exit_codes.empty()) {
+          m_step_.GetCforedClient()->SendTaskExitCodeNotification(all_exit_codes);
+        }
+      }
+      
       // TaskStatusChange of a crun task is triggered in
       // CforedManager.
       auto ok_to_free = m_step_.GetCforedClient()->TaskProcessStop(task_id);

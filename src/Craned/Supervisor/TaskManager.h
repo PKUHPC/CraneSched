@@ -152,11 +152,18 @@ class StepInstance {
   void InitOomBaseline();
   bool EvaluateOomOnExit();
 
+  // Task exit code tracking for crun jobs
+  void RecordTaskExitCode(task_id_t task_id, const TaskExitInfo& exit_info);
+  bool HasAnyTaskFailed() const;
+  std::unordered_map<task_id_t, TaskExitInfo> GetAllTaskExitCodes() const;
+
  private:
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
+  std::unordered_map<task_id_t, TaskExitInfo> m_task_exit_codes_;
+  mutable std::mutex m_task_exit_codes_mtx_;
 };
 
 struct TaskInstanceMeta {
