@@ -98,3 +98,4 @@ fabric.properties
 
 # VS Code 
 .vscode/
+_codeql_detected_source_root
