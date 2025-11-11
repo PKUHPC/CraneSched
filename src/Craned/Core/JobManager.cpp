@@ -984,6 +984,12 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     }
   }
 
+  auto* step_ptr = step.get();
+  {
+    absl::MutexLock lk(job->step_map_mtx.get());
+    job->step_map.emplace(step->step_id, std::move(step));
+  }
+
   // force the script to be executed at job allocation
   if (!g_config.ProLogs.empty() &&
       g_config.PrologFlags & PrologFlagEnum::Alloc &&
@@ -1048,12 +1054,6 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         return;
       }
     }
-  }
-
-  auto* step_ptr = step.get();
-  {
-    absl::MutexLock lk(job->step_map_mtx.get());
-    job->step_map.emplace(step->step_id, std::move(step));
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
