@@ -132,37 +132,6 @@ pdsh -w cranectl "systemctl start cranectld"
 pdsh -w crane[01-04] "systemctl start craned"
 ```
 
-## Gres Configuration
-
-> Device resource related configuration
-
-- **name**: Generally the resource type such as: `GPU`, `NPU`, etc.
-- **type**: Generally the resource model such as: `A100`, `3090`, etc.
-- **DeviceFileRegex**: The device files under the /dev directory corresponding to the resource, suitable for resources where one physical device corresponds to one device file, **each file corresponds to one Gres resource in the system**, supports Regex format. Common device corresponding device files. Such as Nvidia, AMD, Hygon DCU, Ascend, etc.
-- **DeviceFileList**: Suitable for **Gres resources where one physical device corresponds to multiple device files under the /dev directory**, each group of files corresponds to one Gres resource in the system, supports Regex format.
-
-Choose one between DeviceFileRegex and DeviceFileList, the above device files must exist, **otherwise Craned will report an error and exit during startup**
-
-- **EnvInjector**: Environment variables that the device needs to inject
-
-  - Optional values: corresponding environment variables
-
-  - `nvidia`: `CUDA_VISIBLE_DEVICES`
-  - `hip`: `HIP_VISIBLE_DEVICES`
-  - `ascend`: `ASCEND_RT_VISIBLE_DEVICES`
-
-- Common vendor device file paths and related configurations
-
-  - | Vendor | Device File Path | EnvInjector |
-    | :---------- | :---------------------- | :---------- |
-    | Nvidia | /dev/nvidia0 ... | nvidia |
-    | AMD/Hygon DCU | /dev/dri/renderer128... | hip |
-    | Ascend | /dev/davinci0 ... | ascend |
-    | Iluvatar | /dev/iluvatar0 ... | nvidia |
-
-  - 
-  
-
 ## Troubleshooting
 
 **PDSH not found**: Install the `pdsh` package from EPEL repository.
