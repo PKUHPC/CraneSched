@@ -834,6 +834,7 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetStatus(crane::grpc::TaskStatus::Running);
         this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
         this->SetErrorExitCode(0u);
+        this->SetRunningNodes(this->ExecutionNodes());
 
         // Primary:Update job status when primary step is Running.
         if (this->IsPrimaryStep()) {
