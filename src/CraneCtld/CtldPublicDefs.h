@@ -748,6 +748,9 @@ struct TaskInCtld {
   // COMMON steps
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;
 
+  std::queue<step_id_t> pending_step_ids_;
+  ResourceV2 step_res_avail_;
+
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
@@ -881,6 +884,7 @@ struct TaskInCtld {
     CRANE_ASSERT(step->StepToCtld().interactive_meta().interactive_type() ==
                  crane::grpc::InteractiveTaskType::Crun);
     step->job = this;
+    pending_step_ids_.push(step->StepId());
     m_steps_.emplace(step->StepId(), std::move(step));
   }
 
@@ -897,6 +901,7 @@ struct TaskInCtld {
     if (m_steps_.contains(step_id)) {
       auto step =
           std::unique_ptr<CommonStepInCtld>(m_steps_.at(step_id).release());
+      step_res_avail_ += step->AllocatedRes();
       m_steps_.erase(step_id);
       return step;
     }
@@ -905,6 +910,53 @@ struct TaskInCtld {
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> const&
   Steps() {
     return m_steps_;
+  }
+
+  void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
+
+  void SchedulePendingSteps(std::vector<StepInCtld*>* scheduled_steps) {
+    while (!pending_step_ids_.empty()) {
+      const step_id_t& step_id = pending_step_ids_.front();
+      const auto& step = GetStep(step_id);
+      if (step == nullptr) {
+        // step has been removed
+        pending_step_ids_.pop();
+        continue;
+      }
+      ResourceV2 step_alloc_res;
+      std::unordered_set<CranedId> step_craned_ids;
+      for (auto const& craned_id : craned_ids) {
+        if (step->excluded_nodes.contains(craned_id)) {
+          continue;
+        }
+        if (!step->included_nodes.empty() &&
+            !step->included_nodes.contains(craned_id)) {
+          continue;
+        }
+        ResourceInNode feasible_res;
+        bool ok = step->requested_node_res_view.GetFeasibleResourceInNode(
+            step_res_avail_.at(craned_id), &feasible_res);
+        if (!ok) {
+          continue;
+        }
+        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
+        step_craned_ids.insert(craned_id);
+        if (craned_ids.size() >= step->node_num) {
+          break;
+        }
+      }
+      if (step_craned_ids.size() < step->node_num) {
+        break;
+      }
+      step->SetAllocatedRes(step_alloc_res);
+      step->SetCranedIds(step_craned_ids);
+      step->SetConfiguringNodes(step_craned_ids);
+      step->SetExecutionNodes(step_craned_ids);
+      step->SetStatus(crane::grpc::TaskStatus::Configuring);
+      step_res_avail_ -= step_alloc_res;
+      pending_step_ids_.pop();
+      scheduled_steps->push_back(step);
+    }
   }
 
   void SetCachedPriority(const double val);
