@@ -210,14 +210,13 @@ message StepToCtld {
   google.protobuf.Duration time_limit = 1;
   // account, qos from job
   uint32 job_id = 2;
-  ResourceView req_resources = 3;
+  ResourceView req_resources_per_task = 3;
   TaskType type = 5;
   uint32 uid = 6;  // Only for authorization
   string name = 7;
 
-  uint32 node_num = 9;
-  uint32 ntasks_per_node = 10;
-  double cpus_per_task = 11;
+  optional uint32 node_num = 8;
+  optional uint32 ntasks_per_node = 9;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
@@ -680,7 +679,8 @@ enum ErrCode {
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
-  ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job is pending or container is not ready.
+  ERR_STEP_RES_BEYOND = 83;          // Step resource request exceeds job resource.
 }
 
 enum EntityType {

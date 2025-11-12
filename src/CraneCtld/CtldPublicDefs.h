@@ -479,7 +479,6 @@ struct StepInCtld {
   std::string name;
 
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0F};
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
@@ -487,7 +486,9 @@ struct StepInCtld {
   std::string extra_attr;
 
   absl::Duration time_limit;
+  // FIXME: Used for backward compatibility, remove it later.
   ResourceView requested_node_res_view;
+  ResourceView requested_task_res_view;
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
