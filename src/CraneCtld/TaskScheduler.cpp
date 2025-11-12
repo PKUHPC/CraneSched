@@ -758,7 +758,9 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
-        if (!g_licenses_manager->CheckLicenseCountSufficient(job->licenses_count)) {
+        if (!g_licenses_manager->CheckLicenseCountSufficient(
+          job->TaskToCtld().licenses_count(),job->TaskToCtld().is_licenses_or(),
+          &job->licenses_count)) {
           job->pending_reason = "Licenses";
           continue;
         }
@@ -2962,8 +2964,8 @@ void TaskScheduler::QueryTasksInRam(
       return true;
     }
     TaskInCtld& task = *it.second;
-    for (auto& [k, v] : task.TaskToCtld().licenses_count()) {
-      if (req_licenses.contains(k)) {
+    for (auto& license : task.licenses_count) {
+      if (req_licenses.contains(license.first)) {
         return true;
       }
     }
@@ -3674,8 +3676,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   if (!g_config.lic_id_to_count_map.empty()) {
     auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
-        task->TaskToCtld().licenses_count(),
-        task->TaskToCtld().is_licenses_or(), &task->licenses_count);
+      task->TaskToCtld().licenses_count(),
+      task->TaskToCtld().is_licenses_or(), &task->licenses_count);
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());

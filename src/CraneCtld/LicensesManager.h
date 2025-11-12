@@ -44,10 +44,11 @@ class LicensesManager {
   void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest *request,
                        crane::grpc::QueryLicensesInfoReply *response);
 
-  bool CheckLicenseCountSufficient(const std::unordered_map<LicenseId, uint32_t>& actual_licenses);
+  bool CheckLicenseCountSufficient(const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
+  bool is_license_or, std::unordered_map<LicenseId, uint32_t>* actual_licenses);
 
   std::expected<void, std::string> CheckLicensesLegal(
-      const ::google::protobuf::Map<std::string, uint32_t> &lic_id_to_count_map,
+      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
       bool is_license_or, std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
   void MallocLicenseResource(

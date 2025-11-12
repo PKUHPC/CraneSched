@@ -175,7 +175,11 @@ message TaskToCtld {
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
 
-  map<string, uint32> licenses_count = 40;
+  message License {
+    string key = 1;
+    uint32 count = 2;
+  }
+  repeated License licenses_count = 40;
   bool is_licenses_or = 41;
 }
 
