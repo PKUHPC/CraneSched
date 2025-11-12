@@ -1959,10 +1959,18 @@ bool MongodbClient::GetSummaryLastSuccessTimeTm(RollupType rollup_type,
     if (doc_opt) {
       auto doc = doc_opt->view();
       auto it = doc.find("last_success_time");
-      if (it != doc.end() && it->type() == bsoncxx::type::k_int64) {
-        int64_t last_sec = it->get_int64().value;
+      int64_t last_sec = 0;
+      if (it != doc.end()) {
+        if (it->type() == bsoncxx::type::k_int64) {
+          last_sec = it->get_int64().value;
+        } else if (it->type() == bsoncxx::type::k_int32) {
+          last_sec = it->get_int32().value;
+        } else {
+          tm_last = default_time;
+          return true;
+        }
         auto tt = static_cast<std::time_t>(last_sec);
-        localtime_r(&tt, &tm_last);  // Fill tm_last with local time
+        localtime_r(&tt, &tm_last);
       } else {
         tm_last = default_time;
       }
@@ -2018,9 +2026,6 @@ void MongodbClient::RollupSummary(RollupType rollup_type) {
   if (!NeedRollup(tm_last, tm_now, rollup_type)) {
     auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
     auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
-    CRANE_TRACE("Less than 1 {} since last aggregation, skip. {} -> {}",
-                RollupTypeToString(rollup_type), util::FormatTime(last_sec),
-                util::FormatTime(now_sec));
     return;
   }
 
@@ -2211,7 +2216,6 @@ void MongodbClient::AggregateJobSummaryByHour(
       cur_end += 3600;
     }
   } catch (const std::exception& e) {
-    UpdateSummaryLastSuccessTimeSec(RollupType::HOUR, cur_start);
     CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour error: {}",
                        e.what());
   }
@@ -2356,7 +2360,6 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
     CRANE_LOGGER_ERROR(
         m_logger_, "[mongodb] Aggregate job day or month summary exception: {}",
         e.what());
-    UpdateSummaryLastSuccessTimeSec(dst_type, cur_start);
   }
   UpdateSummaryLastSuccessTimeSec(dst_type, cur_start);
 }
@@ -2485,8 +2488,7 @@ bool MongodbClient::QueryJobSizeSummaryByJobIds(
           }
           group_index++;
         }
-        if (group_index == 0) continue;
-        uint32_t bucket = grouping_list[group_index - 1];
+        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
         agg_map[{acc, wk, bucket}].total_cpu_time += total_cpu_time;
         agg_map[{acc, wk, bucket}].total_count += 1;
       }
@@ -2924,7 +2926,7 @@ void MongodbClient::QueryJobSizeSummary(
           if (cpus_alloc < group) break;
           group_index++;
         }
-        uint32_t bucket = grouping_list[group_index - 1];
+        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
         JobSizeSummaryKey key{
             .account = std::string(id["account"].get_string().value),
             .wckey = std::string(id["wckey"].get_string().value),
@@ -3009,7 +3011,7 @@ bool MongodbClient::Init() {
     return false;
   }
   std::shared_ptr<uvw::loop> loop = uvw::loop::create();
-  auto mongodb_task_timer_handle = loop->resource<uvw::timer_handle>();
+  mongodb_task_timer_handle = loop->resource<uvw::timer_handle>();
 
   mongodb_task_timer_handle->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {

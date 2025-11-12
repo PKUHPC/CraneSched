@@ -916,7 +916,12 @@ void InitializeCtldGlobalVariables() {
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
-  g_db_client->Init();
+  ok = g_db_client->Init();
+  if (!ok) {
+    CRANE_ERROR("The initialization of MongoDb client failed. Exiting...");
+    DestroyCtldGlobalVariables();
+    std::exit(1);
+  }
   g_runtime_status.srv_ready.store(true, std::memory_order_release);
 }
 

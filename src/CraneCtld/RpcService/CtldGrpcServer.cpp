@@ -2059,6 +2059,8 @@ grpc::Status CraneCtldServiceImpl::QueryJobSummary(
     ::grpc::ServerContext *context,
     const ::crane::grpc::QueryJobSummaryRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
   g_db_client->QueryJobSummary(request, writer);
   return grpc::Status::OK;
 }
@@ -2067,11 +2069,22 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
     ::grpc::ServerContext *context,
     const ::crane::grpc::QueryJobSizeSummaryRequest *request,
     ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
   if (request->filter_job_ids().size() > 0) {
     g_db_client->QueryJobSizeSummaryByJobIds(request, writer);
   } else {
     g_db_client->QueryJobSizeSummary(request, writer);
   }
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
+    ::grpc::ServerContext *context, const ::google::protobuf::Empty *request,
+    ::google::protobuf::Empty *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  g_db_client->ClusterRollupUsage();
   return grpc::Status::OK;
 }
 

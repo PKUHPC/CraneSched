@@ -541,7 +541,7 @@ std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
-inline std::string FormatTime(std::time_t t) {
+std::string FormatTime(std::time_t t) {
   std::array<char, 32> buf{};
   std::tm tmval{};
   localtime_r(&t, &tmval);
@@ -554,12 +554,14 @@ inline std::string FormatTime(std::time_t t) {
 // Returns true if merged and cur is updated.
 bool TryPushMonths(std::vector<TimeRange> &result, std::time_t &cur,
                    std::time_t end) {
-  std::tm tm_cur = *std::localtime(&cur);
+  std::tm tm_cur{};
+  localtime_r(&cur, &tm_cur);
   if (tm_cur.tm_mday == 1 && tm_cur.tm_hour == 0) {
     std::time_t month_start = cur;
     std::time_t month_cur = cur;
     while (true) {
-      std::tm tm_next_month = *std::localtime(&month_cur);
+      std::tm tm_next_month{};
+      localtime_r(&month_cur, &tm_next_month);
       tm_next_month.tm_mon += 1;
       tm_next_month.tm_mday = 1;
       tm_next_month.tm_hour = 0;
@@ -584,7 +586,8 @@ bool TryPushMonths(std::vector<TimeRange> &result, std::time_t &cur,
 // Try to merge consecutive full-day intervals until the next month's first day.
 bool TryPushDays(std::vector<TimeRange> &result, std::time_t &cur,
                  std::time_t end) {
-  std::tm tm_cur = *std::localtime(&cur);
+  std::tm tm_cur{};
+  localtime_r(&cur, &tm_cur);
   if (tm_cur.tm_hour == 0) {
     std::time_t day_start = cur;
     std::tm tm_next_month = tm_cur;
@@ -595,12 +598,12 @@ bool TryPushDays(std::vector<TimeRange> &result, std::time_t &cur,
     tm_next_month.tm_sec = 0;
     std::time_t next_month_first = mktime(&tm_next_month);
 
-    std::tm tm_end = *std::localtime(&end);
+    std::tm tm_end{};
+    localtime_r(&end, &tm_end);
     tm_end.tm_hour = 0;
     tm_end.tm_min = 0;
     tm_end.tm_sec = 0;
     std::time_t end_trunc_to_day = mktime(&tm_end);
-
     std::time_t day_end = std::min(next_month_first, end_trunc_to_day);
     if (day_end > day_start) {
       result.push_back({day_start, day_end, "day"});
@@ -614,7 +617,8 @@ bool TryPushDays(std::vector<TimeRange> &result, std::time_t &cur,
 // Try to merge consecutive hour intervals until the next day start.
 bool TryPushHours(std::vector<TimeRange> &result, std::time_t &cur,
                   std::time_t end) {
-  std::tm tm_cur = *std::localtime(&cur);
+  std::tm tm_cur{};
+  localtime_r(&cur, &tm_cur);
   if (tm_cur.tm_hour != 0) {
     std::tm tm_next_day = tm_cur;
     tm_next_day.tm_mday += 1;
@@ -622,7 +626,6 @@ bool TryPushHours(std::vector<TimeRange> &result, std::time_t &cur,
     tm_next_day.tm_min = 0;
     tm_next_day.tm_sec = 0;
     std::time_t next_day = mktime(&tm_next_day);
-
     std::time_t hour_end = std::min(next_day, end);
     result.push_back({cur, hour_end, "hour"});
     cur = hour_end;

@@ -1066,15 +1066,15 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
+  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
+  rpc ActiveAggregationManually(google.protobuf.Empty) returns (google.protobuf.Empty);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
 
   /* RPCS called from PKI request */
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
-
-  rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
-  rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
 
   /* RPCS called from ccon */
   rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
