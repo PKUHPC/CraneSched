@@ -31,6 +31,10 @@ CraneCtldForInternalListenPort: 10013
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
 CraneCtldLogFile: cranectld/cranectld.log
+# max size of cranectld log file
+CraneCtldLogMaxSize: 50M
+# max files of cranectld log file
+CraneCtldLogMaxFiles: 3
 # file path of cranectld lock file (relative to CraneBaseDir)
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
@@ -48,6 +52,10 @@ CranedListenPort: 10010
 CranedDebugLevel: trace
 # file path of craned log file (relative to CraneBaseDir)
 CranedLogFile: craned/craned.log
+# max size of craned log file
+CranedLogMaxSize: 50M
+# max files of craned log file
+CranedLogMaxFiles: 3
 # file path of craned lock file (relative to CraneBaseDir)
 CranedMutexFilePath: craned/craned.lock
 # file path of craned go module unix socket path (relative to CraneBaseDir)
@@ -59,7 +67,6 @@ Craned:
   PingInterval: 15
   # register operation timeout in seconds
   CraneCtldTimeout: 5
-
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -119,7 +126,6 @@ Partitions:
 
 DefaultPartition: CPU
 
-
 # Advanced options:
 
 # Maximum size of Pending Queue and must <=900000.
@@ -148,6 +154,10 @@ Supervisor:
   DebugLevel: trace
   # Relate to CraneBaseDir
   LogDir: supervisor
+  # max size of supervisor log file
+  LogMaxSize: 50M
+  # max files of supervisor log file
+  LogMaxFiles: 3
 
 Container:
   # Toggle the container support in CraneSched

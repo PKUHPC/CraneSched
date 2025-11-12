@@ -113,10 +113,19 @@ void ParseConfig(int argc, char** argv) {
       g_config.CraneCtldDebugLevel =
           YamlValueOr(config["CraneCtldDebugLevel"], "info");
 
+      if (config["CraneCtldLogMaxSize"]) {
+        g_config.CraneCtldLogMaxSize =
+            util::ParseMemory(config["CraneCtldLogMaxSize"].as<std::string>());
+      }
+
+      g_config.CraneCtldLogMaxFiles = YamlValueOr<uint64_t>(
+          config["CraneCtldLogMaxFiles"], kDefaultCraneCtldLogMaxFiles);
+
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
-        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true);
+        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true,
+                   g_config.CraneCtldLogMaxSize, g_config.CraneCtldLogMaxFiles);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
@@ -368,23 +377,8 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["memory"]) {
-            auto memory = node["memory"].as<std::string>();
-            std::regex mem_regex(R"((\d+)([KMBG]))");
-            std::smatch mem_group;
-            if (!std::regex_search(memory, mem_group, mem_regex)) {
-              CRANE_ERROR("Illegal memory format.");
-              std::exit(1);
-            }
-
-            uint64_t memory_bytes = std::stoul(mem_group[1]);
-            if (mem_group[2] == "K")
-              memory_bytes *= 1024;
-            else if (mem_group[2] == "M")
-              memory_bytes *= 1024 * 1024;
-            else if (mem_group[2] == "G")
-              memory_bytes *= 1024 * 1024 * 1024;
-
-            node_ptr->memory_bytes = memory_bytes;
+            node_ptr->memory_bytes =
+                util::ParseMemory(node["memory"].as<std::string>());
           } else
             std::exit(1);
 

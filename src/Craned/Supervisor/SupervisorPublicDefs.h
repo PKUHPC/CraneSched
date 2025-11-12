@@ -75,7 +75,8 @@ struct Config {
 
   // Only for debugging
   std::filesystem::path SupervisorLogFile;
-
+  uint64_t SupervisorLogMaxSize{kDefaultSupervisorLogMaxSize};
+  uint64_t SupervisorLogMaxFiles;
   CranedId CranedIdOfThisNode;
 
   std::filesystem::path SupervisorUnixSockPath;

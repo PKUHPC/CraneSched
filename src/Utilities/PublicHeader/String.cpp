@@ -23,9 +23,9 @@
 #include <pthread.h>
 
 #include <cstddef>
+#include <regex>
 
 #include "crane/Logger.h"
-
 namespace util {
 
 uint32_t Crc32Of(std::string_view data, uint32_t seed) {
@@ -59,6 +59,24 @@ std::string ReadableMemory(uint64_t memory_bytes) {
     return fmt::format("{}M", memory_bytes / 1024 / 1024);
   else
     return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
+}
+
+uint64_t ParseMemory(const std::string &mem) {
+  std::regex mem_regex(R"((\d+)([KMBG]))");
+  std::smatch mem_group;
+  if (!std::regex_search(mem, mem_group, mem_regex)) {
+    CRANE_ERROR("Illegal memory format.");
+    std::exit(1);
+  }
+  uint64_t memory_bytes = std::stoul(mem_group[1]);
+  if (mem_group[2] == "K")
+    memory_bytes *= 1024;
+  else if (mem_group[2] == "M")
+    memory_bytes *= 1024 * 1024;
+  else if (mem_group[2] == "G")
+    memory_bytes *= 1024 * 1024 * 1024;
+
+  return memory_bytes;
 }
 
 bool ParseNodeList(const std::string &node_str,

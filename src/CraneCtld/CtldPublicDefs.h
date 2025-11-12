@@ -162,6 +162,8 @@ struct Config {
   uint32_t ConfigCrcVal;
   std::string CraneCtldDebugLevel;
   std::filesystem::path CraneCtldLogFile;
+  uint64_t CraneCtldLogMaxSize{kDefaultCraneCtldLogMaxSize};
+  uint64_t CraneCtldLogMaxFiles;
 
   std::string CraneEmbeddedDbBackend;
   std::filesystem::path CraneCtldDbPath;

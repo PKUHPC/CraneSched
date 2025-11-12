@@ -180,6 +180,14 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   g_config.Supervisor.LogDir =
       g_config.CraneBaseDir /
       YamlValueOr(supervisor_config["LogDir"], "supervisor");
+
+  if (supervisor_config["LogMaxSize"]) {
+    g_config.Supervisor.LogMaxSize =
+        util::ParseMemory(supervisor_config["LogMaxSize"].as<std::string>());
+  }
+
+  g_config.Supervisor.LogMaxFiles = YamlValueOr<uint64_t>(
+      supervisor_config["LogMaxFiles"], kDefaultSupervisorLogMaxFiles);
 }
 
 void ParseConfig(int argc, char** argv) {
@@ -262,6 +270,14 @@ void ParseConfig(int argc, char** argv) {
             g_config.CraneBaseDir /
             YamlValueOr(config["CranedLogFile"], kDefaultCranedLogPath);
 
+      if (config["CranedLogMaxSize"]) {
+        g_config.CranedLogMaxSize =
+            util::ParseMemory(config["CranedLogMaxSize"].as<std::string>());
+      }
+
+      g_config.CranedLogMaxFiles = YamlValueOr<uint64_t>(
+          config["CranedLogMaxFiles"], kDefaultCranedLogMaxFiles);
+
       if (parsed_args.count("debug-level"))
         g_config.CranedDebugLevel =
             parsed_args["debug-level"].as<std::string>();
@@ -279,7 +295,8 @@ void ParseConfig(int argc, char** argv) {
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
-        InitLogger(log_level.value(), g_config.CranedLogFile, true);
+        InitLogger(log_level.value(), g_config.CranedLogFile, true,
+                   g_config.CranedLogMaxSize, g_config.CranedLogMaxFiles);
         Craned::g_runtime_status.conn_logger =
             AddLogger("conn", log_level.value(), true);
       } else {
@@ -398,22 +415,8 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["memory"]) {
-            auto memory = node["memory"].as<std::string>();
-            std::regex mem_regex(R"((\d+)([KMBG]))");
-            std::smatch mem_group;
-            if (!std::regex_search(memory, mem_group, mem_regex)) {
-              CRANE_ERROR("Illegal memory format.");
-              std::exit(1);
-            }
-
-            uint64_t memory_bytes = std::stoul(mem_group[1]);
-            if (mem_group[2] == "K")
-              memory_bytes *= 1024;
-            else if (mem_group[2] == "M")
-              memory_bytes *= 1024 * 1024;
-            else if (mem_group[2] == "G")
-              memory_bytes *= 1024 * 1024 * 1024;
-
+            auto memory_bytes =
+                util::ParseMemory(node["memory"].as<std::string>());
             node_res->allocatable_res.memory_bytes = memory_bytes;
             node_res->allocatable_res.memory_sw_bytes = memory_bytes;
           } else

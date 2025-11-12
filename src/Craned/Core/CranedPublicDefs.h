@@ -114,6 +114,8 @@ struct Config {
     std::filesystem::path Path;
     std::string DebugLevel;
     std::filesystem::path LogDir;
+    uint64_t LogMaxSize{kDefaultSupervisorLogMaxSize};
+    uint64_t LogMaxFiles;
   };
   SupervisorConfig Supervisor;
 
@@ -132,6 +134,9 @@ struct Config {
   std::filesystem::path CranedScriptDir;
   std::filesystem::path CranedUnixSockPath;
   std::filesystem::path CranedForPamUnixSockPath;
+
+  uint64_t CranedLogMaxSize{kDefaultCranedLogMaxSize};
+  uint64_t CranedLogMaxFiles;
 
   bool CranedForeground{};
 

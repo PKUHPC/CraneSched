@@ -40,10 +40,11 @@ std::optional<spdlog::level::level_enum> StrToLogLevel(
 }
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path, bool enable_console) {
+                const std::string& log_file_path, bool enable_console,
+                uint64_t max_size, uint64_t max_files) {
   std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_file_path, 1024 * 1024 * 50 /*MB*/, 3);
+      log_file_path, max_size, max_files);
   file_sink->set_level(level);
   file_sink->set_pattern(kLogPattern);
   default_sinks.file_sink = file_sink;
@@ -72,10 +73,11 @@ void InitLogger(spdlog::level::level_enum level,
 
 std::shared_ptr<spdlog::async_logger> AddLogger(
     const std::string& name, spdlog::level::level_enum level,
-    const std::filesystem::path& log_file_path, bool enable_console) {
+    const std::filesystem::path& log_file_path, bool enable_console,
+    uint64_t max_size, uint64_t max_files) {
   std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_file_path, 1024 * 1024 * 50 /*MB*/, 3);
+      log_file_path, max_size, max_files);
   file_sink->set_level(level);
   file_sink->set_pattern(kLogPattern);
   sinks.push_back(file_sink);

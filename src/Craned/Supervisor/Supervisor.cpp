@@ -115,14 +115,16 @@ void InitFromStdin(int argc, char** argv) {
   g_config.SupervisorLogFile =
       std::filesystem::path(msg.log_dir()) /
       fmt::format("{}.{}.log", g_config.JobId, g_config.StepId);
-
+  g_config.SupervisorLogMaxSize = msg.log_max_size();
+  g_config.SupervisorLogMaxFiles = msg.log_max_files();
   g_config.SupervisorUnixSockPath =
       std::filesystem::path(kDefaultSupervisorUnixSockDir) /
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
-    InitLogger(log_level.value(), g_config.SupervisorLogFile, false);
+    InitLogger(log_level.value(), g_config.SupervisorLogFile, false,
+               g_config.SupervisorLogMaxSize, g_config.SupervisorLogMaxFiles);
   } else {
     fmt::print(stderr, "[Supervisor] Invalid debug level: {}\n",
                g_config.SupervisorDebugLevel);
