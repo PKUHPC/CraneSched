@@ -497,7 +497,6 @@ message StepInfo {
   uint32 exit_code = 33;
   string craned_list = 36;
 
-
   // The time of different nodes across the whole cluster might not always be synchronized.
   // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
   // a negative elapsed time might occur.
