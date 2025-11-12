@@ -389,7 +389,8 @@ class MongodbClient {
   std::thread m_mongodb_sum_thread_;
 
  private:
-  std::atomic_bool m_thread_stop_{};
+  std::atomic_bool m_thread_stop_{false};
+  std::shared_ptr<uvw::timer_handle> mongodb_task_timer_handle;
 };
 
 template <>
