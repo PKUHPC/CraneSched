@@ -661,7 +661,6 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
-  std::string pending_reason;
 
   ~CommonStepInCtld() override = default;
 

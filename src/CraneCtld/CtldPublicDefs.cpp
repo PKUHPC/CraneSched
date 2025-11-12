@@ -652,7 +652,6 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   }
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "";
 
   crane::grpc::StepToCtld step;
 
@@ -996,7 +995,6 @@ void CommonStepInCtld::RecoverFromDb(
   extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "";
 }
 
 void CommonStepInCtld::SetFieldsOfStepInfo(
