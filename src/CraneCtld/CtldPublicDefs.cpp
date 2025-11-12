@@ -546,11 +546,11 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   if (job_finished) {
     context->step_raw_ptrs.insert(this);
     context->step_ptrs.emplace(job->ReleaseDaemonStep());
+    this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
+                     absl::Nanoseconds(timestamp.nanos()));
     if (this->Status() == crane::grpc::TaskStatus::Configuring) {
       this->SetStatus(this->PrevErrorStatus().value());
       this->SetExitCode(this->PrevErrorExitCode());
-      this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                       absl::Nanoseconds(timestamp.nanos()));
       CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", job_id,
                  this->StepId(), this->Status());
       // Daemon step failed to configure, terminate all daemon step,
