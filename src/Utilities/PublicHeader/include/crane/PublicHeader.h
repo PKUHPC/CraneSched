@@ -504,6 +504,7 @@ class ResourceView {
     return allocatable_res;
   }
 
+  DeviceMap& GetDeviceMap() { return device_map; }
   const DeviceMap& GetDeviceMap() const { return device_map; }
 
  private:

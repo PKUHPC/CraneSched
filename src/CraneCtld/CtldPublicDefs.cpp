@@ -241,7 +241,6 @@ void StepInCtld::RecoverFromDb(
   gids = {step_to_ctld.gid().begin(), step_to_ctld.gid().end()};
   name = step_to_ctld.name();
   ntasks_per_node = step_to_ctld.ntasks_per_node();
-  cpus_per_task = cpu_t(step_to_ctld.cpus_per_task());
 
   requeue_if_failed = step_to_ctld.requeue_if_failed();
   get_user_env = step_to_ctld.get_user_env();
@@ -253,7 +252,9 @@ void StepInCtld::RecoverFromDb(
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
   requested_node_res_view =
-      static_cast<ResourceView>(step_to_ctld.req_resources());
+      static_cast<ResourceView>(step_to_ctld.req_resources_per_task());
+  requested_task_res_view =
+      static_cast<ResourceView>(step_to_ctld.req_resources_per_task());
   node_num = step_to_ctld.node_num();
 
   SetStepDbId(runtime_attr.step_db_id());
@@ -340,7 +341,6 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   name = job.name;
 
   ntasks_per_node = job.ntasks_per_node;
-  cpus_per_task = job.cpus_per_task;
 
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
@@ -386,14 +386,13 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
       google::protobuf::util::TimeUtil::MillisecondsToDuration(
           ToInt64Milliseconds(time_limit)));
   step.set_job_id(job.TaskId());
-  *step.mutable_req_resources() =
+  *step.mutable_req_resources_per_task() =
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
   step.set_type(job.type);
   step.set_uid(uid);
   step.set_name(name);
   step.set_node_num(node_num);
   step.set_ntasks_per_node(ntasks_per_node);
-  step.set_cpus_per_task(static_cast<double>(cpus_per_task));
 
   step.set_requeue_if_failed(requeue_if_failed);
   step.set_get_user_env(get_user_env);
@@ -608,7 +607,6 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   name = job.name;
 
   ntasks_per_node = job.ntasks_per_node;
-  cpus_per_task = job.cpus_per_task;
 
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
@@ -659,14 +657,13 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
       google::protobuf::util::TimeUtil::MillisecondsToDuration(
           ToInt64Milliseconds(time_limit)));
   step.set_job_id(job.TaskId());
-  *step.mutable_req_resources() =
+  *step.mutable_req_resources_per_task() =
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
   step.set_type(job.type);
   step.set_uid(uid);
   step.set_name(name);
   step.set_node_num(node_num);
   step.set_ntasks_per_node(ntasks_per_node);
-  step.set_cpus_per_task(static_cast<double>(cpus_per_task));
 
   step.set_requeue_if_failed(requeue_if_failed);
   step.set_get_user_env(get_user_env);
@@ -704,17 +701,26 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   gids = step_to_ctld.gid() | std::ranges::to<std::vector>();
   name = step_to_ctld.name();
 
-  ntasks_per_node = step_to_ctld.ntasks_per_node();
-  cpus_per_task = static_cast<cpu_t>(step_to_ctld.cpus_per_task());
-
   requeue_if_failed = step_to_ctld.requeue_if_failed();
   get_user_env = step_to_ctld.get_user_env();
   env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
   extra_attr = step_to_ctld.extra_attr();
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
-  requested_node_res_view = step_to_ctld.req_resources();
-  node_num = step_to_ctld.node_num();
+  // Following fields will zero value will inherit from job
+  if (step_to_ctld.has_req_resources_per_task()) {
+    requested_task_res_view = step_to_ctld.req_resources_per_task();
+  } else {
+    requested_task_res_view.SetToZero();
+  }
+  if (step_to_ctld.has_node_num())
+    node_num = step_to_ctld.node_num();
+  else
+    node_num = 0;
+  if (step_to_ctld.has_ntasks_per_node())
+    ntasks_per_node = step_to_ctld.ntasks_per_node();
+  else
+    ntasks_per_node = 0;
 
   {
     std::list<std::string> included_list{};
@@ -762,7 +768,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_node_num(this->node_num);
   step_to_d.set_ntasks_per_node(this->ntasks_per_node);
-  step_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());

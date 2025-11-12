@@ -1896,8 +1896,11 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
           absl::ToUnixSeconds(absl::Now()), false,
-          step_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-          static_cast<int64_t>(step_to_ctld.req_resources()
+          step_to_ctld.req_resources_per_task()
+                  .allocatable_res()
+                  .cpu_core_limit() *
+              step_to_ctld.ntasks_per_node(),
+          static_cast<int64_t>(step_to_ctld.req_resources_per_task()
                                    .allocatable_res()
                                    .memory_limit_bytes()),
           // 5-9

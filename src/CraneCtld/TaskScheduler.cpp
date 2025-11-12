@@ -4043,13 +4043,98 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
     for (auto&& node : nodes) step->excluded_nodes.emplace(std::move(node));
   }
 
+  // Fill unset task resource request from job's resource request per task.
+  {
+    auto step_to_ctld = step->MutableStepToCtld();
+    auto* res_step_to_ctld = step_to_ctld->mutable_req_resources_per_task();
+    auto& req_res_view = step->requested_task_res_view;
+    AllocatableResource& allocatable_resource =
+        req_res_view.GetAllocatableRes();
+    if (allocatable_resource.CpuCount() == 0.0f) {
+      allocatable_resource.cpu_count =
+          step->job->requested_node_res_view.GetAllocatableRes().cpu_count;
+      res_step_to_ctld->mutable_allocatable_res()->set_cpu_core_limit(
+          allocatable_resource.CpuCount());
+    }
+    if (allocatable_resource.memory_bytes == 0ull) {
+      allocatable_resource.memory_bytes =
+          step->job->requested_node_res_view.GetAllocatableRes().memory_bytes;
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
+          allocatable_resource.memory_bytes);
+    }
+    if (allocatable_resource.memory_sw_bytes == 0ull) {
+      allocatable_resource.memory_sw_bytes =
+          step->job->requested_node_res_view.GetAllocatableRes()
+              .memory_sw_bytes;
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
+          allocatable_resource.memory_sw_bytes);
+    }
+
+    auto& gres = req_res_view.GetDeviceMap();
+    if (gres.empty()) {
+      gres = step->job->requested_node_res_view.GetDeviceMap();
+      *res_step_to_ctld->mutable_device_map() = ToGrpcDeviceMap(gres);
+    }
+
+    if (step->node_num == 0) {
+      step->node_num = step->job->node_num;
+      step_to_ctld->set_node_num(step->node_num);
+    }
+    if (step->ntasks_per_node == 0) {
+      step->ntasks_per_node = step->job->ntasks_per_node;
+      step_to_ctld->set_ntasks_per_node(step->ntasks_per_node);
+    }
+  }
+
   return {};
 }
 
 CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
+  auto* job = step->job;
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  std::unordered_set<std::string> avail_nodes;
+  for (const auto& craned_id : job->CranedIds()) {
+    auto& job_res = job->AllocatedRes();
+    if (step->requested_task_res_view <= job_res.at(craned_id) &&
+        (step->included_nodes.empty() ||
+         step->included_nodes.contains(craned_id)) &&
+        (step->excluded_nodes.empty() ||
+         !step->excluded_nodes.contains(craned_id)))
+      avail_nodes.emplace(craned_id);
+
+    if (avail_nodes.size() >= step->node_num) break;
+  }
+  if (step->node_num > avail_nodes.size()) {
+    CRANE_TRACE(
+        "Resource not enough. Step #{}.{} needs {} nodes, while only {} "
+        "nodes in job satisfy its requirement.",
+        step->job_id, step->StepId(), step->node_num, avail_nodes.size());
+    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
+  }
+
+  // TODO: Check ntasks with job ntasks
+  // All step res request must be less than or equal to job res request
+
+  if (job->uid != step->uid) {
+    return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
+  }
+  // step->requested_task_res_view <= job->requested_task_res_view
+  // TODO: migrate job to req_task_res_view
+  auto node_res_view = step->requested_task_res_view;
+  node_res_view.GetAllocatableRes().cpu_count *= step->ntasks_per_node;
+  for (auto& type_count_map :
+       node_res_view.GetDeviceMap() | std::views::values) {
+    type_count_map.first *= step->ntasks_per_node;
+    for (auto& count : type_count_map.second | std::views::values) {
+      count *= step->ntasks_per_node;
+    }
+  }
+  step->requested_node_res_view = node_res_view;
+  if (!(step->requested_node_res_view * step->ntasks_per_node <=
+        job->requested_node_res_view))
+    return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
   return {};
 }
 
