@@ -732,6 +732,9 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
     container_meta =
         static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
 
+  cmd_line = step_to_ctld.cmd_line();
+  cwd = step_to_ctld.cwd();
+
   SetStepType(crane::grpc::StepType::COMMON);
 
   SetRequeueCount(0);
