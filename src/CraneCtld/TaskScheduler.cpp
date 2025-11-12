@@ -18,6 +18,8 @@
 
 #include "TaskScheduler.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedMetaContainer.h"
@@ -936,6 +938,7 @@ void TaskScheduler::ScheduleThread_() {
 
           job->SetEndTime(end_time);
           job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
+          job->SetStepResAvail(job_in_scheduler->allocated_res);
           job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
           job->allocated_res_view.SetToZero();
           job->allocated_res_view += job->AllocatedRes();
@@ -1273,8 +1276,90 @@ void TaskScheduler::StepScheduleThread_() {
     {
       absl::MutexLock running_lk(&m_running_task_map_mtx_);
       absl::MutexLock step_lk(&m_step_num_mutex_);
-      for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
-        // TODO: schedule here
+      if (!m_job_pending_step_num_map_.empty()) {
+        std::vector<StepInCtld*> scheduled_steps;
+        for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
+          // TODO: schedule here
+          auto rn_iter = m_running_task_map_.find(job_id);
+          if (rn_iter != m_running_task_map_.end()) {
+            auto& job = rn_iter->second;
+            job->SchedulePendingSteps(&scheduled_steps);
+          } else {
+            CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
+          }
+        }
+
+        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+
+        for (const auto& step : scheduled_steps) {
+          if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
+                  0, step->StepDbId(), step->RuntimeAttr())) {
+            StepStatusChangeAsync(step->job_id, step->StepId(), "",
+                                  crane::grpc::TaskStatus::Failed, 0,
+                                  "DbAppendError", now);
+          }
+          CRANE_ERROR("Failed to append steps to embedded database.");
+          continue;
+        }
+
+        absl::flat_hash_map<CranedId, std::vector<crane::grpc::StepToD>>
+            craned_alloc_steps;
+        for (auto* step : scheduled_steps) {
+          if (!--m_job_pending_step_num_map_[step->job_id]) {
+            m_job_pending_step_num_map_.erase(step->job_id);
+          }
+          for (const auto& craned_id : step->CranedIds()) {
+            craned_alloc_steps[craned_id].emplace_back(
+                step->GetStepToD(craned_id));
+          }
+        }
+
+        Mutex thread_pool_mtx;
+        std::latch alloc_step_latch(craned_alloc_steps.size());
+        for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
+          m_rpc_worker_pool_->detach_task([&, craned_id] {
+            auto stub = g_craned_keeper->GetCranedStub(craned_id);
+            auto& steps = craned_alloc_steps[craned_id];
+            CRANE_TRACE("Send AllocSteps for [{}] steps to {}",
+                        util::StepToDRangeIdString(steps), craned_id);
+
+            if (stub == nullptr || stub->Invalid()) {
+              thread_pool_mtx.Lock();
+              for (const auto& step : steps)
+                StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
+                                      crane::grpc::TaskStatus::Failed, 0,
+                                      "CranedDown", now);
+
+              thread_pool_mtx.Unlock();
+
+              CRANE_DEBUG(
+                  "AllocSteps for steps [{}] to {} failed: Craned down.",
+                  util::StepToDRangeIdString(steps), craned_id);
+              alloc_step_latch.count_down();
+              return;
+            }
+
+            auto err = stub->AllocSteps(steps);
+            if (err == CraneErrCode::SUCCESS) {
+              alloc_step_latch.count_down();
+              return;
+            }
+            CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: {}.",
+                        util::StepToDRangeIdString(steps), craned_id,
+                        CraneErrStr(err));
+
+            thread_pool_mtx.Lock();
+            for (const auto& step : steps)
+              StepStatusChangeAsync(step.job_id(), step.step_id(), craned_id,
+                                    crane::grpc::TaskStatus::Failed, 0,
+                                    "AllocRpcError", now);
+            thread_pool_mtx.Unlock();
+            CRANE_ERROR("Craned #{} failed when AllocSteps.", craned_id);
+
+            alloc_step_latch.count_down();
+          });
+        }
+        alloc_step_latch.wait();
       }
     }
     std::this_thread::sleep_for(100ms);
