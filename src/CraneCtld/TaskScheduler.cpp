@@ -2673,13 +2673,13 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
     if (it != m_running_task_map_.end()) {
       step->job = it->second.get();
       auto err = AcquireStepAttributes(step.get());
-      if (err.error()) {
+      if (!err.has_value()) {
         elems[pos].second.set_value(std::unexpected{err.error()});
         step.reset();
         continue;
       }
       err = CheckStepValidity(step.get());
-      if (err.error()) {
+      if (!err.has_value()) {
         elems[pos].second.set_value(std::unexpected{err.error()});
         step.reset();
         continue;
