@@ -182,6 +182,21 @@ bool StepInstance::EvaluateOomOnExit() {
   return oom_kill > baseline_oom_kill_count;
 }
 
+CraneErrCode ITaskInstance::Prepare() {
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+                                       task_id),
+      m_parent_step_inst_->GetStep().res());
+  if (!cg_expt.has_value()) {
+    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+               g_config.JobId, g_config.StepId, task_id,
+               static_cast<int>(cg_expt.error()));
+    return cg_expt.error();
+  }
+  m_task_cg = std::move(cg_expt.value());
+  return CraneErrCode::SUCCESS;
+}
+
 void ITaskInstance::InitEnvMap() {
   // Job env from CraneD
   for (const auto& [name, value] : g_config.JobEnv) {
@@ -596,6 +611,8 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
 
   // For container, there is only one task in a step. So we use step_id and
@@ -1106,6 +1123,8 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   // Write script content into file
   auto sh_path =
       g_config.CraneScriptDir / fmt::format("Crane-{}.sh", g_config.JobId);

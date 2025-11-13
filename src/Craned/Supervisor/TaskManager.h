@@ -233,6 +233,7 @@ class ITaskInstance {
   StepInstance* m_parent_step_inst_;
   TaskExitInfo m_exit_info_{};
   EnvMap m_env_;
+  std::unique_ptr<Common::CgroupInterface> m_task_cg;
 };
 
 class ContainerInstance : public ITaskInstance {

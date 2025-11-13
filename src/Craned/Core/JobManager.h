@@ -24,9 +24,9 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
-#include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
 
@@ -41,11 +41,17 @@ struct StepInstance {
   pid_t supv_pid;
 
   crane::grpc::StepToD step_to_d;
+
   StepStatus status{StepStatus::Invalid};
-  // TODO: Move supervisor stub to here.
+  std::shared_ptr<SupervisorStub> supervisor_stub{nullptr};
+  std::unique_ptr<CgroupInterface> crane_cgroup{nullptr};
+  std::unique_ptr<CgroupInterface> user_cgroup{nullptr};
+
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
+  // For step recovery
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
-                        StepStatus status);  // Step recovery
+                        StepStatus status,
+                        std::shared_ptr<SupervisorStub> supervisor_stub);
 
   [[nodiscard]] bool IsDaemonStep() const noexcept {
     return step_to_d.step_type() == crane::grpc::StepType::DAEMON;
@@ -82,8 +88,7 @@ struct JobInD {
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
 
-  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
-  CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
@@ -125,9 +130,14 @@ class JobManager {
   CraneErrCode ExecuteStepAsync(
       std::unordered_map<job_id_t, std::unordered_set<step_id_t>>&& steps);
 
+  CraneExpected<void> ChangeStepTimelimit(job_id_t job_id, step_id_t step_id,
+                                          int64_t new_timelimit_sec);
   std::optional<TaskInfoOfUid> QueryTaskInfoOfUid(uid_t uid);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
+
+  CraneExpected<EnvMap> QuerySshStepEnvVariables(job_id_t job_id,
+                                                 step_id_t step_id);
 
   auto QueryJob(job_id_t job_id) {
     return m_job_map_.GetValueExclusivePtr(job_id);
