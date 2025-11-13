@@ -847,8 +847,10 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
 void CranedKeeper::CranedChannelConnFailNoLock_(CranedStub *stub) {
   CranedKeeper *craned_keeper = stub->m_craned_keeper_;
   craned_keeper->m_connect_craned_mtx_.AssertHeld();
+  util::lock_guard guard(craned_keeper->m_unavail_craned_set_mtx_);
   craned_keeper->m_channel_count_.fetch_sub(1);
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
+  craned_keeper->m_unavail_craned_set_.erase(stub->m_craned_id_);
   CRANE_TRACE("Craned {} connection failed.", stub->m_craned_id_);
 }
 

@@ -193,6 +193,8 @@ class CranedKeeper {
     CranedStub *craned;
   };
 
+  // Remove stub from unavail/connecting set. Must be called with
+  // `m_connect_craned_mtx_` held.
   static void CranedChannelConnFailNoLock_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
