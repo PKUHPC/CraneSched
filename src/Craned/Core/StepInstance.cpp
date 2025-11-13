@@ -50,10 +50,8 @@ void StepInstance::CleanUp() {
         "current status: {}.",
         job_id, step_id, static_cast<int>(this->status));
   }
-  constexpr auto destroy_cgroup = [](CgroupInterface* cgroup) {
-    if (cgroup == nullptr) return;
-
-    g_thread_pool->detach_task([cgroup]() {
+  if (this->crane_cgroup != nullptr) {
+    g_thread_pool->detach_task([cgroup = crane_cgroup.release()] {
       int cnt = 0;
 
       while (true) {
@@ -76,14 +74,6 @@ void StepInstance::CleanUp() {
 
       delete cgroup;
     });
-  };
-  if (this->crane_cgroup != nullptr) {
-    destroy_cgroup(this->crane_cgroup.release());
-    this->crane_cgroup = nullptr;
-  }
-  if (this->user_cgroup != nullptr) {
-    destroy_cgroup(this->user_cgroup.release());
-    this->user_cgroup = nullptr;
   }
 }
 

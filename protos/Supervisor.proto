@@ -119,6 +119,14 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message MigrateSshProcToCgroupRequest{
+  int32 pid = 1;
+}
+
+message MigrateSshProcToCgroupReply {
+  ErrCode err_code = 1;
+}
+
 message ShutdownSupervisorRequest {}
 
 message ShutdownSupervisorReply {}
@@ -129,5 +137,6 @@ service Supervisor {
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }

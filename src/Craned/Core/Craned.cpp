@@ -135,10 +135,6 @@ CraneErrCode RecoverCgForJobSteps(
         if (cg_expt.has_value()) {
           if (system_flag)
             step_instance->crane_cgroup = std::move(cg_expt.value());
-          else {
-            CRANE_ASSERT(step_instance->IsDaemonStep());
-            step_instance->user_cgroup = std::move(cg_expt.value());
-          }
           continue;
         }
         // If the cgroup is found but is unrecoverable, just logging out.

@@ -264,7 +264,8 @@ CraneErrCode ITaskInstance::Prepare() {
   auto cg_expt = CgroupManager::AllocateAndGetCgroup(
       CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
                                        task_id),
-      m_parent_step_inst_->GetStep().res(), false);
+      m_parent_step_inst_->GetStep().res(), false,
+      Common::CgConstant::kCgMinMem);
   if (!cg_expt.has_value()) {
     CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
                g_config.JobId, g_config.StepId, task_id,
@@ -1652,6 +1653,13 @@ TaskManager::TaskManager()
         EvGrpcCheckStatusCb_();
       });
 
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcMigrateSshProcToCgroupCb_();
+      });
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -1828,6 +1836,18 @@ void TaskManager::CheckStatusAsync(
   response->set_ok(true);
 }
 
+std::future<CraneErrCode> TaskManager::MigrateSshProcToCgroupAsync(pid_t pid) {
+  CRANE_INFO("Migrating ssh process pid {} to cgroup.", pid);
+  std::promise<CraneErrCode> ok_promise;
+  auto ok_future = ok_promise.get_future();
+
+  std::pair elem{pid, std::move(ok_promise)};
+
+  m_grpc_migrate_ssh_proc_to_cgroup_queue_.enqueue(std::move(elem));
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->send();
+  return ok_future;
+}
+
 void TaskManager::EvSupervisorFinishInitCb_() {
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
     m_step_.GotNewStatus(StepStatus::Running);
@@ -1852,6 +1872,29 @@ void TaskManager::EvShutdownSupervisorCb_() {
         g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
     }
 
+    if (m_step_.step_user_cg) {
+      std::unique_ptr cg = std::move(m_step_.step_user_cg);
+      int cnt = 0;
+
+      while (true) {
+        if (cg->Empty()) break;
+
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cg->CgroupName(), cnt);
+          break;
+        }
+
+        cg->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
+      }
+      cg->Destroy();
+
+      cg.reset();
+    }
     // Explicitly release CriClient
     m_step_.StopCriClient();
 
@@ -2177,7 +2220,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
-      return;
+      continue;
     }
 
     // Calloc tasks have no scripts to run. Just return.
@@ -2186,8 +2229,22 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       m_exec_id_task_id_map_[0] = task_id;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-      return;
+      continue;
     }
+    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+        CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                         false),
+        m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+    if (!cg_expt.has_value()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                  m_step_.step_id);
+      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+      g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::EC_CGROUP_ERR,
+                              "Failed to allocate cgroup");
+      continue;
+    }
+    m_step_.step_user_cg = std::move(cg_expt.value());
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
@@ -2218,6 +2275,36 @@ void TaskManager::EvGrpcCheckStatusCb_() {
   std::promise<StepStatus> elem;
   while (m_grpc_check_status_queue_.try_dequeue(elem)) {
     elem.set_value(m_step_.GetStatus());
+  }
+}
+
+void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
+  std::pair<pid_t, std::promise<CraneErrCode>> elem;
+  while (m_grpc_migrate_ssh_proc_to_cgroup_queue_.try_dequeue(elem)) {
+    auto& pid = elem.first;
+    auto& prom = elem.second;
+    if (!m_step_.IsDaemonStep()) {
+      CRANE_ERROR("Trying to move pid {} to no daemon step", pid);
+      prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+    }
+    if (!m_step_.step_user_cg) {
+      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+          CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                           false),
+          m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+      if (!cg_expt.has_value()) {
+        CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                    m_step_.step_id);
+        prom.set_value(CraneErrCode::ERR_CGROUP);
+        continue;
+      }
+      m_step_.step_user_cg = std::move(cg_expt.value());
+    }
+    if (m_step_.step_user_cg->MigrateProcIn(pid)) {
+      prom.set_value(CraneErrCode::SUCCESS);
+    } else {
+      prom.set_value(CraneErrCode::ERR_CGROUP);
+    }
   }
 }
 

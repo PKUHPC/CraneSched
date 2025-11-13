@@ -769,20 +769,20 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
         job_id, kDaemonStepId, pid, job_id);
   }
   auto& daemon_step = daemon_step_it->second;
-  if (daemon_step->user_cgroup) {
-    return daemon_step->user_cgroup->MigrateProcIn(pid);
+  auto stub = daemon_step->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR(
+        "[Job #{}] Daemon step sSupervisor stub is null when migrating pid {} "
+        "to "
+        "cgroup of job#{}.",
+        job_id, kDaemonStepId, pid, job_id);
   }
-
-  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByStepId(daemon_step->job_id,
-                                       daemon_step->step_id, false),
-      job->job_to_d.res(), false);
-  if (cg_expt.has_value()) {
-    daemon_step->user_cgroup = std::move(cg_expt.value());
-    return daemon_step->user_cgroup->MigrateProcIn(pid);
+  auto err = stub->MigrateSshProcToCg(pid);
+  if (err == CraneErrCode::SUCCESS) {
+    return true;
   }
-
-  CRANE_ERROR("Failed to get cgroup for job#{} daemon step", job_id);
+  CRANE_ERROR("[Job #{}] Failed to migrate pid {} to cgroup of job.", job_id,
+              pid);
   return false;
 }
 

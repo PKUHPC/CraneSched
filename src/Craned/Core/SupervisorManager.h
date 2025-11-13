@@ -36,6 +36,7 @@ class SupervisorStub {
 
   CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
+  CraneErrCode MigrateSshProcToCg(pid_t pid);
   CraneErrCode ShutdownSupervisor();
 
  private:

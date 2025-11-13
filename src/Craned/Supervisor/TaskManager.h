@@ -64,6 +64,9 @@ class StepInstance {
 
   std::string cgroup_path;  // resolved cgroup path
 
+  // For daemon step only
+  std::unique_ptr<Common::CgroupInterface> step_user_cg;
+
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
@@ -162,7 +165,7 @@ class StepInstance {
   bool EvaluateOomOnExit();
 
  private:
-  StepStatus m_status_{StepStatus::Invalid};
+  StepStatus m_status_{StepStatus::Configuring};
   crane::grpc::StepToD m_step_to_supv_;
   std::unique_ptr<cri::CriClient> m_cri_client_;
   std::unique_ptr<CforedClient> m_cfored_client_;
@@ -464,6 +467,8 @@ class TaskManager {
 
   void CheckStatusAsync(crane::grpc::supervisor::CheckStatusReply* response);
 
+  std::future<CraneErrCode> MigrateSshProcToCgroupAsync(pid_t pid);
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -507,6 +512,7 @@ class TaskManager {
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
   void EvGrpcCheckStatusCb_();
+  void EvGrpcMigrateSshProcToCgroupCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -547,6 +553,11 @@ class TaskManager {
 
   std::shared_ptr<uvw::async_handle> m_grpc_check_status_async_handle_;
   ConcurrentQueue<std::promise<StepStatus>> m_grpc_check_status_queue_;
+
+  std::shared_ptr<uvw::async_handle>
+      m_grpc_migrate_ssh_proc_to_cgroup_async_handle_;
+  ConcurrentQueue<std::pair<pid_t, std::promise<CraneErrCode>>>
+      m_grpc_migrate_ssh_proc_to_cgroup_queue_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;

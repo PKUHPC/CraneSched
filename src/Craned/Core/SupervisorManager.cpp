@@ -112,6 +112,20 @@ CraneErrCode SupervisorStub::ChangeTaskTimeLimit(absl::Duration time_limit) {
   return CraneErrCode::ERR_RPC_FAILURE;
 }
 
+CraneErrCode SupervisorStub::MigrateSshProcToCg(pid_t pid) {
+  ClientContext context;
+  crane::grpc::supervisor::MigrateSshProcToCgroupRequest request;
+  crane::grpc::supervisor::MigrateSshProcToCgroupReply reply;
+  request.set_pid(pid);
+  auto ok = m_stub_->MigrateSshProcToCgroup(&context, request, &reply);
+  if (ok.ok())
+    return reply.err_code();
+  else {
+    CRANE_ERROR("MigrateSshProcToCg failed: {}", ok.error_message());
+    return CraneErrCode::ERR_RPC_FAILURE;
+  }
+}
+
 CraneErrCode SupervisorStub::ShutdownSupervisor() {
   ClientContext context;
   crane::grpc::supervisor::ShutdownSupervisorRequest request;

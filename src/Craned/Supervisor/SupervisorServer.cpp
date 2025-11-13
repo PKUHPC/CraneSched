@@ -87,6 +87,16 @@ grpc::Status SupervisorServiceImpl::TerminateTask(
   return Status::OK;
 }
 
+grpc::Status SupervisorServiceImpl::MigrateSshProcToCgroup(
+    grpc::ServerContext* context,
+    const crane::grpc::supervisor::MigrateSshProcToCgroupRequest* request,
+    crane::grpc::supervisor::MigrateSshProcToCgroupReply* response) {
+  auto code_fut = g_task_mgr->MigrateSshProcToCgroupAsync(request->pid());
+  auto code = code_fut.get();
+  response->set_err_code(code);
+  return Status::OK;
+}
+
 grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
