@@ -128,6 +128,7 @@ ccontrol update nodeName=<nodename> state=<state> [reason=<reason>]
 ```
 
 **Parameters:**
+
 - **nodeName** (required): Name of the node to update
 - **state** (required): New state for the node
   - `drain` - Prevent new jobs from being scheduled on the node
@@ -154,6 +155,7 @@ ccontrol update jobid=<job_id> [priority=<priority>] [timelimit=<timelimit>] [co
 ```
 
 **Parameters:**
+
 - **jobid** (required): ID of the job to update
 - **priority** (optional): New priority value (floating-point number)
 - **timelimit** (optional): New time limit (format: HH:MM:SS or D-HH:MM:SS)
@@ -187,6 +189,7 @@ ccontrol update partitionName=<partition> [accounts=<accounts>] [deniedaccounts=
 ```
 
 **Parameters:**
+
 - **partitionName** (required): Name of the partition to update
 - **accounts** (optional): Comma-separated list of accounts allowed to use the partition
 - **deniedaccounts** (optional): Comma-separated list of accounts denied from using the partition
@@ -215,6 +218,7 @@ ccontrol hold <job_id> [timelimit=<duration>]
 ```
 
 **Parameters:**
+
 - **job_id** (required): ID of the job to hold
 - **timelimit** (optional): Duration to hold the job (format: HH:MM:SS)
 
@@ -255,6 +259,7 @@ ccontrol create reservation <name> startTime=<time> duration=<duration> account=
 ```
 
 **Parameters:**
+
 - **name** (required): Name of the reservation
 - **startTime** (required): When the reservation starts (format: YYYY-MM-DDTHH:MM:SS)
 - **duration** (required): Length of reservation (format: HH:MM:SS or D-HH:MM:SS)

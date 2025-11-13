@@ -128,6 +128,7 @@ ccontrol update nodeName=<节点名> state=<状态> [reason=<原因>]
 ```
 
 **参数：**
+
 - **nodeName**（必需）：要更新的节点名称
 - **state**（必需）：节点的新状态
   - `drain` - 阻止在该节点上调度新作业
@@ -154,6 +155,7 @@ ccontrol update jobid=<作业ID> [priority=<优先级>] [timelimit=<时间限制
 ```
 
 **参数：**
+
 - **jobid**（必需）：要更新的作业ID
 - **priority**（可选）：新的优先级值（浮点数）
 - **timelimit**（可选）：新的时间限制（格式：HH:MM:SS 或 D-HH:MM:SS）
@@ -187,6 +189,7 @@ ccontrol update partitionName=<分区> [accounts=<账户列表>] [deniedaccounts
 ```
 
 **参数：**
+
 - **partitionName**（必需）：要更新的分区名称
 - **accounts**（可选）：允许使用分区的账户列表（逗号分隔）
 - **deniedaccounts**（可选）：禁止使用分区的账户列表（逗号分隔）
@@ -215,6 +218,7 @@ ccontrol hold <作业ID> [timelimit=<时长>]
 ```
 
 **参数：**
+
 - **作业ID**（必需）：要暂挂的作业ID
 - **timelimit**（可选）：暂挂作业的时长（格式：HH:MM:SS）
 
@@ -255,6 +259,7 @@ ccontrol create reservation <名称> startTime=<时间> duration=<时长> accoun
 ```
 
 **参数：**
+
 - **名称**（必需）：预留的名称
 - **startTime**（必需）：预留开始时间（格式：YYYY-MM-DDTHH:MM:SS）
 - **duration**（必需）：预留时长（格式：HH:MM:SS 或 D-HH:MM:SS）

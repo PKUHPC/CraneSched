@@ -57,6 +57,7 @@ cacctmgr add account <name> [OPTIONS]
 ```
 
 **Options:**
+
 - **Description=<desc>**: Account description
 - **Parent=<parent>**: Parent account name
 - **DefaultQos=<qos>**: Default QoS for the account
@@ -103,6 +104,7 @@ cacctmgr modify account where Name=<account> set <ATTRIBUTE>=<value>
 ```
 
 **Attributes:**
+
 - **Description=<desc>**: Set description
 - **DefaultQos=<qos>**: Set default QoS
 - **AllowedPartition=<partitions>**: Set allowed partitions (overwrites)
@@ -142,6 +144,7 @@ cacctmgr show account [name] [OPTIONS]
 ```
 
 **Options:**
+
 - **Name=<name1,name2,...>**: Show specific accounts only
 
 **Examples:**
@@ -193,9 +196,11 @@ cacctmgr add user <name> Account=<account> [OPTIONS]
 ```
 
 **Required:**
+
 - **Account=<account>**: Account the user belongs to (required)
 
 **Options:**
+
 - **Coordinator=true|false**: Set user as account coordinator
 - **Level=<level>**: User admin level (none/operator/admin, default: none)
 - **Partition=<part1,part2,...>**: Allowed partitions (comma-separated)
@@ -237,6 +242,7 @@ cacctmgr delete user <name> [Account=<account>]
 ```
 
 **Options:**
+
 - **Account=<account>**: Specify account context (optional)
 - **Name=<name1,name2,...>**: Delete multiple users (comma-separated)
 
@@ -268,11 +274,13 @@ cacctmgr modify user where Name=<user> [Account=<account>] [Partition=<partition
 ```
 
 **Where Clause:**
+
 - **Name=<user>**: User to modify (required)
 - **Account=<account>**: Account context (optional)
 - **Partition=<partitions>**: Partition context (optional)
 
 **Attributes:**
+
 - **AdminLevel=<level>**: Set admin level (none/operator/admin)
 - **DefaultAccount=<account>**: Set default account
 - **DefaultQos=<qos>**: Set default QoS
@@ -308,6 +316,7 @@ cacctmgr show user [name] [OPTIONS]
 ```
 
 **Options:**
+
 - **Accounts=<account>**: Show users of specific account only
 - **Name=<name1,name2,...>**: Show specific users only
 
@@ -337,6 +346,7 @@ cacctmgr unblock user <name> Account=<account>
 ```
 
 **Required:**
+
 - **Account=<account>**: Account context is required for user block/unblock
 
 **Examples:**
@@ -385,6 +395,7 @@ cacctmgr add qos <name> [OPTIONS]
 ```
 
 **Options:**
+
 - **Description=<desc>**: QoS description
 - **Priority=<priority>**: Priority value (higher = higher priority)
 - **MaxJobsPerUser=<num>**: Maximum concurrent jobs per user
@@ -417,6 +428,7 @@ cacctmgr delete qos <name>
 ```
 
 **Options:**
+
 - **Name=<name1,name2,...>**: Delete multiple QoS (comma-separated)
 
 **Example:**
@@ -432,6 +444,7 @@ cacctmgr modify qos where Name=<qos> set <ATTRIBUTE>=<value>
 ```
 
 **Attributes:**
+
 - **Description=<desc>**: Set description
 - **MaxCpusPerUser=<num>**: Set max CPUs per user
 - **MaxJobsPerUser=<num>**: Set max jobs per user
@@ -458,6 +471,7 @@ cacctmgr show qos [name] [OPTIONS]
 ```
 
 **Options:**
+
 - **Name=<name1,name2,...>**: Show specific QoS only
 
 **Examples:**
@@ -484,6 +498,7 @@ cacctmgr show transaction where [OPTIONS]
 ```
 
 **Where Options:**
+
 - **Actor=<username>**: Filter by user who performed the action
 - **Target=<target>**: Filter by target entity
 - **Action=<action>**: Filter by action type
