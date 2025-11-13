@@ -3021,7 +3021,7 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
           "[Job #{}] Task exceeded time limit during craned {} offline. "
           "StartTime: {}, TimeLimit: {}s, Current: {}. "
           "Notifying craned to set status to Completing.",
-          job_id, absl::FormatTime(job->StartTime()),
+          job_id, craned_id, absl::FormatTime(job->StartTime()),
           absl::ToInt64Seconds(job->time_limit), absl::FormatTime(now));
     }
 
