@@ -508,9 +508,14 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetExitCode(this->PrevErrorExitCode());
       } else {
         this->SetStatus(crane::grpc::TaskStatus::Completed);
+        this->SetExitCode(0U);
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
                  this->StepId(), this->Status());
+      // Daemon step terminated by user before primary step created
+      if (job->PrimaryStepStatus() == crane::grpc::TaskStatus::Invalid) {
+        return std::pair{this->Status(), this->ExitCode()};
+      }
       return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
     }
   }
@@ -699,9 +704,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
-    // Configuring -> Configured / Failed / Cancelled,
+    // Configuring -> Starting / Failed / Cancelled,
     this->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configured) {
+    if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }

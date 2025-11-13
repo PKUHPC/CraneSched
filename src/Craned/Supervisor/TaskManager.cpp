@@ -36,7 +36,7 @@
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
-
+using namespace std::chrono_literals;
 using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
@@ -111,6 +111,83 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   return env_map;
 }
 
+void StepInstance::GotNewStatus(StepStatus new_status) {
+  switch (new_status) {
+  case StepStatus::Configuring:
+  case StepStatus::Pending:
+  case StepStatus::Invalid: {
+    CRANE_ERROR("[Step #{}.{}] Invalid new status received: {}, ignored.",
+                job_id, step_id, new_status);
+    return;
+  }
+
+  case StepStatus::Running: {
+    if (this->IsDaemonStep()) {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Daemon step status is not 'Configuring' when "
+            "receiving new status 'Running', current status: {}.",
+            job_id, step_id, m_status_);
+    } else {
+      if (m_status_ != StepStatus::Starting)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Starting' when receiving new "
+            "status 'Running', current status: {}.",
+            job_id, step_id, m_status_);
+    }
+    break;
+  }
+  case StepStatus::Starting: {
+    if (this->IsDaemonStep()) {
+      CRANE_WARN(
+          "[Step {}.{}] Daemon step got invalid status 'Starting' current "
+          "status: {}.",
+          job_id, step_id, m_status_);
+      return;
+    } else {
+      if (m_status_ != StepStatus::Configuring)
+        CRANE_WARN(
+            "[Step {}.{}] Step status is not 'Configuring' when "
+            "receiving new status 'Starting', current status: {}.",
+            job_id, step_id, m_status_);
+    }
+    break;
+  }
+
+  case StepStatus::Completing: {
+    if (m_status_ != StepStatus::Running)
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not 'Running' when receiving new "
+          "status 'Completing', current status: {}.",
+          job_id, step_id, m_status_);
+    break;
+  }
+  // Finished status
+  case StepStatus::ExceedTimeLimit:
+  case StepStatus::OutOfMemory:
+  case StepStatus::Cancelled:
+  case StepStatus::Failed:
+  case StepStatus::Completed: {
+    if (m_status_ != StepStatus::Running &&
+        m_status_ != StepStatus::Completing &&
+        m_status_ != StepStatus::Starting &&
+        m_status_ != StepStatus::Configuring) {
+      CRANE_WARN(
+          "[Step {}.{}] Step status is not "
+          "Running/Completing/Starting/Configuring when receiving new finished "
+          "status {}, current status: {}.",
+          job_id, step_id, new_status, m_status_);
+    }
+    break;
+  }
+  default: {
+    std::unreachable();
+  }
+  }
+
+  m_status_ = new_status;
+}
+
 void StepInstance::AddTaskInstance(task_id_t task_id,
                                    std::unique_ptr<ITaskInstance>&& task) {
   m_task_map_.emplace(task_id, std::move(task));
@@ -180,6 +257,50 @@ bool StepInstance::EvaluateOomOnExit() {
       "[OOM] Evaluate v1 path={} baseline(oom_kill={}) current(oom_kill={})",
       cgroup_path, baseline_oom_kill_count, oom_kill);
   return oom_kill > baseline_oom_kill_count;
+}
+
+CraneErrCode ITaskInstance::Prepare() {
+  // TODO: Use task res.
+  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+      CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
+                                       task_id),
+      m_parent_step_inst_->GetStep().res(), false,
+      Common::CgConstant::kCgMinMem);
+  if (!cg_expt.has_value()) {
+    CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
+               g_config.JobId, g_config.StepId, task_id,
+               static_cast<int>(cg_expt.error()));
+    return cg_expt.error();
+  }
+  m_task_cg = std::move(cg_expt.value());
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ITaskInstance::Cleanup() {
+  if (m_task_cg) {
+    int cnt = 0;
+
+    while (true) {
+      if (m_task_cg->Empty()) break;
+
+      if (cnt >= 5) {
+        CRANE_ERROR(
+            "Couldn't kill the processes in cgroup {} after {} times. "
+            "Skipping it.",
+            m_task_cg->CgroupName(), cnt);
+        break;
+      }
+
+      m_task_cg->KillAllProcesses();
+      ++cnt;
+      std::this_thread::sleep_for(100ms);
+    }
+    // TODO: Plugin support step cgroup destroy hooks.
+    m_task_cg->Destroy();
+
+    m_task_cg.reset();
+  }
+  return CraneErrCode::SUCCESS;
 }
 
 void ITaskInstance::InitEnvMap() {
@@ -596,6 +717,8 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
 
   // For container, there is only one task in a step. So we use step_id and
@@ -784,9 +907,11 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 }
 
 CraneErrCode ContainerInstance::Cleanup() {
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
   // For container tasks, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove pod and container.
-  CraneErrCode err = Kill(0);
+  err = Kill(0);
   return err;
 }
 
@@ -1106,6 +1231,8 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
+  auto err = ITaskInstance::Prepare();
+  if (err != CraneErrCode::SUCCESS) return err;
   // Write script content into file
   auto sh_path =
       g_config.CraneScriptDir / fmt::format("Crane-{}.sh", g_config.JobId);
@@ -1391,6 +1518,8 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
+  auto err = ITaskInstance::Cleanup();
+  if (err != CraneErrCode::SUCCESS) return err;
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
     if (!path.empty())
@@ -1425,6 +1554,18 @@ std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
 TaskManager::TaskManager()
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec) {
   m_uvw_loop_ = uvw::loop::create();
+
+  m_supervisor_finish_init_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_supervisor_finish_init_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvSupervisorFinishInitCb_();
+      });
+
+  m_shutdown_supervisor_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_shutdown_supervisor_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvShutdownSupervisorCb_();
+      });
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
@@ -1505,6 +1646,20 @@ TaskManager::TaskManager()
         EvGrpcQueryStepEnvCb_();
       });
 
+  m_grpc_check_status_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_check_status_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcCheckStatusCb_();
+      });
+
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcMigrateSshProcToCgroupCb_();
+      });
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -1528,26 +1683,21 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
+void TaskManager::SupervisorFinishInit() {
+  m_supervisor_finish_init_handle_->send();
+}
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::ShutdownSupervisor() {
+void TaskManager::ShutdownSupervisorAsync(crane::grpc::TaskStatus new_status,
+                                          uint32_t exit_code,
+                                          std::string reason) {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemonStep()) {
-    CRANE_DEBUG("Sending a completed status as daemon step.");
-    g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
-                                           0, "");
-    g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
-  }
-
-  // Explicitly release CriClient
-  m_step_.StopCriClient();
-
-  g_craned_client->Shutdown();
-  g_server->Shutdown();
-
-  this->Shutdown();
+  m_shutdown_status_queue_.enqueue(
+      std::make_tuple(new_status, exit_code, std::move(reason)));
+  m_shutdown_supervisor_handle_->send();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
@@ -1561,12 +1711,6 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                               std::optional<std::string> reason) {
   CRANE_TRACE("[Task #{}] Task status change to {} exit code: {}, reason: {}.",
               task_id, new_status, exit_code, reason.value_or(""));
-
-  if (g_runtime_status.Status.load() != StepStatus::Completing) {
-    CRANE_INFO("Step completing now, prev status: {}.",
-               g_runtime_status.Status.load());
-    g_runtime_status.Status = StepStatus::Completing;
-  }
 
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
@@ -1585,13 +1729,14 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
+    m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     m_step_.StopCforedClient();
     if (!orphaned) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     }
-    ShutdownSupervisor();
+    ShutdownSupervisorAsync();
   }
 }
 
@@ -1676,6 +1821,88 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+void TaskManager::CheckStatusAsync(
+    crane::grpc::supervisor::CheckStatusReply* response) {
+  std::promise<StepStatus> status_promise;
+  auto status_future = status_promise.get_future();
+  m_grpc_check_status_queue_.enqueue(std::move(status_promise));
+  m_grpc_check_status_async_handle_->send();
+  response->set_job_id(g_config.JobId);
+  response->set_step_id(g_config.StepId);
+  response->set_supervisor_pid(getpid());
+  response->set_status(status_future.get());
+  response->set_ok(true);
+}
+
+std::future<CraneErrCode> TaskManager::MigrateSshProcToCgroupAsync(pid_t pid) {
+  CRANE_INFO("Migrating ssh process pid {} to cgroup.", pid);
+  std::promise<CraneErrCode> ok_promise;
+  auto ok_future = ok_promise.get_future();
+
+  std::pair elem{pid, std::move(ok_promise)};
+
+  m_grpc_migrate_ssh_proc_to_cgroup_queue_.enqueue(std::move(elem));
+  m_grpc_migrate_ssh_proc_to_cgroup_async_handle_->send();
+  return ok_future;
+}
+
+void TaskManager::EvSupervisorFinishInitCb_() {
+  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
+    m_step_.GotNewStatus(StepStatus::Running);
+  } else {
+    m_step_.GotNewStatus(StepStatus::Starting);
+  }
+
+  g_craned_client->StepStatusChangeAsync(m_step_.GetStatus(), 0, std::nullopt);
+}
+
+void TaskManager::EvShutdownSupervisorCb_() {
+  std::tuple<crane::grpc::TaskStatus, uint32_t, std::string> final_status;
+  bool got_final_status = false;
+  do {
+    got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
+    if (!got_final_status) continue;
+    auto& [status, exit_code, reason] = final_status;
+    if (m_step_.IsDaemonStep()) {
+      CRANE_DEBUG("Sending a {} status as daemon step.", status);
+      m_step_.GotNewStatus(status);
+      if (!m_step_.orphaned)
+        g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
+    }
+
+    if (m_step_.step_user_cg) {
+      std::unique_ptr cg = std::move(m_step_.step_user_cg);
+      int cnt = 0;
+
+      while (true) {
+        if (cg->Empty()) break;
+
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cg->CgroupName(), cnt);
+          break;
+        }
+
+        cg->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
+      }
+      cg->Destroy();
+
+      cg.reset();
+    }
+    // Explicitly release CriClient
+    m_step_.StopCriClient();
+
+    g_craned_client->Shutdown();
+    g_server->Shutdown();
+
+    this->Shutdown();
+  } while (!got_final_status);
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1874,15 +2101,14 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     CRANE_TRACE("Receive TerminateRunningTask Request for {}.", g_config.JobId);
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
-    if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
+    if (!elem.mark_as_orphaned && !m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
-
-    if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Terminating a completing task #{}, ignored.",
-                  g_config.JobId);
+    if (m_step_.IsDaemonStep()) {
+      if (elem.mark_as_orphaned)
+        g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
@@ -1890,7 +2116,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
-      g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
+      g_task_mgr->ShutdownSupervisorAsync();
       continue;
     }
 
@@ -1932,7 +2158,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   ChangeTaskTimeLimitQueueElem elem;
   std::vector<ChangeTaskTimeLimitQueueElem> not_ready_elems;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    if (!g_runtime_status.CanStepOperate()) {
+    if (!m_step_.IsRunning()) {
       not_ready_elems.emplace_back(std::move(elem));
       CRANE_DEBUG(
           "Task is not ready to change time limit, will check next time.");
@@ -1975,8 +2201,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
-
-    g_runtime_status.Status = StepStatus::Running;
+    m_step_.GotNewStatus(StepStatus::Running);
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
     auto* task = m_step_.GetTaskInstance(task_id);
@@ -1995,7 +2220,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
-      return;
+      continue;
     }
 
     // Calloc tasks have no scripts to run. Just return.
@@ -2004,8 +2229,22 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       m_exec_id_task_id_map_[0] = task_id;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-      return;
+      continue;
     }
+    auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+        CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                         false),
+        m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+    if (!cg_expt.has_value()) {
+      CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                  m_step_.step_id);
+      elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
+      g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                              ExitCode::EC_CGROUP_ERR,
+                              "Failed to allocate cgroup");
+      continue;
+    }
+    m_step_.step_user_cg = std::move(cg_expt.value());
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
@@ -2031,4 +2270,42 @@ void TaskManager::EvGrpcQueryStepEnvCb_() {
     elem.set_value(m_step_.GetStepProcessEnv());
   }
 }
+
+void TaskManager::EvGrpcCheckStatusCb_() {
+  std::promise<StepStatus> elem;
+  while (m_grpc_check_status_queue_.try_dequeue(elem)) {
+    elem.set_value(m_step_.GetStatus());
+  }
+}
+
+void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
+  std::pair<pid_t, std::promise<CraneErrCode>> elem;
+  while (m_grpc_migrate_ssh_proc_to_cgroup_queue_.try_dequeue(elem)) {
+    auto& pid = elem.first;
+    auto& prom = elem.second;
+    if (!m_step_.IsDaemonStep()) {
+      CRANE_ERROR("Trying to move pid {} to no daemon step", pid);
+      prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+    }
+    if (!m_step_.step_user_cg) {
+      auto cg_expt = CgroupManager::AllocateAndGetCgroup(
+          CgroupManager::CgroupStrByStepId(m_step_.job_id, m_step_.step_id,
+                                           false),
+          m_step_.GetStep().res(), false, Common::CgConstant::kCgMinMem);
+      if (!cg_expt.has_value()) {
+        CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
+                    m_step_.step_id);
+        prom.set_value(CraneErrCode::ERR_CGROUP);
+        continue;
+      }
+      m_step_.step_user_cg = std::move(cg_expt.value());
+    }
+    if (m_step_.step_user_cg->MigrateProcIn(pid)) {
+      prom.set_value(CraneErrCode::SUCCESS);
+    } else {
+      prom.set_value(CraneErrCode::ERR_CGROUP);
+    }
+  }
+}
+
 }  // namespace Craned::Supervisor
