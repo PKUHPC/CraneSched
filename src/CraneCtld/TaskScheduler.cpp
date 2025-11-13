@@ -3011,31 +3011,18 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
     auto* daemon_step = job->DaemonStep();
 
     // Check if task has exceeded time limit during craned offline
+    // Note: We don't modify the task status in ctld here to avoid inconsistency
+    // Instead, we tell craned the expected status, and craned will report back
     bool task_exceeded_time_limit = false;
     if (job->Status() == crane::grpc::TaskStatus::Running &&
         job->StartTime() + job->time_limit < now) {
       task_exceeded_time_limit = true;
       CRANE_INFO(
-          "[Job #{}] Task exceeded time limit during craned {} offline, "
-          "updating status to Completing.",
-          job_id, craned_id);
-
-      // Update task status to Completing
-      job->SetStatus(crane::grpc::TaskStatus::Completing);
-
-      // Update runtime attribute in database
-      txn_id_t txn_id{0};
-      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-      if (ok) {
-        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
-                                                      job->RuntimeAttr());
-        g_embedded_db_client->CommitVariableDbTransaction(txn_id);
-      } else {
-        CRANE_ERROR(
-            "[Job #{}] Failed to update runtime attr when handling time "
-            "limit exceeded during craned offline.",
-            job_id);
-      }
+          "[Job #{}] Task exceeded time limit during craned {} offline. "
+          "StartTime: {}, TimeLimit: {}s, Current: {}. "
+          "Notifying craned to set status to Completing.",
+          job_id, absl::FormatTime(job->StartTime()),
+          absl::ToInt64Seconds(job->time_limit), absl::FormatTime(now));
     }
 
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
@@ -3044,6 +3031,8 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
     steps[daemon_step->StepId()] = daemon_step->GetStepToD(craned_id);
 
     // Set step status based on whether task exceeded time limit
+    // If exceeded, tell craned to set status to Completing
+    // Craned will then report the status change back to ctld
     step_status[daemon_step->StepId()] =
         task_exceeded_time_limit ? crane::grpc::TaskStatus::Completing
                                  : daemon_step->Status();
