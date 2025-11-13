@@ -61,12 +61,11 @@ std::string ReadableMemory(uint64_t memory_bytes) {
     return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
 }
 
-uint64_t ParseMemory(const std::string &mem) {
+CraneExpected<uint64_t> ParseMemory(const std::string &mem) {
   std::regex mem_regex(R"((\d+)([KMBG]))");
   std::smatch mem_group;
   if (!std::regex_search(mem, mem_group, mem_regex)) {
-    CRANE_ERROR("Illegal memory format.");
-    std::exit(1);
+    return std::unexpected{CraneErrCode::ERR_INVALID_MEM_FORMAT};
   }
   uint64_t memory_bytes = std::stoul(mem_group[1]);
   if (mem_group[2] == "K")

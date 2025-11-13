@@ -638,9 +638,9 @@ enum ErrCode {
   ERR_NO_RESOURCE = 41;
   ERR_NON_EXISTENT = 42;
   ERR_INVALID_NODE_NUM = 43;
-  ERR_INVAILD_NODE_LIST = 44;
+  ERR_INVALID_NODE_LIST = 44;
 
-  ERR_INVAILD_EX_NODE_LIST = 45;
+  ERR_INVALID_EX_NODE_LIST = 45;
   ERR_TIME_TIMIT_BEYOND = 46;
   ERR_CPUS_PER_TASK_BEYOND = 47;
   ERR_NO_ENOUGH_NODE = 48;
@@ -683,6 +683,7 @@ enum ErrCode {
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
+  ERR_INVALID_MEM_FORMAT = 84;        // Invalid mem format when parsing mem
 }
 
 enum EntityType {

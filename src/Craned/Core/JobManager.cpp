@@ -557,8 +557,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
     init_req.set_log_dir(g_config.Supervisor.LogDir);
-    init_req.set_log_max_size(g_config.Supervisor.LogMaxSize);
-    init_req.set_log_max_files(g_config.Supervisor.LogMaxFiles);
+    init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
+    init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
     auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
     cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
     cfored_listen_conf->set_domain_suffix(

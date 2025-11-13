@@ -72,8 +72,8 @@ message InitSupervisorRequest {
   }
 
   CforedListenConf cfored_listen_conf = 25;
-  uint64 log_max_size = 26;
-  uint64 log_max_files = 27;
+  uint64 max_log_file_size = 26;
+  uint64 max_log_file_num = 27;
 }
 
 message SupervisorReady {

@@ -77,6 +77,8 @@ constexpr bool kDefaultJobFileOpenModeAppend = false;
 struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
+    uint64_t CraneCtldMaxLogFileSize{kDefaultCraneCtldMaxLogFileSize};
+    uint64_t CraneCtldMaxLogFileNum;
   };
   CraneCtldConf CtldConf;
 
@@ -162,8 +164,6 @@ struct Config {
   uint32_t ConfigCrcVal;
   std::string CraneCtldDebugLevel;
   std::filesystem::path CraneCtldLogFile;
-  uint64_t CraneCtldLogMaxSize{kDefaultCraneCtldLogMaxSize};
-  uint64_t CraneCtldLogMaxFiles;
 
   std::string CraneEmbeddedDbBackend;
   std::filesystem::path CraneCtldDbPath;

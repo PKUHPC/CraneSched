@@ -70,14 +70,15 @@ inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 
-inline constexpr uint64_t kDefaultCraneCtldLogMaxSize =
+inline constexpr uint64_t kDefaultCraneCtldMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
-inline constexpr uint64_t kDefaultCraneCtldLogMaxFiles = 3;
-inline constexpr uint64_t kDefaultCranedLogMaxSize = 1024 * 1024 * 50;  // 50 MB
-inline constexpr uint64_t kDefaultCranedLogMaxFiles = 3;
-inline constexpr uint64_t kDefaultSupervisorLogMaxSize =
+inline constexpr uint64_t kDefaultCraneCtldMaxLogFileNum = 3;
+inline constexpr uint64_t kDefaultCranedMaxLogFileSize =
     1024 * 1024 * 50;  // 50 MB
-inline constexpr uint64_t kDefaultSupervisorLogMaxFiles = 3;
+inline constexpr uint64_t kDefaultCranedMaxLogFileNum = 3;
+inline constexpr uint64_t kDefaultSupervisorMaxLogFileSize =
+    1024 * 1024 * 50;  // 50 MB
+inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
 
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 

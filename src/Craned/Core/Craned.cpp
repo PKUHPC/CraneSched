@@ -155,6 +155,15 @@ void ParseCranedConfig(const YAML::Node& config) {
       conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
     if (craned_config["CraneCtldTimeout"])
       conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
+    if (craned_config["CranedMaxLogFileSize"]) {
+      auto file_size = util::ParseMemory(
+          craned_config["CranedMaxLogFileSize"].as<std::string>());
+      conf.CranedMaxLogFileSize = file_size.has_value()
+                                      ? file_size.value()
+                                      : kDefaultCranedMaxLogFileSize;
+    }
+    conf.CranedMaxLogFileNum = YamlValueOr<uint64_t>(
+        craned_config["CranedMaxLogFileNum"], kDefaultCranedMaxLogFileNum);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -181,13 +190,16 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
       g_config.CraneBaseDir /
       YamlValueOr(supervisor_config["LogDir"], "supervisor");
 
-  if (supervisor_config["LogMaxSize"]) {
-    g_config.Supervisor.LogMaxSize =
-        util::ParseMemory(supervisor_config["LogMaxSize"].as<std::string>());
+  if (supervisor_config["MaxLogFileSize"]) {
+    auto file_size = util::ParseMemory(
+        supervisor_config["MaxLogFileSize"].as<std::string>());
+    g_config.Supervisor.MaxLogFileSize = file_size.has_value()
+                                             ? file_size.value()
+                                             : kDefaultSupervisorMaxLogFileSize;
   }
 
-  g_config.Supervisor.LogMaxFiles = YamlValueOr<uint64_t>(
-      supervisor_config["LogMaxFiles"], kDefaultSupervisorLogMaxFiles);
+  g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
+      supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
 }
 
 void ParseConfig(int argc, char** argv) {
@@ -270,14 +282,6 @@ void ParseConfig(int argc, char** argv) {
             g_config.CraneBaseDir /
             YamlValueOr(config["CranedLogFile"], kDefaultCranedLogPath);
 
-      if (config["CranedLogMaxSize"]) {
-        g_config.CranedLogMaxSize =
-            util::ParseMemory(config["CranedLogMaxSize"].as<std::string>());
-      }
-
-      g_config.CranedLogMaxFiles = YamlValueOr<uint64_t>(
-          config["CranedLogMaxFiles"], kDefaultCranedLogMaxFiles);
-
       if (parsed_args.count("debug-level"))
         g_config.CranedDebugLevel =
             parsed_args["debug-level"].as<std::string>();
@@ -292,11 +296,14 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
+      ParseCranedConfig(config);
+
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true,
-                   g_config.CranedLogMaxSize, g_config.CranedLogMaxFiles);
+                   g_config.CranedConf.CranedMaxLogFileSize,
+                   g_config.CranedConf.CranedMaxLogFileNum);
         Craned::g_runtime_status.conn_logger =
             AddLogger("conn", log_level.value(), true);
       } else {
@@ -339,8 +346,6 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
-
-      ParseCranedConfig(config);
 
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
@@ -417,8 +422,13 @@ void ParseConfig(int argc, char** argv) {
           if (node["memory"]) {
             auto memory_bytes =
                 util::ParseMemory(node["memory"].as<std::string>());
-            node_res->allocatable_res.memory_bytes = memory_bytes;
-            node_res->allocatable_res.memory_sw_bytes = memory_bytes;
+            if (memory_bytes.has_value()) {
+              node_res->allocatable_res.memory_bytes = memory_bytes.value();
+              node_res->allocatable_res.memory_sw_bytes = memory_bytes.value();
+            } else {
+              CRANE_ERROR("Illegal memory format.");
+              std::exit(1);
+            }
           } else
             std::exit(1);
 

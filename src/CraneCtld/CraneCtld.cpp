@@ -47,7 +47,19 @@ void ParseCtldConfig(const YAML::Node& config) {
     auto ctld_cfg = config["CraneCtld"];
     if (ctld_cfg["CranedTimeout"])
       ctld_config.CranedTimeout = ctld_cfg["CranedTimeout"].as<uint32_t>();
+
+    if (ctld_cfg["CraneCtldMaxLogFileSize"]) {
+      auto file_size = util::ParseMemory(
+          ctld_cfg["CraneCtldMaxLogFileSize"].as<std::string>());
+      ctld_config.CraneCtldMaxLogFileSize =
+          file_size.has_value() ? file_size.value()
+                                : kDefaultCraneCtldMaxLogFileSize;
+    }
+
+    ctld_config.CraneCtldMaxLogFileNum = YamlValueOr<uint64_t>(
+        ctld_cfg["CraneCtldMaxLogFileNum"], kDefaultCraneCtldMaxLogFileNum);
   }
+
   g_config.CtldConf = std::move(ctld_config);
 }
 
@@ -113,19 +125,14 @@ void ParseConfig(int argc, char** argv) {
       g_config.CraneCtldDebugLevel =
           YamlValueOr(config["CraneCtldDebugLevel"], "info");
 
-      if (config["CraneCtldLogMaxSize"]) {
-        g_config.CraneCtldLogMaxSize =
-            util::ParseMemory(config["CraneCtldLogMaxSize"].as<std::string>());
-      }
-
-      g_config.CraneCtldLogMaxFiles = YamlValueOr<uint64_t>(
-          config["CraneCtldLogMaxFiles"], kDefaultCraneCtldLogMaxFiles);
+      ParseCtldConfig(config);
 
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CraneCtldLogFile, true,
-                   g_config.CraneCtldLogMaxSize, g_config.CraneCtldLogMaxFiles);
+                   g_config.CtldConf.CraneCtldMaxLogFileSize,
+                   g_config.CtldConf.CraneCtldMaxLogFileNum);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
@@ -149,8 +156,6 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
-
-      ParseCtldConfig(config);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -377,8 +382,13 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["memory"]) {
-            node_ptr->memory_bytes =
-                util::ParseMemory(node["memory"].as<std::string>());
+            auto mem = util::ParseMemory(node["memory"].as<std::string>());
+            if (mem.has_value()) {
+              node_ptr->memory_bytes = mem.value();
+            } else {
+              CRANE_ERROR("Illegal memory format.");
+              std::exit(1);
+            }
           } else
             std::exit(1);
 
