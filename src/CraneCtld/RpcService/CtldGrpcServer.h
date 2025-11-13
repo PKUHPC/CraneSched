@@ -376,6 +376,20 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ExecInContainerTaskRequest *request,
       crane::grpc::ExecInContainerTaskReply *response) override;
 
+  ::grpc::Status QueryJobSummary(
+      ::grpc::ServerContext *context,
+      const ::crane::grpc::QueryJobSummaryRequest *request,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply> *writer)
+      override;
+  grpc::Status QueryJobSizeSummary(
+      ::grpc::ServerContext *context,
+      const ::crane::grpc::QueryJobSizeSummaryRequest *request,
+      ::grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply> *writer)
+      override;
+  grpc::Status ActiveAggregationManually(
+      ::grpc::ServerContext *context, const ::google::protobuf::Empty *request,
+      ::google::protobuf::Empty *response) override;
+
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(
       const grpc::ServerContext *context, uint32_t uid);
