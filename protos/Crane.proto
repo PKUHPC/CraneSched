@@ -791,6 +791,7 @@ message StreamCrunReply {
   message TaskResAllocatedReply {
     bool ok = 1;
     string allocated_craned_regex = 2;
+    repeated string craned_ids = 3;
   }
 
   message TaskCancelRequest {}

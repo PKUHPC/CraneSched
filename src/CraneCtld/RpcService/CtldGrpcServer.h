@@ -86,10 +86,9 @@ class CforedStreamWriter {
       task_res_alloc_reply->set_ok(true);
       task_res_alloc_reply->set_allocated_craned_regex(
           allocated_craned_expt.value().first);
-      std::ranges::for_each(allocated_craned_expt.value().second,
-                            [&task_res_alloc_reply](const auto &craned_id) {
-                              task_res_alloc_reply->add_craned_ids(craned_id);
-                            });
+      auto &craned_list = allocated_craned_expt.value().second;
+      task_res_alloc_reply->mutable_craned_ids()->Assign(craned_list.begin(),
+                                                         craned_list.end());
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(
