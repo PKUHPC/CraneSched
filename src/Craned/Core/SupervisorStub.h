@@ -29,6 +29,20 @@ class SupervisorStub {
  public:
   SupervisorStub(job_id_t job_id, step_id_t step_id);
   SupervisorStub(const std::string& endpoint);
+  struct SupervisorRecoverInfo {
+    pid_t pid;
+    StepStatus status;
+    std::shared_ptr<SupervisorStub> supervisor_stub;
+  };
+  /**
+   * @brief Query all existing supervisor for task they hold.
+   * @return job_id and pid from supervisors. Error when socket file
+   * scanning fails, supervisors are unreachable, or task status queries fail
+   * with specific error codes.
+   */
+  [[nodiscard]] static CraneExpected<absl::flat_hash_map<
+      std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>>
+  InitAndGetRecoveredMap();
   CraneErrCode ExecuteStep();
   CraneExpected<EnvMap> QueryStepEnv();
   CraneExpected<std::tuple<job_id_t, step_id_t, pid_t, StepStatus>>
@@ -44,23 +58,5 @@ class SupervisorStub {
   std::shared_ptr<grpc::Channel> m_channel_;
 
   std::unique_ptr<crane::grpc::supervisor::Supervisor::Stub> m_stub_;
-};
-
-class SupervisorManager {
- public:
-  struct SupervisorRecoverInfo {
-    pid_t pid;
-    StepStatus status;
-    std::shared_ptr<SupervisorStub> supervisor_stub;
-  };
-  /**
-   * @brief Query all existing supervisor for task they hold.
-   * @return job_id and pid from supervisors. Error when socket file
-   * scanning fails, supervisors are unreachable, or task status queries fail
-   * with specific error codes.
-   */
-  [[nodiscard]] static CraneExpected<absl::flat_hash_map<
-      std::pair<job_id_t, step_id_t>, SupervisorRecoverInfo>>
-  InitAndGetRecoveredMap();
 };
 }  // namespace Craned

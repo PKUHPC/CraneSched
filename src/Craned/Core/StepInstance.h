@@ -21,7 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "SupervisorManager.h"
+#include "SupervisorStub.h"
 
 namespace Craned {
 

@@ -39,7 +39,7 @@
 #include "CtldClient.h"
 #include "DeviceManager.h"
 #include "JobManager.h"
-#include "SupervisorManager.h"
+#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -834,7 +834,7 @@ void CreateRequiredDirectories() {
 void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
-
+  using Craned::SupervisorStub;
   std::map<job_id_t, std::set<step_id_t>> ctld_step_ids;
 
   for (const auto& [job_id, job_steps] : config_from_ctld.job_steps()) {
@@ -845,14 +845,12 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   CRANE_DEBUG("CraneCtld claimed [{}] are running on this node.",
               util::JobStepsToString(ctld_step_ids));
 
-  CraneExpected<
-      absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                          Craned::SupervisorManager::SupervisorRecoverInfo>>
-      steps = Craned::SupervisorManager::InitAndGetRecoveredMap();
+  CraneExpected<absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
+                                    SupervisorStub::SupervisorRecoverInfo>>
+      steps = SupervisorStub::InitAndGetRecoveredMap();
 
-  // JobId,supervisor pid
   absl::flat_hash_map<std::pair<job_id_t, step_id_t>,
-                      Craned::SupervisorManager::SupervisorRecoverInfo>
+                      SupervisorStub::SupervisorRecoverInfo>
       step_supv_map;
   if (steps.has_value()) step_supv_map = steps.value();
 

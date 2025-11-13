@@ -462,7 +462,7 @@ message QuerySshStepEnvVariablesReply {
 
 message QuerySshStepEnvVariablesForwardRequest {
   uint32 task_id = 1;
-  string execution_node = 2;
+  string execution_node = 2 [deprecated = true];
 }
 
 message QuerySshStepEnvVariablesForwardReply {
