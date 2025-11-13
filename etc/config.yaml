@@ -39,9 +39,9 @@ CraneCtld:
   # ping timeout in seconds
   CranedTimeout: 30
   # max size of cranectld log file
-  CraneCtldMaxLogFileSize: 50M
+  MaxLogFileSize: 50M
   # max files of cranectld log file
-  CraneCtldMaxLogFileNum: 3
+  MaxLogFileNum: 3
 
 # Craned settings
 # the listening address of control machine
@@ -64,9 +64,9 @@ Craned:
   # register operation timeout in seconds
   CraneCtldTimeout: 5
   # max size of craned log file
-  CranedMaxLogFileSize: 50M
+  MaxLogFileSize: 50M
   # max files of craned log file
-  CranedMaxLogFileNum: 3
+  MaxLogFileNum: 3
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:

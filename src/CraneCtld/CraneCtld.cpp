@@ -48,16 +48,15 @@ void ParseCtldConfig(const YAML::Node& config) {
     if (ctld_cfg["CranedTimeout"])
       ctld_config.CranedTimeout = ctld_cfg["CranedTimeout"].as<uint32_t>();
 
-    if (ctld_cfg["CraneCtldMaxLogFileSize"]) {
-      auto file_size = util::ParseMemory(
-          ctld_cfg["CraneCtldMaxLogFileSize"].as<std::string>());
-      ctld_config.CraneCtldMaxLogFileSize =
-          file_size.has_value() ? file_size.value()
-                                : kDefaultCraneCtldMaxLogFileSize;
+    if (ctld_cfg["MaxLogFileSize"]) {
+      auto file_size =
+          util::ParseMemory(ctld_cfg["MaxLogFileSize"].as<std::string>());
+      ctld_config.MaxLogFileSize =
+          file_size.value_or(kDefaultCraneCtldMaxLogFileSize);
     }
 
-    ctld_config.CraneCtldMaxLogFileNum = YamlValueOr<uint64_t>(
-        ctld_cfg["CraneCtldMaxLogFileNum"], kDefaultCraneCtldMaxLogFileNum);
+    ctld_config.MaxLogFileNum = YamlValueOr<uint64_t>(
+        ctld_cfg["MaxLogFileNum"], kDefaultCraneCtldMaxLogFileNum);
   }
 
   g_config.CtldConf = std::move(ctld_config);
@@ -131,8 +130,8 @@ void ParseConfig(int argc, char** argv) {
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CraneCtldLogFile, true,
-                   g_config.CtldConf.CraneCtldMaxLogFileSize,
-                   g_config.CtldConf.CraneCtldMaxLogFileNum);
+                   g_config.CtldConf.MaxLogFileSize,
+                   g_config.CtldConf.MaxLogFileNum);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);

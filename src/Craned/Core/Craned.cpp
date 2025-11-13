@@ -155,15 +155,13 @@ void ParseCranedConfig(const YAML::Node& config) {
       conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
     if (craned_config["CraneCtldTimeout"])
       conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
-    if (craned_config["CranedMaxLogFileSize"]) {
-      auto file_size = util::ParseMemory(
-          craned_config["CranedMaxLogFileSize"].as<std::string>());
-      conf.CranedMaxLogFileSize = file_size.has_value()
-                                      ? file_size.value()
-                                      : kDefaultCranedMaxLogFileSize;
+    if (craned_config["MaxLogFileSize"]) {
+      auto file_size =
+          util::ParseMemory(craned_config["MaxLogFileSize"].as<std::string>());
+      conf.MaxLogFileSize = file_size.value_or(kDefaultCranedMaxLogFileSize);
     }
-    conf.CranedMaxLogFileNum = YamlValueOr<uint64_t>(
-        craned_config["CranedMaxLogFileNum"], kDefaultCranedMaxLogFileNum);
+    conf.MaxLogFileNum = YamlValueOr<uint64_t>(craned_config["MaxLogFileNum"],
+                                               kDefaultCranedMaxLogFileNum);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -193,9 +191,8 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   if (supervisor_config["MaxLogFileSize"]) {
     auto file_size = util::ParseMemory(
         supervisor_config["MaxLogFileSize"].as<std::string>());
-    g_config.Supervisor.MaxLogFileSize = file_size.has_value()
-                                             ? file_size.value()
-                                             : kDefaultSupervisorMaxLogFileSize;
+    g_config.Supervisor.MaxLogFileSize =
+        file_size.value_or(kDefaultSupervisorMaxLogFileSize);
   }
 
   g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
@@ -302,8 +299,8 @@ void ParseConfig(int argc, char** argv) {
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true,
-                   g_config.CranedConf.CranedMaxLogFileSize,
-                   g_config.CranedConf.CranedMaxLogFileNum);
+                   g_config.CranedConf.MaxLogFileSize,
+                   g_config.CranedConf.MaxLogFileNum);
         Craned::g_runtime_status.conn_logger =
             AddLogger("conn", log_level.value(), true);
       } else {

@@ -77,8 +77,8 @@ struct Config {
   struct CranedConfig {
     uint32_t PingIntervalSec;
     uint32_t CtldTimeoutSec;
-    uint64_t CranedMaxLogFileSize{kDefaultCranedMaxLogFileSize};
-    uint64_t CranedMaxLogFileNum;
+    uint64_t MaxLogFileSize{kDefaultCranedMaxLogFileSize};
+    uint64_t MaxLogFileNum;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {
