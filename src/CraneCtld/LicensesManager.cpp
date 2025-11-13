@@ -92,8 +92,10 @@ bool LicensesManager::CheckLicenseCountSufficient(
     if (!licenses_map->contains(lic_id))
       return false;
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-    if (count > lic->free)
+    if (count > lic->free) {
+      actual_licenses->clear();
       return false;
+    }
     actual_licenses->emplace(lic_id, count);
   }
 
@@ -102,9 +104,8 @@ bool LicensesManager::CheckLicenseCountSufficient(
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-    bool is_license_or, std::unordered_map<LicenseId, uint32_t> *actual_licenses) {
+    bool is_license_or) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
-  actual_licenses->clear();
   if (is_license_or) {
     for (const auto & license : lic_id_to_count) {
       const auto& lic_id = license.key();
@@ -112,10 +113,9 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
       if (licenses_map->contains(lic_id)) {
         auto lic = licenses_map->at(lic_id).GetExclusivePtr();
         if (count <= lic->total)
-          actual_licenses->emplace(lic_id, count);
+          return {};
       }
     }
-    if (!actual_licenses->empty()) return {};
 
     return std::unexpected("Invalid license specification");
   }
@@ -128,7 +128,6 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
     if (count > lic->total)
       return std::unexpected("Invalid license specification");
-    actual_licenses->emplace(lic_id, count);
   }
 
   return {};
