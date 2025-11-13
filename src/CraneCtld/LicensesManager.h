@@ -49,7 +49,7 @@ class LicensesManager {
 
   std::expected<void, std::string> CheckLicensesLegal(
       const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-      bool is_license_or, std::unordered_map<LicenseId, uint32_t> *actual_licenses);
+      bool is_license_or);
 
   void MallocLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);

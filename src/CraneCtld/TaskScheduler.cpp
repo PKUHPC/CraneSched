@@ -3677,7 +3677,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!g_config.lic_id_to_count_map.empty()) {
     auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
       task->TaskToCtld().licenses_count(),
-      task->TaskToCtld().is_licenses_or(), &task->licenses_count);
+      task->TaskToCtld().is_licenses_or());
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());
