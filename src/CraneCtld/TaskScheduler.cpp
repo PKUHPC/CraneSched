@@ -3001,27 +3001,68 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
   if (it == m_node_to_tasks_map_.end()) return;
 
   auto& job_steps = *req->mutable_job_steps();
+  absl::Time now = absl::Now();
 
   for (const auto& job_id : it->second) {
     auto job_it = m_running_task_map_.find(job_id);
     if (job_it == m_running_task_map_.end()) continue;
-    auto* daemon_step = job_it->second->DaemonStep();
+
+    TaskInCtld* job = job_it->second.get();
+    auto* daemon_step = job->DaemonStep();
+
+    // Check if task has exceeded time limit during craned offline
+    bool task_exceeded_time_limit = false;
+    if (job->Status() == crane::grpc::TaskStatus::Running &&
+        job->StartTime() + job->time_limit < now) {
+      task_exceeded_time_limit = true;
+      CRANE_INFO(
+          "[Job #{}] Task exceeded time limit during craned {} offline, "
+          "updating status to Completing.",
+          job_id, craned_id);
+
+      // Update task status to Completing
+      job->SetStatus(crane::grpc::TaskStatus::Completing);
+
+      // Update runtime attribute in database
+      txn_id_t txn_id{0};
+      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+      if (ok) {
+        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
+                                                      job->RuntimeAttr());
+        g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+      } else {
+        CRANE_ERROR(
+            "[Job #{}] Failed to update runtime attr when handling time "
+            "limit exceeded during craned offline.",
+            job_id);
+      }
+    }
+
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
     auto& step_status = *job_steps[job_id].mutable_step_status();
     steps[daemon_step->StepId()] = daemon_step->GetStepToD(craned_id);
-    step_status[daemon_step->StepId()] = daemon_step->Status();
-    if (job_it->second->PrimaryStep() &&
-        std::ranges::contains(job_it->second->PrimaryStep()->ExecutionNodes(),
+
+    // Set step status based on whether task exceeded time limit
+    step_status[daemon_step->StepId()] =
+        task_exceeded_time_limit ? crane::grpc::TaskStatus::Completing
+                                 : daemon_step->Status();
+
+    if (job->PrimaryStep() &&
+        std::ranges::contains(job->PrimaryStep()->ExecutionNodes(),
                               craned_id)) {
-      const auto* step = job_it->second->PrimaryStep();
+      const auto* step = job->PrimaryStep();
       steps[step->StepId()] = step->GetStepToD(craned_id);
-      step_status[step->StepId()] = step->Status();
+      step_status[step->StepId()] = task_exceeded_time_limit
+                                        ? crane::grpc::TaskStatus::Completing
+                                        : step->Status();
     }
-    for (const auto& step : job_it->second->Steps() | std::views::values)
+    for (const auto& step : job->Steps() | std::views::values)
       if (std::ranges::contains(step->ExecutionNodes(), craned_id)) {
         steps[step->StepId()] = step->GetStepToD(craned_id);
-        step_status[step->StepId()] = step->Status();
+        step_status[step->StepId()] = task_exceeded_time_limit
+                                          ? crane::grpc::TaskStatus::Completing
+                                          : step->Status();
       }
   }
 }
