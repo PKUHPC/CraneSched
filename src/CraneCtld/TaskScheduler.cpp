@@ -2315,7 +2315,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
   auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
   for (auto&& [craned_id, steps] : running_task_craned_id_map) {
-   if (!g_meta_container->CheckCranedOnline(craned_id)) {
+    if (!g_meta_container->CheckCranedOnline(craned_id)) {
       for (auto [job_id, step_ids] : steps) {
         for (auto step_id : step_ids)
           StepStatusChangeAsync(job_id, step_id, craned_id,
