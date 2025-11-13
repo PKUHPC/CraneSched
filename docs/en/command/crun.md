@@ -11,6 +11,7 @@ crun only supports request parameters via command line. Supported command-line o
 - **-D/--chdir string**: Working directory for the task
 - **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
 - **-c/--cpus-per-task float**: Number of CPUs required per task (default: 1)
+- **--deadline string**: Deadline time of the job
 - **--comment string**: Comment for the job
 - **--debug-level string**: Available debug levels: trace, debug, info (default: "info")
 - **-x/--exclude string**: Exclude specific nodes from allocation (comma-separated list)

@@ -19,6 +19,7 @@
 #include "DbClient.h"
 
 #include <bsoncxx/exception/exception.hpp>
+#include <cstdint>
 #include <mongocxx/exception/exception.hpp>
 #include <optional>
 
@@ -374,7 +375,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
+  // 35 mem_alloc     device_map     meta_container      has_job_info deadline
 
   try {
     for (auto view : cursor) {
@@ -449,6 +450,8 @@ bool MongodbClient::FetchJobRecords(
             static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
                 container_meta));
       }
+      task->mutable_deadline_time()->set_seconds(ViewValueOr_(
+          view["deadline_time"], std::numeric_limits<int64_t>::max()));
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1540,9 +1543,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_container     has_job_info
+  // deadline_time
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1558,7 +1562,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-    "mem_alloc", "device_map", "meta_container", "has_job_info"
+    "mem_alloc", "device_map", "meta_container", "has_job_info", "deadline_time"
   };
   // clang-format on
 
@@ -1570,7 +1574,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool>                                                   /*38*/
+             int64_t, bool>                                          /*38-39*/
       values{                                                        // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1605,6 +1609,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), container_meta,
+             task_to_ctld.deadline_time().seconds(),
              true /* Mark the document having complete job info */};
 
   return DocumentConstructor_(fields, values);
@@ -1636,9 +1641,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_container      has_job_info
+  // deadline_time
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1654,7 +1660,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_container", "has_job_info"
+      "mem_alloc", "device_map", "meta_container", "has_job_info","deadline_time"
   };
   // clang-format on
 
@@ -1666,34 +1672,36 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool>                                                   /*38*/
-      values{                                                        // 0-4
-             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->account,
-             // 5-9
-             task->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
-             task->name, env_str, static_cast<int32_t>(task->uid),
-             // 10-14
-             static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-             // 15-19
-             static_cast<int64_t>(task->CachedPriority()), 0,
-             task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
-             // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-             task->SubmitTimeInUnixSecond(), task->cwd,
-             // 25-29
-             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env,
-             // 30-34
-             task->type, task->extra_attr, task->reservation,
-             task->TaskToCtld().exclusive(),
-             task->allocated_res_view.CpuCount(),
-             // 35-37
-             static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             task->allocated_res_view.GetDeviceMap(), container_meta,
-             true /* Mark the document having complete job info */};
+             int64_t, bool>                                          /*38-39*/
+      values{
+          // 0-4
+          static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+          absl::ToUnixSeconds(absl::Now()), false, task->account,
+          // 5-9
+          task->requested_node_res_view.CpuCount(),
+          static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+          task->name, env_str, static_cast<int32_t>(task->uid),
+          // 10-14
+          static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
+          static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+          // 15-19
+          static_cast<int64_t>(task->CachedPriority()), 0,
+          task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+          // 20-24
+          script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+          task->SubmitTimeInUnixSecond(), task->cwd,
+          // 25-29
+          task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+          task->get_user_env,
+          // 30-34
+          task->type, task->extra_attr, task->reservation,
+          task->TaskToCtld().exclusive(), task->allocated_res_view.CpuCount(),
+          // 35-37
+          static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
+          task->allocated_res_view.GetDeviceMap(), container_meta,
+          task->TaskToCtld().deadline_time().seconds(),
+          true /* Mark the document having complete job info */
+      };
 
   return DocumentConstructor_(fields, values);
 }

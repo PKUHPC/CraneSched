@@ -51,6 +51,7 @@ cacct
 - **-o, --format string**: Specify output format using format specifiers starting with `%`. A width specifier can be added between `%` and the format character using a dot (`.`) and number. Supported format specifiers (case-insensitive):
   - **%a / %Account**: Display job account
   - **%c / %AllocCpus**: Display allocated CPU count
+  - **%deadline/%Deadline**：Display job deadline
   - **%e / %ExitCode**: Display job exit code (special format: exitcode[:signal])
   - **%h / %ElapsedTime**: Display elapsed time since job start
   - **%j / %JobId**: Display job ID
@@ -80,6 +81,7 @@ cacct
 - **-N, --no-header**: Hide table header in output
 - **-m, --max-lines uint32**: Specify maximum number of output lines (e.g., `-m=500` for max 500 lines)
 - **--json**: Output in JSON format
+- **--deadline string**: Display deadline
 
 ### Miscellaneous
 - **-C, --config string**: Path to configuration file (default: `/etc/crane/config.yaml`)

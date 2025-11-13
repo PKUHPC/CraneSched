@@ -255,6 +255,7 @@ void StepInCtld::RecoverFromDb(
   requested_node_res_view =
       static_cast<ResourceView>(step_to_ctld.req_resources());
   node_num = step_to_ctld.node_num();
+  deadline_time = absl::FromUnixSeconds(step_to_ctld.deadline_time().seconds());
 
   SetStepDbId(runtime_attr.step_db_id());
   SetStepId(runtime_attr.step_id());
@@ -548,6 +549,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
+  deadline_time = job.deadline_time;
 
   if (job.IsContainer())
     container_meta = std::get<ContainerMetaInTask>(job.meta);
@@ -613,7 +615,7 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-
+  step.mutable_deadline_time()->set_seconds(absl::ToUnixSeconds(deadline_time));
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -663,6 +665,8 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
+  step_to_d.mutable_deadline_time()->set_seconds(
+      ToUnixSeconds(this->deadline_time));
 
   if (this->type == crane::grpc::Batch) {
     auto* mutable_meta = step_to_d.mutable_batch_meta();
@@ -1010,11 +1014,16 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   extra_attr = val.extra_attr();
 
   reservation = val.reservation();
+
   if (val.has_begin_time()) {
     begin_time = absl::FromUnixSeconds(val.begin_time().seconds());
   }
 
   exclusive = val.exclusive();
+
+  if (val.has_deadline_time()) {
+    deadline_time = absl::FromUnixSeconds(val.deadline_time().seconds());
+  }
 
   SetHeld(val.hold());
 }
@@ -1129,6 +1138,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+  task_info->mutable_deadline_time()->set_seconds(ToUnixSeconds(deadline_time));
 }
 
 }  // namespace Ctld
