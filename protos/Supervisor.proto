@@ -119,7 +119,7 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
-message MigrateSshProcToCgroupRequest{
+message MigrateSshProcToCgroupRequest {
   int32 pid = 1;
 }
 
