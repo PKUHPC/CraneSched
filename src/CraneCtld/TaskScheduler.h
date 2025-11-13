@@ -31,18 +31,26 @@ class IUpdateNodeCostPolicy {
   virtual void UpdateCost(double& cost, const absl::Time& start_time,
                           const absl::Time& end_time,
                           const ResourceInNode& resources,
-                          const ResourceInNode& total_res) const = 0;
+                          const ResourceInNode& total_res,
+                          bool is_release = false) const = 0;
 };
 
 class MinCpuTimeRatioFirst : public IUpdateNodeCostPolicy {
  public:
   void UpdateCost(double& cost, const absl::Time& start_time,
                   const absl::Time& end_time, const ResourceInNode& resources,
-                  const ResourceInNode& total_res) const override {
+                  const ResourceInNode& total_res,
+                  bool is_release = false) const override {
     cost += absl::ToInt64Seconds(end_time - start_time) *
             (static_cast<double>(resources.allocatable_res.cpu_count) /
              static_cast<double>(total_res.allocatable_res.cpu_count));
   }
+};
+
+struct ResSegment {
+  absl::Time start_time;
+  absl::Time end_time;
+  ResourceInNode res;
 };
 
 struct RnJobInScheduler {
@@ -56,6 +64,7 @@ struct RnJobInScheduler {
   uint32_t partition_priority;
   uint32_t qos_priority;
   std::string account;
+  std::string qos;
 
   uint32_t node_num;
   absl::Time start_time;
@@ -72,6 +81,7 @@ struct RnJobInScheduler {
         partition_priority(job->partition_priority),
         qos_priority(job->qos_priority),
         account(job->account),
+        qos(job->qos),
         start_time(job->StartTime()),
         end_time(job->EndTime()),
         allocated_res(job->AllocatedRes()),
@@ -98,14 +108,20 @@ struct PdJobInScheduler {
   uint32_t partition_priority;
   uint32_t qos_priority;
   std::string account;
+  std::string qos;
 
   double priority;
 
   absl::Time start_time;
+  absl::Time end_time;
   ResourceV2 allocated_res;
   std::vector<CranedId> craned_ids;
+  std::vector<std::variant<PdJobInScheduler*, RnJobInScheduler*>>
+      preempted_jobs;
 
   std::string reason;
+
+  bool is_scheduled() const { return reason.empty(); }
 
   PdJobInScheduler(TaskInCtld* job)
       : job_id(job->TaskId()),
@@ -123,7 +139,10 @@ struct PdJobInScheduler {
         partition_priority(job->partition_priority),
         qos_priority(job->qos_priority),
         account(job->account),
-        priority(job->mandated_priority) {}
+        qos(job->qos),
+        priority(job->mandated_priority),
+        craned_ids(job->CranedIds()),
+        allocated_res(job->AllocatedRes()) {}
 };
 
 class IPrioritySorter {
@@ -217,6 +236,9 @@ class SchedulerAlgo {
   void NodeSelect(
       const absl::Time& now,
       const std::vector<std::unique_ptr<RnJobInScheduler>>& running_jobs,
+      const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_job);
+
+  void AddPreemptedJobs(
       const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs);
 
  private:
@@ -246,6 +268,14 @@ class SchedulerAlgo {
     std::vector<ReservedRes> reserved_res;
 
     TimeAvailResMap time_avail_res_map;
+
+    // Map: QoS name -> set of running/scheduled jobs in this node
+    // Tracks both running jobs and jobs scheduled to start in current
+    // scheduling round
+    absl::flat_hash_map<
+        std::string,
+        absl::flat_hash_set<std::variant<PdJobInScheduler*, RnJobInScheduler*>>>
+        qos_job_map;
 
     NodeState(const CranedId& craned_id, const ResourceInNode& res_total)
         : craned_id(craned_id), res_total(res_total), res_avail(res_total) {}
@@ -286,11 +316,33 @@ class SchedulerAlgo {
       }
 
       time_avail_res_map[end].SetToZero();
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Node {} time_avail_res_map initialized:", craned_id);
+        for (const auto& [time, res] : time_avail_res_map) {
+          CRANE_TRACE("  Time: now+{}s, cpu: {}, mem: {}MB",
+                      absl::ToInt64Seconds(time - now),
+                      res.allocatable_res.cpu_count,
+                      res.allocatable_res.memory_bytes);
+        }
+      }
     }
 
-    void SubtractResourceInNode(const absl::Time& start_time,
-                                const absl::Time& end_time,
-                                const ResourceInNode& res) {
+    void UpdateResourceInNode(const absl::Time& start_time,
+                              const absl::Time& end_time,
+                              const ResourceInNode& res,
+                              bool is_release = false) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Node {} UpdateResourceInNode: start_time now+{}s, end_time "
+            "now+{}s, cpu: {}, mem: {}MB, is_release: {}",
+            craned_id,
+            absl::ToInt64Seconds(start_time -
+                                 time_avail_res_map.begin()->first),
+            absl::ToInt64Seconds(end_time - time_avail_res_map.begin()->first),
+            res.allocatable_res.cpu_count, res.allocatable_res.memory_bytes,
+            is_release);
+      }
       bool ok;
       auto task_duration_begin_it = time_avail_res_map.upper_bound(start_time);
       if (task_duration_begin_it == time_avail_res_map.end()) {
@@ -327,16 +379,24 @@ class SchedulerAlgo {
 
         if (task_duration_begin_it->first == start_time) {
           // Case #1, subtract resource at start_time
-          CRANE_ASSERT(res <= task_duration_begin_it->second);
-          task_duration_begin_it->second -= res;
+          if (is_release) {
+            task_duration_begin_it->second += res;
+          } else {
+            CRANE_ASSERT(res <= task_duration_begin_it->second);
+            task_duration_begin_it->second -= res;
+          }
         } else {
           // Case #2, insert subtracted resource at start_time
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
               start_time, task_duration_begin_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-          CRANE_ASSERT(res <= inserted_it->second);
-          inserted_it->second -= res;
+          if (is_release) {
+            inserted_it->second += res;
+          } else {
+            CRANE_ASSERT(res <= inserted_it->second);
+            inserted_it->second -= res;
+          }
         }
       } else {
         --task_duration_begin_it;  // task_duration_begin_it->first <=
@@ -377,8 +437,12 @@ class SchedulerAlgo {
         // Subtract the required resources within the interval.
         for (auto in_duration_it = task_duration_begin_it;
              in_duration_it != task_duration_end_it; in_duration_it++) {
-          CRANE_ASSERT(res <= in_duration_it->second);
-          in_duration_it->second -= res;
+          if (is_release) {
+            in_duration_it->second += res;
+          } else {
+            CRANE_ASSERT(res <= in_duration_it->second);
+            in_duration_it->second -= res;
+          }
         }
 
         if (task_duration_end_it->first != end_time) {
@@ -387,8 +451,22 @@ class SchedulerAlgo {
               end_time, task_duration_end_it->second);
           CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-          CRANE_ASSERT(res <= task_duration_end_it->second);
-          task_duration_end_it->second -= res;
+          if (is_release) {
+            task_duration_end_it->second += res;
+          } else {
+            CRANE_ASSERT(res <= task_duration_end_it->second);
+            task_duration_end_it->second -= res;
+          }
+        }
+      }
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Node {} time_avail_res_map updated:", craned_id);
+        for (const auto& [time, res] : time_avail_res_map) {
+          CRANE_TRACE(
+              "  Time: now+{}s, cpu: {}, mem: {}MB",
+              absl::ToInt64Seconds(time - time_avail_res_map.begin()->first),
+              res.allocatable_res.cpu_count, res.allocatable_res.memory_bytes);
         }
       }
     }
@@ -408,15 +486,17 @@ class SchedulerAlgo {
     virtual void UpdateCost(const CranedId& craned_id,
                             const absl::Time& start_time,
                             const absl::Time& end_time,
-                            const ResourceInNode& resources) = 0;
+                            const ResourceInNode& resources,
+                            bool is_release = false) = 0;
 
     virtual NodeState* GetNodeState(const CranedId& craned_id) const = 0;
     virtual const std::set<std::pair<double, NodeState*>>& GetOrderedNodesSet()
         const = 0;
 
-    virtual void SubtractResource(const absl::Time& start_time,
-                                  const absl::Time& end_time,
-                                  const ResourceV2& res) = 0;
+    virtual void UpdateResource(const absl::Time& start_time,
+                                const absl::Time& end_time,
+                                const ResourceV2& res,
+                                bool is_release = false) = 0;
   };
 
   class NodeSelector : public INodeSelector {
@@ -454,13 +534,13 @@ class SchedulerAlgo {
     }
 
     void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
-                    const absl::Time& end_time,
-                    const ResourceInNode& resources) override {
+                    const absl::Time& end_time, const ResourceInNode& resources,
+                    bool is_release = false) override {
       NodeRater& node_info = m_node_info_map_.at(craned_id);
       m_cost_node_info_set_.erase(node_info.cost_node_info_set_it);
-      m_update_cost_policy_->UpdateCost(node_info.cost, start_time, end_time,
-                                        resources,
-                                        node_info.node_state->res_total);
+      m_update_cost_policy_->UpdateCost(
+          node_info.cost, start_time, end_time, resources,
+          node_info.node_state->res_total, is_release);
       node_info.cost_node_info_set_it =
           m_cost_node_info_set_.emplace(node_info.cost, node_info.node_state)
               .first;
@@ -487,13 +567,13 @@ class SchedulerAlgo {
       return m_cost_node_info_set_;
     }
 
-    void SubtractResource(const absl::Time& start_time,
-                          const absl::Time& end_time,
-                          const ResourceV2& res) override {
+    void UpdateResource(const absl::Time& start_time,
+                        const absl::Time& end_time, const ResourceV2& res,
+                        bool is_release = false) override {
       for (const auto& [craned_id, res_in_node] : res.EachNodeResMap()) {
-        m_node_info_map_.at(craned_id).node_state->SubtractResourceInNode(
-            start_time, end_time, res_in_node);
-        UpdateCost(craned_id, start_time, end_time, res_in_node);
+        m_node_info_map_.at(craned_id).node_state->UpdateResourceInNode(
+            start_time, end_time, res_in_node, is_release);
+        UpdateCost(craned_id, start_time, end_time, res_in_node, is_release);
       }
     }
 
@@ -522,13 +602,63 @@ class SchedulerAlgo {
       }
     }
 
-    bool CalculateRunningNodesAndStartTime_(const absl::Time& now,
-                                            PdJobInScheduler* job);
+    bool GetNodesAndTrySchedule_(const absl::Time& now, PdJobInScheduler* job,
+                                 std::vector<NodeState*>* nodes_to_sched);
 
-    void UpdateNodeSelector(PdJobInScheduler* job) {
-      m_node_selector_->SubtractResource(job->start_time,
-                                         job->start_time + job->time_limit,
-                                         job->allocated_res);
+    bool TryPreempt_(
+        const absl::Time& now, PdJobInScheduler* job,
+        const std::vector<NodeState*>& nodes_to_sched,
+        const absl::flat_hash_map<std::string, std::vector<std::string>>&
+            qos_preempt_map);
+
+    bool GetEarliestStartTime_(const absl::Time& now, PdJobInScheduler* job,
+                               const std::vector<NodeState*>& nodes_to_sched);
+
+    bool CalculateRunningNodesAndStartTime_(
+        const absl::Time& now, PdJobInScheduler* job,
+        const absl::flat_hash_map<std::string, std::vector<std::string>>&
+            qos_preempt_map);
+
+    void UpdateNodeSelectorWithScheduledJob(const absl::Time& now,
+                                            PdJobInScheduler* job) {
+      m_node_selector_->UpdateResource(job->start_time, job->end_time,
+                                       job->allocated_res);
+      if (job->is_scheduled()) {
+        for (const CranedId& craned_id : job->craned_ids) {
+          m_node_selector_->GetNodeState(craned_id)
+              ->qos_job_map[job->qos]
+              .emplace(job);
+        }
+      }
+    }
+
+    void UpdateNodeSelectorWithPreemptedJob(
+        const absl::Time& now,
+        std::variant<PdJobInScheduler*, RnJobInScheduler*> preempted_job) {
+      if (std::holds_alternative<RnJobInScheduler*>(preempted_job)) {
+        RnJobInScheduler* rn_job = std::get<RnJobInScheduler*>(preempted_job);
+        if (now + absl::Seconds(1) >= rn_job->end_time) {
+          return;
+        }
+        m_node_selector_->UpdateResource(now + absl::Seconds(1),
+                                         rn_job->end_time,
+                                         rn_job->allocated_res, true);
+        for (const auto& [craned_id, _] :
+             rn_job->allocated_res.EachNodeResMap()) {
+          m_node_selector_->GetNodeState(craned_id)
+              ->qos_job_map[rn_job->qos]
+              .erase(rn_job);
+        }
+      } else {
+        PdJobInScheduler* pd_job = std::get<PdJobInScheduler*>(preempted_job);
+        m_node_selector_->UpdateResource(pd_job->start_time, pd_job->end_time,
+                                         pd_job->allocated_res, true);
+        for (const CranedId& craned_id : pd_job->craned_ids) {
+          m_node_selector_->GetNodeState(craned_id)
+              ->qos_job_map[pd_job->qos]
+              .erase(pd_job);
+        }
+      }
     }
 
    private:
@@ -726,7 +856,108 @@ class SchedulerAlgo {
         m_time_priority_queue_;
   };
 
+  class PreemptSegTree {
+   private:
+    struct Node {
+      absl::Time st, ed;
+      Node* ls;
+      Node* rs;
+      bool satisfied;
+      ResourceInNode res;
+      ResourceInNode add_tag;
+      ResourceInNode sub_tag;
+    };
+
+    void add_res(Node* node, const ResourceInNode& res) {
+      node->res += res;
+      node->satisfied = (target_res <= node->res);
+      if (node->ls) node->add_tag += res;
+    }
+
+    void sub_res(Node* node, const ResourceInNode& res) {
+      node->res -= res;
+      node->satisfied = (target_res <= node->res);
+      if (node->ls) node->sub_tag += res;
+    }
+
+    void push_down(Node* node) {
+      if (node->ls == nullptr) {
+        absl::Time mid = node->st + (node->ed - node->st) / 2;
+        node->ls = new Node{node->st,        mid,      nullptr, nullptr,
+                            node->satisfied, node->res};
+        node->rs = new Node{mid,     node->ed,        nullptr,
+                            nullptr, node->satisfied, node->res};
+        return;
+      }
+      if (!node->add_tag.IsZero()) {
+        add_res(node->ls, node->add_tag);
+        add_res(node->rs, node->add_tag);
+        node->add_tag.SetToZero();
+      }
+      if (!node->sub_tag.IsZero()) {
+        sub_res(node->ls, node->sub_tag);
+        sub_res(node->rs, node->sub_tag);
+        node->sub_tag.SetToZero();
+      }
+    }
+
+    void push_up(Node* node) {
+      node->satisfied = node->ls->satisfied && node->rs->satisfied;
+    }
+
+    void add(Node* node, const absl::Time& st, const absl::Time& ed,
+             const ResourceInNode& res) {
+      if (node->ed <= st || ed <= node->st) return;
+      if (st <= node->st && node->ed <= ed) {
+        add_res(node, res);
+        return;
+      }
+      push_down(node);
+      add(node->ls, st, ed, res);
+      add(node->rs, st, ed, res);
+      push_up(node);
+    }
+
+    void sub(Node* node, const absl::Time& st, const absl::Time& ed,
+             const ResourceInNode& res) {
+      if (node->ed <= st || ed <= node->st) return;
+      if (st <= node->st && node->ed <= ed) {
+        sub_res(node, res);
+        return;
+      }
+      push_down(node);
+      sub(node->ls, st, ed, res);
+      sub(node->rs, st, ed, res);
+      push_up(node);
+    }
+    const ResourceInNode target_res;
+    Node* root;
+
+   public:
+    PreemptSegTree(const absl::Time& st, const absl::Time& ed,
+                   const ResourceInNode& target_res)
+        : target_res(target_res) {
+      root = new Node{st, ed, nullptr, nullptr, false};
+    }
+    ~PreemptSegTree() { delete root; }
+
+    void Add(const absl::Time& st, const absl::Time& ed,
+             const ResourceInNode& res) {
+      add(root, st, ed, res);
+    }
+
+    void Sub(const absl::Time& st, const absl::Time& ed,
+             const ResourceInNode& res) {
+      sub(root, st, ed, res);
+    }
+
+    bool IsSatisfied() const { return root->satisfied; }
+
+    const ResourceInNode& TargetRes() const { return target_res; }
+  };
+
   IPrioritySorter* m_priority_sorter_;
+  absl::flat_hash_map<task_id_t, task_id_t> m_preempted_job_map_;
 };
 
 class TaskScheduler {

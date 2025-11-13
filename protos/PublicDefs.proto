@@ -696,6 +696,19 @@ enum OperationType {
   Delete = 2;
 }
 
+enum PreemptType {
+  NONE = 0;
+  QOS = 1;
+  PARTITION = 2;
+}
+
+enum PreemptMode {
+  OFF = 0;
+  CANCEL = 1;
+  REQUEUE = 2;
+  SUSPEND = 3;
+}
+
 enum ModifyField {
   // user and account
   Partition = 0;
@@ -711,6 +724,8 @@ enum ModifyField {
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  Preempt = 34;
+  ModifyPreemptMode = 35;
 }
 
 message AccountInfo {
@@ -764,6 +779,8 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+  repeated string preempt = 7;
+  PreemptMode preempt_mode = 8;
 }
 
 message TimeInterval {
