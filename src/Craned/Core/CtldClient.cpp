@@ -531,7 +531,7 @@ void CtldClient::Init() {
         // Send status change notifications for steps that need sync
         if (!steps_to_sync_status.empty()) {
           CRANE_INFO("Syncing status for steps: [{}]",
-                     util::JobStepsToString(steps_to_sync_status));
+                     util::JobStepsWithStatusToString(steps_to_sync_status));
           for (const auto& [job_id, step_status_map] : steps_to_sync_status) {
             for (const auto& [step_id, status] : step_status_map) {
               g_ctld_client->StepStatusChangeAsync(
