@@ -1720,8 +1720,8 @@ CraneErrCode ProcInstance::Spawn() {
     // Apply environment variables
     InitEnvMap();
 
-    if (!g_config.TaskPrologs.empty()) {
-      RunLogHookArgs run_prolog_args{.scripts = g_config.TaskPrologs,
+    if (!g_config.JobLogHook.TaskPrologs.empty()) {
+      RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.TaskPrologs,
                                      .envs = m_env_,
                                      .run_uid = m_parent_step_inst_->uid,
                                      .run_gid = m_parent_step_inst_->gids[0],
@@ -1913,17 +1913,17 @@ TaskManager::TaskManager()
     m_uvw_loop_->run();
   });
 
-  if (!g_config.Prologs.empty()) {
+  if (!g_config.JobLogHook.Prologs.empty()) {
     CRANE_TRACE("Running Prologs...");
-    RunLogHookArgs run_prolog_args{.scripts = g_config.Prologs,
+    RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.Prologs,
                                    .envs = g_config.JobEnv,
                                    .run_uid = 0,
                                    .run_gid = 0,
                                    .is_prolog = true};
-    if (g_config.PrologTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.PrologTimeout;
-    else if (g_config.PrologEpilogTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+    if (g_config.JobLogHook.PrologTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+    else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
       std::exit(1);
@@ -1935,17 +1935,17 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
   CRANE_TRACE("TaskManager destroyed.");
 
-  if (!g_config.Epilogs.empty()) {
+  if (!g_config.JobLogHook.Epilogs.empty()) {
     CRANE_TRACE("Running Epilogs...");
-    RunLogHookArgs run_epilog_args{.scripts = g_config.Epilogs,
+    RunLogHookArgs run_epilog_args{.scripts = g_config.JobLogHook.Epilogs,
                                    .envs = g_config.JobEnv,
                                    .run_uid = 0,
                                    .run_gid = 0,
                                    .is_prolog = false};
-    if (g_config.PrologTimeout > 0)
-      run_epilog_args.timeout_sec = g_config.PrologTimeout;
-    else if (g_config.PrologEpilogTimeout > 0)
-      run_epilog_args.timeout_sec = g_config.PrologEpilogTimeout;
+    if (g_config.JobLogHook.PrologTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+    else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
     util::os::RunPrologOrEpiLog(run_epilog_args);
   }
@@ -2268,9 +2268,9 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
-    if (!g_config.TaskEpilogs.empty()) {
+    if (!g_config.JobLogHook.TaskEpilogs.empty()) {
       RunLogHookArgs run_epilog_args{
-          .scripts = g_config.TaskEpilogs,
+          .scripts = g_config.JobLogHook.TaskEpilogs,
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
                                      task->GetParentStep().env().end()},
           .run_uid = task->GetParentStep().uid(),

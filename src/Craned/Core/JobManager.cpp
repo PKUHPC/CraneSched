@@ -644,25 +644,30 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
 
-    for (const auto& prolog : g_config.TaskPrologs) {
-      init_req.add_task_prologs(prolog);
-    }
-    for (const auto& epilog : g_config.TaskEpilogs) {
-      init_req.add_task_epilogs(epilog);
-    }
+    if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob
+      || !g_config.JobLogHook.TaskPrologs.empty() || !g_config.JobLogHook.TaskEpilogs.empty()) {
+      auto* log_hook_conf = init_req.mutable_job_log_hook_config();
 
-    if (g_config.PrologFlags & PrologFlagEnum::RunInJob) {
-      for (const auto& prolog : g_config.ProLogs) {
-        init_req.add_prologs(prolog);
+      for (const auto& prolog : g_config.JobLogHook.TaskPrologs) {
+        log_hook_conf->add_task_prologs(prolog);
       }
-      for (const auto& epilog : g_config.EpiLogs) {
-        init_req.add_epilogs(epilog);
+      for (const auto& epilog : g_config.JobLogHook.TaskEpilogs) {
+        log_hook_conf->add_task_epilogs(epilog);
       }
-    }
 
-    init_req.set_prologtimeout(g_config.PrologTimeout);
-    init_req.set_epilogtimeout(g_config.EpilogTimeout);
-    init_req.set_prologepilogtimeout(g_config.PrologEpilogTimeout);
+      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob) {
+        for (const auto& prolog : g_config.JobLogHook.ProLogs) {
+          log_hook_conf->add_prologs(prolog);
+        }
+        for (const auto& epilog : g_config.JobLogHook.EpiLogs) {
+          log_hook_conf->add_epilogs(epilog);
+        }
+      }
+
+      log_hook_conf->set_prologtimeout(g_config.JobLogHook.PrologTimeout);
+      log_hook_conf->set_epilogtimeout(g_config.JobLogHook.EpilogTimeout);
+      log_hook_conf->set_prologepilogtimeout(g_config.JobLogHook.PrologEpilogTimeout);
+    }
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
@@ -821,28 +826,28 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     }
 
     // By default, Prolog is executed just before the task is launched.
-    if (!g_config.ProLogs.empty() &&
-        ((g_config.PrologFlags & PrologFlagEnum::Alloc) == 0) &&
+    if (!g_config.JobLogHook.ProLogs.empty() &&
+        ((g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc) == 0) &&
         !job->is_prolog_run &&
         step_it->second->step_to_d.interactive_meta().interactive_type() !=
             crane::grpc::Calloc) {
       CRANE_DEBUG("#{}: Running prologs....", job_id);
       job->is_prolog_run = true;
       bool script_lock = false;
-      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
         m_prolog_serial_mutex_.Lock();
         script_lock = true;
       }
 
-      RunLogHookArgs run_prolog_args{.scripts = g_config.ProLogs,
+      RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.ProLogs,
                                      .envs = job->GetJobEnvMap(),
                                      .run_uid = 0,
                                      .run_gid = 0,
                                      .is_prolog = true};
-      if (g_config.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologTimeout;
-      else if (g_config.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.PrologEpilogTimeout;
+      if (g_config.JobLogHook.PrologTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+      else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+        run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
       if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
         if (script_lock) m_prolog_serial_mutex_.Unlock();
@@ -1023,33 +1028,33 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 
   // force the script to be executed at job allocation
-  if (!g_config.ProLogs.empty() &&
-      g_config.PrologFlags & PrologFlagEnum::Alloc &&
-      !(g_config.PrologFlags & PrologFlagEnum::RunInJob) &&
+  if (!g_config.JobLogHook.ProLogs.empty() &&
+      g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc &&
+      !(g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob) &&
       !job->is_prolog_run) {
     job->is_prolog_run = true;
     auto run_prolog = [this, job](task_id_t job_id, EnvMap env_map) -> bool {
       bool script_lock = false;
 
-      if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
         m_prolog_serial_mutex_.Lock();
         script_lock = true;
       }
 
       RunLogHookArgs args{
-          .scripts = g_config.ProLogs,
+          .scripts = g_config.JobLogHook.ProLogs,
           .envs = env_map,
           .run_uid = 0,
           .run_gid = 0,
           .is_prolog = true,
       };
 
-      if (g_config.PrologTimeout > 0)
-        args.timeout_sec = g_config.PrologTimeout;
-      else if (g_config.PrologEpilogTimeout > 0)
-        args.timeout_sec = g_config.PrologEpilogTimeout;
+      if (g_config.JobLogHook.PrologTimeout > 0)
+        args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+      else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+        args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
-      if (g_config.PrologFlags & PrologFlagEnum::Contain) {
+      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Contain) {
         args.callback = [this, job](pid_t pid) {
           return job->cgroup->MigrateProcIn(pid);
         };
@@ -1063,7 +1068,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     };
 
     CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
-    if (g_config.PrologFlags & PrologFlagEnum::NoHold) {
+    if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::NoHold) {
       EnvMap env_map = job->GetJobEnvMap();
       g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
                                   env_map]() {
@@ -1423,26 +1428,26 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       CRANE_DEBUG("[Job #{}] is already completing, ignore clean up.", job_id);
       continue;
     }
-    if (!g_config.EpiLogs.empty() &&
-        !(g_config.PrologFlags & PrologFlagEnum::RunInJob)) {
+    if (!g_config.JobLogHook.EpiLogs.empty() &&
+        !(g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob)) {
       EnvMap env_map = job.GetJobEnvMap();
       g_thread_pool->detach_task([this, job_id, env_map]() {
         CRANE_DEBUG("Running epilogs...");
         bool script_lock = false;
-        if (g_config.PrologFlags & PrologFlagEnum::Serial) {
+        if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
           m_prolog_serial_mutex_.Lock();
           script_lock = true;
         }
 
-        RunLogHookArgs run_epilog_args{.scripts = g_config.EpiLogs,
+        RunLogHookArgs run_epilog_args{.scripts = g_config.JobLogHook.EpiLogs,
                                        .envs = env_map,
                                        .run_uid = 0,
                                        .run_gid = 0,
                                        .is_prolog = false};
-        if (g_config.EpilogTimeout > 0)
-          run_epilog_args.timeout_sec = g_config.EpilogTimeout;
-        else if (g_config.PrologEpilogTimeout > 0)
-          run_epilog_args.timeout_sec = g_config.PrologEpilogTimeout;
+        if (g_config.JobLogHook.EpilogTimeout > 0)
+          run_epilog_args.timeout_sec = g_config.JobLogHook.EpilogTimeout;
+        else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+          run_epilog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
         auto epilog_result = util::os::RunPrologOrEpiLog(run_epilog_args);
         if (!epilog_result)

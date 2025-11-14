@@ -176,23 +176,30 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
-      if (config["PrologCranectld"])
-        util::ParseLogHookPaths(config["PrologCranectld"].as<std::string>(),
-                                config_path, &g_config.ProLogs);
+      if (config["JobLogHook"]) {
+        const auto& hook_config = config["JobLogHook"];
+        if (hook_config["PrologCranectld"])
+          util::ParseLogHookPaths(
+              hook_config["PrologCranectld"].as<std::string>(), config_path,
+              &g_config.JobLogHook.ProLogs);
 
-      if (config["EpilogCranectld"])
-        util::ParseLogHookPaths(config["EpilogCranectld"].as<std::string>(),
-                                config_path, &g_config.EpiLogs);
+        if (hook_config["EpilogCranectld"])
+          util::ParseLogHookPaths(
+              hook_config["EpilogCranectld"].as<std::string>(), config_path,
+              &g_config.JobLogHook.EpiLogs);
 
-      if (config["PrologTimeout"]) {
-        g_config.PrologTimeout = config["PrologTimeout"].as<uint32_t>();
-      }
-      if (config["EpilogTimeout"]) {
-        g_config.EpilogTimeout = config["EpilogTimeout"].as<uint32_t>();
-      }
-      if (config["PrologEpilogTimeout"]) {
-        g_config.PrologEpilogTimeout =
-            config["PrologEpilogTimeout"].as<uint32_t>();
+        if (hook_config["PrologTimeout"]) {
+          g_config.JobLogHook.PrologTimeout =
+              hook_config["PrologTimeout"].as<uint32_t>();
+        }
+        if (hook_config["EpilogTimeout"]) {
+          g_config.JobLogHook.EpilogTimeout =
+              hook_config["EpilogTimeout"].as<uint32_t>();
+        }
+        if (hook_config["PrologEpilogTimeout"]) {
+          g_config.JobLogHook.PrologEpilogTimeout =
+              hook_config["PrologEpilogTimeout"].as<uint32_t>();
+        }
       }
 
       if (config["CompressedRpc"])

@@ -89,13 +89,17 @@ message InitSupervisorRequest {
   CforedListenConf cfored_listen_conf = 25;
   uint64 max_log_file_size = 26;
   uint64 max_log_file_num = 27;
-  repeated string task_prologs = 28;
-  repeated string task_epilogs = 29;
-  repeated string prologs = 30;
-  repeated string epilogs = 31;
-  uint32 PrologTimeout = 32;
-  uint32 EpilogTimeout = 33;
-  uint32 PrologEpilogTimeout = 34;
+
+  message JobLogHookConfig {
+    repeated string task_prologs = 1;
+    repeated string task_epilogs = 2;
+    repeated string prologs = 3;
+    repeated string epilogs = 4;
+    uint32 PrologTimeout = 5;
+    uint32 EpilogTimeout = 6;
+    uint32 PrologEpilogTimeout = 7;
+  };
+  JobLogHookConfig job_log_hook_config = 30;
 }
 
 message SupervisorReady {

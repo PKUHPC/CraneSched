@@ -167,12 +167,15 @@ struct Config {
   };
   ContainerConfig Container;
 
-  std::vector<std::string> ProLogs;
-  std::vector<std::string> EpiLogs;
-  uint32_t PrologTimeout{0};
-  uint32_t EpilogTimeout{0};
-  uint32_t PrologEpilogTimeout{0};
-  int PrologFlags{0};
+  struct JobLogHookConfig {
+    std::vector<std::string> ProLogs; // ctld prologs
+    std::vector<std::string> EpiLogs; // ctld epilogs
+    uint32_t PrologTimeout{0};
+    uint32_t EpilogTimeout{0};
+    uint32_t PrologEpilogTimeout{0};
+  };
+
+  JobLogHookConfig JobLogHook;
 
   bool CompressedRpc{};
 
