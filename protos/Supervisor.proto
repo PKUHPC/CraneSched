@@ -72,7 +72,6 @@ message InitSupervisorRequest {
   }
 
   CforedListenConf cfored_listen_conf = 25;
-  string crane_cluster_name = 26;
 }
 
 message SupervisorReady {
