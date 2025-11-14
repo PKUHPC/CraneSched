@@ -425,7 +425,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   for (const auto& hostname : this->job->excluded_nodes)
     step_to_d.mutable_exclude_nodelist()->Add()->assign(hostname);
-  
+
   return step_to_d;
 }
 
