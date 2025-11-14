@@ -65,62 +65,25 @@ void LicensesManager::GetLicensesInfo(
   }
 }
 
-bool LicensesManager::CheckLicenseCountSufficient(
-  const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-  bool is_license_or, std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
-
-  auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
-  actual_licenses->clear();
-  if (is_license_or) {
-    for (const auto & license : lic_id_to_count) {
-      const auto& lic_id = license.key();
-      auto count = license.count();
-      if (licenses_map->contains(lic_id)) {
-        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-        if (count <= lic->free) {
-          actual_licenses->emplace(lic_id, count);
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  for (const auto & license : lic_id_to_count) {
-    const auto& lic_id = license.key();
-    auto count = license.count();
-    if (!licenses_map->contains(lic_id))
-      return false;
-    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-    if (count > lic->free) {
-      actual_licenses->clear();
-      return false;
-    }
-    actual_licenses->emplace(lic_id, count);
-  }
-
-  return true;
-}
-
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-  const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+        lic_id_to_count,
     bool is_license_or) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
   if (is_license_or) {
-    for (const auto & license : lic_id_to_count) {
+    for (const auto& license : lic_id_to_count) {
       const auto& lic_id = license.key();
       auto count = license.count();
       if (licenses_map->contains(lic_id)) {
         auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-        if (count <= lic->total)
-          return {};
+        if (count <= lic->total) return {};
       }
     }
 
     return std::unexpected("Invalid license specification");
   }
 
-  for (const auto & license : lic_id_to_count) {
+  for (const auto& license : lic_id_to_count) {
     const auto& lic_id = license.key();
     auto count = license.count();
     if (!licenses_map->contains(lic_id))
@@ -133,13 +96,69 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   return {};
 }
 
+bool LicensesManager::TryMallocLicense(
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+        lic_id_to_count, bool is_license_or,
+    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
+  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+  actual_licenses->clear();
+  if (is_license_or) {
+    for (const auto& license : lic_id_to_count) {
+      const auto& lic_id = license.key();
+      auto count = license.count();
+      if (licenses_map->contains(lic_id)) {
+        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+        if (count <= lic->free) {
+          actual_licenses->emplace(lic_id, count);
+          break;
+        }
+      }
+    }
+  } else {
+    for (const auto& license : lic_id_to_count) {
+      const auto& lic_id = license.key();
+      auto count = license.count();
+      if (!licenses_map->contains(lic_id)) {
+        actual_licenses->clear();
+        return false;
+      }
+      auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+      if (count > lic->free) {
+        actual_licenses->clear();
+        return false;
+      }
+      actual_licenses->emplace(lic_id, count);
+    }
+  }
+
+  for (auto [lic_id, count] : *actual_licenses) {
+    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+    // malloc
+    lic->used += count;
+    if (lic->free < count) {
+      CRANE_ERROR(
+          "MallocLicenseResource: license [{}] requested={}, free={}, will set "
+          "free=0",
+          lic_id, count, lic->free);
+      lic->free = 0;
+    } else {
+      lic->free -= count;
+    }
+  }
+
+  return !actual_licenses->empty();
+}
+
 void LicensesManager::MallocLicenseResource(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
     lic->used += count;
     if (lic->free < count) {
-      CRANE_ERROR("MallocLicenseResource: license [{}] requested={}, free={}, will set free=0", lic_id, count, lic->free);
+      CRANE_ERROR(
+          "MallocLicenseResource: license [{}] requested={}, free={}, will set "
+          "free=0",
+          lic_id, count, lic->free);
       lic->free = 0;
     } else {
       lic->free -= count;
@@ -152,7 +171,10 @@ void LicensesManager::FreeLicenseResource(
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
     if (lic->used < count) {
-      CRANE_ERROR("FreeLicenseResource: license [{}] used < freeing count ({} < {}), will set used=0", lic_id, lic->used + count, count);
+      CRANE_ERROR(
+          "FreeLicenseResource: license [{}] used < freeing count ({} < {}), "
+          "will set used=0",
+          lic_id, lic->used + count, count);
       lic->used = 0;
     } else {
       lic->used -= count;

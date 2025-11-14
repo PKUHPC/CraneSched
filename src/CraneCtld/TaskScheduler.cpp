@@ -758,11 +758,13 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
-        if (!g_licenses_manager->CheckLicenseCountSufficient(
-          job->TaskToCtld().licenses_count(),job->TaskToCtld().is_licenses_or(),
-          &job->licenses_count)) {
-          job->pending_reason = "Licenses";
-          continue;
+        if (!job->TaskToCtld().licenses_count().empty()) {
+          if (!g_licenses_manager->TryMallocLicense(
+                  job->TaskToCtld().licenses_count(),
+                  job->TaskToCtld().is_licenses_or(), &job->licenses_count)) {
+            job->pending_reason = "Licenses";
+            continue;
+          }
         }
 
         pending_jobs.emplace_back(
@@ -843,7 +845,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
-
+      std::unordered_set<job_id_t> jobs_to_next_pending;
       LockGuard pending_guard(&m_pending_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
@@ -854,6 +856,7 @@ void TaskScheduler::ScheduleThread_() {
           job->SetStartTime(job_in_scheduler->start_time);
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
+            jobs_to_next_pending.insert(job->TaskId());
             continue;
           }
           absl::Time end_time =
@@ -890,6 +893,7 @@ void TaskScheduler::ScheduleThread_() {
           }
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
+            jobs_to_next_pending.insert(job->TaskId());
             continue;
           }
 
@@ -913,8 +917,6 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->MallocResourceFromResv(
                 job->reservation, job->TaskId(), job->AllocatedRes());
           }
-          if (!job->licenses_count.empty())
-            g_licenses_manager->MallocLicenseResource(job->licenses_count);
 
           if (job->ShouldLaunchOnAllNodes()) {
             for (auto const& craned_id : job->CranedIds())
@@ -936,6 +938,15 @@ void TaskScheduler::ScheduleThread_() {
       // Resource has been subtracted, other resource reduce events are
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
+
+      for (auto& job_id : jobs_to_next_pending) {
+        auto it = m_pending_task_map_.find(job_id);
+        if (it != m_pending_task_map_.end()) {
+          auto& job = it->second;
+          if (!job->licenses_count.empty())
+            g_licenses_manager->FreeLicenseResource(job->licenses_count);
+        }
+      }
 
       num_tasks_single_execution = jobs_to_run.size();
 
@@ -3676,8 +3687,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   if (!g_config.lic_id_to_count_map.empty()) {
     auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
-      task->TaskToCtld().licenses_count(),
-      task->TaskToCtld().is_licenses_or());
+        task->TaskToCtld().licenses_count(),
+        task->TaskToCtld().is_licenses_or());
     if (!check_licenses_result) {
       CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
                   check_licenses_result.error());
