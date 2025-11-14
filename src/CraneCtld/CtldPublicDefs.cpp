@@ -376,6 +376,10 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_account(job->account);
   job_to_d.set_qos(job->qos);
   job_to_d.set_partition(job->partition_id);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 76168279 (rebase)
   *job_to_d.mutable_res() =
       crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
   return job_to_d;
@@ -415,6 +419,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   if (this->container_meta.has_value())
     step_to_d.mutable_container_meta()->CopyFrom(
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
+
   step_to_d.set_submit_hostname(job->TaskToCtld().submit_hostname());
   step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
   step_to_d.set_cwd(this->job->cwd);
@@ -685,8 +690,10 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().container_meta());
   }
 
-  step_to_d.set_submit_hostname(StepToCtld().submit_hostname());
-  step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
+  // step_to_d.set_submit_hostname(this->job->TaskToCtld().submit_hostname());
+  // step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
+  // for (const auto& hostname : this->m_execute_nodes_)
+  //   step_to_d.mutable_exclude_nodelist()->Add()->assign(hostname);
 
   return step_to_d;
 }
