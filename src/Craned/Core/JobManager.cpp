@@ -55,7 +55,7 @@ EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
 
-  auto node_id_to_str = [this]() -> std::string {
+  auto node_id_to_str = [&, this]() -> std::string {
     uint32_t node_idx = 0;
 
     std::array<char, HOST_NAME_MAX> host_name{};
@@ -63,15 +63,14 @@ EnvMap JobInD::GetJobEnvMap() {
       return std::to_string(-1);  // invalid
     }
     std::string_view host_name_view(host_name.data());
-    const auto& nodelist = daemon_step_to_d.allocated_nodes();
-    for (const auto& node_name : nodelist) {
+    for (const auto& node_name : daemon_step_to_d.nodelist()) {
       if (node_name == host_name_view) {
         break;
       }
       node_idx++;
     }
 
-    if (node_idx >= nodelist.size()) {
+    if (node_idx >= daemon_step_to_d.nodelist().size()) {
       return std::to_string(-1);  // invalid
     }
 
@@ -79,17 +78,16 @@ EnvMap JobInD::GetJobEnvMap() {
   };
 
   uint64_t gpus_per_node = 0;
-  auto alloc_node_num = daemon_step_to_d.allocated_nodes().size();
+  auto alloc_node_num = daemon_step_to_d.nodelist().size();
   if (alloc_node_num != 0) {
     gpus_per_node = daemon_step_to_d.total_gpus() / alloc_node_num;
   }
-  auto mem_in_node = daemon_step_to_d.resources()
-                         .allocatable_res_in_node()
-                         .memory_limit_bytes() /
-                     (static_cast<uint64_t>(1024 * 1024));
+  auto mem_in_node =
+      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
+      (static_cast<uint64_t>(1024 * 1024));
 
   auto cpus_on_node =
-      daemon_step_to_d.resources().allocatable_res_in_node().cpu_core_limit();
+      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
   auto mem_per_cpu = static_cast<double>(mem_in_node) / cpus_on_node;
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
@@ -112,8 +110,7 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
   env_map.emplace("CRANE_EXCLUDES",
-                  absl::StrJoin(daemon_step_to_d.excludes(), ";"));
-  env_map.emplace("CRANE_ACCOUNT", daemon_step_to_d.account());
+                  absl::StrJoin(daemon_step_to_d.exclude_nodelist(), ";"));
   env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.cwd());
   env_map.emplace("CRANE_CPUS_PER_TASK",
                   std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
@@ -613,7 +610,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
     init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
     init_req.set_log_dir(g_config.Supervisor.LogDir);
-    init_req.set_crane_cluster_name(g_config.CraneClusterName);
+    // init_req.set_crane_cluster_name(g_config.CraneClusterName);
     auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
     cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
     cfored_listen_conf->set_domain_suffix(
