@@ -98,7 +98,8 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
 
 bool LicensesManager::TryMallocLicense(
     const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
-        lic_id_to_count, bool is_license_or,
+        lic_id_to_count,
+    bool is_license_or,
     std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
   actual_licenses->clear();
