@@ -91,13 +91,9 @@ EnvMap JobInD::GetJobEnvMap() {
 
   auto cpus_on_node =
       daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
-<<<<<<< HEAD
   auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
                          ? (static_cast<double>(mem_in_node) / cpus_on_node)
                          : 0.0;
-=======
-  auto mem_per_cpu = static_cast<double>(mem_in_node) / cpus_on_node;
->>>>>>> 76168279 (rebase)
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 
@@ -620,10 +616,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_log_dir(g_config.Supervisor.LogDir);
     init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
     init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
+
     auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
     cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
-    cfored_listen_conf->set_domain_suffix(
-        g_config.ListenConf.TlsConfig.DomainSuffix);
     auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
     tls_certs->set_cert_content(
         g_config.ListenConf.TlsConfig.TlsCerts.CertContent);
