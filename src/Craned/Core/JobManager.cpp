@@ -91,9 +91,13 @@ EnvMap JobInD::GetJobEnvMap() {
 
   auto cpus_on_node =
       daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
+<<<<<<< HEAD
   auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
                          ? (static_cast<double>(mem_in_node) / cpus_on_node)
                          : 0.0;
+=======
+  auto mem_per_cpu = static_cast<double>(mem_in_node) / cpus_on_node;
+>>>>>>> 76168279 (rebase)
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 
