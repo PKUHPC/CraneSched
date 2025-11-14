@@ -758,6 +758,8 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
+        // ctld only virtual resource;
+        // scheduling occurs when resources are sufficient.
         if (!job->TaskToCtld().licenses_count().empty()) {
           if (!g_licenses_manager->TryMallocLicense(
                   job->TaskToCtld().licenses_count(),
@@ -845,7 +847,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
-      std::unordered_set<job_id_t> jobs_to_next_pending;
+      std::vector<job_id_t> jobs_to_next_pending;
       LockGuard pending_guard(&m_pending_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
@@ -856,7 +858,7 @@ void TaskScheduler::ScheduleThread_() {
           job->SetStartTime(job_in_scheduler->start_time);
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
-            jobs_to_next_pending.insert(job->TaskId());
+            jobs_to_next_pending.emplace_back(job->TaskId());
             continue;
           }
           absl::Time end_time =
@@ -893,7 +895,7 @@ void TaskScheduler::ScheduleThread_() {
           }
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
-            jobs_to_next_pending.insert(job->TaskId());
+            jobs_to_next_pending.emplace_back(job->TaskId());
             continue;
           }
 
@@ -939,13 +941,10 @@ void TaskScheduler::ScheduleThread_() {
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
 
-      for (auto& job_id : jobs_to_next_pending) {
-        auto it = m_pending_task_map_.find(job_id);
-        if (it != m_pending_task_map_.end()) {
-          auto& job = it->second;
-          if (!job->licenses_count.empty())
-            g_licenses_manager->FreeLicenseResource(job->licenses_count);
-        }
+      for (auto job_id : jobs_to_next_pending) {
+        auto& job = m_pending_task_map_[job_id];
+        if (!job->licenses_count.empty())
+          g_licenses_manager->FreeLicenseResource(job->licenses_count);
       }
 
       num_tasks_single_execution = jobs_to_run.size();
