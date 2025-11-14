@@ -30,6 +30,8 @@
 
 #include "crane/Logger.h"
 
+#include <absl/cleanup/cleanup.h>
+
 #include <future>
 
 #include "absl/strings/str_split.h"
@@ -449,12 +451,31 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     }
 
     int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
-    if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1 ||
-        pipe(sync_pipe) == -1) {
-      CRANE_ERROR("{} pipe creation failed: {}", script, strerror(errno));
-      if (args.is_prolog) return std::nullopt;
+    if (pipe(stdout_pipe) == -1) {
+      CRANE_ERROR("{} pipe stdout creation failed: {}", script, strerror(errno));
+      if (args.is_prolog)
+        return std::nullopt;
       is_failed = true;
-      continue;
+    }
+
+    if (pipe(stderr_pipe) == -1) {
+      CRANE_ERROR("{} pipe stderr creation failed: {}", script, strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      if (args.is_prolog)
+        return std::nullopt;
+      is_failed = true;
+    }
+
+    if (pipe(sync_pipe) == -1) {
+      CRANE_ERROR("{} pipe sync creation failed: {}", script, strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
+      if (args.is_prolog)
+        return std::nullopt;
+      is_failed = true;
     }
 
     pid_t pid = fork();
@@ -535,16 +556,26 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
 
+      char buf;
+      read(sync_pipe[0], &buf, 1);
+      close(sync_pipe[1]);
+      close(sync_pipe[0]);
+
+      if (setgid(args.run_gid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {}\n",
+                   args.run_gid, strerror(errno));
+        exit(EXIT_FAILURE);
+      }
+      if (setuid(args.run_uid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setuid({}) failed: {}\n",
+                   args.run_uid, strerror(errno));
+        exit(EXIT_FAILURE);
+      }
       for (const auto& [name, value] : args.envs)
         if (setenv(name.c_str(), value.c_str(), 1))
           fmt::print(stderr,
                      "[Subprocess] Warning: setenv() for {}={} failed.\n", name,
                      value);
-
-      char buf;
-      read(sync_pipe[0], &buf, 1);
-      close(sync_pipe[1]);
-      close(sync_pipe[0]);
 
       std::vector<const char*> argv = {script.c_str(), nullptr};
       execvp(argv[0], const_cast<char* const*>(argv.data()));

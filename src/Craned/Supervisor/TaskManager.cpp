@@ -1912,23 +1912,6 @@ TaskManager::TaskManager()
     }
     m_uvw_loop_->run();
   });
-
-  if (!g_config.JobLogHook.Prologs.empty()) {
-    CRANE_TRACE("Running Prologs...");
-    RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.Prologs,
-                                   .envs = g_config.JobEnv,
-                                   .run_uid = 0,
-                                   .run_gid = 0,
-                                   .is_prolog = true};
-    if (g_config.JobLogHook.PrologTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
-    else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
-
-    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
-      std::exit(1);
-    }
-  }
 }
 
 TaskManager::~TaskManager() {
