@@ -143,6 +143,32 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
+      if (config["JobLogHook"]) {
+        const auto& hook_config = config["JobLogHook"];
+        if (hook_config["PrologCranectld"])
+          util::ParseLogHookPaths(
+              hook_config["PrologCranectld"].as<std::string>(), config_path,
+              &g_config.JobLogHook.ProLogs);
+
+        if (hook_config["EpilogCranectld"])
+          util::ParseLogHookPaths(
+              hook_config["EpilogCranectld"].as<std::string>(), config_path,
+              &g_config.JobLogHook.EpiLogs);
+
+        if (hook_config["PrologTimeout"]) {
+          g_config.JobLogHook.PrologTimeout =
+              hook_config["PrologTimeout"].as<uint32_t>();
+        }
+        if (hook_config["EpilogTimeout"]) {
+          g_config.JobLogHook.EpilogTimeout =
+              hook_config["EpilogTimeout"].as<uint32_t>();
+        }
+        if (hook_config["PrologEpilogTimeout"]) {
+          g_config.JobLogHook.PrologEpilogTimeout =
+              hook_config["PrologEpilogTimeout"].as<uint32_t>();
+        }
+      }
+
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
