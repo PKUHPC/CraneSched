@@ -45,11 +45,15 @@ class LicensesManager {
                        crane::grpc::QueryLicensesInfoReply *response);
 
   std::expected<void, std::string> CheckLicensesLegal(
-    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-    bool is_license_or);
+      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
+          &lic_id_to_count,
+      bool is_license_or);
 
-  bool TryMallocLicense(const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-  bool is_license_or, std::unordered_map<LicenseId, uint32_t>* actual_licenses);
+  bool TryMallocLicense(
+      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
+          &lic_id_to_count,
+      bool is_license_or,
+      std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
   void MallocLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
