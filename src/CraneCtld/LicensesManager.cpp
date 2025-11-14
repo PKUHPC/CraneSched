@@ -80,13 +80,14 @@ void LicensesManager::GetLicensesInfo(
 }
 
 bool LicensesManager::CheckLicenseCountSufficient(
-  const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-  bool is_license_or, std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
-
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+        lic_id_to_count,
+    bool is_license_or,
+    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
   actual_licenses->clear();
   if (is_license_or) {
-    for (const auto & license : lic_id_to_count) {
+    for (const auto& license : lic_id_to_count) {
       const auto& lic_id = license.key();
       auto count = license.count();
       if (licenses_map->contains(lic_id)) {
@@ -100,14 +101,12 @@ bool LicensesManager::CheckLicenseCountSufficient(
     return false;
   }
 
-  for (const auto & license : lic_id_to_count) {
+  for (const auto& license : lic_id_to_count) {
     const auto& lic_id = license.key();
     auto count = license.count();
-    if (!licenses_map->contains(lic_id))
-      return false;
+    if (!licenses_map->contains(lic_id)) return false;
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-    if (count > lic->free)
-      return false;
+    if (count > lic->free) return false;
     actual_licenses->emplace(lic_id, count);
   }
 
@@ -115,18 +114,19 @@ bool LicensesManager::CheckLicenseCountSufficient(
 }
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-  const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> &lic_id_to_count,
-    bool is_license_or, std::unordered_map<LicenseId, uint32_t> *actual_licenses) {
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+        lic_id_to_count,
+    bool is_license_or,
+    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
   actual_licenses->clear();
   if (is_license_or) {
-    for (const auto & license : lic_id_to_count) {
+    for (const auto& license : lic_id_to_count) {
       const auto& lic_id = license.key();
       auto count = license.count();
       if (licenses_map->contains(lic_id)) {
         auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-        if (count <= lic->total)
-          actual_licenses->emplace(lic_id, count);
+        if (count <= lic->total) actual_licenses->emplace(lic_id, count);
       }
     }
     if (!actual_licenses->empty()) return {};
@@ -134,7 +134,7 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     return std::unexpected("Invalid license specification");
   }
 
-  for (const auto & license : lic_id_to_count) {
+  for (const auto& license : lic_id_to_count) {
     const auto& lic_id = license.key();
     auto count = license.count();
     if (!licenses_map->contains(lic_id))
@@ -154,7 +154,10 @@ void LicensesManager::MallocLicenseResource(
     auto lic = m_licenses_map_[lic_id];
     lic->used += count;
     if (lic->free < count) {
-      CRANE_ERROR("MallocLicenseResource: license [{}] requested={}, free={}, will set free=0", lic_id, count, lic->free);
+      CRANE_ERROR(
+          "MallocLicenseResource: license [{}] requested={}, free={}, will set "
+          "free=0",
+          lic_id, count, lic->free);
       lic->free = 0;
     } else {
       lic->free -= count;
@@ -176,7 +179,6 @@ void LicensesManager::MallocLicenseResource(
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
   }
-
 }
 
 void LicensesManager::FreeLicenseResource(
@@ -184,7 +186,10 @@ void LicensesManager::FreeLicenseResource(
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
     if (lic->used < count) {
-      CRANE_ERROR("FreeLicenseResource: license [{}] used < freeing count ({} < {}), will set used=0", lic_id, lic->used + count, count);
+      CRANE_ERROR(
+          "FreeLicenseResource: license [{}] used < freeing count ({} < {}), "
+          "will set used=0",
+          lic_id, lic->used + count, count);
       lic->used = 0;
     } else {
       lic->used -= count;
