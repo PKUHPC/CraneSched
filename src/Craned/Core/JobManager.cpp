@@ -58,7 +58,7 @@ EnvMap JobInD::GetJobEnvMap() {
   auto node_id_to_str = [&, this]() -> std::string {
     uint32_t node_idx = 0;
 
-    std::array<char, HOST_NAME_MAX> host_name{};
+    std::array<char, HOST_NAME_MAX + 1> host_name{};
     if (gethostname(host_name.data(), host_name.size()) != 0) {
       return std::to_string(-1);  // invalid
     }
@@ -88,7 +88,9 @@ EnvMap JobInD::GetJobEnvMap() {
 
   auto cpus_on_node =
       daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
-  auto mem_per_cpu = static_cast<double>(mem_in_node) / cpus_on_node;
+  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
+                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
+                         : 0.0;
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 
