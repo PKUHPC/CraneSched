@@ -690,11 +690,6 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().container_meta());
   }
 
-  // step_to_d.set_submit_hostname(this->job->TaskToCtld().submit_hostname());
-  // step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
-  // for (const auto& hostname : this->m_execute_nodes_)
-  //   step_to_d.mutable_exclude_nodelist()->Add()->assign(hostname);
-
   return step_to_d;
 }
 
