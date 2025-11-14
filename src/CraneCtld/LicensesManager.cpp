@@ -174,7 +174,7 @@ void LicensesManager::FreeLicenseResource(
       CRANE_ERROR(
           "FreeLicenseResource: license [{}] used < freeing count ({} < {}), "
           "will set used=0",
-          lic_id, lic->used + count, count);
+          lic_id, lic->used, count);
       lic->used = 0;
     } else {
       lic->used -= count;
