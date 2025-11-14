@@ -409,7 +409,8 @@ void CtldClient::Init() {
         for (auto status_change_steps = g_ctld_client->GetAllStepStatusChange();
              auto& [job_id, step_status_map] : status_change_steps) {
           for (auto& [step_id, status] : step_status_map) {
-            exact_job_steps[job_id][step_id] = status;
+            exact_job_steps[job_id][step_id] = {.status = status,
+                                                .exit_code = 0};
           }
         }
         auto craned_job_ids = exact_job_steps | std::views::keys;
@@ -460,14 +461,19 @@ void CtldClient::Init() {
             completing_steps{};
         // For status recovery: steps that need to sync status from Craned to
         // Ctld
-        std::unordered_map<job_id_t, std::map<step_id_t, StepStatus>>
+        struct StepStatusRecovery {
+          StepStatus status;
+          uint32_t exit_code;
+        };
+        std::unordered_map<job_id_t, std::map<step_id_t, StepStatusRecovery>>
             steps_to_sync_status{};
 
         for (const auto& [job_id, steps] : valid_job_steps) {
           for (const auto& step_id : steps) {
             auto ctld_status =
                 arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto craned_status = exact_job_steps.at(job_id).at(step_id);
+            auto craned_step_info = exact_job_steps.at(job_id).at(step_id);
+            auto craned_status = craned_step_info.status;
             CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
                         step_id, craned_status, ctld_status);
 
@@ -487,7 +493,9 @@ void CtldClient::Init() {
                     "[Step #{}.{}] Craned has Completing status, will sync to "
                     "Ctld.",
                     job_id, step_id);
-                steps_to_sync_status[job_id][step_id] = craned_status;
+                steps_to_sync_status[job_id][step_id] = {
+                    .status = craned_status,
+                    .exit_code = craned_step_info.exit_code};
                 continue;
               }
 
@@ -500,7 +508,9 @@ void CtldClient::Init() {
                     "Completing, "
                     "will sync to Ctld.",
                     job_id, step_id);
-                steps_to_sync_status[job_id][step_id] = craned_status;
+                steps_to_sync_status[job_id][step_id] = {
+                    .status = craned_status,
+                    .exit_code = craned_step_info.exit_code};
                 continue;
               }
 
@@ -513,7 +523,9 @@ void CtldClient::Init() {
                     "[Step #{}.{}] Craned reports terminal state {}, will sync "
                     "to Ctld.",
                     job_id, step_id, craned_status);
-                steps_to_sync_status[job_id][step_id] = craned_status;
+                steps_to_sync_status[job_id][step_id] = {
+                    .status = craned_status,
+                    .exit_code = craned_step_info.exit_code};
                 continue;
               }
 
@@ -530,15 +542,23 @@ void CtldClient::Init() {
 
         // Send status change notifications for steps that need sync
         if (!steps_to_sync_status.empty()) {
+          // Transform for logging (extract just status part)
+          std::unordered_map<job_id_t, std::map<step_id_t, StepStatus>>
+              status_map_for_log;
+          for (const auto& [job_id, step_map] : steps_to_sync_status) {
+            for (const auto& [step_id, recovery] : step_map) {
+              status_map_for_log[job_id][step_id] = recovery.status;
+            }
+          }
           CRANE_INFO("Syncing status for steps: [{}]",
-                     util::JobStepsWithStatusToString(steps_to_sync_status));
+                     util::JobStepsWithStatusToString(status_map_for_log));
           for (const auto& [job_id, step_status_map] : steps_to_sync_status) {
-            for (const auto& [step_id, status] : step_status_map) {
+            for (const auto& [step_id, recovery] : step_status_map) {
               g_ctld_client->StepStatusChangeAsync(
                   {.job_id = job_id,
                    .step_id = step_id,
-                   .new_status = status,
-                   .exit_code = 0,  // Will be updated by actual exit code later
+                   .new_status = recovery.status,
+                   .exit_code = recovery.exit_code,
                    .reason =
                        "Status recovered from Craned after reconnection"});
             }

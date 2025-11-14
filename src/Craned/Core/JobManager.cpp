@@ -1023,17 +1023,22 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   return false;
 }
 
-std::map<job_id_t, std::map<step_id_t, StepStatus>>
+std::map<job_id_t, std::map<step_id_t, JobManager::StepStatusWithExitCode>>
 JobManager::GetAllocatedJobSteps() {
   auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
-  std::map<job_id_t, std::map<step_id_t, StepStatus>> job_steps;
+  std::map<job_id_t, std::map<step_id_t, StepStatusWithExitCode>> job_steps;
   for (auto& [job_id, job] : *job_map_ptr) {
     auto job_ptr = job.GetExclusivePtr();
     absl::MutexLock lk(job_ptr->step_map_mtx.get());
-    std::map<step_id_t, StepStatus> step_status_map;
-    ;
+    std::map<step_id_t, StepStatusWithExitCode> step_status_map;
     for (auto& [step_id, step] : job_ptr->step_map) {
-      step_status_map[step_id] = step->status;
+      // Get exit code from step_to_d if available
+      uint32_t exit_code = 0;
+      if (step->step_to_d.has_runtime_attr()) {
+        exit_code = step->step_to_d.runtime_attr().exit_code();
+      }
+      step_status_map[step_id] = {.status = step->status,
+                                  .exit_code = exit_code};
     }
     job_steps[job_id] = std::move(step_status_map);
   }
