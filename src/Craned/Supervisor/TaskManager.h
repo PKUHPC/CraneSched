@@ -218,6 +218,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Suspend() = 0;
+  virtual CraneErrCode Resume() = 0;
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
@@ -250,6 +252,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
@@ -323,6 +327,8 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   void InitEnvMap() override;
@@ -447,6 +453,10 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  std::future<CraneErrCode> SuspendJobAsync();
+
+  std::future<CraneErrCode> ResumeJobAsync();
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -468,6 +478,12 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  struct TaskSignalQueueElem {
+    enum class Action { Suspend, Resume };
+    Action action;
+    std::promise<CraneErrCode> prom;
+  };
+
   // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
@@ -483,9 +499,13 @@ class TaskManager {
   void EvTaskTimerCb_();
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanTaskSignalQueueCb_();
 
   void EvGrpcExecuteTaskCb_();
   void EvGrpcQueryStepEnvCb_();
+
+  CraneErrCode SuspendRunningTasks_();
+  CraneErrCode ResumeSuspendedTasks_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -511,6 +531,9 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   std::shared_ptr<uvw::timer_handle> m_change_task_time_limit_timer_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_task_signal_async_handle_;
+  ConcurrentQueue<TaskSignalQueueElem> m_task_signal_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;

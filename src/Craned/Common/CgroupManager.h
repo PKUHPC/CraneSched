@@ -110,12 +110,16 @@ inline constexpr std::string_view kMemoryEventsFileV2 = "memory.events";
 // cgroup v1 memory oom control file used to read OOM_KILL counter
 inline constexpr std::string_view kMemoryOomControlFileV1 =
     "memory.oom_control";
+// cgroup v1 freezer state file name
+inline constexpr std::string_view kFreezerStateFileV1 = "freezer.state";
+// cgroup v2 freezer file name
+inline constexpr std::string_view kCgroupFreezeFileV2 = "cgroup.freeze";
 
 #ifdef CRANE_ENABLE_BPF
-inline const char *kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
-inline const char *kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
-inline const char *kBpfMapName = "craned_dev_map";
-inline const char *kBpfProgramName = "craned_device_access";
+inline const char* kBpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
+inline const char* kBpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
+inline const char* kBpfMapName = "craned_dev_map";
+inline const char* kBpfProgramName = "craned_device_access";
 #endif
 
 namespace Internal {
@@ -207,14 +211,14 @@ class ControllerFlags {
   constexpr explicit ControllerFlags(CgConstant::Controller controller) noexcept
       : m_flags_(1U << static_cast<uint64_t>(controller)) {}
 
-  ControllerFlags(const ControllerFlags &val) noexcept = default;
+  ControllerFlags(const ControllerFlags& val) noexcept = default;
 
-  constexpr ControllerFlags operator|=(const ControllerFlags &rhs) noexcept {
+  constexpr ControllerFlags operator|=(const ControllerFlags& rhs) noexcept {
     m_flags_ |= rhs.m_flags_;
     return *this;
   }
 
-  constexpr ControllerFlags operator&=(const ControllerFlags &rhs) noexcept {
+  constexpr ControllerFlags operator&=(const ControllerFlags& rhs) noexcept {
     m_flags_ &= rhs.m_flags_;
     return *this;
   }
@@ -230,50 +234,50 @@ class ControllerFlags {
 
  private:
   friend constexpr ControllerFlags operator|(
-      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
+      const ControllerFlags& lhs, const ControllerFlags& rhs) noexcept;
   friend constexpr ControllerFlags operator&(
-      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
+      const ControllerFlags& lhs, const ControllerFlags& rhs) noexcept;
   friend constexpr ControllerFlags operator|(
-      const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept;
+      const ControllerFlags& lhs, const CgConstant::Controller& rhs) noexcept;
   friend constexpr ControllerFlags operator&(
-      const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept;
+      const ControllerFlags& lhs, const CgConstant::Controller& rhs) noexcept;
   friend constexpr ControllerFlags operator|(
-      const CgConstant::Controller &lhs,
-      const CgConstant::Controller &rhs) noexcept;
+      const CgConstant::Controller& lhs,
+      const CgConstant::Controller& rhs) noexcept;
   uint64_t m_flags_;
 };
 
-constexpr ControllerFlags operator|(const ControllerFlags &lhs,
-                                    const ControllerFlags &rhs) noexcept {
+constexpr ControllerFlags operator|(const ControllerFlags& lhs,
+                                    const ControllerFlags& rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ | rhs.m_flags_;
   return flags;
 }
 
-constexpr ControllerFlags operator&(const ControllerFlags &lhs,
-                                    const ControllerFlags &rhs) noexcept {
+constexpr ControllerFlags operator&(const ControllerFlags& lhs,
+                                    const ControllerFlags& rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ & rhs.m_flags_;
   return flags;
 }
 
 constexpr ControllerFlags operator|(
-    const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept {
+    const ControllerFlags& lhs, const CgConstant::Controller& rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ | (1U << static_cast<uint64_t>(rhs));
   return flags;
 }
 
 constexpr ControllerFlags operator&(
-    const ControllerFlags &lhs, const CgConstant::Controller &rhs) noexcept {
+    const ControllerFlags& lhs, const CgConstant::Controller& rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ & (1U << static_cast<uint64_t>(rhs));
   return flags;
 }
 
 constexpr ControllerFlags operator|(
-    const CgConstant::Controller &lhs,
-    const CgConstant::Controller &rhs) noexcept {
+    const CgConstant::Controller& lhs,
+    const CgConstant::Controller& rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ =
       (1U << static_cast<uint64_t>(lhs)) | (1U << static_cast<uint64_t>(rhs));
@@ -311,10 +315,10 @@ class BpfRuntimeInfo {
   void Destroy();
   static void RmBpfDeviceMap();
 
-  struct bpf_object *BpfObj() { return bpf_obj_; }
-  struct bpf_program *BpfProgram() { return bpf_prog_; }
-  absl::Mutex *BpfMutex() { return bpf_mtx_.get(); }
-  struct bpf_map *BpfDevMap() { return dev_map_; }
+  struct bpf_object* BpfObj() { return bpf_obj_; }
+  struct bpf_program* BpfProgram() { return bpf_prog_; }
+  absl::Mutex* BpfMutex() { return bpf_mtx_.get(); }
+  struct bpf_map* BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
   void SetLogEnabled(bool enabled) { bpf_enable_logging_ = enabled; }
   bool Valid() const {
@@ -324,9 +328,9 @@ class BpfRuntimeInfo {
 
  private:
   bool bpf_enable_logging_;
-  struct bpf_object *bpf_obj_;
-  struct bpf_program *bpf_prog_;
-  struct bpf_map *dev_map_;
+  struct bpf_object* bpf_obj_;
+  struct bpf_program* bpf_prog_;
+  struct bpf_map* dev_map_;
   int bpf_prog_fd_;
   std::unique_ptr<absl::Mutex> bpf_mtx_;
   size_t cgroup_count_;
@@ -335,11 +339,11 @@ class BpfRuntimeInfo {
 
 class Cgroup {
  public:
-  Cgroup(const std::string &name, struct cgroup *handle, uint64_t id = 0)
+  Cgroup(const std::string& name, struct cgroup* handle, uint64_t id = 0)
       : m_cgroup_name_(name), m_cgroup_(handle), m_cgroup_id_(id) {}
   ~Cgroup() = default;
 
-  struct cgroup *NativeHandle() { return m_cgroup_; }
+  struct cgroup* NativeHandle() { return m_cgroup_; }
 
   // Using the zombie object pattern as exceptions are not available.
   bool Valid() const { return m_cgroup_ != nullptr; }
@@ -349,31 +353,31 @@ class Cgroup {
                           uint64_t value);
   bool SetControllerStr(CgConstant::Controller controller,
                         CgConstant::ControllerFile controller_file,
-                        const std::string &str);
+                        const std::string& str);
   bool SetControllerStrs(CgConstant::Controller controller,
                          CgConstant::ControllerFile controller_file,
-                         const std::vector<std::string> &strs);
+                         const std::vector<std::string>& strs);
 
   void Destroy();
 
   // CgConstant::CgroupVersion cg_version; // maybe for hybrid mode
   bool ModifyCgroup_(CgConstant::ControllerFile controller_file);
 
-  const std::string &GetCgroupName() const { return m_cgroup_name_; }
+  const std::string& GetCgroupName() const { return m_cgroup_name_; }
 
   uint64_t GetCgroupId() const { return m_cgroup_id_; }
 
-  struct cgroup *RawCgHandle() const { return m_cgroup_; }
+  struct cgroup* RawCgHandle() const { return m_cgroup_; }
 
  private:
   std::string m_cgroup_name_;
-  mutable struct cgroup *m_cgroup_;
+  mutable struct cgroup* m_cgroup_;
   uint64_t m_cgroup_id_;
 };
 
 class CgroupInterface {
  public:
-  CgroupInterface(const std::string &name, struct cgroup *handle,
+  CgroupInterface(const std::string& name, struct cgroup* handle,
                   uint64_t id = 0)
       : m_cgroup_info_(name, handle, id) {};
   virtual ~CgroupInterface() = default;
@@ -383,7 +387,7 @@ class CgroupInterface {
   virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
   virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
   virtual bool SetBlockioWeight(uint64_t weight) = 0;
-  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+  virtual bool SetDeviceAccess(const std::unordered_set<SlotId>& devices,
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
 
@@ -406,7 +410,7 @@ class CgroupInterface {
 
 class CgroupV1 : public CgroupInterface {
  public:
-  CgroupV1(const std::string &name, struct cgroup *handle)
+  CgroupV1(const std::string& name, struct cgroup* handle)
       : CgroupInterface(name, handle) {}
   ~CgroupV1() override = default;
 
@@ -417,7 +421,7 @@ class CgroupV1 : public CgroupInterface {
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
   bool SetBlockioWeight(uint64_t weight) override;
 
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+  bool SetDeviceAccess(const std::unordered_set<SlotId>& devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
   bool KillAllProcesses() override;
@@ -429,11 +433,11 @@ class CgroupV1 : public CgroupInterface {
 
 class CgroupV2 : public CgroupInterface {
  public:
-  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id);
+  CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id);
 
 #ifdef CRANE_ENABLE_BPF
-  CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id,
-           std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
+  CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
+           std::vector<BpfDeviceMeta>& cgroup_bpf_devices);
 #endif
 
   ~CgroupV2() override = default;
@@ -470,11 +474,11 @@ class CgroupV2 : public CgroupInterface {
   file. reference from:
   https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html#device-controller
   */
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+  bool SetDeviceAccess(const std::unordered_set<SlotId>& devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
-  bool RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource);
+  bool RecoverFromCgSpec(const crane::grpc::ResourceInNode& resource);
   bool EraseBpfDeviceMap();
 #endif
   bool KillAllProcesses() override;
@@ -492,19 +496,19 @@ class CgroupV2 : public CgroupInterface {
 
 class AllocatableResourceAllocator {
  public:
-  static bool Allocate(const AllocatableResource &resource,
-                       CgroupInterface *cg);
-  static bool Allocate(const crane::grpc::AllocatableResource &resource,
-                       CgroupInterface *cg);
+  static bool Allocate(const AllocatableResource& resource,
+                       CgroupInterface* cg);
+  static bool Allocate(const crane::grpc::AllocatableResource& resource,
+                       CgroupInterface* cg);
 };
 
 class DedicatedResourceAllocator {
  public:
-  static bool Allocate(const DedicatedResourceInNode &request_resource,
-                       CgroupInterface *cg);
+  static bool Allocate(const DedicatedResourceInNode& request_resource,
+                       CgroupInterface* cg);
   static bool Allocate(
-      const crane::grpc::DedicatedResourceInNode &request_resource,
-      CgroupInterface *cg);
+      const crane::grpc::DedicatedResourceInNode& request_resource,
+      CgroupInterface* cg);
 };
 
 using CgroupStrParsedIds =
@@ -516,10 +520,10 @@ class CgroupManager {
   CgroupManager() = default;
   ~CgroupManager() = default;
 
-  CgroupManager(const CgroupManager &) = delete;
-  CgroupManager(CgroupManager &&) = delete;
-  CgroupManager &operator=(const CgroupManager &) = delete;
-  CgroupManager &operator=(CgroupManager &&) = delete;
+  CgroupManager(const CgroupManager&) = delete;
+  CgroupManager(CgroupManager&&) = delete;
+  CgroupManager& operator=(const CgroupManager&) = delete;
+  CgroupManager& operator=(CgroupManager&&) = delete;
 
   static CraneErrCode Init(spdlog::level::level_enum debug_level);
 
@@ -555,12 +559,12 @@ class CgroupManager {
    * \return CraneExpected<std::unique_ptr<CgroupInterface>> created cgroup
    */
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
-      const std::string &cgroup_str,
-      const crane::grpc::ResourceInNode &resource, bool recover,
+      const std::string& cgroup_str,
+      const crane::grpc::ResourceInNode& resource, bool recover,
       std::uint64_t min_mem = 0U);
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
-      const crane::grpc::ResourceInNode &res_in_node);
+      const crane::grpc::ResourceInNode& res_in_node);
 
   static void SetCgroupVersion(CgConstant::CgroupVersion v) {
     m_cg_version_ = v;
@@ -579,23 +583,25 @@ class CgroupManager {
   // oom_kill and oom are read from memory.events. For cgroup v1, only
   // oom_kill is read from memory.oom_control and 'oom' will stay 0.
   // Returns false on any failure.
-  static bool ReadOomCountsFromCgroupPath(const std::string &cg_path,
-                                          uint64_t &oom_kill, uint64_t &oom);
+  static bool ReadOomCountsFromCgroupPath(const std::string& cg_path,
+                                          uint64_t& oom_kill, uint64_t& oom);
+  static CraneErrCode FreezeCgroupByPath(const std::string& cg_path);
+  static CraneErrCode ThawCgroupByPath(const std::string& cg_path);
 
   // Make these functions public for use in Craned.cpp
   static std::unique_ptr<CgroupInterface> CreateOrOpen_(
-      const std::string &cgroup_str, ControllerFlags preferred_controllers,
+      const std::string& cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
   static std::set<job_id_t> GetJobIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
   static std::set<job_id_t> GetJobIdsFromCgroupV2_(
-      const std::filesystem::path &root_cgroup_path);
+      const std::filesystem::path& root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
   static CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
-  GetJobBpfMapCgroupsV2_(const std::filesystem::path &root_cgroup_path);
+  GetJobBpfMapCgroupsV2_(const std::filesystem::path& root_cgroup_path);
 #endif
 
 #ifdef CRANE_ENABLE_BPF
@@ -603,15 +609,15 @@ class CgroupManager {
 #endif
  private:
   static CgroupStrParsedIds ParseIdsFromCgroupStr_(
-      const std::string &cgroup_str);
+      const std::string& cgroup_str);
 
-  static int InitializeController_(struct cgroup &cgroup,
+  static int InitializeController_(struct cgroup& cgroup,
                                    CgConstant::Controller controller,
                                    bool required, bool has_cgroup,
-                                   bool &changed_cgroup);
+                                   bool& changed_cgroup);
 
   static std::unordered_map<ino_t, job_id_t> GetCgJobIdMapCgroupV2_(
-      const std::filesystem::path &root_cgroup_path);
+      const std::filesystem::path& root_cgroup_path);
 
   inline static ControllerFlags m_mounted_controllers_ = NO_CONTROLLER_FLAG;
 

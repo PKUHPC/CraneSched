@@ -29,11 +29,125 @@
 #  include <linux/bpf.h>
 #endif
 
+#include <fstream>
+#include <optional>
+#include <string_view>
+
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
 namespace Craned::Common {
+
+namespace {
+enum class FreezerAction : uint8_t { Freeze = 0, Thaw };
+
+CraneErrCode WriteFreezerValue(const std::filesystem::path& file_path,
+                               std::string_view value, FreezerAction action) {
+  std::ofstream ofs(file_path);
+  if (!ofs.is_open()) {
+    CRANE_ERROR("Unable to open '{}' when writing freezer state", file_path);
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  ofs << value;
+  if (!ofs.good()) {
+    CRANE_ERROR("Failed to write '{}' into '{}'", value, file_path);
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  CRANE_DEBUG("Freezer action {} succeeded at '{}'",
+              action == FreezerAction::Freeze ? "freeze" : "thaw", file_path);
+  return CraneErrCode::SUCCESS;
+}
+
+std::optional<std::filesystem::path> BuildControllerSpecificPath(
+    const std::filesystem::path& cg_path, CgConstant::Controller controller) {
+  std::error_code ec;
+  auto relative_path =
+      std::filesystem::relative(cg_path, CgConstant::kSystemCgPathPrefix, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to derive controller path for '{}': {}",
+                cg_path.string(), ec.message());
+    return std::nullopt;
+  }
+
+  return CgConstant::kSystemCgPathPrefix /
+         CgConstant::GetControllerStringView(controller) / relative_path;
+}
+
+std::optional<std::string> ReadFreezerValue(
+    const std::filesystem::path& file_path) {
+  std::ifstream ifs(file_path);
+  if (!ifs.is_open()) return std::nullopt;
+
+  std::string state;
+  ifs >> state;
+  if (!ifs.good()) return std::nullopt;
+  return state;
+}
+
+CraneErrCode ChangeFreezerStateByPath(const std::string& cg_path,
+                                      FreezerAction action) {
+  if (cg_path.empty()) {
+    CRANE_WARN("Freezer action ignored due to empty cgroup path");
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  std::filesystem::path cg_fs_path(cg_path);
+  std::error_code ec;
+  if (!std::filesystem::exists(cg_fs_path, ec)) {
+    CRANE_WARN("Freezer action on '{}' ignored: {}", cg_path, ec.message());
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  if (CgroupManager::IsCgV2()) {
+    auto freeze_file = cg_fs_path / CgConstant::kCgroupFreezeFileV2;
+    auto current_state = ReadFreezerValue(freeze_file);
+    if (current_state.has_value()) {
+      const std::string& state = current_state.value();
+      if ((action == FreezerAction::Freeze && state == "1") ||
+          (action == FreezerAction::Thaw && state == "0")) {
+        return CraneErrCode::SUCCESS;
+      }
+    }
+
+    return WriteFreezerValue(
+        freeze_file, action == FreezerAction::Freeze ? "1" : "0", action);
+  }
+
+  if (!CgroupManager::IsMounted(CgConstant::Controller::FREEZE_CONTROLLER)) {
+    CRANE_ERROR("Freezer controller is not mounted; cannot {} '{}'.",
+                action == FreezerAction::Freeze ? "freeze" : "thaw", cg_path);
+    return CraneErrCode::ERR_CGROUP;
+  }
+
+  auto controller_path = BuildControllerSpecificPath(
+      cg_fs_path, CgConstant::Controller::FREEZE_CONTROLLER);
+  if (!controller_path.has_value()) return CraneErrCode::ERR_CGROUP;
+
+  auto freezer_file = controller_path.value() / CgConstant::kFreezerStateFileV1;
+  if (!std::filesystem::exists(freezer_file, ec)) {
+    CRANE_WARN(
+        "Freezer file '{}' missing for action {}: {}", freezer_file.string(),
+        action == FreezerAction::Freeze ? "freeze" : "thaw", ec.message());
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto current_state = ReadFreezerValue(freezer_file);
+  if (current_state.has_value()) {
+    const std::string& state = current_state.value();
+    if ((action == FreezerAction::Freeze && state == "FROZEN") ||
+        (action == FreezerAction::Thaw && state == "THAWED")) {
+      return CraneErrCode::SUCCESS;
+    }
+  }
+
+  return WriteFreezerValue(
+      freezer_file, action == FreezerAction::Freeze ? "FROZEN" : "THAWED",
+      action);
+}
+}  // namespace
 CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
@@ -65,7 +179,7 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   using CgConstant::GetControllerStringView;
 
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
-    void *handle = nullptr;
+    void* handle = nullptr;
     controller_data info{};
 
     int ret = cgroup_get_all_controller_begin(&handle, &info);
@@ -126,7 +240,7 @@ CraneErrCode CgroupManager::Init(spdlog::level::level_enum debug_level) {
   } else if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V2) {
     // cgroup v2 don't use /proc/cgroups to manage controller.
     // Instead, we use root cgroup ("/") to check mounted controllers.
-    cgroup *root = cgroup_new_cgroup("/");
+    cgroup* root = cgroup_new_cgroup("/");
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
       return CraneErrCode::ERR_CGROUP;
@@ -231,10 +345,10 @@ void CgroupManager::ControllersMounted() {
  * Not designed for external users - extracted from CgroupManager::CreateOrOpen_
  * to reduce code duplication. return 0 on success, 1 on failure
  */
-int CgroupManager::InitializeController_(struct cgroup &cgroup,
+int CgroupManager::InitializeController_(struct cgroup& cgroup,
                                          CgConstant::Controller controller,
                                          bool required, bool has_cgroup,
-                                         bool &changed_cgroup) {
+                                         bool& changed_cgroup) {
   std::string_view controller_str =
       CgConstant::GetControllerStringView(controller);
 
@@ -252,7 +366,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
     }
   }
 
-  struct cgroup_controller *p_raw_controller;
+  struct cgroup_controller* p_raw_controller;
   if (!has_cgroup ||
       cgroup_get_controller(&cgroup, controller_str.data()) == nullptr) {
     changed_cgroup = true;
@@ -294,7 +408,7 @@ std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
 }
 
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
-    const std::string &cgroup_str) {
+    const std::string& cgroup_str) {
   // Pattern now includes optional system/user suffix for step:
   // job_{job_id}[/step_{step_id}[/system|user[/task_{task_id}]]]
   static const auto cg_pattern_str = std::format(
@@ -321,7 +435,7 @@ CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
  * @return unique_ptr to CgroupInterface, null if failed.
  */
 std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
-    const std::string &cgroup_str, ControllerFlags preferred_controllers,
+    const std::string& cgroup_str, ControllerFlags preferred_controllers,
     ControllerFlags required_controllers, bool retrieve) {
   using CgConstant::Controller;
   using CgConstant::GetControllerStringView;
@@ -330,7 +444,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   std::string full_cg_name = CgConstant::kRootCgNamePrefix + "/" + cgroup_str;
 
   bool changed_cgroup = false;
-  struct cgroup *native_cgroup = cgroup_new_cgroup(full_cg_name.c_str());
+  struct cgroup* native_cgroup = cgroup_new_cgroup(full_cg_name.c_str());
   if (native_cgroup == nullptr) {
     CRANE_WARN("Unable to construct new cgroup object.\n");
     return nullptr;
@@ -470,8 +584,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 }
 
 CraneExpected<std::unique_ptr<CgroupInterface>>
-CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
-                                    const crane::grpc::ResourceInNode &resource,
+CgroupManager::AllocateAndGetCgroup(const std::string& cgroup_str,
+                                    const crane::grpc::ResourceInNode& resource,
                                     bool recover, std::uint64_t min_mem) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
@@ -496,7 +610,7 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     if (GetCgroupVersion() != CgConstant::CgroupVersion::CGROUP_V2) {
       return cg_unique_ptr;
     }
-    auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
+    auto* cg_v2_ptr = dynamic_cast<CgroupV2*>(cg_unique_ptr.get());
     cg_v2_ptr->RecoverFromCgSpec(resource);
 #endif
 
@@ -538,11 +652,11 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
 
 std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
     CgConstant::Controller controller) {
-  void *handle = nullptr;
+  void* handle = nullptr;
   cgroup_file_info info{};
   std::set<job_id_t> job_ids;
 
-  const char *controller_str =
+  const char* controller_str =
       CgConstant::GetControllerStringView(controller).data();
 
   int base_level;
@@ -564,14 +678,14 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
 }
 
 std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
-    const std::filesystem::path &root_cgroup_path) {
+    const std::filesystem::path& root_cgroup_path) {
   std::set<job_id_t> job_ids;
 
   // If the directory not existed, return an empty set.
   if (!std::filesystem::exists(root_cgroup_path)) return job_ids;
 
   try {
-    for (const auto &it :
+    for (const auto& it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
@@ -579,21 +693,21 @@ std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
         if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
       }
     }
-  } catch (const std::filesystem::filesystem_error &e) {
+  } catch (const std::filesystem::filesystem_error& e) {
     CRANE_ERROR("Error: {}", e.what());
   }
   return job_ids;
 }
 
 std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
-    const std::filesystem::path &root_cgroup_path) {
+    const std::filesystem::path& root_cgroup_path) {
   std::unordered_map<ino_t, job_id_t> cg_job_id_map;
 
   // If the directory not existed, return an empty map.
   if (!std::filesystem::exists(root_cgroup_path)) return cg_job_id_map;
 
   try {
-    for (const auto &it :
+    for (const auto& it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
@@ -610,7 +724,7 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
         cg_job_id_map.emplace(cg_stat.st_ino, job_id_opt.value());
       }
     }
-  } catch (const std::filesystem::filesystem_error &e) {
+  } catch (const std::filesystem::filesystem_error& e) {
     CRANE_ERROR("Error: {}", e.what());
   }
   return cg_job_id_map;
@@ -620,7 +734,7 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
 
 CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
 CgroupManager::GetJobBpfMapCgroupsV2_(
-    const std::filesystem::path &root_cgroup_path) {
+    const std::filesystem::path& root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
       GetCgJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
@@ -631,7 +745,7 @@ CgroupManager::GetJobBpfMapCgroupsV2_(
 
   std::unordered_map<task_id_t, std::vector<BpfKey>> results;
 
-  auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
+  auto add_task = [&results, &cg_ino_job_id_map](BpfKey* key) {
     // Skip log level record.
     if (key->cgroup_id == 0) {
       return;
@@ -662,7 +776,7 @@ CgroupManager::GetJobBpfMapCgroupsV2_(
 #endif
 
 Common::EnvMap CgroupManager::GetResourceEnvMapByResInNode(
-    const crane::grpc::ResourceInNode &res_in_node) {
+    const crane::grpc::ResourceInNode& res_in_node) {
   std::unordered_map env_map = DeviceManager::GetDevEnvMapByResInNode(
       res_in_node.dedicated_res_in_node());
 
@@ -715,9 +829,9 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
   return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
-bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
-                                                uint64_t &oom_kill,
-                                                uint64_t &oom) {
+bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string& cg_path,
+                                                uint64_t& oom_kill,
+                                                uint64_t& oom) {
   oom_kill = 0;
   oom = 0;
   std::error_code ec;
@@ -777,6 +891,14 @@ bool CgroupManager::ReadOomCountsFromCgroupPath(const std::string &cg_path,
   return true;
 }
 
+CraneErrCode CgroupManager::FreezeCgroupByPath(const std::string& cg_path) {
+  return ChangeFreezerStateByPath(cg_path, FreezerAction::Freeze);
+}
+
+CraneErrCode CgroupManager::ThawCgroupByPath(const std::string& cg_path) {
+  return ChangeFreezerStateByPath(cg_path, FreezerAction::Thaw);
+}
+
 bool Cgroup::SetControllerValue(CgConstant::Controller controller,
                                 CgConstant::ControllerFile controller_file,
                                 uint64_t value) {
@@ -789,7 +911,7 @@ bool Cgroup::SetControllerValue(CgConstant::Controller controller,
 
   int err;
 
-  struct cgroup_controller *cg_controller;
+  struct cgroup_controller* cg_controller;
 
   if ((cg_controller = cgroup_get_controller(
            m_cgroup_,
@@ -816,7 +938,7 @@ bool Cgroup::SetControllerValue(CgConstant::Controller controller,
 
 bool Cgroup::SetControllerStr(CgConstant::Controller controller,
                               CgConstant::ControllerFile controller_file,
-                              const std::string &str) {
+                              const std::string& str) {
   if (!CgroupManager::IsMounted(controller)) {
     CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
                 CgConstant::GetControllerFileStringView(controller_file),
@@ -826,7 +948,7 @@ bool Cgroup::SetControllerStr(CgConstant::Controller controller,
 
   int err;
 
-  struct cgroup_controller *cg_controller;
+  struct cgroup_controller* cg_controller;
 
   if ((cg_controller = cgroup_get_controller(
            m_cgroup_,
@@ -891,7 +1013,7 @@ bool Cgroup::ModifyCgroup_(CgConstant::ControllerFile controller_file) {
 
 bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
                                CgConstant::ControllerFile controller_file,
-                               const std::vector<std::string> &strs) {
+                               const std::vector<std::string>& strs) {
   if (!CgroupManager::IsMounted(controller)) {
     CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
                 CgConstant::GetControllerFileStringView(controller_file),
@@ -901,7 +1023,7 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
 
   int err;
 
-  struct cgroup_controller *cg_controller;
+  struct cgroup_controller* cg_controller;
 
   if ((cg_controller = cgroup_get_controller(
            m_cgroup_,
@@ -911,7 +1033,7 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
                CgConstant::GetControllerStringView(controller), m_cgroup_name_);
     return false;
   }
-  for (const auto &str : strs) {
+  for (const auto& str : strs) {
     if ((err = cgroup_set_value_string(
              cg_controller,
              CgConstant::GetControllerFileStringView(controller_file).data(),
@@ -1025,16 +1147,16 @@ bool CgroupV1::SetBlockioWeight(uint64_t weight) {
       CgConstant::ControllerFile::BLOCKIO_WEIGHT, weight);
 }
 
-bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
                                bool set_read, bool set_write, bool set_mknod) {
   std::string op;
   if (set_read) op += "r";
   if (set_write) op += "w";
   if (set_mknod) op += "m";
   std::vector<std::string> deny_limits;
-  for (const auto &this_device : g_this_node_device | std::views::values) {
+  for (const auto& this_device : g_this_node_device | std::views::values) {
     if (!devices.contains(this_device->slot_id)) {
-      for (const auto &dev_meta : this_device->device_file_metas) {
+      for (const auto& dev_meta : this_device->device_file_metas) {
         deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
                                              dev_meta.major, dev_meta.minor,
                                              op));
@@ -1052,17 +1174,17 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 bool CgroupV1::KillAllProcesses() {
   using namespace CgConstant::Internal;
 
-  const char *controller = CgConstant::GetControllerStringView(
+  const char* controller = CgConstant::GetControllerStringView(
                                CgConstant::Controller::CPU_CONTROLLER)
                                .data();
 
-  const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
+  const char* cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
   int size, rc;
-  pid_t *pids;
+  pid_t* pids;
 
-  rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                        const_cast<char *>(controller), &pids, &size);
+  rc = cgroup_get_procs(const_cast<char*>(cg_name),
+                        const_cast<char*>(controller), &pids, &size);
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
@@ -1080,17 +1202,17 @@ bool CgroupV1::KillAllProcesses() {
 bool CgroupV1::Empty() {
   using namespace CgConstant::Internal;
 
-  const char *controller = CgConstant::GetControllerStringView(
+  const char* controller = CgConstant::GetControllerStringView(
                                CgConstant::Controller::CPU_CONTROLLER)
                                .data();
 
-  const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
+  const char* cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
   int size, rc;
-  pid_t *pids;
+  pid_t* pids;
 
-  rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                        const_cast<char *>(controller), &pids, &size);
+  rc = cgroup_get_procs(const_cast<char*>(cg_name),
+                        const_cast<char*>(controller), &pids, &size);
   if (rc == 0) {
     free(pids);
     return size == 0;
@@ -1229,13 +1351,13 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
     } else {
       CRANE_TRACE("File does not exist: {}", CgConstant::kBpfDeviceMapFilePath);
     }
-  } catch (const std::filesystem::filesystem_error &e) {
+  } catch (const std::filesystem::filesystem_error& e) {
     CRANE_ERROR("Error: {}", e.what());
   }
 }
 #endif
 
-CgroupV2::CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id)
+CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id)
     : CgroupInterface(name, handle, id) {
 #ifdef CRANE_ENABLE_BPF
   if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
@@ -1248,8 +1370,8 @@ CgroupV2::CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id)
 
 #ifdef CRANE_ENABLE_BPF
 // For recovery
-CgroupV2::CgroupV2(const std::string &name, struct cgroup *handle, uint64_t id,
-                   std::vector<BpfDeviceMeta> &cgroup_bpf_devices)
+CgroupV2::CgroupV2(const std::string& name, struct cgroup* handle, uint64_t id,
+                   std::vector<BpfDeviceMeta>& cgroup_bpf_devices)
     : CgroupV2(name, handle, id) {
   m_cgroup_bpf_devices = std::move(cgroup_bpf_devices);
   m_bpf_attached_ = true;
@@ -1302,7 +1424,7 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
       CgConstant::ControllerFile::IO_WEIGHT_V2, weight);
 }
 
-bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId>& devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
   if (!CgroupManager::bpf_runtime_info.Valid()) {
@@ -1325,10 +1447,10 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (set_write) access |= BPF_DEVCG_ACC_WRITE;
   if (set_mknod) access |= BPF_DEVCG_ACC_MKNOD;
 
-  auto &bpf_devices = m_cgroup_bpf_devices;
-  for (const auto &this_device : g_this_node_device | std::views::values) {
+  auto& bpf_devices = m_cgroup_bpf_devices;
+  for (const auto& this_device : g_this_node_device | std::views::values) {
     if (!devices.contains(this_device->slot_id)) {
-      for (const auto &dev_meta : this_device->device_file_metas) {
+      for (const auto& dev_meta : this_device->device_file_metas) {
         int16_t op_type = 0;
         if (dev_meta.op_type == 'c') {
           op_type |= BPF_DEVCG_DEV_CHAR;
@@ -1344,7 +1466,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
   {
     absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
-    for (auto &bpf_device : bpf_devices) {
+    for (auto& bpf_device : bpf_devices) {
       struct BpfKey key = {.cgroup_id = m_cgroup_info_.GetCgroupId(),
                            .major = bpf_device.major,
                            .minor = bpf_device.minor};
@@ -1382,7 +1504,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
+bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode& resource) {
   if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
@@ -1405,17 +1527,17 @@ bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
   if (CgConstant::kCgLimitDeviceMknod) access |= BPF_DEVCG_ACC_MKNOD;
 
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &type_slots_map :
+  for (const auto& type_slots_map :
        resource.dedicated_res_in_node().name_type_map() | std::views::values) {
-    for (const auto &slots :
+    for (const auto& slots :
          type_slots_map.type_slots_map() | std::views::values)
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 
-  auto &bpf_devices = m_cgroup_bpf_devices;
-  for (const auto &this_device : g_this_node_device | std::views::values) {
+  auto& bpf_devices = m_cgroup_bpf_devices;
+  for (const auto& this_device : g_this_node_device | std::views::values) {
     if (!all_request_slots.contains(this_device->slot_id)) {
-      for (const auto &dev_meta : this_device->device_file_metas) {
+      for (const auto& dev_meta : this_device->device_file_metas) {
         int16_t op_type = 0;
         if (dev_meta.op_type == 'c') {
           op_type |= BPF_DEVCG_DEV_CHAR;
@@ -1439,7 +1561,7 @@ bool CgroupV2::EraseBpfDeviceMap() {
     return false;
   }
   absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
-  for (const auto &bpf_meta : m_cgroup_bpf_devices) {
+  for (const auto& bpf_meta : m_cgroup_bpf_devices) {
     struct BpfKey key = {.cgroup_id = m_cgroup_info_.GetCgroupId(),
                          .major = bpf_meta.major,
                          .minor = bpf_meta.minor};
@@ -1458,17 +1580,17 @@ bool CgroupV2::EraseBpfDeviceMap() {
 bool CgroupV2::KillAllProcesses() {
   using namespace CgConstant::Internal;
 
-  const char *controller = CgConstant::GetControllerStringView(
+  const char* controller = CgConstant::GetControllerStringView(
                                CgConstant::Controller::CPU_CONTROLLER_V2)
                                .data();
 
-  const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
+  const char* cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
   int size, rc;
-  pid_t *pids;
+  pid_t* pids;
 
-  rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                        const_cast<char *>(controller), &pids, &size);
+  rc = cgroup_get_procs(const_cast<char*>(cg_name),
+                        const_cast<char*>(controller), &pids, &size);
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
@@ -1486,17 +1608,17 @@ bool CgroupV2::KillAllProcesses() {
 bool CgroupV2::Empty() {
   using namespace CgConstant::Internal;
 
-  const char *controller = CgConstant::GetControllerStringView(
+  const char* controller = CgConstant::GetControllerStringView(
                                CgConstant::Controller::CPU_CONTROLLER_V2)
                                .data();
 
-  const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
+  const char* cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
   int size, rc;
-  pid_t *pids;
+  pid_t* pids;
 
-  rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                        const_cast<char *>(controller), &pids, &size);
+  rc = cgroup_get_procs(const_cast<char*>(cg_name),
+                        const_cast<char*>(controller), &pids, &size);
   if (rc == 0) {
     // NOLINTNEXTLINE(hicpp-no-malloc)
     free(pids);
@@ -1518,8 +1640,8 @@ void CgroupV2::Destroy() {
 #endif
 }
 
-bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            CgroupInterface *cg) {
+bool AllocatableResourceAllocator::Allocate(const AllocatableResource& resource,
+                                            CgroupInterface* cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
@@ -1532,7 +1654,7 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg) {
+    const crane::grpc::AllocatableResource& resource, CgroupInterface* cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
@@ -1545,11 +1667,11 @@ bool AllocatableResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(
-    const DedicatedResourceInNode &request_resource, CgroupInterface *cg) {
+    const DedicatedResourceInNode& request_resource, CgroupInterface* cg) {
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &type_slots_map :
+  for (const auto& type_slots_map :
        request_resource.name_type_slots_map | std::ranges::views::values) {
-    for (const auto &slots :
+    for (const auto& slots :
          type_slots_map.type_slots_map | std::ranges::views::values)
       all_request_slots.insert(slots.cbegin(), slots.cend());
   };
@@ -1575,12 +1697,12 @@ bool DedicatedResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(
-    const crane::grpc::DedicatedResourceInNode &request_resource,
-    CgroupInterface *cg) {
+    const crane::grpc::DedicatedResourceInNode& request_resource,
+    CgroupInterface* cg) {
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &type_slots_map :
+  for (const auto& type_slots_map :
        request_resource.name_type_map() | std::ranges::views::values) {
-    for (const auto &slots :
+    for (const auto& slots :
          type_slots_map.type_slots_map() | std::ranges::views::values)
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
