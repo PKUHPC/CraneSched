@@ -409,8 +409,7 @@ void CtldClient::Init() {
         for (auto status_change_steps = g_ctld_client->GetAllStepStatusChange();
              auto& [job_id, step_status_map] : status_change_steps) {
           for (auto& [step_id, status] : step_status_map) {
-            exact_job_steps[job_id][step_id] = {.status = status,
-                                                .exit_code = 0};
+            exact_job_steps[job_id][step_id] = status;
           }
         }
         auto craned_job_ids = exact_job_steps | std::views::keys;
@@ -472,8 +471,9 @@ void CtldClient::Init() {
           for (const auto& step_id : steps) {
             auto ctld_status =
                 arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto craned_step_info = exact_job_steps.at(job_id).at(step_id);
-            auto craned_status = craned_step_info.status;
+            auto craned_status = exact_job_steps.at(job_id).at(step_id);
+            uint32_t craned_exit_code =
+                g_job_mgr->GetStepExitCode(job_id, step_id);
             CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
                         step_id, craned_status, ctld_status);
 
@@ -495,7 +495,7 @@ void CtldClient::Init() {
                     job_id, step_id);
                 steps_to_sync_status[job_id][step_id] = {
                     .status = craned_status,
-                    .exit_code = craned_step_info.exit_code};
+                    .exit_code = craned_exit_code};
                 continue;
               }
 
@@ -510,7 +510,7 @@ void CtldClient::Init() {
                     job_id, step_id);
                 steps_to_sync_status[job_id][step_id] = {
                     .status = craned_status,
-                    .exit_code = craned_step_info.exit_code};
+                    .exit_code = craned_exit_code};
                 continue;
               }
 
@@ -525,7 +525,7 @@ void CtldClient::Init() {
                     job_id, step_id, craned_status);
                 steps_to_sync_status[job_id][step_id] = {
                     .status = craned_status,
-                    .exit_code = craned_step_info.exit_code};
+                    .exit_code = craned_exit_code};
                 continue;
               }
 

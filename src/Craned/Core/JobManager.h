@@ -134,12 +134,9 @@ class JobManager {
     return m_job_map_.GetValueExclusivePtr(job_id);
   }
 
-  struct StepStatusWithExitCode {
-    StepStatus status;
-    uint32_t exit_code;
-  };
-  std::map<job_id_t, std::map<step_id_t, StepStatusWithExitCode>>
-  GetAllocatedJobSteps();
+  std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
+
+  uint32_t GetStepExitCode(job_id_t job_id, step_id_t step_id);
 
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
