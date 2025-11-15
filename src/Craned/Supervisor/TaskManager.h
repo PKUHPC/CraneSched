@@ -476,6 +476,12 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  struct TaskSignalQueueElem {
+    enum class Action { Suspend, Resume };
+    Action action;
+    std::promise<CraneErrCode> prom;
+  };
+
   // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();

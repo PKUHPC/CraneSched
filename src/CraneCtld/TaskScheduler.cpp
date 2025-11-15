@@ -1305,7 +1305,7 @@ std::vector<CraneErrCode> TaskScheduler::SuspendRunningTasks(
       for (const auto& craned_id : executing_nodes) {
         StepStatusChangeAsync(
             task_id, 0, craned_id, crane::grpc::TaskStatus::Failed,
-            ExitCode::kExitCodeRpcError, "",
+            ExitCode::EC_RPC_ERR, "",
             google::protobuf::util::TimeUtil::GetCurrentTime());
       }
 
@@ -1448,7 +1448,7 @@ std::vector<CraneErrCode> TaskScheduler::ResumeSuspendedTasks(
       for (const auto& craned_id : executing_nodes) {
         StepStatusChangeAsync(
             task_id, 0, craned_id, crane::grpc::TaskStatus::Failed,
-            ExitCode::kExitCodeRpcError, "",
+            ExitCode::EC_RPC_ERR, "",
             google::protobuf::util::TimeUtil::GetCurrentTime());
       }
 
