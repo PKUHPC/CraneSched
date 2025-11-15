@@ -969,6 +969,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
         if (auto step_it = job_ptr->step_map.find(status_change.step_id);
             step_it != job_ptr->step_map.end()) {
           step_it->second->status = status_change.new_status;
+          step_it->second->exit_code = status_change.exit_code;
         }
       }
     }
@@ -1032,13 +1033,8 @@ JobManager::GetAllocatedJobSteps() {
     absl::MutexLock lk(job_ptr->step_map_mtx.get());
     std::map<step_id_t, StepStatusWithExitCode> step_status_map;
     for (auto& [step_id, step] : job_ptr->step_map) {
-      // Get exit code from step_to_d if available
-      uint32_t exit_code = 0;
-      if (step->step_to_d.has_runtime_attr()) {
-        exit_code = step->step_to_d.runtime_attr().exit_code();
-      }
       step_status_map[step_id] = {.status = step->status,
-                                  .exit_code = exit_code};
+                                  .exit_code = step->exit_code};
     }
     job_steps[job_id] = std::move(step_status_map);
   }
