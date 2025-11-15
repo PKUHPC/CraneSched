@@ -314,7 +314,7 @@ crane::grpc::AttachContainerStepReply CranedStub::AttachContainerStep(
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    auto *err = reply.mutable_status();
+    auto* err = reply.mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description(status.error_message());
     reply.set_ok(false);
@@ -342,7 +342,7 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    auto *err = reply.mutable_status();
+    auto* err = reply.mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description(status.error_message());
     reply.set_ok(false);

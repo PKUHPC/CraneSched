@@ -108,9 +108,9 @@ class CranedServiceImpl : public Craned::Service {
       crane::grpc::ChangeJobTimeLimitReply* response) override;
 
   grpc::Status StepStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::StepStatusChangeRequest *request,
-      crane::grpc::StepStatusChangeReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::StepStatusChangeRequest* request,
+      crane::grpc::StepStatusChangeReply* response) override;
 
   grpc::Status AttachContainerStep(
       grpc::ServerContext *context,

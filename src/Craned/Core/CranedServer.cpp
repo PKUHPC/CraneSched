@@ -472,7 +472,7 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
     crane::grpc::AttachContainerStepReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description("CranedServer is not ready.");
     response->set_ok(false);
@@ -515,7 +515,7 @@ grpc::Status CranedServiceImpl::AttachContainerStep(
     return Status::OK;
   }
 
-  const auto &container_id = container_expt.value();
+  const auto& container_id = container_expt.value();
   auto url_expt =
       g_cri_client->Attach(container_id, request->tty(), request->stdin(),
                            request->stdout(), request->stderr());
@@ -542,7 +542,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     crane::grpc::ExecInContainerStepReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description("CranedServer is not ready.");
     response->set_ok(false);
@@ -586,7 +586,7 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
         std::format("Container not found, possibly initializing or exited: {}",
@@ -595,12 +595,12 @@ grpc::Status CranedServiceImpl::ExecInContainerStep(
     return Status::OK;
   }
 
-  const auto &container_id = container_expt.value();
+  const auto& container_id = container_expt.value();
 
   // Convert command from protobuf to vector
   std::vector<std::string> command;
   command.reserve(request->command_size());
-  for (const auto &cmd : request->command()) {
+  for (const auto& cmd : request->command()) {
     command.push_back(cmd);
   }
 
