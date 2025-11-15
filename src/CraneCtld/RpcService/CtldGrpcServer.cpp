@@ -18,6 +18,8 @@
 
 #include "CtldGrpcServer.h"
 
+#include <grpcpp/support/status.h>
+
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
@@ -146,7 +148,7 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
       for (const auto step_id : steps | std::views::reverse)
         g_task_scheduler->StepStatusChangeWithReasonAsync(
             job_id, step_id, request->craned_id(),
-            crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+            crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
             "Craned re-registered but step lost.", now);
     }
   }
@@ -386,6 +388,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
@@ -416,6 +426,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // Check task type
+  if (request->task().type() == crane::grpc::TaskType::Container &&
+      !g_config.Container.Enabled) {
+    response->add_task_id_list(0);
+    response->add_code_list(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
 
   std::vector<CraneExpected<std::future<task_id_t>>> results;
 
@@ -1356,7 +1374,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         user_info->set_account(account);
       }
       user_info->set_admin_level(
-          (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+          static_cast<crane::grpc::UserInfo_AdminLevel>(user.admin_level));
       user_info->set_blocked(item.blocked);
 
       auto *partition_qos_list =
@@ -1947,6 +1965,98 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::AttachInContainerTaskRequest *request,
+    crane::grpc::AttachInContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot attach both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be attached");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->AttachInContainerTask(*request);
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecInContainerTaskRequest *request,
+    crane::grpc::ExecInContainerTaskReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  // Validate request
+  if (request->task_id() <= 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Invalid task ID");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->command_size() == 0) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Command cannot be empty");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (request->tty() && request->stderr()) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description("Cannot exec with both tty and stderr");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (!(request->stdout() || request->stderr() || request->stdin())) {
+    auto *err = response->mutable_status();
+    err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    err->set_description(
+        "At least one of stdout, stderr, or stdin must be enabled");
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  *response = g_task_scheduler->ExecInContainerTask(*request);
+
+  return grpc::Status::OK;
+}
+
 std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
     const grpc::ServerContext *context, uint32_t uid) {
   if (!g_config.ListenConf.TlsConfig.Enabled) return std::nullopt;
@@ -1966,7 +2076,7 @@ std::optional<std::string> CraneCtldServiceImpl::CheckCertAndUIDAllowed_(
   if (cn_parts.empty() || cn_parts[0].empty()) return "Certificate is invalid";
 
   try {
-    uint32_t parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
+    auto parsed_uid = static_cast<uint32_t>(std::stoul(cn_parts[0]));
     if (parsed_uid != uid) return "Uid mismatch";
   } catch (const std::invalid_argument &) {
     return "Certificate contains an invalid UID";

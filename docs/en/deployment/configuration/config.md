@@ -189,9 +189,11 @@ TLS:
   DomainSuffix: crane.local
 ```
 
-### GPU Configuration
+### Gres Configuration
 
-Define GPU resources with device control:
+> Device resource related configuration
+
+Define generic resources like GPUs, NPUs, and other accelerators:
 
 ```yaml
 Nodes:
@@ -209,6 +211,32 @@ Nodes:
         # Environment injector for runtime
         EnvInjector: nvidia
 ```
+
+**Gres Parameters:**
+
+- **name**: Generally the resource type such as: `GPU`, `NPU`, etc.
+- **type**: Generally the resource model such as: `A100`, `3090`, etc.
+- **DeviceFileRegex**: The device files under the /dev directory corresponding to the resource, suitable for resources where one physical device corresponds to one device file, **each file corresponds to one Gres resource in the system**, supports Regex format. Common device corresponding device files. Such as Nvidia, AMD, Hygon DCU, Ascend, etc.
+- **DeviceFileList**: Suitable for **Gres resources where one physical device corresponds to multiple device files under the /dev directory**, each group of files corresponds to one Gres resource in the system, supports Regex format.
+
+Choose one between DeviceFileRegex and DeviceFileList, the above device files must exist, **otherwise Craned will report an error and exit during startup**
+
+- **EnvInjector**: Environment variables that the device needs to inject
+
+    - Optional values: corresponding environment variables
+    
+    - `nvidia`: `CUDA_VISIBLE_DEVICES`
+    - `hip`: `HIP_VISIBLE_DEVICES`
+    - `ascend`: `ASCEND_RT_VISIBLE_DEVICES`
+
+- Common vendor device file paths and related configurations
+
+| Vendor | Device File Path | EnvInjector |
+| :---------- | :---------------------- | :---------- |
+| Nvidia | /dev/nvidia0 ... | nvidia |
+| AMD/Hygon DCU | /dev/dri/renderer128... | hip |
+| Ascend | /dev/davinci0 ... | ascend |
+| Iluvatar | /dev/iluvatar0 ... | nvidia |
 
 ### Queue Limits
 
@@ -264,6 +292,61 @@ CranedLogFile: craned/craned.log
 CraneCtldForeground: false
 CranedForeground: false
 ```
+
+
+### Supervisor Configuration
+
+Supervisor is CraneSched's job execution management component, responsible for controlling job steps on compute nodes.
+
+```yaml
+Supervisor:
+  # Path to supervisor executable
+  Path: /usr/libexec/csupervisor
+  
+  # Supervisor log level: trace, debug, info, warn, error
+  DebugLevel: trace
+  
+  # Log directory (relative to CraneBaseDir)
+  LogDir: supervisor
+```
+
+**Supervisor Parameters:**
+
+- **Path**: Full path to the supervisor executable. The default path is `/usr/libexec/csupervisor`, **which is typically set correctly during installation**.
+- **DebugLevel**: Controls the verbosity of supervisor logs. Available values include `trace` (most verbose), `debug`, `info`, `warn`, `error` (least verbose). For production environments, `info` or `warn` is recommended.
+- **LogDir**: Directory for supervisor log files, relative to the `CraneBaseDir` setting. Log files are helpful for diagnosing job execution issues.
+
+!!! tip
+    When troubleshooting job execution problems, you can temporarily set `DebugLevel` to `debug` or `trace` for more detailed log information.
+
+## Container Support
+
+CraneSched supports running jobs in containers through CRI (Container Runtime Interface):
+
+```yaml
+Container:
+  # Enable container support (experimental)
+  Enabled: false
+  
+  # Temporary directory for container data (relative to CraneBaseDir)
+  TempDir: supervisor/containers/
+  
+  # Path to container runtime socket
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  
+  # Path to image service socket (usually same as RuntimeEndpoint)
+  ImageEndpoint: /run/containerd/containerd.sock
+```
+
+!!! info "Experimental Feature"
+    Container support is currently experimental. There may be limitations and problems.
+
+**Requirements:**
+
+- CRI-compatible runtime (containerd or CRI-O) installed on compute nodes
+- Runtime socket accessible with appropriate permissions
+- Container images available or accessible from registries
+
 
 ## Applying Changes
 

@@ -14,7 +14,7 @@
 鹤思分为两个主要软件包组件:
 
 - **cranectld** - 控制守护进程软件包（用于控制节点）
-- **craned** - 执行守护进程软件包（用于计算节点）
+- **craned** - 计算节点守护进程软件包（用于计算节点）
 
 每个软件包包括：
 
@@ -167,8 +167,8 @@ sudo dpkg -i CraneSched-*-craned.deb
 包含计算节点的文件：
 
 ```
-/usr/bin/craned                             # 执行守护进程二进制文件
-/usr/libexec/csupervisor                    # 每步执行监督器
+/usr/bin/craned                             # 计算节点守护进程二进制文件
+/usr/libexec/csupervisor                    # 作业步骤守护进程
 /usr/lib/systemd/system/craned.service      # Systemd 服务文件
 /etc/crane/config.yaml.sample               # 集群配置模板
 /usr/lib64/security/pam_crane.so            # PAM 身份验证模块
@@ -179,13 +179,13 @@ sudo dpkg -i CraneSched-*-craned.deb
 
     **使用 RPM/DEB 软件包（`cpack`）时：**
     - 二进制文件安装到 `/usr/bin/`（遵循 FHS 标准）
-    - 监督器安装到 `/usr/libexec/`
+    - supervisor 安装到 `/usr/libexec/`
     - 示例：`/usr/bin/craned`、`/usr/libexec/csupervisor`
 
     **使用直接安装（`cmake --install`）时：**
     - 二进制文件安装到 `/usr/local/bin/`（默认 `CMAKE_INSTALL_PREFIX`）
-    - 监督器安装到 `/usr/local/libexec/`
-    - 示例：`/usr/local/bin/craned`、`/usr/local/libexec/csupervisor`，你可能需要修改 `config.yaml` 中supervsior的path
+    - supervisor 安装到 `/usr/local/libexec/`
+    - 示例：`/usr/local/bin/craned`、`/usr/local/libexec/csupervisor`，你可能需要修改 `config.yaml` 中 supervisor 的 path
     - 您可以使用 `cmake --install --prefix=/custom/path` 自定义此设置
 
 ### 安装后操作

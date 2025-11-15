@@ -80,9 +80,9 @@ class SupervisorServer {
  public:
   explicit SupervisorServer();
 
-  inline void Shutdown() { m_server_->Shutdown(); }
+  void Shutdown() { m_server_->Shutdown(); }
 
-  inline void Wait() { m_server_->Wait(); }
+  void Wait() { m_server_->Wait(); }
 
  private:
   std::unique_ptr<SupervisorServiceImpl> m_service_impl_;

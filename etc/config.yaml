@@ -153,27 +153,7 @@ Container:
   # Toggle the container support in CraneSched
   Enabled: false
   # Relate to CraneBaseDir
-  TempDir: craned/containers/
-  # OCI Runtime must support `state`, `kill`, `delete`, `run` subcommands
-  # %b, %u, %U, %j, %x will be replaced by bundle_path, user, uid, job_id, job_name
-  RuntimeBin: /usr/bin/runc
-  RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
-  RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM
-  RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
-  RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
-
-Plugin:
-  # Toggle the plugin module in CraneSched
-  Enabled: false
-  # Relative to CraneBaseDir
-  PlugindSockPath: "cplugind/cplugind.sock"
-  # Debug level of Plugind
-  PlugindDebugLevel: "trace"
-  # the address of Plugind to listen
-  PlugindListenAddress: 127.0.0.1
-  PlugindListenPort: 10018  
-  # Plugins to be loaded in Plugind
-  Plugins:
-    - Name: "dummy"
-      Path: "/path/to/dummy.so"
-      Config: "/path/to/dummy.yaml"
+  TempDir: supervisor/containers/
+  # In most cases, ImageEndpoint is the same as RuntimeEndpoint
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  ImageEndpoint: /run/containerd/containerd.sock

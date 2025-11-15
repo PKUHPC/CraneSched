@@ -25,6 +25,7 @@
 #include "EmbeddedDbClient.h"
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
+#include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -152,7 +153,7 @@ bool TaskScheduler::Init() {
 
       bool mark_task_as_failed = false;
 
-      if (task->type != crane::grpc::Batch) {
+      if (task->type == crane::grpc::Interactive) {
         CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
         mark_task_as_failed = true;
       }
@@ -306,18 +307,21 @@ bool TaskScheduler::Init() {
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
+
       auto step_status = step_info.runtime_attr().status();
       if (completed_step_status.contains(step_status)) {
         CRANE_INFO("[Step #{}{}] Step is completed, put to mongodb!", job_id,
                    step_id);
         completed_steps.emplace_back(std::move(step_info));
       }
+
       StepInCtld* step;
       if (step_type == crane::grpc::StepType::DAEMON) {
         step = new DaemonStepInCtld();
       } else {
         step = new CommonStepInCtld();
       }
+
       step->RecoverFromDb(*job, step_info);
       if (auto err_expt = AcquireStepAttributes(*job, step);
           !err_expt.has_value()) {
@@ -329,6 +333,7 @@ bool TaskScheduler::Init() {
 
         continue;
       }
+
       if (auto err_expt = CheckStepValidity(*job, step);
           !err_expt.has_value()) {
         CRANE_ERROR("[Step #{}{}] CheckStepValidity failed: {}, step dropped!",
@@ -337,6 +342,7 @@ bool TaskScheduler::Init() {
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
+
       if (step_status == crane::grpc::TaskStatus::Pending) {
         // Not support to recover pending step now. All pending steps are crun
         // which can not recover now.
@@ -344,24 +350,31 @@ bool TaskScheduler::Init() {
         invalid_steps[job_id].emplace_back(std::move(step_info));
         continue;
       }
+
       if (step_type == crane::grpc::StepType::DAEMON) {
         std::unique_ptr<DaemonStepInCtld> step_ptr(
             dynamic_cast<DaemonStepInCtld*>(step));
+
         job->SetDaemonStep(std::move(step_ptr));
         CRANE_INFO("Daemon step recovered for job #{}", job->TaskId());
+
       } else if (step_type == crane::grpc::StepType::PRIMARY) {
         std::unique_ptr<CommonStepInCtld> step_ptr(
             dynamic_cast<CommonStepInCtld*>(step));
-        CRANE_INFO("Primary step recovered for job #{}", job->TaskId());
+
         job->SetPrimaryStep(std::move(step_ptr));
+        CRANE_INFO("Primary step recovered for job #{}", job->TaskId());
+
       } else {
         std::unique_ptr<CommonStepInCtld> step_ptr(
             dynamic_cast<CommonStepInCtld*>(step));
+
+        job->AddStep(std::move(step_ptr));
         CRANE_INFO("Common step {} recovered for job #{}", job->TaskId(),
                    step->StepId());
-        job->AddStep(std::move(step_ptr));
       }
     }
+
     if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty())
       mark_job_invalid(job.get());
     step_snapshot.steps.erase(it);
@@ -941,8 +954,7 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<crane::grpc::JobToD>>
-          craned_daemon_step_map;
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
 
       // Job primary steps
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
@@ -959,6 +971,7 @@ void TaskScheduler::ScheduleThread_() {
         step_in_ctld_vec.push_back(daemon_step.get());
         job->SetDaemonStep(std::move(daemon_step));
       }
+
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
         for (auto& job : jobs_to_run) {
           failed_task_id_set.insert(job->TaskId());
@@ -968,7 +981,7 @@ void TaskScheduler::ScheduleThread_() {
         for (auto& job : jobs_to_run) {
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
-            craned_daemon_step_map[craned_id].push_back(
+            craned_alloc_job_map[craned_id].push_back(
                 daemon_step->GetJobToD(craned_id));
           }
           for (const auto& craned_id : daemon_step->CranedIds())
@@ -977,8 +990,8 @@ void TaskScheduler::ScheduleThread_() {
         }
       }
 
-      absl::BlockingCounter bl(craned_daemon_step_map.size());
-      for (auto&& iter : craned_daemon_step_map) {
+      std::latch alloc_job_latch(craned_alloc_job_map.size());
+      for (auto&& iter : craned_alloc_job_map) {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
 
@@ -999,13 +1012,13 @@ void TaskScheduler::ScheduleThread_() {
             absl::MutexLock lk(&thread_pool_mtx);
             for (const auto& job_to_d : jobs)
               failed_task_id_set.emplace(job_to_d.job_id());
-            bl.DecrementCount();
+            alloc_job_latch.count_down();
             return;
           }
 
           auto err = stub->AllocJobs(jobs);
           if (err == CraneErrCode::SUCCESS) {
-            bl.DecrementCount();
+            alloc_job_latch.count_down();
             return;
           }
           CRANE_TRACE("AllocJobs for jobs [{}] to {} failed: Rpc failure.",
@@ -1016,11 +1029,10 @@ void TaskScheduler::ScheduleThread_() {
                                      }),
                           ","),
                       craned_id);
-          thread_pool_mtx.Lock();
 
+          thread_pool_mtx.Lock();
           for (const auto& job_to_d : jobs)
             failed_task_id_set.emplace(job_to_d.job_id());
-
           thread_pool_mtx.Unlock();
 
           // If jobs in task_uid_pairs failed to start, they will be moved to
@@ -1030,23 +1042,25 @@ void TaskScheduler::ScheduleThread_() {
           // 3. Move these jobs to the completed queue.
           CRANE_ERROR("Craned #{} failed when AllocJobs.", craned_id);
 
-          bl.DecrementCount();
+          alloc_job_latch.count_down();
         });
       }
-      bl.Wait();
+      alloc_job_latch.wait();
 
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
-          auto& steps = craned_alloc_steps[craned_id];
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          auto& steps = craned_alloc_steps[craned_id];
           CRANE_TRACE("Send AllocSteps for [{}] steps to {}",
                       util::StepToDRangeIdString(steps), craned_id);
+
           if (stub == nullptr || stub->Invalid()) {
             thread_pool_mtx.Lock();
             for (const auto& step_to_d : steps)
               failed_task_id_set.emplace(step_to_d.job_id());
             thread_pool_mtx.Unlock();
+
             CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: Craned down.",
                         util::StepToDRangeIdString(steps), craned_id);
             alloc_step_latch.count_down();
@@ -1150,7 +1164,7 @@ void TaskScheduler::ScheduleThread_() {
 
       // TODO: Refactor here! Add filter chain for post-scheduling stage.
       absl::Time post_sched_time_point = absl::Now();
-      for (auto const& craned_id : craned_daemon_step_map | std::views::keys) {
+      for (auto const& craned_id : craned_alloc_job_map | std::views::keys) {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
@@ -1185,7 +1199,7 @@ void TaskScheduler::ScheduleThread_() {
           failed_job_raw_ptrs.emplace(job.get());
 
           job->SetStatus(crane::grpc::Failed);
-          job->SetExitCode(ExitCode::kExitCodeCgroupError);
+          job->SetExitCode(ExitCode::EC_CGROUP_ERR);
           job->SetEndTime(absl::Now());
         }
         ProcessFinalTasks_(failed_job_raw_ptrs);
@@ -1928,6 +1942,177 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
+crane::grpc::AttachInContainerTaskReply TaskScheduler::AttachInContainerTask(
+    const crane::grpc::AttachInContainerTaskRequest& request) {
+  crane::grpc::AttachInContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If tty is requested, tty must be enabled when creating the container
+    if (request.tty() && !std::get<ContainerMetaInTask>(task->meta).tty) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "TTY not enabled when creating this container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // If stdin is requested, stdin must be enabled when creating the container
+    if (request.stdin() && !std::get<ContainerMetaInTask>(task->meta).stdin) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description(
+          "STDIN not opened when creating this container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to attach.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
+      response.set_ok(false);
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
+    response.set_ok(false);
+    return response;
+  }
+
+  return stub->AttachInContainerTask(request);
+}
+
+crane::grpc::ExecInContainerTaskReply TaskScheduler::ExecInContainerTask(
+    const crane::grpc::ExecInContainerTaskRequest& request) {
+  crane::grpc::ExecInContainerTaskReply response;
+
+  CranedId target_craned_id;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    task_id_t task_id = request.task_id();
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
+      err->set_description("Task is still pending. Try again later.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not running.");
+      response.set_ok(false);
+      return response;
+    }
+
+    TaskInCtld* task = rn_it->second.get();
+    if (!task->IsContainer()) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested task is not a container task.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // Validate command
+    if (request.command_size() == 0) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Command cannot be empty.");
+      response.set_ok(false);
+      return response;
+    }
+
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
+        request.uid(), task->Username(), false);
+    if (!result) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_PERMISSION_USER);
+      err->set_description("Insufficient permission to exec.");
+      response.set_ok(false);
+      return response;
+    }
+
+    // TODO: Handle multiple nodes after step/task is implemented.
+    if (task->executing_craned_ids.size() != 1) {
+      auto* err = response.mutable_status();
+      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
+      err->set_description("Multiple-node task not supported yet.");
+      response.set_ok(false);
+      return response;
+    }
+
+    target_craned_id = task->executing_craned_ids.front();
+  }
+
+  auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
+  if (stub == nullptr || stub->Invalid()) {
+    auto* err = response.mutable_status();
+    err->set_code(CraneErrCode::ERR_RPC_FAILURE);
+    err->set_description("Craned is not available.");
+    response.set_ok(false);
+    return response;
+  }
+
+  return stub->ExecInContainerTask(request);
+}
+
 crane::grpc::CreateReservationReply TaskScheduler::CreateResv(
     const crane::grpc::CreateReservationRequest& request) {
   crane::grpc::CreateReservationReply reply;
@@ -2424,7 +2609,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
         for (auto step_id : step_ids)
           StepStatusChangeAsync(job_id, step_id, craned_id,
                                 crane::grpc::TaskStatus::Cancelled,
-                                ExitCode::kExitCodeTerminated, "", now);
+                                ExitCode::EC_TERMINATED, "", now);
       }
       continue;
     }
@@ -2759,7 +2944,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
-              crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCranedDown,
+              crane::grpc::TaskStatus::Failed, ExitCode::EC_CRANED_DOWN,
               "CranedDown", now);
         }
       }
@@ -2809,7 +2994,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             for (const auto& step_id : step_ids)
               StepStatusChangeWithReasonAsync(
                   job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeRpcError, "ExecRpcError", now);
+                  ExitCode::EC_RPC_ERR, "ExecRpcError", now);
           }
         }
       } else {
@@ -2822,7 +3007,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           for (const auto& step_id : step_ids)
             StepStatusChangeWithReasonAsync(
                 job_id, step_id, craned_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeCranedDown, "CranedDown", now);
+                ExitCode::EC_CRANED_DOWN, "CranedDown", now);
         }
       }
       exec_step_latch.count_down();
@@ -2894,7 +3079,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeRpcError, "Rpc failure when free job", now);
+              ExitCode::EC_RPC_ERR, "Rpc failure when free job", now);
         }
       }
       free_job_latch.count_down();
@@ -3063,6 +3248,14 @@ void TaskScheduler::QueryTasksInRam(
            req_task_states.contains(task.RuntimeAttr().status());
   };
 
+  bool no_task_types_constraint = request->filter_task_types().empty();
+  std::unordered_set<int> req_task_types(request->filter_task_types().begin(),
+                                         request->filter_task_types().end());
+  auto task_rng_filter_task_type = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_types_constraint || req_task_types.contains(task.type);
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
@@ -3079,6 +3272,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
+                      ranges::views::filter(task_rng_filter_task_type) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -3670,7 +3864,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
-  if (task->type == crane::grpc::Batch) {
+  if (task->IsBatch()) {
     auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
     if (!batch_meta->has_open_mode_append())
       batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
@@ -4010,6 +4204,15 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.node_num_min = std::min(nodes_req, bound.node_num_min);
     bound.node_num_max = std::max(nodes_req, bound.node_num_max);
 
+    uint64_t job_mem_req = job->requested_node_res_view.MemoryBytes();
+    bound.mem_alloc_min = std::min(job_mem_req, bound.mem_alloc_min);
+    bound.mem_alloc_max = std::max(job_mem_req, bound.mem_alloc_max);
+
+    double job_cpus_req =
+        static_cast<double>(job->requested_node_res_view.CpuCount());
+    bound.cpus_alloc_min = std::min(job_cpus_req, bound.cpus_alloc_min);
+    bound.cpus_alloc_max = std::max(job_cpus_req, bound.cpus_alloc_max);
+
     uint32_t qos_priority = job->qos_priority;
     bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
     bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
@@ -4106,7 +4309,7 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
                  static_cast<double>(bound.age_max - bound.age_min);
 
   // qos_factor
-  if (bound.qos_priority_min > bound.qos_priority_max)
+  if (bound.qos_priority_max > bound.qos_priority_min)
     qos_factor = 1.0 * (job_qos_priority - bound.qos_priority_min) /
                  (bound.qos_priority_max - bound.qos_priority_min);
 

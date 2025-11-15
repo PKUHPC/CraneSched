@@ -6,7 +6,7 @@
 
 [2024/10/24] v1.0.0: Added job monitoring, plugin modules, and device support; enhanced scheduler; improved resource and job management; IPv6 support.
 
-# Introduction #
+# Introduction
 
 [[中文](./README.md) | English]
 
@@ -22,7 +22,7 @@ We welcome community contributions.
 
 **Demo cluster** (test account: demo_admin / demo_admin): <https://hpc.pku.edu.cn/demo/cranesched>
 
-# Highlights #
+# Highlights
 
 - **Performance**: >100,000 scheduling decisions per second
 - **Scalability**: Scales to million-core clusters
@@ -31,7 +31,7 @@ We welcome community contributions.
 - **Resilience**: Automatic job recovery, no SPOF, fast state recovery
 - **Open Source**: All code available
 
-# Architecture #
+# Architecture
 
 **Cranectld** is the control plane: manages node lifecycles, schedules queues, manages resources, and processes job submission/modification/query.
 
@@ -43,8 +43,9 @@ CraneSched introduces a **Resource Manager** to support both HPC and AI workload
 
 - For **HPC jobs**: the **Cgroup Manager** allocates resources and isolates jobs via cgroups.
 - For **AI jobs**: the **Container Manager** allocates resources with Kubernetes, packages apps into containers, and manages their lifecycle.
+- Additionally, for **containerized workloads** (experimental): supports CRI (Container Runtime Interface) with runtimes like containerd or CRI-O for running containerized applications.
 
-# Application Scenarios #
+# Application Scenarios
 
 CraneSched serves mixed HPC + AI workloads across distributed clusters. Clusters can be connected via cloud, and the scheduler places jobs on the most available cluster to improve utilization and reduce wait time.
 

@@ -11,7 +11,7 @@
 
 | 组件 | 描述 | 位置 |
 |------|------|------|
-| **后端** | `cranectld`（调度器）+ `craned`（工作节点守护进程）| 控制节点和计算节点 |
+| **后端** | `cranectld` (Scheduler) + `craned` (worker daemon) | 控制节点和计算节点 |
 | **前端** | CLI（`cbatch`、`cqueue` 等）+ 其他服务（`cfored`、`cplugind`）| 按需部署 |
 | **数据库** | MongoDB，用于存储作业、账户和使用数据 | 控制节点/存储节点 |
 
@@ -132,7 +132,7 @@ MongoDB 存储作业历史记录、用户账户和资源使用数据。
 
 - **[前端部署](./frontend/frontend.md)**
 
-安装基于 Go 的前端组件：`cbatch`、`cqueue`、`cinfo`、`cacct` 和支持守护进程。
+安装基于 Go 的前端组件：`cbatch`、`cqueue`、`cinfo`、`cacct` 和 daemon 支持服务。
 
 ---
 

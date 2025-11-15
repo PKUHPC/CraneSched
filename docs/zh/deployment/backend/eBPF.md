@@ -90,12 +90,12 @@ make install
 cp ./src/Misc/BPF/cgroup_dev_bpf.o /etc/crane/cgroup_dev_bpf.o
 ```
 
-检查子 cgroup 是否启用了相关控制器（例如 cpu、io、memory 等）：
+检查子 cgroup 是否启用了相关 controller（例如 cpu、io、memory 等）：
 ```bash
 cat /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-为子 cgroup 启用控制器：
+为子 cgroup 启用 controller：
 ```bash
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```

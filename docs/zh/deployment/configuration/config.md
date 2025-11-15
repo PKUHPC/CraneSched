@@ -189,9 +189,11 @@ TLS:
   DomainSuffix: crane.local
 ```
 
-### GPU 配置
+### Gres配置
 
-使用设备控制定义 GPU 资源：
+> 设备资源相关配置
+
+定义 GPU、NPU 和其他加速器等通用资源：
 
 ```yaml
 Nodes:
@@ -209,6 +211,31 @@ Nodes:
         # 运行时的环境注入器
         EnvInjector: nvidia
 ```
+
+**Gres 参数：**
+
+- **name**：一般是资源类型如：`GPU`，`NPU`等
+- **type**：一般是资源型号如：`A100`，`3090`等
+- **DeviceFileRegex**: 资源对应的 /dev 目录下的设备文件，适用于一个物理设备对应一个设备文件的资源，**每个文件对应系统内的一个 Gres 资源**，支持 Regex 格式。常见设备对应设备文件。如 Nvidia、AMD、海光 DCU、昇腾等。
+- **DeviceFileList**：适用于**一个物理设备对应多个 /dev 目录下设备文件的 Gres 资源**，每一组文件对应系统内的一个 Gres 资源，支持 Regex 格式。
+
+DeviceFileRegex与DeviceFileList二选一，以上设备文件必须存在，**否则 Craned 启动时将报错退出**
+
+- **EnvInjector**: 设备需要注入的环境变量
+
+  -  可选值：对应环境变量
+  - `nvidia`：`CUDA_VISIABLE_DEVICES`
+  - `hip`：`HIP_VISIABLE_DEVICES`
+  - `ascend`：`ASCEND_RT_VISIBLE_DEVICES`
+
+- 常见厂商设备文件路径及相关配置
+
+| 厂商        | 设备文件路径            | EnvInjector |
+| :---------- | :---------------------- | :---------- |
+| Nvidia      | /dev/nvidia0 ...        | nvidia      |
+| AMD/海光DCU | /dev/dri/renderer128... | hip         |
+| 昇腾        | /dev/davinci0 ...       | ascend      |
+| 天数智芯    | /dev/iluvatar0 ...      | nvidia      |
 
 ### 队列限制
 
@@ -264,6 +291,62 @@ CranedLogFile: craned/craned.log
 CraneCtldForeground: false
 CranedForeground: false
 ```
+
+
+### Supervisor 配置
+
+Supervisor 是鹤思的作业执行管理组件,负责在计算节点上监控和控制作业步骤（step）。
+
+```yaml
+Supervisor:
+  # Supervisor 可执行文件路径
+  Path: /usr/libexec/csupervisor
+  
+  # Supervisor 日志级别: trace, debug, info, warn, error
+  DebugLevel: trace
+  
+  # 日志目录(相对于 CraneBaseDir)
+  LogDir: supervisor
+```
+
+**Supervisor 参数:**
+
+- **Path**: Supervisor 可执行文件的完整路径。默认路径为 `/usr/libexec/csupervisor`,通常在安装时已正确设置。
+- **DebugLevel**: 控制 Supervisor 日志的详细程度。可选值包括 `trace`(最详细)、`debug`、`info`、`warn`、`error`(最简略)。生产环境建议使用 `info` 或 `warn`。
+- **LogDir**: Supervisor 日志文件的存储目录,相对于 `CraneBaseDir` 配置项。日志文件对于诊断作业执行问题很有帮助。
+
+!!! tip
+    在排查作业执行问题时,可以临时将 `DebugLevel` 设置为 `debug` 或 `trace` 以获取更详细的日志信息。
+
+## 容器支持
+
+鹤思支持通过 CRI（容器运行时接口）在容器中运行作业：
+
+```yaml
+Container:
+  # 启用容器支持（实验性）
+  Enabled: false
+  
+  # 容器数据临时目录（相对于 CraneBaseDir）
+  TempDir: supervisor/containers/
+  
+  # 容器运行时套接字路径
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  
+  # 镜像服务套接字路径（通常与 RuntimeEndpoint 相同）
+  ImageEndpoint: /run/containerd/containerd.sock
+```
+
+!!! info "实验性功能"
+    容器支持目前处于实验阶段，可能存在限制和问题。
+
+
+**要求：**
+
+- 在计算节点上安装兼容 CRI 的运行时（containerd 或 CRI-O）
+- 具有适当权限可访问运行时套接字
+- 容器镜像可用或可从 Registry 访问
+
 
 ## 应用更改
 

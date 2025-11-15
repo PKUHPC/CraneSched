@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CtldPreCompiledHeader.h"
+#include "protos/PublicDefs.pb.h"
 // Precompiled header come first!
 
 namespace Ctld {
@@ -60,6 +61,8 @@ constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
+constexpr uint16_t kProxiedCriReqTimeoutSeconds = 180;
+
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
@@ -75,8 +78,8 @@ struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
   };
-
   CraneCtldConf CtldConf;
+
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
@@ -146,6 +149,12 @@ struct Config {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
+  PluginConfig Plugin;
+
+  struct ContainerConfig {
+    bool Enabled{false};
+  };
+  ContainerConfig Container;
 
   bool CompressedRpc{};
 
@@ -176,9 +185,6 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
-
-  // Plugin config
-  PluginConfig Plugin;
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
@@ -359,6 +365,47 @@ struct BatchMetaInTask {
   std::string output_file_pattern;
   std::string error_file_pattern;
 };
+
+struct ContainerMetaInTask {
+  struct ImageInfo {
+    std::string image;
+    std::string username;
+    std::string password;
+    std::string server_address;
+    std::string pull_policy;
+  };
+
+  ImageInfo image_info{};
+
+  std::string name;
+  std::unordered_map<std::string, std::string> labels;
+  std::unordered_map<std::string, std::string> annotations;
+
+  std::string command;
+  std::vector<std::string> args;
+  std::string workdir;
+  std::unordered_map<std::string, std::string> env;
+
+  bool detached{true};
+  bool tty{false};
+  bool stdin{false};
+  bool stdin_once{false};
+
+  bool userns{true};
+  uid_t run_as_user{0};
+  gid_t run_as_group{0};
+
+  std::unordered_map<std::string, std::string> mounts;
+  std::unordered_map<uint32_t, uint32_t> port_mappings;
+
+ public:
+  ContainerMetaInTask() = default;
+
+  explicit ContainerMetaInTask(
+      const crane::grpc::ContainerTaskAdditionalMeta& rhs);
+  explicit operator crane::grpc::ContainerTaskAdditionalMeta() const;
+};
+
 struct TaskInCtld;
 struct StepInCtld;
 using StepInteractiveMeta = InteractiveMetaInTask;
@@ -404,11 +451,9 @@ struct StepStatusChangeContext {
   std::unordered_set<TaskInCtld*> job_raw_ptrs;
 };
 
+// Abstract interface of all the steps in Ctld.
 struct StepInCtld {
-  /**
-   * DAEMON, INTERACTIVE, BATCH or COMMON. only COMMON step is allowed to
-   * cancel.
-   */
+ public:
   crane::grpc::TaskType type;
 
   TaskInCtld* job;
@@ -419,18 +464,20 @@ struct StepInCtld {
   std::string name;
 
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0f};
+  cpu_t cpus_per_task{0.0F};
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
   std::unordered_map<std::string, std::string> env;
-  std::string container;
 
   absl::Duration time_limit;
   ResourceView requested_node_res_view;
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
+
+  // TODO: Find somewhere else to put this field?
+  std::optional<ContainerMetaInTask> container_meta;
 
  protected:
   /* ------------- [2] -------------
@@ -472,21 +519,26 @@ struct StepInCtld {
   crane::grpc::RuntimeAttrOfStep m_runtime_attr_;
 
  public:
-  virtual ~StepInCtld();
+  virtual ~StepInCtld() = default;
+
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
+
   void SetStepToCtld(const crane::grpc::StepToCtld& step_to_ctld) {
     m_step_to_ctld_ = step_to_ctld;
   }
   const crane::grpc::StepToCtld& StepToCtld() const;
   crane::grpc::StepToCtld* MutableStepToCtld();
+
   void SetStepId(step_id_t id);
   step_id_t StepId() const { return m_step_id_; }
+
   void SetStepDbId(step_db_id_t id);
   step_db_id_t StepDbId() const { return m_step_db_id_; }
 
   void SetRequeueCount(std::int32_t count);
   std::int32_t RequeueCount() const { return m_requeue_count_; }
+
   void SetAllocatedRes(const ResourceV2& res);
   ResourceV2 AllocatedRes() const { return m_allocated_res_; }
 
@@ -494,6 +546,7 @@ struct StepInCtld {
   const std::unordered_set<CranedId>& CranedIds() const {
     return m_craned_ids_;
   }
+
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
     return m_execute_nodes_;
@@ -502,6 +555,7 @@ struct StepInCtld {
   void SetConfiguringNodes(const std::unordered_set<CranedId>& nodes);
   void NodeConfigured(const CranedId& node);
   bool AllNodesConfigured() const { return m_configuring_nodes_.empty(); }
+
   void SetRunningNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> RunningNodes() const { return m_running_nodes_; }
   void StepOnNodeFinish(const CranedId& node);
@@ -509,8 +563,10 @@ struct StepInCtld {
 
   void SetSubmitTime(absl::Time submit_time);
   absl::Time SubmitTime() const { return m_submit_time_; }
+
   void SetStartTime(absl::Time start_time);
   absl::Time StartTime() const { return m_start_time_; }
+
   void SetEndTime(absl::Time end_time);
   absl::Time EndTime() const { return m_end_time_; }
 
@@ -525,6 +581,7 @@ struct StepInCtld {
   uint32_t PrevErrorExitCode() { return m_error_exit_code_; }
   void SetStatus(crane::grpc::TaskStatus new_status);
   crane::grpc::TaskStatus Status() const { return m_status_; }
+
   void SetExitCode(uint32_t exit_code);
   uint32_t ExitCode() const { return m_exit_code_; }
 
@@ -534,10 +591,12 @@ struct StepInCtld {
   crane::grpc::RuntimeAttrOfStep const& RuntimeAttr() const {
     return m_runtime_attr_;
   }
-  virtual void RecoverFromDb(const TaskInCtld& job,
-                             crane::grpc::StepInEmbeddedDb const& step_in_db);
+
+  // Interface methods
   [[nodiscard]] virtual crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const = 0;
+  virtual void RecoverFromDb(const TaskInCtld& job,
+                             crane::grpc::StepInEmbeddedDb const& step_in_db);
 };
 
 struct DaemonStepInCtld : StepInCtld {
@@ -546,9 +605,11 @@ struct DaemonStepInCtld : StepInCtld {
   std::string qos;
 
   ~DaemonStepInCtld() override = default;
+
   void InitFromJob(const TaskInCtld& job);
   [[nodiscard]] crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const;
 
+  // Interface methods
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
@@ -563,10 +624,8 @@ struct DaemonStepInCtld : StepInCtld {
 
 struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
-
   std::string cmd_line;
   std::string cwd;
-
   std::string extra_attr;
 
   // TODO: fill this field
@@ -579,11 +638,16 @@ struct CommonStepInCtld : StepInCtld {
 
   std::string allocated_craneds_regex;
   std::string pending_reason;
+
   ~CommonStepInCtld() override = default;
+
   void InitPrimaryStepFromJob(const TaskInCtld& job);
   bool IsPrimaryStep() const noexcept;
   [[nodiscard]] bool SetFieldsByStepToCtld(
       const crane::grpc::StepToCtld& step_to_ctld);
+
+  // Interface methods
+
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
@@ -613,7 +677,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0f};
+  cpu_t cpus_per_task{0.0F};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -624,11 +688,11 @@ struct TaskInCtld {
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
-  std::string container;
 
   std::string extra_attr;
 
-  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+  std::variant<InteractiveMetaInTask, BatchMetaInTask, ContainerMetaInTask>
+      meta;
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
@@ -720,6 +784,7 @@ struct TaskInCtld {
            task_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveTaskType::Calloc;
   }
+  bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
   bool ShouldLaunchOnAllNodes() const;

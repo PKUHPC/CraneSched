@@ -72,6 +72,7 @@ plugins:
             Account Management: 账户管理
             Reference: 参考文档
             Exit Codes: 退出代码
+            Job Environment Variables: 作业环境变量
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
@@ -86,6 +87,7 @@ plugins:
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
+            Container Support: 容器支持
             Plugins: 插件
         - locale: en
           name: English
@@ -170,6 +172,7 @@ nav:
         - cacctmgr: command/cacctmgr.md
   - Reference:
     - Exit Codes: reference/exit_code.md
+    - Job Environment Variables: reference/job_env_vars.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md

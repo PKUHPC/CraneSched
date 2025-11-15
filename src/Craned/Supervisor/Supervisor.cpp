@@ -102,13 +102,9 @@ void InitFromStdin(int argc, char** argv) {
   g_config.Container.Enabled = msg.has_container_config();
   if (g_config.Container.Enabled) {
     g_config.Container.TempDir = msg.container_config().temp_dir();
-    g_config.Container.RuntimeBin = msg.container_config().runtime_bin();
-    g_config.Container.RuntimeState = msg.container_config().state_cmd();
-    g_config.Container.RuntimeRun = msg.container_config().run_cmd();
-    g_config.Container.RuntimeKill = msg.container_config().kill_cmd();
-    g_config.Container.RuntimeDelete = msg.container_config().delete_cmd();
-    g_config.Container.RuntimePause = msg.container_config().pause_cmd();
-    g_config.Container.RuntimeResume = msg.container_config().resume_cmd();
+    g_config.Container.RuntimeEndpoint =
+        msg.container_config().runtime_endpoint();
+    g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
   }
 
   // Plugin config
@@ -187,6 +183,7 @@ void GlobalVariableInit() {
   signal(SIGALRM, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
 
+  // Set OOM score adjustment for supervisor process
   std::filesystem::path oom_adj_file =
       fmt::format("/proc/{}/oom_score_adj", getpid());
 
@@ -262,6 +259,7 @@ void StartServer() {
 
   g_craned_client.reset();
   g_plugin_client.reset();
+
   g_thread_pool->wait();
   g_thread_pool.reset();
 

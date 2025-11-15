@@ -57,6 +57,7 @@ cacctmgr add account <名称> [选项]
 ```
 
 **选项：**
+
 - **Description=<描述>**: 账户描述
 - **Parent=<父账户>**: 父账户名称
 - **DefaultQos=<qos>**: 账户的默认 QoS
@@ -103,6 +104,7 @@ cacctmgr modify account where Name=<账户> set <属性>=<值>
 ```
 
 **属性：**
+
 - **Description=<描述>**: 设置描述
 - **DefaultQos=<qos>**: 设置默认 QoS
 - **AllowedPartition=<分区>**: 设置允许的分区（覆盖）
@@ -142,6 +144,7 @@ cacctmgr show account [名称] [选项]
 ```
 
 **选项：**
+
 - **Name=<名称1,名称2,...>**: 仅显示特定账户
 
 **示例：**
@@ -193,9 +196,11 @@ cacctmgr add user <名称> Account=<账户> [选项]
 ```
 
 **必需：**
+
 - **Account=<账户>**: 用户所属的账户（必需）
 
 **选项：**
+
 - **Coordinator=true|false**: 将用户设置为账户调度员
 - **Level=<级别>**: 用户管理级别（none/operator/admin，默认：none）
 - **Partition=<分区1,分区2,...>**: 允许的分区（逗号分隔）
@@ -237,6 +242,7 @@ cacctmgr delete user <名称> [Account=<账户>]
 ```
 
 **选项：**
+
 - **Account=<账户>**: 指定账户上下文（可选）
 - **Name=<名称1,名称2,...>**: 删除多个用户（逗号分隔）
 
@@ -268,11 +274,13 @@ cacctmgr modify user where Name=<用户> [Account=<账户>] [Partition=<分区>]
 ```
 
 **Where 子句：**
+
 - **Name=<用户>**: 要修改的用户（必需）
 - **Account=<账户>**: 账户上下文（可选）
 - **Partition=<分区>**: 分区上下文（可选）
 
 **属性：**
+
 - **AdminLevel=<级别>**: 设置管理级别（none/operator/admin）
 - **DefaultAccount=<账户>**: 设置默认账户
 - **DefaultQos=<qos>**: 设置默认 QoS
@@ -308,6 +316,7 @@ cacctmgr show user [名称] [选项]
 ```
 
 **选项：**
+
 - **Accounts=<账户>**: 仅显示特定账户的用户
 - **Name=<名称1,名称2,...>**: 仅显示特定用户
 
@@ -337,6 +346,7 @@ cacctmgr unblock user <名称> Account=<账户>
 ```
 
 **必需：**
+
 - **Account=<账户>**: 用户阻止/解除阻止需要账户上下文
 
 **示例：**
@@ -385,6 +395,7 @@ cacctmgr add qos <名称> [选项]
 ```
 
 **选项：**
+
 - **Description=<描述>**: QoS 描述
 - **Priority=<优先级>**: 优先级值（值越高，优先级越高）
 - **MaxJobsPerUser=<数量>**: 每个用户的最大并发作业数
@@ -417,6 +428,7 @@ cacctmgr delete qos <名称>
 ```
 
 **选项：**
+
 - **Name=<名称1,名称2,...>**: 删除多个 QoS（逗号分隔）
 
 **示例：**
@@ -432,6 +444,7 @@ cacctmgr modify qos where Name=<qos> set <属性>=<值>
 ```
 
 **属性：**
+
 - **Description=<描述>**: 设置描述
 - **MaxCpusPerUser=<数量>**: 设置每个用户的最大 CPU 数
 - **MaxJobsPerUser=<数量>**: 设置每个用户的最大作业数
@@ -458,6 +471,7 @@ cacctmgr show qos [名称] [选项]
 ```
 
 **选项：**
+
 - **Name=<名称1,名称2,...>**: 仅显示特定 QoS
 
 **示例：**
@@ -484,6 +498,7 @@ cacctmgr show transaction where [选项]
 ```
 
 **Where 选项：**
+
 - **Actor=<用户名>**: 按执行操作的用户过滤
 - **Target=<目标>**: 按目标实体过滤
 - **Action=<操作>**: 按操作类型过滤

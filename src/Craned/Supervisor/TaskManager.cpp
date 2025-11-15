@@ -18,31 +18,38 @@
 
 #include "TaskManager.h"
 
-#include <absl/strings/str_split.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
-#include <spdlog/fmt/bundled/core.h>
+#include <sys/types.h>
 #include <sys/wait.h>
-
-#include <nlohmann/json.hpp>
 
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
+#include "crane/CriClient.h"
 #include "crane/OS.h"
+#include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
 namespace Craned::Supervisor {
-using Common::kStepRequestCheckIntervalMs;
 
 using Common::CgroupManager;
+using Common::kStepRequestCheckIntervalMs;
+
+bool StepInstance::IsContainer() const noexcept {
+  return m_step_to_supv_.has_container_meta();
+}
 
 bool StepInstance::IsBatch() const noexcept {
   return !interactive_type.has_value();
+}
+
+bool StepInstance::IsInteractive() const noexcept {
+  return interactive_type.has_value();
 }
 
 bool StepInstance::IsCrun() const noexcept {
@@ -55,7 +62,7 @@ bool StepInstance::IsCalloc() const noexcept {
          interactive_type.value() == crane::grpc::Calloc;
 }
 
-bool StepInstance::IsDaemon() const noexcept {
+bool StepInstance::IsDaemonStep() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
 
@@ -107,22 +114,6 @@ EnvMap StepInstance::GetStepProcessEnv() const {
 void StepInstance::AddTaskInstance(task_id_t task_id,
                                    std::unique_ptr<ITaskInstance>&& task) {
   m_task_map_.emplace(task_id, std::move(task));
-}
-
-ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) {
-  auto it = m_task_map_.find(task_id);
-  if (it == m_task_map_.end()) {
-    return nullptr;
-  }
-  return it->second.get();
-}
-
-const ITaskInstance* StepInstance::GetTaskInstance(task_id_t task_id) const {
-  auto it = m_task_map_.find(task_id);
-  if (it == m_task_map_.end()) {
-    return nullptr;
-  }
-  return it->second.get();
 }
 
 std::unique_ptr<ITaskInstance> StepInstance::RemoveTaskInstance(
@@ -191,13 +182,27 @@ bool StepInstance::EvaluateOomOnExit() {
   return oom_kill > baseline_oom_kill_count;
 }
 
-ITaskInstance::~ITaskInstance() {
+void ITaskInstance::InitEnvMap() {
+  // Job env from CraneD
+  for (const auto& [name, value] : g_config.JobEnv) {
+    m_env_.emplace(name, value);
+  }
+  // Crane env will override user task env;
+  for (const auto& [name, value] : m_parent_step_inst_->GetStep().env()) {
+    m_env_.emplace(name, value);
+  }
+  for (const auto& [name, value] : m_parent_step_inst_->GetStepProcessEnv()) {
+    m_env_.emplace(name, value);
+  }
+}
+
+ProcInstance::~ProcInstance() {
   if (m_parent_step_inst_->IsCrun()) {
-    auto* crun_meta = GetCrunMeta();
+    auto* crun_meta = GetCrunMeta_();
 
     // For crun non pty job, close out fd in CforedClient
     // For crun pty job, close tty fd in CforedClient
-    if (!crun_meta->pty) close(crun_meta->stdin_write);
+    if (!m_parent_step_inst_->pty) close(crun_meta->stdin_write);
 
     if (!crun_meta->x11_auth_path.empty() &&
         !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
@@ -210,45 +215,16 @@ ITaskInstance::~ITaskInstance() {
   }
 }
 
-EnvMap ITaskInstance::GetChildProcessEnv() const {
-  std::unordered_map<std::string, std::string> env_map;
-
-  // Job env from CraneD
-  for (auto& [name, value] : g_config.JobEnv) {
-    env_map.emplace(name, value);
+void ProcInstance::InitEnvMap() {
+  ITaskInstance::InitEnvMap();
+  if (m_parent_step_inst_->IsCrun()) {
+    const auto& ia_meta = m_parent_step_inst_->GetStep().interactive_meta();
+    if (!ia_meta.term_env().empty()) m_env_.emplace("TERM", ia_meta.term_env());
   }
-
-  // Crane env will override user task env;
-  for (auto& [name, value] : this->m_parent_step_inst_->GetStep().env()) {
-    env_map.emplace(name, value);
-  }
-
-  for (auto& [name, value] : this->m_parent_step_inst_->GetStepProcessEnv()) {
-    env_map.emplace(name, value);
-  }
-
-  // TODO: Move this to step instance.
-  if (this->m_parent_step_inst_->IsCrun()) {
-    auto const& ia_meta =
-        this->m_parent_step_inst_->GetStep().interactive_meta();
-    if (!ia_meta.term_env().empty())
-      env_map.emplace("TERM", ia_meta.term_env());
-
-    if (ia_meta.x11()) {
-      auto const& x11_meta = ia_meta.x11_meta();
-
-      std::string target =
-          ia_meta.x11_meta().enable_forwarding() ? "" : x11_meta.target();
-      env_map["DISPLAY"] =
-          fmt::format("{}:{}", target, this->GetCrunMeta()->x11_port - 6000);
-      env_map["XAUTHORITY"] = this->GetCrunMeta()->x11_auth_path;
-    }
-  }
-  return env_map;
 }
 
-std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
-                                                 const std::string& cwd) const {
+std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
+                                                const std::string& cwd) const {
   std::filesystem::path resolved_path(pattern);
 
   // If not specified, use cwd.
@@ -271,8 +247,8 @@ std::string ITaskInstance::ParseFilePathPattern_(const std::string& pattern,
   return resolved_path_pattern;
 }
 
-CraneErrCode ITaskInstance::SetupCrunX11_() {
-  auto* inst_crun_meta = this->GetCrunMeta();
+CraneErrCode ProcInstance::PrepareXauthFiles_() {
+  auto* inst_crun_meta = this->GetCrunMeta_();
   const PasswordEntry& pwd_entry = m_parent_step_inst_->pwd;
 
   inst_crun_meta->x11_auth_path =
@@ -301,17 +277,18 @@ CraneErrCode ITaskInstance::SetupCrunX11_() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
+CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   if (!m_parent_step_inst_->IsCrun()) return fork();
 
-  auto* meta = GetCrunInstanceMeta();
-  meta->pty = m_parent_step_inst_->GetStep().interactive_meta().pty();
-  CRANE_DEBUG("Launch crun task #{} pty: {}", task_id, meta->pty);
+  auto* meta = GetCrunMeta_();
+  CRANE_DEBUG("Launch crun task #{} pty: {}", task_id,
+              m_parent_step_inst_->pty);
 
-  int to_crun_pipe[2], from_crun_pipe[2];
+  int to_crun_pipe[2];
+  int from_crun_pipe[2];
   int crun_pty_fd = -1;
 
-  if (!meta->pty) {
+  if (!m_parent_step_inst_->pty) {
     if (pipe(to_crun_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                   task_id, strerror(errno));
@@ -328,7 +305,7 @@ CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
   }
 
   pid_t pid = -1;
-  if (meta->pty) {
+  if (m_parent_step_inst_->pty) {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
     if (pid > 0) {
@@ -356,10 +333,11 @@ CraneExpected<pid_t> ITaskInstance::ForkCrunAndInitMeta_() {
   return pid;
 }
 
-bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
-  auto* meta = dynamic_cast<CrunInstanceMeta*>(m_meta_.get());
+bool ProcInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
+  auto* meta = GetCrunMeta_();
+  pid_t pid = std::get<pid_t>(*GetExecId());
 
-  if (!meta->pty) {
+  if (!m_parent_step_inst_->pty) {
     // For non-pty tasks, pipe is used for stdin/stdout and one end should be
     // closed.
     close(meta->stdin_read);
@@ -368,11 +346,11 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   // For pty tasks, stdin_read and stdout_write are the same fd and should not
   // be closed.
 
-  const auto& parent_step = m_parent_step_inst_->GetStep();
+  const auto& parent_step = GetParentStep();
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
   auto ok = parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
-      task_id, meta->stdin_write, meta->stdout_read, meta->pty);
+      task_id, meta->stdin_write, meta->stdout_read, m_parent_step_inst_->pty);
   if (!ok) return false;
 
   if (m_parent_step_inst_->x11) {
@@ -390,7 +368,7 @@ bool ITaskInstance::SetupCrunFwdAtParent_(uint16_t* x11_port) {
   return true;
 }
 
-void ITaskInstance::ResetChildProcSigHandler_() {
+void ProcInstance::ResetChildProcSigHandler_() {
   // Recover SIGPIPE default handler in from child processes.
   signal(SIGPIPE, SIG_DFL);
   // Disable SIGABRT backtrace from child processes.
@@ -406,7 +384,7 @@ void ITaskInstance::ResetChildProcSigHandler_() {
   signal(SIGHUP, SIG_DFL);
 }
 
-CraneErrCode ITaskInstance::SetChildProcessProperty_() {
+CraneErrCode ProcInstance::SetChildProcProperty_() {
   // Reset OOM score adjustment for child process
   std::filesystem::path oom_score_adj_file =
       fmt::format("/proc/{}/oom_score_adj", getpid());
@@ -447,7 +425,7 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  const std::string& cwd = m_parent_step_inst_->GetStep().cwd();
+  const std::string& cwd = GetParentStep().cwd();
   rc = chdir(cwd.c_str());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: chdir to {}. {}\n", cwd.c_str(),
@@ -461,16 +439,15 @@ CraneErrCode ITaskInstance::SetChildProcessProperty_() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
+CraneErrCode ProcInstance::SetChildProcBatchFd_() {
   int stdout_fd, stderr_fd;
 
   auto* meta = dynamic_cast<BatchInstanceMeta*>(m_meta_.get());
   const std::string& stdout_file_path = meta->parsed_output_file_pattern;
   const std::string& stderr_file_path = meta->parsed_error_file_pattern;
 
-  int open_mode = m_parent_step_inst_->GetStep().batch_meta().open_mode_append()
-                      ? O_APPEND
-                      : O_TRUNC;
+  int open_mode =
+      GetParentStep().batch_meta().open_mode_append() ? O_APPEND : O_TRUNC;
   stdout_fd =
       open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
   if (stdout_fd == -1) {
@@ -499,10 +476,10 @@ CraneErrCode ITaskInstance::SetChildProcessBatchFd_() {
   return CraneErrCode::SUCCESS;
 }
 
-void ITaskInstance::SetupCrunFwdAtChild_() {
-  const auto* meta = GetCrunInstanceMeta();
+void ProcInstance::SetupCrunFwdAtChild_() {
+  const auto* meta = GetCrunMeta_();
 
-  if (!meta->pty) {
+  if (!m_parent_step_inst_->pty) {
     if (dup2(meta->stdin_read, STDIN_FILENO) == -1) std::exit(1);
     if (dup2(meta->stdout_write, STDOUT_FILENO) == -1) std::exit(1);
     if (dup2(meta->stdout_write, STDERR_FILENO) == -1) std::exit(1);
@@ -511,10 +488,10 @@ void ITaskInstance::SetupCrunFwdAtChild_() {
   }
 }
 
-void ITaskInstance::SetupChildProcessCrunX11_() {
-  auto* inst_crun_meta = this->GetCrunMeta();
+void ProcInstance::SetupChildProcCrunX11_() {
+  auto* inst_crun_meta = this->GetCrunMeta_();
   const auto& proto_x11_meta =
-      this->m_parent_step_inst_->GetStep().interactive_meta().x11_meta();
+      this->GetParentStep().interactive_meta().x11_meta();
 
   std::string x11_target = proto_x11_meta.enable_forwarding()
                                ? g_config.CranedIdOfThisNode
@@ -547,16 +524,17 @@ void ITaskInstance::SetupChildProcessCrunX11_() {
     std::abort();
   }
 
-  auto buf = std::make_unique<char[]>(4096);
-  std::string xauth_stdout_str, xauth_stderr_str;
+  auto buf = std::array<char, 4096>();
+  std::string xauth_stdout_str;
+  std::string xauth_stderr_str;
 
   std::FILE* cmd_fd = subprocess_stdout(&subprocess);
-  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
-    xauth_stdout_str.append(buf.get());
+  while (std::fgets(buf.data(), 4096, cmd_fd) != nullptr)
+    xauth_stdout_str.append(buf.data());
 
   cmd_fd = subprocess_stderr(&subprocess);
-  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
-    xauth_stderr_str.append(buf.get());
+  while (std::fgets(buf.data(), 4096, cmd_fd) != nullptr)
+    xauth_stderr_str.append(buf.data());
 
   if (0 != subprocess_join(&subprocess, &result))
     fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
@@ -571,25 +549,29 @@ void ITaskInstance::SetupChildProcessCrunX11_() {
     fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
                xauth_stderr_str);
   }
+
+  // After xauth is set up, set DISPLAY and XAUTHORITY envs
+  m_env_["DISPLAY"] = display;
+  m_env_["XAUTHORITY"] = inst_crun_meta->x11_auth_path;
 }
 
-CraneErrCode ITaskInstance::SetChildProcessEnv_() const {
-  if (clearenv())
+CraneErrCode ProcInstance::SetChildProcEnv_() const {
+  if (clearenv() != 0)
     fmt::print(stderr, "[Subprocess] Warning: clearenv() failed.\n");
 
   for (const auto& [name, value] : m_env_)
-    if (setenv(name.c_str(), value.c_str(), 1))
+    if (setenv(name.c_str(), value.c_str(), 1) != 0)
       fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
                  name, value);
 
   return CraneErrCode::SUCCESS;
 }
 
-std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
+std::vector<std::string> ProcInstance::GetChildProcExecArgv_() const {
   // "bash (--login) -c 'm_executable_ [m_arguments_...]'"
   std::vector<std::string> argv;
   argv.emplace_back("/bin/bash");
-  if (m_parent_step_inst_->GetStep().get_user_env()) {
+  if (GetParentStep().get_user_env()) {
     // Use --login to load user's shell settings
     argv.emplace_back("--login");
   }
@@ -605,667 +587,522 @@ std::vector<std::string> ITaskInstance::GetChildProcessExecArgv_() const {
   return argv;
 }
 
-CraneErrCode ITaskInstance::Suspend() {
-  if (m_pid_ != 0) {
-    CRANE_TRACE("Suspending process {} with SIGSTOP", m_pid_);
-    // Send SIGSTOP to the whole process group
-    int err = kill(-m_pid_, SIGSTOP);
-    if (err == 0) {
-      return CraneErrCode::SUCCESS;
-    } else {
-      CRANE_ERROR("Failed to suspend process {}: {}", m_pid_, strerror(errno));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
-    }
+void ContainerInstance::InitEnvMap() {
+  ITaskInstance::InitEnvMap();
+  const auto& ca_meta = this->GetParentStep().container_meta();
+  for (const auto& [name, value] : ca_meta.env()) {
+    m_env_.emplace(name, value);
   }
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-CraneErrCode ITaskInstance::Resume() {
-  if (m_pid_ != 0) {
-    CRANE_TRACE("Resuming process {} with SIGCONT", m_pid_);
-    // Send SIGCONT to the whole process group
-    int err = kill(-m_pid_, SIGCONT);
-    if (err == 0) {
-      return CraneErrCode::SUCCESS;
-    } else {
-      CRANE_ERROR("Failed to resume process {}: {}", m_pid_, strerror(errno));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
-    }
-  }
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-std::string ContainerInstance::ParseOCICmdPattern_(
-    const std::string& cmd) const {
-  auto& pwd = m_parent_step_inst_->pwd;
-  std::string parsed_cmd(cmd);
-  // NOTE: Using m_temp_path_ as the bundle is modified and stored here
-  absl::StrReplaceAll({{"%b", m_temp_path_.string()},
-                       {"%j", std::to_string(g_config.JobId)},
-                       {"%x", m_parent_step_inst_->GetStep().name()},
-                       {"%u", pwd.Username()},
-                       {"%U", std::to_string(pwd.Uid())}},
-                      &parsed_cmd);
-  return parsed_cmd;
-}
-
-CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
-    const std::string& src, const std::string& dst) const {
-  using json = nlohmann::json;
-
-  // Check if bundle is valid
-  auto src_config = std::filesystem::path(src) / "config.json";
-  auto src_rootfs = std::filesystem::path(src) / "rootfs";
-  if (!std::filesystem::exists(src_config) ||
-      !std::filesystem::exists(src_rootfs)) {
-    CRANE_ERROR("Bundle provided by task #{} not exists : {}", task_id,
-                src_config.string());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  std::ifstream fin{src_config};
-  if (!fin) {
-    CRANE_ERROR("Failed to open bundle config provided by task #{}: {}",
-                task_id, src_config.string());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  json config = json::parse(fin, nullptr, false);
-  if (config.is_discarded()) {
-    CRANE_ERROR("Bundle config provided by task #{} is invalid: {}", task_id,
-                src_config.string());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  try {
-    // Set root object, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#root
-    // Set real rootfs path in the modified config.
-    config["root"]["path"] = src_rootfs;
-
-    // Set mounts array, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
-    // Bind mount script into the container
-    auto mounts = config["mounts"].get<std::vector<json>>();
-    std::string parsed_sh_mounted_path = "/tmp/crane/script.sh";
-    mounts.emplace_back(json::object({
-        {"destination", parsed_sh_mounted_path},
-        {"source", m_meta_->parsed_sh_script_path},
-        {"options", json::array({"bind", "ro"})},
-    }));
-    config["mounts"] = mounts;
-
-    // Set process object, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
-    auto& process = config["process"];
-
-    // Set pass-through mode.
-    // TODO: Check if interactive task is supported.
-    process["terminal"] = false;
-
-    // Write environment variables in IEEE format.
-    std::vector<std::string> env_list;
-    for (const auto& [name, value] : m_env_)
-      env_list.emplace_back(fmt::format("{}={}", name, value));
-    process["env"] = env_list;
-
-    // For container, we use `/bin/sh` as the default interpreter.
-    std::string real_exe = "/bin/sh";
-    if (m_parent_step_inst_->IsBatch() &&
-        !m_parent_step_inst_->GetStep().batch_meta().interpreter().empty())
-      real_exe = m_parent_step_inst_->GetStep().batch_meta().interpreter();
-
-    std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
-    args.emplace_back(std::move(parsed_sh_mounted_path));
-    process["args"] = args;
-  } catch (json::exception& e) {
-    CRANE_ERROR("Failed to generate bundle config for task #{}: {}", task_id,
-                e.what());
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
-  // Write the modified config
-  auto dst_config = std::filesystem::path(dst) / "config.json";
-  std::ofstream fout{dst_config};
-  if (!fout) {
-    CRANE_ERROR("Failed to write bundle config for task #{}: {}", task_id,
-                dst_config.string());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  fout << config.dump(4);
-  fout.flush();
-
-  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::Prepare() {
-  // Generate path and params.
-  m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", task_id);
-  m_bundle_path_ = m_parent_step_inst_->GetStep().container();
-  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
-  // FIXME: Some env like x11 port are assigned later in spawn.
-  m_env_ = GetChildProcessEnv();
-  // m_arguments_ is not applicable for container tasks.
+  const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
 
-  // Check relative path
-  if (m_bundle_path_.is_relative())
-    m_bundle_path_ = m_parent_step_inst_->GetStep().cwd() / m_bundle_path_;
+  // For container, there is only one task in a step. So we use step_id and
+  // job_id here.
+  step_id_t step_id = m_parent_step_inst_->step_id;
+  job_id_t job_id = g_config.JobId;
 
-  // Write script into the temp folder
-  auto sh_path = m_temp_path_ / fmt::format("Crane-{}.sh", task_id);
-  if (!util::os::CreateFoldersForFile(sh_path)) {
+  // Generate log pathes
+  m_log_dir_ = std::filesystem::path(m_parent_step_inst_->GetStep().cwd()) /
+               std::format(kContainerLogDirPattern, job_id);
+  m_log_file_ =
+      m_log_dir_ / std::format(kContainerLogFilePattern, job_id, step_id);
+
+  // Create private directory for container task
+  if (!util::os::CreateFoldersForFileEx(m_log_file_,
+                                        m_parent_step_inst_->pwd.Uid(),
+                                        m_parent_step_inst_->pwd.Gid(), 0700)) {
+    CRANE_ERROR("Failed to create log directory {} for container #{}.{}",
+                m_log_file_, job_id, step_id);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", task_id);
+  // Create the log file and chmod/chown it
+  std::ofstream(m_log_file_).close();
+  if (chmod(m_log_file_.c_str(), 0600) != 0) {
+    CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
+            m_parent_step_inst_->pwd.Gid()) != 0) {
+    CRANE_ERROR("Failed to chown log file {}", m_log_file_);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (m_parent_step_inst_->IsBatch())
-    fputs(m_parent_step_inst_->GetStep().batch_meta().sh_script().c_str(),
-          fptr);
-  else  // Crun
-    fputs(m_parent_step_inst_->GetStep().interactive_meta().sh_script().c_str(),
-          fptr);
+  // Pull image according to pull policy
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+  auto image_id_opt = cri_client->PullImage(
+      ca_meta.image().image(), ca_meta.image().username(),
+      ca_meta.image().password(), ca_meta.image().server_address(),
+      ca_meta.image().pull_policy());
 
-  fclose(fptr);
-
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  // FIXME: gids[0] or pwd.Gid()
-  if (chown(sh_path.c_str(), m_parent_step_inst_->GetStep().uid(),
-            m_parent_step_inst_->gids[0]) != 0) {
-    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
-                task_id, strerror(errno));
+  if (!image_id_opt.has_value()) {
+    CRANE_ERROR("Failed to pull image {} for container #{}.{}",
+                ca_meta.image().image(), job_id, step_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // Write meta
-  if (m_parent_step_inst_->IsBatch()) {
-    // Prepare file output name for batch tasks.
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
-    auto meta = std::make_unique<BatchInstanceMeta>();
-    meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        m_parent_step_inst_->GetStep().batch_meta().output_file_pattern(),
-        m_parent_step_inst_->GetStep().cwd());
+  m_image_id_ = std::move(image_id_opt.value());
+  InitEnvMap();
 
-    // If -e / --error is not defined, leave
-    // batch_meta.parsed_error_file_pattern empty;
-    if (!m_parent_step_inst_->GetStep()
-             .batch_meta()
-             .error_file_pattern()
-             .empty()) {
-      meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          m_parent_step_inst_->GetStep().batch_meta().error_file_pattern(),
-          m_parent_step_inst_->GetStep().cwd());
-    }
-
-    m_meta_ = std::move(meta);
-  } else {
-    m_meta_ = std::make_unique<CrunInstanceMeta>();
-  }
-  m_meta_->parsed_sh_script_path = sh_path;
-
-  // Modify bundle
-  auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
-  if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("Failed to modify OCI bundle config for task #{}", task_id);
+  // Launch the pod after all configurations are set
+  if (auto err = SetPodSandboxConfig_(); err != CraneErrCode::SUCCESS)
     return err;
+  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
+  if (!pod_id_expt.has_value()) {
+    const auto& rich_err = pod_id_expt.error();
+    CRANE_ERROR("Failed to run pod sandbox for container #{}: {}", job_id,
+                rich_err.description());
+    return rich_err.code();
   }
+  m_pod_id_ = std::move(pod_id_expt.value());
+  // TODO: Fix Pod here. Pod should only related to job instead of step.
+  CRANE_DEBUG("Pod {} created for container #{}.{}", m_pod_id_, job_id,
+              step_id);
+
+  // Create the container but not start here
+  if (auto err = SetContainerConfig_(); err != CraneErrCode::SUCCESS)
+    return err;
+  auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
+                                                       &m_container_config_);
+  if (!container_id_expt.has_value()) {
+    const auto& rich_err = container_id_expt.error();
+    CRANE_ERROR("Failed to create container for #{}.{}: {}", job_id, step_id,
+                rich_err.description());
+    return rich_err.code();
+  }
+  m_container_id_ = std::move(container_id_expt.value());
+  CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_, job_id,
+              step_id);
 
   return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::Spawn() {
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelStepIdKey;
+  using cri::kCriLabelUidKey;
 
-  using crane::grpc::supervisor::CanStartMessage;
-  using crane::grpc::supervisor::ChildProcessReady;
+  job_id_t job_id = m_parent_step_inst_->job_id;
+  step_id_t step_id = m_parent_step_inst_->step_id;
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
 
-  std::array<int, 2> ctrl_sock_pair{};  // Socket pair for passing control msg
+  // Subscribe to container event stream
+  // NOTE: The callback is called in another thread!
+  if (!cri_client->IsEventStreamActive())
+    cri_client->StartContainerEventStream(
+        [](const cri::api::ContainerEventResponse& ev) {
+          // Only care about stopped and deleted events
+          if (ev.container_event_type() !=
+                  cri::api::ContainerEventType::CONTAINER_STOPPED_EVENT &&
+              ev.container_event_type() !=
+                  cri::api::ContainerEventType::CONTAINER_DELETED_EVENT)
+            return;
 
-  if (this->m_parent_step_inst_->IsCrun() &&
-      this->m_parent_step_inst_->GetStep().interactive_meta().x11()) {
-    auto err = SetupCrunX11_();
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("Failed to setup crun X11 forwarding.");
-      return err;
-    }
+          CRANE_TRACE("Received CRI event: {}", ev.ShortDebugString());
+
+          // TODO: Add handler for pod status changes?
+          auto changes =
+              ev.containers_statuses() |
+              std::views::filter([](const auto& status) {
+                return cri::CriClient::ParseAndCompareLabel(
+                           status, std::string(kCriLabelJobIdKey),
+                           g_config.JobId) &&
+                       cri::CriClient::ParseAndCompareLabel(
+                           status, std::string(kCriLabelStepIdKey),
+                           g_config.StepId) &&
+                       (status.state() ==
+                            cri::api::ContainerState::CONTAINER_EXITED ||
+                        status.state() ==
+                            cri::api::ContainerState::CONTAINER_UNKNOWN);
+              }) |
+              std::ranges::to<std::vector<cri::api::ContainerStatus>>();
+
+          if (!changes.empty()) g_task_mgr->HandleCriEvents(std::move(changes));
+        });
+
+  auto ret = cri_client->StartContainer(m_container_id_);
+  if (!ret.has_value()) {
+    const auto& rich_err = ret.error();
+    CRANE_ERROR("Failed to start container for #{}.{}: {}", job_id, step_id,
+                rich_err.description());
+    return rich_err.code();
   }
 
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair.data()) != 0) {
-    CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  pid_t child_pid = -1;
-  if (m_parent_step_inst_->IsBatch())
-    child_pid = fork();
-  else {
-    auto pid_expt = ForkCrunAndInitMeta_();
-    if (!pid_expt) return pid_expt.error();
-
-    child_pid = pid_expt.value();
-  }
-
-  if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", task_id, strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  if (child_pid > 0) {  // Parent proc
-    m_pid_ = child_pid;
-    int ctrl_fd = ctrl_sock_pair[0];
-    close(ctrl_sock_pair[1]);
-
-    bool ok;
-    FileInputStream istream(ctrl_fd);
-    FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    bool crun_init_success{true};
-    if (m_parent_step_inst_->IsCrun()) {
-      if (m_parent_step_inst_->x11) {
-        uint16_t x11_port;
-        crun_init_success = SetupCrunFwdAtParent_(&x11_port);
-        msg.set_x11_port(x11_port);
-      } else
-        crun_init_success = SetupCrunFwdAtParent_(nullptr);
-
-      CRANE_DEBUG("Task #{} has initialized crun forwarding.", task_id);
-    }
-
-    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                task_id);
-
-    // Tell subprocess that the parent process is ready. Then the
-    // subprocess should continue to exec().
-    msg.set_ok(crun_init_success);
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    if (!ok) {
-      CRANE_ERROR("Failed to serialize msg to ostream: {}",
-                  strerror(ostream.GetErrno()));
-    }
-
-    if (ok) ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
-                  child_pid, task_id, strerror(ostream.GetErrno()));
-      close(ctrl_fd);
-
-      // Communication failure caused by process crash or grpc error.
-      // Since now the parent cannot ask the child
-      // process to commit suicide, kill child process here and just return.
-      // The child process will be reaped in SIGCHLD handler and
-      // thus only ONE TaskStatusChange will be triggered!
-      err_before_exec = CraneErrCode::ERR_PROTOBUF;
-      Kill(SIGKILL);
-      return CraneErrCode::SUCCESS;
-    }
-
-    ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
-                                          nullptr);
-    if (!ok || !msg.ok()) {
-      if (!ok)
-        CRANE_ERROR("Socket child endpoint failed: {}",
-                    strerror(istream.GetErrno()));
-      if (!msg.ok())
-        CRANE_ERROR("False from subprocess {} of task #{}", child_pid, task_id);
-      close(ctrl_fd);
-
-      // See comments above.
-      err_before_exec = CraneErrCode::ERR_PROTOBUF;
-      Kill(SIGKILL);
-      return CraneErrCode::SUCCESS;
-    }
-
-    close(ctrl_fd);
-    return CraneErrCode::SUCCESS;
-
-  } else {  // Child proc
-    ResetChildProcSigHandler_();
-
-    CraneErrCode err = SetChildProcessProperty_();
-    if (err != CraneErrCode::SUCCESS) std::abort();
-
-    close(ctrl_sock_pair[0]);
-    int ctrl_fd = ctrl_sock_pair[1];
-
-    FileInputStream istream(ctrl_fd);
-    FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-    bool ok;
-
-    ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
-    if (!ok || !msg.ok()) {
-      if (!ok) {
-        int err = istream.GetErrno();
-        fmt::print(stderr,
-                   "[Subprocess] Error: Failed to read socket from "
-                   "parent: {}\n",
-                   strerror(err));
-      }
-
-      if (!msg.ok()) {
-        fmt::print(stderr,
-                   "[Subprocess] Error: Parent process ask to suicide.\n");
-      }
-
-      std::abort();
-    }
-
-    if (m_parent_step_inst_->IsBatch()) {
-      SetChildProcessBatchFd_();
-    } else if (m_parent_step_inst_->IsCrun()) {
-      SetupCrunFwdAtChild_();
-    }
-
-    child_process_ready.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) {
-      fmt::print(stderr, "[Subprocess] Error: Failed to flush.\n");
-      std::abort();
-    }
-
-    close(ctrl_fd);
-
-    // Close stdin for batch tasks.
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    if (m_parent_step_inst_->IsBatch()) close(0);
-    util::os::CloseFdFrom(3);
-
-    // TODO: X11 in Container (feasible?)
-    // SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
-
-    // Set env just in case OCI requires some.
-    // Real env in container is handled in ModifyOCIBundle_
-    err = SetChildProcessEnv_();
-    if (err != CraneErrCode::SUCCESS) {
-      fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
-    }
-
-    // Prepare the command line arguments.
-    auto argv = GetChildProcessExecArgv_();
-    auto argv_ptrs = argv |
-                     std::ranges::views::transform(
-                         [](const std::string& s) { return s.c_str(); }) |
-                     std::ranges::to<std::vector<const char*>>();
-    argv_ptrs.push_back(nullptr);
-
-    execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
-
-    // Error occurred since execv returned. At this point, errno is set.
-    // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Subprocess] Error: execv failed: {}\n",
-               strerror(errno));
-    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
-    //  exit codes
-    abort();
-  }
-}
-
-CraneErrCode ContainerInstance::Kill(int signum) {
-  using json = nlohmann::json;
-  if (m_pid_ != 0) {
-    // If m_pid_ not exists, no further operation.
-    int rc = 0;
-    std::array<char, 256> buffer{};
-    std::string cmd, ret, status;
-    json jret;
-
-    // Check the state of the container
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
-
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
-                                                  pclose);
-    if (!pipe) {
-      CRANE_TRACE(
-          "[Subprocess] Error in getting container status: popen() failed.");
-      goto ProcessKill;
-    }
-    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
-           nullptr) {
-      ret += buffer.data();
-    }
-
-    jret = json::parse(std::move(ret), nullptr, false);
-    if (jret.is_discarded() || !jret.contains("status") ||
-        !jret["status"].is_string()) {
-      CRANE_TRACE("[Subprocess] Error in parsing container status: {}", cmd);
-      goto ProcessKill;
-    }
-
-    // Take action according to OCI container states, see:
-    // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
-    status = std::move(jret["status"]);
-    if (status == "creating") {
-      goto ProcessKill;
-    } else if (status == "created") {
-      goto ContainerDelete;
-    } else if (status == "running") {
-      goto ContainerKill;
-    } else if (status == "stopped") {
-      goto ContainerDelete;
-    } else {
-      CRANE_WARN("[Subprocess] Unknown container status received: {}", status);
-      goto ProcessKill;
-    }
-
-  ContainerKill:
-    // Try to stop gracefully.
-    // NOTE: It's admin's responsibility to ensure the command is safe.
-    // Note: Signal is configured in config.yaml instead of in the param.
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeKill);
-    rc = system(cmd.c_str());
-    if (rc != 0) {
-      CRANE_TRACE(
-          "[Subprocess] Failed to kill container for task #{}: error in {}",
-          task_id, cmd);
-    }
-
-  ContainerDelete:
-    // Delete the container
-    // NOTE: Admin could choose if --force is configured or not.
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeDelete);
-    rc = system(cmd.c_str());
-    if (rc != 0) {
-      CRANE_TRACE(
-          "[Subprocess] Failed to delete container for task #{}: error in {}",
-          task_id, cmd);
-    }
-
-  ProcessKill:
-    // Kill runc process as the last resort.
-    // Note: If runc is launched in `detached` mode, this will not work.
-    rc = kill(-m_pid_, signum);
-    if ((rc != 0) && (errno != ESRCH)) {
-      CRANE_TRACE("[Subprocess] Failed to kill pid {}. error: {}", m_pid_,
-                  strerror(errno));
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-
-    return CraneErrCode::SUCCESS;
-  }
-
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-CraneErrCode ContainerInstance::Suspend() {
-  using json = nlohmann::json;
-  if (m_pid_ != 0) {
-    int rc = 0;
-    std::array<char, 256> buffer{};
-    std::string cmd, ret, status;
-    json jret;
-
-    // Check the state of the container
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
-
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
-                                                  pclose);
-    if (!pipe) {
-      CRANE_TRACE(
-          "[Subprocess] Error in getting container status for suspend: popen() "
-          "failed.");
-      goto ProcessSuspend;
-    }
-    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
-           nullptr) {
-      ret += buffer.data();
-    }
-
-    jret = json::parse(std::move(ret), nullptr, false);
-    if (jret.is_discarded() || !jret.contains("status") ||
-        !jret["status"].is_string()) {
-      CRANE_TRACE(
-          "[Subprocess] Error in parsing container status for suspend: {}",
-          cmd);
-      goto ProcessSuspend;
-    }
-
-    status = std::move(jret["status"]);
-    if (status == "running") {
-      // Suspend the container using OCI runtime pause command
-      if (!g_config.Container.RuntimePause.empty()) {
-        cmd = ParseOCICmdPattern_(g_config.Container.RuntimePause);
-        rc = system(cmd.c_str());
-        if (rc == 0) {
-          CRANE_DEBUG("Container for task #{} suspended successfully", task_id);
-          return CraneErrCode::SUCCESS;
-        } else {
-          CRANE_WARN(
-              "[Subprocess] Failed to suspend container for task #{}: error in "
-              "{}",
-              task_id, cmd);
-        }
-      }
-    } else {
-      CRANE_WARN("[Subprocess] Container not in running state for suspend: {}",
-                 status);
-    }
-
-  ProcessSuspend:
-    // Fall back to process group suspend
-    return ITaskInstance::Suspend();
-  }
-
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-CraneErrCode ContainerInstance::Resume() {
-  using json = nlohmann::json;
-  if (m_pid_ != 0) {
-    int rc = 0;
-    std::array<char, 256> buffer{};
-    std::string cmd, ret, status;
-    json jret;
-
-    // Check the state of the container
-    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
-
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
-                                                  pclose);
-    if (!pipe) {
-      CRANE_TRACE(
-          "[Subprocess] Error in getting container status for resume: popen() "
-          "failed.");
-      goto ProcessResume;
-    }
-    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
-           nullptr) {
-      ret += buffer.data();
-    }
-
-    jret = json::parse(std::move(ret), nullptr, false);
-    if (jret.is_discarded() || !jret.contains("status") ||
-        !jret["status"].is_string()) {
-      CRANE_TRACE(
-          "[Subprocess] Error in parsing container status for resume: {}", cmd);
-      goto ProcessResume;
-    }
-
-    status = std::move(jret["status"]);
-    if (status == "paused") {
-      // Resume the container using OCI runtime resume command
-      if (!g_config.Container.RuntimeResume.empty()) {
-        cmd = ParseOCICmdPattern_(g_config.Container.RuntimeResume);
-        rc = system(cmd.c_str());
-        if (rc == 0) {
-          CRANE_DEBUG("Container for task #{} resumed successfully", task_id);
-          return CraneErrCode::SUCCESS;
-        } else {
-          CRANE_WARN(
-              "[Subprocess] Failed to resume container for task #{}: error in "
-              "{}",
-              task_id, cmd);
-        }
-      }
-    } else {
-      CRANE_WARN("[Subprocess] Container not in paused state for resume: {}",
-                 status);
-    }
-
-  ProcessResume:
-    // Fall back to process group resume
-    return ITaskInstance::Resume();
-  }
-
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-CraneErrCode ContainerInstance::Cleanup() {
-  if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
-    if (!m_temp_path_.empty())
-      g_thread_pool->detach_task(
-          [p = m_temp_path_]() { util::os::DeleteFolders(p); });
-  }
-
-  // Dummy return
   return CraneErrCode::SUCCESS;
 }
 
-std::optional<const TaskExitInfo> ContainerInstance::HandleSigchld(pid_t pid,
-                                                                   int status) {
-  m_exit_info_.pid = pid;
+CraneErrCode ContainerInstance::Kill(int signum) {
+  // For containers, we ignore the signum parameter and use CRI to stop/cleanup
+  // Stop Container -> Remove Container -> Stop Pod -> Remove Pod
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
 
-  if (WIFEXITED(status)) {
-    // Exited with status WEXITSTATUS(status)
-    m_exit_info_.value = WEXITSTATUS(status);
-    if (m_exit_info_.value > 128) {
-      // OCI runtime may return 128 + signal number
-      // See: https://tldp.org/LDP/abs/html/exitcodes.html
-      m_exit_info_.is_terminated_by_signal = true;
-      m_exit_info_.value -= 128;
-    } else {
-      // OCI runtime normal exiting
-      m_exit_info_.is_terminated_by_signal = false;
+  // Step 1: Stop Container
+  if (!m_container_id_.empty()) {
+    auto stop_ret = cri_client->StopContainer(m_container_id_, 10);
+    if (!stop_ret.has_value()) {
+      const auto& rich_err = stop_ret.error();
+      CRANE_DEBUG("Failed to stop container {}: {}", m_container_id_,
+                  rich_err.description());
+      // Continue with cleanup even if stop fails
     }
 
-  } else if (WIFSIGNALED(status)) {
-    // OCI runtime is forced to exit by signal
-    // This is a undesired situation, but we should handle it gracefully.
-    m_exit_info_.is_terminated_by_signal = true;
-    m_exit_info_.value = WTERMSIG(status);
-    CRANE_WARN("OCI runtime for task #{} is killed by signal {}.", task_id,
-               m_exit_info_.value);
-  } else {
-    CRANE_TRACE("Received SIGCHLD with status {} for task #{} but ignored.",
-                status, task_id);
-    return std::nullopt;
+    // Step 2: Remove Container
+    auto remove_ret = cri_client->RemoveContainer(m_container_id_);
+    if (!remove_ret.has_value()) {
+      const auto& rich_err = remove_ret.error();
+      CRANE_DEBUG("Failed to remove container {}: {}", m_container_id_,
+                  rich_err.description());
+      // Continue with pod cleanup even if container removal fails
+    }
   }
 
-  return std::optional<TaskExitInfo>{m_exit_info_};
+  // Step 3: Stop Pod
+  if (!m_pod_id_.empty()) {
+    auto stop_pod_ret = cri_client->StopPodSandbox(m_pod_id_);
+    if (!stop_pod_ret.has_value()) {
+      const auto& rich_err = stop_pod_ret.error();
+      CRANE_DEBUG("Failed to stop pod {}: {}", m_pod_id_,
+                  rich_err.description());
+      // Continue with pod removal even if stop fails
+    }
+
+    // Step 4: Remove Pod
+    auto remove_pod_ret = cri_client->RemovePodSandbox(m_pod_id_);
+    if (!remove_pod_ret.has_value()) {
+      const auto& rich_err = remove_pod_ret.error();
+      CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
+                  rich_err.description());
+      return rich_err.code();
+    }
+
+    CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::Cleanup() {
+  // For container tasks, Kill() is idempotent.
+  // It's ok to call it (at most) twice to remove pod and container.
+  CraneErrCode err = Kill(0);
+  return err;
+}
+
+const TaskExitInfo& ContainerInstance::HandleContainerExited(
+    const cri::api::ContainerStatus& status) {
+  m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
+  m_exit_info_.value = m_exit_info_.is_terminated_by_signal
+                           ? status.exit_code() - 128
+                           : status.exit_code();
+  return m_exit_info_;
+}
+
+CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelUidKey;
+
+  // All steps in a job share the same pod.
+  job_id_t job_id = g_config.JobId;
+  const auto& ca_meta = GetParentStep().container_meta();
+
+  // FIXME: Use job_name. Here is step_name actually.
+  const std::string& job_name = GetParentStep().name();
+  const std::string& node_name = g_config.CranedIdOfThisNode;
+
+  uid_t uid = m_parent_step_inst_->pwd.Uid();
+  gid_t gid = m_parent_step_inst_->pwd.Gid();
+
+  // Generate hash for pod name and uid.
+  std::string h16 = MakeHashId_(job_id, job_name, node_name);
+  std::string hsuffix = h16.substr(0, kCriPodSuffixLen);
+
+  std::string pod_name_base = util::SlugDns1123(
+      job_name.empty() ? std::format("job-{}", job_id) : job_name,
+      kCriDnsMaxLabelLen - /*'-'*/ 1 - kCriPodSuffixLen);
+
+  // metadata
+  auto* pod_meta = m_pod_config_.mutable_metadata();
+  // pod name：<pod_name_base>-<hsuffix>; pod uid: <h16>
+  pod_meta->set_name(pod_name_base + "-" + hsuffix);
+  pod_meta->set_uid(std::move(h16));
+
+  // hostname
+  m_pod_config_.set_hostname(util::SlugDns1123(
+      pod_meta->name() + "-" + node_name, kCriDnsMaxLabelLen));
+
+  // labels
+  m_pod_config_.mutable_labels()->insert(
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(kCriLabelJobNameKey), job_name}});
+
+  // log directory
+  m_pod_config_.set_log_directory(m_log_dir_);
+
+  // TODO: What about the port allocation when multiple containers in a pod?
+  for (const auto& port : ca_meta.ports()) {
+    auto* p = m_pod_config_.add_port_mappings();
+    p->set_host_port(port.first);
+    p->set_container_port(port.second);
+  }
+
+  // FIXME: This is just a workaround before we have CgroupManager refactored
+  // into a public library.
+  {
+    // set cgroup parent
+    auto* linux_config = m_pod_config_.mutable_linux();
+    std::ifstream cgroup_file("/proc/self/cgroup");
+    std::string line;
+    std::filesystem::path cgroup_path;
+
+    while (std::getline(cgroup_file, line)) {
+      // cgroup v1: 10:memory:/user.slice
+      // cgroup v2: 0::/user.slice
+      auto pos = line.rfind(':');
+      if (pos != std::string::npos && pos + 1 < line.size()) {
+        cgroup_path = line.substr(pos + 1);
+        if (!cgroup_path.empty()) {
+          break;
+        }
+      }
+    }
+
+    if (cgroup_path.empty()) {
+      CRANE_ERROR("Failed to determine cgroup path from /proc/self/cgroup");
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+    linux_config->set_cgroup_parent(cgroup_path.parent_path().string());
+  }
+
+  // security context
+  auto* sec_ctx = m_pod_config_.mutable_linux()->mutable_security_context();
+  if (uid != 0) {
+    // Non root task can use userns or run_as_user/run_as_group.
+    if (ca_meta.userns()) {
+      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
+          CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
+                    job_id);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
+      // Set run_as_user and run_as_group if not using userns.
+      // TODO: egid and supplemental groups?
+      sec_ctx->mutable_run_as_user()->set_value(uid);
+      sec_ctx->mutable_run_as_group()->set_value(gid);
+    } else {
+      CRANE_ERROR("Unsupported identity setting for pod of job #{}", job_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+  } else {
+    // Root task will not use userns but can set run_as_user/run_as_group.
+    sec_ctx->mutable_run_as_user()->set_value(ca_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(ca_meta.run_as_group());
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::SetContainerConfig_() {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelStepIdKey;
+  using cri::kCriLabelUidKey;
+
+  // There is only one task in a step. So we use step_id and job_id here.
+  job_id_t job_id = GetParentStep().job_id();
+  step_id_t step_id = m_parent_step_inst_->step_id;
+
+  const auto& ca_meta = GetParentStep().container_meta();
+  const std::string& step_name = GetParentStep().name();
+  const std::string& node_name = g_config.CranedIdOfThisNode;
+
+  uid_t uid = m_parent_step_inst_->pwd.Uid();
+  gid_t gid = m_parent_step_inst_->pwd.Gid();
+
+  // Using job_id/step_id to generate unique name in pod metadata
+  m_container_config_.mutable_metadata()->set_name(
+      std::format("job-{}-{}", job_id, step_id));
+
+  // labels
+  m_container_config_.mutable_labels()->insert(
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(kCriLabelStepIdKey), std::to_string(step_id)},
+       {std::string(kCriLabelJobNameKey), step_name}});
+
+  // log_path (a relative path to pod log dir)
+  m_container_config_.set_log_path(m_log_file_.filename());
+
+  // image already checked and pulled.
+  m_container_config_.mutable_image()->set_image(m_image_id_);
+
+  // interactive options
+  m_container_config_.set_stdin(ca_meta.stdin());
+  m_container_config_.set_stdin_once(ca_meta.stdin_once());
+  m_container_config_.set_tty(ca_meta.tty());
+
+  // mount the generated script with uid/gid mapping.
+  for (const auto& mount : ca_meta.mounts()) {
+    auto* m = m_container_config_.add_mounts();
+
+    // If relative path is given, handle it with cwd.
+    std::filesystem::path host_path(mount.first);
+    if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
+
+    m->set_host_path(std::move(host_path));
+    m->set_container_path(mount.second);
+    m->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
+  }
+
+  // security context
+  auto* sec_ctx =
+      m_container_config_.mutable_linux()->mutable_security_context();
+  if (uid != 0) {
+    // Non root task can use userns or run_as_user/run_as_group.
+    if (ca_meta.userns()) {
+      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd,
+                                &m_container_config_) !=
+          CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to inject fake root config for #{}.{}", job_id,
+                    step_id);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    } else if (ca_meta.run_as_user() == uid && ca_meta.run_as_group() == gid) {
+      // Set run_as_user and run_as_group if not using userns
+      // TODO: egid and supplemental groups?
+      sec_ctx->mutable_run_as_user()->set_value(uid);
+      sec_ctx->mutable_run_as_group()->set_value(gid);
+    } else {
+      CRANE_ERROR(
+          "Container #{}.{} is not allowed to use other identities when not "
+          "using userns",
+          job_id, step_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+  } else {
+    // Root task will not use userns but can set run_as_user/run_as_group.
+    sec_ctx->mutable_run_as_user()->set_value(ca_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(ca_meta.run_as_group());
+  }
+
+  // workdir
+  if (!ca_meta.workdir().empty())
+    m_container_config_.set_working_dir(ca_meta.workdir());
+
+  // command and args
+  if (!ca_meta.command().empty())
+    m_container_config_.mutable_command()->Add()->assign(ca_meta.command());
+  m_container_config_.mutable_args()->CopyFrom(ca_meta.args());
+
+  // envs
+  for (const auto& [name, value] : m_env_) {
+    auto* env = m_container_config_.add_envs();
+    env->set_key(name);
+    env->set_value(value);
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+// Setup mapping for kid <-> uid. For kernel id and userspace id, See:
+// https://www.kernel.org/doc/html/next/filesystems/idmappings.html
+cri::api::IDMapping ContainerInstance::MakeIdMapping_(uid_t kernel_id,
+                                                      uid_t userspace_id,
+                                                      size_t size) {
+  cri::api::IDMapping mapping{};
+  mapping.set_host_id(kernel_id);
+  mapping.set_container_id(userspace_id);
+  mapping.set_length(size);
+  return mapping;
+}
+
+std::string ContainerInstance::MakeHashId_(job_id_t job_id,
+                                           const std::string& job_name,
+                                           const std::string& node_name) {
+  std::string h_msg =
+      std::format("{}\x1f{}\x1f{}", job_id, node_name, job_name);
+  uint64_t h64 =
+      (static_cast<uint64_t>(util::Crc32Of(h_msg, 0xA5A5A5A5U)) << 32) |
+      util::Adler32Of(h_msg, 0x3C3C3C3CU);
+  return std::format("{:016x}", h64);  // 16 hex chars, lowercase
+}
+
+CraneErrCode ContainerInstance::SetSubIdMappings_(const PasswordEntry& pwd) {
+  auto subuid = pwd.SubUidRanges();
+  auto subgid = pwd.SubGidRanges();
+
+  if (!subuid.Valid() || !subgid.Valid()) {
+    CRANE_ERROR("SubUID/SubGID ranges are not valid for user {}", pwd.Uid());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // K8s/Containerd currently assume only one continuous range is set for
+  // userns. Otherwise, netns in userns will fail.
+  m_userns_uid_mapping_ = MakeIdMapping_(subuid[0].start, 0, subuid[0].count);
+  m_userns_gid_mapping_ = MakeIdMapping_(subgid[0].start, 0, subgid[0].count);
+
+  // Use idmapped mounts for fake root.
+  // Code below could be unintuitive. See vfsuid for details.
+  m_mount_uid_mapping_ = MakeIdMapping_(subuid[0].start, pwd.Uid(), 1);
+  m_mount_gid_mapping_ = MakeIdMapping_(subgid[0].start, pwd.Gid(), 1);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::InjectFakeRootConfig_(
+    const PasswordEntry& pwd, cri::api::PodSandboxConfig* config) {
+  if (m_userns_uid_mapping_.length() == 0 &&
+      SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // set linux pod options
+  auto* linux_sec_context = config->mutable_linux()->mutable_security_context();
+  auto* userns_options =
+      linux_sec_context->mutable_namespace_options()->mutable_userns_options();
+
+  // Fake root
+  userns_options->set_mode(cri::api::NamespaceMode::POD);
+  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
+  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
+
+  linux_sec_context->mutable_run_as_user()->set_value(0);
+  linux_sec_context->mutable_run_as_group()->set_value(0);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::InjectFakeRootConfig_(
+    const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
+  if (m_userns_uid_mapping_.length() == 0 &&
+      SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // set linux container options
+  auto* linux_sec_context = config->mutable_linux()->mutable_security_context();
+  auto* userns_options =
+      linux_sec_context->mutable_namespace_options()->mutable_userns_options();
+
+  // fake root
+  userns_options->set_mode(cri::api::NamespaceMode::POD);
+  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
+  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
+
+  linux_sec_context->mutable_run_as_user()->set_value(0);
+  linux_sec_context->mutable_run_as_group()->set_value(0);
+
+  // modify mounts, see comments regarding *mapping members
+  for (auto& mount : *config->mutable_mounts()) {
+    mount.mutable_uidmappings()->Add()->CopyFrom(m_mount_uid_mapping_);
+    mount.mutable_gidmappings()->Add()->CopyFrom(m_mount_gid_mapping_);
+  }
+
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ProcInstance::Prepare() {
@@ -1280,11 +1117,9 @@ CraneErrCode ProcInstance::Prepare() {
   }
 
   if (m_parent_step_inst_->IsBatch())
-    fputs(m_parent_step_inst_->GetStep().batch_meta().sh_script().c_str(),
-          fptr);
+    fputs(GetParentStep().batch_meta().sh_script().c_str(), fptr);
   else  // Crun
-    fputs(m_parent_step_inst_->GetStep().interactive_meta().sh_script().c_str(),
-          fptr);
+    fputs(GetParentStep().interactive_meta().sh_script().c_str(), fptr);
 
   fclose(fptr);
 
@@ -1305,18 +1140,15 @@ CraneErrCode ProcInstance::Prepare() {
      */
     auto meta = std::make_unique<BatchInstanceMeta>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        m_parent_step_inst_->GetStep().batch_meta().output_file_pattern(),
-        m_parent_step_inst_->GetStep().cwd());
+        GetParentStep().batch_meta().output_file_pattern(),
+        GetParentStep().cwd());
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
-    if (!m_parent_step_inst_->GetStep()
-             .batch_meta()
-             .error_file_pattern()
-             .empty()) {
+    if (!GetParentStep().batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          m_parent_step_inst_->GetStep().batch_meta().error_file_pattern(),
-          m_parent_step_inst_->GetStep().cwd());
+          GetParentStep().batch_meta().error_file_pattern(),
+          GetParentStep().cwd());
     }
 
     m_meta_ = std::move(meta);
@@ -1329,10 +1161,9 @@ CraneErrCode ProcInstance::Prepare() {
   // If interpreter is not set, let system decide.
   m_executable_ = sh_path.string();
   if (m_parent_step_inst_->IsBatch() &&
-      !m_parent_step_inst_->GetStep().batch_meta().interpreter().empty()) {
+      !GetParentStep().batch_meta().interpreter().empty()) {
     m_executable_ = fmt::format(
-        "{} {}", m_parent_step_inst_->GetStep().batch_meta().interpreter(),
-        sh_path.string());
+        "{} {}", GetParentStep().batch_meta().interpreter(), sh_path.string());
   }
   // TODO: Currently we don't support arguments in batch scripts.
   // m_arguments_ = std::list<std::string>{};
@@ -1354,11 +1185,10 @@ CraneErrCode ProcInstance::Spawn() {
   std::vector<int> to_crun_pipe(2, -1);
   std::vector<int> from_crun_pipe(2, -1);
 
-  if (this->m_parent_step_inst_->IsCrun() &&
-      this->m_parent_step_inst_->GetStep().interactive_meta().x11()) {
-    auto err = SetupCrunX11_();
+  if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
+    auto err = PrepareXauthFiles_();
     if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("Failed to setup crun X11 forwarding.");
+      CRANE_WARN("Failed to prepare crun X11 forwarding.");
       return err;
     }
   }
@@ -1401,8 +1231,9 @@ CraneErrCode ProcInstance::Spawn() {
         uint16_t x11_port;
         crun_init_success = SetupCrunFwdAtParent_(&x11_port);
         msg.set_x11_port(x11_port);
-      } else
+      } else {
         crun_init_success = SetupCrunFwdAtParent_(nullptr);
+      }
 
       CRANE_DEBUG("Task #{} has initialized crun forwarding.", task_id);
     }
@@ -1457,7 +1288,7 @@ CraneErrCode ProcInstance::Spawn() {
   } else {  // Child proc
     ResetChildProcSigHandler_();
 
-    CraneErrCode err = SetChildProcessProperty_();
+    CraneErrCode err = SetChildProcProperty_();
     if (err != CraneErrCode::SUCCESS) std::abort();
 
     close(ctrl_sock_pair[0]);
@@ -1488,7 +1319,7 @@ CraneErrCode ProcInstance::Spawn() {
     }
 
     if (m_parent_step_inst_->IsBatch()) {
-      if (SetChildProcessBatchFd_() != CraneErrCode::SUCCESS) std::abort();
+      if (SetChildProcBatchFd_() != CraneErrCode::SUCCESS) std::abort();
     } else if (m_parent_step_inst_->IsCrun()) {
       SetupCrunFwdAtChild_();
     }
@@ -1509,22 +1340,20 @@ CraneErrCode ProcInstance::Spawn() {
     if (m_parent_step_inst_->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
-    if (m_parent_step_inst_->IsCrun() &&
-        m_parent_step_inst_->GetStep().interactive_meta().x11()) {
-      this->GetCrunMeta()->x11_port = msg.x11_port();
-      SetupChildProcessCrunX11_();
+    if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
+      this->GetCrunMeta_()->x11_port = msg.x11_port();
+      SetupChildProcCrunX11_();
     }
 
-    m_env_ = GetChildProcessEnv();
-
     // Apply environment variables
-    err = SetChildProcessEnv_();
+    InitEnvMap();
+    err = SetChildProcEnv_();
     if (err != CraneErrCode::SUCCESS) {
       fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
     }
 
     // Prepare the command line arguments.
-    auto argv = GetChildProcessExecArgv_();
+    auto argv = GetChildProcExecArgv_();
     auto argv_ptrs = argv |
                      std::ranges::views::transform(
                          [](const std::string& s) { return s.c_str(); }) |
@@ -1547,18 +1376,15 @@ CraneErrCode ProcInstance::Spawn() {
 }
 
 CraneErrCode ProcInstance::Kill(int signum) {
-  if (m_pid_) {
+  if (m_pid_ != 0) {
     CRANE_TRACE("Killing pid {} with signal {}", m_pid_, signum);
 
     // Send the signal to the whole process group.
     int err = kill(-m_pid_, signum);
+    if (err == 0) return CraneErrCode::SUCCESS;
 
-    if (err == 0)
-      return CraneErrCode::SUCCESS;
-    else {
-      CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErrCode::ERR_GENERIC_FAILURE;
-    }
+    CRANE_TRACE("Killing pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 
   return CraneErrCode::ERR_NON_EXISTENT;
@@ -1623,10 +1449,16 @@ TaskManager::TaskManager()
         EvCleanSigchldQueueCb_();
       });
 
-  m_task_stop_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_task_stop_async_handle_->on<uvw::async_event>(
+  m_task_stopped_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_stopped_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanTaskStopQueueCb_();
+      });
+
+  m_cri_event_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_cri_event_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanCriEventQueueCb_();
       });
 
   m_terminate_task_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
@@ -1699,7 +1531,6 @@ TaskManager::TaskManager()
 }
 
 TaskManager::~TaskManager() {
-  CRANE_TRACE("Shutting down task manager.");
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
@@ -1709,20 +1540,25 @@ void TaskManager::Wait() {
 
 void TaskManager::ShutdownSupervisor() {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemon()) {
+  if (m_step_.IsDaemonStep()) {
     CRANE_DEBUG("Sending a completed status as daemon step.");
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
                                            0, "");
     g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
   }
+
+  // Explicitly release CriClient
+  m_step_.StopCriClient();
+
   g_craned_client->Shutdown();
   g_server->Shutdown();
-  g_task_mgr->Shutdown();
+
+  this->Shutdown();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
-  m_task_stop_queue_.enqueue(task_id);
-  m_task_stop_async_handle_->send();
+  m_task_stopped_queue_.enqueue(task_id);
+  m_task_stopped_async_handle_->send();
 }
 
 void TaskManager::TaskFinish_(task_id_t task_id,
@@ -1731,15 +1567,28 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                               std::optional<std::string> reason) {
   CRANE_TRACE("[Task #{}] Task status change to {} exit code: {}, reason: {}.",
               task_id, new_status, exit_code, reason.value_or(""));
-  g_runtime_status.Status = crane::grpc::Completing;
+
+  if (g_runtime_status.Status.load() != StepStatus::Completing) {
+    CRANE_INFO("Step completing now, prev status: {}.",
+               g_runtime_status.Status.load());
+    g_runtime_status.Status = StepStatus::Completing;
+  }
+
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
     CRANE_DEBUG("[Task #{}] Task not found.");
     return;
-  }  // One-shot model: nothing to stop, just proceed to cleanup.
+  }
+
+  // One-shot model: nothing to stop, just proceed to cleanup.
   m_step_.oom_baseline_inited = false;
 
-  task->Cleanup();
+  auto err = task->Cleanup();
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_WARN("[Task #{}] Failed to cleanup task: {}", task_id,
+               static_cast<int>(err));
+  }
+
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
     DelTerminationTimer_();
@@ -1760,7 +1609,7 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.container.length() != 0) {
+  if (m_step_.IsContainer()) {
     // Container
     elem.instance = std::make_unique<ContainerInstance>(&m_step_);
   } else {
@@ -1773,32 +1622,35 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
   return ok_future;
 }
 
-void TaskManager::LaunchExecution_(ITaskInstance* task) {
+CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
+  // Init CriClient before preparation
+  if (m_step_.IsContainer()) m_step_.InitCriClient();
+
   // Prepare for execution
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
   CraneErrCode err = task->Prepare();
   if (err != CraneErrCode::SUCCESS) {
-    CRANE_DEBUG("[Task #{}] Failed to prepare task", task->task_id);
-    TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeFileNotFound,
-                fmt::format("Failed to prepare task"));
-    return;
+    TaskFinish_(
+        task->task_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::EC_FILE_NOT_FOUND,
+        fmt::format("Failed to prepare task, code: {}", static_cast<int>(err)));
+    return err;
   }
 
-  CRANE_TRACE("[Task #{}] Spawning process in task", task->task_id);
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
-
+  // Init cfored before start the task.
   if (m_step_.IsCrun()) m_step_.InitCforedClient();
 
+  CRANE_INFO("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
   if (err != CraneErrCode::SUCCESS) {
     TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                ExitCode::kExitCodeSpawnProcessFail,
-                fmt::format("Cannot spawn child process in task"));
+                ExitCode::EC_SPAWN_FAILED,
+                fmt::format("Cannot spawn child process in task, code: {}",
+                            static_cast<int>(err)));
+    return err;
   }
+
+  return CraneErrCode::SUCCESS;
 }
 
 std::future<CraneExpected<EnvMap>> TaskManager::QueryStepEnvAsync() {
@@ -1881,6 +1733,7 @@ void TaskManager::EvSigchldCb_() {
     }
   }
 }
+
 void TaskManager::EvSigchldTimerCb_() {
   m_process_sigchld_async_handle_->send();
 }
@@ -1888,29 +1741,26 @@ void TaskManager::EvSigchldTimerCb_() {
 void TaskManager::EvCleanSigchldQueueCb_() {
   std::vector<std::pair<pid_t, int>> not_found_tasks;
   std::pair<pid_t, int> elem;
+
   while (m_sigchld_queue_.try_dequeue(elem)) {
-    if (g_runtime_status.Status.load() != StepStatus::Completing) {
-      CRANE_INFO("Step completing now, prev status: {}.",
-                 g_runtime_status.Status.load());
-      g_runtime_status.Status = StepStatus::Completing;
-    }
     auto [pid, status] = elem;
-    auto it = m_pid_task_id_map_.find(pid);
-    if (it == m_pid_task_id_map_.end()) {
+    auto it = m_exec_id_task_id_map_.find(pid);
+    if (it == m_exec_id_task_id_map_.end()) {
       not_found_tasks.emplace_back(elem);
       CRANE_TRACE("Cannot find task for pid {}, will check next time.", pid);
       continue;
     }
+
     auto task_id = it->second;
     CRANE_TRACE("[Task #{}] Receiving SIGCHLD for pid {}", task_id, pid);
-    auto task = m_step_.GetTaskInstance(task_id);
+
+    // Only ProcInstance could receive SIGCHLD.
+    auto* task = dynamic_cast<ProcInstance*>(m_step_.GetTaskInstance(task_id));
     const auto exit_info = task->HandleSigchld(pid, status);
     if (!exit_info.has_value()) continue;
 
-    m_pid_task_id_map_.erase(pid);
-    CRANE_INFO(
-        "[Task #{}] Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}",
-        task_id, pid, exit_info->is_terminated_by_signal, exit_info->value);
+    CRANE_INFO("Receiving SIGCHLD for pid {}. Signaled: {}, Value: {}", pid,
+               exit_info->is_terminated_by_signal, exit_info->value);
 
     if (m_step_.IsCrun()) {
       // TaskStatusChange of a crun task is triggered in
@@ -1921,14 +1771,32 @@ void TaskManager::EvCleanSigchldQueueCb_() {
         m_step_.GetCforedClient()->TaskEnd(task_id);
       }
     } else /* Batch / Calloc */ {
-      // If the TaskInstance has no process left,
+      // If has no process/container left,
       // send TaskStatusChange for this task.
-      // See the comment of EvActivateTaskStatusChange_.
       TaskStopAndDoStatusChange(task_id);
     }
   }
+
+  // Put not found tasks back to the queue
   for (auto task : not_found_tasks) {
     m_sigchld_queue_.enqueue(task);
+  }
+}
+
+void TaskManager::EvCleanCriEventQueueCb_() {
+  cri::api::ContainerStatus status;
+  while (m_cri_event_queue_.try_dequeue(status)) {
+    // NOTE: a CRI event comes at LEAST once.
+    // For container steps, task_id always equals to 0.
+    auto* t = m_step_.GetTaskInstance(0);
+    if (t == nullptr) continue;  // Duplicated event
+    auto* task = dynamic_cast<ContainerInstance*>(t);
+
+    const auto& exit_info = task->HandleContainerExited(status);
+    CRANE_INFO("Receiving container exited event: {}. Signaled: {}, Value: {}",
+               status.id(), exit_info.is_terminated_by_signal, exit_info.value);
+
+    TaskStopAndDoStatusChange(0);
   }
 }
 
@@ -1938,32 +1806,34 @@ void TaskManager::EvTaskTimerCb_() {
 
   DelTerminationTimer_();
 
-  if (m_step_.IsBatch() || m_step_.IsCrun()) {
+  if (m_step_.IsCalloc()) {
+    // For calloc job, we use job id, send TaskFinish_ directly.
+    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
+  } else {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
         .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT});
     m_terminate_task_async_handle_->send();
-  } else {
-    // For calloc job, we use job id, send TaskFinish_ directly.
-    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
 }
 
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
-  while (m_task_stop_queue_.try_dequeue(task_id)) {
+  while (m_task_stopped_queue_.try_dequeue(task_id)) {
     CRANE_INFO("[Task #{}] Stopped and is doing TaskStatusChange...", task_id);
-    auto task = m_step_.GetTaskInstance(task_id);
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task->GetExecId().has_value())
+      m_exec_id_task_id_map_.erase(*task->GetExecId());
 
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
+                  ExitCode::EC_SPAWN_FAILED, std::nullopt);
       return;
 
     case CraneErrCode::ERR_CGROUP:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodeCgroupError, std::nullopt);
+                  ExitCode::EC_CGROUP_ERR, std::nullopt);
       return;
 
     default:
@@ -1971,14 +1841,15 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     }
 
     const auto& exit_info = task->GetExitInfo();
-    if (m_step_.IsBatch() || m_step_.IsCrun()) {
-      bool considered_signal = exit_info.is_terminated_by_signal;
+    if (!m_step_.IsCalloc()) {
+      bool signalled = exit_info.is_terminated_by_signal;
       if (task->terminated_by == TerminatedBy::NONE) {
         if (m_step_.EvaluateOomOnExit()) {
           task->terminated_by = TerminatedBy::TERMINATION_BY_OOM;
         }
       }
-      if (considered_signal) {
+
+      if (signalled) {
         switch (task->terminated_by) {
         case TerminatedBy::CANCELLED_BY_USER:
           TaskFinish_(task_id, crane::grpc::TaskStatus::Cancelled,
@@ -1987,13 +1858,12 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
           break;
         case TerminatedBy::TERMINATION_BY_TIMEOUT:
           TaskFinish_(task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                      ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+                      ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
           break;
         case TerminatedBy::TERMINATION_BY_OOM:
-          TaskFinish_(
-              task_id, crane::grpc::TaskStatus::OutOfMemory,
-              exit_info.value + ExitCode::kTerminationSignalBase,
-              std::optional<std::string>("Detected by oom_kill counter delta"));
+          TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
+                      exit_info.value + ExitCode::kTerminationSignalBase,
+                      "Detected by oom_kill counter delta");
           break;
         default:
           TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
@@ -2007,8 +1877,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
         if (task->terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
           TaskFinish_(task_id, crane::grpc::TaskStatus::OutOfMemory,
                       exit_info.value,
-                      std::optional<std::string>(
-                          "Detected by oom_kill counter delta (no signal)"));
+                      "Detected by oom_kill counter delta (no signal)");
         } else {
           TaskFinish_(task_id, crane::grpc::TaskStatus::Failed, exit_info.value,
                       std::nullopt);
@@ -2035,10 +1904,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   std::vector<TaskTerminateQueueElem> not_ready_elems;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
-    CRANE_TRACE(
-        "Receive TerminateRunningTask Request from internal queue. "
-        "Task id: {}",
-        g_config.JobId);
+    // TODO: Replace job id with task id.
+    CRANE_TRACE("Receive TerminateRunningTask Request for {}.", g_config.JobId);
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
@@ -2053,17 +1920,16 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    int sig = SIGTERM;  // For BatchTask
-    if (m_step_.IsCrun()) sig = SIGHUP;
+    int sig = (m_step_.IsBatch() || m_step_.IsContainer()) ? SIGTERM : SIGHUP;
 
-    if (m_pid_task_id_map_.empty() && elem.mark_as_orphaned) {
+    if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
       g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
       continue;
     }
 
-    for (auto task_id : m_pid_task_id_map_ | std::views::values) {
-      auto task = m_step_.GetTaskInstance(task_id);
+    for (task_id_t task_id : m_step_.GetTaskIds()) {
+      auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
       }
@@ -2073,14 +1939,17 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         sig = SIGKILL;
         task->terminated_by = TerminatedBy::CANCELLED_BY_USER;
       }
-      if (task->GetPid()) {
-        // For an Interactive task with a process running or a Batch task, we
-        // just send a kill signal here.
+
+      if (task->GetExecId().has_value()) {
+        // Will kill in 3 cases:
+        // 1. Container Task
+        // 2. Batch Task
+        // 3. Interactive Task having running process
         task->Kill(sig);
       } else if (m_step_.interactive_type.has_value()) {
         // For an Interactive task with no process running, it ends immediately.
         TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
-                    ExitCode::kExitCodeTerminated, std::nullopt);
+                    ExitCode::EC_TERMINATED, std::nullopt);
       } else {
         CRANE_ASSERT_MSG(false, "Terminating a batch step without any task");
       }
@@ -2120,12 +1989,12 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
           .termination_reason = TerminatedBy::TERMINATION_BY_TIMEOUT};
       m_task_terminate_queue_.enqueue(ev_task_terminate);
       m_terminate_task_async_handle_->send();
-
     } else {
       // If the task haven't timed out, set up a new timer.
       AddTerminationTimer_(
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
     }
+
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
   }
   for (auto& not_ready_elem : not_ready_elems) {
@@ -2215,6 +2084,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
       continue;
     }
+
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
@@ -2230,7 +2100,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
       TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::kExitCodePermissionDenied,
+                  ExitCode::EC_PERMISSION_DENIED,
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
@@ -2240,7 +2110,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
-      m_pid_task_id_map_[task->GetPid()] = task->task_id;
+      m_exec_id_task_id_map_[0] = task_id;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       return;
@@ -2248,18 +2118,19 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    LaunchExecution_(task);
-    if (!task->GetPid()) {
-      CRANE_WARN("[task #{}] Failed to launch process.", task->task_id);
-      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
+    auto err = LaunchExecution_(task);
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_WARN("[task #{}] Failed to launch process.", task_id);
     } else {
-      CRANE_INFO("[task #{}] Launched process {}.", task->task_id,
-                 task->GetPid());
-      m_pid_task_id_map_[task->GetPid()] = task->task_id;
+      auto exec_id = task->GetExecId().value();
+      CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+                 std::visit([](auto&& arg) { return std::format("{}", arg); },
+                            exec_id));
+      m_exec_id_task_id_map_[exec_id] = task_id;
       m_step_.InitOomBaseline();
-
-      elem.ok_prom.set_value(CraneErrCode::SUCCESS);
     }
+
+    elem.ok_prom.set_value(err);
   }
 }
 
