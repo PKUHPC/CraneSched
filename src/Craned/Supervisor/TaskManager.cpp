@@ -783,6 +783,50 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode ContainerInstance::Suspend() {
+  auto* step = GetParentStepInstance();
+  if (step == nullptr) return CraneErrCode::ERR_GENERIC_FAILURE;
+
+  if (step->cgroup_path.empty()) {
+    CRANE_WARN("Task #{} has no cgroup path; cannot suspend container.",
+               task_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto err = CgroupManager::FreezeCgroupByPath(step->cgroup_path);
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to suspend container task #{} via cg '{}': {}", task_id,
+                step->cgroup_path, CraneErrStr(err));
+  } else {
+    CRANE_DEBUG("Container task #{} suspended via cg '{}'.", task_id,
+                step->cgroup_path);
+  }
+
+  return err;
+}
+
+CraneErrCode ContainerInstance::Resume() {
+  auto* step = GetParentStepInstance();
+  if (step == nullptr) return CraneErrCode::ERR_GENERIC_FAILURE;
+
+  if (step->cgroup_path.empty()) {
+    CRANE_WARN("Task #{} has no cgroup path; cannot resume container.",
+               task_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto err = CgroupManager::ThawCgroupByPath(step->cgroup_path);
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to resume container task #{} via cg '{}': {}", task_id,
+                step->cgroup_path, CraneErrStr(err));
+  } else {
+    CRANE_DEBUG("Container task #{} resumed via cg '{}'.", task_id,
+                step->cgroup_path);
+  }
+
+  return err;
+}
+
 CraneErrCode ContainerInstance::Cleanup() {
   // For container tasks, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove pod and container.
@@ -1427,34 +1471,6 @@ CraneErrCode ProcInstance::Cleanup() {
 
   // Dummy return
   return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode ProcInstance::Suspend() {
-  if (m_pid_ != 0) {
-    CRANE_TRACE("Suspending pid {} with SIGSTOP", m_pid_);
-    // Send SIGSTOP to the whole process group
-    int err = kill(-m_pid_, SIGSTOP);
-    if (err == 0) return CraneErrCode::SUCCESS;
-
-    CRANE_TRACE("Suspending pid {} failed, error: {}", m_pid_, strerror(errno));
-    return CraneErrCode::ERR_GENERIC_FAILURE;
-  }
-
-  return CraneErrCode::ERR_NON_EXISTENT;
-}
-
-CraneErrCode ProcInstance::Resume() {
-  if (m_pid_ != 0) {
-    CRANE_TRACE("Resuming pid {} with SIGCONT", m_pid_);
-    // Send SIGCONT to the whole process group
-    int err = kill(-m_pid_, SIGCONT);
-    if (err == 0) return CraneErrCode::SUCCESS;
-
-    CRANE_TRACE("Resuming pid {} failed, error: {}", m_pid_, strerror(errno));
-    return CraneErrCode::ERR_GENERIC_FAILURE;
-  }
-
-  return CraneErrCode::ERR_NON_EXISTENT;
 }
 
 std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,
