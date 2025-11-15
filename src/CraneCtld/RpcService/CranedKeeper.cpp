@@ -356,7 +356,7 @@ CraneErrCode CranedStub::ChangeJobTimeLimit(uint32_t task_id,
 }
 
 crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
-    const crane::grpc::AttachInContainerTaskRequest &request) {
+    const crane::grpc::AttachInContainerTaskRequest& request) {
   using crane::grpc::AttachInContainerTaskReply;
   using crane::grpc::AttachInContainerTaskRequest;
 
@@ -372,7 +372,7 @@ crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    auto *err = reply.mutable_status();
+    auto* err = reply.mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description(status.error_message());
     reply.set_ok(false);
@@ -384,7 +384,7 @@ crane::grpc::AttachInContainerTaskReply CranedStub::AttachInContainerTask(
 }
 
 crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
-    const crane::grpc::ExecInContainerTaskRequest &request) {
+    const crane::grpc::ExecInContainerTaskRequest& request) {
   using crane::grpc::ExecInContainerTaskReply;
   using crane::grpc::ExecInContainerTaskRequest;
 
@@ -400,7 +400,7 @@ crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
         m_craned_id_, status.error_message());
     HandleGrpcErrorCode_(status.error_code());
 
-    auto *err = reply.mutable_status();
+    auto* err = reply.mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description(status.error_message());
     reply.set_ok(false);

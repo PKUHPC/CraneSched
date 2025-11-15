@@ -464,12 +464,12 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
 }
 
 grpc::Status CranedServiceImpl::AttachInContainerTask(
-    grpc::ServerContext *context,
-    const crane::grpc::AttachInContainerTaskRequest *request,
-    crane::grpc::AttachInContainerTaskReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::AttachInContainerTaskRequest* request,
+    crane::grpc::AttachInContainerTaskReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description("CranedServer is not ready.");
     response->set_ok(false);
@@ -480,7 +480,7 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
     // Should never happen.
     CRANE_ERROR(
         "AttachInContainerTask request received but Container is not enabled.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
     response->set_ok(false);
@@ -498,13 +498,13 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
   };
   auto container_expt = g_cri_client->SelectContainerId(label_selector);
   if (!container_expt) {
-    const auto &rich_err = container_expt.error();
+    const auto& rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
                 rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
         std::format("Container not found, possibly initializing: {}",
@@ -513,16 +513,16 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
     return Status::OK;
   }
 
-  const auto &container_id = container_expt.value();
+  const auto& container_id = container_expt.value();
   auto url_expt =
       g_cri_client->Attach(container_id, request->tty(), request->stdin(),
                            request->stdout(), request->stderr());
 
   if (!url_expt) {
-    const auto &rich_err = url_expt.error();
+    const auto& rich_err = url_expt.error();
     CRANE_ERROR("Failed to attach to container for #{}: {}", request->task_id(),
                 rich_err.description());
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;
@@ -535,12 +535,12 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
 }
 
 grpc::Status CranedServiceImpl::ExecInContainerTask(
-    grpc::ServerContext *context,
-    const crane::grpc::ExecInContainerTaskRequest *request,
-    crane::grpc::ExecInContainerTaskReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::ExecInContainerTaskRequest* request,
+    crane::grpc::ExecInContainerTaskReply* response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_RPC_FAILURE);
     err->set_description("CranedServer is not ready.");
     response->set_ok(false);
@@ -551,7 +551,7 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
     // Should never happen.
     CRANE_ERROR(
         "ExecInContainerTask request received but Container is not enabled.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
     response->set_ok(false);
@@ -561,7 +561,7 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
   // Validate command
   if (request->command_size() == 0) {
     CRANE_ERROR("ExecInContainerTask request has empty command.");
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
     err->set_description("Command cannot be empty.");
     response->set_ok(false);
@@ -577,13 +577,13 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
   };
   auto container_expt = g_cri_client->SelectContainerId(label_selector);
   if (!container_expt) {
-    const auto &rich_err = container_expt.error();
+    const auto& rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
                 rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_CRI_CONTAINER_NOT_READY);
     err->set_description(
         std::format("Container not found, possibly initializing: {}",
@@ -592,12 +592,12 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
     return Status::OK;
   }
 
-  const auto &container_id = container_expt.value();
+  const auto& container_id = container_expt.value();
 
   // Convert command from protobuf to vector
   std::vector<std::string> command;
   command.reserve(request->command_size());
-  for (const auto &cmd : request->command()) {
+  for (const auto& cmd : request->command()) {
     command.push_back(cmd);
   }
 
@@ -606,10 +606,10 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
                                      request->stderr());
 
   if (!url_expt) {
-    const auto &rich_err = url_expt.error();
+    const auto& rich_err = url_expt.error();
     CRANE_ERROR("Failed to exec in container for #{}: {}", request->task_id(),
                 rich_err.description());
-    auto *err = response->mutable_status();
+    auto* err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
     return Status::OK;

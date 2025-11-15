@@ -108,19 +108,19 @@ class CranedServiceImpl : public Craned::Service {
       crane::grpc::ChangeJobTimeLimitReply* response) override;
 
   grpc::Status StepStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::StepStatusChangeRequest *request,
-      crane::grpc::StepStatusChangeReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::StepStatusChangeRequest* request,
+      crane::grpc::StepStatusChangeReply* response) override;
 
   grpc::Status AttachInContainerTask(
-      grpc::ServerContext *context,
-      const crane::grpc::AttachInContainerTaskRequest *request,
-      crane::grpc::AttachInContainerTaskReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::AttachInContainerTaskRequest* request,
+      crane::grpc::AttachInContainerTaskReply* response) override;
 
   grpc::Status ExecInContainerTask(
-      grpc::ServerContext *context,
-      const crane::grpc::ExecInContainerTaskRequest *request,
-      crane::grpc::ExecInContainerTaskReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ExecInContainerTaskRequest* request,
+      crane::grpc::ExecInContainerTaskReply* response) override;
 };
 
 class CranedServer {
