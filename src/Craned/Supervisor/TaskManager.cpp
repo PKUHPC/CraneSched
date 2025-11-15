@@ -1867,6 +1867,34 @@ CraneErrCode ProcInstance::Kill(int signum) {
   return CraneErrCode::ERR_NON_EXISTENT;
 }
 
+CraneErrCode ProcInstance::Suspend() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Suspending pid {} with SIGSTOP", m_pid_);
+    // Send SIGSTOP to the whole process group
+    int err = kill(-m_pid_, SIGSTOP);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Suspending pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
+CraneErrCode ProcInstance::Resume() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Resuming pid {} with SIGCONT", m_pid_);
+    // Send SIGCONT to the whole process group
+    int err = kill(-m_pid_, SIGCONT);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Resuming pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
 CraneErrCode ProcInstance::Cleanup() {
   // No cleanup for calloc.
   if (!m_parent_step_inst_->IsCalloc()) {
@@ -1877,6 +1905,34 @@ CraneErrCode ProcInstance::Cleanup() {
 
   // Dummy return
   return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ProcInstance::Suspend() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Suspending pid {} with SIGSTOP", m_pid_);
+    // Send SIGSTOP to the whole process group
+    int err = kill(-m_pid_, SIGSTOP);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Suspending pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
+CraneErrCode ProcInstance::Resume() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Resuming pid {} with SIGCONT", m_pid_);
+    // Send SIGCONT to the whole process group
+    int err = kill(-m_pid_, SIGCONT);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Resuming pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
 }
 
 std::optional<const TaskExitInfo> ProcInstance::HandleSigchld(pid_t pid,

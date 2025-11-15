@@ -225,8 +225,8 @@ class ITaskInstance {
   virtual CraneErrCode Prepare() = 0;
   virtual CraneErrCode Spawn() = 0;
   virtual CraneErrCode Kill(int signum) = 0;
-  virtual CraneErrCode Suspend();
-  virtual CraneErrCode Resume();
+  virtual CraneErrCode Suspend() = 0;
+  virtual CraneErrCode Resume() = 0;
   virtual CraneErrCode Cleanup() = 0;
 
   virtual std::optional<TaskExecId> GetExecId() const = 0;
@@ -317,8 +317,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
-  CraneErrCode Suspend() override;
-  CraneErrCode Resume() override;
+  CraneErrCode Suspend() override { return CraneErrCode::ERR_NOT_SUPPORTED; }
+  CraneErrCode Resume() override { return CraneErrCode::ERR_NOT_SUPPORTED; }
   CraneErrCode Cleanup() override;
 
   std::optional<TaskExecId> GetExecId() const override {
@@ -429,6 +429,8 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode Prepare() override;
   CraneErrCode Spawn() override;
   CraneErrCode Kill(int signum) override;
+  CraneErrCode Suspend() override;
+  CraneErrCode Resume() override;
   CraneErrCode Cleanup() override;
 
   void InitEnvMap() override;
