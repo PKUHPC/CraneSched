@@ -356,11 +356,10 @@ jobs:
           NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
 
-          VERSION: ${{ 
-            (github.event_name == 'pull_request')
+          VERSION: >- 
+            ${{ (github.event_name == 'pull_request')
             && format('pr-{0}', github.event.number)
-            || github.ref_name
-          }}
+            || github.ref_name }}
 
           RPM_REPO_NAME: "crane"
           RPM_ARCH: "x86_64"
