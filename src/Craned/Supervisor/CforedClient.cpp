@@ -80,6 +80,7 @@ CforedClient::~CforedClient() {
   if (m_ev_thread_.joinable()) m_ev_thread_.join();
 
   m_cq_.Shutdown();
+  CRANE_ASSERT(m_fwd_meta_map.empty());
 
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
@@ -539,12 +540,14 @@ void CforedClient::AsyncSendRecvThread_() {
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
       CRANE_ERROR("Cfored connection failed.");
-      absl::MutexLock lock(&m_mtx_);
-      for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
-        m_stop_task_io_queue_.enqueue(task_id);
+      {
+        absl::MutexLock lock(&m_mtx_);
+        for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+          m_stop_task_io_queue_.enqueue(task_id);
+        }
+        m_clean_stop_task_io_queue_async_handle_->send();
+        CRANE_ERROR("Terminating all task due to cfored connection failure.");
       }
-      m_clean_stop_task_io_queue_async_handle_->send();
-      CRANE_ERROR("Terminating all task due to cfored connection failure.");
       g_task_mgr->TerminateTaskAsync(
           false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
       state = State::End;
@@ -704,7 +707,11 @@ bool CforedClient::TaskProcessStop(task_id_t task_id) {
 }
 
 void CforedClient::TaskEnd(task_id_t task_id) {
-  // FIXME: erase meta_map for task here!
+  CRANE_DEBUG("[Task #{}] Unregistered from cfored client.", task_id);
+  {
+    absl::MutexLock lock(&m_mtx_);
+    m_fwd_meta_map.erase(task_id);
+  }
   g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 

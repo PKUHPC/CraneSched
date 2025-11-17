@@ -494,7 +494,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
                                     const crane::grpc::ResourceInNode &resource,
-                                    bool recover, std::uint64_t min_mem) {
+                                    bool recover, std::uint64_t min_mem,
+                                    bool alloc_mem) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -534,23 +535,27 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
         cg_unique_ptr->CgroupName(), resource);
   }
   ResourceInNode resource_in_node(resource);
-  if (min_mem != 0) {
-    if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
-      CRANE_WARN(
-          "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
-          cgroup_str);
-      resource_in_node.allocatable_res.memory_bytes = min_mem;
-      resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
+  if (alloc_mem) {
+    if (min_mem != 0) {
+      if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
+        CRANE_WARN(
+            "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
+            cgroup_str);
+        resource_in_node.allocatable_res.memory_bytes = min_mem;
+        resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
+      }
     }
   }
 
-  CRANE_TRACE("Setting cgroup {}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
-              cgroup_str, resource_in_node.allocatable_res.CpuCount(),
-              resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
-              util::ReadableDresInNode(resource_in_node));
+  CRANE_TRACE(
+      "Setting cgroup {}. Res: CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}. Limit "
+      "mem: {}.",
+      cgroup_str, resource_in_node.allocatable_res.CpuCount(),
+      resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
+      util::ReadableDresInNode(resource_in_node), alloc_mem);
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      resource_in_node.allocatable_res, cg_unique_ptr.get());
+      resource_in_node.allocatable_res, cg_unique_ptr.get(), alloc_mem);
   if (ok)
     ok &= DedicatedResourceAllocator::Allocate(resource_in_node.dedicated_res,
                                                cg_unique_ptr.get());
@@ -1585,7 +1590,8 @@ void CgroupV2::Destroy() {
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            CgroupInterface *cg) {
+                                            CgroupInterface *cg,
+                                            bool alloc_mem) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
@@ -1598,7 +1604,8 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg) {
+    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg,
+    bool alloc_mem) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());

@@ -264,8 +264,7 @@ CraneErrCode ITaskInstance::Prepare() {
   auto cg_expt = CgroupManager::AllocateAndGetCgroup(
       CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
                                        task_id),
-      m_parent_step_inst_->GetStep().res(), false,
-      Common::CgConstant::kCgMinMem);
+      m_parent_step_inst_->GetStep().res(), false, 0, false);
   if (!cg_expt.has_value()) {
     CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
                g_config.JobId, g_config.StepId, task_id,
@@ -342,6 +341,8 @@ void ProcInstance::InitEnvMap() {
     const auto& ia_meta = m_parent_step_inst_->GetStep().interactive_meta();
     if (!ia_meta.term_env().empty()) m_env_.emplace("TERM", ia_meta.term_env());
   }
+  // m_env_.emplace("CRANE_TASK_ID", std::to_string(task_id));
+  m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -426,6 +427,9 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   }
 
   pid_t pid = -1;
+  CRANE_ASSERT_MSG(
+      !(m_parent_step_inst_->pty && m_parent_step_inst_->task_ids.size() > 1),
+      "Crun pty task with task-per-node >1 not supported.");
   if (m_parent_step_inst_->pty) {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
@@ -1747,14 +1751,6 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.IsContainer()) {
-    // Container
-    elem.instance = std::make_unique<ContainerInstance>(&m_step_);
-  } else {
-    // Process
-    elem.instance = std::make_unique<ProcInstance>(&m_step_);
-  }
-
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
   return ok_future;
@@ -1762,7 +1758,9 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
 CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   // Init CriClient before preparation
-  if (m_step_.IsContainer()) m_step_.InitCriClient();
+  if (m_step_.IsContainer())
+    std::call_once(m_step_.cri_client_flag,
+                   [this] { m_step_.InitCriClient(); });
 
   // Prepare for execution
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
@@ -1776,7 +1774,9 @@ CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
   }
 
   // Init cfored before start the task.
-  if (m_step_.IsCrun()) m_step_.InitCforedClient();
+  if (m_step_.IsCrun())
+    std::call_once(m_step_.cfored_client_flag,
+                   [this] { m_step_.InitCforedClient(); });
 
   CRANE_INFO("[Task #{}] Spawning process in task", task->task_id);
   err = task->Spawn();
@@ -2119,7 +2119,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    for (task_id_t task_id : m_step_.GetTaskIds()) {
+    for (task_id_t task_id : m_step_.GetRunningTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
@@ -2196,14 +2196,18 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 void TaskManager::EvGrpcExecuteTaskCb_() {
   ExecuteTaskElem elem;
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    if (!elem.instance) {
-      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
-      continue;
-    }
     m_step_.GotNewStatus(StepStatus::Running);
-    task_id_t task_id = elem.instance->task_id;
-    m_step_.AddTaskInstance(task_id, std::move(elem.instance));
-    auto* task = m_step_.GetTaskInstance(task_id);
+    for (auto task_id : m_step_.task_ids) {
+      std::unique_ptr<ITaskInstance> instance;
+      if (m_step_.IsContainer()) {
+        // Container
+        instance = std::make_unique<ContainerInstance>(&m_step_, task_id);
+      } else {
+        // Process
+        instance = std::make_unique<ProcInstance>(&m_step_, task_id);
+      }
+      m_step_.AddTaskInstance(task_id, std::move(instance));
+    }
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
@@ -2214,18 +2218,21 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
-                  ExitCode::EC_PERMISSION_DENIED,
-                  fmt::format("Failed to look up password entry for uid {}",
-                              m_step_.uid));
+      for (auto task_id : m_step_.task_ids)
+        TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                    ExitCode::EC_PERMISSION_DENIED,
+                    fmt::format("Failed to look up password entry for uid {}",
+                                m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       continue;
     }
 
+    // TODO: We dont need to exec task for a calloc job
+
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");
-      m_exec_id_task_id_map_[0] = task_id;  // Placeholder
+      m_exec_id_task_id_map_[0] = 0;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
       continue;
@@ -2237,27 +2244,43 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (!cg_expt.has_value()) {
       CRANE_ERROR("[Step #{}.{}] Failed to allocate cgroup", m_step_.job_id,
                   m_step_.step_id);
+      for (auto task_id : m_step_.task_ids) {
+        g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                                ExitCode::EC_CGROUP_ERR,
+                                "Failed to allocate cgroup");
+      }
       elem.ok_prom.set_value(CraneErrCode::ERR_CGROUP);
-      g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                              ExitCode::EC_CGROUP_ERR,
-                              "Failed to allocate cgroup");
       continue;
     }
     m_step_.step_user_cg = std::move(cg_expt.value());
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    auto err = LaunchExecution_(task);
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("[task #{}] Failed to launch process.", task_id);
-    } else {
-      auto exec_id = task->GetExecId().value();
-      CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
-                 std::visit([](auto&& arg) { return std::format("{}", arg); },
-                            exec_id));
-      m_exec_id_task_id_map_[exec_id] = task_id;
-      m_step_.InitOomBaseline();
+    absl::Mutex thread_pool_mutex;
+    CraneErrCode err = CraneErrCode::SUCCESS;
+    std::latch latch(m_step_.task_ids.size());
+    for (auto task_id : m_step_.task_ids) {
+      auto* task = m_step_.GetTaskInstance(task_id);
+      g_thread_pool->detach_task(
+          [this, task, task_id, &thread_pool_mutex, &latch, &err] {
+            auto task_err = LaunchExecution_(task);
+            if (task_err != CraneErrCode::SUCCESS) {
+              CRANE_WARN("[task #{}] Failed to launch process.", task_id);
+              absl::MutexLock lock(&thread_pool_mutex);
+              err = task_err;
+            } else {
+              auto exec_id = task->GetExecId().value();
+              CRANE_INFO(
+                  "[task #{}] Launched exection, id: {}.", task_id,
+                  std::visit([](auto&& arg) { return std::format("{}", arg); },
+                             exec_id));
+              absl::MutexLock lock(&thread_pool_mutex);
+              m_exec_id_task_id_map_[exec_id] = task_id;
+            }
+            latch.count_down();
+          });
     }
+    latch.wait();
 
     elem.ok_prom.set_value(err);
   }

@@ -64,6 +64,8 @@ class StepInstance {
 
   std::string cgroup_path;  // resolved cgroup path
 
+  std::once_flag cri_client_flag;
+  std::once_flag cfored_client_flag;
   // Only daemon step may migrate ssh procs to cgroup
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
@@ -75,7 +77,8 @@ class StepInstance {
       : m_step_to_supv_(step),
         job_id(step.job_id()),
         step_id(step.step_id()),
-        task_ids({0}),  // TODO: Set task_id here
+        task_ids(step.task_res_map() | std::views::keys |
+                 std::ranges::to<std::vector>()),
         uid(step.uid()),
         gids(step.gid().begin(), step.gid().end()) {
     interactive_type =
@@ -93,6 +96,8 @@ class StepInstance {
   StepInstance& operator=(const StepInstance&) = delete;
   StepInstance& operator=(StepInstance&&) = delete;
 
+  // Do not do any clean up action in destructor. This will only be called when
+  // supervisor is exiting.
   ~StepInstance() = default;
 
   [[nodiscard]] bool IsContainer() const noexcept;
@@ -138,7 +143,7 @@ class StepInstance {
   void StopCriClient() { m_cri_client_.reset(); }
 
   // Just a convenient method for iteration on the map.
-  auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
+  auto GetRunningTaskIds() const { return m_task_map_ | std::views::keys; }
 
   ITaskInstance* GetTaskInstance(task_id_t task_id) {
     if (!m_task_map_.contains(task_id)) return nullptr;
@@ -208,8 +213,8 @@ using TaskExecId = std::variant<std::string, pid_t>;
 
 class ITaskInstance {
  public:
-  explicit ITaskInstance(StepInstance* step_inst)
-      : m_parent_step_inst_(step_inst) {}
+  explicit ITaskInstance(StepInstance* step_inst, task_id_t task_id)
+      : task_id(task_id), m_parent_step_inst_(step_inst) {}
 
   virtual ~ITaskInstance() = default;
 
@@ -238,7 +243,7 @@ class ITaskInstance {
   // Set environment variables for the task instance. Can be overridden.
   virtual void InitEnvMap();
 
-  task_id_t task_id{};
+  task_id_t task_id;
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
@@ -251,8 +256,8 @@ class ITaskInstance {
 
 class ContainerInstance : public ITaskInstance {
  public:
-  explicit ContainerInstance(StepInstance* step_spec)
-      : ITaskInstance(step_spec) {}
+  explicit ContainerInstance(StepInstance* step_spec, task_id_t task_id)
+      : ITaskInstance(step_spec, task_id) {}
   ~ContainerInstance() override = default;
 
   ContainerInstance(const ContainerInstance&) = delete;
@@ -324,7 +329,8 @@ class ContainerInstance : public ITaskInstance {
 
 class ProcInstance : public ITaskInstance {
  public:
-  explicit ProcInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  explicit ProcInstance(StepInstance* step_spec, task_id_t task_id)
+      : ITaskInstance(step_spec, task_id) {}
 
   ~ProcInstance() override;
 
@@ -476,7 +482,6 @@ class TaskManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   struct ExecuteTaskElem {
-    std::unique_ptr<ITaskInstance> instance;
     std::promise<CraneErrCode> ok_prom;
   };
 

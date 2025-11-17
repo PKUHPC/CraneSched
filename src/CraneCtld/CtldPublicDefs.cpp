@@ -583,7 +583,14 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   extra_attr = job.extra_attr;
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  // pending_reason = job.pending_reason;
+  task_id_t cur_task_id = 0;
+  for (const auto& craned_id : job.CranedIds()) {
+    for (int i = 0; i < job.ntasks_per_node; ++i) {
+      craned_task_map[craned_id].insert(cur_task_id);
+      task_res_map[cur_task_id] = job.AllocatedRes().at(craned_id);
+      ++cur_task_id;
+    }
+  }
 
   crane::grpc::StepToCtld step;
 
@@ -655,6 +662,14 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+
+  auto* task_res_map = step_to_d.mutable_task_res_map();
+  for (auto task_id : this->craned_task_map.at(craned_id)) {
+    auto& res = this->task_res_map.at(task_id);
+    task_res_map->emplace(task_id,
+                          static_cast<crane::grpc::ResourceInNode>(res));
+  }
+
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
@@ -668,16 +683,19 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-
-  if (this->type == crane::grpc::Batch) {
-    auto* mutable_meta = step_to_d.mutable_batch_meta();
-    mutable_meta->CopyFrom(StepToCtld().batch_meta());
-  } else if (this->type == crane::grpc::Interactive) {
-    auto* mutable_meta = step_to_d.mutable_interactive_meta();
-    mutable_meta->CopyFrom(StepToCtld().interactive_meta());
-  } else if (this->type == crane::grpc::Container) {
-    auto* mutable_meta = step_to_d.mutable_container_meta();
-    mutable_meta->CopyFrom(StepToCtld().container_meta());
+  switch (this->type) {
+  case crane::grpc::Batch:
+    step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
+    break;
+  case crane::grpc::Interactive:
+    step_to_d.mutable_interactive_meta()->CopyFrom(
+        StepToCtld().interactive_meta());
+    break;
+  case crane::grpc::Container:
+    step_to_d.mutable_container_meta()->CopyFrom(StepToCtld().container_meta());
+    break;
+  default:
+    std::unreachable();
   }
 
   return step_to_d;
@@ -836,7 +854,6 @@ void CommonStepInCtld::RecoverFromDb(
   extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex = job.allocated_craneds_regex;
-  pending_reason = "Not implemented yet";
 }
 
 bool TaskInCtld::IsX11() const {
