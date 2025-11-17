@@ -45,7 +45,7 @@ class SubIdRanges {
 
   ~SubIdRanges() {
     if (m_ranges_ != nullptr) {
-      subid_free(m_ranges_);
+      free(m_ranges_);
     }
   }
 
@@ -61,7 +61,7 @@ class SubIdRanges {
   SubIdRanges& operator=(SubIdRanges&& other) noexcept {
     if (this != &other) {
       if (m_ranges_ != nullptr) {
-        subid_free(m_ranges_);
+        free(m_ranges_);
       }
       m_ranges_ = other.m_ranges_;
       m_count_ = other.m_count_;
