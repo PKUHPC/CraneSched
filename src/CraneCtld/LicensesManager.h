@@ -49,13 +49,13 @@ class LicensesManager {
           &lic_id_to_count,
       bool is_license_or);
 
-  bool TryMallocLicense(
+  bool CheckLicenseCountSufficient(
       const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
           &lic_id_to_count,
       bool is_license_or,
       std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
-  void MallocLicenseResource(
+  bool MallocLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
   void FreeLicenseResource(

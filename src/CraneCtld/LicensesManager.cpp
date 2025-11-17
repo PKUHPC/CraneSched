@@ -96,7 +96,7 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   return {};
 }
 
-bool LicensesManager::TryMallocLicense(
+bool LicensesManager::CheckLicenseCountSufficient(
     const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
         lic_id_to_count,
     bool is_license_or,
@@ -109,7 +109,7 @@ bool LicensesManager::TryMallocLicense(
       auto count = license.count();
       if (licenses_map->contains(lic_id)) {
         auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-        if (count <= lic->free) {
+        if (count + lic->reserved <= lic->free) {
           actual_licenses->emplace(lic_id, count);
           break;
         }
@@ -124,7 +124,7 @@ bool LicensesManager::TryMallocLicense(
         return false;
       }
       auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-      if (count > lic->free) {
+      if (count + lic->reserved > lic->free) {
         actual_licenses->clear();
         return false;
       }
@@ -134,26 +134,32 @@ bool LicensesManager::TryMallocLicense(
 
   for (auto [lic_id, count] : *actual_licenses) {
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-    // malloc
-    lic->used += count;
-    if (lic->free < count) {
-      CRANE_ERROR(
-          "MallocLicenseResource: license [{}] requested={}, free={}, will set "
-          "free=0",
-          lic_id, count, lic->free);
-      lic->free = 0;
-    } else {
-      lic->free -= count;
-    }
+    lic->reserved += count;
   }
 
   return !actual_licenses->empty();
 }
 
-void LicensesManager::MallocLicenseResource(
+bool LicensesManager::MallocLicenseResource(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+  bool result = true;
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto lic = m_licenses_map_[lic_id];
+    if (lic->reserved < count) {
+      CRANE_ERROR(
+          "MallocLicenseResource: license [{}] reserved < req count ({} < {}), "
+          "will set reserved=0",
+          lic_id, lic->reserved, count);
+      lic->reserved = 0;
+    } else {
+      lic->reserved -= count;
+    }
+
+    if (lic->used + count > lic->total) {
+      result = false;
+      continue;
+    }
+
     lic->used += count;
     if (lic->free < count) {
       CRANE_ERROR(
@@ -165,6 +171,8 @@ void LicensesManager::MallocLicenseResource(
       lic->free -= count;
     }
   }
+
+  return result;
 }
 
 void LicensesManager::FreeLicenseResource(

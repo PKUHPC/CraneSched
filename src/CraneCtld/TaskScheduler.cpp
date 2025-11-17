@@ -758,17 +758,6 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
-        // ctld only virtual resource;
-        // scheduling occurs when resources are sufficient.
-        if (!job->TaskToCtld().licenses_count().empty()) {
-          if (!g_licenses_manager->TryMallocLicense(
-                  job->TaskToCtld().licenses_count(),
-                  job->TaskToCtld().is_licenses_or(), &job->licenses_count)) {
-            job->pending_reason = "Licenses";
-            continue;
-          }
-        }
-
         pending_jobs.emplace_back(
             std::make_unique<PdJobInScheduler>(job.get()));
       }
@@ -847,7 +836,6 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
-      std::vector<job_id_t> jobs_to_next_pending;
       LockGuard pending_guard(&m_pending_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
@@ -858,7 +846,6 @@ void TaskScheduler::ScheduleThread_() {
           job->SetStartTime(job_in_scheduler->start_time);
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
-            jobs_to_next_pending.emplace_back(job->TaskId());
             continue;
           }
           absl::Time end_time =
@@ -895,8 +882,14 @@ void TaskScheduler::ScheduleThread_() {
           }
           if (!job_in_scheduler->reason.empty()) {
             job->pending_reason = job_in_scheduler->reason;
-            jobs_to_next_pending.emplace_back(job->TaskId());
             continue;
+          }
+
+          if (!job_in_scheduler->actual_licenses.empty()) {
+            if (!g_licenses_manager->MallocLicenseResource(job_in_scheduler->actual_licenses)) {
+              job->pending_reason = "Licenses";
+              continue;
+            }
           }
 
           PartitionId const& partition_id = job->partition_id;
@@ -907,6 +900,7 @@ void TaskScheduler::ScheduleThread_() {
           job->allocated_res_view.SetToZero();
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
+          job->licenses_count = job_in_scheduler->actual_licenses;
           job->SetStatus(crane::grpc::TaskStatus::Configuring);
 
           job->allocated_craneds_regex =
@@ -940,12 +934,6 @@ void TaskScheduler::ScheduleThread_() {
       // Resource has been subtracted, other resource reduce events are
       // allowed now.
       g_meta_container->StopLoggingAndUnlock();
-
-      for (auto job_id : jobs_to_next_pending) {
-        auto& job = m_pending_task_map_[job_id];
-        if (!job->licenses_count.empty())
-          g_licenses_manager->FreeLicenseResource(job->licenses_count);
-      }
 
       num_tasks_single_execution = jobs_to_run.size();
 
@@ -3454,6 +3442,13 @@ void SchedulerAlgo::NodeSelect(
   // Schedule pending tasks
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
+    // ctld only virtual resource;
+    if (!job->req_licenses.empty()) {
+      if (!g_licenses_manager->CheckLicenseCountSufficient(job->req_licenses, job->is_license_or, &job->actual_licenses)) {
+        job->reason = "License";
+        continue;
+      }
+    }
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
       auto it = part_scheduler_map.find(job->partition_id);
