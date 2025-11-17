@@ -11,7 +11,7 @@
 
 | 组件 | 描述 | 位置 |
 |------|------|------|
-| **后端** | `cranectld` (Scheduler) + `craned` (worker daemon) | 控制节点和计算节点 |
+| **后端** | `cranectld` (Scheduler) + `craned` (Node daemon) | 控制节点和计算节点 |
 | **前端** | CLI（`cbatch`、`cqueue` 等）+ 其他服务（`cfored`、`cplugind`）| 按需部署 |
 | **数据库** | MongoDB，用于存储作业、账户和使用数据 | 控制节点/存储节点 |
 
@@ -95,7 +95,7 @@ graph TB
 
 所有指南都涵盖系统准备、依赖项和编译。构建完成后：
 
-- **[打包指南](./backend/packaging.md)** - 创建 RPM/DEB 软件包以便于跨节点分发
+- **[打包指南](./packaging.md)** - 创建 RPM/DEB 软件包以便于跨节点分发
 
 ### 步骤 2：配置数据库
 

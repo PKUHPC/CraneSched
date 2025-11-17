@@ -11,7 +11,7 @@ CraneSched consists of three main components:
 
 | Component | Description | Location |
 |-----------|-------------|----------|
-| **Backend** | `cranectld` (scheduler) + `craned` (worker daemon) | Control & Compute nodes |
+| **Backend** | `cranectld` (scheduler) + `craned` (Node daemon) | Control & Compute nodes |
 | **Frontend** | CLI (`cbatch`, `cqueue`, etc.) + other services (`cfored`, `cplugind`) | As needed |
 | **Database** | MongoDB for storing jobs, accounts, and usage data | Control/Storage node |
 
@@ -95,7 +95,7 @@ Choose your operating system and follow the corresponding guide:
 
 All guides cover system preparation, dependencies, and compilation. After building:
 
-- **[Packaging Guide](./backend/packaging.md)** - Create RPM/DEB packages for easier distribution across nodes
+- **[Packaging Guide](./packaging.md)** - Create RPM/DEB packages for easier distribution across nodes
 
 ### Step 2: Setup Database
 
