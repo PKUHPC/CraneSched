@@ -3,7 +3,7 @@
 !!! tip
     This tutorial has been verified on **Rocky Linux 9**. It is expected to work on other systemd-based distributions, such as **Debian, Ubuntu, AlmaLinux, and Fedora**.
 
-    This tutorial is designed for **x86-64** architecture. For other architectures, such as **ARM64**, ensure you modify the download links and commands as needed.
+    This tutorial targets the **x86-64** architecture. For other architectures (for example, **ARM64**), adjust download links and commands accordingly.
 
 This guide assumes a demo cluster with the following nodes:
 
@@ -11,185 +11,41 @@ This guide assumes a demo cluster with the following nodes:
 - **cranectld**: Control node.
 - **crane[01-04]**: Compute nodes.
 
-Please run all commands as the root user throughout this tutorial. Ensure the backend environment installation is completed before proceeding.
+Run all commands as the root user. Make sure the backend environment is in place before proceeding.
 
 ## Overview
 
 A brief overview of the main frontend components you will install and run:
 
-- CLI tools (`cbatch`, `cqueue`, `cinfo`...):
-    - User-facing command-line utilities for job submission, querying queues and job status, accounting, and job control.
-    - Designed to be lightweight and distributed to user login nodes. They communicate with the control node (`cranectld`).
+- CLI tools (`cbatch`, `cqueue`, `cinfo`, etc.):
+  
+    - User-facing command-line utilities for job submission, queue and job status queries, accounting, and job control.
+    - Designed to be lightweight and distributed to login nodes. They communicate with the control node (`cranectld`).
 
-- `cfored` (Frontend daemon for interactive jobs):
+- `cfored` (interactive job daemon):
+  
     - Provides support for interactive jobs (used by `crun`, `calloc`).
     - Typically runs on login nodes where interactive jobs are submitted. Managed by systemd as `cfored.service`.
 
-- `cplugind` (Plugin daemon):
+- `cplugind` (plugin daemon):
+  
     - Loads and manages plugins (mail, monitor, energy, event, etc.) and exposes plugin services to CraneSched components.
-    - Must be running on nodes that require plugin functionality. Plugin `.so` files and plugin configuration are registered in `/etc/crane/config.yaml`.
+    - Must run on nodes that need plugin functionality. Plugin `.so` files and configuration are registered in `/etc/crane/config.yaml`.
 
-## Installation Methods
+## Deployment Strategy
 
-CraneSched frontend components can be installed in two ways:
+There are no official pre-built frontend RPM/DEB packages at the moment. You must build the components from source and deploy them in one of the following ways:
 
-1. **Via RPM/DEB packages** (Recommended): Pre-built binary packages for quick deployment in production environments. This method requires no build dependencies and provides automatic systemd integration.
+- **Install directly from source**: Run `make install` on the nodes that need the frontend. This is convenient for quick validation and development environments.
+- **Build your own RPM/DEB packages**: Use GoReleaser to produce packages and install them through the system package manager. This is suitable for production environments that require standardized delivery.
+- **Use GitHub Action artifacts**: CI uploads experimental packages after each build. They are meant for testing only and are not recommended for production.
 
-2. **From source**: Manual compilation and installation for development or when customization is needed. This method requires Golang and other build tools.
+The following sections describe how to prepare the build environment and how to deploy either directly or via self-built packages.
 
-For most production deployments, we recommend using the package-based installation method described below.
+## Prepare the Build Environment
 
-## Installation via RPM/DEB Packages (Recommended)
+### Install Golang
 
-The frontend is distributed as two separate packages:
-
-- **cranesched-frontend**: Core CLI tools and cfored daemon
-- **cranesched-plugin**: Optional plugin daemon (cplugind) and plugin shared objects
-
-### Prerequisites
-
-No build dependencies are required. You only need a package manager:
-- RPM-based systems: `dnf` or `yum`
-- DEB-based systems: `apt` or `dpkg`
-
-### Obtaining Packages
-
-You can obtain packages in two ways:
-
-1. **Download from GitHub Releases**: Visit the [CraneSched-FrontEnd releases page](https://github.com/PKUHPC/CraneSched-FrontEnd/releases) and download the appropriate packages for your distribution.
-
-2. **Build from source**: See [Building Packages from Source](#building-packages-from-source) below.
-
-### Installing Frontend Package
-
-For RPM-based systems (Rocky Linux, CentOS, Fedora, AlmaLinux):
-```bash
-sudo dnf install cranesched-frontend-*.rpm
-```
-
-For DEB-based systems (Debian, Ubuntu):
-```bash
-sudo apt install ./cranesched-frontend_*.deb
-```
-
-This installs the following CLI tools to `/usr/bin/`:
-- `cacct`, `cacctmgr`, `calloc`, `cbatch`, `ccancel`, `ccon`, `ccontrol`
-- `ceff`, `cfored`, `cinfo`, `cqueue`, `crun`, `cwrapper`
-
-The package also installs the `cfored.service` systemd unit to `/usr/lib/systemd/system/`.
-
-### Installing Plugin Package (Optional)
-
-If you need plugin functionality (monitoring, email notifications, power management, etc.):
-
-For RPM-based systems:
-```bash
-sudo dnf install cranesched-plugin-*.rpm
-```
-
-For DEB-based systems:
-```bash
-sudo apt install ./cranesched-plugin_*.deb
-```
-
-This installs:
-- `cplugind` daemon to `/usr/bin/`
-- Plugin shared objects to `/usr/lib/crane/plugin/`:
-    - `dummy.so`, `energy.so`, `event.so`, `mail.so`, `monitor.so`, `powerControl.so`
-- `cplugind.service` systemd unit to `/usr/lib/systemd/system/`
-
-### Distributing Packages to Cluster Nodes
-
-After installing packages on the login node, distribute them to other nodes:
-
-```bash
-# Copy packages to all nodes
-pdcp -w login01,cranectld,crane[01-04] cranesched-frontend-*.rpm /tmp/
-pdcp -w login01,cranectld,crane[01-04] cranesched-plugin-*.rpm /tmp/
-
-# Install on all nodes (RPM example)
-pdsh -w login01,cranectld,crane[01-04] "dnf install -y /tmp/cranesched-frontend-*.rpm"
-
-# Install plugins on nodes that need them
-pdsh -w login01,cranectld,crane[01-04] "dnf install -y /tmp/cranesched-plugin-*.rpm"
-```
-
-### Enabling Services
-
-After installation, enable and start the required services:
-
-```bash
-# Enable cfored on login nodes (for interactive jobs)
-pdsh -w login01 systemctl enable --now cfored
-
-# Enable cplugind on nodes that need plugin functionality
-pdsh -w login01,cranectld,crane[01-04] systemctl enable --now cplugind
-```
-
-### Verification
-
-Verify the installation:
-
-```bash
-# Check installed binaries
-which cbatch cqueue cinfo
-
-# Check service status
-systemctl status cfored
-systemctl status cplugind  # if plugins installed
-```
-
-### Important Notes
-
-!!! note "Installation Paths"
-    Package installations use FHS-compliant paths:
-
-    - Binaries: `/usr/bin/`
-    - Plugins: `/usr/lib/crane/plugin/`
-    - Services: `/usr/lib/systemd/system/`
-
-    These differ from source installations which default to `/usr/local/` prefix. When configuring plugins, ensure you use the correct paths based on your installation method.
-
-## Building Packages from Source
-
-If you need to build the RPM/DEB packages yourself:
-
-### Prerequisites
-
-Install the required build tools:
-
-```bash
-# Install Golang (see detailed instructions in "Installation from Source" section below)
-# Install Protoc (see detailed instructions in "Installation from Source" section below)
-
-# Install goreleaser
-go install github.com/goreleaser/goreleaser/v2@latest
-```
-
-### Building Packages
-
-```bash
-# Clone the repository
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
-cd CraneSched-FrontEnd
-
-# Build packages
-make package
-```
-
-The packages will be generated in `build/dist/`:
-- `cranesched-frontend_<version>_amd64.rpm` / `cranesched-frontend_<version>_amd64.deb`
-- `cranesched-plugin_<version>_amd64.rpm` / `cranesched-plugin_<version>_amd64.deb`
-
-### Version Control
-
-The package version is determined by the `VERSION` file in the repository root. To create a custom version, edit this file before running `make package`.
-
-## Installation from Source (Alternative)
-
-This method is recommended for development environments or when you need to customize the build. For production deployments, we recommend using the package-based installation above.
-
-### 1. Install Golang
 ```bash
 GOLANG_TARBALL=go1.22.0.linux-amd64.tar.gz
 # ARM architecture: wget https://dl.google.com/go/go1.22.0.linux-arm64.tar.gz
@@ -209,7 +65,8 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ```
 
-### 2. Install Protoc
+### Install Protoc
+
 ```bash
 PROTOC_ZIP=protoc-30.2-linux-x86_64.zip
 # aarch64: protoc-30.2-linux-aarch_64.zip
@@ -218,51 +75,106 @@ unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```
 
-### 3. Pull the frontend repository
+### Install GoReleaser (only if you build packages)
+
 ```bash
-git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
+go install github.com/goreleaser/goreleaser/v2@latest
 ```
 
-### 4. Build and install
+## Fetch and Build
 
-The working directory is CraneSched-FrontEnd. In this directory, compile all Golang components and install.
+### Clone the frontend repository
+
 ```bash
+git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
 cd CraneSched-FrontEnd
+```
+
+### Build the binaries
+
+```bash
 make
+```
+
+The binaries are placed in `build/bin/` and the systemd units are placed in `etc/` after a successful build.
+
+### Install on the current node
+
+```bash
 make install
 ```
 
-By default, binaries are installed to `/usr/local/bin/` and services to `/usr/local/lib/systemd/system/`. You can customize the installation prefix by setting the `PREFIX` variable:
+By default, binaries go to `/usr/local/bin/` and services to `/usr/local/lib/systemd/system/`. Set `PREFIX` if you need a different installation root:
 
 ```bash
 make install PREFIX=/opt/crane
 ```
 
-### 5. Distribute and start services
+## Build RPM/DEB Packages (optional)
 
-!!! note
-    This section applies to source installations. The binaries and service files are installed to `/usr/local/bin/` and `/usr/lib/systemd/system/` by default. If you installed via packages, the files are already in the correct system paths (`/usr/bin/`).
+If you prefer to deploy via package managers, run the following in the repository root:
+
+```bash
+make package
+```
+
+Packages are generated under `build/dist/`:
+
+- `cranesched-frontend_<version>_amd64.rpm` / `cranesched-frontend_<version>_amd64.deb`
+- `cranesched-plugin_<version>_amd64.rpm` / `cranesched-plugin_<version>_amd64.deb`
+
+The version number is taken from the `VERSION` file in the repository root. Update it before `make package` if you need a custom version.
+
+Install the self-built packages on the target nodes:
+
+```bash
+# RPM example
+sudo dnf install /tmp/cranesched-frontend-*.rpm
+sudo dnf install /tmp/cranesched-plugin-*.rpm
+
+# DEB example
+sudo apt install ./cranesched-frontend_*.deb
+sudo apt install ./cranesched-plugin_*.deb
+```
+
+## Distribute and Enable
+
+### Deploy compiled binaries (when not using packages)
 
 ```bash
 pdcp -w login01,cranectld,crane[01-04] build/bin/* /usr/local/bin/
-pdcp -w login01,cranectld,crane[01-04] etc/* /usr/lib/systemd/system/
-
-# If you need to submit interactive jobs (crun, calloc), enable Cfored:
-pdsh -w login01 systemctl daemon-reload
-pdsh -w login01 systemctl enable cfored
-pdsh -w login01 systemctl start cfored
-
-# If you configured with plugin, enable cplugind
-pdsh -w login01,crane[01-04] systemctl daemon-reload
-pdsh -w login01,cranectld,crane[01-04] systemctl enable cplugind
-pdsh -w login01,cranectld,crane[01-04] systemctl start cplugind
+pdcp -w login01,cranectld,crane[01-04] etc/* /usr/local/lib/systemd/system/
 ```
 
-### 6. Install CLI aliases (optional)
-You can install Slurm-style aliases for Crane using the following commands, allowing you to use Crane with Slurm command forms:
+Adjust the destination paths if you used a custom `PREFIX`. After the files are copied, run `systemctl daemon-reload` on every node to reload systemd units.
+
+### Enable the required services
 
 ```bash
-cat > /etc/profile.d/cwrapper.sh << 'EOF'
+# cfored is needed on login nodes for interactive jobs
+pdsh -w login01 systemctl enable --now cfored
+
+# cplugind runs on nodes that need plugin features
+pdsh -w login01,cranectld,crane[01-04] systemctl enable --now cplugind
+```
+
+### Verify the deployment
+
+```bash
+which cbatch cqueue cinfo
+systemctl status cfored
+systemctl status cplugind
+```
+
+### Plugin path reminder
+
+!!! note "Installation paths"
+    Source installations default to the `/usr/local/` prefix. Package installations place files under `/usr/bin/`, `/usr/lib/crane/plugin/`, and `/usr/lib/systemd/system/`. When updating `/etc/crane/plugin.yaml`, make sure the `.so` paths match the installation method you used.
+
+## Optional: install CLI aliases
+
+```bash
+cat > /etc/profile.d/cwrapper.sh << 'EOCWRAPPER'
 alias sbatch='cwrapper sbatch'
 alias sacct='cwrapper sacct'
 alias sacctmgr='cwrapper sacctmgr'
@@ -272,8 +184,12 @@ alias sinfo='cwrapper sinfo'
 alias squeue='cwrapper squeue'
 alias srun='cwrapper srun'
 alias salloc='cwrapper salloc'
-EOF
+EOCWRAPPER
 
 pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
 pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
+
+## GitHub Action artifacts (testing only)
+
+Every master-branch CI run uploads RPM/DEB artifacts. These builds are not fully validated and should be used only for quick testing or CI reproduction. Download them from the corresponding workflow page if you need to inspect them, but always rely on self-built binaries or packages for production deployments.

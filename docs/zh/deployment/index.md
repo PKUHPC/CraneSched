@@ -56,10 +56,11 @@ graph TB
 
 对于简单的单节点测试环境：
 
-1. 安装后端：按照 [Rocky Linux 9 指南](./backend/Rocky9.md) （步骤 1-5）
-2. 配置数据库：按照 [数据库配置指南](./configuration/database.md)
-3. 配置集群：编辑 `/etc/crane/config.yaml` （参见 [配置指南](./configuration/config.md)）
-4. 启动服务：`systemctl start cranectld craned` （以及根据需要启动其他前端服务）
+1. 安装后端：按照 [Rocky Linux 9 指南](./backend/Rocky9.md) 
+2. 安装前端：按照 [前端部署指南](./frontend/frontend.md)
+3. 配置数据库：按照 [数据库配置指南](./configuration/database.md)
+4. 配置集群：编辑 `/etc/crane/config.yaml` （参见 [配置指南](./configuration/config.md)）
+5. 启动服务：`systemctl start cranectld craned` （以及根据需要启动其他前端服务）
 
 **对于生产环境的多节点集群**，请遵循下面的完整部署流程。
 

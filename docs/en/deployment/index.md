@@ -56,10 +56,11 @@ graph TB
 
 For a simple single-node test environment:
 
-1. Install backend: Follow [Rocky Linux 9 Guide](./backend/Rocky9.md) (Steps 1-5)
-2. Setup database: Follow [Database Configuration Guide](./configuration/database.md)
-3. Configure cluster: Edit `/etc/crane/config.yaml` (see [Configuration Guide](./configuration/config.md))
-4. Start services: `systemctl start cranectld craned` (And other frontend services as needed)
+1. Install backend: Follow [Rocky Linux 9 Guide](./backend/Rocky9.md)
+2. Install frontend: Follow [Frontend Deployment Guide](./frontend/frontend.md)
+3. Setup database: Follow [Database Configuration Guide](./configuration/database.md)
+4. Configure cluster: Edit `/etc/crane/config.yaml` (see [Configuration Guide](./configuration/config.md))
+5. Start services: `systemctl start cranectld craned` (And other frontend services as needed)
 
 **For production multi-node clusters**, follow the complete deployment workflow below.
 
