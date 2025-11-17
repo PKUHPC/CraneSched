@@ -914,7 +914,7 @@ struct TaskInCtld {
 
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  void SchedulePendingSteps(std::vector<StepInCtld*>* scheduled_steps) {
+  void SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
     while (!pending_step_ids_.empty()) {
       const step_id_t& step_id = pending_step_ids_.front();
       const auto& step = GetStep(step_id);
@@ -954,6 +954,12 @@ struct TaskInCtld {
       step->SetConfiguringNodes(step_craned_ids);
       step->SetExecutionNodes(step_craned_ids);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
+      const auto& meta = step->ia_meta.value();
+      meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+          .job_id = step->job_id,
+          .step_id = step->StepId(),
+          .allocated_nodes{std::make_pair(
+              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       scheduled_steps->push_back(step);

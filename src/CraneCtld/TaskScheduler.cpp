@@ -1277,7 +1277,7 @@ void TaskScheduler::StepScheduleThread_() {
       absl::MutexLock running_lk(&m_running_task_map_mtx_);
       absl::MutexLock step_lk(&m_step_num_mutex_);
       if (!m_job_pending_step_num_map_.empty()) {
-        std::vector<StepInCtld*> scheduled_steps;
+        std::vector<CommonStepInCtld*> scheduled_steps;
         for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
           // TODO: schedule here
           auto rn_iter = m_running_task_map_.find(job_id);
@@ -1297,10 +1297,10 @@ void TaskScheduler::StepScheduleThread_() {
         for (const auto& step : scheduled_steps) {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
-            CRANE_ERROR("Failed to append steps to embedded database.");
+            CRANE_ERROR("Failed to update steps to embedded database.");
             StepStatusChangeAsync(step->job_id, step->StepId(), "",
                                   crane::grpc::TaskStatus::Failed, 0,
-                                  "DbAppendError", now);
+                                  "DbUpdateError", now);
           }
         }
 
