@@ -1289,17 +1289,19 @@ void TaskScheduler::StepScheduleThread_() {
           }
         }
 
+        CRANE_TRACE("StepScheduleThread_ scheduled {} steps",
+                    scheduled_steps.size());
+
         auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
 
         for (const auto& step : scheduled_steps) {
           if (!g_embedded_db_client->UpdateRuntimeAttrOfStepIfExists(
                   0, step->StepDbId(), step->RuntimeAttr())) {
+            CRANE_ERROR("Failed to append steps to embedded database.");
             StepStatusChangeAsync(step->job_id, step->StepId(), "",
                                   crane::grpc::TaskStatus::Failed, 0,
                                   "DbAppendError", now);
           }
-          CRANE_ERROR("Failed to append steps to embedded database.");
-          continue;
         }
 
         absl::flat_hash_map<CranedId, std::vector<crane::grpc::StepToD>>

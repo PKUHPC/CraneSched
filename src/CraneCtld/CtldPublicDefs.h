@@ -925,7 +925,8 @@ struct TaskInCtld {
       }
       ResourceV2 step_alloc_res;
       std::unordered_set<CranedId> step_craned_ids;
-      for (auto const& craned_id : craned_ids) {
+      for (auto const& craned_id :
+           step_res_avail_.EachNodeResMap() | std::views::keys) {
         if (step->excluded_nodes.contains(craned_id)) {
           continue;
         }
