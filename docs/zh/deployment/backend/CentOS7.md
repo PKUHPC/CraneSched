@@ -144,7 +144,7 @@ ninja install
 ```
 
 !!! info
-    如果您希望使用 RPM 软件包，请参阅[打包指南](packaging.md)获取说明。
+    如果您希望使用 RPM 软件包，请参阅[打包指南](../packaging.md)获取说明。
 
 对于多节点部署鹤思，请按照[多节点部署指南](../configuration/multi-node.md)。
 
