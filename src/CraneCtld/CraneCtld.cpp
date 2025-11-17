@@ -336,11 +336,23 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["Licenses"]) {
-        auto licenses_str = config["Licenses"].as<std::string>();
-        if (!util::ParseLicensesList(licenses_str,
-                                     &g_config.lic_id_to_count_map)) {
-          CRANE_ERROR("Illegal licenses string format.");
-          std::exit(1);
+        for (auto it = config["Licenses"].begin(); it != config["Licenses"].end(); ++it) {
+          auto license = it->as<YAML::Node>();
+          std::string name;
+          uint32_t quantity;
+          if (license["name"]) {
+            name = license["name"].as<std::string>();
+          } else {
+            CRANE_ERROR("Illegal licenses name format.");
+            std::exit(1);
+          }
+          if (license["quantity"]) {
+            quantity = license["quantity"].as<uint32_t>();
+          } else {
+            CRANE_ERROR("Illegal licenses quantity format.");
+            std::exit(1);
+          }
+          g_config.lic_id_to_count_map.emplace(name, quantity);
         }
       }
 

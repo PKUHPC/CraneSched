@@ -74,8 +74,9 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     for (const auto& license : lic_id_to_count) {
       const auto& lic_id = license.key();
       auto count = license.count();
-      if (licenses_map->contains(lic_id)) {
-        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+      auto iter = licenses_map->find(lic_id);
+      if (iter != licenses_map->end()) {
+        auto lic = iter->second.GetExclusivePtr();
         if (count <= lic->total) return {};
       }
     }
@@ -86,9 +87,9 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   for (const auto& license : lic_id_to_count) {
     const auto& lic_id = license.key();
     auto count = license.count();
-    if (!licenses_map->contains(lic_id))
-      return std::unexpected("Invalid license specification");
-    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+    auto iter = licenses_map->find(lic_id);
+    if (iter == licenses_map->end()) return std::unexpected("Invalid license specification");
+    auto lic = iter->second.GetExclusivePtr();
     if (count > lic->total)
       return std::unexpected("Invalid license specification");
   }

@@ -196,26 +196,6 @@ bool ParseHostList(const std::string &host_str,
   return true;
 }
 
-bool ParseLicensesList(const std::string &licenses_str,
-                       std::unordered_map<LicenseId, uint32_t> *licenses_map) {
-  std::string tmp_str = "";
-  for (auto &ch : licenses_str) {
-    if (ch != ' ') tmp_str += ch;
-  }
-
-  std::vector<std::string> licenses_vec = absl::StrSplit(tmp_str, ",");
-
-  static const LazyRE2 pattern(R"((\w+):(\d+))");
-
-  for (auto &licenses_count : licenses_vec) {
-    if (!RE2::FullMatch(licenses_count, *pattern)) return false;
-    std::vector<std::string> name_count = absl::StrSplit(licenses_count, ":");
-    licenses_map->insert({name_count[0], std::stoul(name_count[1])});
-  }
-
-  return true;
-}
-
 bool HostNameListToStr_(std::list<std::string> &host_list,
                         std::list<std::string> *res_list) {
   std::unordered_map<std::string, std::vector<std::string>> host_map;
