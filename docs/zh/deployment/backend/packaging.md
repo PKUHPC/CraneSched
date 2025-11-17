@@ -9,9 +9,9 @@
 ### 软件包组件
 
 !!! tip
-    前端组件不包含在这些软件包中。有关前端安装，请参阅[前端部署指南](../frontend/frontend.md)。
+    鹤思作为独立的后端和前端软件包分发。本指南涵盖后端软件包（cranectld/craned）。有关前端软件包安装（CLI 工具和插件），请参阅[前端打包指南](../frontend/frontend.md#通过-rpmdeb-软件包安装推荐)。
 
-鹤思分为两个主要软件包组件:
+鹤思后端分为两个主要软件包组件:
 
 - **cranectld** - 控制守护进程软件包（用于控制节点）
 - **craned** - 计算节点守护进程软件包（用于计算节点）
@@ -198,3 +198,62 @@ sudo dpkg -i CraneSched-*-craned.deb
 4. 将示例配置文件复制到 `/etc/crane/config.yaml`（如果不存在）
 5. 将数据库配置复制到 `/etc/crane/database.yaml`（如果不存在，仅 cranectld）
 6. 设置适当的文件所有权和权限
+
+## 前端软件包
+
+鹤思前端组件与后端分开分发，并使用不同的构建系统（GoReleaser 而不是 CPack）。
+
+### 可用的前端软件包
+
+前端提供两个软件包：
+
+| 软件包 | 描述 | 内容 |
+|--------|------|------|
+| **cranesched-frontend** | 核心 CLI 工具和前端守护进程 | CLI 工具（`cbatch`、`cqueue`、`cinfo` 等）、`cfored` 守护进程、systemd 服务 |
+| **cranesched-plugin** | 插件守护进程和插件库 | `cplugind` 守护进程、插件 `.so` 文件（monitor、mail、energy、event 等）|
+
+### 安装路径
+
+前端软件包使用标准 FHS 路径：
+
+- **二进制文件**：`/usr/bin/`（CLI 工具、cfored、cplugind）
+- **插件**：`/usr/lib/crane/plugin/`（插件 .so 文件）
+- **服务**：`/usr/lib/systemd/system/`（systemd 单元）
+
+### 快速安装
+
+**对于基于 RPM 的系统：**
+```bash
+# 核心前端工具
+sudo dnf install cranesched-frontend-*.rpm
+
+# 插件（可选）
+sudo dnf install cranesched-plugin-*.rpm
+```
+
+**对于基于 DEB 的系统：**
+```bash
+# 核心前端工具
+sudo apt install ./cranesched-frontend_*.deb
+
+# 插件（可选）
+sudo apt install ./cranesched-plugin_*.deb
+```
+
+### 构建前端软件包
+
+前端软件包的构建过程与后端软件包不同：
+
+```bash
+# 克隆前端仓库
+git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
+cd CraneSched-FrontEnd
+
+# 构建软件包（需要 goreleaser）
+make package
+
+# 软件包将位于 build/dist/ 中
+ls build/dist/*.rpm build/dist/*.deb
+```
+
+有关完整的前端安装说明、配置详细信息和插件设置，请参阅[前端部署指南](../frontend/frontend.md)。

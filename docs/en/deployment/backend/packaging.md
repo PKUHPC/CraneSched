@@ -9,9 +9,9 @@ CraneSched uses CPack to generate packages for easy distribution and installatio
 ### Package Components
 
 !!! tip
-    Frontend components are not included in these packages. Please refer to the [Frontend Deployment Guide](../frontend/frontend.md) for frontend installation.
+    CraneSched is distributed as separate backend and frontend packages. This guide covers backend packages (cranectld/craned). For frontend package installation (CLI tools and plugins), see the [Frontend Packaging Guide](../frontend/frontend.md#installation-via-rpmdeb-packages-recommended).
 
-CraneSched is divided into two main package components:
+CraneSched backend is divided into two main package components:
 
 - **cranectld** - Control daemon package (for control nodes)
 - **craned** - Execution daemon package (for compute nodes)
@@ -198,3 +198,62 @@ Both packages include a post-installation script that automatically:
 4. Copies sample configuration files to `/etc/crane/config.yaml` (if not exists)
 5. Copies database configuration to `/etc/crane/database.yaml` (if not exists, cranectld only)
 6. Sets appropriate file ownership and permissions
+
+## Frontend Packages
+
+CraneSched frontend components are distributed separately from the backend and use a different build system (GoReleaser instead of CPack).
+
+### Available Frontend Packages
+
+The frontend provides two packages:
+
+| Package | Description | Contents |
+|---------|-------------|----------|
+| **cranesched-frontend** | Core CLI tools and frontend daemon | CLI tools (`cbatch`, `cqueue`, `cinfo`, etc.), `cfored` daemon, systemd service |
+| **cranesched-plugin** | Plugin daemon and plugin libraries | `cplugind` daemon, plugin `.so` files (monitor, mail, energy, event, etc.) |
+
+### Installation Paths
+
+Frontend packages use standard FHS paths:
+
+- **Binaries**: `/usr/bin/` (CLI tools, cfored, cplugind)
+- **Plugins**: `/usr/lib/crane/plugin/` (plugin .so files)
+- **Services**: `/usr/lib/systemd/system/` (systemd units)
+
+### Quick Installation
+
+**For RPM-based systems:**
+```bash
+# Core frontend tools
+sudo dnf install cranesched-frontend-*.rpm
+
+# Plugins (optional)
+sudo dnf install cranesched-plugin-*.rpm
+```
+
+**For DEB-based systems:**
+```bash
+# Core frontend tools
+sudo apt install ./cranesched-frontend_*.deb
+
+# Plugins (optional)
+sudo apt install ./cranesched-plugin_*.deb
+```
+
+### Building Frontend Packages
+
+Frontend packages are built using a different process than backend packages:
+
+```bash
+# Clone frontend repository
+git clone https://github.com/PKUHPC/CraneSched-FrontEnd.git
+cd CraneSched-FrontEnd
+
+# Build packages (requires goreleaser)
+make package
+
+# Packages will be in build/dist/
+ls build/dist/*.rpm build/dist/*.deb
+```
+
+For complete frontend installation instructions, configuration details, and plugin setup, refer to the [Frontend Deployment Guide](../frontend/frontend.md).
