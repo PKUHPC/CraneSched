@@ -4,14 +4,32 @@
 
 本指南将指导您在计算节点上设置 eBPF。
 
-## 1. 安装 Clang 19+
+## 安装 Clang 19+
 
-!!! tip
-    如果您的系统已经安装了 clang >= 19 或您的发行版提供 clang 19 软件包，则可以跳过此部分。
+### Debian/Ubuntu
 
-    有关更多详细信息，请参阅 LLVM 的[官方文档](https://llvm.org/docs/GettingStarted.html)。
+请使用 [https://apt.llvm.org/](https://apt.llvm.org/) 提供的官方 LLVM 软件源安装最新版 Clang。
 
-安装先决条件：
+安装后，可使用以下命令将 Clang（以 19 为例）设置为默认版本：
+
+```bash
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 120 \
+--slave /usr/bin/clang++ clang++ /usr/bin/clang++-19 
+```
+
+### RHEL/Fedora/CentOS
+
+RHEL 9 及以上系统的官方软件源中包含 Clang 19。低于 RHEL 9 的系统（例如 Rocky Linux 8）需要从源码构建 Clang 19+。
+
+```bash
+dnf install clang
+```
+
+### 从源码构建 Clang 19+
+
+有关具体的安装信息，请参阅 LLVM 的[官方文档](https://llvm.org/docs/GettingStarted.html)。以下为 Rocky Linux 8 的示例：
+
+**安装依赖：**
 ```bash
 dnf install \
     bpftool \
@@ -21,7 +39,7 @@ dnf install \
     zlib-devel
 ```
 
-从源码构建并安装 Clang 19：
+**从源码构建并安装：**
 ```bash
 # 克隆 LLVM 19.1.0
 git clone --depth=1 --branch llvmorg-19.1.0 https://github.com/llvm/llvm-project.git \
@@ -58,32 +76,77 @@ cmake ../compiler-rt -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
 ninja install
 ```
 
-下载并构建/安装 libbpf：
-```bash
-# 下载并解压 libbpf
-wget https://github.com/libbpf/libbpf/archive/refs/tags/v1.4.6.zip
-unzip v1.4.6.zip
-cd libbpf-1.4.6/src
+## 安装 libbpf
 
-# 构建并安装
-make
-make install
+CraneSched 需要 libbpf 版本 ≥ 1.4.6。
+
+### RHEL/CentOS/Fedora
+
+RHEL 9 及以上系统的官方软件源中包含满足条件的 libbpf，可通过包管理器安装：
+
+```bash
+dnf install libbpf-devel
 ```
 
-## 2. 使用 eBPF 支持构建
+### Debian/Ubuntu
 
-鹤思可以使用 GCC 或 Clang 构建。但是，要使用 eBPF 功能，您必须使用 Clang 19 或更高版本。
+Ubuntu 25.04 及以上系统的官方软件源中包含满足条件的 libbpf，可通过包管理器安装：
 
-构建鹤思时，请确保 Clang 19 已正确安装并且**在您的 PATH 中可用**，并使用以下 CMake 选项构建：
+```bash
+apt install libbpf-dev
+```
+
+其他版本的 Debian/Ubuntu 系统需要从源码构建 libbpf。
+
+### 从源码构建 libbpf
+
+**安装 libbpf 的依赖：**
+
+```bash
+# RHEL/CentOS/Fedora
+dnf install zlib-devel elfutils-libelf-devel pkgconf
+
+# Debian/Ubuntu
+apt install zlib1g-dev libelf-dev pkg-config
+```
+
+**构建并安装 libbpf：**
+
+!!! warning
+    在 Debian/Ubuntu 和 RHEL/CentOS/Fedora 系统上，构建和安装 libbpf 的命令略有不同，请根据您的系统选择相应的命令运行。 
+
+```bash
+# 下载并解压
+wget https://github.com/libbpf/libbpf/archive/refs/tags/v1.6.2.tar.gz
+tar -xzf v1.6.2.tar.gz
+cd libbpf-1.6.2/
+
+# Debian/Ubuntu
+ARCH=$(dpkg-architecture -q DEB_HOST_MULTIARCH)
+make -j$(nproc) install PREFIX=/usr LIBDIR=/usr/lib/$ARCH
+
+# RHEL/CentOS/Fedora
+make -j$(nproc) install
+
+# 测试使用
+ldconfig
+pkg-config --cflags --libs libbpf
+```
+
+## 构建 eBPF 程序
+
+鹤思可以使用 GCC 或 Clang 构建，但编译 eBPF 程序必须使用 Clang 19 或更高版本。
+
+构建鹤思时，请确保 Clang 已正确安装并且**在您的 PATH 中可用**，并使用以下 CMake 选项构建：
 
 ```
 -DCRANE_ENABLE_CGROUP_V2=ON
 -DCRANE_ENABLE_BPF=ON
 ```
 
-构建后，您应该在构建输出的 `src/Misc/BPF/` 目录中看到 `cgroup_dev_bpf.o`。
+构建后，您应该可在构建输出的 `src/Misc/BPF/` 目录中看到 `cgroup_dev_bpf.o`。
 
-## 3. eBPF 配置
+## 安装 eBPF 程序
 
 在项目构建目录中：
 ```bash
@@ -100,7 +163,7 @@ cat /sys/fs/cgroup/cgroup.subtree_control
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-## 4. 挂载 BPF 文件系统
+## 挂载 BPF 文件系统
 
 如果您看到如下错误：
 

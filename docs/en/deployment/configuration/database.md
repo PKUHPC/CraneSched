@@ -39,9 +39,9 @@ systemctl enable mongod
 systemctl start mongod
 ```
 
-#### Example: Ubuntu/Debian
+#### Example: Debian/Ubuntu
 
-For Ubuntu/Debian systems:
+For Debian/Ubuntu systems:
 
 ```bash
 # Follow the official guide for the latest instructions

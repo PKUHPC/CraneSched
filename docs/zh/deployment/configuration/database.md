@@ -39,9 +39,9 @@ systemctl enable mongod
 systemctl start mongod
 ```
 
-#### 示例：Ubuntu/Debian
+#### 示例：Debian/Ubuntu
 
-对于 Ubuntu/Debian 系统：
+对于 Debian/Ubuntu 系统：
 
 ```bash
 # 按照官方指南获取最新说明
