@@ -2080,11 +2080,19 @@ grpc::Status CraneCtldServiceImpl::QueryJobSizeSummary(
 }
 
 grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
-    ::grpc::ServerContext *context, const ::google::protobuf::Empty *request,
-    ::google::protobuf::Empty *response) {
+    ::grpc::ServerContext *context,
+    const ::crane::grpc::ActiveAggregationManuallyRequest *request,
+    ::crane::grpc::ActiveAggregationManuallyReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  if (request->uid() != 0) {
+    response->set_ok(false);
+    response->set_reason("Only the root user can perform this operation");
+    return grpc::Status::OK;
+  }
   g_db_client->ClusterRollupUsage();
+  response->set_ok(true);
+
   return grpc::Status::OK;
 }
 

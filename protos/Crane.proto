@@ -1014,6 +1014,15 @@ message QueryJobSizeSummaryReply {
   repeated JobSizeSummaryItem item_list = 1;
 }
 
+message ActiveAggregationManuallyRequest {
+  uint32 uid = 1;
+}
+
+message ActiveAggregationManuallyReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -1068,7 +1077,7 @@ service CraneCtld {
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
   rpc QueryJobSummary(QueryJobSummaryRequest) returns (stream QueryJobSummaryReply);
   rpc QueryJobSizeSummary(QueryJobSizeSummaryRequest) returns (stream QueryJobSizeSummaryReply);
-  rpc ActiveAggregationManually(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc ActiveAggregationManually(ActiveAggregationManuallyRequest) returns (ActiveAggregationManuallyReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);
