@@ -478,6 +478,7 @@ bool MongodbClient::FetchJobRecords(
 bool MongodbClient::FetchJobStepRecords(
     const crane::grpc::QueryTasksInfoRequest* request,
     std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
+  if (job_info_map->empty()()) return true;
   document filter;
 
   bool has_submit_time_interval = request->has_filter_submit_time_interval();
