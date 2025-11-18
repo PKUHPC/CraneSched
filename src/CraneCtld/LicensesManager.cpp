@@ -27,7 +27,7 @@ int LicensesManager::Init(
   HashMap<LicenseId, License> licenses_map;
 
   for (auto& [lic_id, count] : lic_id_to_count_map) {
-    licenses_map.insert({lic_id, License(lic_id, count, 0, count)});
+    licenses_map.insert({lic_id, License(lic_id, count, 0, count, 0)});
   }
 
   m_licenses_map_.InitFromMap(std::move(licenses_map));
@@ -146,7 +146,15 @@ void LicensesManager::FreeReserved(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   for (const auto& [lic_id, count] : actual_license) {
     auto lic = m_licenses_map_[lic_id];
-    lic->reserved -= count;
+    if (lic->reserved < count) {
+      CRANE_ERROR(
+          "FreeReserved: license [{}] reserved < freeing count ({} < {}), "
+          "will clamp to 0",
+          lic_id, lic->reserved, count);
+      lic->reserved = 0;
+    } else {
+      lic->reserved -= count;
+    }
   }
 }
 
