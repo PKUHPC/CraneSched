@@ -55,12 +55,14 @@ class LicensesManager {
       bool is_license_or,
       std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
-  void FreeReserved(const std::unordered_map<LicenseId, uint32_t> &actual_license);
+  void FreeReserved(
+      const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
   bool MallocLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void MallocLicenseResourceWhenRecoverRunning(const std::unordered_map<LicenseId, uint32_t> &actual_license);
+  void MallocLicenseResourceWhenRecoverRunning(
+      const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
   void FreeLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);

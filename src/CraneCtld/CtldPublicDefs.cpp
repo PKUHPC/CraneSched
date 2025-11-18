@@ -945,7 +945,7 @@ void TaskInCtld::SetEndTimeByUnixSecond(uint64_t val) {
 
 void TaskInCtld::SetActualLicenses(
     std::unordered_map<LicenseId, uint32_t>&& actual_licenses) {
-  auto * mutable_map = runtime_attr.mutable_actual_licenses();
+  auto* mutable_map = runtime_attr.mutable_actual_licenses();
   for (const auto& [id, count] : actual_licenses) {
     mutable_map->insert({id, count});
   }
@@ -1076,7 +1076,8 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
   start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
   end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
   submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
-  licenses_count = std::unordered_map{runtime_attr.actual_licenses().begin(), runtime_attr.actual_licenses().end()};
+  licenses_count = std::unordered_map{runtime_attr.actual_licenses().begin(),
+                                      runtime_attr.actual_licenses().end()};
 }
 
 void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {

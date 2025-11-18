@@ -336,7 +336,8 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["Licenses"]) {
-        for (auto it = config["Licenses"].begin(); it != config["Licenses"].end(); ++it) {
+        for (auto it = config["Licenses"].begin();
+             it != config["Licenses"].end(); ++it) {
           auto license = it->as<YAML::Node>();
           std::string name;
           uint32_t quantity;

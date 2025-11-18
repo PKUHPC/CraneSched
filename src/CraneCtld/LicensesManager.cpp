@@ -88,7 +88,8 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     const auto& lic_id = license.key();
     auto count = license.count();
     auto iter = licenses_map->find(lic_id);
-    if (iter == licenses_map->end()) return std::unexpected("Invalid license specification");
+    if (iter == licenses_map->end())
+      return std::unexpected("Invalid license specification");
     auto lic = iter->second.GetExclusivePtr();
     if (count > lic->total)
       return std::unexpected("Invalid license specification");
@@ -182,7 +183,8 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
     lic->used += count;
     if (lic->free < count) {
       CRANE_ERROR(
-          "MallocLicenseResourceWhenRecoverRunning: license [{}] requested={}, free={}, will set "
+          "MallocLicenseResourceWhenRecoverRunning: license [{}] requested={}, "
+          "free={}, will set "
           "free=0",
           lic_id, count, lic->free);
       lic->free = 0;

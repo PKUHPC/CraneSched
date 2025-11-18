@@ -107,7 +107,8 @@ struct PdJobInScheduler {
   ResourceV2 allocated_res;
   std::vector<CranedId> craned_ids;
 
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License> req_licenses;
+  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
+      req_licenses;
   bool is_license_or;
   std::unordered_map<LicenseId, uint32_t> actual_licenses;
 

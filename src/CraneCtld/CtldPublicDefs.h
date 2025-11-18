@@ -842,7 +842,8 @@ struct TaskInCtld {
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
-  void SetActualLicenses(std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
+  void SetActualLicenses(
+      std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
 
   void SetHeld(bool val);
   bool const& Held() const { return held; }

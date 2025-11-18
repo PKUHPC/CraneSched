@@ -595,7 +595,8 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
   if (!task->licenses_count.empty())
-    g_licenses_manager->MallocLicenseResourceWhenRecoverRunning(task->licenses_count);
+    g_licenses_manager->MallocLicenseResourceWhenRecoverRunning(
+        task->licenses_count);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -840,7 +841,6 @@ void TaskScheduler::ScheduleThread_() {
       LockGuard pending_guard(&m_pending_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
-
         if (!job_in_scheduler->actual_licenses.empty())
           g_licenses_manager->FreeReserved(job_in_scheduler->actual_licenses);
 
@@ -891,7 +891,8 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           if (!job_in_scheduler->actual_licenses.empty()) {
-            if (!g_licenses_manager->MallocLicenseResource(job_in_scheduler->actual_licenses)) {
+            if (!g_licenses_manager->MallocLicenseResource(
+                    job_in_scheduler->actual_licenses)) {
               job->pending_reason = "Licenses";
               continue;
             }
@@ -3450,7 +3451,8 @@ void SchedulerAlgo::NodeSelect(
   for (const auto& job : job_ptr_vec) {
     // ctld only virtual resource;
     if (!job->req_licenses.empty()) {
-      if (!g_licenses_manager->CheckLicenseCountSufficient(job->req_licenses, job->is_license_or, &job->actual_licenses)) {
+      if (!g_licenses_manager->CheckLicenseCountSufficient(
+              job->req_licenses, job->is_license_or, &job->actual_licenses)) {
         job->reason = "License";
         continue;
       }
