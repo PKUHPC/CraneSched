@@ -92,3 +92,4 @@ Memory Efficiency shows how much of the allocated memory was actually used:
 - [cqueue](cqueue.md) - View active jobs in the queue
 - [cbatch](cbatch.md) - Submit batch jobs
 - [crun](crun.md) - Run interactive jobs
+- [creport](creport.md) - Query job-related statistics

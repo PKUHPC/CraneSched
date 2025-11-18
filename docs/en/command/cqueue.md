@@ -210,3 +210,4 @@ cqueue --json
 - [calloc](calloc.md) - Allocate resources
 - [ccancel](ccancel.md) - Cancel jobs
 - [cacct](cacct.md) - Query completed jobs
+- [creport](creport.md) - Query job-related statistics

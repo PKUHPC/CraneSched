@@ -274,3 +274,4 @@ cacct -o="%.8j %20n %-10P %.15U %t"
 - [cbatch](cbatch.md) - 提交批处理作业
 - [ccancel](ccancel.md) - 取消作业
 - [ceff](ceff.md) - 查看作业效率统计
+- [creport](creport.md) - 查询作业相关统计信息

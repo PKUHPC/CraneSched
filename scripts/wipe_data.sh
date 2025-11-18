@@ -81,5 +81,9 @@ fi
 
 if [ "$mode" -eq 10 ]; then
   batch_insert_collection_process "task_table" "./tasks_bulk.json"
+  if [ $? -ne 0 ]; then
+    echo "Error: Failed to import tasks from ./tasks_bulk.json"
+    exit 1
+  fi
   exit 0
 fi

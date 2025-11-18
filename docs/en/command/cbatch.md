@@ -336,3 +336,4 @@ cbatch --wrap "echo Hello && sleep 10 && echo Done"
 - [ccancel](ccancel.md) - Cancel jobs
 - [cacct](cacct.md) - View job accounting information
 - [ccontrol](ccontrol.md) - Control jobs and system resources
+- [creport](creport.md) - Query job-related statistics
