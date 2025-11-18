@@ -902,7 +902,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   if (job_info_map.size() >= num_limit ||
       !request->option_include_completed_tasks()) {
-    //Fetch job finished steps in Mongodb
+    // Fetch job finished steps in Mongodb
     if (!g_db_client->FetchJobStepRecords(request, &job_info_map)) {
       CRANE_ERROR("Failed to call g_db_client->FetchJobStepRecords");
       return grpc::Status::OK;
