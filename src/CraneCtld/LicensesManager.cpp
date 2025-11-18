@@ -295,4 +295,122 @@ void LicensesManager::FreeLicenseResource(
   }
 }
 
+CraneExpected<void> LicensesManager::AddRemoteLicense(
+    LicenseResource&& new_license) {
+  util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  auto key = std::make_pair(new_license.name, new_license.server);
+
+  if (m_license_resource_map_.contains(key))
+    return std::unexpected(CraneErrCode::ERR_LICENSE_NOT_FOUND);
+
+  // TODO: insert db
+
+  m_license_resource_map_[key] = std::make_unique<LicenseResource>(std::move(new_license));
+
+  return {};
+}
+
+CraneExpected<void> LicensesManager::ModifyRemoteLicense(
+    const std::string& name, const std::vector<std::string>& clusters,
+    const std::string& server, const crane::grpc::LicenseResource_Field& field,
+    const std::string& value) {
+  util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  auto key = std::make_pair(name, server);
+  auto iter = m_license_resource_map_.find(key);
+  if (iter == m_license_resource_map_.end())
+    return std::unexpected(CraneErrCode::ERR_LICENSE_NOT_FOUND);
+
+  LicenseResource res_resource(*(iter->second));
+  switch (field) {
+  case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
+    try {
+      res_resource.count = std::stoul(value);
+    } catch (std::exception& e) {
+      CRANE_ERROR("Failed to parse 'count' from value '{}': {}", value, e.what());
+      return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
+    }
+      break;
+    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
+      for (const auto& cluster : clusters) {
+        std::unordered_map<std::string, uint32_t>::iterator iter;
+        if (cluster == "local") {
+          iter = res_resource.cluster_resources.find(g_config.CraneClusterName);
+        } else {
+          iter = res_resource.cluster_resources.find(cluster);
+        }
+        if (iter == res_resource.cluster_resources.end())
+          return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
+        try {
+          iter->second = std::stoul(value);
+        } catch (std::exception& e) {
+          CRANE_ERROR("Failed to parse 'allowed' for cluster '{}' from value '{}': {}", cluster, value, e.what());
+          return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
+        }
+      }
+      break;
+  case crane::grpc::LicenseResource_Field_LastConsumed:
+    try {
+      res_resource.last_consumed = std::stoul(value);
+    } catch (std::exception& e) {
+      CRANE_ERROR("Failed to parse 'last_consumed' from value '{}': {}", value, e.what());
+      return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
+    }
+    break;
+    case crane::grpc::LicenseResource_Field_Description:
+      res_resource.description = value;
+      break;
+  case crane::grpc::LicenseResource_Field_Flags:
+    break;
+  case crane::grpc::LicenseResource_Field_ServerType:
+    res_resource.server_type = value;
+    break;
+  default:
+    CRANE_ERROR("Unrecognized LicenseResource field: {}", std::to_string(field));
+  }
+
+  // TODO: update db
+
+  m_license_resource_map_[key] = std::make_unique<LicenseResource>(std::move(res_resource));
+
+  return {};
+}
+
+CraneExpected<void> LicensesManager::RemoveRemoteLicense(
+    const std::string& name, const std::string& server,
+    const std::vector<std::string>& clusters) {
+  util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  auto key = std::make_pair(name, server);
+  auto iter = m_license_resource_map_.find(key);
+  if (iter == m_license_resource_map_.end())
+    return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
+
+  // TODO: remove on db
+  auto* license_resource = iter->second.get();
+  if (clusters.empty()) {
+    m_license_resource_map_.erase(key);
+  } else {
+    for (const auto& cluster : clusters) {
+      std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
+      if (cluster == "local") {
+        cluster_iter = license_resource->cluster_resources.find(g_config.CraneClusterName);
+        // TODO: remove license
+      } else {
+        cluster_iter = license_resource->cluster_resources.find(cluster);
+      }
+      if (cluster_iter == license_resource->cluster_resources.end())
+        return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
+
+      license_resource->cluster_resources.erase(cluster_iter);
+    }
+  }
+
+
+  // TODO: remove on license map
+
+  return {};
+}
+
 }  // namespace Ctld

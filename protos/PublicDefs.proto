@@ -799,6 +799,10 @@ enum ErrCode {
   ERR_MISSING_DEPENDENCY = 91;
   ERR_DB_INSERT_FAILED = 92;
   ERR_LUA_FAILED = 93;
+  ERR_LICENSE_NOT_FOUND = 94;
+  ERR_INVALID_ARGUMENT = 95;
+
+  ERR_CLUSTER_LICENSE_NOT_FOUND = 96;
 }
 
 enum EntityType {
@@ -947,4 +951,21 @@ message LicenseInfo {
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+}
+
+
+message LicenseResource {
+  enum Type{
+    NotSet = 0;
+    License = 1;
+  }
+
+  enum Field {
+    Count = 0;
+    Allowed = 1;
+    LastConsumed = 2;
+    Description = 3;
+    Flags = 4;
+    ServerType = 5;
+  }
 }

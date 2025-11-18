@@ -1838,6 +1838,112 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
 
   return grpc::Status::OK;
 }
+grpc::Status CraneCtldServiceImpl::AddLicenseResource(
+    grpc::ServerContext *context,
+    const crane::grpc::AddLicenseResourceRequest *request,
+    crane::grpc::AddLicenseResourceReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+    return grpc::Status::OK;
+  }
+
+  LicenseResource resource;
+  resource.name = request->resource_name();
+  resource.count = request->count();
+  resource.server = request->server();
+  resource.server_type = request->server_type();
+  resource.type = request->type();
+
+  for (const auto &cluster : request->clusters()) {
+    if (cluster == "local") {
+      resource.cluster_resources.emplace(g_config.CraneClusterName, request->allowed());
+    } else {
+      resource.cluster_resources.emplace(cluster, request->allowed());
+    }
+  }
+
+  auto add_result = g_licenses_manager->AddRemoteLicense(std::move(resource));
+  if (!add_result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ModifyLicenseResource(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyLicenseResourceRequest *request,
+    crane::grpc::ModifyLicenseResourceReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+    return grpc::Status::OK;
+  }
+
+  std::vector<std::string> clusters{request->clusters().begin(),
+                                    request->clusters().end()};
+
+  auto modify_result = g_licenses_manager->ModifyRemoteLicense(
+      request->resource_name(), clusters, request->server(),
+      request->operator_field(), request->value());
+  if (!modify_result) {
+    response->set_ok(false);
+    response->set_code(modify_result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
+    grpc::ServerContext *context,
+    const crane::grpc::DeleteLicenseResourceRequest *request,
+    crane::grpc::DeleteLicenseResourceReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+    return grpc::Status::OK;
+  }
+
+  std::vector<std::string> clusters{request->clusters().begin(),
+                                      request->clusters().end()};
+  auto del_result = g_licenses_manager->RemoveRemoteLicense(
+      request->resource_name(), request->server(), clusters);
+  if (!del_result) {
+    response->set_ok(false);
+    response->set_code(del_result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
 
 grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext* context,

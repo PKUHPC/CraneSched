@@ -1293,6 +1293,20 @@ struct Wckey {
   }
 };
 
+struct LicenseResource {
+  std::string name;
+  std::string server;
+  std::string server_type;
+  crane::grpc::LicenseResource_Type type;
+  uint32_t allocated;
+  uint32_t last_consumed;
+  std::unordered_map<std::string, uint32_t> /* cluster, allowed */cluster_resources;
+  uint32_t count;
+  uint32_t flags;
+  uint64_t last_update;
+  std::string description;
+};
+
 // TODO: not use free, only total and used
 struct License {
   LicenseId license_id; /* license name */
