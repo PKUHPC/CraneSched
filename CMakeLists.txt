@@ -86,7 +86,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         if (CRANE_ENABLE_CGROUP_V2)
             if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
                 set(CRANE_ENABLE_BPF ON)
-                message(STATUS "EBPF is Enabled.")
+                message(STATUS "eBPF is Enabled.")
             else()
                 message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
             endif()
@@ -115,6 +115,7 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" OFF)
 
 option(CRANE_USE_SYSTEM_LIBCGROUP "Use libcgroup from system instead of building from source" OFF)
+option(CRANE_USE_SYSTEM_LIBBPF "Use libbpf from system instead of building from source" OFF)
 
 option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
 
@@ -346,10 +347,6 @@ if (Subid_FOUND)
     message(STATUS "Subid found. Include: ${SUBID_INCLUDE_DIRS}; Libs: ${SUBID_LIBRARIES}")
 else ()
     message(FATAL_ERROR "Subid library was not found.")
-endif ()
-
-if (CRANE_ENABLE_BPF)
-    find_package(BPF 1.4.6 REQUIRED)
 endif ()
 
 # Needed by grpc
