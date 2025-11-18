@@ -11,13 +11,36 @@ set(LIBBPF_EXTRA_LIBS "" CACHE STRING "Extra libraries required by libbpf" FORCE
 if (CRANE_USE_SYSTEM_LIBBPF)
     message(STATUS "Using libbpf from system.")
 
-    pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
+    pkg_check_modules(PC_LIBBPF REQUIRED libbpf>=1.4.6)
 
-    message(STATUS "Found libbpf ${libbpf_VERSION} via pkg-config.")
+    message(STATUS "PkgConfig: LIBBPF INCLUDE_DIR:${PC_LIBBPF_INCLUDE_DIRS}, LIB_DIR:${PC_LIBBPF_LIBRARY_DIRS}, Ver: ${PC_LIBBPF_VERSION}")
 
-    set(LIBBPF_INCLUDE_DIR ${libbpf_INCLUDE_DIRS} CACHE STRING "Path to libbpf headers" FORCE)
-    set(LIBBPF_BUILD_PRODUCTS PkgConfig::libbpf CACHE STRING "Path to libbpf library" FORCE)
-    set(LIBBPF_EXTRA_LIBS "" CACHE STRING "Extra libraries required by libbpf" FORCE)
+    find_path(LIBBPF_INCLUDE_DIRS
+            NAMES bpf/bpf.h
+            HINTS ${PC_LIBBPF_INCLUDE_DIRS})
+
+    find_library(LIBBPF_LIBRARIES
+            NAMES bpf
+            HINTS ${PC_LIBBPF_LIBRARY_DIRS})
+
+    if (NOT LIBBPF_INCLUDE_DIRS OR NOT LIBBPF_LIBRARIES)
+        message(FATAL_ERROR "Error occurred when searching libbpf")
+    endif ()
+
+    if (PC_LIBBPF_LIBRARIES)
+        set(_LIBBPF_LINK_LIBS ${PC_LIBBPF_LIBRARIES})
+    else ()
+        set(_LIBBPF_LINK_LIBS ${LIBBPF_LIBRARIES})
+    endif ()
+
+    set(LIBBPF_INCLUDE_DIR ${LIBBPF_INCLUDE_DIRS} CACHE STRING "Path to libbpf headers" FORCE)
+    set(LIBBPF_BUILD_PRODUCTS "${_LIBBPF_LINK_LIBS}" CACHE STRING "Path to libbpf library" FORCE)
+    if (PC_LIBBPF_LDFLAGS_OTHER)
+        set(LIBBPF_EXTRA_LIBS "${PC_LIBBPF_LDFLAGS_OTHER}" CACHE STRING "Extra libraries required by libbpf" FORCE)
+    else ()
+        set(LIBBPF_EXTRA_LIBS "" CACHE STRING "Extra libraries required by libbpf" FORCE)
+    endif ()
+    unset(_LIBBPF_LINK_LIBS)
     return()
 endif ()
 
