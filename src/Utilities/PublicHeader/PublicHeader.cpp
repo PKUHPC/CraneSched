@@ -712,7 +712,7 @@ uint64_t ResourceView::MemoryBytes() const {
 
 bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
                                              ResourceInNode* feasible_res) {
-  if (avail_res.allocatable_res < this->allocatable_res) return false;
+  if (!(this->allocatable_res <= avail_res.allocatable_res)) return false;
 
   feasible_res->allocatable_res = this->allocatable_res;
 
