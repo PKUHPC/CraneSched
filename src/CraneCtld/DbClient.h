@@ -118,6 +118,10 @@ class MongodbClient {
       std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map,
       size_t limit);
 
+  bool FetchJobStepRecords(
+      const crane::grpc::QueryTasksInfoRequest* request,
+      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map);
+
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
   /* ----- Method of operating the step table ----------- */

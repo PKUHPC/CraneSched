@@ -475,6 +475,182 @@ bool MongodbClient::FetchJobRecords(
   return true;
 }
 
+bool MongodbClient::FetchJobStepRecords(
+    const crane::grpc::QueryTasksInfoRequest* request,
+    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
+  document filter;
+
+  bool has_submit_time_interval = request->has_filter_submit_time_interval();
+  if (has_submit_time_interval) {
+    const auto& interval = request->filter_submit_time_interval();
+    filter.append(kvp("time_submit", [&interval](sub_document time_submit_doc) {
+      if (interval.has_lower_bound()) {
+        time_submit_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_submit_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_start_time_interval = request->has_filter_start_time_interval();
+  if (has_start_time_interval) {
+    const auto& interval = request->filter_start_time_interval();
+    filter.append(kvp("time_start", [&interval](sub_document time_start_doc) {
+      if (interval.has_lower_bound()) {
+        time_start_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_start_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_end_time_interval = request->has_filter_end_time_interval();
+  if (has_end_time_interval) {
+    const auto& interval = request->filter_end_time_interval();
+    filter.append(kvp("time_end", [&interval](sub_document time_end_doc) {
+      if (interval.has_lower_bound()) {
+        time_end_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_end_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_accounts_constraint = !request->filter_accounts().empty();
+  if (has_accounts_constraint) {
+    filter.append(kvp("account", [&request](sub_document account_doc) {
+      array account_array;
+      for (const auto& account : request->filter_accounts()) {
+        account_array.append(account);
+      }
+      account_doc.append(kvp("$in", account_array));
+    }));
+  }
+
+  bool has_users_constraint = !request->filter_users().empty();
+  if (has_users_constraint) {
+    filter.append(kvp("username", [&request](sub_document user_doc) {
+      array user_array;
+      for (const auto& user : request->filter_users()) {
+        user_array.append(user);
+      }
+      user_doc.append(kvp("$in", user_array));
+    }));
+  }
+
+  bool has_task_names_constraint = !request->filter_task_names().empty();
+  if (has_task_names_constraint) {
+    filter.append(kvp("task_name", [&request](sub_document task_name_doc) {
+      array task_name_array;
+      for (const auto& task_name : request->filter_task_names()) {
+        task_name_array.append(task_name);
+      }
+      task_name_doc.append(kvp("$in", task_name_array));
+    }));
+  }
+
+  bool has_qos_constraint = !request->filter_qos().empty();
+  if (has_qos_constraint) {
+    filter.append(kvp("qos", [&request](sub_document qos_doc) {
+      array qos_array;
+      for (const auto& qos : request->filter_qos()) {
+        qos_array.append(qos);
+      }
+      qos_doc.append(kvp("$in", qos_array));
+    }));
+  }
+
+  bool has_partitions_constraint = !request->filter_partitions().empty();
+  if (has_partitions_constraint) {
+    filter.append(kvp("partition_name", [&request](sub_document partition_doc) {
+      array partition_array;
+      for (const auto& partition : request->filter_partitions()) {
+        partition_array.append(partition);
+      }
+      partition_doc.append(kvp("$in", partition_array));
+    }));
+  }
+
+  filter.append(kvp("task_id", [&job_info_map](sub_document task_id_doc) {
+    array task_id_array;
+    for (const auto job_id : *job_info_map | std::views::keys) {
+      task_id_array.append(static_cast<std::int32_t>(job_id));
+    }
+    task_id_doc.append(kvp("$in", task_id_array));
+  }));
+
+  bool has_task_status_constraint = !request->filter_states().empty();
+  if (has_task_status_constraint) {
+    filter.append(kvp("state", [&request](sub_document state_doc) {
+      array state_array;
+      for (const auto& state : request->filter_states()) {
+        state_array.append(state);
+      }
+      state_doc.append(kvp("$in", state_array));
+    }));
+  }
+
+  bool has_task_types_constraint = !request->filter_task_types().empty();
+  if (has_task_types_constraint) {
+    filter.append(kvp("type", [&request](sub_document type_doc) {
+      array type_array;
+      for (const auto& type : request->filter_task_types()) {
+        type_array.append(static_cast<std::int32_t>(type));
+      }
+      type_doc.append(kvp("$in", type_array));
+    }));
+  }
+
+  mongocxx::options::find option;
+
+  document sort_doc;
+  sort_doc.append(kvp("task_db_id", -1));
+  option = option.sort(sort_doc.view());
+
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
+                                                                option);
+
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc    node_inx      partition_name
+  // 15 priority      time_eligible  time_start     time_end      time_suspended
+  // 20 script        state          timelimit      time_submit   work_dir
+  // 25 submit_line   exit_code      username       qos           get_user_env
+  // 30 type          extra_attr     reservation    exclusive     cpus_alloc
+  // 35 mem_alloc     device_map     meta_container has_job_info
+
+  try {
+    for (auto view : cursor) {
+      job_id_t job_id = view["task_id"].get_int32().value;
+      auto in_mem_job_it = job_info_map->find(job_id);
+      bool has_in_mem_job_info = in_mem_job_it != job_info_map->end();
+      if (!has_in_mem_job_info) {
+        CRANE_ERROR(
+            "Trying to fetch step records for non-existing job #{} in mem.",
+            job_id);
+        continue;
+      }
+      auto* job_info_ptr = &in_mem_job_it->second;
+
+      auto steps_elem = view["steps"];
+      if (!steps_elem || steps_elem.type() != bsoncxx::type::k_array) continue;
+      for (const auto& elem : steps_elem.get_array().value) {
+        auto* step_info = job_info_ptr->add_step_info_list();
+        ViewToStepInfo_(elem.get_document().value, step_info);
+        step_info->set_job_id(job_id);
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return true;
+}
+
 bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   document doc;
   doc.append(kvp("job_db_inx", task_db_id));
