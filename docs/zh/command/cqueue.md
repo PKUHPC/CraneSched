@@ -210,3 +210,4 @@ cqueue --json
 - [calloc](calloc.zh.md) - 分配资源
 - [ccancel](ccancel.zh.md) - 取消作业
 - [cacct](cacct.zh.md) - 查询已完成作业
+- [creport](creport.md) - 查询作业相关统计信息
