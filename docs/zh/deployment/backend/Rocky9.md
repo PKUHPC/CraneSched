@@ -48,7 +48,7 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 firewall-cmd --reload
 ```
 
-### 1.4 禁用 SELinux
+### 1.4 禁用 SELinux<small>（可选）</small>
 
 ```bash
 # 临时禁用（重启后会恢复）
@@ -58,7 +58,7 @@ setenforce 0
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
-### 1.5 选择 CGroup 版本（可选）
+### 1.5 选择 CGroup 版本<small>（可选）</small>
 
 Rocky 9 默认使用 **CGroup v2**。
 鹤思默认使用 **CGroup v1**。
@@ -111,6 +111,7 @@ dnf install -y \
     patch \
     flex \
     bison \
+    automake \
     ninja-build
 
 echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
@@ -136,8 +137,7 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
-    shadow-utils-subid-devel \
-    automake
+    shadow-utils-subid-devel
 ```
 
 ## 4. 安装和配置 MongoDB

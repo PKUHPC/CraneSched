@@ -110,7 +110,7 @@ make install
 make install PREFIX=/opt/crane
 ```
 
-## 构建 RPM/DEB 软件包（可选）
+## 构建 RPM/DEB 软件包<small>（可选）</small>
 
 如果需要使用包管理器部署，请在仓库根目录执行：
 

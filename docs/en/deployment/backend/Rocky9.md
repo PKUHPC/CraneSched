@@ -47,7 +47,7 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 firewall-cmd --reload
 ```
 
-### 1.4 Disable SELinux
+### 1.4 Disable SELinux <small>(Optional)</small>
 
 ```bash
 # Temporary (will be reset after reboot)
@@ -57,7 +57,7 @@ setenforce 0
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
-### 1.5 Select CGroup Version (Optional)
+### 1.5 Select CGroup Version <small>(Optional)</small>
 
 Rocky 9 uses **CGroup v2** by default.
 CraneSched uses **CGroup v1** by default.
@@ -110,6 +110,7 @@ dnf install -y \
     patch \
     flex \
     bison \
+    automake \
     ninja-build
 
 echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
@@ -135,8 +136,7 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
-    shadow-utils-subid-devel \
-    automake
+    shadow-utils-subid-devel
 ```
 
 ## 4. Install and Configure MongoDB
