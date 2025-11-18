@@ -68,7 +68,27 @@ class LicensesManager {
   void FreeLicenseResource(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
+  CraneExpected<void> AddRemoteLicense(LicenseResource &&new_license);
+  CraneExpected<void> ModifyRemoteLicense(
+      const std::string &name, const std::vector<std::string> &clusters,
+      const std::string &server,
+      const crane::grpc::LicenseResource_Field &field,
+      const std::string &value);
+  CraneExpected<void> RemoveRemoteLicense(const std::string &name, const std::string& server, const std::vector<std::string>& clusters);
+
  private:
+  struct LicenseIdServerPairHash {
+    std::size_t operator()(const std::pair<LicenseId, std::string>& p) const {
+      std::size_t h1 = std::hash<LicenseId>{}(p.first);
+      std::size_t h2 = std::hash<std::string>{}(p.second);
+      return h1 ^ (h2 << 1);
+    }
+  };
+  std::unordered_map<std::pair<LicenseId, std::string>, std::unique_ptr<LicenseResource>, LicenseIdServerPairHash>
+      m_license_resource_map_;
+
+  util::rw_mutex m_rw_resource_mutex_;
+
   LicensesAtomicMap m_licenses_map_;
 };
 

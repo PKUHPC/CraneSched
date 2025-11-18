@@ -762,6 +762,10 @@ enum ErrCode {
   ERR_INVALID_CLUSTER = 88;
   ERR_DEL_DEFAULT_WCKEY = 89;
   ERR_NO_DEFAULT_WCKEY = 90;
+
+  ERR_LICENSE_NOT_FOUND = 91;
+  ERR_INVALID_ARGUMENT = 92;
+  ERR_CLUSTER_LICENSE_NOT_FOUND = 93;
 }
 
 enum EntityType {
@@ -910,4 +914,21 @@ message LicenseInfo {
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+}
+
+
+message LicenseResource {
+  enum Type{
+    NotSet = 0;
+    License = 1;
+  }
+
+  enum Field {
+    Count = 0;
+    Allowed = 1;
+    LastConsumed = 2;
+    Description = 3;
+    Flags = 4;
+    ServerType = 5;
+  }
 }
