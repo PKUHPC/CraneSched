@@ -63,8 +63,7 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 Rocky 9 默认使用 **CGroup v2**。
 鹤思默认使用 **CGroup v1**。
 
-如果您希望启用 CGroup v2 支持，需要[额外配置](eBPF.md)，
-或者您可以将系统切换为使用 CGroup v1。
+如果您希望启用 CGroup v2 支持，需要[额外配置](eBPF.md)，或者您可以将系统切换为使用 CGroup v1。
 
 #### 1.5.1 配置 CGroup v1
 
@@ -98,11 +97,11 @@ echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 
 工具链必须满足以下版本要求：
 
-* `cmake` ≥ **3.24**
-* 如果使用 **clang**，版本 ≥ **19**
+* CMake ≥ **3.24**
+* 如果使用 **clang++**，版本 ≥ **19**
 * 如果使用 **g++**，版本 ≥ **14**
 
-### 2.1 安装构建工具
+使用以下命令安装并启用所需的工具链：
 
 ```bash
 dnf install -y \
@@ -116,12 +115,6 @@ dnf install -y \
 
 echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
 source /etc/profile.d/extra.sh
-```
-
-### 2.2 安装常用工具
-
-```bash
-dnf install -y tar curl unzip git
 ```
 
 ## 3. 安装项目依赖

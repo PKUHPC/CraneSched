@@ -62,8 +62,7 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 Rocky 9 uses **CGroup v2** by default.
 CraneSched uses **CGroup v1** by default.
 
-If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md),
-or you can switch the system to use CGroup v1.
+If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md), or you can switch the system to use CGroup v1.
 
 #### 1.5.1 Configure CGroup v1
 
@@ -97,11 +96,11 @@ Additionally, if you plan to use GRES with CGroup v2, please refer to the [eBPF 
 
 The toolchain must meet the following version requirements:
 
-* `cmake` ≥ **3.24**
-* If using **clang**, version ≥ **19**
+* CMake ≥ **3.24**
+* If using **clang++**, version ≥ **19**
 * If using **g++**, version ≥ **14**
 
-### 2.1 Install Build Tools
+Use the following commands to install and enable the required toolchain:
 
 ```bash
 dnf install -y \
@@ -115,12 +114,6 @@ dnf install -y \
 
 echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
 source /etc/profile.d/extra.sh
-```
-
-### 2.2 Install Common Utilities
-
-```bash
-dnf install -y tar curl unzip git
 ```
 
 ## 3. Install Project Dependencies

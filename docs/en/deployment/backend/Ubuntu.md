@@ -1,24 +1,23 @@
-# Deployment Guide for Ubuntu
+# Debian/Ubuntu Deployment Guide
 
 !!! tip
-    This guide is for **Ubuntu 20.04, 22.04, and 24.04**. It is recommended to use the latest LTS version for better compatibility and support.
+    This guide has been tested on **Ubuntu 24.04 LTS**, but it also applies to **Ubuntu 20.04/22.04+** and **Debian 11/12+**.
 
-## 1. Environment Preparation
+    The instructions target x86-64 systems. For other architectures (such as ARM64), adjust download links and commands accordingly.
 
-### 1.1 Update Package Lists
-It is recommended to change the package source to a domestic mirror for faster downloads.
+Run every command in this tutorial as the root user.
+
+## 1. Environment preparation
+
+### 1.1 Update package lists
+
+Update existing packages:
 
 ```bash
 apt update && apt upgrade -y 
 ```
 
-### 1.2 Install Certificates
-
-```bash
-apt install ca-certificates -y
-```
-
-### 1.3 Enable Time Synchronization
+### 1.2 Enable time synchronization
 
 ```bash
 apt install -y chrony
@@ -27,17 +26,21 @@ timedatectl set-timezone Asia/Shanghai
 timedatectl set-ntp true
 ```
 
-### 1.4 Configure Firewall
-!!! tip
-    If you have multiple nodes, perform this step on **each node**. Otherwise, inter-node communication will fail.
+### 1.3 Configure the firewall
 
-    Please see the config file `/etc/crane/config.yaml` for port configuration details.
+!!! tip
+    Run this step on **every node** in the cluster—otherwise communication between nodes fails.
+
+    Refer to `/etc/crane/config.yaml` for port configuration details.
+
+Debian/Ubuntu ships with UFW by default. Disable it with:
 
 ```bash
 systemctl stop ufw
 systemctl disable ufw
 ```
-If your cluster requires the firewall to remain active, open the following ports:
+
+If the firewall must remain active, allow these ports:
 
 ```bash
 ufw allow 10013
@@ -47,157 +50,221 @@ ufw allow 10010
 ufw allow 873
 ```
 
-### 1.5 Disable SELinux
+### 1.4 Disable SELinux <small>(optional)</small>
 
 ```bash
-# Temporary (will be reset after reboot)
+# Temporarily disable (resets after reboot)
 setenforce 0
-# Permanent (survives reboot)
+# Permanently disable
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
-### 1.6 Select CGroup Version (Optional)
+### 1.5 Choose the cgroup version <small>(optional)</small>
 
-Ubuntu 20.04 uses **CGroup v1** by default, while Ubuntu 22.04 and 24.04 uses **CGroup v2** by default.
+Ubuntu 20.04 uses **cgroup v1** by default, while Ubuntu 22.04 and 24.04 default to **cgroup v2**.
 
-CraneSched uses **CGroup v1** by default.
+CraneSched also defaults to **cgroup v1**. To enable cgroup v2 support with GRES you must perform [additional configuration](eBPF.md), or switch the system back to cgroup v1.
 
-If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md) for GRES,
-or you can switch the system to use CGroup v1.
+#### 1.5.1 Configure cgroup v1
 
-#### 1.6.1 Configure CGroup v1
-
-If your system is already using CGroup v1, skip this section.
+Skip this section if your system already runs cgroup v1.
 
 ```bash
-# Set kernel boot parameters to switch to CGroup v1
+# Set kernel boot arguments to switch to cgroup v1
 grubby --update-kernel=/boot/vmlinuz-$(uname -r) \
   --args="systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller"
 
-# Reboot to apply changes
+# Reboot to apply the change
 reboot
 
-# Verify version
+# Verify the version
 mount | grep cgroup
 ```
 
-#### 1.6.2 Configure CGroup v2
+#### 1.5.2 Configure cgroup v2
 
 ```bash
-# Check if sub-cgroups have access to resources (expect to see cpu, io, memory, etc.)
+# Verify that child cgroups expose resource controllers (expect cpu, io, memory, etc.)
 cat /sys/fs/cgroup/cgroup.subtree_control
 
-# Grant resource permissions to subgroups
+# Enable controllers for child cgroups
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-Additionally, if you plan to use GRES with CGroup v2, please refer to the [eBPF guide](eBPF.md) for setup instructions.
+As noted earlier, see the [eBPF guide](eBPF.md) if you plan to use GRES on cgroup v2.
 
-## 2. Install Toolchain
+## 2. Install the toolchain
 
-The toolchain must meet the following version requirements:
+Your toolchain must meet these minimum versions:
 
-* `cmake` ≥ **3.24**
-* If using **clang**, version ≥ **19**
-* If using **g++**, version ≥ **14**
+* CMake ≥ **3.24**
+* **clang++** ≥ **19**
+* **g++** ≥ **14**
 
-### 2.1 Install Build Tools
+### 2.1 GCC/G++
 
-```bash
-apt install build-essential
-apt install libmpfr-dev libgmp3-dev libmpc-dev -y
-wget http://ftp.gnu.org/gnu/gcc/gcc-14.1.0/gcc-14.1.0.tar.gz
-tar -xf gcc-14.1.0.tar.gz
-cd gcc-14.1.0
+!!! tip
+    If your distribution already provides an up-to-date GCC (for example Ubuntu 24.04+ or the Ubuntu Toolchain PPA), install it directly.
 
-./contrib/download_prerequisites
-mkdir build && cd build
-../configure --enable-checking=release --enable-languages=c,c++ --disable-multilib
-make -j
-make install
+=== "Ubuntu 25.04+/Debian 13+"
 
-#For ubuntu 20.04
-wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.sh
-bash cmake-3.26.4-linux-x86_64.sh --prefix=/usr/local --skip-license
-#For ubuntu 22.04 or newer
-apt install -y cmake
+    ```bash
+    apt install -y gcc g++
+    ```
 
-apt install -y ninja-build pkg-config flex bison
-clang --version
-cmake --version
-```
+=== "Ubuntu 24.04"
 
-### 2.2 Install Common Utilities
+    ```bash
+    apt install -y gcc-14 g++-14
 
-```bash
-apt install -y tar unzip git curl
-```
+    # Configure update-alternatives
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+    --slave /usr/bin/g++ g++ /usr/bin/g++-14 \
+    --slave /usr/bin/gcov gcov /usr/bin/gcov-14
 
-## 3. Install Project Dependencies
+    # Select gcc-14 as the default
+    update-alternatives --config gcc
+    ```
+
+=== "Build from source"
+
+    1. Build and install GCC 14:
+    ```bash
+    apt install build-essential
+    wget https://ftp.gnu.org/gnu/gcc/gcc-14.3.0/gcc-14.3.0.tar.gz 
+    tar -xf gcc-14.3.0.tar.gz
+    cd gcc-14.3.0
+
+    ./contrib/download_prerequisites
+    mkdir build && cd build
+    ../configure --prefix=/opt/gcc-14 --enable-checking=release --enable-languages=c,c++ --disable-multilib
+    make -j$(nproc)
+    make install
+    ```
+
+    2. Switch the default GCC with `update-alternatives`:
+    ```bash
+    update-alternatives --install /usr/bin/gcc gcc /opt/gcc-14/bin/gcc 100 \
+    --slave /usr/bin/g++ g++ /opt/gcc-14/bin/g++ \
+    --slave /usr/bin/gcov gcov /opt/gcc-14/bin/gcov
+
+    update-alternatives --config gcc
+    # Select gcc-14 as the default
+    ```
+
+### 2.2 CMake
+
+=== "Ubuntu 24.04+/Debian 12+"
+
+    ```bash
+    apt install -y cmake
+    ```
+
+=== "Install from script"
+
+    ```bash
+    export CMAKE_SCRIPT=cmake-3.26.4-linux-x86_64.sh
+    # For ARM64v8 use:
+    # CMAKE_SCRIPT=cmake-3.26.4-linux-aarch64.sh
+
+    wget https://github.com/Kitware/CMake/releases/download/v3.26.4/$CMAKE_SCRIPT
+    bash $CMAKE_SCRIPT --prefix=/usr/local --skip-license
+    ```
+
+### 2.3 Other build tools
 
 ```bash
 apt install -y \
-    libcgroup-dev \
+    ninja-build \
+    pkg-config \
+    automake \
+    flex \
+    bison
+```
+
+## 3. Install project dependencies
+
+```bash
+apt install -y \
     libssl-dev \
-    libcurl-dev \
-    libpam-dev \
+    libcurl4-openssl-dev \
+    libpam0g-dev \
     zlib1g-dev \
     libaio-dev \
     libsystemd-dev \
-    pkg-config \
-    ninja \
-    libelf-dev \
-    libsubid-dev \
-    bcc \
-    linux-headers-$(uname -r)
+    libsubid-dev
 ```
 
-## 4. Install and Configure MongoDB
+!!! info
+    `libsubid-dev` is unavailable on Ubuntu 22.04 and older releases. Build and install shadow 4.0+ from [https://github.com/shadow-maint/shadow/releases/](https://github.com/shadow-maint/shadow/releases/).
 
-MongoDB is required on the **control node** only.
+## 4. Install and configure MongoDB
 
-Please follow the [Database Configuration Guide](../configuration/database.md) for detailed instructions.
+MongoDB is only required on the **control node**.
+
+See the [Database Configuration Guide](../configuration/database.md) for step-by-step instructions.
 
 
-## 5. Install and Configure CraneSched
+## 5. Install and configure CraneSched
 
-### 5.1 Build and Install
+### 5.1 Build and install
 
-1. Configure and build CraneSched:
+**Configure and build CraneSched:**
+
 ```bash
 git clone https://github.com/PKUHPC/CraneSched.git
 cd CraneSched
-mkdir -p build && cd build
 
-# For CGroup v1
-cmake -G Ninja .. -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ 
-cmake --build .
+# For cgroup v1
+cmake -G Ninja -S . -B build
+cmake --build build
 
-# For CGroup v2
-cmake -G Ninja .. -DCRANE_ENABLE_CGROUP_V2=true -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ 
-cmake --build .
+# For cgroup v2
+cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=true -S . -B build
+cmake --build build
+
+# For cgroup v2 with eBPF GRES support
+cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=true -DCRANE_ENABLE_BPF=true -S . -B build
+cmake --build build
 ```
 
-2. Install the built binaries:
+**Install the built binaries:**
 
 !!! tip
-    We recommend deploying CraneSched using DEB packages. See the [Packaging Guide](../packaging.md) for installation instructions.
+    We recommend deploying CraneSched with DEB packages. Refer to the [Packaging Guide](../packaging.md) for details.
 
 ```bash
-cmake --install .
+cmake --install build
 ```
 
-For deploying CraneSched to multiple nodes, please follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
+For multi-node installations, follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
 
-### 5.2 Configure PAM Module
+### 5.2 Configure the PAM module
 
-PAM module configuration is optional but recommended for production clusters to control user access.
+Configuring PAM is optional but recommended in production clusters to control user access.
 
-Please follow the [PAM Module Configuration Guide](../configuration/pam.md) for detailed instructions.
+See the [PAM Module Configuration Guide](../configuration/pam.md) for details.
 
-### 5.3 Configure the Cluster
+### 5.3 Configure the cluster
 
-For cluster configuration details, see the [Cluster Configuration Guide](../configuration/config.md).
+Refer to the [Cluster Configuration Guide](../configuration/config.md) for configuration options.
+
+## 6. Start CraneSched
+
+Run manually in the foreground:
+
+```bash
+cranectld
+craned
+```
+
+Or via systemd:
+
+```bash
+systemctl daemon-reload
+systemctl enable cranectld --now
+systemctl enable craned --now
+```
 
 ## 6. Start CraneSched
 
