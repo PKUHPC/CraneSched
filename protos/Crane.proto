@@ -1090,14 +1090,7 @@ message ExecInContainerStepReply {
 
 message AddLicenseResourceRequest {
   uint32 uid = 1;
-  string resource_name = 2;
-  repeated string clusters = 3;
-  uint32 count = 5;
-  uint32 allowed = 6;
-  string server = 7;
-  string server_type = 8;
-  LicenseResource.Type type = 9;
-  string description = 10;
+  LicenseResourceInfo license_resource = 2;
 }
 
 message AddLicenseResourceReply {

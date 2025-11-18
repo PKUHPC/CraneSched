@@ -1856,17 +1856,17 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
   }
 
   LicenseResource resource;
-  resource.name = request->resource_name();
-  resource.count = request->count();
-  resource.server = request->server();
-  resource.server_type = request->server_type();
-  resource.type = request->type();
+  resource.name = request->license_resource().resource_name();
+  resource.count = request->license_resource().count();
+  resource.server = request->license_resource().server();
+  resource.server_type = request->license_resource().server_type();
+  resource.type = request->license_resource().type();
 
-  for (const auto &cluster : request->clusters()) {
+  for (const auto &cluster : request->license_resource().clusters()) {
     if (cluster == "local") {
-      resource.cluster_resources.emplace(g_config.CraneClusterName, request->allowed());
+      resource.cluster_resources.emplace(g_config.CraneClusterName, request->license_resource().allowed());
     } else {
-      resource.cluster_resources.emplace(cluster, request->allowed());
+      resource.cluster_resources.emplace(cluster, request->license_resource().allowed());
     }
   }
 
