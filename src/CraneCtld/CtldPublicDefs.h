@@ -842,6 +842,8 @@ struct TaskInCtld {
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
+  void SetActualLicenses(std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
+
   void SetHeld(bool val);
   bool const& Held() const { return held; }
 
@@ -1062,6 +1064,7 @@ struct User {
   }
 };
 
+// TODO: not use free, only total and used
 struct License {
   LicenseId license_id; /* license name */
   uint32_t total;       /* The total number of configured license */

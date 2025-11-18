@@ -210,6 +210,7 @@ message RuntimeAttrOfTask {
 
   TaskStatus primary_step_status = 21;
   uint32 primary_step_exit_code = 22;
+  map<string, uint32> actual_licenses = 23;
 }
 
 message StepToCtld {

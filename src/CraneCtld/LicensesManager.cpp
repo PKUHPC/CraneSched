@@ -141,26 +141,25 @@ bool LicensesManager::CheckLicenseCountSufficient(
   return !actual_licenses->empty();
 }
 
-bool LicensesManager::MallocLicenseResource(
-    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
-  bool result = true;
-  for (auto& [lic_id, count] : lic_id_to_count_map) {
+void LicensesManager::FreeReserved(
+    const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  for (const auto& [lic_id, count] : actual_license) {
     auto lic = m_licenses_map_[lic_id];
-    if (lic->reserved < count) {
-      CRANE_ERROR(
-          "MallocLicenseResource: license [{}] reserved < req count ({} < {}), "
-          "will set reserved=0",
-          lic_id, lic->reserved, count);
-      lic->reserved = 0;
-    } else {
-      lic->reserved -= count;
-    }
+    lic->reserved -= count;
+  }
+}
 
-    if (lic->used + count > lic->total) {
-      result = false;
-      continue;
-    }
+bool LicensesManager::MallocLicenseResource(
+    const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
+  for (const auto& [lic_id, count] : actual_license) {
+    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+    if (lic->used + count > lic->total) return false;
+  }
+
+  for (auto& [lic_id, count] : actual_license) {
+    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
     lic->used += count;
     if (lic->free < count) {
       CRANE_ERROR(
@@ -173,7 +172,24 @@ bool LicensesManager::MallocLicenseResource(
     }
   }
 
-  return result;
+  return true;
+}
+
+void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
+    const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  for (auto& [lic_id, count] : actual_license) {
+    auto lic = m_licenses_map_[lic_id];
+    lic->used += count;
+    if (lic->free < count) {
+      CRANE_ERROR(
+          "MallocLicenseResourceWhenRecoverRunning: license [{}] requested={}, free={}, will set "
+          "free=0",
+          lic_id, count, lic->free);
+      lic->free = 0;
+    } else {
+      lic->free -= count;
+    }
+  }
 }
 
 void LicensesManager::FreeLicenseResource(

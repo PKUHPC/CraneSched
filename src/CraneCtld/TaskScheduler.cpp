@@ -595,7 +595,8 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
   if (!task->licenses_count.empty())
-    g_licenses_manager->MallocLicenseResource(task->licenses_count);
+    g_licenses_manager->MallocLicenseResourceWhenRecoverRunning(task->licenses_count);
+
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
@@ -839,6 +840,10 @@ void TaskScheduler::ScheduleThread_() {
       LockGuard pending_guard(&m_pending_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
+
+        if (!job_in_scheduler->actual_licenses.empty())
+          g_licenses_manager->FreeReserved(job_in_scheduler->actual_licenses);
+
         auto it = m_pending_task_map_.find(job_in_scheduler->job_id);
         if (it != m_pending_task_map_.end()) {
           auto& job = it->second;
@@ -897,10 +902,11 @@ void TaskScheduler::ScheduleThread_() {
           job->SetEndTime(end_time);
           job->SetCranedIds(std::move(job_in_scheduler->craned_ids));
           job->SetAllocatedRes(std::move(job_in_scheduler->allocated_res));
+          job->SetActualLicenses(std::move(job_in_scheduler->actual_licenses));
           job->allocated_res_view.SetToZero();
           job->allocated_res_view += job->AllocatedRes();
           job->nodes_alloc = job->CranedIds().size();
-          job->licenses_count = job_in_scheduler->actual_licenses;
+
           job->SetStatus(crane::grpc::TaskStatus::Configuring);
 
           job->allocated_craneds_regex =
