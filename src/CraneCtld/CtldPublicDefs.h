@@ -1267,6 +1267,10 @@ struct License {
   uint32_t used;        /* Number of license in use */
   uint32_t free;        /* Number of license in free */
   uint32_t reserved;
+  bool remote;
+  bool last_consumed;
+  bool last_deficit;
+  bool last_update;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
