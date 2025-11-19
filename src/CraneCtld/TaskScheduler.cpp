@@ -74,7 +74,8 @@ bool TaskScheduler::Init() {
   }
 
   auto& running_queue = snapshot.running_queue;
-
+  std::unordered_map<job_id_t, std::unique_ptr<TaskInCtld>>
+      recovered_running_tasks;
   if (!running_queue.empty()) {
     CRANE_INFO("{} running task(s) recovered.", running_queue.size());
 
@@ -131,7 +132,7 @@ bool TaskScheduler::Init() {
         // process next task.
         continue;
       }
-      PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
+      recovered_running_tasks.emplace(task_id, std::move(task));
     }
   }
 
@@ -256,14 +257,47 @@ bool TaskScheduler::Init() {
       crane::grpc::TaskStatus::Cancelled,
       crane::grpc::TaskStatus::OutOfMemory,
   };
+  auto mark_job_invalid = [&recovered_running_tasks](TaskInCtld* job) {
+    job_id_t job_id = job->TaskId();
+    CRANE_ERROR("[Job #{}] Running job without step, mark the job as FAILED!",
+                job_id);
+    job->SetStatus(crane::grpc::Failed);
+    auto ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
+                                                            job->RuntimeAttr());
+    if (!ok) {
+      CRANE_ERROR(
+          "[Job #{}] UpdateRuntimeAttrOfTask failed when "
+          "mark the job as FAILED.",
+          job_id);
+    }
 
-  std::vector<job_id_t> invalid_jobs;
+    ok = g_db_client->InsertJob(job);
+    if (!ok) {
+      CRANE_ERROR(
+          "InsertJob failed for task #{} when recovering pending "
+          "queue.",
+          job_id);
+    }
+
+    ok = g_embedded_db_client->PurgeEndedTasks(
+        {{job->TaskId(), job->TaskDbId()}});
+    if (!ok) {
+      CRANE_ERROR(
+          "PurgeEndedTasks failed for task #{} when recovering "
+          "pending queue.",
+          job_id);
+    }
+    auto it = recovered_running_tasks.find(job_id);
+    return recovered_running_tasks.erase(it);
+  };
   // When store, write/purge step info first, then job info.
   // When read, iterate by job.
-  for (auto& [job_id, job] : m_running_task_map_) {
+  for (auto job_it = recovered_running_tasks.begin();
+       job_it != recovered_running_tasks.end();) {
+    auto& [job_id, job] = *job_it;
     auto it = step_snapshot.steps.find(job_id);
     if (it == step_snapshot.steps.end()) {
-      invalid_jobs.push_back(job->TaskId());
+      job_it = mark_job_invalid(job.get());
       continue;
     }
     for (auto&& step_info : it->second) {
@@ -343,8 +377,11 @@ bool TaskScheduler::Init() {
       }
     }
 
-    if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty())
-      invalid_jobs.push_back(job->TaskId());
+    if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty()) {
+      job_it = mark_job_invalid(job.get());
+    } else {
+      ++job_it;
+    }
     step_snapshot.steps.erase(it);
   }
 
@@ -356,10 +393,8 @@ bool TaskScheduler::Init() {
       invalid_steps[job_id].emplace_back(std::move(step_info));
     }
   }
-
-  for (auto& job_id : invalid_jobs) {
-    HandleFailToRecoverRngJob_(job_id);
-  }
+  for (auto& [job_id, job] : recovered_running_tasks)
+    PutRecoveredTaskIntoRunningQueueLock_(std::move(job));
 
   std::vector<step_db_id_t> purged_step_db_ids;
   for (auto& steps : invalid_steps | std::views::values) {
@@ -574,60 +609,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
-}
-
-void TaskScheduler::HandleFailToRecoverRngJob_(task_id_t task_id) {
-  // The order of LockGuards matters.
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  LockGuard indexes_guard(&m_task_indexes_mtx_);
-  auto it = m_running_task_map_.find(task_id);
-  if (it == m_running_task_map_.end()) {
-    CRANE_ERROR(
-        "RemoveRecoveredRunningTask: task #{} not found in running map.",
-        task_id);
-    return;
-  }
-  auto& job = it->second;
-  g_account_meta_container->FreeQosResource(*job);
-  for (const CranedId& craned_id : job->CranedIds())
-    g_meta_container->FreeResourceFromNode(craned_id, job->TaskId());
-  if (!job->reservation.empty()) {
-    g_meta_container->FreeResourceFromResv(job->reservation, job->TaskId());
-  }
-
-  for (const CranedId& craned_id : job->CranedIds())
-    m_node_to_tasks_map_[craned_id].erase(job->TaskId());
-
-  job_id_t job_id = job->TaskId();
-  CRANE_ERROR("[Job #{}] Running job failed to recover, mark as FAILED!",
-              job_id);
-  job->SetStatus(crane::grpc::Failed);
-  auto ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
-                                                          job->RuntimeAttr());
-  if (!ok) {
-    CRANE_ERROR(
-        "[Job #{}] UpdateRuntimeAttrOfTask failed when "
-        "mark the job as FAILED.",
-        job_id);
-  }
-
-  ok = g_db_client->InsertJob(job.get());
-  if (!ok) {
-    CRANE_ERROR(
-        "InsertJob failed for task #{} when recovering pending "
-        "queue.",
-        job_id);
-  }
-
-  ok =
-      g_embedded_db_client->PurgeEndedTasks({{job->TaskId(), job->TaskDbId()}});
-  if (!ok) {
-    CRANE_ERROR(
-        "PurgeEndedTasks failed for task #{} when recovering "
-        "pending queue.",
-        job_id);
-  }
-  m_running_task_map_.erase(job->TaskId());
 }
 
 void TaskScheduler::ReleaseTaskThread_(
