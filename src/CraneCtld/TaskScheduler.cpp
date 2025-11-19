@@ -258,44 +258,12 @@ bool TaskScheduler::Init() {
   };
 
   std::vector<job_id_t> invalid_jobs;
-  auto mark_job_invalid = [&invalid_jobs](TaskInCtld* job) {
-    job_id_t job_id = job->TaskId();
-    CRANE_ERROR("[Job #{}] Running job without step, mark the job as FAILED!",
-                job_id);
-    job->SetStatus(crane::grpc::Failed);
-    auto ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
-                                                            job->RuntimeAttr());
-    if (!ok) {
-      CRANE_ERROR(
-          "[Job #{}] UpdateRuntimeAttrOfTask failed when "
-          "mark the job as FAILED.",
-          job_id);
-    }
-
-    ok = g_db_client->InsertJob(job);
-    if (!ok) {
-      CRANE_ERROR(
-          "InsertJob failed for task #{} when recovering pending "
-          "queue.",
-          job_id);
-    }
-
-    ok = g_embedded_db_client->PurgeEndedTasks(
-        {{job->TaskId(), job->TaskDbId()}});
-    if (!ok) {
-      CRANE_ERROR(
-          "PurgeEndedTasks failed for task #{} when recovering "
-          "pending queue.",
-          job_id);
-    }
-    invalid_jobs.push_back(job_id);
-  };
   // When store, write/purge step info first, then job info.
   // When read, iterate by job.
   for (auto& [job_id, job] : m_running_task_map_) {
     auto it = step_snapshot.steps.find(job_id);
     if (it == step_snapshot.steps.end()) {
-      mark_job_invalid(job.get());
+      invalid_jobs.push_back(job->TaskId());
       continue;
     }
     for (auto&& step_info : it->second) {
@@ -376,7 +344,7 @@ bool TaskScheduler::Init() {
     }
 
     if (!job->PrimaryStep() && !job->DaemonStep() && job->Steps().empty())
-      mark_job_invalid(job.get());
+      invalid_jobs.push_back(job->TaskId());
     step_snapshot.steps.erase(it);
   }
 
@@ -390,7 +358,7 @@ bool TaskScheduler::Init() {
   }
 
   for (auto& job_id : invalid_jobs) {
-    m_running_task_map_.erase(job_id);
+    HandleFailToRecoverRngJob_(job_id);
   }
 
   std::vector<step_db_id_t> purged_step_db_ids;
@@ -606,6 +574,60 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
+}
+
+void TaskScheduler::HandleFailToRecoverRngJob_(task_id_t task_id) {
+  // The order of LockGuards matters.
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  LockGuard indexes_guard(&m_task_indexes_mtx_);
+  auto it = m_running_task_map_.find(task_id);
+  if (it == m_running_task_map_.end()) {
+    CRANE_ERROR(
+        "RemoveRecoveredRunningTask: task #{} not found in running map.",
+        task_id);
+    return;
+  }
+  auto& job = it->second;
+  g_account_meta_container->FreeQosResource(*job);
+  for (const CranedId& craned_id : job->CranedIds())
+    g_meta_container->FreeResourceFromNode(craned_id, job->TaskId());
+  if (!job->reservation.empty()) {
+    g_meta_container->FreeResourceFromResv(job->reservation, job->TaskId());
+  }
+
+  for (const CranedId& craned_id : job->CranedIds())
+    m_node_to_tasks_map_[craned_id].erase(job->TaskId());
+
+  job_id_t job_id = job->TaskId();
+  CRANE_ERROR("[Job #{}] Running job failed to recover, mark as FAILED!",
+              job_id);
+  job->SetStatus(crane::grpc::Failed);
+  auto ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
+                                                          job->RuntimeAttr());
+  if (!ok) {
+    CRANE_ERROR(
+        "[Job #{}] UpdateRuntimeAttrOfTask failed when "
+        "mark the job as FAILED.",
+        job_id);
+  }
+
+  ok = g_db_client->InsertJob(job.get());
+  if (!ok) {
+    CRANE_ERROR(
+        "InsertJob failed for task #{} when recovering pending "
+        "queue.",
+        job_id);
+  }
+
+  ok =
+      g_embedded_db_client->PurgeEndedTasks({{job->TaskId(), job->TaskDbId()}});
+  if (!ok) {
+    CRANE_ERROR(
+        "PurgeEndedTasks failed for task #{} when recovering "
+        "pending queue.",
+        job_id);
+  }
+  m_running_task_map_.erase(job->TaskId());
 }
 
 void TaskScheduler::ReleaseTaskThread_(
