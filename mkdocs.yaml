@@ -149,8 +149,8 @@ nav:
       - Rocky Linux 9: deployment/backend/Rocky9.md
       - Ubuntu: deployment/backend/Ubuntu.md
       - CentOS 7: deployment/backend/CentOS7.md
-      - Packaging Guide: deployment/backend/packaging.md
       - eBPF Support: deployment/backend/eBPF.md
+    - Packaging Guide: deployment/packaging.md
     - Configuration:
       - Cluster Configuration: deployment/configuration/config.md
       - Database Configuration: deployment/configuration/database.md

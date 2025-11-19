@@ -148,7 +148,7 @@ ninja install
 ```
 
 !!! info
-    If you prefer to use RPM packages, please refer to the [Packaging Guide](packaging.md) for instructions.
+    If you prefer to use RPM packages, please refer to the [Packaging Guide](../packaging.md) for instructions.
 
 For deploying CraneSched to multiple nodes, please follow the [Multi-node Deployment Guide](../configuration/multi-node.md).
 

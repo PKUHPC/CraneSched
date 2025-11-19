@@ -168,7 +168,7 @@ cmake --build .
 2. 安装构建的二进制文件：
 
 !!! tip
-    我们建议使用 RPM 软件包部署鹤思。有关安装说明，请参阅[打包指南](packaging.md)。
+    我们建议使用 RPM 软件包部署鹤思。有关安装说明，请参阅[打包指南](../packaging.md)。
 ```bash
 cmake --install .
 ```

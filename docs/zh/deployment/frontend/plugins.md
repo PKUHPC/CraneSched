@@ -40,7 +40,36 @@
 
 ## 安装 cplugind
 
-`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。有关安装说明，请参阅[前端部署指南](frontend.md)。
+`cplugind` 守护进程是 CraneSched-FrontEnd 仓库的一部分。您可以通过软件包或从源代码构建安装它。
+
+### 通过软件包管理器（推荐）
+
+安装包含 `cplugind` 和所有插件共享对象的 `cranesched-plugin` 软件包：
+
+**对于基于 RPM 的系统**（Rocky Linux、CentOS、Fedora、AlmaLinux）：
+```bash
+sudo dnf install cranesched-plugin-*.rpm
+```
+
+**对于基于 DEB 的系统**（Debian、Ubuntu）：
+```bash
+sudo apt install ./cranesched-plugin_*.deb
+```
+
+这将安装：
+- `cplugind` 守护进程到 `/usr/bin/`
+- 插件共享对象到 `/usr/lib/crane/plugin/`：
+  - `dummy.so`、`energy.so`、`event.so`、`mail.so`、`monitor.so`、`powerControl.so`
+- `cplugind.service` systemd 单元
+
+启用并启动服务：
+```bash
+systemctl enable --now cplugind
+```
+
+### 从源代码构建
+
+有关从源代码构建的说明，请参阅[前端部署指南](frontend.md)。构建后，插件文件将位于 `build/plugin/` 目录中。
 
 手动启动 `cplugind` 或通过 systemd：
 
@@ -70,8 +99,9 @@ PlugindListenPort: "10018"
 # 要加载的插件
 Plugins:
   - Name: "monitor"
-    Path: "/path/to/monitor.so"
-    Config: "/path/to/monitor.yaml"
+    Path: "/usr/lib/crane/plugin/monitor.so"  # 软件包安装
+    # Path: "/usr/local/lib/crane/plugin/monitor.so"  # 源代码安装（默认 PREFIX）
+    Config: "/etc/crane/monitor.yaml"
 ```
 
 ### 配置选项
@@ -84,6 +114,8 @@ Plugins:
 - **Plugins**：此节点上要加载的插件列表
   - **Name**：插件标识符（任何字符串）
   - **Path**：`.so` 文件的绝对路径
+    - 软件包安装：`/usr/lib/crane/plugin/<plugin>.so`
+    - 源代码安装：`/usr/local/lib/crane/plugin/<plugin>.so`（或自定义 PREFIX）
   - **Config**：插件配置文件的绝对路径
 
 ## Monitor 插件
@@ -140,11 +172,16 @@ BufferSize: 32
 Enabled: true
 Plugins:
   - Name: "monitor"
-    Path: "/path/to/build/plugin/monitor.so"
+    Path: "/usr/lib/crane/plugin/monitor.so"  # 软件包安装
+    # Path: "/usr/local/lib/crane/plugin/monitor.so"  # 源代码安装（默认）
+    # Path: "/path/to/build/plugin/monitor.so"  # 开发/构建目录
     Config: "/etc/crane/monitor.yaml"
 ```
 
-`monitor.so` 文件通常位于前端构建目录（`build/plugin/monitor.so`）中。
+!!! note "插件路径"
+    - **软件包安装**：使用 `/usr/lib/crane/plugin/monitor.so`
+    - **源代码安装**：使用 `/usr/local/lib/crane/plugin/monitor.so`（或自定义 PREFIX 位置）
+    - **开发**：使用构建目录中的 `build/plugin/monitor.so`
 
 ## Mail 插件
 

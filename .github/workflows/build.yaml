@@ -2,7 +2,7 @@ name: Build, Upload and Test
 
 on:
   schedule:
-    - cron: "0 22 * * *"  # UTC 22:00 = Beijing Time 06:00 (next day)
+    - cron: "0 22 * * *"  # UTC 22:00 = CST 06:00 (next day)
   push:
     branches:
       - master
@@ -356,7 +356,10 @@ jobs:
           NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.CCREPO_PASSWORD }}
 
-          VERSION: ${{ github.ref_name }}
+          VERSION: >- 
+            ${{ (github.event_name == 'pull_request')
+            && format('pr-{0}', github.event.number)
+            || github.ref_name }}
 
           RPM_REPO_NAME: "crane"
           RPM_ARCH: "x86_64"
