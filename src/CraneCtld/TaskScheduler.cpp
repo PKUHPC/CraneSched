@@ -3687,7 +3687,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
 
-  if (!g_config.lic_id_to_count_map.empty()) {
+  if (!task->TaskToCtld().licenses_count().empty()) {
     auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
         task->TaskToCtld().licenses_count(),
         task->TaskToCtld().is_licenses_or());

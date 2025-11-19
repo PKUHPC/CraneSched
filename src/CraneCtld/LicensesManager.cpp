@@ -27,7 +27,11 @@ int LicensesManager::Init(
   HashMap<LicenseId, License> licenses_map;
 
   for (auto& [lic_id, count] : lic_id_to_count_map) {
-    licenses_map.insert({lic_id, License(lic_id, count, 0, count, 0)});
+    licenses_map.insert({lic_id, License{.license_id = lic_id,
+                                         .total = count,
+                                         .used = 0,
+                                         .free = count,
+                                         .reserved = 0}});
   }
 
   m_licenses_map_.InitFromMap(std::move(licenses_map));
@@ -53,9 +57,10 @@ void LicensesManager::GetLicensesInfo(
     }
   } else {
     for (auto& license_name : request->license_name_list()) {
-      if (licenses_map->contains(license_name)) {
+      auto iter = licenses_map->find(license_name);
+      if (iter != licenses_map->end()) {
         auto* lic_info = list->Add();
-        auto lic = licenses_map->at(license_name).GetExclusivePtr();
+        auto lic = iter->second.GetExclusivePtr();
         lic_info->set_name(lic->license_id);
         lic_info->set_total(lic->total);
         lic_info->set_used(lic->used);
@@ -107,30 +112,28 @@ bool LicensesManager::CheckLicenseCountSufficient(
   actual_licenses->clear();
   if (is_license_or) {
     for (const auto& license : lic_id_to_count) {
-      const auto& lic_id = license.key();
-      auto count = license.count();
-      if (licenses_map->contains(lic_id)) {
-        auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-        if (count + lic->reserved <= lic->free) {
-          actual_licenses->emplace(lic_id, count);
+      auto iter = licenses_map->find(license.key());
+      if (iter != licenses_map->end()) {
+        auto lic = iter->second.GetExclusivePtr();
+        if (license.count() + lic->reserved <= lic->free) {
+          actual_licenses->emplace(license.key(), license.count());
           break;
         }
       }
     }
   } else {
     for (const auto& license : lic_id_to_count) {
-      const auto& lic_id = license.key();
-      auto count = license.count();
-      if (!licenses_map->contains(lic_id)) {
+      auto iter = licenses_map->find(license.key());
+      if (iter == licenses_map->end()) {
         actual_licenses->clear();
         return false;
       }
-      auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-      if (count + lic->reserved > lic->free) {
+      auto lic = iter->second.GetExclusivePtr();
+      if (license.count() + lic->reserved > lic->free) {
         actual_licenses->clear();
         return false;
       }
-      actual_licenses->emplace(lic_id, count);
+      actual_licenses->emplace(license.key(), license.count());
     }
   }
 
@@ -144,8 +147,12 @@ bool LicensesManager::CheckLicenseCountSufficient(
 
 void LicensesManager::FreeReserved(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+
   for (const auto& [lic_id, count] : actual_license) {
-    auto lic = m_licenses_map_[lic_id];
+    auto iter = licenses_map->find(lic_id);
+    if (iter == licenses_map->end()) continue;
+    auto lic = iter->second.GetExclusivePtr();
     if (lic->reserved < count) {
       CRANE_ERROR(
           "FreeReserved: license [{}] reserved < freeing count ({} < {}), "
@@ -163,7 +170,9 @@ bool LicensesManager::MallocLicenseResource(
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
   for (const auto& [lic_id, count] : actual_license) {
-    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
+    auto iter = licenses_map->find(lic_id);
+    if (iter == licenses_map->end()) return false;
+    auto lic = iter->second.GetExclusivePtr();
     if (lic->used + count > lic->total) return false;
   }
 
@@ -186,8 +195,12 @@ bool LicensesManager::MallocLicenseResource(
 
 void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+
   for (auto& [lic_id, count] : actual_license) {
-    auto lic = m_licenses_map_[lic_id];
+    auto iter = licenses_map->find(lic_id);
+    if (iter == licenses_map->end()) continue;
+    auto lic = iter->second.GetExclusivePtr();
     lic->used += count;
     if (lic->free < count) {
       CRANE_ERROR(
@@ -203,9 +216,13 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
 }
 
 void LicensesManager::FreeLicenseResource(
-    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
-  for (auto& [lic_id, count] : lic_id_to_count_map) {
-    auto lic = m_licenses_map_[lic_id];
+    const std::unordered_map<LicenseId, uint32_t>& actual_license) {
+  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+
+  for (auto& [lic_id, count] : actual_license) {
+    auto iter = licenses_map->find(lic_id);
+    if (iter == licenses_map->end()) continue;
+    auto lic = iter->second.GetExclusivePtr();
     if (lic->used < count) {
       CRANE_ERROR(
           "FreeLicenseResource: license [{}] used < freeing count ({} < {}), "

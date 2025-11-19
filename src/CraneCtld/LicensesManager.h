@@ -65,7 +65,7 @@ class LicensesManager {
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
   void FreeLicenseResource(
-      const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+      const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
  private:
   LicensesAtomicMap m_licenses_map_;
