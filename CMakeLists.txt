@@ -87,9 +87,9 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
                 set(CRANE_ENABLE_BPF ON)
                 message(STATUS "EBPF is Enabled.")
-            else()
+            else ()
                 message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
-            endif()
+            endif ()
         endif ()
         message(STATUS "Using Clang for all module.")
     else ()
@@ -498,6 +498,8 @@ set(CPACK_PACKAGE_RELOCATABLE OFF)
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
+# Generate requires/provides automatically
+set(CPACK_RPM_PACKAGE_AUTOREQPROV "ON")
 # Separate the debuginfo to avoid large RPM package and help debugging
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/crane")
@@ -505,12 +507,14 @@ set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/crane")
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
+# Generate requires/provides automatically
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # Separate the debuginfo to avoid large DEB package and help debugging
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 
 # Create post-installation script for creating crane user and directory
-file(WRITE ${CMAKE_BINARY_DIR}/post_install.sh 
-"#!/bin/bash
+file(WRITE ${CMAKE_BINARY_DIR}/post_install.sh
+        "#!/bin/bash
 # Create crane user if it doesn't exist
 if ! id -u crane &>/dev/null; then
     useradd -r -s /sbin/nologin crane
@@ -549,8 +553,8 @@ exit 0
 ")
 
 # Set execute permissions on the post-install script
-file(CHMOD ${CMAKE_BINARY_DIR}/post_install.sh 
-     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+file(CHMOD ${CMAKE_BINARY_DIR}/post_install.sh
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_BINARY_DIR}/post_install.sh")
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_BINARY_DIR}/post_install.sh;")
 
