@@ -53,53 +53,6 @@ endif ()
 
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
-# Check and set compiler
-set(REQUIRED_GNU_VERSION 14.0.0)
-set(REQUIRED_CLANG_VERSION 19.0.0)
-set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
-
-set(CLANG_VERSION "0.0.0")
-
-if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
-    if (CRANE_ENABLE_CGROUP_V2)
-        message(STATUS "Enabling Cgroup V2 needs to build EBPF, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules.")
-        find_program(CLANG_EXECUTABLE NAMES clang)
-        if (CLANG_EXECUTABLE)
-            execute_process(
-                    COMMAND ${CLANG_EXECUTABLE} --version
-                    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
-                    OUTPUT_STRIP_TRAILING_WHITESPACE
-            )
-            string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
-            if (CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
-                set(CRANE_ENABLE_BPF ON)
-                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; EBPF will be built with it.")
-            else ()
-                message(FATAL_ERROR "Clang found at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, but version ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You may use Cgroup V1 instead.")
-            endif ()
-        else ()
-            message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
-        endif ()
-    endif ()
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
-        if (CRANE_ENABLE_CGROUP_V2)
-            if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
-                set(CRANE_ENABLE_BPF ON)
-                message(STATUS "eBPF is Enabled.")
-            else()
-                message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
-            endif()
-        endif ()
-        message(STATUS "Using Clang for all module.")
-    else ()
-        message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required.")
-    endif ()
-else ()
-    message(FATAL_ERROR "Neither GNU ${REQUIRED_GNU_VERSION}+ nor Clang ${REQUIRED_CLANG_VERSION}+ found. Stop compiling crane")
-endif ()
-
-
 # Options start here ----------------------------------------------------------------------------
 
 option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
@@ -117,7 +70,8 @@ option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download sourc
 option(CRANE_USE_SYSTEM_LIBCGROUP "Use libcgroup from system instead of building from source" OFF)
 option(CRANE_USE_SYSTEM_LIBBPF "Use libbpf from system instead of building from source" OFF)
 
-option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
+option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" ON)
+option(CRANE_ENABLE_BPF "Enable eBPF support for Cgroup V2 device management" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
@@ -131,6 +85,47 @@ option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" O
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
+
+if (CRANE_ENABLE_BPF AND NOT CRANE_ENABLE_CGROUP_V2)
+    message(FATAL_ERROR "CRANE_ENABLE_BPF requires CRANE_ENABLE_CGROUP_V2 to be enabled.")
+endif ()
+
+# Check and set compiler
+set(REQUIRED_GNU_VERSION 14.0.0)
+set(REQUIRED_CLANG_VERSION 19.0.0)
+
+set(CLANG_VERSION "0.0.0")
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
+    if (CRANE_ENABLE_BPF)
+        message(STATUS "Enabling Cgroup V2 with eBPF, which requires Clang ${REQUIRED_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules.")
+        find_program(CLANG_EXECUTABLE NAMES clang)
+        if (CLANG_EXECUTABLE)
+            execute_process(
+                    COMMAND ${CLANG_EXECUTABLE} --version
+                    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
+            if (CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
+                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; eBPF will be built with it.")
+            else ()
+                message(FATAL_ERROR "Clang ${CLANG_VERSION} found at ${CLANG_EXECUTABLE}, but version ${REQUIRED_CLANG_VERSION} or higher is required for eBPF. You may use Cgroup V1/V2 without device support.")
+            endif ()
+        else ()
+            message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required for eBPF. You may use Cgroup V1/V2 without device support.")
+        endif ()
+    endif ()
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
+        message(STATUS "Using Clang for all module.")
+    else ()
+        message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required.")
+    endif ()
+else ()
+    message(FATAL_ERROR "Neither GNU ${REQUIRED_GNU_VERSION}+ nor Clang ${REQUIRED_CLANG_VERSION}+ found. Stop compiling crane")
+endif ()
+
 
 set(CMAKE_CXX_STANDARD 23)
 
