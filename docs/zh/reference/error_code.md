@@ -7,9 +7,9 @@
 | 3 | `ERR_INVALID_USER` | 输入的用户不是Crane的用户 | 检查用户名拼写是否正确 | The entered user is not a user of Crane | |
 | 4 | `ERR_PERMISSION_USER` | 低权限用户操作高权限用户 | 联系管理员申请相应权限或请管理员代为执行操作 | Your permission is insufficient | |
 | 5 | `ERR_BLOCKED_USER` | 该用户已被封禁 | 联系管理员了解封禁原因并申请解封 | The user has been blocked | |
-| 6 | `ERR_USER_ALREADY_EXISTS` | 添加重复用户 | \ | The user already exists in this account | |
+| 6 | `ERR_USER_ALREADY_EXISTS` | 添加重复用户 |  | The user already exists in this account | |
 | 7 | `ERR_USER_ACCESS_TO_ACCOUNT_DENIED` | 用户无权访增删改查账号 | 查看自己可用的账户列表 | The user is not allowed to access account |
-| 8 | `ERR_INVALID_ADMIN_LEVEL` | 设置用户权限非法,不识别 | \ | Unknown admin level |
+| 8 | `ERR_INVALID_ADMIN_LEVEL` | 设置用户权限非法,不识别 |  | Unknown admin level |
 | 9 | `ERR_USER_ACCOUNT_MISMATCH` | 被操作用户和账号不匹配 | 确认使用正确的账户名称 | The user does not belong to this account | |
 | 10 | `ERR_NO_ACCOUNT_SPECIFIED` | 未指定有效账号 | 联系管理员处理 | No account is specified for the user | |
 | 11 | `ERR_INVALID_ACCOUNT` | 指定的账号不存在 | 查看可用账户列表 | The entered account does not exist | |
@@ -19,25 +19,25 @@
 | 15 | `ERR_BLOCKED_ACCOUNT` | 账号被禁 | 联系管理员了解账户封禁原因 | The account has been blocked |
 | 16 | `ERR_INVALID_PARTITION` | 分区不存在 | 使用 cinfo 或 sinfo 查看可用分区列表 | The entered partition does not exist | |
 | 17 | `ERR_PARTITION_MISSING` | 账号或用户没有对应分区 | 使用已授权的分区,或联系管理员申请分区访问权限 | The entered account or user does not include this partition | |
-| 18 | `ERR_PARTITION_ALREADY_EXISTS` | 分区在用户或账号中已存在 | \ | The partition already exists in the account or user |
-| 19 | `ERR_PARENT_ACCOUNT_PARTITION_MISSING` | 父账号不包含这个分区 | \ | Parent account does not include the partition |
+| 18 | `ERR_PARTITION_ALREADY_EXISTS` | 分区在用户或账号中已存在 |  | The partition already exists in the account or user |
+| 19 | `ERR_PARENT_ACCOUNT_PARTITION_MISSING` | 父账号不包含这个分区 |  | Parent account does not include the partition |
 | 20 | `ERR_USER_EMPTY_PARTITION` | 用户缺少分区,无法添加qos | 联系管理员先为用户分配至少一个分区 | The user does not contain any partitions, operation cannot be performed. |
 | 21 | `ERR_CHILD_HAS_PARTITION` | 该分区当前正被子账户或账户用户使用,无法执行操作。您可以使用强制操作来忽略此限制 | 联系管理员 | The partition is currently being used by the child accounts or users of the account, operation cannot be performed. You can use a forced operation to ignore this constraint |
 | 22 | `ERR_HAS_NO_QOS_IN_PARTITION` | 提交作业时指定的分区无可用 QoS | 联系管理员为该分区分配 QoS | The user has no QoS available for this partition to be used | |
 | 23 | `ERR_HAS_ALLOWED_QOS_IN_PARTITION` | 指定的 QoS 未被分区允许使用 | 选择分区允许的 QoS | The qos you set is not in partition's allowed qos list |
 | 24 | `ERR_INVALID_QOS` | qos不存在 | 使用 cacctmgr show qos 查看可用 QoS 列表 | The entered qos does not exist | |
-| 25 | `ERR_DB_QOS_ALREADY_EXISTS` | qos已存在 | \ | Qos already exists in the crane |
-| 26 | `ERR_QOS_REFERENCES_EXIST` | qos正在被用户或账号使用 | \ | QoS is still being used by accounts or users, unable to delete |
+| 25 | `ERR_DB_QOS_ALREADY_EXISTS` | qos已存在 |  | Qos already exists in the crane |
+| 26 | `ERR_QOS_REFERENCES_EXIST` | qos正在被用户或账号使用 |  | QoS is still being used by accounts or users, unable to delete |
 | 27 | `ERR_CONVERT_TO_INTEGER` | 参数值格式错误,期望整数但提供了非数字值 | 检查参数值格式,确保提供有效整数 | Failed to convert value to integer | |
 | 28 | `ERR_TIME_LIMIT` | 时间格式非法 | 使用正确的时间格式(如 HH:MM:SS 或 days-HH:MM:SS) | Invalid time limit value | |
-| 29 | `ERR_QOS_MISSING` | 账号不包含该qos | \ | The entered account or user does not include this qos |
-| 30 | `ERR_QOS_ALREADY_EXISTS` | qos已经在账号或用户中 | \ | The Qos already exists in the account or user |
-| 31 | `ERR_PARENT_ACCOUNT_QOS_MISSING` | 父账号没有该qos | \ | Parent account does not include the qos |
-| 32 | `ERR_SET_ALLOWED_QOS` | 输入的QoS列表中未包含此用户的默认QoS。若强制操作忽略此约束,则默认QoS将被新QoS列表中的一项随机替换 | \ | The entered QoS list does not include the default QoS for this user. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
-| 33 | `ERR_DEFAULT_QOS_NOT_INHERITED` | 尝试设置的默认 QoS 不在允许 QoS 列表中 | \ | The entered default_qos is not allowed |
-| 34 | `ERR_DUPLICATE_DEFAULT_QOS` | 该QoS已经是用户账户或指定分区的默认QoS | \ | The QoS is already the default QoS for the account or specified partition of the user |
-| 35 | `ERR_CHILD_HAS_DEFAULT_QOS` | 输入的QoS列表中未包含此账户或某些子节点的默认QoS。您可以使用强制操作来忽略此限制 | \ | Some child accounts or users is using the QoS as the default QoS. By ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list |
-| 36 | `ERR_SET_ACCOUNT_QOS` | 某些子账户或用户正在使用该QoS作为默认QoS。如果强制删除时忽略此约束,则被删除的默认QoS将被QoS列表中的剩余项之一随机替换 | \ | The entered QoS list does not include the default QoS for this account or some descendant node. You can use a forced operation to ignore this constraint |
+| 29 | `ERR_QOS_MISSING` | 账号不包含该qos |  | The entered account or user does not include this qos |
+| 30 | `ERR_QOS_ALREADY_EXISTS` | qos已经在账号或用户中 |  | The Qos already exists in the account or user |
+| 31 | `ERR_PARENT_ACCOUNT_QOS_MISSING` | 父账号没有该qos |  | Parent account does not include the qos |
+| 32 | `ERR_SET_ALLOWED_QOS` | 输入的QoS列表中未包含此用户的默认QoS。若强制操作忽略此约束,则默认QoS将被新QoS列表中的一项随机替换 |  | The entered QoS list does not include the default QoS for this user. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
+| 33 | `ERR_DEFAULT_QOS_NOT_INHERITED` | 尝试设置的默认 QoS 不在允许 QoS 列表中 |  | The entered default_qos is not allowed |
+| 34 | `ERR_DUPLICATE_DEFAULT_QOS` | 该QoS已经是用户账户或指定分区的默认QoS |  | The QoS is already the default QoS for the account or specified partition of the user |
+| 35 | `ERR_CHILD_HAS_DEFAULT_QOS` | 输入的QoS列表中未包含此账户或某些子节点的默认QoS。您可以使用强制操作来忽略此限制 |  | Some child accounts or users is using the QoS as the default QoS. By ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list |
+| 36 | `ERR_SET_ACCOUNT_QOS` | 某些子账户或用户正在使用该QoS作为默认QoS。如果强制删除时忽略此约束,则被删除的默认QoS将被QoS列表中的剩余项之一随机替换 |  | The entered QoS list does not include the default QoS for this account or some descendant node. You can use a forced operation to ignore this constraint |
 | 37 | `ERR_SET_DEFAULT_QOS` | 设置的默认qos已经是当前默认qos | \ | The Qos not allowed or is already the default qos |
 | 38 | `ERR_DEFAULT_QOS_MODIFICATION_DENIED` | QoS是当前用户/账户的默认QoS,且无法修改。若强制操作忽略此限制,则默认QoS将随机替换为新QoS列表中的一项 | \ | The QoS is the default QoS for the current user/Account and cannot be modified. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
 | 39 | `ERR_UPDATE_DATABASE` | 更新数据库中的数据失败 | | Fail to update data in database |

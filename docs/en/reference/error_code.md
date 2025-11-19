@@ -7,9 +7,9 @@
 | 3 | `ERR_INVALID_USER` | The entered user is not a Crane user | Check if the username spelling is correct | The entered user is not a user of Crane |
 | 4 | `ERR_PERMISSION_USER` | Low-privilege user operates on high-privilege user | Contact administrator to apply for appropriate permissions or ask administrator to execute operations on your behalf | Your permission is insufficient |
 | 5 | `ERR_BLOCKED_USER` | The user has been blocked | Contact administrator to understand the reason for blocking and apply for unblocking | The user has been blocked |
-| 6 | `ERR_USER_ALREADY_EXISTS` | Adding duplicate user | \ | The user already exists in this account |
+| 6 | `ERR_USER_ALREADY_EXISTS` | Adding duplicate user |  | The user already exists in this account |
 | 7 | `ERR_USER_ACCESS_TO_ACCOUNT_DENIED` | User has no permission to create, delete, modify or query account | View your available account list | The user is not allowed to access account |
-| 8 | `ERR_INVALID_ADMIN_LEVEL` | Setting illegal user permission, not recognized | \ | Unknown admin level |
+| 8 | `ERR_INVALID_ADMIN_LEVEL` | Setting illegal user permission, not recognized |  | Unknown admin level |
 | 9 | `ERR_USER_ACCOUNT_MISMATCH` | The operated user and account do not match | Confirm using the correct account name | The user does not belong to this account |
 | 10 | `ERR_NO_ACCOUNT_SPECIFIED` | No valid account specified | Contact administrator | No account is specified for the user |
 | 11 | `ERR_INVALID_ACCOUNT` | The specified account does not exist | View available account list | The entered account does not exist |
@@ -19,27 +19,27 @@
 | 15 | `ERR_BLOCKED_ACCOUNT` | Account is blocked | Contact administrator to understand the reason for account blocking | The account has been blocked |
 | 16 | `ERR_INVALID_PARTITION` | Partition does not exist | Use cinfo or sinfo to view available partition list | The entered partition does not exist |
 | 17 | `ERR_PARTITION_MISSING` | Account or user does not have corresponding partition | Use authorized partitions, or contact administrator to apply for partition access permissions | The entered account or user does not include this partition |
-| 18 | `ERR_PARTITION_ALREADY_EXISTS` | Partition already exists in user or account | \ | The partition already exists in the account or user |
-| 19 | `ERR_PARENT_ACCOUNT_PARTITION_MISSING` | Parent account does not include this partition | \ | Parent account does not include the partition |
+| 18 | `ERR_PARTITION_ALREADY_EXISTS` | Partition already exists in user or account |  | The partition already exists in the account or user |
+| 19 | `ERR_PARENT_ACCOUNT_PARTITION_MISSING` | Parent account does not include this partition |  | Parent account does not include the partition |
 | 20 | `ERR_USER_EMPTY_PARTITION` | User lacks partition, unable to add qos | Contact administrator to allocate at least one partition for the user first | The user does not contain any partitions, operation cannot be performed. |
 | 21 | `ERR_CHILD_HAS_PARTITION` | The partition is currently being used by child accounts or account users, operation cannot be performed. You can use forced operation to ignore this constraint | Contact administrator | The partition is currently being used by the child accounts or users of the account, operation cannot be performed. You can use a forced operation to ignore this constraint |
 | 22 | `ERR_HAS_NO_QOS_IN_PARTITION` | No available QoS for the specified partition when submitting job | Contact administrator to allocate QoS for this partition | The user has no QoS available for this partition to be used |
 | 23 | `ERR_HAS_ALLOWED_QOS_IN_PARTITION` | The specified QoS is not allowed by the partition | Select QoS allowed by the partition | The qos you set is not in partition's allowed qos list |
 | 24 | `ERR_INVALID_QOS` | QoS does not exist | Use cacctmgr show qos to view available QoS list | The entered qos does not exist |
-| 25 | `ERR_DB_QOS_ALREADY_EXISTS` | QoS already exists | \ | Qos already exists in the crane |
-| 26 | `ERR_QOS_REFERENCES_EXIST` | QoS is being used by users or accounts | \ | QoS is still being used by accounts or users, unable to delete |
+| 25 | `ERR_DB_QOS_ALREADY_EXISTS` | QoS already exists |  | Qos already exists in the crane |
+| 26 | `ERR_QOS_REFERENCES_EXIST` | QoS is being used by users or accounts |  | QoS is still being used by accounts or users, unable to delete |
 | 27 | `ERR_CONVERT_TO_INTEGER` | Parameter value format error, expected integer but provided non-numeric value | Check parameter value format, ensure valid integer is provided | Failed to convert value to integer |
 | 28 | `ERR_TIME_LIMIT` | Time format is illegal | Use correct time format (e.g., HH:MM:SS or days-HH:MM:SS) | Invalid time limit value |
-| 29 | `ERR_QOS_MISSING` | Account does not include the qos | \ | The entered account or user does not include this qos |
-| 30 | `ERR_QOS_ALREADY_EXISTS` | QoS already exists in account or user | \ | The Qos already exists in the account or user |
-| 31 | `ERR_PARENT_ACCOUNT_QOS_MISSING` | Parent account does not have the qos | \ | Parent account does not include the qos |
-| 32 | `ERR_SET_ALLOWED_QOS` | The entered QoS list does not include the default QoS for this user. If forced operation ignores this constraint, the default QoS will be randomly replaced with one item in the new QoS list | \ | The entered QoS list does not include the default QoS for this user. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
-| 33 | `ERR_DEFAULT_QOS_NOT_INHERITED` | The default QoS being set is not in the allowed QoS list | \ | The entered default_qos is not allowed |
-| 34 | `ERR_DUPLICATE_DEFAULT_QOS` | The QoS is already the default QoS for user's account or specified partition | \ | The QoS is already the default QoS for the account or specified partition of the user |
-| 35 | `ERR_CHILD_HAS_DEFAULT_QOS` | The entered QoS list does not include the default QoS for this account or some child nodes. You can use forced operation to ignore this constraint | \ | Some child accounts or users is using the QoS as the default QoS. By ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list |
-| 36 | `ERR_SET_ACCOUNT_QOS` | Some child accounts or users are using this QoS as default QoS. If this constraint is ignored during forced deletion, the deleted default QoS will be randomly replaced with one of the remaining items in the QoS list | \ | The entered QoS list does not include the default QoS for this account or some descendant node. You can use a forced operation to ignore this constraint |
-| 37 | `ERR_SET_DEFAULT_QOS` | The default qos being set is already the current default qos | \ | The Qos not allowed or is already the default qos |
-| 38 | `ERR_DEFAULT_QOS_MODIFICATION_DENIED` | QoS is the default QoS for current user/account and cannot be modified. If forced operation ignores this constraint, the default QoS will be randomly replaced with one item in the new QoS list | \ | The QoS is the default QoS for the current user/Account and cannot be modified. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
+| 29 | `ERR_QOS_MISSING` | Account does not include the qos |  | The entered account or user does not include this qos |
+| 30 | `ERR_QOS_ALREADY_EXISTS` | QoS already exists in account or user |  | The Qos already exists in the account or user |
+| 31 | `ERR_PARENT_ACCOUNT_QOS_MISSING` | Parent account does not have the qos |  | Parent account does not include the qos |
+| 32 | `ERR_SET_ALLOWED_QOS` | The entered QoS list does not include the default QoS for this user. If forced operation ignores this constraint, the default QoS will be randomly replaced with one item in the new QoS list |  | The entered QoS list does not include the default QoS for this user. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
+| 33 | `ERR_DEFAULT_QOS_NOT_INHERITED` | The default QoS being set is not in the allowed QoS list |  | The entered default_qos is not allowed |
+| 34 | `ERR_DUPLICATE_DEFAULT_QOS` | The QoS is already the default QoS for user's account or specified partition |  | The QoS is already the default QoS for the account or specified partition of the user |
+| 35 | `ERR_CHILD_HAS_DEFAULT_QOS` | The entered QoS list does not include the default QoS for this account or some child nodes. You can use forced operation to ignore this constraint |  | Some child accounts or users is using the QoS as the default QoS. By ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list |
+| 36 | `ERR_SET_ACCOUNT_QOS` | Some child accounts or users are using this QoS as default QoS. If this constraint is ignored during forced deletion, the deleted default QoS will be randomly replaced with one of the remaining items in the QoS list |  | The entered QoS list does not include the default QoS for this account or some descendant node. You can use a forced operation to ignore this constraint |
+| 37 | `ERR_SET_DEFAULT_QOS` | The default qos being set is already the current default qos |  | The Qos not allowed or is already the default qos |
+| 38 | `ERR_DEFAULT_QOS_MODIFICATION_DENIED` | QoS is the default QoS for current user/account and cannot be modified. If forced operation ignores this constraint, the default QoS will be randomly replaced with one item in the new QoS list |  | The QoS is the default QoS for the current user/Account and cannot be modified. Ignoring this constraint with forced operation, the default QoS is randomly replaced with one of the items in the new QoS list |
 | 39 | `ERR_UPDATE_DATABASE` | Failed to update data in database | | Fail to update data in database |
 | 40 | `ERR_GENERIC_FAILURE` | | | Generic failure |
 | 41 | `ERR_NO_RESOURCE` | Submitted task but insufficient resources for task execution | Modify required task resources or contact administrator to adjust according to actual situation | Resource not enough for task |
