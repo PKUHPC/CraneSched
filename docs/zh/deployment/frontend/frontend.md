@@ -47,8 +47,8 @@
 ### 安装 Golang
 
 ```bash
-GOLANG_TARBALL=go1.22.0.linux-amd64.tar.gz
-# ARM 架构：wget https://dl.google.com/go/go1.22.0.linux-arm64.tar.gz
+GOLANG_TARBALL=go1.25.4.linux-amd64.tar.gz
+# ARM 架构：wget https://dl.google.com/go/go1.25.4.linux-arm64.tar.gz
 curl -L https://go.dev/dl/${GOLANG_TARBALL} -o /tmp/go.tar.gz
 
 # 删除旧的 Golang 环境
@@ -68,9 +68,9 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ### 安装 Protoc
 
 ```bash
-PROTOC_ZIP=protoc-30.2-linux-x86_64.zip
-# aarch64：protoc-30.2-linux-aarch_64.zip
-curl -L https://github.com/protocolbuffers/protobuf/releases/download/v30.2/${PROTOC_ZIP} -o /tmp/protoc.zip
+PROTOC_ZIP=protoc-33.1-linux-x86_64.zip
+# aarch64：protoc-33.1-linux-aarch_64.zip
+curl -L https://github.com/protocolbuffers/protobuf/releases/download/v33.1/${PROTOC_ZIP} -o /tmp/protoc.zip
 unzip /tmp/protoc.zip -d /usr/local
 rm /tmp/protoc.zip /usr/local/readme.txt
 ```

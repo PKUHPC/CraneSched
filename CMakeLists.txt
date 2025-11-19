@@ -126,7 +126,6 @@ else ()
     message(FATAL_ERROR "Neither GNU ${REQUIRED_GNU_VERSION}+ nor Clang ${REQUIRED_CLANG_VERSION}+ found. Stop compiling crane")
 endif ()
 
-
 set(CMAKE_CXX_STANDARD 23)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
