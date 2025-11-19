@@ -494,8 +494,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
 CraneExpected<std::unique_ptr<CgroupInterface>>
 CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
                                     const crane::grpc::ResourceInNode &resource,
-                                    bool recover, std::uint64_t min_mem,
-                                    bool alloc_mem) {
+                                    bool recover, std::uint64_t min_mem) {
   // NOLINTBEGIN(readability-suspicious-call-argument)
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
   if (GetCgroupVersion() == CgConstant::CgroupVersion::CGROUP_V1) {
@@ -526,36 +525,24 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     return cg_unique_ptr;
   }
 
-  // To avoid access g_config.
-  if (g_plugin_client) {
-    // FIXME: Refactor related plugin interface and replace here.
-    auto ids = ParseIdsFromCgroupStr_(cgroup_str);
-    g_plugin_client->CreateCgroupHookAsync(
-        std::get<CgConstant::KParsedJobIdIdx>(ids).value_or(0),
-        cg_unique_ptr->CgroupName(), resource);
-  }
   ResourceInNode resource_in_node(resource);
-  if (alloc_mem) {
-    if (min_mem != 0) {
-      if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
-        CRANE_WARN(
-            "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
-            cgroup_str);
-        resource_in_node.allocatable_res.memory_bytes = min_mem;
-        resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
-      }
+  if (min_mem != 0) {
+    if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
+      CRANE_WARN(
+          "Cgroup {} memory limit is smaller than min_mem, set to min_mem",
+          cgroup_str);
+      resource_in_node.allocatable_res.memory_bytes = min_mem;
+      resource_in_node.allocatable_res.memory_sw_bytes = min_mem;
     }
   }
 
-  CRANE_TRACE(
-      "Setting cgroup {}. Res: CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}. Limit "
-      "mem: {}.",
-      cgroup_str, resource_in_node.allocatable_res.CpuCount(),
-      resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
-      util::ReadableDresInNode(resource_in_node), alloc_mem);
+  CRANE_TRACE("Setting cgroup {}. Res: CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
+              cgroup_str, resource_in_node.allocatable_res.CpuCount(),
+              resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
+              util::ReadableDresInNode(resource_in_node));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      resource_in_node.allocatable_res, cg_unique_ptr.get(), alloc_mem);
+      resource_in_node.allocatable_res, cg_unique_ptr.get());
   if (ok)
     ok &= DedicatedResourceAllocator::Allocate(resource_in_node.dedicated_res,
                                                cg_unique_ptr.get());
@@ -1590,30 +1577,36 @@ void CgroupV2::Destroy() {
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            CgroupInterface *cg,
-                                            bool alloc_mem) {
+                                            CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
-  ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
+  if (resource.memory_bytes != 0) {
+    ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
+  }
 
-  // Depending on the system configuration, the following two options may
-  // not be enabled, so we ignore the result of them.
-  cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
-  cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
+  if (resource.memory_sw_bytes != 0) {
+    // Depending on the system configuration, the following two options may
+    // not be enabled, so we ignore the result of them.
+    cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
+    cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
+  }
   return ok;
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg,
-    bool alloc_mem) {
+    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
-  ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
+  if (resource.memory_limit_bytes() != 0) {
+    ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
+  }
 
-  // Depending on the system configuration, the following two options may
-  // not be enabled, so we ignore the result of them.
-  cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
-  cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
+  if (resource.memory_sw_limit_bytes() != 0) {
+    // Depending on the system configuration, the following two options may
+    // not be enabled, so we ignore the result of them.
+    cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
+    cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
+  }
   return ok;
 }
 

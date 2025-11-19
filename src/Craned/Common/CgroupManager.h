@@ -510,10 +510,10 @@ class CgroupV2 : public CgroupInterface {
 
 class AllocatableResourceAllocator {
  public:
-  static bool Allocate(const AllocatableResource &resource, CgroupInterface *cg,
-                       bool alloc_mem = true);
+  static bool Allocate(const AllocatableResource &resource,
+                       CgroupInterface *cg);
   static bool Allocate(const crane::grpc::AllocatableResource &resource,
-                       CgroupInterface *cg, bool alloc_mem = true);
+                       CgroupInterface *cg);
 };
 
 class DedicatedResourceAllocator {
@@ -577,7 +577,7 @@ class CgroupManager {
   static CraneExpected<std::unique_ptr<CgroupInterface>> AllocateAndGetCgroup(
       const std::string &cgroup_str,
       const crane::grpc::ResourceInNode &resource, bool recover,
-      std::uint64_t min_mem = 0U, bool alloc_mem = true);
+      std::uint64_t min_mem = 0U);
 
   static Common::EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);

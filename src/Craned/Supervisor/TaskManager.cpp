@@ -264,7 +264,7 @@ CraneErrCode ITaskInstance::Prepare() {
   auto cg_expt = CgroupManager::AllocateAndGetCgroup(
       CgroupManager::CgroupStrByTaskId(g_config.JobId, g_config.StepId,
                                        task_id),
-      m_parent_step_inst_->GetStep().res(), false, 0, false);
+      m_parent_step_inst_->GetStep().task_res_map().at(task_id), false);
   if (!cg_expt.has_value()) {
     CRANE_WARN("[Step #{}.{}] Failed to allocate cgroup for task #{}: {}",
                g_config.JobId, g_config.StepId, task_id,
@@ -1527,7 +1527,7 @@ CraneErrCode ProcInstance::Cleanup() {
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
     if (!path.empty())
-      g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
+      g_thread_pool->detach_task([p = path] { util::os::DeleteFile(p); });
   }
 
   // Dummy return
