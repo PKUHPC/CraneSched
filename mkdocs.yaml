@@ -72,6 +72,7 @@ plugins:
             Account Management: 账户管理
             Reference: 参考文档
             Exit Codes: 退出代码
+            Error Codes: 系统错误提示和解决方法
             Job Environment Variables: 作业环境变量
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
@@ -172,6 +173,7 @@ nav:
         - cacctmgr: command/cacctmgr.md
   - Reference:
     - Exit Codes: reference/exit_code.md
+    - Error Codes: reference/error_code.md
     - Job Environment Variables: reference/job_env_vars.md
     - Use Cases:
         - Overview: reference/use_cases.md
