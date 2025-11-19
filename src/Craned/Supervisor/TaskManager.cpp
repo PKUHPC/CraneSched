@@ -1581,8 +1581,7 @@ TaskManager::TaskManager()
       [this](const uvw::timer_event&, uvw::timer_handle&) {
         EvSigchldTimerCb_();
       });
-  m_sigchld_timer_handle_->start(std::chrono::seconds(1),
-                                 std::chrono::seconds(1));
+  m_sigchld_timer_handle_->start(1s, 1s);
 
   m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_process_sigchld_async_handle_->on<uvw::async_event>(
@@ -1670,7 +1669,7 @@ TaskManager::TaskManager()
             h.parent().stop();
             CRANE_TRACE("Stopping supervisor.");
           }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          std::this_thread::sleep_for(50ms);
         });
     if (idle_handle->start() != 0) {
       CRANE_ERROR("Failed to start the idle event in TaskManager loop.");
@@ -1889,7 +1888,7 @@ void TaskManager::EvShutdownSupervisorCb_() {
 
         cg->KillAllProcesses();
         ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
+        std::this_thread::sleep_for(100ms);
       }
       cg->Destroy();
 

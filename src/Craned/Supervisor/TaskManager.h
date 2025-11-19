@@ -64,7 +64,7 @@ class StepInstance {
 
   std::string cgroup_path;  // resolved cgroup path
 
-  // For daemon step only
+  // Only daemon step may migrate ssh procs to cgroup
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
   bool oom_baseline_inited{false};
