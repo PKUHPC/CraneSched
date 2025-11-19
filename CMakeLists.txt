@@ -498,8 +498,6 @@ set(CPACK_PACKAGE_RELOCATABLE OFF)
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
-# Generate requires/provides automatically
-set(CPACK_RPM_PACKAGE_AUTOREQPROV "ON")
 # Separate the debuginfo to avoid large RPM package and help debugging
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/crane")
@@ -507,8 +505,6 @@ set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/crane")
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
-# Generate requires/provides automatically
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # Separate the debuginfo to avoid large DEB package and help debugging
 set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 
