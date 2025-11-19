@@ -312,7 +312,7 @@ CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
   // Pattern now includes optional system/user suffix for step:
   // job_{job_id}[/step_{step_id}[/system|user[/task_{task_id}]]]
   static const auto cg_pattern_str = std::format(
-      R"(.*{}(\d+)(?:\/{}(\d+)(?:\/(?:system|user)(?:\/{}(\d+))?)?)?)",
+      R"(.*{}(\d+)(?:\/{}(\d+)(?:\/(system|user)(?:\/{}(\d+))?)?)?)",
       CgConstant::kJobCgNamePrefix, CgConstant::kStepCgNamePrefix,
       CgConstant::kTaskCgNamePrefix);
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
@@ -559,7 +559,7 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
   return std::unexpected(CraneErrCode::ERR_CGROUP);
 }
 
-std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV1_(
+std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
@@ -569,9 +569,8 @@ std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV1_(
       CgConstant::GetControllerStringView(controller).data();
 
   int base_level;
-  int depth = 1;
   int ret = cgroup_walk_tree_begin(controller_str,
-                                   CgConstant::kRootCgNamePrefix.c_str(), depth,
+                                   CgConstant::kRootCgNamePrefix.c_str(), 0,
                                    &handle, &info, &base_level);
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
@@ -579,14 +578,14 @@ std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV1_(
       auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
       if (job_id_opt.has_value()) ids.emplace(parsed_ids);
     }
-    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+    ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
   }
 
   if (handle != nullptr) cgroup_walk_tree_end(&handle);
   return ids;
 }
 
-std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV2_(
+std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
     const std::filesystem::path &root_cgroup_path) {
   std::set<CgroupStrParsedIds> ids;
 
@@ -595,7 +594,7 @@ std::set<CgroupStrParsedIds> CgroupManager::GetJobIdsFromCgroupV2_(
 
   try {
     for (const auto &it :
-         std::filesystem::directory_iterator(root_cgroup_path)) {
+         std::filesystem::recursive_directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
         auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);

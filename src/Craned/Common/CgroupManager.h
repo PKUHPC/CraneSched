@@ -606,10 +606,10 @@ class CgroupManager {
       const std::string &cgroup_str, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
-  static std::set<CgroupStrParsedIds> GetJobIdsFromCgroupV1_(
+  static std::set<CgroupStrParsedIds> GetIdsFromCgroupV1_(
       CgConstant::Controller controller);
 
-  static std::set<CgroupStrParsedIds> GetJobIdsFromCgroupV2_(
+  static std::set<CgroupStrParsedIds> GetIdsFromCgroupV2_(
       const std::filesystem::path &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF

@@ -61,14 +61,14 @@ CraneErrCode RecoverCgForJobSteps(
     // FIXME: What about the case of inconsistency?
 
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::CPU_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::MEMORY_CONTROLLER));
     rn_job_ids_with_cg.merge(
-        CgroupManager::GetJobIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
+        CgroupManager::GetIdsFromCgroupV1_(Controller::DEVICES_CONTROLLER));
 
   } else if (CgroupManager::GetCgroupVersion() == CgroupVersion::CGROUP_V2) {
-    rn_job_ids_with_cg = CgroupManager::GetJobIdsFromCgroupV2_(
+    rn_job_ids_with_cg = CgroupManager::GetIdsFromCgroupV2_(
         kSystemCgPathPrefix / kRootCgNamePrefix);
 
 #ifdef CRANE_ENABLE_BPF
