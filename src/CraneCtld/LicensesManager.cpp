@@ -413,4 +413,11 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
   return {};
 }
 
+CraneExpected<void> LicensesManager::QueryRemoteLicense(
+    const std::string& name, const std::string& server,
+    const std::vector<std::string>& clusters,
+    std::list<LicenseResource>* res_licenses) {
+
+}
+
 }  // namespace Ctld

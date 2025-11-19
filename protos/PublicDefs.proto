@@ -954,14 +954,18 @@ message LicenseInfo {
 }
 
 message LicenseResourceInfo {
-  string resource_name = 2;
-  repeated string clusters = 3;
-  uint32 count = 5;
-  uint32 allowed = 6;
-  string server = 7;
-  string server_type = 8;
-  LicenseResource.Type type = 9;
-  string description = 10;
+  string resource_name = 1;
+  message ClusterResourceInfo {
+    string cluster_name = 1;
+    uint32 allowed = 2;
+  }
+  repeated ClusterResourceInfo cluster_resource_info = 2;
+  uint32 count = 3;
+  string server = 4;
+  string server_type = 5;
+  LicenseResource.Type type = 6;
+  string description = 7;
+  uint32 last_consumed = 8;
 }
 
 message LicenseResource {
