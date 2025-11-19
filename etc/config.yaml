@@ -9,6 +9,8 @@ DbConfigPath: /etc/crane/database.yaml
 
 # Data storage settings
 CraneBaseDir: /var/crane/
+# the base directory of NFS storage
+CraneNFSBaseDir: /var/crane/
 
 # Tls settings
 TLS:
@@ -31,7 +33,8 @@ CraneCtldForInternalListenPort: 10013
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
 CraneCtldLogFile: cranectld/cranectld.log
-# file path of cranectld lock file (relative to CraneBaseDir)
+CraneCtldAliveFile: cranectld/cranectld.alive
+# file path of cranectld lock file (relative to CraneNFSBaseDir)
 CraneCtldMutexFilePath: cranectld/cranectld.lock
 # whether the cranectld is running in the background
 CraneCtldForeground: true
