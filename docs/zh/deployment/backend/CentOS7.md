@@ -138,7 +138,8 @@ cd CraneSched
 
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc \
-               -DCMAKE_CXX_COMPILER=/usr/bin/g++ ..
+               -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+               -DCRANE_ENABLE_CGROUP_V2=OFF ..
 cmake --build .
 ninja install
 ```

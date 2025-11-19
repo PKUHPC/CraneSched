@@ -22,7 +22,7 @@ This guide explains how to prepare eBPF support on your compute nodes.
 
     ```bash
     update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 120 \
-    --slave /usr/bin/clang++ clang++ /usr/bin/clang++-19 
+    --slave /usr/bin/clang++ clang++ /usr/bin/clang++-19
     ```
 
 === "Build from source"
@@ -76,7 +76,12 @@ This guide explains how to prepare eBPF support on your compute nodes.
     ninja install
     ```
 
-## Install libbpf
+## Install libbpf <small>(Optional)</small>
+
+!!! tip
+    By default CraneSched builds and uses a bundled libbpf when you configure CMake with `-DCRANE_ENABLE_BPF=ON`.
+
+    To use the system-provided libbpf instead, follow the instructions below and add `-DCRANE_USE_SYSTEM_LIBBPF=ON` to your CMake configuration.
 
 CraneSched requires libbpf version ≥ 1.4.6.
 
@@ -137,17 +142,12 @@ CraneSched requires libbpf version ≥ 1.4.6.
 
 CraneSched can be built with GCC or Clang, but the eBPF program must be compiled with Clang 19 or newer.
 
-When building CraneSched, make sure Clang is correctly installed and **available in your PATH**, and enable the following CMake options:
-
-```
--DCRANE_ENABLE_CGROUP_V2=ON
--DCRANE_ENABLE_BPF=ON
-```
+When building CraneSched, make sure Clang is correctly installed and **available in your PATH**, and set the CMake option `-DCRANE_ENABLE_BPF=ON`.
 
 For example:
 
 ```bash
-cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=ON -DCRANE_ENABLE_BPF=ON -S . -B build
+cmake -G Ninja -DCRANE_ENABLE_BPF=ON -S . -B build
 cmake --build build
 ```
 
@@ -157,7 +157,7 @@ After a successful build, you should find `cgroup_dev_bpf.o` under `src/Misc/BPF
 
 From the project build directory, copy the compiled BPF object:
 ```bash
-cp ./src/Misc/BPF/cgroup_dev_bpf.o /etc/crane/cgroup_dev_bpf.o
+cp ./src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
 ```
 
 Verify that the child cgroups have the relevant controllers enabled (e.g., cpu, io, memory):

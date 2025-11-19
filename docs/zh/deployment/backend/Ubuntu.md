@@ -63,13 +63,11 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 
 Ubuntu 20.04 默认使用 **CGroup v1**，而 Ubuntu 22.04 和 24.04 默认使用 **CGroup v2**。
 
-鹤思默认使用 **CGroup v1**。如果您希望启用 CGroup v2 支持，且需要使用 GRES 资源，则需进行[额外配置](eBPF.md)。
-
-或者您可以将系统切换为使用 CGroup v1。
+鹤思默认支持 **CGroup v1** 和 **CGroup v2**。但是，在基于 CGroup v2 的系统上使用 GRES 功能时，需要进行额外配置，具体请参阅 [eBPF 指南](eBPF.md)。
 
 #### 1.5.1 配置 CGroup v1
 
-如果您的系统已经使用 CGroup v1，请跳过此部分。
+如果您无法构建 eBPF 相关组件，且需要使用 GRES 功能，可切换回 CGroup v1：
 
 ```bash
 # 设置内核启动参数以切换到 CGroup v1
@@ -194,6 +192,7 @@ apt install -y \
     zlib1g-dev \
     libaio-dev \
     libsystemd-dev \
+    libelf-dev \
     libsubid-dev
 ```
 

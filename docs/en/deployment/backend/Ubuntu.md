@@ -63,11 +63,11 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 
 Ubuntu 20.04 uses **cgroup v1** by default, while Ubuntu 22.04 and 24.04 default to **cgroup v2**.
 
-CraneSched also defaults to **cgroup v1**. To enable cgroup v2 support with GRES you must perform [additional configuration](eBPF.md), or switch the system back to cgroup v1.
+CraneSched supports both **cgroup v1** and **cgroup v2**. However, using GRES on a cgroup v2 system requires additional configuration; see the [eBPF guide](eBPF.md) for the required steps.
 
 #### 1.5.1 Configure cgroup v1
 
-Skip this section if your system already runs cgroup v1.
+If you cannot build the eBPF components and still need GRES, you can switch back to cgroup v1:
 
 ```bash
 # Set kernel boot arguments to switch to cgroup v1
@@ -192,6 +192,7 @@ apt install -y \
     zlib1g-dev \
     libaio-dev \
     libsystemd-dev \
+    libelf-dev \
     libsubid-dev
 ```
 

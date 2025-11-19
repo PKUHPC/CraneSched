@@ -76,7 +76,12 @@
     ninja install
     ```
 
-## 安装 libbpf
+## 安装 libbpf<small>（可选）</small>
+
+!!! tip
+    默认情况下 CraneSched 在启用 `-DCRANE_ENABLE_BPF=ON` 选项时会构建并使用内置的 libbpf。
+    
+    如果您希望使用系统提供的 libbpf，请按照下文操作，并在 CMake 配置时设置 `-DCRANE_USE_SYSTEM_LIBBPF=ON`。
 
 CraneSched 需要 libbpf 版本 ≥ 1.4.6。
 
@@ -137,17 +142,12 @@ CraneSched 需要 libbpf 版本 ≥ 1.4.6。
 
 鹤思可以使用 GCC 或 Clang 构建，但编译 eBPF 程序必须使用 Clang 19 或更高版本。
 
-构建鹤思时，请确保 Clang 已正确安装并且**在您的 PATH 中可用**，并使用以下 CMake 选项构建：
-
-```
--DCRANE_ENABLE_CGROUP_V2=ON
--DCRANE_ENABLE_BPF=ON
-```
+构建鹤思时，请确保 Clang 已正确安装并且**在您的 PATH 中可用**，并设置 CMake 选项 `-DCRANE_ENABLE_BPF=ON`。
 
 例如：
 
 ```bash
-cmake -G Ninja -DCRANE_ENABLE_CGROUP_V2=ON -DCRANE_ENABLE_BPF=ON -S . -B build
+cmake -G Ninja -DCRANE_ENABLE_BPF=ON -S . -B build
 cmake --build build
 ```
 
@@ -157,7 +157,7 @@ cmake --build build
 
 在项目构建目录中：
 ```bash
-cp ./src/Misc/BPF/cgroup_dev_bpf.o /etc/crane/cgroup_dev_bpf.o
+cp ./src/Misc/BPF/cgroup_dev_bpf.o /usr/local/lib64/bpf/
 ```
 
 检查子 cgroup 是否启用了相关 controller（例如 cpu、io、memory 等）：

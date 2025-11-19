@@ -60,13 +60,12 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ### 1.5 Select CGroup Version <small>(Optional)</small>
 
 Rocky 9 uses **CGroup v2** by default.
-CraneSched uses **CGroup v1** by default.
 
-If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md), or you can switch the system to use CGroup v1.
+CraneSched supports both **CGroup v1** and **CGroup v2**. However, using GRES on a CGroup v2 system requires additional configuration; see the [eBPF guide](eBPF.md) for details.
 
 #### 1.5.1 Configure CGroup v1
 
-If your system is already using CGroup v1, skip this section.
+If you cannot build the eBPF components and still need GRES, you can switch back to CGroup v1:
 
 ```bash
 # Set kernel boot parameters to switch to CGroup v1
@@ -90,7 +89,7 @@ cat /sys/fs/cgroup/cgroup.subtree_control
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-Additionally, if you plan to use GRES with CGroup v2, please refer to the [eBPF guide](eBPF.md) for setup instructions.
+As mentioned earlier, using GRES with CGroup v2 requires the additional steps described in the [eBPF guide](eBPF.md).
 
 ## 2. Install Toolchain
 
@@ -129,6 +128,7 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
+    elfutils-libelf-devel \
     shadow-utils-subid-devel
 ```
 

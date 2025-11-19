@@ -61,13 +61,12 @@ sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ### 1.5 选择 CGroup 版本<small>（可选）</small>
 
 Rocky 9 默认使用 **CGroup v2**。
-鹤思默认使用 **CGroup v1**。
 
-如果您希望启用 CGroup v2 支持，需要[额外配置](eBPF.md)，或者您可以将系统切换为使用 CGroup v1。
+鹤思默认支持 **CGroup v1** 和 **CGroup v2**。但是，在基于 CGroup v2 的系统上使用 GRES 功能时，需要进行额外配置，具体请参阅 [eBPF 指南](eBPF.md)。
 
 #### 1.5.1 配置 CGroup v1
 
-如果您的系统已经使用 CGroup v1，请跳过此部分。
+如果您无法构建 eBPF 相关组件，且需要使用 GRES 功能，可切换回 CGroup v1：
 
 ```bash
 # 设置内核启动参数以切换到 CGroup v1
@@ -91,7 +90,7 @@ cat /sys/fs/cgroup/cgroup.subtree_control
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-此外，如果您计划在 CGroup v2 上使用 GRES，请参阅 [eBPF 指南](eBPF.md)以获取设置说明。
+如前所述，如果您计划在 CGroup v2 上使用 GRES，需参阅 [eBPF 指南](eBPF.md) 进行额外配置。
 
 ## 2. 安装工具链
 
@@ -130,6 +129,7 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
+    elfutils-libelf-devel \
     shadow-utils-subid-devel
 ```
 
