@@ -128,10 +128,6 @@ endif ()
 
 set(CMAKE_CXX_STANDARD 23)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CRANE_ENABLE_TESTS ON)
-endif ()
-
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr/local" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
 endif ()
