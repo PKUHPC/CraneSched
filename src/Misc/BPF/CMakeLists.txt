@@ -22,6 +22,16 @@ endif ()
 # always use -g for BPF CO-RE
 list(APPEND BPF_COMPILE_OPTIONS -O2 -g)
 
+# When compiling with -target bpf clang does not add the multiarch include path,
+# so explicitly provide it to make sure asm/* headers (pulled by linux/types.h)
+# are found on non-x86 hosts as well.
+if (CMAKE_LIBRARY_ARCHITECTURE)
+    set(MULTIARCH_INCLUDE_DIR "/usr/include/${CMAKE_LIBRARY_ARCHITECTURE}")
+    if (EXISTS "${MULTIARCH_INCLUDE_DIR}/asm/types.h")
+        list(APPEND BPF_COMPILE_OPTIONS -isystem "${MULTIARCH_INCLUDE_DIR}")
+    endif ()
+endif ()
+
 add_custom_command(
         OUTPUT ${BPF_OBJECT_FILE}
         COMMAND ${BPF_COMPILER} -target bpf ${BPF_COMPILE_OPTIONS} -D${BPF_ARCH} -c ${BPF_SOURCE_FILE} -o ${BPF_OBJECT_FILE}

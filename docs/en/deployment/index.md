@@ -11,7 +11,7 @@ CraneSched consists of three main components:
 
 | Component | Description | Location |
 |-----------|-------------|----------|
-| **Backend** | `cranectld` (scheduler) + `craned` (worker daemon) | Control & Compute nodes |
+| **Backend** | `cranectld` (scheduler) + `craned` (Node daemon) | Control & Compute nodes |
 | **Frontend** | CLI (`cbatch`, `cqueue`, etc.) + other services (`cfored`, `cplugind`) | As needed |
 | **Database** | MongoDB for storing jobs, accounts, and usage data | Control/Storage node |
 
@@ -56,10 +56,11 @@ graph TB
 
 For a simple single-node test environment:
 
-1. Install backend: Follow [Rocky Linux 9 Guide](./backend/Rocky9.md) (Steps 1-5)
-2. Setup database: Follow [Database Configuration Guide](./configuration/database.md)
-3. Configure cluster: Edit `/etc/crane/config.yaml` (see [Configuration Guide](./configuration/config.md))
-4. Start services: `systemctl start cranectld craned` (And other frontend services as needed)
+1. Install backend: Follow [Rocky Linux 9 Guide](./backend/Rocky9.md)
+2. Install frontend: Follow [Frontend Deployment Guide](./frontend/frontend.md)
+3. Setup database: Follow [Database Configuration Guide](./configuration/database.md)
+4. Configure cluster: Edit `/etc/crane/config.yaml` (see [Configuration Guide](./configuration/config.md))
+5. Start services: `systemctl start cranectld craned` (And other frontend services as needed)
 
 **For production multi-node clusters**, follow the complete deployment workflow below.
 
@@ -95,7 +96,7 @@ Choose your operating system and follow the corresponding guide:
 
 All guides cover system preparation, dependencies, and compilation. After building:
 
-- **[Packaging Guide](./backend/packaging.md)** - Create RPM/DEB packages for easier distribution across nodes
+- **[Packaging Guide](./packaging.md)** - Create RPM/DEB packages for easier distribution across nodes
 
 ### Step 2: Setup Database
 
