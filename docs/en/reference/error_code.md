@@ -1,9 +1,5 @@
 # Error Code Reference
 
-This document provides detailed descriptions of all error codes in the CraneSched system.
-
-## Error Code List
-
 | Error ID | Error Code | Expected Error Message | Trigger Condition/Error Cause | User Solution | Notes |
 |----------|------------|------------------------|-------------------------------|---------------|-------|
 | 1 | ERR_INVALID_UID | The user UID being operated on does not exist in the system | The user UID being operated is not registered in the system or has been deleted | Confirm account status and check UID | |
@@ -83,32 +79,3 @@ This document provides detailed descriptions of all error codes in the CraneSche
 | 75 | ERR_IDENTITY_MISMATCH | User information does not match, unable to submit the task. | User identity information mismatch | Modify identity information | |
 | 76 | ERR_NOT_FORCE | You need to set --force for this operation. | Did not explicitly mark --force when deleting all users | Explicitly mark --force | |
 | 77 | ERR_INVALID_USERNAME | Invalid username | Using "ALL" as name when creating new user | Cancel using "ALL" as new username | |
-
-## Error Code Classification
-
-### User-Related Errors (1-10)
-Errors related to user authentication, permissions, and account status.
-
-### Account-Related Errors (11-15)
-Errors related to account management and account hierarchy.
-
-### Partition-Related Errors (16-21)
-Errors related to partition configuration and access permissions.
-
-### QoS-Related Errors (22-38)
-Errors related to Quality of Service configuration and management.
-
-### Database and System Errors (39-49)
-Errors related to database operations and system resources.
-
-### Task-Related Errors (50-52)
-Errors related to task submission and execution.
-
-### Connection and RPC Errors (53-60)
-Errors related to network connections and remote procedure calls.
-
-### Component Errors (61-70)
-Errors related to various system components (cgroup, protobuf, eBPF, etc.).
-
-### Certificate and Security Errors (71-77)
-Errors related to certificate management and user authentication.
