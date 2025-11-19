@@ -61,6 +61,8 @@ class StepInstance {
   bool x11_fwd{};
   bool pty{};
 
+  std::optional<std::filesystem::path> script_path;
+
   std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
@@ -89,6 +91,8 @@ class StepInstance {
   StepInstance& operator=(StepInstance&&) = delete;
 
   ~StepInstance() = default;
+  CraneErrCode Prepare();
+  void CleanUp();
 
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsBatch() const noexcept;
