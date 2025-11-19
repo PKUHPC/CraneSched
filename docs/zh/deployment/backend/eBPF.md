@@ -124,7 +124,7 @@ CraneSched 需要 libbpf 版本 ≥ 1.4.6。
     # 下载并解压
     wget https://github.com/libbpf/libbpf/archive/refs/tags/v1.6.2.tar.gz
     tar -xzf v1.6.2.tar.gz
-    cd libbpf-1.6.2/
+    cd libbpf-1.6.2/src
 
     # Debian/Ubuntu
     ARCH=$(dpkg-architecture -q DEB_HOST_MULTIARCH)
