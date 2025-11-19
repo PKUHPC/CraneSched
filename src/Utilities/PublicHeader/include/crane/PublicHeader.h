@@ -252,6 +252,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
         "Invalid username",
+        "Reserved for future use",
+        "Reserved for future use",
+  
+        // 80 - 84
+        "Reserved for future use",
+        "Reserved for future use",
+        "Reserved for future use",
         "Invalid memory parsing format"
     };
 // clang-format on
