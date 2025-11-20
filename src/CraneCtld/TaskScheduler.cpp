@@ -3037,11 +3037,11 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
       }
 
       // Persist the state change to database
-      if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, job->TaskDbId(),
-              [](crane::grpc::RuntimeAttrOfTask* runtime_attr) {
-                runtime_attr->set_status(crane::grpc::TaskStatus::Completing);
-              })) {
+      // Need to update the RuntimeAttr with new status
+      auto runtime_attr = job->RuntimeAttr();
+      runtime_attr.set_status(crane::grpc::TaskStatus::Completing);
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
+                                                         runtime_attr)) {
         CRANE_ERROR("[Job #{}] Failed to update job status to Completing in DB",
                     job_id);
       }
