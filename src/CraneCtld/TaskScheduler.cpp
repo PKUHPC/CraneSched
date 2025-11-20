@@ -3037,10 +3037,10 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
       }
 
       // Persist the state change to database
-      if (!g_embedded_db_client->UpdateJob(
-              job_id, [](crane::grpc::TaskInEmbeddedDb* task_in_db) {
-                task_in_db->mutable_status()->set_status(
-                    crane::grpc::TaskStatus::Completing);
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              0, job->TaskDbId(),
+              [](crane::grpc::RuntimeAttrOfTask* runtime_attr) {
+                runtime_attr->set_status(crane::grpc::TaskStatus::Completing);
               })) {
         CRANE_ERROR("[Job #{}] Failed to update job status to Completing in DB",
                     job_id);
@@ -3254,11 +3254,14 @@ void TaskScheduler::SyncStepStatusFromCraned(
                step_id, ctld_status, craned_status, reason);
 
     // Perform the status change
+    // Note: We cannot call async function while holding the lock,
+    // so we release the lock by ending the function scope and schedule the call
+  }
+
+  // Lock is released here when running_guard destructs
+
+  if (should_sync) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-
-    // Release the lock before calling async function to avoid deadlock
-    running_guard.unlock();
-
     StepStatusChangeWithReasonAsync(
         job_id, step_id, craned_id, craned_status, exit_code,
         fmt::format("Status synced from Craned during registration: {}",
