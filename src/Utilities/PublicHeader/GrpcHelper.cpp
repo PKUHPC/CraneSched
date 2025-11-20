@@ -18,7 +18,6 @@
 
 #include "crane/GrpcHelper.h"
 
-#include "../../Misc/Pam/PamUtil.h"
 #include "crane/Network.h"
 
 std::string_view GrpcConnStateStr(grpc_connectivity_state state) {
