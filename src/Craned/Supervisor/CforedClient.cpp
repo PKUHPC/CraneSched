@@ -106,9 +106,8 @@ bool CforedClient::InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id,
   return ok_future.get();
 }
 
-uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
+uint16_t CforedClient::InitUvX11FwdHandler() {
   CreateX11FwdQueueElem elem;
-  elem.task_id = task_id;
   auto port_future = elem.promise.get_future();
   m_create_x11_fwd_handler_queue_.enqueue(std::move(elem));
   m_clean_x11_fwd_handler_queue_async_handle_->send();
@@ -118,14 +117,10 @@ uint16_t CforedClient::InitUvX11FwdHandler(task_id_t task_id) {
 uint16_t CforedClient::SetupX11forwarding_() {
   int ret;
 
+  // This handle will be closed when CforedClient destructor called.
   auto x11_proxy_h = m_loop_->resource<uvw::tcp_handle>();
   constexpr uint16_t x11_port_begin = 6020;
   constexpr uint16_t x11_port_end = 6100;
-
-  auto x11_data = std::make_shared<X11FdInfo>();
-  x11_data->proxy_handle = x11_proxy_h;
-
-  x11_proxy_h->data(x11_data);
 
   uint16_t port;
   for (port = x11_port_begin; port < x11_port_end; ++port) {
@@ -157,42 +152,47 @@ uint16_t CforedClient::SetupX11forwarding_() {
                                             uvw::tcp_handle& h) {
     CRANE_TRACE("Accepting connection on x11 proxy.");
 
+    x11_local_id_t x11_local_id = next_x11_id_++;
+    auto& x11_fd_info = m_x11_fd_info_map_[x11_local_id];
     auto sock = h.parent().resource<uvw::tcp_handle>();
 
-    sock->on<uvw::data_event>([this](uvw::data_event& e, uvw::tcp_handle& s) {
+    sock->on<uvw::data_event>([x11_local_id, this](uvw::data_event& e,
+                                                   uvw::tcp_handle& s) {
       CRANE_TRACE("Read x11 output. Forwarding...");
-
-      TaskX11OutPutForward(std::move(e.data), e.length);
+      TaskX11OutPutForward(x11_local_id, std::move(e.data), e.length, false);
     });
     sock->on<uvw::write_event>(
         [this](const uvw::write_event&, uvw::tcp_handle&) {
           CRANE_TRACE("Write x11 input done.");
         });
 
-    sock->on<uvw::end_event>([](uvw::end_event&, uvw::tcp_handle& h) {
+    sock->on<uvw::end_event>([x11_local_id, this](uvw::end_event&,
+                                                  uvw::tcp_handle& s) {
       // EOF
       CRANE_TRACE("X11 proxy connection ended. Closing it.");
-      if (auto* p = h.data<X11FdInfo>().get(); p) p->sock_stopped = true;
-      h.close();
+      if (auto* p = s.data<X11FdInfo>().get(); p) p->sock_stopped = true;
+      TaskX11OutPutForward(x11_local_id, std::make_unique<char[]>(0), 0, true);
+      s.close();
     });
-    sock->on<uvw::error_event>([](uvw::error_event& e, uvw::tcp_handle& h) {
+    sock->on<uvw::error_event>([x11_local_id, this](uvw::error_event& e,
+                                                    uvw::tcp_handle& s) {
       CRANE_ERROR("Error on x11 proxy of {}. Closing it.", e.what());
-      if (auto* p = h.data<X11FdInfo>().get(); p) p->sock_stopped = true;
-      h.close();
+      if (auto* p = s.data<X11FdInfo>().get(); p) p->sock_stopped = true;
+      TaskX11OutPutForward(x11_local_id, std::make_unique<char[]>(0), 0, true);
+      s.close();
     });
-    sock->on<uvw::close_event>([](uvw::close_event&, uvw::tcp_handle& h) {
-      CRANE_TRACE("X11 proxy connection was closed.");
-    });
+    sock->on<uvw::close_event>(
+        [x11_local_id, this](uvw::close_event&, uvw::tcp_handle& s) {
+          CRANE_TRACE("X11 proxy connection was closed.");
+          m_x11_fd_info_map_.erase(x11_local_id);
+        });
+    sock->data(x11_fd_info);
 
     h.accept(*sock);
 
-    h.data<X11FdInfo>()->fd = sock->fd();
-    h.data<X11FdInfo>()->sock = sock;
+    x11_fd_info->fd = sock->fd();
+    x11_fd_info->sock = sock;
     sock->read();
-
-    // Currently only 1 connection of x11 client will be accepted.
-    // Close it once we accept one x11 client.
-    h.close();
   });
 
   x11_proxy_h->on<uvw::close_event>(
@@ -209,8 +209,6 @@ uint16_t CforedClient::SetupX11forwarding_() {
     CRANE_TRACE("X11 proxy listening port received EOF.");
     h.close();
   });
-
-  x11_data->port = port;
   return port;
 }
 
@@ -267,8 +265,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
 
       ph->on<uvw::data_event>([this](uvw::data_event& e, uvw::pipe_handle&) {
         if (e.length > 0) {
-          std::string output(e.data.get(), e.length);
-          this->TaskOutPutForward(output);
+          this->TaskOutPutForward(std::move(e.data), e.length);
         }
       });
 
@@ -307,8 +304,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
 
       th->on<uvw::data_event>([this](uvw::data_event& e, uvw::tty_handle&) {
         if (e.length > 0) {
-          std::string output(e.data.get(), e.length);
-          this->TaskOutPutForward(output);
+          this->TaskOutPutForward(std::move(e.data), e.length);
         }
       });
 
@@ -405,26 +401,47 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
         stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
-  std::string output;
-  std::pair<std::unique_ptr<char[]>, size_t> x11_output;
-  bool ok = m_output_queue_.try_dequeue(output);
-  bool x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
+  FwdRequest fwd_req;
+  bool ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
 
   // Make sure before exit all output has been drained.
-  while (!m_stopped_ || ok || x11_ok) {
-    if (!ok && !x11_ok) {
+  while (!m_stopped_ || ok) {
+    if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
-      ok = m_output_queue_.try_dequeue(output);
-      x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
+      ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
       continue;
     }
 
     if (ok) {
       StreamTaskIORequest request;
-      request.set_type(StreamTaskIORequest::TASK_OUTPUT);
+      request.set_type(fwd_req.type);
+      switch (fwd_req.type) {
+      case StreamTaskIORequest::TASK_OUTPUT: {
+        auto& io_fwd_req = std::get<IOFwdRequest>(fwd_req.data);
 
-      auto* payload = request.mutable_payload_task_output_req();
-      payload->set_msg(output);
+        auto* payload = request.mutable_payload_task_output_req();
+        payload->set_msg(io_fwd_req.data.get(), io_fwd_req.len);
+      } break;
+      case StreamTaskIORequest::TASK_X11_OUTPUT: {
+        auto& x11_fwd_req = std::get<X11FwdRequest>(fwd_req.data);
+
+        auto* payload = request.mutable_payload_task_x11_output_req();
+        payload->set_x11_id(x11_fwd_req.x11_id);
+        payload->set_msg(x11_fwd_req.data.get(), x11_fwd_req.len);
+        payload->set_eof(x11_fwd_req.eof);
+        payload->set_craned_id(g_config.CranedIdOfThisNode);
+      } break;
+      case StreamTaskIORequest::TASK_EXIT_STATUS: {
+        auto& status = std::get<TaskFinishStatus>(fwd_req.data);
+        auto* payload = request.mutable_payload_task_exit_status_req();
+        payload->set_task_id(status.task_id);
+        payload->set_exit_code(status.exit_code);
+        payload->set_signaled(status.signaled);
+      } break;
+      default:
+        CRANE_ERROR("Unknown FwdRequest type: {}", int(fwd_req.type));
+        std::unreachable();
+      }
 
       while (write_pending->load(std::memory_order::acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -433,27 +450,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       write_pending->store(true, std::memory_order::release);
       stream->Write(request, (void*)Tag::Write);
 
-      ok = m_output_queue_.try_dequeue(output);
-    }
-
-    if (x11_ok) {
-      StreamTaskIORequest request;
-      request.set_type(StreamTaskIORequest::TASK_X11_OUTPUT);
-
-      auto* payload = request.mutable_payload_task_x11_output_req();
-
-      auto& [p, len] = x11_output;
-      payload->set_msg(p.get(), len);
-
-      while (write_pending->load(std::memory_order::acquire))
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-
-      CRANE_TRACE("Forwarding x11 output from task to cfored {}",
-                  this->m_cfored_name_);
-      write_pending->store(true, std::memory_order::release);
-      stream->Write(request, (void*)Tag::Write);
-
-      x11_ok = m_x11_output_queue_.try_dequeue(x11_output);
+      ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
     }
   }
 
@@ -462,6 +459,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
 }
 
 void CforedClient::AsyncSendRecvThread_() {
+  util::SetCurrentThreadName("CforedSendRecv");
   enum class State : int {
     Registering = 0,
     WaitRegisterAck = 1,
@@ -623,11 +621,18 @@ void CforedClient::AsyncSendRecvThread_() {
       m_mtx_.Lock();
 
       if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
-        for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
-          CRANE_ASSERT(fwd_meta.x11_fd_info);
-          if (!fwd_meta.x11_input_stopped)
-            fwd_meta.x11_input_stopped =
-                !WriteStringToFd_(*msg, fwd_meta.x11_fd_info->fd, false);
+        x11_local_id_t x11_id = 0;
+        bool eof = reply.payload_task_x11_input_req().eof();
+        auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
+        if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
+          auto& x11_fd_info = x11_fd_info_it->second;
+          if (!x11_fd_info->x11_input_stopped)
+            x11_fd_info->x11_input_stopped =
+                !WriteStringToFd_(*msg, x11_fd_info->fd, eof);
+          if (eof) {
+            // User closed X11 connection at crun
+            x11_fd_info->sock->close();
+          }
         }
       } else {
         bool eof = reply.payload_task_input_req().eof();
@@ -700,7 +705,16 @@ bool CforedClient::TaskOutputFinishNoLock_(task_id_t task_id) {
   return m_fwd_meta_map[task_id].proc_stopped;
 };
 
-bool CforedClient::TaskProcessStop(task_id_t task_id) {
+bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
+                                   bool signaled) {
+  CRANE_DEBUG("[Task #{}] Process stopped with exit_code: {}, signaled: {}.",
+              task_id, exit_code, signaled);
+  m_task_fwd_req_queue_.enqueue(FwdRequest{
+      .type = StreamTaskIORequest::TASK_EXIT_STATUS,
+      .data = TaskFinishStatus{.task_id = task_id,
+                               .exit_code = exit_code,
+                               .signaled = signaled},
+  });
   absl::MutexLock lock(&m_mtx_);
   m_fwd_meta_map[task_id].proc_stopped = true;
   return m_fwd_meta_map[task_id].output_stopped;
@@ -715,15 +729,26 @@ void CforedClient::TaskEnd(task_id_t task_id) {
   g_task_mgr->TaskStopAndDoStatusChange(task_id);
 };
 
-void CforedClient::TaskOutPutForward(const std::string& msg) {
-  CRANE_TRACE("Receive TaskOutputForward len: {}.", msg.size());
-  m_output_queue_.enqueue(msg);
+void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
+                                     size_t len) {
+  CRANE_TRACE("Receive TaskOutputForward len: {}.", len);
+  m_task_fwd_req_queue_.enqueue(FwdRequest{
+      .type = StreamTaskIORequest::TASK_OUTPUT,
+      .data = IOFwdRequest{.data = std::move(data), .len = len},
+  });
 }
 
-void CforedClient::TaskX11OutPutForward(std::unique_ptr<char[]>&& data,
-                                        size_t len) {
+void CforedClient::TaskX11OutPutForward(x11_local_id_t x11_local_id,
+                                        std::unique_ptr<char[]>&& data,
+                                        size_t len, bool eof) {
   CRANE_TRACE("Receive TaskX11OutPutForward len: {}.", len);
-  m_x11_output_queue_.enqueue({std::move(data), len});
+  m_task_fwd_req_queue_.enqueue(FwdRequest{
+      .type = StreamTaskIORequest::TASK_X11_OUTPUT,
+      .data = X11FwdRequest{.x11_id = x11_local_id,
+                            .data = std::move(data),
+                            .len = len,
+                            .eof = eof},
+  });
 }
 
 }  // namespace Craned::Supervisor

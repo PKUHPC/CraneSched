@@ -598,7 +598,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
           break;
         }
 
-        cgroup->KillAllProcesses();
+        cgroup->KillAllProcesses(SIGKILL);
         ++cnt;
         std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
       }

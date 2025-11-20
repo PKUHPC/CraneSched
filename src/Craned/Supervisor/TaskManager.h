@@ -62,10 +62,16 @@ class StepInstance {
   bool x11_fwd{};
   bool pty{};
 
-  std::string cgroup_path;  // resolved cgroup path
+  struct X11Meta {
+    uint16_t x11_port;
+    std::string x11_auth_path;
+  };
 
-  std::once_flag cri_client_flag;
-  std::once_flag cfored_client_flag;
+  std::optional<X11Meta> x11_meta;
+
+  std::string cgroup_path;  // resolved cgroup path
+  std::filesystem::path script_path;
+
   // Only daemon step may migrate ssh procs to cgroup
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
@@ -107,6 +113,9 @@ class StepInstance {
   // Do not do any clean up action in destructor. This will only be called when
   // supervisor is exiting.
   ~StepInstance() = default;
+
+  CraneErrCode Prepare();
+  void CleanUp();
 
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsBatch() const noexcept;
@@ -187,8 +196,6 @@ class StepInstance {
 
 struct TaskInstanceMeta {
   virtual ~TaskInstanceMeta() = default;
-
-  std::string parsed_sh_script_path;
 };
 
 struct BatchInstanceMeta : TaskInstanceMeta {
@@ -205,10 +212,6 @@ struct CrunInstanceMeta : TaskInstanceMeta {
   int stdout_write;
   int stdin_read;
   int stdout_read;
-
-  std::string x11_target;
-  uint16_t x11_port;
-  std::string x11_auth_path;
 };
 
 struct TaskExitInfo {
@@ -372,10 +375,9 @@ class ProcInstance : public ITaskInstance {
 
   CraneExpected<pid_t> ForkCrunAndInitMeta_();
 
-  bool SetupCrunFwdAtParent_(uint16_t* x11_port);
+  bool SetupCrunFwdAtParent_();
   void SetupCrunFwdAtChild_();
 
-  CraneErrCode PrepareXauthFiles_();
   void SetupChildProcCrunX11_();
 
   // Methods related to Batch only

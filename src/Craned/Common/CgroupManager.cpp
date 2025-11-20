@@ -949,10 +949,9 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
 void Cgroup::Destroy() {
   if (m_cgroup_ != nullptr) {
     CRANE_DEBUG("Destroying cgroup {}.", m_cgroup_name_);
-    int err;
-    if ((err = cgroup_delete_cgroup_ext(
-             m_cgroup_,
-             CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+    int err = cgroup_delete_cgroup_ext(
+        m_cgroup_, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION);
+    if (err != 0) {
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
     }
@@ -1085,7 +1084,7 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   return ok;
 }
 
-bool CgroupV1::KillAllProcesses() {
+bool CgroupV1::KillAllProcesses(int signum) {
   using namespace CgConstant::Internal;
 
   const char *controller = CgConstant::GetControllerStringView(
@@ -1093,7 +1092,7 @@ bool CgroupV1::KillAllProcesses() {
                                .data();
 
   const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
-
+  CRANE_TRACE("Killing process with signal {} in cgroup: {}", signum, cg_name);
   int size, rc;
   pid_t *pids;
 
@@ -1102,7 +1101,8 @@ bool CgroupV1::KillAllProcesses() {
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
-      kill(pids[i], SIGKILL);
+      // Kill the process group
+      kill(-pids[i], signum);
     }
     free(pids);
     return true;
@@ -1513,7 +1513,7 @@ bool CgroupV2::EraseBpfDeviceMap() {
 }
 #endif
 
-bool CgroupV2::KillAllProcesses() {
+bool CgroupV2::KillAllProcesses(int signum) {
   using namespace CgConstant::Internal;
 
   const char *controller = CgConstant::GetControllerStringView(
@@ -1522,6 +1522,7 @@ bool CgroupV2::KillAllProcesses() {
 
   const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
+  CRANE_TRACE("Killing process with signal {} in cgroup: {}", signum, cg_name);
   int size, rc;
   pid_t *pids;
 
@@ -1530,7 +1531,8 @@ bool CgroupV2::KillAllProcesses() {
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
-      kill(pids[i], SIGKILL);
+      // Kill the process group
+      kill(-pids[i], signum);
     }
     free(pids);
     return true;

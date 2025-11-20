@@ -190,7 +190,7 @@ CraneErrCode RecoverCgForJobSteps(
       continue;
     }
 
-    cg_ptr->KillAllProcesses();
+    cg_ptr->KillAllProcesses(SIGKILL);
     cg_ptr->Destroy();
   }
 
