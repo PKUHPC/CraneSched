@@ -969,6 +969,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
         if (auto step_it = job_ptr->step_map.find(status_change.step_id);
             step_it != job_ptr->step_map.end()) {
           step_it->second->status = status_change.new_status;
+          step_it->second->exit_code = status_change.exit_code;
         }
       }
     }
@@ -1031,13 +1032,23 @@ JobManager::GetAllocatedJobSteps() {
     auto job_ptr = job.GetExclusivePtr();
     absl::MutexLock lk(job_ptr->step_map_mtx.get());
     std::map<step_id_t, StepStatus> step_status_map;
-    ;
     for (auto& [step_id, step] : job_ptr->step_map) {
       step_status_map[step_id] = step->status;
     }
     job_steps[job_id] = std::move(step_status_map);
   }
   return job_steps;
+}
+
+uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return 0;
+
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  auto step_it = job_ptr->step_map.find(step_id);
+  if (step_it == job_ptr->step_map.end()) return 0;
+
+  return step_it->second->exit_code;
 }
 
 std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {

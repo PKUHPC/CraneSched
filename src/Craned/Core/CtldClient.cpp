@@ -458,30 +458,14 @@ void CtldClient::Init() {
         std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
-        for (const auto& [job_id, steps] : valid_job_steps) {
-          for (const auto& step_id : steps) {
-            auto status =
-                arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto exact_status = exact_job_steps.at(job_id).at(step_id);
-            CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
-                        step_id, exact_status, status);
-            // TODO: Craned status must be the real status of the step, maybe we
-            // can send a step status change in craned status to kick step
-            // status change in Ctld. Then we will not lose step whose status
-            // changed during craned and ctld connection failure.
-            if (status != exact_status) {
-              CRANE_DEBUG(
-                  "[Step #{}.{}] status inconsistent, craned: {} ,ctld: {} .",
-                  job_id, step_id, exact_status, status);
-              invalid_steps[job_id].insert(step_id);
-              lost_steps[job_id].insert(step_id);
-            }
-          }
-        }
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+
+        // Only terminate truly invalid steps (those not in Ctld's view at all)
+        // Don't kill steps that exist in both but may have status differences
+        // - Ctld will handle status synchronization via intelligent merging
         if (!invalid_steps.empty()) {
-          CRANE_INFO("Terminating invalid step as orphaned : [{}].",
+          CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
                      util::JobStepsToString(invalid_steps));
           for (auto [job_id, steps] : invalid_steps) {
             for (auto step_id : steps)
@@ -643,6 +627,24 @@ bool CtldClient::CranedRegister_(
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
+  }
+
+  // Collect current step statuses from Craned
+  auto allocated_steps = g_job_mgr->GetAllocatedJobSteps();
+  auto& grpc_step_statuses = *grpc_meta->mutable_craned_step_statuses();
+  for (const auto& [job_id, step_map] : allocated_steps) {
+    auto& job_step_statuses = grpc_step_statuses[job_id];
+    auto& step_statuses_map = *job_step_statuses.mutable_step_statuses();
+    for (const auto& [step_id, status] : step_map) {
+      uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+      auto& step_status_info = step_statuses_map[step_id];
+      step_status_info.set_status(status);
+      step_status_info.set_exit_code(exit_code);
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "[Step #{}.{}] Reporting status {} with exit code {} "
+                         "in CranedRegister",
+                         job_id, step_id, status, exit_code);
+    }
   }
 
   grpc::ClientContext context;

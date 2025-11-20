@@ -40,10 +40,10 @@
 namespace util {
 
 template <typename T = std::string, typename YamlNode, typename DefaultType>
-  requires requires(const YamlNode &node) {
+  requires requires(const YamlNode& node) {
     { node.template as<T>() };
   } && std::convertible_to<DefaultType, T>
-T YamlValueOr(const YamlNode &node, const DefaultType &default_value) {
+T YamlValueOr(const YamlNode& node, const DefaultType& default_value) {
   return node ? node.template as<T>() : default_value;
 }
 
@@ -53,23 +53,23 @@ using CertPair = std::pair<std::string,   // CN
 uint32_t Crc32Of(std::string_view data, uint32_t seed = 0);
 uint32_t Adler32Of(std::string_view data, uint32_t seed = 1);
 
-std::string ReadFileIntoString(std::filesystem::path const &p);
+std::string ReadFileIntoString(std::filesystem::path const& p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
 
-bool ParseHostList(const std::string &host_str,
-                   std::list<std::string> *host_list);
+bool ParseHostList(const std::string& host_str,
+                   std::list<std::string>* host_list);
 
-bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
-                                     int *end);
+bool FoundFirstNumberWithoutBrackets(const std::string& input, int* start,
+                                     int* end);
 
-std::string RemoveBracketsWithoutDashOrComma(const std::string &input);
+std::string RemoveBracketsWithoutDashOrComma(const std::string& input);
 
-bool HostNameListToStr_(std::list<std::string> &host_list,
-                        std::list<std::string> *res_list);
+bool HostNameListToStr_(std::list<std::string>& host_list,
+                        std::list<std::string>* res_list);
 
 template <std::ranges::range T>
-std::string HostNameListToStr(T const &host_list)
+std::string HostNameListToStr(T const& host_list)
   requires std::same_as<std::ranges::range_value_t<T>, std::string>
 {
   std::list<std::string> source_list{host_list.begin(), host_list.end()};
@@ -88,35 +88,35 @@ std::string HostNameListToStr(T const &host_list)
   }
 }
 
-void SetCurrentThreadName(const std::string &name);
+void SetCurrentThreadName(const std::string& name);
 
-bool ConvertStringToInt64(const std::string &s, int64_t *val);
+bool ConvertStringToInt64(const std::string& s, int64_t* val);
 
-std::string ReadableTypedDeviceMap(const DeviceMap &dedicated_resource);
-std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
+std::string ReadableTypedDeviceMap(const DeviceMap& dedicated_resource);
+std::string ReadableDresInNode(const ResourceInNode& dedicated_resource);
 
 std::string ReadableGrpcDresInNode(
-    const crane::grpc::DedicatedResourceInNode &dres_in_node);
+    const crane::grpc::DedicatedResourceInNode& dres_in_node);
 
 std::string GenerateCommaSeparatedString(int val);
 
-uint32_t CalcConfigCRC32(const YAML::Node &config);
+uint32_t CalcConfigCRC32(const YAML::Node& config);
 
 std::string SlugDns1123(std::string_view s, size_t max_len);
 
 std::expected<CertPair, std::string> ParseCertificate(
-    const std::string &cert_pem);
+    const std::string& cert_pem);
 
 template <typename YamlNode>
-std::optional<std::string> ParseCertConfig(const std::string &cert_name,
-                                           const YamlNode &tls_config,
-                                           std::string *file_path,
-                                           std::string *file_content) {
+std::optional<std::string> ParseCertConfig(const std::string& cert_name,
+                                           const YamlNode& tls_config,
+                                           std::string* file_path,
+                                           std::string* file_content) {
   if (tls_config[cert_name]) {
     *file_path = tls_config[cert_name].template as<std::string>();
     try {
       *file_content = util::ReadFileIntoString(*file_path);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       return fmt::format("Read {} error: {}", cert_name, e.what());
     }
     if (file_content->empty())
@@ -129,11 +129,11 @@ std::optional<std::string> ParseCertConfig(const std::string &cert_name,
 }
 
 template <typename Map>
-auto FlattenMapView(const Map &m) {
-  return m | std::views::transform([](const auto &kv) {
-           const auto &key = kv.first;
-           const auto &values = kv.second;
-           return values | std::views::transform([&key](const auto &v) {
+auto FlattenMapView(const Map& m) {
+  return m | std::views::transform([](const auto& kv) {
+           const auto& key = kv.first;
+           const auto& values = kv.second;
+           return values | std::views::transform([&key](const auto& v) {
                     return std::pair{key, v};
                   });
          }) |
@@ -141,22 +141,35 @@ auto FlattenMapView(const Map &m) {
 }
 
 std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
-std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
+std::string StepIdPairToString(const std::pair<job_id_t, step_id_t>& step);
 
-std::string StepToDIdString(const crane::grpc::StepToD &step_to_d);
+std::string StepToDIdString(const crane::grpc::StepToD& step_to_d);
 template <typename Range>
-std::string StepToDRangeIdString(const Range &step_to_d_range) {
+std::string StepToDRangeIdString(const Range& step_to_d_range) {
   return absl::StrJoin(step_to_d_range | std::views::transform(StepToDIdString),
                        ",");
 }
 
 template <typename Map>
-std::string JobStepsToString(const Map &m) {
+std::string JobStepsToString(const Map& m) {
   auto step_strs_view =
-      m | std::views::transform([](const auto &kv) {
+      m | std::views::transform([](const auto& kv) {
         return kv.second |
-               std::views::transform([key = kv.first](const auto &step_id) {
+               std::views::transform([key = kv.first](const auto& step_id) {
                  return StepIdsToString(key, step_id);
+               });
+      }) |
+      std::views::join | std::ranges::to<std::vector>();
+  return absl::StrJoin(step_strs_view, ",");
+}
+
+template <typename Map>
+std::string JobStepsWithStatusToString(const Map& m) {
+  auto step_strs_view =
+      m | std::views::transform([](const auto& kv) {
+        return kv.second |
+               std::views::transform([key = kv.first](const auto& step_kv) {
+                 return StepIdsToString(key, step_kv.first);
                });
       }) |
       std::views::join | std::ranges::to<std::vector>();
@@ -191,5 +204,5 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
 // clang-format on
 };  // namespace Internal
 
-std::string StepStatusToString(const crane::grpc::TaskStatus &status);
+std::string StepStatusToString(const crane::grpc::TaskStatus& status);
 }  // namespace util

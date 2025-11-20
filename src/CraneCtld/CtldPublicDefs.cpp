@@ -426,6 +426,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, this->StepId(), this->Status(), new_status, craned_id);
+
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
@@ -698,6 +699,7 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
+
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
     // Configuring -> Configured / Failed / Cancelled,
     this->NodeConfigured(craned_id);
@@ -732,8 +734,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         context->rn_step_raw_ptrs.insert(this);
       }
     }
-  } else if (this->Status() == crane::grpc::TaskStatus::Running) {
-    // Running -> Completed / Failed / Cancelled,
+  } else if (this->Status() == crane::grpc::TaskStatus::Running ||
+             this->Status() == crane::grpc::TaskStatus::Completing) {
+    // Running/Completing -> Completed / Failed / Cancelled,
     // Primary: the job is completed.
 
     this->StepOnNodeFinish(craned_id);
