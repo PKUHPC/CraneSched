@@ -2,7 +2,7 @@ include(FetchContent)
 FetchContent_Declare(
         mimalloc
         GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
-        GIT_TAG v2.1.7
+        GIT_TAG v2.2.4
         GIT_SHALLOW TRUE
 )
 # If MI_OVERRIDE is ON then operator new and delete will be override not only malloc and free  
