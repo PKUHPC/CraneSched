@@ -40,7 +40,36 @@ CraneSched currently provides the following plugins:
 
 ## Installing cplugind
 
-The `cplugind` daemon is part of the CraneSched-FrontEnd repository. Refer to the [Frontend Deployment Guide](../backend/Rocky9.md) for installation instructions.
+The `cplugind` daemon is part of the CraneSched-FrontEnd repository. You can install it via packages or build from source.
+
+### Via Package Manager (Recommended)
+
+Install the `cranesched-plugin` package which includes `cplugind` and all plugin shared objects:
+
+**For RPM-based systems** (Rocky Linux, CentOS, Fedora, AlmaLinux):
+```bash
+sudo dnf install cranesched-plugin-*.rpm
+```
+
+**For DEB-based systems** (Debian, Ubuntu):
+```bash
+sudo apt install ./cranesched-plugin_*.deb
+```
+
+This installs:
+- `cplugind` daemon to `/usr/bin/`
+- Plugin shared objects to `/usr/lib/crane/plugin/`:
+  - `dummy.so`, `energy.so`, `event.so`, `mail.so`, `monitor.so`, `powerControl.so`
+- `cplugind.service` systemd unit
+
+Enable and start the service:
+```bash
+systemctl enable --now cplugind
+```
+
+### From Source
+
+Refer to the [Frontend Deployment Guide](frontend.md) for instructions on building from source. After building, the plugin files will be located in the `build/plugin/` directory.
 
 Start `cplugind` manually or via systemd:
 
@@ -70,8 +99,9 @@ PlugindListenPort: "10018"
 # Plugins to load
 Plugins:
   - Name: "monitor"
-    Path: "/path/to/monitor.so"
-    Config: "/path/to/monitor.yaml"
+    Path: "/usr/lib/crane/plugin/monitor.so"  # Package installation
+    # Path: "/usr/local/lib/crane/plugin/monitor.so"  # Source installation (default PREFIX)
+    Config: "/etc/crane/monitor.yaml"
 ```
 
 ### Configuration Options
@@ -84,6 +114,8 @@ Plugins:
 - **Plugins**: List of plugins to load on this node
   - **Name**: Plugin identifier (any string)
   - **Path**: Absolute path to the `.so` file
+    - Package installation: `/usr/lib/crane/plugin/<plugin>.so`
+    - Source installation: `/usr/local/lib/crane/plugin/<plugin>.so` (or custom PREFIX)
   - **Config**: Absolute path to the plugin configuration file
 
 ## Monitor Plugin
@@ -140,11 +172,16 @@ BufferSize: 32
 Enabled: true
 Plugins:
   - Name: "monitor"
-    Path: "/path/to/build/plugin/monitor.so"
+    Path: "/usr/lib/crane/plugin/monitor.so"  # Package installation
+    # Path: "/usr/local/lib/crane/plugin/monitor.so"  # Source installation (default)
+    # Path: "/path/to/build/plugin/monitor.so"  # Development/build directory
     Config: "/etc/crane/monitor.yaml"
 ```
 
-The `monitor.so` file is typically located in the frontend build directory (`build/plugin/monitor.so`).
+!!! note "Plugin Path"
+    - **Package installation**: Use `/usr/lib/crane/plugin/monitor.so`
+    - **Source installation**: Use `/usr/local/lib/crane/plugin/monitor.so` (or custom PREFIX location)
+    - **Development**: Use `build/plugin/monitor.so` from the build directory
 
 ## Mail Plugin
 

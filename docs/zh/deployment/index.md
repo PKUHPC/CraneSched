@@ -11,7 +11,7 @@
 
 | 组件 | 描述 | 位置 |
 |------|------|------|
-| **后端** | `cranectld` (Scheduler) + `craned` (worker daemon) | 控制节点和计算节点 |
+| **后端** | `cranectld` (Scheduler) + `craned` (Node daemon) | 控制节点和计算节点 |
 | **前端** | CLI（`cbatch`、`cqueue` 等）+ 其他服务（`cfored`、`cplugind`）| 按需部署 |
 | **数据库** | MongoDB，用于存储作业、账户和使用数据 | 控制节点/存储节点 |
 
@@ -56,10 +56,11 @@ graph TB
 
 对于简单的单节点测试环境：
 
-1. 安装后端：按照 [Rocky Linux 9 指南](./backend/Rocky9.md) （步骤 1-5）
-2. 配置数据库：按照 [数据库配置指南](./configuration/database.md)
-3. 配置集群：编辑 `/etc/crane/config.yaml` （参见 [配置指南](./configuration/config.md)）
-4. 启动服务：`systemctl start cranectld craned` （以及根据需要启动其他前端服务）
+1. 安装后端：按照 [Rocky Linux 9 指南](./backend/Rocky9.md) 
+2. 安装前端：按照 [前端部署指南](./frontend/frontend.md)
+3. 配置数据库：按照 [数据库配置指南](./configuration/database.md)
+4. 配置集群：编辑 `/etc/crane/config.yaml` （参见 [配置指南](./configuration/config.md)）
+5. 启动服务：`systemctl start cranectld craned` （以及根据需要启动其他前端服务）
 
 **对于生产环境的多节点集群**，请遵循下面的完整部署流程。
 
@@ -95,7 +96,7 @@ graph TB
 
 所有指南都涵盖系统准备、依赖项和编译。构建完成后：
 
-- **[打包指南](./backend/packaging.md)** - 创建 RPM/DEB 软件包以便于跨节点分发
+- **[打包指南](./packaging.md)** - 创建 RPM/DEB 软件包以便于跨节点分发
 
 ### 步骤 2：配置数据库
 

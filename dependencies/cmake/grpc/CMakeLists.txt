@@ -9,9 +9,9 @@ if (CRANE_USE_GITEE_SOURCE)
 else ()
     set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20250127.1/abseil-cpp-20250127.1.tar.gz")
     set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/v1.34.4/c-ares-1.34.4.tar.gz")
-    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v29.4/protobuf-29.4.tar.gz")
+    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protobuf-33.1.tar.gz")
     set(RE2_SRC_URL "https://github.com/google/re2/releases/download/2024-07-02/re2-2024-07-02.tar.gz")
-    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.71.0.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.76.0.tar.gz")
 endif ()
 
 set(ABSL_PROPAGATE_CXX_STD ON)
@@ -60,7 +60,7 @@ FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
         URL ${PROTOBUF_SRC_URL}
-        URL_HASH SHA256=6BD9DCC91B17EF25C26ADF86DB71C67EC02431DC92E9589EAF82E22889230496
+        URL_HASH SHA256=FDA132CB0C86400381C0AF1FE98BD0F775CB566CB247CDCC105E344E00ACC30E
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(protobuf)
@@ -111,7 +111,7 @@ FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
         URL ${GRPC_SRC_URL}
-        URL_HASH SHA256=0D631419E54EC5B29DEF798623EE3BF5520DAC77ABEAB3284EF7027EC2363F91
+        URL_HASH SHA256=0AF37B800953130B47C075B56683EE60BDC3EDA3C37FC6004193F5B569758204
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(grpc)

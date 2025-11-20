@@ -47,7 +47,7 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 firewall-cmd --reload
 ```
 
-### 1.4 Disable SELinux
+### 1.4 Disable SELinux <small>(Optional)</small>
 
 ```bash
 # Temporary (will be reset after reboot)
@@ -57,17 +57,15 @@ setenforce 0
 sed -i s#SELINUX=enforcing#SELINUX=disabled# /etc/selinux/config
 ```
 
-### 1.5 Select CGroup Version (Optional)
+### 1.5 Select CGroup Version <small>(Optional)</small>
 
 Rocky 9 uses **CGroup v2** by default.
-CraneSched uses **CGroup v1** by default.
 
-If you prefer to enable CGroup v2 support, you’ll need [additional configuration](eBPF.md),
-or you can switch the system to use CGroup v1.
+CraneSched supports both **CGroup v1** and **CGroup v2**. However, using GRES on a CGroup v2 system requires additional configuration; see the [eBPF guide](eBPF.md) for details.
 
 #### 1.5.1 Configure CGroup v1
 
-If your system is already using CGroup v1, skip this section.
+If you cannot build the eBPF components and still need GRES, you can switch back to CGroup v1:
 
 ```bash
 # Set kernel boot parameters to switch to CGroup v1
@@ -91,17 +89,17 @@ cat /sys/fs/cgroup/cgroup.subtree_control
 echo '+cpuset +cpu +io +memory +pids' > /sys/fs/cgroup/cgroup.subtree_control
 ```
 
-Additionally, if you plan to use GRES with CGroup v2, please refer to the [eBPF guide](eBPF.md) for setup instructions.
+As mentioned earlier, using GRES with CGroup v2 requires the additional steps described in the [eBPF guide](eBPF.md).
 
 ## 2. Install Toolchain
 
 The toolchain must meet the following version requirements:
 
-* `cmake` ≥ **3.24**
-* If using **clang**, version ≥ **19**
+* CMake ≥ **3.24**
+* If using **clang++**, version ≥ **19**
 * If using **g++**, version ≥ **14**
 
-### 2.1 Install Build Tools
+Use the following commands to install and enable the required toolchain:
 
 ```bash
 dnf install -y \
@@ -110,16 +108,11 @@ dnf install -y \
     patch \
     flex \
     bison \
+    automake \
     ninja-build
 
 echo 'source /opt/rh/gcc-toolset-14/enable' >> /etc/profile.d/extra.sh
 source /etc/profile.d/extra.sh
-```
-
-### 2.2 Install Common Utilities
-
-```bash
-dnf install -y tar curl unzip git
 ```
 
 ## 3. Install Project Dependencies
@@ -135,8 +128,8 @@ dnf install -y \
     libaio-devel \
     systemd-devel \
     libcurl-devel \
-    shadow-utils-subid-devel \
-    automake
+    elfutils-libelf-devel \
+    shadow-utils-subid-devel
 ```
 
 ## 4. Install and Configure MongoDB
@@ -167,7 +160,7 @@ cmake --build .
 2. Install the built binaries:
 
 !!! tip
-    We recommend deploying CraneSched using RPM packages. See the [Packaging Guide](packaging.md) for installation instructions.
+    We recommend deploying CraneSched using RPM packages. See the [Packaging Guide](../packaging.md) for installation instructions.
 ```bash
 cmake --install .
 ```

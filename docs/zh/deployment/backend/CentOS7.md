@@ -71,13 +71,13 @@ firewall-cmd --reload
 ## 3. 安装依赖
 
 ```bash
-yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel automake libcurl-devel
+yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel
 ```
 
 从源码安装 libcgroup：
 
 ```bash
-yum install -y tar bison flex systemd-devel
+yum install -y tar bison flex automake
 
 wget https://github.com/libcgroup/libcgroup/releases/download/v3.1.0/libcgroup-3.1.0.tar.gz
 tar -zxvf libcgroup-3.1.0.tar.gz
@@ -138,13 +138,14 @@ cd CraneSched
 
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc \
-               -DCMAKE_CXX_COMPILER=/usr/bin/g++ ..
+               -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+               -DCRANE_ENABLE_CGROUP_V2=OFF ..
 cmake --build .
 ninja install
 ```
 
 !!! info
-    如果您希望使用 RPM 软件包，请参阅[打包指南](packaging.md)获取说明。
+    如果您希望使用 RPM 软件包，请参阅[打包指南](../packaging.md)获取说明。
 
 对于多节点部署鹤思，请按照[多节点部署指南](../configuration/multi-node.md)。
 
