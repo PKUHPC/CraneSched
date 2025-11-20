@@ -35,13 +35,13 @@ theme:
       accent: indigo
       toggle:
         icon: material/brightness-7
-        name: 切换至深色模式 Toggle dark mode
+        name: 切换至深色模式
     - scheme: slate
       primary: indigo
       accent: indigo
       toggle:
         icon: material/brightness-4
-        name: 切换至浅色模式 Toggle light mode
+        name: 切换至浅色模式
   logo: images/logo.png
   favicon: images/logo.png
 
