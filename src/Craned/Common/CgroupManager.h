@@ -403,7 +403,7 @@ class CgroupInterface {
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
 
-  virtual bool KillAllProcesses() = 0;
+  virtual bool KillAllProcesses(int signum) = 0;
 
   virtual bool Empty() = 0;
 
@@ -437,7 +437,7 @@ class CgroupV1 : public CgroupInterface {
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
-  bool KillAllProcesses() override;
+  bool KillAllProcesses(int signum) override;
 
   bool Empty() override;
 
@@ -495,7 +495,7 @@ class CgroupV2 : public CgroupInterface {
   bool RecoverFromResInNode(const crane::grpc::ResourceInNode &resource);
   bool EraseBpfDeviceMap();
 #endif
-  bool KillAllProcesses() override;
+  bool KillAllProcesses(int signum) override;
 
   bool Empty() override;
 
