@@ -46,7 +46,7 @@ Before building backend packages, ensure you have:
    ```
 4. **DEB tools** (for DEB packages):
    ```bash
-   # Ubuntu/Debian
+   # Debian/Ubuntu
    apt-get install -y dpkg-dev
    ```
 

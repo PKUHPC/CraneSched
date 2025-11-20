@@ -75,13 +75,13 @@ firewall-cmd --reload
 ## 3. Install Dependencies
 
 ```bash
-yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel automake libcurl-devel
+yum install -y openssl-devel curl-devel pam-devel zlib-devel zlib-static libaio-devel libcurl-devel systemd-devel
 ```
 
 Install libcgroup from source:
 
 ```bash
-yum install -y tar bison flex systemd-devel
+yum install -y tar bison flex automake
 
 wget https://github.com/libcgroup/libcgroup/releases/download/v3.1.0/libcgroup-3.1.0.tar.gz
 tar -zxvf libcgroup-3.1.0.tar.gz
@@ -142,7 +142,8 @@ cd CraneSched
 
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc \
-               -DCMAKE_CXX_COMPILER=/usr/bin/g++ ..
+               -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+               -DCRANE_ENABLE_CGROUP_V2=OFF ..
 cmake --build .
 ninja install
 ```
