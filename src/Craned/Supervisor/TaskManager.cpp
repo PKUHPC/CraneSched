@@ -341,8 +341,8 @@ void ProcInstance::InitEnvMap() {
     const auto& ia_meta = m_parent_step_inst_->GetStep().interactive_meta();
     if (!ia_meta.term_env().empty()) m_env_.emplace("TERM", ia_meta.term_env());
   }
-  // m_env_.emplace("CRANE_TASK_ID", std::to_string(task_id));
   m_env_.emplace("CRANE_PROCID", std::to_string(task_id));
+  m_env_.emplace("CRANE_PROC_ID", std::to_string(task_id));
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
@@ -1730,14 +1730,24 @@ void TaskManager::TaskFinish_(task_id_t task_id,
                static_cast<int>(err));
   }
 
-  bool orphaned = m_step_.orphaned;
+  auto& status = m_step_.final_termination_status;
+  if (status.max_exit_code < exit_code) {
+    // Bigger exit code always mean a FAILED status cased by a none zero exit
+    // code, signal or crane error.
+    status.max_exit_code = exit_code;
+    status.final_status_on_termination = new_status;
+  }
+  // Error status has higher priority than success status.
+  if (new_status != StepStatus::Completed)
+    status.final_status_on_termination = new_status;
   if (m_step_.AllTaskFinished()) {
     m_step_.GotNewStatus(StepStatus::Completing);
     DelTerminationTimer_();
     m_step_.StopCforedClient();
-    if (!orphaned) {
-      g_craned_client->StepStatusChangeAsync(new_status, exit_code,
-                                             std::move(reason));
+    if (!m_step_.orphaned) {
+      g_craned_client->StepStatusChangeAsync(
+          status.final_status_on_termination, status.max_exit_code,
+          status.final_reason_on_termination);
     }
     ShutdownSupervisorAsync();
   }

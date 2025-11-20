@@ -69,6 +69,14 @@ class StepInstance {
   // Only daemon step may migrate ssh procs to cgroup
   std::unique_ptr<Common::CgroupInterface> step_user_cg;
 
+  struct TerminationStatus {
+    // Will return to crun for interactive steps
+    uint32_t max_exit_code{0};
+    StepStatus final_status_on_termination{StepStatus::Completed};
+    std::string final_reason_on_termination{""};
+  };
+
+  TerminationStatus final_termination_status;
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
   uint64_t baseline_oom_count{0};       // v2 only
@@ -411,6 +419,8 @@ class TaskManager {
   void SupervisorFinishInit();
 
   void Wait();
+  // Shutdown supervisor asynchronously with given status, exit code and reason.
+  // Status change will be sent only if daemon step.
   void ShutdownSupervisorAsync(
       crane::grpc::TaskStatus new_status = StepStatus::Completed,
       uint32_t exit_code = 0, std::string reason = "");
