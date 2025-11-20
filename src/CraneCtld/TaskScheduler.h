@@ -880,7 +880,6 @@ class TaskScheduler {
       std::unique_ptr<TaskInCtld> task);
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
-  void HandleFailToRecoverRngJob_(task_id_t task_id);
 
   static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
   static void PersistAndTransferStepsToMongodb_(
