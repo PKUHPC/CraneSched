@@ -458,116 +458,14 @@ void CtldClient::Init() {
         std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
-        // For status recovery: steps that need to sync status from Craned to
-        // Ctld
-        struct StepStatusRecovery {
-          StepStatus status;
-          uint32_t exit_code;
-        };
-        std::unordered_map<job_id_t, std::map<step_id_t, StepStatusRecovery>>
-            steps_to_sync_status{};
-
-        for (const auto& [job_id, steps] : valid_job_steps) {
-          for (const auto& step_id : steps) {
-            auto ctld_status =
-                arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto craned_status = exact_job_steps.at(job_id).at(step_id);
-            uint32_t craned_exit_code =
-                g_job_mgr->GetStepExitCode(job_id, step_id);
-            CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
-                        step_id, craned_status, ctld_status);
-
-            if (ctld_status != craned_status) {
-              CRANE_DEBUG(
-                  "[Step #{}.{}] status inconsistent, craned: {} ,ctld: {} .",
-                  job_id, step_id, craned_status, ctld_status);
-
-              // Slurm-like behavior: recover to actual status instead of
-              // cleaning up Priority: Use Craned's actual status as the source
-              // of truth
-
-              // If Craned status is Completing, it means the task exceeded time
-              // limit but is still running - we should sync this to Ctld
-              if (craned_status == StepStatus::Completing) {
-                CRANE_INFO(
-                    "[Step #{}.{}] Craned has Completing status, will sync to "
-                    "Ctld.",
-                    job_id, step_id);
-                steps_to_sync_status[job_id][step_id] = {
-                    .status = craned_status,
-                    .exit_code = craned_exit_code};
-                continue;
-              }
-
-              // If Craned status is Running but Ctld thinks it's Completing,
-              // trust Craned's status (task is still running)
-              if (craned_status == StepStatus::Running &&
-                  ctld_status == StepStatus::Completing) {
-                CRANE_INFO(
-                    "[Step #{}.{}] Craned reports Running, Ctld has "
-                    "Completing, "
-                    "will sync to Ctld.",
-                    job_id, step_id);
-                steps_to_sync_status[job_id][step_id] = {
-                    .status = craned_status,
-                    .exit_code = craned_exit_code};
-                continue;
-              }
-
-              // For terminal states from Craned (Completed/Failed), sync to
-              // Ctld
-              if (craned_status == StepStatus::Completed ||
-                  craned_status == StepStatus::Failed ||
-                  craned_status == StepStatus::Cancelled) {
-                CRANE_INFO(
-                    "[Step #{}.{}] Craned reports terminal state {}, will sync "
-                    "to Ctld.",
-                    job_id, step_id, craned_status);
-                steps_to_sync_status[job_id][step_id] = {
-                    .status = craned_status,
-                    .exit_code = craned_exit_code};
-                continue;
-              }
-
-              // For other inconsistencies, mark as lost (old behavior)
-              CRANE_WARN(
-                  "[Step #{}.{}] Unhandled status inconsistency, marking as "
-                  "lost/invalid.",
-                  job_id, step_id);
-              invalid_steps[job_id].insert(step_id);
-              lost_steps[job_id].insert(step_id);
-            }
-          }
-        }
-
-        // Send status change notifications for steps that need sync
-        if (!steps_to_sync_status.empty()) {
-          // Transform for logging (extract just status part)
-          std::unordered_map<job_id_t, std::map<step_id_t, StepStatus>>
-              status_map_for_log;
-          for (const auto& [job_id, step_map] : steps_to_sync_status) {
-            for (const auto& [step_id, recovery] : step_map) {
-              status_map_for_log[job_id][step_id] = recovery.status;
-            }
-          }
-          CRANE_INFO("Syncing status for steps: [{}]",
-                     util::JobStepsWithStatusToString(status_map_for_log));
-          for (const auto& [job_id, step_status_map] : steps_to_sync_status) {
-            for (const auto& [step_id, recovery] : step_status_map) {
-              g_ctld_client->StepStatusChangeAsync(
-                  {.job_id = job_id,
-                   .step_id = step_id,
-                   .new_status = recovery.status,
-                   .exit_code = recovery.exit_code,
-                   .reason =
-                       "Status recovered from Craned after reconnection"});
-            }
-          }
-        }
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+
+        // Only terminate truly invalid steps (those not in Ctld's view at all)
+        // Don't kill steps that exist in both but may have status differences
+        // - Ctld will handle status synchronization via intelligent merging
         if (!invalid_steps.empty()) {
-          CRANE_INFO("Terminating invalid step as orphaned : [{}].",
+          CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
                      util::JobStepsToString(invalid_steps));
           for (auto [job_id, steps] : invalid_steps) {
             for (auto step_id : steps)
@@ -729,6 +627,24 @@ bool CtldClient::CranedRegister_(
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
+  }
+
+  // Collect current step statuses from Craned
+  auto allocated_steps = g_job_mgr->GetAllocatedJobSteps();
+  auto& grpc_step_statuses = *grpc_meta->mutable_craned_step_statuses();
+  for (const auto& [job_id, step_map] : allocated_steps) {
+    auto& job_step_statuses = grpc_step_statuses[job_id];
+    auto& step_statuses_map = *job_step_statuses.mutable_step_statuses();
+    for (const auto& [step_id, status] : step_map) {
+      uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+      auto& step_status_info = step_statuses_map[step_id];
+      step_status_info.set_status(status);
+      step_status_info.set_exit_code(exit_code);
+      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
+                         "[Step #{}.{}] Reporting status {} with exit code {} "
+                         "in CranedRegister",
+                         job_id, step_id, status, exit_code);
+    }
   }
 
   grpc::ClientContext context;

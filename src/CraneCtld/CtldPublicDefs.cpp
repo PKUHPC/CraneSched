@@ -427,34 +427,6 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, this->StepId(), this->Status(), new_status, craned_id);
 
-  // Status recovery: Handle status sync from Craned after reconnection
-  // If the reason indicates this is a status recovery, update to Craned's
-  // state
-  if (reason.find("Status recovered from Craned") != std::string::npos) {
-    CRANE_INFO("[Step #{}.{}] Recovering status from Craned: {} -> {}", job_id,
-               this->StepId(), this->Status(), new_status);
-
-    // Update to the recovered status
-    if (new_status == crane::grpc::TaskStatus::Completing) {
-      // Ctld accepts Completing status from Craned
-      this->SetStatus(crane::grpc::TaskStatus::Completing);
-      CRANE_INFO("[Step #{}.{}] Status recovered to Completing", job_id,
-                 this->StepId());
-      // Persist the recovered status to DB
-      context->rn_step_raw_ptrs.insert(this);
-      return std::nullopt;  // Job not finished yet
-    } else if (new_status == crane::grpc::TaskStatus::Running) {
-      // If Craned reports Running, update from Completing to Running
-      this->SetStatus(crane::grpc::TaskStatus::Running);
-      CRANE_INFO("[Step #{}.{}] Status recovered to Running", job_id,
-                 this->StepId());
-      // Persist the recovered status to DB
-      context->rn_step_raw_ptrs.insert(this);
-      return std::nullopt;  // Job not finished yet
-    }
-    // For terminal states, continue with normal processing below
-  }
-
   switch (this->Status()) {
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
@@ -727,36 +699,6 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
   CRANE_TRACE("[Step #{}.{}] current status {}, got new status {} from {}",
               job_id, step_id, this->Status(), new_status, craned_id);
-
-  // Status recovery: Handle status sync from Craned after reconnection
-  if (reason.find("Status recovered from Craned") != std::string::npos) {
-    CRANE_INFO("[Step #{}.{}] Recovering status from Craned: {} -> {}", job_id,
-               step_id, this->Status(), new_status);
-
-    // Update to the recovered status
-    if (new_status == crane::grpc::TaskStatus::Completing) {
-      this->SetStatus(crane::grpc::TaskStatus::Completing);
-      if (this->IsPrimaryStep()) {
-        job->SetStatus(crane::grpc::TaskStatus::Completing);
-        context->rn_job_raw_ptrs.insert(job);
-      }
-      context->rn_step_raw_ptrs.insert(this);
-      CRANE_INFO("[Step #{}.{}] Status recovered to Completing", job_id,
-                 step_id);
-      return;  // Don't process as normal status change
-    } else if (new_status == crane::grpc::TaskStatus::Running) {
-      this->SetStatus(crane::grpc::TaskStatus::Running);
-      if (this->IsPrimaryStep()) {
-        job->SetStatus(crane::grpc::TaskStatus::Running);
-        context->rn_job_raw_ptrs.insert(job);
-      }
-      context->rn_step_raw_ptrs.insert(this);
-      CRANE_INFO("[Step #{}.{}] Status recovered to Running", job_id, step_id);
-      return;  // Don't process as normal status change
-    }
-    // For terminal states (Completed/Failed/Cancelled), continue with normal
-    // processing
-  }
 
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
     // Configuring -> Configured / Failed / Cancelled,
