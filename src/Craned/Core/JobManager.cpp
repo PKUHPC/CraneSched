@@ -55,27 +55,27 @@ EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
 
-  auto node_id_to_str = [&, this]() -> std::string {
-    uint32_t node_idx = 0;
+  // auto node_id_to_str = [&, this]() -> std::string {
+  //   uint32_t node_idx = 0;
 
-    std::array<char, HOST_NAME_MAX + 1> host_name{};
-    if (gethostname(host_name.data(), host_name.size()) != 0) {
-      return std::to_string(-1);  // invalid
-    }
-    std::string_view host_name_view(host_name.data());
-    for (const auto& node_name : daemon_step_to_d.nodelist()) {
-      if (node_name == host_name_view) {
-        break;
-      }
-      node_idx++;
-    }
+  //   std::array<char, HOST_NAME_MAX + 1> host_name{};
+  //   if (gethostname(host_name.data(), host_name.size()) != 0) {
+  //     return std::to_string(-1);  // invalid
+  //   }
+  //   std::string_view host_name_view(host_name.data());
+  //   for (const auto& node_name : daemon_step_to_d.nodelist()) {
+  //     if (node_name == host_name_view) {
+  //       break;
+  //     }
+  //     node_idx++;
+  //   }
 
-    if (node_idx >= daemon_step_to_d.nodelist().size()) {
-      return std::to_string(-1);  // invalid
-    }
+  //   if (node_idx >= daemon_step_to_d.nodelist().size()) {
+  //     return std::to_string(-1);  // invalid
+  //   }
 
-    return std::to_string(node_idx);
-  };
+  //   return std::to_string(node_idx);
+  // };
 
   uint64_t gpus_per_node = 0;
   auto alloc_node_num = daemon_step_to_d.nodelist().size();
@@ -111,24 +111,25 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
-  env_map.emplace("CRANE_EXCLUDES",
-                  absl::StrJoin(daemon_step_to_d.exclude_nodelist(), ";"));
-  env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.cwd());
-  env_map.emplace("CRANE_CPUS_PER_TASK",
-                  std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
-  env_map.emplace("CRANE_MEM_PER_NODE", std::to_string(mem_in_node));
-  env_map.emplace("CRANE_NTASKS_PER_NODE",
-                  std::to_string(daemon_step_to_d.ntasks_per_node()));
-  env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
-  env_map.emplace("CRANE_GPUS_PER_NODE", std::to_string(gpus_per_node));
-  env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
-  env_map.emplace(
-      "CRANE_NTASKS",
-      std::to_string(alloc_node_num * daemon_step_to_d.ntasks_per_node()));
-  env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
-  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
-  env_map.emplace("CRANE_NODEID", node_id_to_str());
-  env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+  // env_map.emplace("CRANE_EXCLUDES",
+  //                 absl::StrJoin(daemon_step_to_d.exclude_nodelist(), ";"));
+  // env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.cwd());
+  // env_map.emplace("CRANE_CPUS_PER_TASK",
+  //                 std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
+  // env_map.emplace("CRANE_MEM_PER_NODE", std::to_string(mem_in_node));
+  // env_map.emplace("CRANE_NTASKS_PER_NODE",
+  //                 std::to_string(daemon_step_to_d.ntasks_per_node()));
+  // env_map.emplace("CRANE_GPUS",
+  // std::to_string(daemon_step_to_d.total_gpus()));
+  // env_map.emplace("CRANE_GPUS_PER_NODE", std::to_string(gpus_per_node));
+  // env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
+  // env_map.emplace(
+  //     "CRANE_NTASKS",
+  //     std::to_string(alloc_node_num * daemon_step_to_d.ntasks_per_node()));
+  // env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
+  // env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  // env_map.emplace("CRANE_NODEID", node_id_to_str());
+  // env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
 
   return env_map;
 }
