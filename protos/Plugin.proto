@@ -110,6 +110,14 @@ message RegisterCranedHookReply {
   bool ok = 1;
 }
 
+message UpdateLicensesHookRequest {
+  repeated LicenseInfo license_info = 1;
+}
+
+message UpdateLicensesHookReply {
+  bool ok = 1;
+}
+
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc StartHook(StartHookRequest) returns (StartHookReply);
@@ -117,6 +125,7 @@ service CranePluginD {
   rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
   rpc UpdatePowerStateHook(UpdatePowerStateHookRequest) returns (UpdatePowerStateHookReply);
   rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
+  rpc UpdateLicensesHook(UpdateLicensesHookRequest) returns (UpdateLicensesHookReply);
 
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
