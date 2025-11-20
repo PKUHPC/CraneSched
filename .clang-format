@@ -16,7 +16,7 @@ AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLoopsOnASingleLine: true
 
 BinPackArguments: true
-BinPackParameters: BinPack
+# BinPackParameters: BinPack
 
 EmptyLineBeforeAccessModifier: LogicalBlock
 
