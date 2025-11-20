@@ -510,7 +510,7 @@ set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${CRANE_CPACK_DEBUGINFO_PACKAGE})
 
 # Create post-installation script for creating crane user and directory
 file(WRITE ${CMAKE_BINARY_DIR}/post_install.sh
-        "#!/bin/bash
+"#!/bin/bash
 # Create crane user if it doesn't exist
 if ! id -u crane &>/dev/null; then
     useradd -r -s /sbin/nologin crane
