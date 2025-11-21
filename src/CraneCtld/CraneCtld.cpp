@@ -98,10 +98,10 @@ void ParseConfig(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
 
-      g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
-
       if (config["ClusterName"])
         g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+
+      g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
@@ -233,7 +233,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
         }
-        }
+      }
 
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
