@@ -25,6 +25,7 @@ ccontrol <ACTION> <ENTITY> [OPTIONS]
 - **partition** - Node partitions
 - **job** - Jobs/tasks
 - **reservation** - Resource reservations
+- **lic** - License
 
 ## Global Options
 
@@ -116,6 +117,26 @@ ccontrol show reservation my_reservation
 ```
 
 ![ccontrol](../../images/ccontrol/ccontrol_showreservation.png)
+
+#### Show License
+
+Display information about the license.
+
+```bash
+# 显示所有许可证
+ccontrol show lic
+
+# 显示特定许可证
+ccontrol show lic <license_name>
+```
+
+**示例：**
+```bash
+ccontrol show lic
+ccontrol show lic my_lic
+```
+
+![ccontrol](../../images/ccontrol/ccontrol_showlic.png)
 
 ### Update Commands
 

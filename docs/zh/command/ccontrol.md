@@ -25,6 +25,7 @@ ccontrol <操作> <实体> [选项]
 - **partition** - 节点分区
 - **job** - 作业/任务
 - **reservation** - 资源预留
+- **lic** - 许可证
 
 ## 全局选项
 
@@ -116,6 +117,27 @@ ccontrol show reservation my_reservation
 ```
 
 ![ccontrol](../../images/ccontrol/ccontrol_showreservation.png)
+
+
+#### 显示许可证
+
+显示许可证的信息。
+
+```bash
+# 显示所有许可证
+ccontrol show lic
+
+# 显示特定许可证
+ccontrol show lic <许可证名称>
+```
+
+**示例：**
+```bash
+ccontrol show lic
+ccontrol show lic my_lic
+```
+
+![ccontrol](../../images/ccontrol/ccontrol_showlic.png)
 
 ### Update 命令
 
