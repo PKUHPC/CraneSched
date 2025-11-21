@@ -77,20 +77,20 @@ EnvMap JobInD::GetJobEnvMap() {
   //   return std::to_string(node_idx);
   // };
 
-  uint64_t gpus_per_node = 0;
-  auto alloc_node_num = daemon_step_to_d.nodelist().size();
-  if (alloc_node_num != 0) {
-    gpus_per_node = daemon_step_to_d.total_gpus() / alloc_node_num;
-  }
-  auto mem_in_node =
-      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
-      (static_cast<uint64_t>(1024 * 1024));
+  // uint64_t gpus_per_node = 0;
+  // auto alloc_node_num = daemon_step_to_d.nodelist().size();
+  // if (alloc_node_num != 0) {
+  //   gpus_per_node = daemon_step_to_d.total_gpus() / alloc_node_num;
+  // }
+  // auto mem_in_node =
+  //     daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
+  //     (static_cast<uint64_t>(1024 * 1024));
 
-  auto cpus_on_node =
-      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
-  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
-                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
-                         : 0.0;
+  // auto cpus_on_node =
+  //     daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
+  // auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
+  //                        ? (static_cast<double>(mem_in_node) / cpus_on_node)
+  //                        : 0.0;
 
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 

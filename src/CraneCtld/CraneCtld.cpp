@@ -100,6 +100,9 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ConfigCrcVal = util::CalcConfigCRC32(config);
 
+      if (config["ClusterName"])
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
 
@@ -124,16 +127,17 @@ void ParseConfig(int argc, char** argv) {
         db_config_path = config["DbConfigPath"].as<std::string>();
       }
 
-      if (config["ClusterName"]) {
-        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
-        if (g_config.CraneClusterName.empty()) {
-          CRANE_ERROR("ClusterName is empty.");
-          std::exit(1);
-        }
-      } else {
-        CRANE_ERROR("ClusterName is empty.");
-        std::exit(1);
-      }
+      // if (config["ClusterName"]) {
+      //   g_config.CraneClusterName =
+      //   config["ClusterName"].as<std::string>(); if
+      //   (g_config.CraneClusterName.empty()) {
+      //     CRANE_ERROR("ClusterName is empty.");
+      //     std::exit(1);
+      //   }
+      // } else {
+      //   CRANE_ERROR("ClusterName is empty.");
+      //   std::exit(1);
+      // }
 
       g_config.CraneCtldMutexFilePath =
           g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
@@ -229,7 +233,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
         }
-      }
+        }
 
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
