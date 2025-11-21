@@ -63,12 +63,14 @@ bool SetFdNonBlocking(int fd);
 void CloseFdRange(int fd_begin, int fd_end);
 
 // Close file descriptors from fd_begin to the max fd.
+// This may be slow if fd_max is too large.
 void CloseFdFrom(int fd_begin);
 
 // Set close-on-exec flag on [fd_begin, fd_end).
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 
 // Set close-on-exec flag from fd_begin to the max fd.
+// This may be slow if fd_max is too large.
 void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
