@@ -69,6 +69,7 @@ void CloseFdFrom(int fd_begin);
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 
 // Set close-on-exec flag from fd_begin to the max fd.
+// This may be slow if fd_max is too large.
 void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
