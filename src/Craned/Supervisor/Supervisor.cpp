@@ -31,6 +31,7 @@
 using Craned::Supervisor::g_config;
 
 void InitFromStdin(int argc, char** argv) {
+  auto supervisor_start_time = std::chrono::system_clock::now();
   cxxopts::Options options("CSupervisor");
 
   // clang-format off
@@ -68,6 +69,7 @@ void InitFromStdin(int argc, char** argv) {
     fmt::print(stderr, "[Supervisor] Failed to recv message from Craned.\n");
     std::abort();
   }
+  auto recv_init_msg_time = std::chrono::system_clock::now();
 
   g_config.JobId = msg.job_id();
   g_config.StepId = msg.step_id();
@@ -139,6 +141,10 @@ void InitFromStdin(int argc, char** argv) {
     ostream.Flush();
     std::abort();
   }
+  CRANE_INFO("Supervisor start at: {}",
+             std::chrono::current_zone()->to_local(supervisor_start_time));
+  CRANE_INFO("Supervisor recv init msg at: {}",
+             std::chrono::current_zone()->to_local(recv_init_msg_time));
 }
 
 bool CreateRequiredDirectories() {
