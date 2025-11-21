@@ -120,6 +120,37 @@ void InitFromStdin(int argc, char** argv) {
       std::filesystem::path(kDefaultSupervisorUnixSockDir) /
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
+  if (msg.has_job_log_hook_config()) {
+    g_config.JobLogHook.TaskPrologs.reserve(
+        msg.job_log_hook_config().task_prologs_size());
+    for (const auto& task_prolog : msg.job_log_hook_config().task_prologs()) {
+      g_config.JobLogHook.TaskPrologs.emplace_back(task_prolog);
+    }
+    g_config.JobLogHook.TaskEpilogs.reserve(
+        msg.job_log_hook_config().task_epilogs_size());
+    for (const auto& task_epilog : msg.job_log_hook_config().task_epilogs()) {
+      g_config.JobLogHook.TaskEpilogs.emplace_back(task_epilog);
+    }
+
+    g_config.JobLogHook.Prologs.reserve(
+        msg.job_log_hook_config().prologs_size());
+    for (const auto& prolog : msg.job_log_hook_config().prologs()) {
+      g_config.JobLogHook.Prologs.emplace_back(prolog);
+    }
+    g_config.JobLogHook.Epilogs.reserve(
+        msg.job_log_hook_config().epilogs_size());
+    for (const auto& epilog : msg.job_log_hook_config().epilogs()) {
+      g_config.JobLogHook.Epilogs.emplace_back(epilog);
+    }
+
+    g_config.JobLogHook.PrologTimeout =
+        msg.job_log_hook_config().prologtimeout();
+    g_config.JobLogHook.EpilogTimeout =
+        msg.job_log_hook_config().epilogtimeout();
+    g_config.JobLogHook.PrologEpilogTimeout =
+        msg.job_log_hook_config().prologepilogtimeout();
+  }
+
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
     InitLogger(log_level.value(), g_config.SupervisorLogFile, false);
@@ -197,6 +228,23 @@ void GlobalVariableInit() {
 
   if (oom_adj_file_stream.fail()) {
     std::exit(1);
+  }
+
+  if (!g_config.JobLogHook.Prologs.empty()) {
+    CRANE_TRACE("Running Prologs...");
+    RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.Prologs,
+                                   .envs = g_config.JobEnv,
+                                   .run_uid = 0,
+                                   .run_gid = 0,
+                                   .is_prolog = true};
+    if (g_config.JobLogHook.PrologTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+    else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+      run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+
+    if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+      std::exit(1);
+    }
   }
 
   PasswordEntry::InitializeEntrySize();

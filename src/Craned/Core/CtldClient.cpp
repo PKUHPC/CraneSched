@@ -572,6 +572,19 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
+void CtldClient::UpdateNodeDrainState(bool is_drain,
+                                      const std::string& reason) {
+  grpc::ClientContext context;
+  crane::grpc::UpdateNodeDrainStateRequest request;
+  crane::grpc::UpdateNodeDrainStateReply reply;
+  request.set_craned_id(g_config.CranedIdOfThisNode);
+  request.set_drain(is_drain);
+  request.set_reason(reason);
+
+  auto status = m_stub_->UpdateNodeDrainState(&context, request, &reply);
+  if (!status.ok() || !reply.ok()) CRANE_DEBUG("UpdateNodeDrainState failed");
+}
+
 std::map<job_id_t, std::map<step_id_t, StepStatus>>
 CtldClient::GetAllStepStatusChange() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
