@@ -15,7 +15,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **--ntasks-per-node uint32**: Number of tasks per node (default: 1)
 - **--mem string**: Maximum memory per node. Supports GB (G, g), MB (M, m), KB (K, k), and Bytes (B), default unit is MB
 - **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
-- **--L, --licenses**: The licenses that the job requires to use
+- **--L, --licenses**: The licenses that the job requires to use, format: `lic1:2,lic2:4` or `lic1:2|lic2:4`
 
 ### Job Information
 - **-J, --job-name string**: Job name

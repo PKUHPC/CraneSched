@@ -44,7 +44,7 @@ cbatch cbatch_test.sh
 - **--ntasks-per-node uint32**: Number of tasks to invoke on each node (default: 1)
 - **--mem string**: Maximum amount of real memory. Supports GB (G, g), MB (M, m), KB (K, k) and Bytes (B), default unit is MB
 - **--gres string**: Generic resources required per task, format: `gpu:a100:1` or `gpu:1`
-- **--L, --licenses**: The licenses that the job requires to use
+- **--L, --licenses**: The licenses that the job requires to use, format: `lic1:2,lic2:4` or `lic1:2|lic2:4`
 
 ### Job Information
 - **-J, --job-name string**: Name of the job
