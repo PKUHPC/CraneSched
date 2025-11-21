@@ -73,7 +73,8 @@ option(CRANE_USE_SYSTEM_LIBBPF "Use libbpf from system instead of building from 
 option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" ON)
 option(CRANE_ENABLE_BPF "Enable eBPF support for Cgroup V2 device management" OFF)
 
-option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
+option(CRANE_FULL_DYNAMIC "Enable dynamic linking for most libraries" OFF)
+option(CRANE_USE_LIBCXX "Force libc++ when using the Clang toolchain" OFF)
 
 option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 
@@ -174,8 +175,17 @@ if (${CRANE_FORCE_COLORED_OUTPUT})
 endif ()
 
 if (${CRANE_NATIVE_ARCH_OPT})
-    message(STATUS "-march=native enabled")
+    message(STATUS "-march=native enabled, which could make the binaries not portable across different CPUs.")
     add_compile_options(-march=native)
+endif ()
+
+if (CRANE_USE_LIBCXX)
+    if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "CRANE_USE_LIBCXX requires Clang since -stdlib=libc++ is a Clang-only option.")
+    endif ()
+    message(STATUS "Forcing libc++ for C++ targets.")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
+    add_link_options($<$<LINK_LANGUAGE:CXX>:-stdlib=libc++> $<$<LINK_LANGUAGE:CXX>:-lc++abi>)
 endif ()
 
 # In CentOS 7, the following packages are required to enable sanitizers:
@@ -266,8 +276,11 @@ endif ()
 if (${CRANE_FULL_DYNAMIC})
     set(CMAKE_SKIP_BUILD_RPATH FALSE)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+elseif (${CRANE_USE_LIBCXX})
+    message(STATUS "Static linking of libc++ is not supported; use dynamic linking.")
 else ()
     # static link on c++ libs
+    message(STATUS "Static linking libstdc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 endif ()
