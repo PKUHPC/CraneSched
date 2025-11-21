@@ -164,10 +164,7 @@ void CloseFdRange(int fd_begin, int fd_end) {
   for (int i = fd_begin; i < fd_max; i++) close(i);
 }
 
-void CloseFdFrom(int fd_begin) {
-  int fd_max = GetFdOpenMax();
-  for (int i = fd_begin; i < fd_max; i++) close(i);
-}
+void CloseFdFrom(int fd_begin) { closefrom(fd_begin); }
 
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end) {
   int fd_max;
