@@ -188,6 +188,9 @@ struct Config {
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
+
+  std::unordered_map<LicenseId, uint32_t> lic_id_to_count_map;
+
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
@@ -699,6 +702,8 @@ struct TaskInCtld {
 
   bool exclusive{false};
 
+  std::unordered_map<std::string, uint32_t> licenses_count;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -836,6 +841,9 @@ struct TaskInCtld {
   void SetEndTimeByUnixSecond(uint64_t val);
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
+
+  void SetActualLicenses(
+      std::unordered_map<LicenseId, uint32_t>&& actual_licenses);
 
   void SetHeld(bool val);
   bool const& Held() const { return held; }
@@ -1055,6 +1063,15 @@ struct User {
       return "Unknown";
     }
   }
+};
+
+// TODO: not use free, only total and used
+struct License {
+  LicenseId license_id; /* license name */
+  uint32_t total;       /* The total number of configured license */
+  uint32_t used;        /* Number of license in use */
+  uint32_t free;        /* Number of license in free */
+  uint32_t reserved;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

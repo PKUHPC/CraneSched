@@ -32,6 +32,7 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "LicensesManager.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
@@ -332,6 +333,28 @@ void ParseConfig(int argc, char** argv) {
                      Ctld::kMaxScheduledBatchSize);
       } else {
         g_config.ScheduledBatchSize = Ctld::kDefaultScheduledBatchSize;
+      }
+
+      if (config["Licenses"]) {
+        for (auto it = config["Licenses"].begin();
+             it != config["Licenses"].end(); ++it) {
+          auto license = it->as<YAML::Node>();
+          std::string name;
+          uint32_t quantity;
+          if (license["name"]) {
+            name = license["name"].as<std::string>();
+          } else {
+            CRANE_ERROR("Illegal licenses name format.");
+            std::exit(1);
+          }
+          if (license["quantity"]) {
+            quantity = license["quantity"].as<uint32_t>();
+          } else {
+            CRANE_ERROR("Illegal licenses quantity format.");
+            std::exit(1);
+          }
+          g_config.lic_id_to_count_map.emplace(name, quantity);
+        }
       }
 
       g_config.RejectTasksBeyondCapacity =
@@ -833,6 +856,9 @@ void InitializeCtldGlobalVariables() {
   // since the recovery stage of the task scheduler will acquire
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
+
+  g_licenses_manager = std::make_unique<LicensesManager>();
+  g_licenses_manager->Init(g_config.lic_id_to_count_map);
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
