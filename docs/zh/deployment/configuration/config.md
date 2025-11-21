@@ -290,6 +290,25 @@ CranedLogFile: craned/craned.log
 # 在前台运行（对调试有用）
 CraneCtldForeground: false
 CranedForeground: false
+
+CraneCtld:
+  # cranectld的单个日志文件大小限制
+  MaxLogFileSize: 50M
+  # cranectld保留的日志文件最大数量
+  MaxLogFileNum: 3  
+
+Craned:
+  # craned的单个日志文件大小限制
+  MaxLogFileSize: 50M
+  # craned保留的日志文件最大数量
+  MaxLogFileNum: 3
+
+Supervisor:
+  # supervisor的单个日志文件大小限制
+  MaxLogFileSize: 50M
+  # supervisor保留的日志文件最大数量
+  MaxLogFileNum: 3
+            
 ```
 
 

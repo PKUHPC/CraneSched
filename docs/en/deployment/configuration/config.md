@@ -291,6 +291,25 @@ CranedLogFile: craned/craned.log
 # Run in foreground (useful for debugging)
 CraneCtldForeground: false
 CranedForeground: false
+
+CraneCtld:
+  # Maximum log file size for cranectld
+  MaxLogFileSize: 50M
+  # Maximum log file number for cranectld
+  MaxLogFileNum: 3  
+
+Craned:
+  # Maximum log file size for craned
+  MaxLogFileSize: 50M
+  # Maximum log file number for craned
+  MaxLogFileNum: 3  
+
+Supervisor:
+  # Maximum log file size for supervisor
+  MaxLogFileSize: 50M
+  # Maximum log file number for supervisor
+  MaxLogFileNum: 3  
+            
 ```
 
 
