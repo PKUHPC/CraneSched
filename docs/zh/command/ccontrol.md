@@ -151,7 +151,7 @@ ccontrol update nodename=crane01 state=resume
 修改作业属性，包括优先级、时间限制、备注和邮件设置。
 
 ```bash
-ccontrol update jobid=<作业ID> [priority=<优先级>] [timelimit=<时间限制>] [comment=<备注>] [mailuser=<邮箱>] [mailtype=<类型>]
+ccontrol update jobid=<作业ID> [priority=<优先级>] [timelimit=<时间限制>] [comment=<备注>] [mailuser=<邮箱>] [mailtype=<类型>] [deadline=<截止时间>]
 ```
 
 **参数：**
@@ -162,7 +162,7 @@ ccontrol update jobid=<作业ID> [priority=<优先级>] [timelimit=<时间限制
 - **comment**（可选）：作业的新备注字符串
 - **mailuser**（可选）：接收通知的邮箱地址
 - **mailtype**（可选）：邮件通知类型（NONE, BEGIN, END, FAIL, TIMELIMIT, ALL）
-
+- **deadline**（可选）：截止时间(多种时间格式)
 **示例：**
 ```bash
 # 更新作业优先级

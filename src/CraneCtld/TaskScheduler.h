@@ -759,7 +759,9 @@ class TaskScheduler {
   std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
                                                  int64_t secs);
 
-  CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
+  CraneErrCode ChangeTaskTimeConstraint(
+      task_id_t task_id, std::optional<int64_t> time_limit_seconds,
+      std::optional<int64_t> deadline_time);
 
   CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
 
@@ -820,8 +822,9 @@ class TaskScheduler {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         meta.has_been_cancelled_on_front_end = true;
       }
-      m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{.task = std::move(task)});
+      m_cancel_task_queue_.enqueue(CancelPendingTaskQueueElem{
+          .task = std::move(task),
+          .finish_status = crane::grpc::TaskStatus::Cancelled});
       m_cancel_task_async_handle_->send();
       m_pending_task_map_.erase(pd_it);
       return CraneErrCode::SUCCESS;
@@ -958,6 +961,10 @@ class TaskScheduler {
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::shared_ptr<uvw::loop> uvw_deadline_loop;
+  std::thread m_job_deadline_timer_thread_;
+  void DeadlineTimerThread_();
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
@@ -981,6 +988,7 @@ class TaskScheduler {
 
   struct CancelPendingTaskQueueElem {
     std::unique_ptr<TaskInCtld> task;
+    crane::grpc::TaskStatus finish_status;
   };
 
   struct CancelRunningTaskQueueElem {
@@ -1044,6 +1052,21 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
   void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_async_handle_;
+  ConcurrentQueue<job_id_t> m_job_deadline_timer_queue_;
+
+  using DeadlineTimerQueueElem = std::pair<job_id_t, int64_t>;
+  std::shared_ptr<uvw::async_handle> m_job_deadline_timer_create_async_handle_;
+  ConcurrentQueue<DeadlineTimerQueueElem> m_job_deadline_timer_create_queue_;
+
+  TreeMap<job_id_t, std::shared_ptr<uvw::timer_handle>> m_deadline_timer_map_;
+
+  void CancelDeadlineTaskCb_();
+
+  void CreateDeadlineTimerCb_();
+
+  void DelDeadlineTimer_(job_id_t job_id);
 };
 
 }  // namespace Ctld

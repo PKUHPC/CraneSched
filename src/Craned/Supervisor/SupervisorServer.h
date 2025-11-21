@@ -50,10 +50,11 @@ class SupervisorServiceImpl : public Supervisor::Service {
       const crane::grpc::supervisor::CheckStatusRequest* request,
       crane::grpc::supervisor::CheckStatusReply* response) override;
 
-  grpc::Status ChangeTaskTimeLimit(
+  grpc::Status ChangeTaskTimeConstraint(
       grpc::ServerContext* context,
-      const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
-      crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) override;
+      const crane::grpc::supervisor::ChangeTaskTimeConstraintRequest* request,
+      crane::grpc::supervisor::ChangeTaskTimeConstraintReply* response)
+      override;
 
   grpc::Status TerminateTask(
       grpc::ServerContext* context,

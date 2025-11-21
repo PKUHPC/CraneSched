@@ -24,11 +24,13 @@ cqueue
 - **TimeLimit**: Job time limit
 - **Nodes**: Number of nodes allocated to the job
 - **NodeList**: Names of nodes where the job is running
+- **Deadline**： Deadline of the job
 
 ## Main Options
 
 - **-A/--account string**: Specify accounts to query (comma-separated list for multiple accounts)
 - **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
+- **--deadline** **string**: Display deadline
 - **-F/--full**: Display full content. If not specified, only 30 characters per cell are displayed by default
 - **-h/--help**: Display help
 - **-i/--iterate uint**: Refresh query results at specified intervals (seconds). For example, `-i=3` outputs results every 3 seconds
@@ -62,6 +64,7 @@ The `--format` option allows customized output formatting. Fields are identified
 | %a | Account | Account associated with the job |
 | %c | AllocCpus | CPUs allocated to the job |
 | %C | ReqCpus | Total CPUs requested by the job |
+| %deadline | Deadline | Deadline time of the job |
 | %e | ElapsedTime | Elapsed time since job started |
 | %h | Held | Hold state of the job |
 | %j | JobID | Job ID |

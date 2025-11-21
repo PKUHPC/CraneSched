@@ -320,31 +320,38 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
+grpc::Status CranedServiceImpl::ChangeJobTimeConstraint(
     grpc::ServerContext *context,
-    const crane::grpc::ChangeJobTimeLimitRequest *request,
-    crane::grpc::ChangeJobTimeLimitReply *response) {
+    const crane::grpc::ChangeJobTimeConstraintRequest *request,
+    crane::grpc::ChangeJobTimeConstraintReply *response) {
   response->set_ok(false);
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_ERROR("CranedServer is not ready.");
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
+  std::optional<int64_t> time_limit_seconds =
+      request->has_time_limit_seconds()
+          ? std::optional<int64_t>(request->time_limit_seconds())
+          : std::nullopt;
+
+  std::optional<int64_t> deadline_time =
+      request->has_deadline_time()
+          ? std::optional<int64_t>(request->deadline_time())
+          : std::nullopt;
+
   auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
   if (!stub) {
     CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
     return Status::OK;
   }
-
-  auto err =
-      stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
+  auto err = stub->ChangeTaskTimeConstraint(time_limit_seconds, deadline_time);
   if (err != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
+    CRANE_ERROR("[Step #{}.{}] Failed to change task time constraint",
                 request->task_id(), kPrimaryStepId);
     return Status::OK;
   }
   response->set_ok(true);
-
   return Status::OK;
 }
 

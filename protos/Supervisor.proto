@@ -101,11 +101,12 @@ message CheckStatusReply {
   bool ok = 5;
 }
 
-message ChangeTaskTimeLimitRequest {
-  int64 time_limit_seconds = 1;
+message ChangeTaskTimeConstraintRequest {
+  optional int64 time_limit_seconds = 1;
+  optional int64 deadline_time = 2;
 }
 
-message ChangeTaskTimeLimitReply {
+message ChangeTaskTimeConstraintReply {
   bool ok = 1;
 }
 
@@ -127,7 +128,7 @@ service Supervisor {
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc QueryEnvMap(QueryStepEnvRequest) returns (QueryStepEnvReply);
   rpc CheckStatus(CheckStatusRequest) returns (CheckStatusReply);
-  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
+  rpc ChangeTaskTimeConstraint(ChangeTaskTimeConstraintRequest) returns (ChangeTaskTimeConstraintReply);
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
   rpc ShutdownSupervisor(ShutdownSupervisorRequest) returns (ShutdownSupervisorReply);
 }
