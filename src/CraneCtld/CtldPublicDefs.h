@@ -494,6 +494,7 @@ struct StepInCtld {
 
   std::unordered_set<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
+
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
 
@@ -637,7 +638,9 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
-  std::string pending_reason;
+  // TODO: Schedule thread should fill in following task map
+  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
+  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
