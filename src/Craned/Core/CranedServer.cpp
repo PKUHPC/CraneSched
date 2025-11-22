@@ -23,11 +23,10 @@
 #include <unordered_map>
 
 #include "CgroupManager.h"
-#include "CranedForPamServer.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "JobManager.h"
-#include "SupervisorKeeper.h"
+#include "SupervisorStub.h"
 #include "crane/CriClient.h"
 #include "crane/String.h"
 
@@ -192,7 +191,8 @@ grpc::Status CranedServiceImpl::QueryStepFromPort(
   do {
     auto pid_to_ids_expt = CgroupManager::GetIdsByPid(pid_i);
     if (pid_to_ids_expt.has_value()) {
-      auto [job_id_opt, step_id_opt, task_id_opt] = pid_to_ids_expt.value();
+      auto [job_id_opt, step_id_opt, system_flag, task_id_opt] =
+          pid_to_ids_expt.value();
 
       // FIXME: Use step_id_opt after multi-step is supported.
       CRANE_ASSERT_MSG(job_id_opt.has_value(),
@@ -304,18 +304,15 @@ grpc::Status CranedServiceImpl::QuerySshStepEnvVariables(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kDaemonStepId);
-  if (!stub) {
-    CRANE_ERROR("Failed to get stub of task #{}", request->task_id());
+  auto task_env_map =
+      g_job_mgr->QuerySshStepEnvVariables(request->task_id(), kDaemonStepId);
+  if (task_env_map.error()) {
+    CRANE_ERROR("Failed to get step env of job #{}", request->task_id());
     return Status::OK;
   }
-
-  auto task_env_map = stub->QueryStepEnv();
-  if (task_env_map.has_value()) {
-    for (const auto &[name, value] : task_env_map.value())
-      response->mutable_env_map()->emplace(name, value);
-    response->set_ok(true);
-  }
+  for (const auto &[name, value] : task_env_map.value())
+    response->mutable_env_map()->emplace(name, value);
+  response->set_ok(true);
 
   return Status::OK;
 }
@@ -330,15 +327,10 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
     return Status{grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready"};
   }
 
-  auto stub = g_supervisor_keeper->GetStub(request->task_id(), kPrimaryStepId);
-  if (!stub) {
-    CRANE_ERROR("Supervisor for task #{} not found", request->task_id());
-    return Status::OK;
-  }
+  auto err = g_job_mgr->ChangeStepTimelimit(request->task_id(), kPrimaryStepId,
+                                            request->time_limit_seconds());
 
-  auto err =
-      stub->ChangeTaskTimeLimit(absl::Seconds(request->time_limit_seconds()));
-  if (err != CraneErrCode::SUCCESS) {
+  if (err.error()) {
     CRANE_ERROR("[Step #{}.{}] Failed to change task time limit",
                 request->task_id(), kPrimaryStepId);
     return Status::OK;

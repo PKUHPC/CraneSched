@@ -28,10 +28,11 @@ namespace Craned::Supervisor {
 class CforedClient {
   struct X11FdInfo {
     int fd;
-    uint16_t port;
     std::shared_ptr<uvw::tcp_handle> sock;
-    std::shared_ptr<uvw::tcp_handle> proxy_handle;
     std::atomic<bool> sock_stopped;
+
+    // Cannot write to process x11 fd after input stopped
+    bool x11_input_stopped{false};
   };
 
   struct TaskFwdMeta {
@@ -49,11 +50,11 @@ class CforedClient {
     bool input_stopped{false};
     bool output_stopped{false};
 
-    bool x11_input_stopped{false};
-    std::shared_ptr<X11FdInfo> x11_fd_info{nullptr};
-
     bool proc_stopped{false};
   };
+
+  using x11_local_id_t = uint32_t;
+  using x11_id_t = std::pair<CranedId, uint32_t>;
 
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
@@ -67,9 +68,9 @@ class CforedClient {
   bool InitFwdMetaAndUvStdoutFwdHandler(task_id_t task_id, int stdin_write,
                                         int stdout_read, bool pty);
 
-  uint16_t InitUvX11FwdHandler(task_id_t task_id);
+  uint16_t InitUvX11FwdHandler();
 
-  bool TaskProcessStop(task_id_t task_id);
+  bool TaskProcessStop(task_id_t task_id, uint32_t exit_code, bool signaled);
   void TaskEnd(task_id_t task_id);
 
   const std::string& CforedName() const { return m_cfored_name_; }
@@ -90,7 +91,6 @@ class CforedClient {
   void CleanStdoutFwdHandlerQueueCb_();
 
   struct CreateX11FwdQueueElem {
-    task_id_t task_id;
     std::promise<uint16_t> promise;
   };
   ConcurrentQueue<CreateX11FwdQueueElem> m_create_x11_fwd_handler_queue_;
@@ -103,9 +103,11 @@ class CforedClient {
 
   void AsyncSendRecvThread_();
 
-  void TaskOutPutForward(const std::string& msg);
+  void TaskOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
-  void TaskX11OutPutForward(std::unique_ptr<char[]>&& data, size_t len);
+  void TaskX11OutPutForward(x11_local_id_t x11_local_id,
+                            std::unique_ptr<char[]>&& data, size_t len,
+                            bool eof);
 
   void CleanOutputQueueAndWriteToStreamThread_(
       grpc::ClientAsyncReaderWriter<crane::grpc::StreamTaskIORequest,
@@ -114,12 +116,27 @@ class CforedClient {
 
   std::atomic<bool> m_stopped_{false};
   std::atomic<bool> m_output_drained_{false};
+  struct IOFwdRequest {
+    std::unique_ptr<char[]> data;
+    size_t len;
+  };
+  struct X11FwdRequest {
+    x11_local_id_t x11_id;
+    std::unique_ptr<char[]> data;
+    size_t len;
+    bool eof;
+  };
+  struct TaskFinishStatus {
+    task_id_t task_id{0};
+    uint32_t exit_code{0};
+    bool signaled{false};
+  };
 
-  ConcurrentQueue<std::string> m_output_queue_;
-  ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
-      m_x11_input_queue_;
-  ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
-      m_x11_output_queue_;
+  struct FwdRequest {
+    crane::grpc::StreamTaskIORequest::SupervisorRequestType type;
+    std::variant<IOFwdRequest, X11FwdRequest, TaskFinishStatus> data;
+  };
+  ConcurrentQueue<FwdRequest> m_task_fwd_req_queue_;
 
   std::thread m_fwd_thread_;
 
@@ -129,6 +146,10 @@ class CforedClient {
   std::string m_cfored_name_;
   std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map
       ABSL_GUARDED_BY(m_mtx_);
+
+  x11_local_id_t next_x11_id_{0};
+  std::unordered_map<x11_local_id_t, std::shared_ptr<X11FdInfo>>
+      m_x11_fd_info_map_;
 
   std::shared_ptr<grpc::Channel> m_cfored_channel_;
   std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;

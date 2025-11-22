@@ -105,6 +105,7 @@ constexpr uint64_t kEraseResvIntervalSec = 5;
 
 namespace ExitCode {
 
+constexpr size_t KCrunExitCodeStatusNum = 128;
 inline constexpr size_t kExitStatusNum = 256;
 inline constexpr size_t kTerminationSignalBase = kExitStatusNum;
 inline constexpr size_t kTerminationSignalNum = 64;
