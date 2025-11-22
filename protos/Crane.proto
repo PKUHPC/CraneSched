@@ -838,10 +838,10 @@ message StreamTaskIORequest {
     bytes msg = 1;
   }
 
-  message TaskExitStatus{
+  message TaskExitStatus {
     uint32 task_id = 1;
     uint32 exit_code = 2;
-    bool   signaled = 3;
+    bool signaled = 3;
   }
 
   SupervisorRequestType type = 1;
