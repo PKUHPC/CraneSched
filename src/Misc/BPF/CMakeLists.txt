@@ -19,7 +19,7 @@ else ()
     set(BPF_COMPILER ${CMAKE_C_COMPILER})
 endif ()
 
-# always use -g for BPF CO-RE
+# Always use -g for BPF CO-RE
 list(APPEND BPF_COMPILE_OPTIONS -O2 -g)
 
 # When compiling with -target bpf clang does not add the multiarch include path,

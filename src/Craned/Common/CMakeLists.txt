@@ -17,6 +17,10 @@ target_include_directories(craned_common
         ${LIBCGROUP_PATH}/include/
 )
 
+if (CRANE_ENABLE_BPF)
+    target_include_directories(craned_common PUBLIC ${LIBBPF_INCLUDE_DIR})
+endif ()
+
 # Link dependencies for the common library
 target_link_libraries(craned_common
     PUBLIC
@@ -47,8 +51,8 @@ target_link_libraries(craned_common
         
         Backward::Interface
         
-        $<$<BOOL:${CRANE_ENABLE_BPF}>:BPF::BPF>
-        $<$<BOOL:${ENABLE_BPF}>:bpf>
+        $<$<BOOL:${CRANE_ENABLE_BPF}>:${LIBBPF_BUILD_PRODUCTS}>
+        $<$<BOOL:${CRANE_ENABLE_BPF}>:${LIBBPF_EXTRA_LIBS}>
 )
 
 # Compile definitions
@@ -64,6 +68,9 @@ endif ()
 add_dependencies(craned_common libcgroup)
 if (CRANE_ENABLE_BPF)
     add_dependencies(craned_common crane_ebpf)
+    if (NOT CRANE_USE_SYSTEM_LIBBPF)
+        add_dependencies(craned_common libbpf_ep)
+    endif ()
 endif ()
 
 # Linker flag for c++ 17 filesystem library

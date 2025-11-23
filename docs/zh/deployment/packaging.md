@@ -46,7 +46,7 @@
    ```
 4. **DEB 工具**（用于 DEB 软件包）：
    ```bash
-   # Ubuntu/Debian
+   # Debian/Ubuntu
    apt-get install -y dpkg-dev
    ```
 

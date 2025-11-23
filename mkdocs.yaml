@@ -45,6 +45,49 @@ theme:
   logo: images/logo.png
   favicon: images/logo.png
 
+nav:
+  - Home: index.md
+  - Deployment:
+    - Overview: deployment/index.md
+    - Frontend:
+      - Deployment: deployment/frontend/frontend.md
+      - Plugins: deployment/frontend/plugins.md
+    - Backend:
+      - Rocky Linux 9: deployment/backend/Rocky9.md
+      - Debian/Ubuntu: deployment/backend/Ubuntu.md
+      - CentOS 7: deployment/backend/CentOS7.md
+      - eBPF Support: deployment/backend/eBPF.md
+    - Packaging Guide: deployment/packaging.md
+    - Configuration:
+      - Cluster Configuration: deployment/configuration/config.md
+      - Database Configuration: deployment/configuration/database.md
+      - PAM Module: deployment/configuration/pam.md
+      - Multi-node Deployment: deployment/configuration/multi-node.md
+  - Commands:
+    - Job Submission:
+        - cbatch: command/cbatch.md
+        - crun: command/crun.md
+        - calloc: command/calloc.md
+    - Job Monitoring:
+        - cqueue: command/cqueue.md
+        - cinfo: command/cinfo.md
+        - ceff: command/ceff.md
+        - cacct: command/cacct.md
+    - Job Control:
+        - ccancel: command/ccancel.md
+        - ccontrol: command/ccontrol.md
+    - Account Management:
+        - cacctmgr: command/cacctmgr.md
+  - Reference:
+    - Exit Codes: reference/exit_code.md
+    - Job Environment Variables: reference/job_env_vars.md
+    - Use Cases:
+        - Overview: reference/use_cases.md
+        - Multi-Node Parallel Job: reference/use_case_multi_node.md
+        - GPU-Accelerated Training: reference/use_case_gpu.md
+        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
+        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
+
 plugins:
   - search
   - i18n:
@@ -80,7 +123,7 @@ plugins:
             # Parameter Sweep with Job Arrays: 参数扫描作业数组
             # Chained Jobs with Dependencies: 带依赖的作业链
             Rocky Linux 9: Rocky Linux 9
-            Ubuntu: Ubuntu
+            Debian/Ubuntu: Debian/Ubuntu
             CentOS 7: CentOS 7
             Packaging Guide: 打包指南
             eBPF Support: eBPF 支持
@@ -128,6 +171,9 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: fold
   - pymdownx.tasklist:
       custom_checkbox: true
   - pymdownx.caret
@@ -137,48 +183,3 @@ markdown_extensions:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.arithmatex:
       generic: true
-
-nav:
-  - Home: index.md
-  - Deployment:
-    - Overview: deployment/index.md
-    - Frontend:
-      - Deployment: deployment/frontend/frontend.md
-      - Plugins: deployment/frontend/plugins.md
-    - Backend:
-      - Rocky Linux 9: deployment/backend/Rocky9.md
-      - Ubuntu: deployment/backend/Ubuntu.md
-      - CentOS 7: deployment/backend/CentOS7.md
-      - eBPF Support: deployment/backend/eBPF.md
-    - Packaging Guide: deployment/packaging.md
-    - Configuration:
-      - Cluster Configuration: deployment/configuration/config.md
-      - Database Configuration: deployment/configuration/database.md
-      - PAM Module: deployment/configuration/pam.md
-      - Multi-node Deployment: deployment/configuration/multi-node.md
-  - Commands:
-    - Job Submission:
-        - cbatch: command/cbatch.md
-        - crun: command/crun.md
-        - calloc: command/calloc.md
-    - Job Monitoring:
-        - cqueue: command/cqueue.md
-        - cinfo: command/cinfo.md
-        - ceff: command/ceff.md
-        - cacct: command/cacct.md
-    - Job Control:
-        - ccancel: command/ccancel.md
-        - ccontrol: command/ccontrol.md
-    - Account Management:
-        - cacctmgr: command/cacctmgr.md
-  - Reference:
-    - Exit Codes: reference/exit_code.md
-    - Error Codes: reference/error_code.md
-    - Job Environment Variables: reference/job_env_vars.md
-    - Use Cases:
-        - Overview: reference/use_cases.md
-        - Multi-Node Parallel Job: reference/use_case_multi_node.md
-        - GPU-Accelerated Training: reference/use_case_gpu.md
-        # - Parameter Sweep with Job Arrays: reference/use_case_param_sweep.md
-        # - Chained Jobs with Dependencies: reference/use_case_pipeline.md
-        
