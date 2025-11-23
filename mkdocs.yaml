@@ -80,6 +80,7 @@ nav:
         - cacctmgr: command/cacctmgr.md
   - Reference:
     - Exit Codes: reference/exit_code.md
+    - Error Codes: reference/error_code.md
     - Job Environment Variables: reference/job_env_vars.md
     - Use Cases:
         - Overview: reference/use_cases.md
