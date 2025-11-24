@@ -1347,6 +1347,18 @@ CraneErrCode ProcInstance::Spawn() {
 
     // Apply environment variables
     InitEnvMap();
+
+    if (!g_config.JobLogHook.TaskPrologs.empty()) {
+      RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.TaskPrologs,
+                                     .envs = m_env_,
+                                     .run_uid = m_parent_step_inst_->uid,
+                                     .run_gid = m_parent_step_inst_->gids[0],
+                                     .is_prolog = true};
+      auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
+      if (!result) std::abort();
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, 1);
+    }
+
     err = SetChildProcEnv_();
     if (err != CraneErrCode::SUCCESS) {
       fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
@@ -1526,6 +1538,21 @@ TaskManager::TaskManager()
 
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+
+  if (!g_config.JobLogHook.Epilogs.empty()) {
+    CRANE_TRACE("Running Epilogs...");
+    RunLogHookArgs run_epilog_args{.scripts = g_config.JobLogHook.Epilogs,
+                                   .envs = g_config.JobEnv,
+                                   .run_uid = 0,
+                                   .run_gid = 0,
+                                   .is_prolog = false};
+    if (g_config.JobLogHook.PrologTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+    else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+      run_epilog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+
+    util::os::RunPrologOrEpiLog(run_epilog_args);
+  }
 }
 
 void TaskManager::Wait() {
@@ -1791,6 +1818,17 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
     if (task->GetExecId().has_value())
       m_exec_id_task_id_map_.erase(*task->GetExecId());
 
+    if (!g_config.JobLogHook.TaskEpilogs.empty()) {
+      RunLogHookArgs run_epilog_args{
+          .scripts = g_config.JobLogHook.TaskEpilogs,
+          .envs = std::unordered_map{task->GetParentStep().env().begin(),
+                                     task->GetParentStep().env().end()},
+          .run_uid = task->GetParentStep().uid(),
+          .run_gid = task->GetParentStep().gid()[0],
+          .is_prolog = false};
+      util::os::RunPrologOrEpiLog(run_epilog_args);
+    }
+
     switch (task->err_before_exec) {
     case CraneErrCode::ERR_PROTOBUF:
       TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
@@ -1997,7 +2035,6 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
       return;
     }
-
     // Calloc tasks have no scripts to run. Just return.
     if (m_step_.IsCalloc()) {
       CRANE_DEBUG("Calloc step, no script to run.");

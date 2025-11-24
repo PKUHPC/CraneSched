@@ -18,6 +18,13 @@
 
 #include "crane/OS.h"
 
+#include <absl/cleanup/cleanup.h>
+
+#include <future>
+
+#include "absl/strings/str_split.h"
+#include "re2/re2.h"
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -272,6 +279,191 @@ absl::Time GetSystemBootTime() {
 #else
 #  error "Unsupported OS"
 #endif
+}
+
+std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
+  bool is_failed = false;
+
+  auto read_stream = [](int fd) {
+    std::string out;
+    char buf[4096];
+    ssize_t bytes_read;
+    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
+      out.append(buf, bytes_read);
+    }
+    return out;
+  };
+
+  std::string output;
+
+  auto start_time = std::chrono::steady_clock::now();
+
+  for (const auto& script : args.scripts) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start_time);
+    if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
+      CRANE_ERROR("Total timeout ({}s) reached before running {}.",
+                  args.timeout_sec, script);
+      return std::nullopt;
+    }
+
+    int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
+    if (pipe(stdout_pipe) == -1) {
+      CRANE_ERROR("{} pipe stdout creation failed: {}", script,
+                  strerror(errno));
+      if (args.is_prolog) return std::nullopt;
+      is_failed = true;
+    }
+
+    if (pipe(stderr_pipe) == -1) {
+      CRANE_ERROR("{} pipe stderr creation failed: {}", script,
+                  strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      if (args.is_prolog) return std::nullopt;
+      is_failed = true;
+    }
+
+    if (pipe(sync_pipe) == -1) {
+      CRANE_ERROR("{} pipe sync creation failed: {}", script, strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
+      if (args.is_prolog) return std::nullopt;
+      is_failed = true;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+      CRANE_ERROR("{} subprocess creation failed: {}.", script,
+                  strerror(errno));
+      if (args.is_prolog) return std::nullopt;
+      is_failed = true;
+      continue;
+    }
+
+    if (pid > 0) {
+      if (args.callback) {
+        bool result = args.callback(pid);
+        if (!result) {
+          CRANE_ERROR("subprocess callback failed");
+          return std::nullopt;
+        }
+      }
+
+      close(stdout_pipe[1]);
+      close(stderr_pipe[1]);
+      int status = 0;
+      auto fut = std::async(std::launch::async, [pid, &status]() {
+        return waitpid(pid, &status, 0);
+      });
+
+      write(sync_pipe[1], "x", 1);
+      close(sync_pipe[0]);
+      close(sync_pipe[1]);
+
+      auto now = std::chrono::steady_clock::now();
+      auto elapsed_now =
+          std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
+      uint32_t remaining_time =
+          (args.timeout_sec > 0)
+              ? std::max<uint32_t>(0, args.timeout_sec - elapsed_now.count())
+              : 0;
+      bool child_exited = false;
+
+      if (args.timeout_sec == 0) {
+        fut.get();
+        child_exited = true;
+      } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
+                 std::future_status::ready) {
+        child_exited = true;
+      }
+
+      if (!child_exited) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
+                    read_stream(stdout_pipe[0]), read_stream(stderr_pipe[0]));
+        if (args.is_prolog) return std::nullopt;
+        is_failed = true;
+        continue;
+      }
+
+      if (status != 0) {
+        CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
+                    status, read_stream(stdout_pipe[0]),
+                    read_stream(stderr_pipe[0]));
+        if (args.is_prolog) return std::nullopt;
+        is_failed = true;
+        continue;
+      }
+
+      output.append(read_stream(stdout_pipe[0]));
+
+      CRANE_DEBUG("{} finished successfully.", script);
+
+    } else {  // child proc
+      close(stdout_pipe[0]);
+      close(stderr_pipe[0]);
+      dup2(stdout_pipe[1], STDOUT_FILENO);
+      dup2(stderr_pipe[1], STDERR_FILENO);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[1]);
+
+      char buf;
+      read(sync_pipe[0], &buf, 1);
+      close(sync_pipe[1]);
+      close(sync_pipe[0]);
+
+      if (setgid(args.run_gid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {}\n",
+                   args.run_gid, strerror(errno));
+        exit(EXIT_FAILURE);
+      }
+      if (setuid(args.run_uid) != 0) {
+        fmt::print(stderr, "[Subprocess] Error: setuid({}) failed: {}\n",
+                   args.run_uid, strerror(errno));
+        exit(EXIT_FAILURE);
+      }
+      for (const auto& [name, value] : args.envs)
+        if (setenv(name.c_str(), value.c_str(), 1))
+          fmt::print(stderr,
+                     "[Subprocess] Warning: setenv() for {}={} failed.\n", name,
+                     value);
+
+      std::vector<const char*> argv = {script.c_str(), nullptr};
+      execvp(argv[0], const_cast<char* const*>(argv.data()));
+      fmt::print(stderr, "[Subprocess] execvp() failed: %s\n", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  if (is_failed) return std::nullopt;
+
+  return output;
+}
+
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd) {
+  static const LazyRE2 export_re = {
+      R"(^export\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$)"};
+  static const LazyRE2 unset_re = {R"(^unset\s+([A-Za-z_][A-Za-z0-9_]*)\s*$)"};
+  static const LazyRE2 print_re = {R"(^print\s+(.*)$)"};
+
+  for (std::string_view line : absl::StrSplit(output, '\n')) {
+    std::string name, value, to_print;
+    if (RE2::FullMatch(line, *export_re, &name, &value)) {
+      (*env_map)[name] = value;
+    } else if (RE2::FullMatch(line, *unset_re, &name)) {
+      env_map->erase(name);
+    } else if (RE2::FullMatch(line, *print_re, &to_print)) {
+      write(task_stdout_fd, to_print.data(), to_print.size());
+      write(task_stdout_fd, "\n", 1);
+    }
+  }
 }
 
 }  // namespace util::os
