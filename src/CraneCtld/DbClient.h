@@ -330,7 +330,8 @@ void MongodbClient::DocumentAppendItem_<DeviceMap>(document& doc,
                                                    const DeviceMap& value);
 
 template <>
-void MongodbClient::DocumentAppendItem_<std::unordered_map<std::string, uint32_t>>(
+void MongodbClient::DocumentAppendItem_<
+    std::unordered_map<std::string, uint32_t>>(
     document& doc, const std::string& key,
     const std::unordered_map<std::string, uint32_t>& value);
 

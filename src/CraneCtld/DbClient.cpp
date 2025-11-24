@@ -451,8 +451,11 @@ bool MongodbClient::FetchJobRecords(
       }
 
       auto* mutable_licenses = task->mutable_licenses_count();
-      for (auto&& elem : ViewValueOr_(view["licenses_alloc"], bsoncxx::builder::basic::make_document().view())) {
-        mutable_licenses->emplace(std::string(elem.key()), elem.get_int32().value);
+      for (auto&& elem :
+           ViewValueOr_(view["licenses_alloc"],
+                        bsoncxx::builder::basic::make_document().view())) {
+        mutable_licenses->emplace(std::string(elem.key()),
+                                  elem.get_int32().value);
       }
     }
   } catch (const std::exception& e) {
@@ -1556,8 +1559,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     meta_container     has_job_info  req_licenses
-  // 40 licenses_alloc
+  // 35 mem_alloc     device_map     meta_container     has_job_info
+  // req_licenses 40 licenses_alloc
 
   // clang-format off
   std::array<std::string, 40> fields{
@@ -1656,7 +1659,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info   licenses_alloc
+  // 35 mem_alloc     device_map     meta_container      has_job_info
+  // licenses_alloc
 
   // clang-format off
   std::array<std::string, 40> fields{
