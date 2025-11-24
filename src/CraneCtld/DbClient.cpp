@@ -1907,6 +1907,45 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
+void MongodbClient::CreateCollectionIndex(
+    mongocxx::collection& coll, const std::vector<std::string>& fields) {
+  bsoncxx::builder::stream::document index_builder;
+  for (const auto& field : fields) {
+    index_builder << field << 1;  // 1 for ascending order
+  }
+
+  // Generate a readable index name
+  std::string idx_name;
+  for (size_t i = 0; i < fields.size(); ++i) {
+    if (i > 0) idx_name += "_";
+    idx_name += fields[i] + "_1";
+  }
+
+  mongocxx::options::index index_options;
+  index_options.name(idx_name);
+  coll.create_index(index_builder.view(), index_options);
+}
+
+bool MongodbClient::InitTableIndexes() {
+  try {
+    // Create index for the raw task table
+    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    CreateCollectionIndex(raw_table, {"nodename_list"});
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::Init() {
+  if (!InitTableIndexes()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
+    return false;
+  }
+  return true;
+}
+
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
