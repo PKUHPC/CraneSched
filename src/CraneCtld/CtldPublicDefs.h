@@ -178,6 +178,8 @@ struct Config {
 
   Priority PriorityConfig;
 
+  std::string JobSubmitLuaScript;
+
   // Database config
   std::string DbUser;
   std::string DbPassword;
