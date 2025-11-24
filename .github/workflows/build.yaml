@@ -351,6 +351,7 @@ jobs:
       # Upload RPM/DEB to private repository (only on miss)
       - name: Upload to private repository (only on miss)
         if: steps.local_cache.outputs.hit != 'true'
+        continue-on-error: true
         env: 
           NEXUS_URL: ${{ secrets.CCREPO_URL }}
           NEXUS_USERNAME: ${{ secrets.CCREPO_USERNAME }}
@@ -375,6 +376,15 @@ jobs:
           UPLOAD_MODE: "RPM"  # Currently only upload RPMs in this workflow
 
         run: |
+          set -euo pipefail
+          
+          # Check if secrets are available (they won't be in forked repositories)
+          if [ -z "${NEXUS_URL:-}" ] || [ -z "${NEXUS_USERNAME:-}" ] || [ -z "${NEXUS_PASSWORD:-}" ]; then
+            echo "Skipping upload: Repository secrets not available"
+            echo "This is expected for forked repositories and does not affect build/test results."
+            exit 0
+          fi
+          
           unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
           ./script/upload.sh
 
