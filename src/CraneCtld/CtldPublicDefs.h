@@ -156,6 +156,11 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct PreemptConfig {
+    crane::grpc::PreemptMode PreemptMode{crane::grpc::PreemptMode::OFF};
+    crane::grpc::PreemptType PreemptType{crane::grpc::PreemptType::NONE};
+  };
+
   bool CompressedRpc{};
 
   std::string CraneClusterName;
@@ -191,6 +196,8 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+
+  PreemptConfig Preempt;
 };
 
 struct RunTimeStatus {
@@ -911,6 +918,8 @@ struct Qos {
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+  std::list<std::string> preempt;
+  crane::grpc::PreemptMode preempt_mode{crane::grpc::PreemptMode::OFF};
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -933,17 +942,22 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
   }
+  static constexpr const char* FieldStringOfPreempt() { return "preempt"; }
+  static constexpr const char* FieldStringOfPreemptMode() {
+    return "preempt_mode";
+  }
 
   std::string QosToString() const {
     return fmt::format(
         "name: {}, description: {}, reference_count: {}, priority: {}, "
         "max_jobs_per_user: {}, max_running_tasks_per_user: {}, "
         "max_time_limit_per_task: {}, max_cpus_per_user: {}, "
-        "max_cpus_per_account: {}",
+        "max_cpus_per_account: {}, preempt: [{}], preempt_mode: {}",
         name, description, reference_count, priority, max_jobs_per_user,
         max_running_tasks_per_user,
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
-        max_cpus_per_account);
+        max_cpus_per_account, fmt::join(preempt, ", "),
+        static_cast<int>(preempt_mode));
   }
 };
 

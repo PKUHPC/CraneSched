@@ -622,6 +622,46 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled = container_config["Enabled"].as<bool>();
       }
 
+      if (config["Preempt"]) {
+        const auto& preempt_config = config["Preempt"];
+        if (preempt_config["PreemptType"]) {
+          const auto& preempt_type =
+              preempt_config["PreemptType"].as<std::string>();
+          if (preempt_type == "none")
+            g_config.Preempt.PreemptType = crane::grpc::PreemptType::NONE;
+          else if (preempt_type == "qos")
+            g_config.Preempt.PreemptType = crane::grpc::PreemptType::QOS;
+          else if (preempt_type == "partition")
+            g_config.Preempt.PreemptType = crane::grpc::PreemptType::PARTITION;
+          else {
+            CRANE_ERROR("Unknown PreemptType '{}'", preempt_type);
+            std::exit(1);
+          }
+        }
+
+        if (preempt_config["PreemptMode"]) {
+          const auto& preempt_mode =
+              preempt_config["PreemptMode"].as<std::string>();
+          if (preempt_mode == "OFF")
+            g_config.Preempt.PreemptMode = crane::grpc::PreemptMode::OFF;
+          else if (preempt_mode == "CANCEL")
+            g_config.Preempt.PreemptMode = crane::grpc::PreemptMode::CANCEL;
+          else if (preempt_mode == "REQUEUE")
+            g_config.Preempt.PreemptMode = crane::grpc::PreemptMode::REQUEUE;
+          else if (preempt_mode == "SUSPEND")
+            g_config.Preempt.PreemptMode = crane::grpc::PreemptMode::SUSPEND;
+          else {
+            CRANE_ERROR("Unknown PreemptMode '{}'", preempt_mode);
+            std::exit(1);
+          }
+        }
+
+        if ((g_config.Preempt.PreemptType == crane::grpc::PreemptType::NONE) ^
+            (g_config.Preempt.PreemptMode == crane::grpc::PreemptMode::OFF)) {
+          CRANE_ERROR("PreemptType and PreemptMode values incompatible.");
+          std::exit(1);
+        }
+      }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
