@@ -304,6 +304,10 @@ CraneExpected<void> LicensesManager::AddRemoteLicense(
   if (m_license_resource_map_.contains(key))
     return std::unexpected(CraneErrCode::ERR_LICENSE_NOT_FOUND);
 
+  for (const auto& allowed : new_license.cluster_resources | std::views::values) {
+    new_license.allocated += allowed;
+  }
+
   // TODO: insert db
 
   m_license_resource_map_[key] = std::make_unique<LicenseResource>(std::move(new_license));
@@ -343,7 +347,9 @@ CraneExpected<void> LicensesManager::ModifyRemoteLicense(
         if (iter == res_resource.cluster_resources.end())
           return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
         try {
+          res_resource.allocated -= iter->second;
           iter->second = std::stoul(value);
+          res_resource.allocated += iter->second;
         } catch (std::exception& e) {
           CRANE_ERROR("Failed to parse 'allowed' for cluster '{}' from value '{}': {}", cluster, value, e.what());
           return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
@@ -403,6 +409,7 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
       if (cluster_iter == license_resource->cluster_resources.end())
         return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
 
+      license_resource->allocated -= cluster_iter->second;
       license_resource->cluster_resources.erase(cluster_iter);
     }
   }
