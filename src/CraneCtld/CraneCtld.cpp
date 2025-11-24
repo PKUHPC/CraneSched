@@ -149,6 +149,17 @@ void ParseConfig(int argc, char** argv) {
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
 
+      if (config["ClusterName"]) {
+        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
+        if (g_config.CraneClusterName.empty()) {
+          CRANE_ERROR("Cluster name is empty.");
+          std::exit(1);
+        }
+      } else {
+        CRANE_ERROR("Cluster name is empty.");
+        std::exit(1);
+      }
+
       ParseCtldConfig(config);
 
       if (config["CompressedRpc"])
