@@ -386,7 +386,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container  has_job_info   nodename_list
+  // 35 mem_alloc     device_map     meta_container  has_job_info nodename_list
 
   try {
     for (auto view : cursor) {
