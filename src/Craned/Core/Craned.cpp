@@ -164,6 +164,8 @@ void ParseCranedConfig(const YAML::Node& config) {
         CRANE_ERROR("Illegal memory format.");
         std::exit(1);
       }
+    } else {
+      conf.MaxLogFileSize = kDefaultCranedMaxLogFileSize;
     }
     conf.MaxLogFileNum = YamlValueOr<uint64_t>(craned_config["MaxLogFileNum"],
                                                kDefaultCranedMaxLogFileNum);
@@ -202,6 +204,8 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
       CRANE_ERROR("Illegal memory format.");
       std::exit(1);
     }
+  } else {
+    g_config.Supervisor.MaxLogFileSize = kDefaultSupervisorMaxLogFileSize;
   }
 
   g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(

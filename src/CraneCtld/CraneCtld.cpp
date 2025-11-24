@@ -57,6 +57,8 @@ void ParseCtldConfig(const YAML::Node& config) {
         CRANE_ERROR("Illegal memory format.");
         std::exit(1);
       }
+    } else {
+      ctld_config.MaxLogFileSize = kDefaultCraneCtldMaxLogFileSize;
     }
 
     ctld_config.MaxLogFileNum = YamlValueOr<uint64_t>(

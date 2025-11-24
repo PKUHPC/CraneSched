@@ -77,7 +77,7 @@ struct Config {
   struct CranedConfig {
     uint32_t PingIntervalSec;
     uint32_t CtldTimeoutSec;
-    uint64_t MaxLogFileSize{kDefaultCranedMaxLogFileSize};
+    uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
   };
   CranedConfig CranedConf;
@@ -116,7 +116,7 @@ struct Config {
     std::filesystem::path Path;
     std::string DebugLevel;
     std::filesystem::path LogDir;
-    uint64_t MaxLogFileSize{kDefaultSupervisorMaxLogFileSize};
+    uint64_t MaxLogFileSize;
     uint64_t MaxLogFileNum;
   };
   SupervisorConfig Supervisor;
