@@ -800,8 +800,7 @@ class TaskScheduler {
       const std::unordered_map<job_id_t, std::set<step_id_t>>& steps,
       const CranedId& excluded_node);
 
-  // Intelligently synchronize step status from Craned during registration.
-  // Uses Slurm-like merging strategy to avoid killing legitimate running tasks.
+  // Synchronize step status from Craned during registration.
   void SyncStepStatusFromCraned(job_id_t job_id, step_id_t step_id,
                                 const CranedId& craned_id,
                                 crane::grpc::TaskStatus craned_status,

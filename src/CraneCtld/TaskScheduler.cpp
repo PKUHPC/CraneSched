@@ -3035,16 +3035,6 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
       for (const auto& step : job->Steps() | std::views::values) {
         step->SetStatus(crane::grpc::TaskStatus::Completing);
       }
-
-      // Persist the state change to database
-      // Need to update the RuntimeAttr with new status
-      auto runtime_attr = job->RuntimeAttr();
-      runtime_attr.set_status(crane::grpc::TaskStatus::Completing);
-      if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(0, job->TaskDbId(),
-                                                         runtime_attr)) {
-        CRANE_ERROR("[Job #{}] Failed to update job status to Completing in DB",
-                    job_id);
-      }
     }
 
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
@@ -3197,25 +3187,8 @@ void TaskScheduler::SyncStepStatusFromCraned(
   int ctld_priority = GetStatusPriority(ctld_status);
   int craned_priority = GetStatusPriority(craned_status);
 
-  // Decision logic similar to Slurm:
-  // 1. If Ctld has terminal state, keep it (already finished from Ctld
-  // perspective)
-  // 2. If Craned reports terminal state and Ctld doesn't, accept it (task
-  // actually finished)
-  // 3. If Craned has Running and Ctld has Configuring/Pending, accept it (task
-  // started)
-  // 4. If both have same level, prefer Ctld's view (but log the difference)
-
   bool should_sync = false;
   std::string reason;
-
-  if (ctld_priority >= 100) {
-    // Ctld already has terminal state - keep it authoritative
-    CRANE_TRACE(
-        "[Step #{}.{}] Ctld has terminal status {}, ignoring Craned status {}.",
-        job_id, step_id, ctld_status, craned_status);
-    return;
-  }
 
   if (craned_priority >= 100 && ctld_priority < 100) {
     // Craned reports terminal state - task actually finished
@@ -3242,32 +3215,35 @@ void TaskScheduler::SyncStepStatusFromCraned(
     return;
   } else if (craned_status != ctld_status) {
     // Status mismatch but Ctld has higher/equal priority
-    CRANE_INFO(
-        "[Step #{}.{}] Status mismatch: Ctld has {}, Craned {} reports {}. "
-        "Keeping Ctld's authoritative state.",
+    // This indicates a potential state inconsistency - terminate the step to
+    // maintain consistency
+    CRANE_WARN(
+        "[Step #{}.{}] Status mismatch detected: Ctld has {}, Craned {} "
+        "reports {}. Terminating step to maintain state consistency.",
         job_id, step_id, ctld_status, craned_id, craned_status);
+
+    should_sync = true;
+    reason = fmt::format("Status mismatch: Ctld has {}, Craned {} reports {}",
+                         ctld_status, craned_id, craned_status);
+    craned_status = TaskStatus::Failed;
+    exit_code = ExitCode::EC_EXEC_ERR;
+  }
+
+  if (!should_sync) {
     return;
   }
 
-  if (should_sync) {
-    CRANE_INFO("[Step #{}.{}] Syncing status: {} -> {}. Reason: {}", job_id,
-               step_id, ctld_status, craned_status, reason);
-
-    // Perform the status change
-    // Note: We cannot call async function while holding the lock,
-    // so we release the lock by ending the function scope and schedule the call
-  }
+  CRANE_INFO("[Step #{}.{}] Syncing status: {} -> {}. Reason: {}", job_id,
+             step_id, ctld_status, craned_status, reason);
 
   // Lock is released here when running_guard destructs
+  running_guard.Unlock();
 
-  if (should_sync) {
-    auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
-    StepStatusChangeWithReasonAsync(
-        job_id, step_id, craned_id, craned_status, exit_code,
-        fmt::format("Status synced from Craned during registration: {}",
-                    reason),
-        now);
-  }
+  auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  StepStatusChangeWithReasonAsync(
+      job_id, step_id, craned_id, craned_status, exit_code,
+      fmt::format("Status synced from Craned during registration: {}", reason),
+      now);
 }
 
 bool SchedulerAlgo::LocalScheduler::CalculateRunningNodesAndStartTime_(
