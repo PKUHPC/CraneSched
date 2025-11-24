@@ -1858,17 +1858,22 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
   LicenseResource resource;
   resource.name = request->license_resource().resource_name();
   resource.count = request->license_resource().count();
-  resource.server = request->license_resource().server();
-  resource.server_type = request->license_resource().server_type();
+  if (request->license_resource().server().empty()) {
+    resource.server = "db";
+    resource.server_type = "db";
+  } else {
+    resource.server = request->license_resource().server();
+    resource.server_type = request->license_resource().server_type();
+  }
   resource.type = request->license_resource().type();
   resource.last_consumed = request->license_resource().last_consumed();
   resource.type = request->license_resource().type();
 
-  for (const auto &cluster : request->license_resource().cluster_resource_info()) {
-    if (cluster.cluster_name() == "local") {
-      resource.cluster_resources.emplace(g_config.CraneClusterName, cluster.allowed());
+  for (const auto &[cluster, allowed] : request->license_resource().cluster_resource_info()) {
+    if (cluster == "local") {
+      resource.cluster_resources.emplace(g_config.CraneClusterName, allowed);
     } else {
-      resource.cluster_resources.emplace(cluster.cluster_name(), cluster.allowed());
+      resource.cluster_resources.emplace(cluster, allowed);
     }
   }
 
@@ -1983,9 +1988,7 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
 
     auto* mutable_cluster_resources = mutable_license_resource->mutable_cluster_resource_info();
     for (const auto& [cluster_name, allowed] : license_resource.cluster_resources) {
-      auto* mutable_cluster_resource = mutable_cluster_resources->Add();
-      mutable_cluster_resource->set_cluster_name(cluster_name);
-      mutable_cluster_resource->set_allowed(allowed);
+      mutable_cluster_resources->emplace(cluster_name, allowed);
     }
   }
 

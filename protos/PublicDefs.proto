@@ -962,6 +962,7 @@ message LicenseResourceInfo {
   LicenseResource.Type type = 6;
   string description = 7;
   uint32 last_consumed = 8;
+  uint32 allocated = 9;
 }
 
 message LicenseResource {
