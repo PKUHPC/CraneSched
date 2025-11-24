@@ -355,13 +355,15 @@ void CforedClient::CleanStopTaskIOQueueCb_() {
   while (m_stop_task_io_queue_.try_dequeue(task_id)) {
     absl::MutexLock lock(&m_mtx_);
     auto it = m_fwd_meta_map.find(task_id);
-    if (it != m_fwd_meta_map.end()) {
-      auto& output_handle = it->second.out_handle;
-      if (!it->second.pty && output_handle.pipe) output_handle.pipe->close();
-      if (it->second.pty && output_handle.tty) output_handle.tty->close();
-      output_handle.pipe.reset();
-      output_handle.tty.reset();
+    if (it == m_fwd_meta_map.end()) {
+      CRANE_ERROR("[Task #{}] Cannot find fwd meta to stop task io.", task_id);
+      continue;
     }
+    auto& output_handle = it->second.out_handle;
+    if (!it->second.pty && output_handle.pipe) output_handle.pipe->close();
+    if (it->second.pty && output_handle.tty) output_handle.tty->close();
+    output_handle.pipe.reset();
+    output_handle.tty.reset();
 
     close(it->second.stdout_read);
 
@@ -541,9 +543,12 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_ERROR("Cfored connection failed.");
       absl::MutexLock lock(&m_mtx_);
       for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+        CRANE_ERROR(
+            "[Task #{}] Markd task io stopped due to cfored conn failure.",
+            task_id);
         m_stop_task_io_queue_.enqueue(task_id);
+        m_clean_stop_task_io_queue_async_handle_->send();
       }
-      m_clean_stop_task_io_queue_async_handle_->send();
       CRANE_ERROR("Terminating all task due to cfored connection failure.");
       g_task_mgr->TerminateTaskAsync(
           false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
