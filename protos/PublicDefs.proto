@@ -118,6 +118,7 @@ enum TaskStatus {
   Configured = 8;
   Completing = 9;
 
+  Deadline = 10;
   Invalid = 15;
 }
 
@@ -174,6 +175,7 @@ message TaskToCtld {
 
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
+  google.protobuf.Timestamp deadline_time = 40;
 }
 
 message TaskInEmbeddedDb {
@@ -239,6 +241,7 @@ message StepToCtld {
   string excludes = 34;
   string nodelist = 35;
   string container = 26;
+  google.protobuf.Timestamp deadline_time = 36;
 }
 
 message RuntimeAttrOfStep {
@@ -328,6 +331,7 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  google.protobuf.Timestamp deadline_time = 30;
 
   // Not used now.
   string extra_attr = 29;
@@ -460,6 +464,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  google.protobuf.Timestamp deadline_time = 41;
 }
 
 message StepInfo {
@@ -476,6 +481,7 @@ message StepInfo {
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
   google.protobuf.Timestamp submit_time = 10;
+  google.protobuf.Timestamp deadline_time = 11;
 
   uint32 node_num = 12;
   string cmd_line = 13;
@@ -679,6 +685,8 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+
+  ERR_INVALID_DEADLINE = 78;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.

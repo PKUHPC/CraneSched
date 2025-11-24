@@ -475,6 +475,7 @@ struct StepInCtld {
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
+  absl::Time deadline_time{absl::InfiniteFuture()};
 
   // TODO: Find somewhere else to put this field?
   std::optional<ContainerMetaInTask> container_meta;
@@ -696,6 +697,7 @@ struct TaskInCtld {
 
   std::string reservation;
   absl::Time begin_time{absl::InfinitePast()};
+  absl::Time deadline_time{absl::InfiniteFuture()};
 
   bool exclusive{false};
 

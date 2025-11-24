@@ -557,9 +557,13 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
 
   CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
+    std::optional<int64_t> time_limit_seconds =
+        request->has_time_limit_seconds()
+            ? std::optional<int64_t>(request->time_limit_seconds())
+            : std::nullopt;
     for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->ChangeTaskTimeLimit(
-          task_id, request->time_limit_seconds());
+      err = g_task_scheduler->ChangeTaskTimeConstraint(
+          task_id, time_limit_seconds, std::nullopt);
       if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
@@ -612,6 +616,30 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
         response->add_not_modified_tasks(false);
         response->add_not_modified_reasons(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+      }
+    }
+  } else if (request->attribute() == ModifyTaskRequest::Deadline) {
+    std::optional<int64_t> deadline_time =
+        request->has_deadline_time()
+            ? std::optional<int64_t>(request->deadline_time().seconds())
+            : std::nullopt;
+    for (auto task_id : request->task_ids()) {
+      err = g_task_scheduler->ChangeTaskTimeConstraint(task_id, std::nullopt,
+                                                       deadline_time);
+      if (err == CraneErrCode::SUCCESS) {
+        response->add_modified_tasks(task_id);
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Task #{} was not found in running or pending queue.", task_id));
+      } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons("Invalid deadline_time value.");
+      } else {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the deadline of Task#{}: {}.",
+                        task_id, CraneErrStr(err)));
       }
     }
   } else {

@@ -11,6 +11,7 @@ crun只支持通过命令行指定请求参数，支持的命令行选项：
 - **-D/--chdir string**: 任务工作路径
 - **-C/--config string**: 配置文件路径（默认"/etc/crane/config.yaml"）
 - **-c/--cpus-per-task float**: 每个任务所需的CPU数量（默认值为1）
+- **--deadline string**：作业的截止时间
 - **--comment string**: 作业的备注
 - **--debug-level string**: 可用的调试级别：trace、debug、info（默认值为"info"）
 - **-x/--exclude string**: 从分配中排除特定节点（以逗号分隔的列表）
