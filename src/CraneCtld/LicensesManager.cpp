@@ -417,7 +417,41 @@ CraneExpected<void> LicensesManager::QueryRemoteLicense(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
     std::list<LicenseResource>* res_licenses) {
+  util::read_lock_guard resource_guard(m_rw_resource_mutex_);
 
+  if (name.empty() || server.empty()) {
+    for (const auto& [key, resource] : m_license_resource_map_) {
+      if (!name.empty() && key.first != name) continue;
+      if (!server.empty() && key.second != server) continue;
+      if (!clusters.empty()) {
+        bool found = false;
+        for (const auto& cluster : clusters) {
+          if (resource->cluster_resources.contains(cluster)) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) continue;
+      }
+      res_licenses->emplace_back(*resource);
+    }
+  } else {
+    auto iter = m_license_resource_map_.find(std::make_pair(name, server));
+    if (iter == m_license_resource_map_.end()) return {};
+    if (!clusters.empty()) {
+      bool found = false;
+      for (const auto& cluster : clusters) {
+        if (iter->second->cluster_resources.contains(cluster)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) return {};
+    }
+    res_licenses->emplace_back(*iter->second);
+  }
+
+  return {};
 }
 
 }  // namespace Ctld
