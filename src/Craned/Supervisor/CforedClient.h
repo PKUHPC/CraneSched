@@ -105,9 +105,12 @@ class CforedClient {
 
   void TaskOutPutForward(std::unique_ptr<char[]>&& data, size_t len);
 
+  void TaskX11ConnectForward(x11_local_id_t x11_local_id);
+
   void TaskX11OutPutForward(x11_local_id_t x11_local_id,
-                            std::unique_ptr<char[]>&& data, size_t len,
-                            bool eof);
+                            std::unique_ptr<char[]>&& data, size_t len);
+
+  void TaskX11OutputFinish(x11_local_id_t x11_local_id);
 
   void CleanOutputQueueAndWriteToStreamThread_(
       grpc::ClientAsyncReaderWriter<crane::grpc::StreamTaskIORequest,
@@ -116,16 +119,25 @@ class CforedClient {
 
   std::atomic<bool> m_stopped_{false};
   std::atomic<bool> m_output_drained_{false};
+
   struct IOFwdRequest {
     std::unique_ptr<char[]> data;
     size_t len;
   };
-  struct X11FwdRequest {
+
+  struct X11FwdConnectReq {
+    x11_local_id_t x11_id;
+  };
+  struct X11FwdReq {
     x11_local_id_t x11_id;
     std::unique_ptr<char[]> data;
     size_t len;
-    bool eof;
   };
+
+  struct X11FwdEofReq {
+    x11_local_id_t x11_id;
+  };
+
   struct TaskFinishStatus {
     task_id_t task_id{0};
     uint32_t exit_code{0};
@@ -134,7 +146,9 @@ class CforedClient {
 
   struct FwdRequest {
     crane::grpc::StreamTaskIORequest::SupervisorRequestType type;
-    std::variant<IOFwdRequest, X11FwdRequest, TaskFinishStatus> data;
+    std::variant<IOFwdRequest, X11FwdConnectReq, X11FwdReq, X11FwdEofReq,
+                 TaskFinishStatus>
+        data;
   };
   ConcurrentQueue<FwdRequest> m_task_fwd_req_queue_;
 
