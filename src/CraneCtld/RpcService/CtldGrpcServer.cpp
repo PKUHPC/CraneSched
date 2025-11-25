@@ -137,11 +137,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   }
   CRANE_INFO("Craned {} lost executing step: [{}]", request->craned_id(),
              util::JobStepsToString(orphaned_steps));
-
-  // Synchronize step status reported by Craned during registration
-  // Use intelligent merging strategy similar to Slurm:
-  // - If Craned reports a more "advanced" state (e.g., Completed when Ctld has
-  // Running),
   if (!orphaned_steps.empty()) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
     g_task_scheduler->TerminateOrphanedSteps(orphaned_steps,
