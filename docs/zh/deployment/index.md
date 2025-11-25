@@ -15,10 +15,15 @@
 | **前端** | CLI（`cbatch`、`cqueue` 等）+ 其他服务（`cfored`、`cplugind`）| 按需部署 |
 | **数据库** | MongoDB，用于存储作业、账户和使用数据 | 控制节点/存储节点 |
 
-下图展示了鹤思组件在不同节点类型上的典型部署方式。
+下图展示了鹤思组件在不同节点类型上的典型部署方式（虚线边框表示可选组件）。
+
+!!! tip "可选组件说明"
+    - **cplugind**: 仅需在该节点需要插件功能时部署。
+    - **cfored**: 仅在需要提交交互式作业（如 `calloc` / `crun`）的节点上部署。
 
 ```mermaid
 graph TB
+    %% === 节点定义 ===
     subgraph 登录节点
         CLIs[命令行工具]
         cfored_login[cfored]
@@ -32,6 +37,7 @@ graph TB
 
     subgraph 计算节点
         craned[craned]
+        cfored_compute[cfored]
         cplugind_compute[cplugind]
     end
 
@@ -39,10 +45,12 @@ graph TB
         mongodb[(MongoDB)]
     end
 
-    %% 通信关系
+    %% === 通信关系 ===
     CLIs --> cranectld
     cfored_login --> cranectld
     cfored_login <-->|流式 I/O| craned
+    cfored_compute --> cranectld
+    cfored_compute <-->|流式 I/O| craned
     cranectld <-->|调度/响应| craned
     cranectld <--> mongodb
 
@@ -50,6 +58,23 @@ graph TB
     cplugind_ctrl <-.-> cranectld
     cplugind_login <-.-> cranectld
     cplugind_compute <-.-> craned
+
+    %% === 样式定义 ===
+    %% 必选组件：深灰实线
+    classDef required stroke:#555,stroke-width:2px;
+
+    %% 可选组件：深灰虚线
+    classDef optional stroke:#555,stroke-dasharray: 6 6, stroke-width:2px;
+
+    %% 指定可选组件（所有 cplugind）
+    class cplugind_login optional;
+    class cplugind_ctrl optional;
+    class cplugind_compute optional;
+    class cfored_compute optional;
+
+    %% 其他均为必选组件
+    class CLIs,cfored_login,cranectld,craned,mongodb required;
+
 ```
 
 ## 快速开始
