@@ -35,21 +35,21 @@ class CranedKeeper;
  */
 class CranedStub {
  public:
-  explicit CranedStub(CranedKeeper *craned_keeper);
-  CranedStub(const CranedStub &) = delete;
-  CranedStub(CranedStub &&) = delete;
-  CranedStub &operator=(const CranedStub &) = delete;
-  CranedStub &operator=(CranedStub &&) = delete;
+  explicit CranedStub(CranedKeeper* craned_keeper);
+  CranedStub(const CranedStub&) = delete;
+  CranedStub(CranedStub&&) = delete;
+  CranedStub& operator=(const CranedStub&) = delete;
+  CranedStub& operator=(CranedStub&&) = delete;
 
   ~CranedStub() = default;
   void Fini();
 
-  void SetRegToken(const RegToken &token) {
+  void SetRegToken(const RegToken& token) {
     absl::MutexLock l(&m_lock_);
     m_token_ = token;
   }
 
-  [[nodiscard]] bool CheckToken(const RegToken &token) {
+  [[nodiscard]] bool CheckToken(const RegToken& token) {
     absl::MutexLock l(&m_lock_);
     bool ret = m_token_.has_value() && m_token_.value() == token;
     if (!ret) {
@@ -59,7 +59,7 @@ class CranedStub {
     return ret;
   }
 
-  void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
+  void ConfigureCraned(const CranedId& craned_id, const RegToken& token);
 
   void SetReady() {
     CRANE_LOGGER_TRACE(g_runtime_status.conn_logger, "Craned {} stub ready.",
@@ -71,31 +71,35 @@ class CranedStub {
     m_token_.reset();
   }
 
-  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD> &jobs);
+  CraneErrCode AllocJobs(const std::vector<crane::grpc::JobToD>& jobs);
 
-  CraneErrCode FreeJobs(const std::vector<task_id_t> &task);
+  CraneErrCode FreeJobs(const std::vector<task_id_t>& task);
 
-  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD> &steps);
+  CraneErrCode AllocSteps(const std::vector<crane::grpc::StepToD>& steps);
 
   CraneExpected<std::unordered_map<job_id_t, std::set<step_id_t>>> ExecuteSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode FreeSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
+
+  CraneErrCode SuspendJobs(const std::vector<job_id_t>& job_ids);
+
+  CraneErrCode ResumeJobs(const std::vector<job_id_t>& job_ids);
 
   CraneErrCode TerminateSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode TerminateOrphanedSteps(
-      const std::unordered_map<job_id_t, std::set<step_id_t>> &steps);
+      const std::unordered_map<job_id_t, std::set<step_id_t>>& steps);
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
   crane::grpc::AttachInContainerTaskReply AttachInContainerTask(
-      const crane::grpc::AttachInContainerTaskRequest &request);
+      const crane::grpc::AttachInContainerTaskRequest& request);
 
   crane::grpc::ExecInContainerTaskReply ExecInContainerTask(
-      const crane::grpc::ExecInContainerTaskRequest &request);
+      const crane::grpc::ExecInContainerTaskRequest& request);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
@@ -114,7 +118,7 @@ class CranedStub {
  private:
   void HandleGrpcErrorCode_(grpc::StatusCode code);
 
-  CranedKeeper *m_craned_keeper_;
+  CranedKeeper* m_craned_keeper_;
 
   grpc_connectivity_state m_prev_channel_state_;
   std::shared_ptr<grpc::Channel> m_channel_;
@@ -137,7 +141,7 @@ class CranedStub {
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.
-  std::function<void(CranedStub *)> m_clean_up_cb_;
+  std::function<void(CranedStub*)> m_clean_up_cb_;
 
   friend class CranedKeeper;
 };
@@ -154,10 +158,10 @@ class CranedKeeper {
 
  public:
   explicit CranedKeeper(uint32_t node_num);
-  CranedKeeper(const CranedKeeper &) = delete;
-  CranedKeeper(CranedKeeper &&) = delete;
-  CranedKeeper &operator=(const CranedKeeper &) = delete;
-  CranedKeeper &operator=(CranedKeeper &&) = delete;
+  CranedKeeper(const CranedKeeper&) = delete;
+  CranedKeeper(CranedKeeper&&) = delete;
+  CranedKeeper& operator=(const CranedKeeper&) = delete;
+  CranedKeeper& operator=(CranedKeeper&&) = delete;
 
   ~CranedKeeper();
 
@@ -165,7 +169,7 @@ class CranedKeeper {
 
   uint32_t AvailableCranedCount();
 
-  bool IsCranedConnected(const CranedId &craned_id);
+  bool IsCranedConnected(const CranedId& craned_id);
 
   /**
    * Get the pointer to CranedStub.
@@ -177,38 +181,40 @@ class CranedKeeper {
    * The callback registerer should do necessary synchronization to clean up all
    * the usage of the CranedStub pointer before CranedIsDown() returns.
    */
-  std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
+  std::shared_ptr<CranedStub> GetCranedStub(const CranedId& craned_id);
 
-  void SetCranedConnectedCb(std::function<void(CranedId, const RegToken &)> cb);
+  void SetCranedConnectedCb(std::function<void(CranedId, const RegToken&)> cb);
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
-  void PutNodeIntoUnavailSet(const std::string &crane_id,
-                             const RegToken &token);
+  void PutNodeIntoUnavailSet(const std::string& crane_id,
+                             const RegToken& token);
 
  private:
   struct CqTag {
     enum Type : uint8_t { kInitializingCraned, kEstablishedCraned };
     Type type;
-    CranedStub *craned;
+    CranedStub* craned;
   };
 
-  static void CranedChannelConnFailNoLock_(CranedStub *stub);
+  static void CranedChannelConnectFail_(CranedStub* stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id, RegToken token);
+  static void CranedChannelConnFailNoLock_(CranedStub* stub);
 
-  CqTag *InitCranedStateMachine_(CranedStub *craned,
+  void ConnectCranedNode_(const CranedId& craned_id, const RegToken& token);
+
+  CqTag* InitCranedStateMachine_(CranedStub* craned,
                                  grpc_connectivity_state new_state);
-  CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
+  CqTag* EstablishedCranedStateMachine_(CranedStub* craned,
                                         grpc_connectivity_state new_state);
 
-  bool CheckNodeTimeoutAndClean(CqTag *tag);
+  bool CheckNodeTimeoutAndClean(CqTag* tag);
 
   void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
 
-  std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
+  std::function<void(CranedId, const RegToken&)> m_craned_connected_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.

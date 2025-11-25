@@ -50,74 +50,82 @@ class CranedServiceImpl : public Craned::Service {
  public:
   CranedServiceImpl() = default;
 
-  grpc::Status Configure(grpc::ServerContext *context,
-                         const crane::grpc::ConfigureCranedRequest *request,
-                         google::protobuf::Empty *response) override;
+  grpc::Status Configure(grpc::ServerContext* context,
+                         const crane::grpc::ConfigureCranedRequest* request,
+                         google::protobuf::Empty* response) override;
 
-  grpc::Status ExecuteSteps(grpc::ServerContext *context,
-                            const crane::grpc::ExecuteStepsRequest *request,
-                            crane::grpc::ExecuteStepsReply *response) override;
+  grpc::Status ExecuteSteps(grpc::ServerContext* context,
+                            const crane::grpc::ExecuteStepsRequest* request,
+                            crane::grpc::ExecuteStepsReply* response) override;
 
   grpc::Status TerminateSteps(
-      grpc::ServerContext *context,
-      const crane::grpc::TerminateStepsRequest *request,
-      crane::grpc::TerminateStepsReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::TerminateStepsRequest* request,
+      crane::grpc::TerminateStepsReply* response) override;
 
   grpc::Status TerminateOrphanedStep(
-      grpc::ServerContext *context,
-      const crane::grpc::TerminateOrphanedStepRequest *request,
-      crane::grpc::TerminateOrphanedStepReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::TerminateOrphanedStepRequest* request,
+      crane::grpc::TerminateOrphanedStepReply* response) override;
+
+  grpc::Status SuspendJobs(grpc::ServerContext* context,
+                           const crane::grpc::SuspendJobsRequest* request,
+                           crane::grpc::SuspendJobsReply* response) override;
+
+  grpc::Status ResumeJobs(grpc::ServerContext* context,
+                          const crane::grpc::ResumeJobsRequest* request,
+                          crane::grpc::ResumeJobsReply* response) override;
 
   grpc::Status QueryStepFromPort(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryStepFromPortRequest *request,
-      crane::grpc::QueryStepFromPortReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::QueryStepFromPortRequest* request,
+      crane::grpc::QueryStepFromPortReply* response) override;
 
   grpc::Status QuerySshStepEnvVariables(
-      grpc::ServerContext *context,
-      const ::crane::grpc::QuerySshStepEnvVariablesRequest *request,
-      crane::grpc::QuerySshStepEnvVariablesReply *response) override;
+      grpc::ServerContext* context,
+      const ::crane::grpc::QuerySshStepEnvVariablesRequest* request,
+      crane::grpc::QuerySshStepEnvVariablesReply* response) override;
 
-  grpc::Status AllocJobs(grpc::ServerContext *context,
-                         const crane::grpc::AllocJobsRequest *request,
-                         crane::grpc::AllocJobsReply *response) override;
+  grpc::Status AllocJobs(grpc::ServerContext* context,
+                         const crane::grpc::AllocJobsRequest* request,
+                         crane::grpc::AllocJobsReply* response) override;
 
-  grpc::Status FreeJobs(grpc::ServerContext *context,
-                        const crane::grpc::FreeJobsRequest *request,
-                        crane::grpc::FreeJobsReply *response) override;
+  grpc::Status FreeJobs(grpc::ServerContext* context,
+                        const crane::grpc::FreeJobsRequest* request,
+                        crane::grpc::FreeJobsReply* response) override;
 
-  grpc::Status AllocSteps(grpc::ServerContext *context,
-                          const crane::grpc::AllocStepsRequest *request,
-                          crane::grpc::AllocStepsReply *response) override;
+  grpc::Status AllocSteps(grpc::ServerContext* context,
+                          const crane::grpc::AllocStepsRequest* request,
+                          crane::grpc::AllocStepsReply* response) override;
 
-  grpc::Status FreeSteps(grpc::ServerContext *context,
-                         const crane::grpc::FreeStepsRequest *request,
-                         crane::grpc::FreeStepsReply *response) override;
+  grpc::Status FreeSteps(grpc::ServerContext* context,
+                         const crane::grpc::FreeStepsRequest* request,
+                         crane::grpc::FreeStepsReply* response) override;
 
   grpc::Status ChangeJobTimeLimit(
-      grpc::ServerContext *context,
-      const crane::grpc::ChangeJobTimeLimitRequest *request,
-      crane::grpc::ChangeJobTimeLimitReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ChangeJobTimeLimitRequest* request,
+      crane::grpc::ChangeJobTimeLimitReply* response) override;
 
   grpc::Status StepStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::StepStatusChangeRequest *request,
-      crane::grpc::StepStatusChangeReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::StepStatusChangeRequest* request,
+      crane::grpc::StepStatusChangeReply* response) override;
 
   grpc::Status AttachInContainerTask(
-      grpc::ServerContext *context,
-      const crane::grpc::AttachInContainerTaskRequest *request,
-      crane::grpc::AttachInContainerTaskReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::AttachInContainerTaskRequest* request,
+      crane::grpc::AttachInContainerTaskReply* response) override;
 
   grpc::Status ExecInContainerTask(
-      grpc::ServerContext *context,
-      const crane::grpc::ExecInContainerTaskRequest *request,
-      crane::grpc::ExecInContainerTaskReply *response) override;
+      grpc::ServerContext* context,
+      const crane::grpc::ExecInContainerTaskRequest* request,
+      crane::grpc::ExecInContainerTaskReply* response) override;
 };
 
 class CranedServer {
  public:
-  explicit CranedServer(const Config::CranedListenConf &listen_conf);
+  explicit CranedServer(const Config::CranedListenConf& listen_conf);
 
   void Shutdown() {
     m_status_ = CranedStatus::STOPPING;

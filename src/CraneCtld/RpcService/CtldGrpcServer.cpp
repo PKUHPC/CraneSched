@@ -626,6 +626,52 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
             fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
       }
     }
+  } else if (request->attribute() == ModifyTaskRequest::Suspend) {
+    std::vector<task_id_t> task_ids(request->task_ids().begin(),
+                                    request->task_ids().end());
+    auto results = g_task_scheduler->SuspendRunningTasks(task_ids);
+    for (size_t i = 0; i < task_ids.size(); ++i) {
+      task_id_t task_id = task_ids[i];
+      err = results[i];
+      if (err == CraneErrCode::SUCCESS) {
+        response->add_modified_tasks(task_id);
+      } else {
+        response->add_not_modified_tasks(task_id);
+        if (err == CraneErrCode::ERR_NON_EXISTENT) {
+          response->add_not_modified_reasons(
+              fmt::format("Task #{} was not found in running queue.", task_id));
+        } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
+          response->add_not_modified_reasons(
+              fmt::format("Task #{} is not running.", task_id));
+        } else {
+          response->add_not_modified_reasons(
+              fmt::format("Failed to suspend task: {}.", CraneErrStr(err)));
+        }
+      }
+    }
+  } else if (request->attribute() == ModifyTaskRequest::Resume) {
+    std::vector<task_id_t> task_ids(request->task_ids().begin(),
+                                    request->task_ids().end());
+    auto results = g_task_scheduler->ResumeSuspendedTasks(task_ids);
+    for (size_t i = 0; i < task_ids.size(); ++i) {
+      task_id_t task_id = task_ids[i];
+      err = results[i];
+      if (err == CraneErrCode::SUCCESS) {
+        response->add_modified_tasks(task_id);
+      } else {
+        response->add_not_modified_tasks(task_id);
+        if (err == CraneErrCode::ERR_NON_EXISTENT) {
+          response->add_not_modified_reasons(
+              fmt::format("Task #{} was not found in running queue.", task_id));
+        } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
+          response->add_not_modified_reasons(
+              fmt::format("Task #{} is not suspended.", task_id));
+        } else {
+          response->add_not_modified_reasons(
+              fmt::format("Failed to resume task: {}.", CraneErrStr(err)));
+        }
+      }
+    }
   } else {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);

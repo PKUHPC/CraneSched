@@ -783,6 +783,50 @@ CraneErrCode ContainerInstance::Kill(int signum) {
   return CraneErrCode::SUCCESS;
 }
 
+CraneErrCode ContainerInstance::Suspend() {
+  auto* step = GetParentStepInstance();
+  if (step == nullptr) return CraneErrCode::ERR_GENERIC_FAILURE;
+
+  if (step->cgroup_path.empty()) {
+    CRANE_WARN("Task #{} has no cgroup path; cannot suspend container.",
+               task_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto err = CgroupManager::FreezeCgroupByPath(step->cgroup_path);
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to suspend container task #{} via cg '{}': {}", task_id,
+                step->cgroup_path, CraneErrStr(err));
+  } else {
+    CRANE_DEBUG("Container task #{} suspended via cg '{}'.", task_id,
+                step->cgroup_path);
+  }
+
+  return err;
+}
+
+CraneErrCode ContainerInstance::Resume() {
+  auto* step = GetParentStepInstance();
+  if (step == nullptr) return CraneErrCode::ERR_GENERIC_FAILURE;
+
+  if (step->cgroup_path.empty()) {
+    CRANE_WARN("Task #{} has no cgroup path; cannot resume container.",
+               task_id);
+    return CraneErrCode::ERR_NON_EXISTENT;
+  }
+
+  auto err = CgroupManager::ThawCgroupByPath(step->cgroup_path);
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to resume container task #{} via cg '{}': {}", task_id,
+                step->cgroup_path, CraneErrStr(err));
+  } else {
+    CRANE_DEBUG("Container task #{} resumed via cg '{}'.", task_id,
+                step->cgroup_path);
+  }
+
+  return err;
+}
+
 CraneErrCode ContainerInstance::Cleanup() {
   // For container tasks, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove pod and container.
@@ -1390,6 +1434,34 @@ CraneErrCode ProcInstance::Kill(int signum) {
   return CraneErrCode::ERR_NON_EXISTENT;
 }
 
+CraneErrCode ProcInstance::Suspend() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Suspending pid {} with SIGSTOP", m_pid_);
+    // Send SIGSTOP to the whole process group
+    int err = kill(-m_pid_, SIGSTOP);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Suspending pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
+CraneErrCode ProcInstance::Resume() {
+  if (m_pid_ != 0) {
+    CRANE_TRACE("Resuming pid {} with SIGCONT", m_pid_);
+    // Send SIGCONT to the whole process group
+    int err = kill(-m_pid_, SIGCONT);
+    if (err == 0) return CraneErrCode::SUCCESS;
+
+    CRANE_TRACE("Resuming pid {} failed, error: {}", m_pid_, strerror(errno));
+    return CraneErrCode::ERR_GENERIC_FAILURE;
+  }
+
+  return CraneErrCode::ERR_NON_EXISTENT;
+}
+
 CraneErrCode ProcInstance::Cleanup() {
   if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
@@ -1490,6 +1562,12 @@ TaskManager::TaskManager()
   m_change_task_time_limit_timer_handle_->start(
       std::chrono::milliseconds(kStepRequestCheckIntervalMs * 3),
       std::chrono::milliseconds(kStepRequestCheckIntervalMs));
+
+  m_task_signal_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_task_signal_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanTaskSignalQueueCb_();
+      });
 
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
@@ -1676,6 +1754,34 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+std::future<CraneErrCode> TaskManager::SuspendJobAsync() {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Suspend;
+  elem.prom = std::move(promise);
+
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+
+  return future;
+}
+
+std::future<CraneErrCode> TaskManager::ResumeJobAsync() {
+  std::promise<CraneErrCode> promise;
+  auto future = promise.get_future();
+
+  TaskSignalQueueElem elem;
+  elem.action = TaskSignalQueueElem::Action::Resume;
+  elem.prom = std::move(promise);
+
+  m_task_signal_queue_.enqueue(std::move(elem));
+  m_task_signal_async_handle_->send();
+
+  return future;
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1966,6 +2072,81 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   for (auto& not_ready_elem : not_ready_elems) {
     m_task_time_limit_change_queue_.enqueue(std::move(not_ready_elem));
   }
+}
+
+void TaskManager::EvCleanTaskSignalQueueCb_() {
+  TaskSignalQueueElem elem;
+  while (m_task_signal_queue_.try_dequeue(elem)) {
+    CraneErrCode err;
+    switch (elem.action) {
+    case TaskSignalQueueElem::Action::Suspend:
+      err = SuspendRunningTasks_();
+      break;
+    case TaskSignalQueueElem::Action::Resume:
+      err = ResumeSuspendedTasks_();
+      break;
+    default:
+      err = CraneErrCode::ERR_INVALID_PARAM;
+    }
+    elem.prom.set_value(err);
+  }
+}
+
+CraneErrCode TaskManager::SuspendRunningTasks_() {
+  CRANE_DEBUG("Suspending all running tasks");
+
+  // Daemon steps don't have actual task instances to suspend
+  // Note: This should not be reached as daemon steps are filtered at RPC level
+  if (m_step_.IsDaemonStep()) {
+    CRANE_DEBUG("Daemon step has no tasks to suspend, skipping.");
+    return CraneErrCode::SUCCESS;
+  }
+
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  for (const auto& task_id : m_step_.task_ids) {
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task) {
+      CraneErrCode err = task->Suspend();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to suspend task #{}: {}", task_id,
+                    CraneErrStr(err));
+        result = err;
+      } else {
+        CRANE_DEBUG("Task #{} suspended successfully", task_id);
+      }
+    }
+  }
+
+  return result;
+}
+
+CraneErrCode TaskManager::ResumeSuspendedTasks_() {
+  CRANE_DEBUG("Resuming all suspended tasks");
+
+  // Daemon steps don't have actual task instances to resume
+  // Note: This should not be reached as daemon steps are filtered at RPC level
+  if (m_step_.IsDaemonStep()) {
+    CRANE_DEBUG("Daemon step has no tasks to resume, skipping.");
+    return CraneErrCode::SUCCESS;
+  }
+
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  for (const auto& task_id : m_step_.task_ids) {
+    auto* task = m_step_.GetTaskInstance(task_id);
+    if (task) {
+      CraneErrCode err = task->Resume();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to resume task #{}: {}", task_id, CraneErrStr(err));
+        result = err;
+      } else {
+        CRANE_DEBUG("Task #{} resumed successfully", task_id);
+      }
+    }
+  }
+
+  return result;
 }
 
 void TaskManager::EvGrpcExecuteTaskCb_() {
