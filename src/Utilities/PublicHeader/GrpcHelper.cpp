@@ -18,7 +18,6 @@
 
 #include "crane/GrpcHelper.h"
 
-#include "../../Misc/Pam/PamUtil.h"
 #include "crane/Network.h"
 
 std::string_view GrpcConnStateStr(grpc_connectivity_state state) {
@@ -41,8 +40,9 @@ std::string_view GrpcConnStateStr(grpc_connectivity_state state) {
 std::chrono::system_clock::time_point ChronoFromProtoTimestamp(
     const google::protobuf::Timestamp& timestamp) {
   return std::chrono::system_clock::time_point(
-      std::chrono::seconds(timestamp.seconds()) +
-      std::chrono::nanoseconds(static_cast<uint64_t>(timestamp.nanos())));
+      std::chrono::duration_cast<std::chrono::system_clock::duration>(
+          std::chrono::seconds(timestamp.seconds()) +
+          std::chrono::nanoseconds(static_cast<uint64_t>(timestamp.nanos()))));
 }
 
 std::string ProtoTimestampToString(

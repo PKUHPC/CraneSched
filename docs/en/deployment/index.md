@@ -15,10 +15,15 @@ CraneSched consists of three main components:
 | **Frontend** | CLI (`cbatch`, `cqueue`, etc.) + other services (`cfored`, `cplugind`) | As needed |
 | **Database** | MongoDB for storing jobs, accounts, and usage data | Control/Storage node |
 
-The diagram below shows a typical placement of CraneSched components across node types.
+The diagram below shows a typical placement of CraneSched components across node types (dashed borders indicate optional components).
+
+!!! tip "Optional Components"
+    - **cplugind**: Only required on nodes that need plugin functionality.
+    - **cfored**: Only required on nodes where interactive jobs (e.g., `calloc` / `crun`) need to be submitted.
 
 ```mermaid
 graph TB
+    %% === Node Definitions ===
     subgraph Login Node
         CLIs[CLIs]
         cfored_login[cfored]
@@ -32,6 +37,7 @@ graph TB
 
     subgraph Compute Node
         craned[craned]
+        cfored_compute[cfored]
         cplugind_compute[cplugind]
     end
 
@@ -39,10 +45,12 @@ graph TB
         mongodb[(MongoDB)]
     end
 
-    %% Communication
+    %% === Communication ===
     CLIs --> cranectld
     cfored_login --> cranectld
     cfored_login <-->|streaming I/O| craned
+    cfored_compute --> cranectld
+    cfored_compute <-->|streaming I/O| craned
     cranectld <-->|dispatch/response| craned
     cranectld <--> mongodb
 
@@ -50,6 +58,23 @@ graph TB
     cplugind_ctrl <-.-> cranectld
     cplugind_login <-.-> cranectld
     cplugind_compute <-.-> craned
+
+    %% === Style Definitions ===
+    %% Required components: dark gray solid border
+    classDef required stroke:#555,stroke-width:2px;
+
+    %% Optional components: dark gray dashed border
+    classDef optional stroke:#555,stroke-dasharray: 6 6, stroke-width:2px;
+
+    %% Specify optional components (all cplugind)
+    class cplugind_login optional;
+    class cplugind_ctrl optional;
+    class cplugind_compute optional;
+    class cfored_compute optional;
+
+    %% All others are required components
+    class CLIs,cfored_login,cranectld,craned,mongodb required;
+
 ```
 
 ## Quick Start

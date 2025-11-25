@@ -251,6 +251,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryReservationInfoRequest *request,
       crane::grpc::QueryReservationInfoReply *response) override;
 
+  grpc::Status QueryLicensesInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLicensesInfoRequest *request,
+      crane::grpc::QueryLicensesInfoReply *response) override;
+
   grpc::Status ModifyTask(grpc::ServerContext *context,
                           const crane::grpc::ModifyTaskRequest *request,
                           crane::grpc::ModifyTaskReply *response) override;

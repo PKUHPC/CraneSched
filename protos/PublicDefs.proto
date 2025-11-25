@@ -174,6 +174,13 @@ message TaskToCtld {
 
   bool hold = 38;
   google.protobuf.Timestamp begin_time = 39;
+
+  message License {
+    string key = 1;
+    uint32 count = 2;
+  }
+  repeated License licenses_count = 40;
+  bool is_licenses_or = 41;
 }
 
 message TaskInEmbeddedDb {
@@ -203,6 +210,7 @@ message RuntimeAttrOfTask {
 
   TaskStatus primary_step_status = 21;
   uint32 primary_step_exit_code = 22;
+  map<string, uint32> actual_licenses = 23;
 }
 
 message StepToCtld {
@@ -429,6 +437,7 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
   ResourceView req_res_view = 17;
+  map<string, uint32> licenses_count = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 
@@ -679,6 +688,7 @@ enum ErrCode {
   ERR_IDENTITY_MISMATCH = 75;
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
+  ERR_LICENSE_LEGAL_FAILED = 78;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
@@ -819,4 +829,10 @@ enum TxnAction {
   AddQos = 6;
   ModifyQos = 7;
   DeleteQos = 8;
+}
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 free = 4;
 }

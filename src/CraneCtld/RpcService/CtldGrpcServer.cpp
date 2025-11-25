@@ -560,6 +560,18 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
 
   return grpc::Status::OK;
 }
+grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLicensesInfoRequest *request,
+    crane::grpc::QueryLicensesInfoReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+
+  g_licenses_manager->GetLicensesInfo(request, response);
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
 
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext* context, const crane::grpc::ModifyTaskRequest* request,

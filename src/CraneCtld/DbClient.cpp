@@ -449,6 +449,14 @@ bool MongodbClient::FetchJobRecords(
             static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
                 container_meta));
       }
+
+      auto* mutable_licenses = task->mutable_licenses_count();
+      for (auto&& elem :
+           ViewValueOr_(view["licenses_alloc"],
+                        bsoncxx::builder::basic::make_document().view())) {
+        mutable_licenses->emplace(std::string(elem.key()),
+                                  elem.get_int32().value);
+      }
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1084,6 +1092,18 @@ void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
   }));
 }
 
+template <>
+void MongodbClient::DocumentAppendItem_<
+    std::unordered_map<std::string, uint32_t>>(
+    document& doc, const std::string& key,
+    const std::unordered_map<std::string, uint32_t>& value) {
+  doc.append(kvp(key, [&value](sub_document sub_doc) {
+    for (const auto& [k, v] : value) {
+      sub_doc.append(kvp(k, static_cast<int32_t>(v)));
+    }
+  }));
+}
+
 template <typename... Ts, std::size_t... Is>
 bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
@@ -1540,9 +1560,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_container     has_job_info
+  // req_licenses 40 licenses_alloc
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1557,8 +1578,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
-      // 35 - 39
-    "mem_alloc", "device_map", "meta_container", "has_job_info"
+    // 35 - 39
+    "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
   };
   // clang-format on
 
@@ -1570,7 +1591,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool>                                                   /*38*/
+             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
       values{                                                        // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1605,7 +1626,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              // 35-39
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
              allocated_res_view.GetDeviceMap(), container_meta,
-             true /* Mark the document having complete job info */};
+             true /* Mark the document having complete job info */,
+             std::unordered_map<std::string, uint32_t>{
+                 runtime_attr.actual_licenses().begin(),
+                 runtime_attr.actual_licenses().end()}};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1636,9 +1660,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
   // 35 mem_alloc     device_map     meta_container      has_job_info
+  // licenses_alloc
 
   // clang-format off
-  std::array<std::string, 39> fields{
+  std::array<std::string, 40> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1654,7 +1679,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_container", "has_job_info"
+      "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc"
   };
   // clang-format on
 
@@ -1666,7 +1691,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool>                                                   /*38*/
+             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1693,7 +1718,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 35-37
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), container_meta,
-             true /* Mark the document having complete job info */};
+             true /* Mark the document having complete job info */,
+             task->licenses_count};
 
   return DocumentConstructor_(fields, values);
 }

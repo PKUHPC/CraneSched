@@ -130,6 +130,13 @@ PendingQueueMaxSize: 900000
 # Default value is 100000.
 ScheduledBatchSize: 100000
 
+# The set licenses and their quantities (Only need to configure in the ctld config file.)
+Licenses:
+  - name: fluent
+    quantity: 30
+  - name: ansys
+    quantity: 100
+
 # Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
 # if this option is set to true.
 # Default value is false.
