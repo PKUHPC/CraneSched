@@ -7,12 +7,12 @@ Crane 可以通过在调度时为作业分配可用的许可证来帮助管理�
 
 在 Crane 中，许可证目前可以通过下面方式进行配置：
 
-* 本地许可证：指在某个 `crane/config.yaml` 中配置的许可证，只在使用该 `crane/config.yaml` 的集群内本地有效。
+* 本地许可证：指在某个 `/etc/crane/config.yaml` 中配置的许可证，只在使用该 `/etc/crane/config.yaml` 的集群内本地有效。
 
 
 ## 本地许可证
 
-本地许可证在 `crane/config.yaml` 中使用 `Licenses` 选项定义。
+本地许可证在 `/etc/crane/config.yaml` 中使用 `Licenses` 选项定义。
 
 ```Yaml
 Licenses:

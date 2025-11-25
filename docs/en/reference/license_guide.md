@@ -7,12 +7,12 @@ but are instead associated with the entire cluster.
 
 Crane currently supports configuring licenses in the following way:
 
-* **Local licenses**: Licenses configured in a specific `crane/config.yaml`, which are only valid within the cluster that uses that configuration file.
+* **Local licenses**: Licenses configured in a specific `/etc/crane/config.yaml`, which are only valid within the cluster that uses that configuration file.
 
 
 ## Local Licenses
 
-Local licenses are defined in `crane/config.yaml` using the `Licenses` option.
+Local licenses are defined in `/etc/crane/config.yaml` using the `Licenses` option.
 
 ```yaml
 Licenses:
