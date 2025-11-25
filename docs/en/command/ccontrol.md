@@ -123,14 +123,14 @@ ccontrol show reservation my_reservation
 Display information about the license.
 
 ```bash
-# 显示所有许可证
+# Show all licenses
 ccontrol show lic
 
-# 显示特定许可证
+#  Show specific license
 ccontrol show lic <license_name>
 ```
 
-**示例：**
+**Example:**
 ```bash
 ccontrol show lic
 ccontrol show lic my_lic
