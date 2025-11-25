@@ -269,6 +269,7 @@ using PartitionId = std::string;
 using CranedId = std::string;
 using ResvId = std::string;
 using cpu_t = fpm::fixed_24_8;
+using LicenseId = std::string;
 
 // TODO: refactor SlotId, it should not be a string of file path.
 // Device path. e.g. /dev/nvidia0

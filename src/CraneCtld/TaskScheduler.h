@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "CranedMetaContainer.h"
+#include "LicensesManager.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -105,6 +107,11 @@ struct PdJobInScheduler {
   ResourceV2 allocated_res;
   std::vector<CranedId> craned_ids;
 
+  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
+      req_licenses;
+  bool is_license_or;
+  std::unordered_map<LicenseId, uint32_t> actual_licenses;
+
   std::string reason;
 
   PdJobInScheduler(TaskInCtld* job)
@@ -123,7 +130,9 @@ struct PdJobInScheduler {
         partition_priority(job->partition_priority),
         qos_priority(job->qos_priority),
         account(job->account),
-        priority(job->mandated_priority) {}
+        priority(job->mandated_priority),
+        req_licenses(job->TaskToCtld().licenses_count()),
+        is_license_or(job->TaskToCtld().is_licenses_or()) {}
 };
 
 class IPrioritySorter {

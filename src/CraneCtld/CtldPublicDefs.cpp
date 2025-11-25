@@ -943,6 +943,15 @@ void TaskInCtld::SetEndTimeByUnixSecond(uint64_t val) {
   runtime_attr.mutable_end_time()->set_seconds(val);
 }
 
+void TaskInCtld::SetActualLicenses(
+    std::unordered_map<LicenseId, uint32_t>&& actual_licenses) {
+  auto* mutable_map = runtime_attr.mutable_actual_licenses();
+  for (const auto& [id, count] : actual_licenses) {
+    mutable_map->insert({id, count});
+  }
+  licenses_count = std::move(actual_licenses);
+}
+
 void TaskInCtld::SetHeld(bool val) {
   held = val;
   runtime_attr.set_held(val);
@@ -1067,6 +1076,8 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
   start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
   end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
   submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
+  licenses_count = std::unordered_map{runtime_attr.actual_licenses().begin(),
+                                      runtime_attr.actual_licenses().end()};
 }
 
 void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
@@ -1129,6 +1140,9 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
+
+  task_info->mutable_licenses_count()->insert(licenses_count.begin(),
+                                              licenses_count.end());
 }
 
 }  // namespace Ctld
