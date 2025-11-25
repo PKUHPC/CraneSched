@@ -537,3 +537,11 @@ ResourceView operator*(const ResourceView& lhs, uint32_t rhs);
 
 bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
+
+template <class... Ts>
+struct VariantVisitor : Ts... {
+  using Ts::operator()...;
+};
+
+template <class... Ts>
+VariantVisitor(Ts...) -> VariantVisitor<Ts...>;

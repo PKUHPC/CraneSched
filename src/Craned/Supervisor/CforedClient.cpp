@@ -153,40 +153,39 @@ uint16_t CforedClient::SetupX11forwarding_() {
     CRANE_TRACE("Accepting connection on x11 proxy.");
 
     x11_local_id_t x11_local_id = next_x11_id_++;
+    this->TaskX11ConnectForward(x11_local_id);
     auto x11_fd_info = std::make_shared<X11FdInfo>();
     auto sock = h.parent().resource<uvw::tcp_handle>();
 
-    sock->on<uvw::data_event>([x11_local_id, this](uvw::data_event& e,
-                                                   uvw::tcp_handle& s) {
-      CRANE_TRACE("Read x11 output. Forwarding...");
-      TaskX11OutPutForward(x11_local_id, std::move(e.data), e.length, false);
-    });
+    sock->on<uvw::data_event>(
+        [x11_local_id, this](uvw::data_event& e, uvw::tcp_handle& s) {
+          CRANE_TRACE("[X11 #{}] Read x11 output len [{}]. Forwarding...",
+                      x11_local_id, e.length);
+          TaskX11OutPutForward(x11_local_id, std::move(e.data), e.length);
+        });
     sock->on<uvw::write_event>(
-        [this](const uvw::write_event&, uvw::tcp_handle&) {
-          CRANE_TRACE("Write x11 input done.");
+        [x11_local_id, this](const uvw::write_event&, uvw::tcp_handle&) {
+          CRANE_TRACE("[X11 #{}] Write x11 input done.", x11_local_id);
         });
 
-    sock->on<uvw::end_event>([x11_local_id, this](uvw::end_event&,
-                                                  uvw::tcp_handle& s) {
-      // EOF
-      CRANE_TRACE("X11 proxy connection ended. Closing it.");
-      if (auto* p = s.data<X11FdInfo>().get(); p) p->sock_stopped = true;
-      TaskX11OutPutForward(x11_local_id, std::make_unique<char[]>(0), 0, true);
-      s.close();
-    });
+    sock->on<uvw::end_event>(
+        [x11_local_id, this](uvw::end_event&, uvw::tcp_handle& s) {
+          // EOF
+          CRANE_TRACE("[X11 #{}] connection ended. Closing it.", x11_local_id);
+          if (auto* p = s.data<X11FdInfo>().get(); p) p->sock_stopped = true;
+          s.close();
+        });
     sock->on<uvw::error_event>([x11_local_id, this](uvw::error_event& e,
                                                     uvw::tcp_handle& s) {
-      CRANE_ERROR("Error on x11 proxy of {}. Closing it.", e.what());
+      CRANE_ERROR("[X11 #{}] Error :{}. Closing it.", x11_local_id, e.what());
       if (auto* p = s.data<X11FdInfo>().get(); p) p->sock_stopped = true;
-      TaskX11OutPutForward(x11_local_id, std::make_unique<char[]>(0), 0, true);
       s.close();
     });
     sock->on<uvw::close_event>(
         [x11_local_id, this](uvw::close_event&, uvw::tcp_handle& s) {
-          CRANE_TRACE("X11 proxy connection was closed.");
-          m_x11_fd_info_map_.erase(x11_local_id);
+          CRANE_INFO("[X11 #{}] proxy connection was closed.", x11_local_id);
+          this->TaskX11OutputFinish(x11_local_id);
         });
-    sock->data(x11_fd_info);
 
     h.accept(*sock);
 
@@ -194,9 +193,6 @@ uint16_t CforedClient::SetupX11forwarding_() {
     x11_fd_info->sock = sock;
     m_x11_fd_info_map_[x11_local_id] = x11_fd_info;
     sock->read();
-    // Currently only 1 connection of x11 client will be accepted.
-    // Close it once we accept one x11 client.
-    h.close();
   });
 
   x11_proxy_h->on<uvw::close_event>(
@@ -420,44 +416,47 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
       ok = m_task_fwd_req_queue_.try_dequeue(fwd_req);
+      CRANE_TRACE("Waiting for output to forward...");
       continue;
     }
 
     if (ok) {
       StreamTaskIORequest request;
       request.set_type(fwd_req.type);
-      switch (fwd_req.type) {
-      case StreamTaskIORequest::TASK_OUTPUT: {
-        auto& io_fwd_req = std::get<IOFwdRequest>(fwd_req.data);
-
-        auto* payload = request.mutable_payload_task_output_req();
-        payload->set_msg(io_fwd_req.data.get(), io_fwd_req.len);
-      } break;
-      case StreamTaskIORequest::TASK_X11_OUTPUT: {
-        auto& x11_fwd_req = std::get<X11FwdRequest>(fwd_req.data);
-
-        auto* payload = request.mutable_payload_task_x11_output_req();
-        // payload->set_x11_id(x11_fwd_req.x11_id);
-        payload->set_msg(x11_fwd_req.data.get(), x11_fwd_req.len);
-        // payload->set_eof(x11_fwd_req.eof);
-        // payload->set_craned_id(g_config.CranedIdOfThisNode);
-      } break;
-      case StreamTaskIORequest::TASK_EXIT_STATUS: {
-        auto& status = std::get<TaskFinishStatus>(fwd_req.data);
-        auto* payload = request.mutable_payload_task_exit_status_req();
-        payload->set_task_id(status.task_id);
-        payload->set_exit_code(status.exit_code);
-        payload->set_signaled(status.signaled);
-      } break;
-      default:
-        CRANE_ERROR("Unknown FwdRequest type: {}", int(fwd_req.type));
-        std::unreachable();
-      }
+      std::visit(
+          VariantVisitor{
+              [&request](IOFwdRequest& req) {
+                auto* payload = request.mutable_payload_task_output_req();
+                payload->set_msg(req.data.get(), req.len);
+              },
+              [&request](X11FwdConnectReq& req) {
+                auto* payload = request.mutable_payload_task_x11_fwd_conn_req();
+                payload->set_local_id(req.x11_id);
+                payload->set_craned_id(g_config.CranedIdOfThisNode);
+              },
+              [&request](X11FwdReq& req) {
+                auto* payload = request.mutable_payload_task_x11_output_req();
+                payload->set_local_id(req.x11_id);
+                payload->set_craned_id(g_config.CranedIdOfThisNode);
+                payload->set_msg(req.data.get(), req.len);
+              },
+              [&request](TaskFinishStatus& status) {
+                auto* payload = request.mutable_payload_task_exit_status_req();
+                payload->set_task_id(status.task_id);
+                payload->set_exit_code(status.exit_code);
+                payload->set_signaled(status.signaled);
+              },
+              [&request](X11FwdEofReq& req) {
+                auto* payload = request.mutable_payload_task_x11_eof_req();
+                payload->set_local_id(req.x11_id);
+                payload->set_craned_id(g_config.CranedIdOfThisNode);
+              }},
+          fwd_req.data);
 
       while (write_pending->load(std::memory_order::acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
 
-      CRANE_TRACE("Writing output...");
+      CRANE_TRACE("Writing output type: {}...", static_cast<int>(fwd_req.type));
       write_pending->store(true, std::memory_order::release);
       stream->Write(request, (void*)Tag::Write);
 
@@ -508,7 +507,8 @@ void CforedClient::AsyncSendRecvThread_() {
     // thus a context switch of state machine.
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
-        CRANE_TRACE("TIMEOUT with m_stopped_=true.");
+        CRANE_TRACE("TIMEOUT with m_stopped_=true state={}.",
+                    static_cast<int>(state));
         if (state < State::Forwarding) {
           CRANE_TRACE("Waiting for register.");
           continue;
@@ -619,7 +619,8 @@ void CforedClient::AsyncSendRecvThread_() {
 
       if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
         msg = &reply.payload_task_x11_input_req().msg();
-        CRANE_TRACE("TASK_X11_INPUT len:{}.", msg->length());
+        CRANE_TRACE("TASK_X11_INPUT len:{} EOF: {}.", msg->length(),
+                    reply.payload_task_x11_input_req().eof());
       } else if (reply.type() == StreamTaskIOReply::TASK_INPUT) {
         msg = &reply.payload_task_input_req().msg();
         CRANE_TRACE("TASK_INPUT len:{} EOF:{}.", msg->length(),
@@ -633,9 +634,8 @@ void CforedClient::AsyncSendRecvThread_() {
       m_mtx_.Lock();
 
       if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
-        x11_local_id_t x11_id = 0;
-        // bool eof = reply.payload_task_x11_input_req().eof();
-        bool eof = false;
+        x11_local_id_t x11_id = reply.payload_task_x11_input_req().local_id();
+        bool eof = reply.payload_task_x11_input_req().eof();
         auto x11_fd_info_it = m_x11_fd_info_map_.find(x11_id);
         if (x11_fd_info_it != m_x11_fd_info_map_.end()) {
           auto& x11_fd_info = x11_fd_info_it->second;
@@ -643,9 +643,13 @@ void CforedClient::AsyncSendRecvThread_() {
             x11_fd_info->x11_input_stopped =
                 !WriteStringToFd_(*msg, x11_fd_info->fd, eof);
           if (eof) {
+            CRANE_DEBUG("[X11 #{}] Received EOF.", x11_id);
             // User closed X11 connection at crun
             x11_fd_info->sock->close();
           }
+        } else {
+          CRANE_WARN("Trying to write X11 input to unknown x11_local_id: {}.",
+                     x11_id);
         }
       } else {
         bool eof = reply.payload_task_input_req().eof();
@@ -750,18 +754,31 @@ void CforedClient::TaskOutPutForward(std::unique_ptr<char[]>&& data,
       .data = IOFwdRequest{.data = std::move(data), .len = len},
   });
 }
+void CforedClient::TaskX11ConnectForward(x11_local_id_t x11_local_id) {
+  CRANE_INFO("Receive TaskX11ConnectForward id:{} .", x11_local_id);
+  m_task_fwd_req_queue_.enqueue(
+      FwdRequest{.type = StreamTaskIORequest::TASK_X11_CONN,
+                 .data = X11FwdConnectReq{.x11_id = x11_local_id}});
+}
 
 void CforedClient::TaskX11OutPutForward(x11_local_id_t x11_local_id,
                                         std::unique_ptr<char[]>&& data,
-                                        size_t len, bool eof) {
+                                        size_t len) {
   CRANE_TRACE("Receive TaskX11OutPutForward len: {}.", len);
   m_task_fwd_req_queue_.enqueue(FwdRequest{
       .type = StreamTaskIORequest::TASK_X11_OUTPUT,
-      .data = X11FwdRequest{.x11_id = x11_local_id,
-                            .data = std::move(data),
-                            .len = len,
-                            .eof = eof},
+      .data = X11FwdReq{.x11_id = x11_local_id,
+                        .data = std::move(data),
+                        .len = len},
   });
+}
+
+void CforedClient::TaskX11OutputFinish(x11_local_id_t x11_local_id) {
+  CRANE_INFO("Receive TaskX11OutputFinish id:{} .", x11_local_id);
+  m_task_fwd_req_queue_.enqueue(
+      FwdRequest{.type = StreamTaskIORequest::TASK_X11_EOF,
+                 .data = X11FwdEofReq{.x11_id = x11_local_id}});
+  m_x11_fd_info_map_.erase(x11_local_id);
 }
 
 }  // namespace Craned::Supervisor
