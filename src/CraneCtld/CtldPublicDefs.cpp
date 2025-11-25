@@ -373,6 +373,9 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   crane::grpc::JobToD job_to_d;
   job_to_d.set_job_id(job_id);
   job_to_d.set_uid(uid);
+  job_to_d.set_account(job->account);
+  job_to_d.set_qos(job->qos);
+  job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() =
       crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
   return job_to_d;
