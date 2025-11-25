@@ -328,6 +328,7 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  uint32 total_gpus = 27;
 
   // Not used now.
   string extra_attr = 29;
