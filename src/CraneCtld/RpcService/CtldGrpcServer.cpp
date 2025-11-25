@@ -142,32 +142,6 @@ grpc::Status CtldForInternalServiceImpl::CranedRegister(
   // Use intelligent merging strategy similar to Slurm:
   // - If Craned reports a more "advanced" state (e.g., Completed when Ctld has
   // Running),
-  //   accept it as the node actually completed the task
-  // - If Ctld has a terminal state, keep it as authoritative
-  // - Avoid killing tasks that are legitimately running on Craned
-  if (!request->remote_meta().craned_step_statuses().empty()) {
-    std::map<job_id_t, std::map<step_id_t, crane::grpc::TaskStatus>>
-        craned_statuses;
-    for (const auto& [job_id, job_step_statuses] :
-         request->remote_meta().craned_step_statuses()) {
-      for (const auto& [step_id, step_status_info] :
-           job_step_statuses.step_statuses()) {
-        auto craned_status = step_status_info.status();
-        craned_statuses[job_id][step_id] = craned_status;
-
-        // Synchronize status intelligently
-        g_task_scheduler->SyncStepStatusFromCraned(
-            job_id, step_id, request->craned_id(), craned_status,
-            step_status_info.exit_code());
-      }
-    }
-    CRANE_INFO(
-        "Craned {} reported step statuses during registration: [{}]. "
-        "Synchronized with intelligent merging strategy.",
-        request->craned_id(),
-        util::JobStepsWithStatusToString(craned_statuses));
-  }
-
   if (!orphaned_steps.empty()) {
     auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
     g_task_scheduler->TerminateOrphanedSteps(orphaned_steps,
@@ -561,9 +535,9 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   return grpc::Status::OK;
 }
 grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryLicensesInfoRequest *request,
-    crane::grpc::QueryLicensesInfoReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QueryLicensesInfoRequest* request,
+    crane::grpc::QueryLicensesInfoReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};

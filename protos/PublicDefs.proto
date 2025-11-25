@@ -807,16 +807,6 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
-
-  // Step status information reported by Craned during registration
-  message StepStatusInfo {
-    TaskStatus status = 1;
-    uint32 exit_code = 2;
-  }
-  message JobStepStatuses {
-    map<uint32 /*step_id*/, StepStatusInfo> step_statuses = 1;
-  }
-  map<uint32 /*job_id*/, JobStepStatuses> craned_step_statuses = 10;
 }
 
 enum TxnAction {

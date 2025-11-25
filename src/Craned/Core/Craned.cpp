@@ -885,6 +885,39 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
       completing_steps{};
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> failed_steps{};
+  std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
+      steps_to_sync{};
+
+  // Define status priority for intelligent merging
+  auto GetStatusPriority = [](StepStatus status) -> int {
+    switch (status) {
+    case StepStatus::Completed:
+    case StepStatus::Failed:
+    case StepStatus::ExceedTimeLimit:
+    case StepStatus::Cancelled:
+    case StepStatus::OutOfMemory:
+      return 100;  // Terminal states - highest priority
+
+    case StepStatus::Completing:
+      return 90;  // Almost terminal
+
+    case StepStatus::Running:
+      return 50;  // Active execution
+
+    case StepStatus::Configured:
+      return 30;  // Configuration completed
+
+    case StepStatus::Configuring:
+      return 20;  // Being configured
+
+    case StepStatus::Pending:
+      return 10;  // Lowest priority
+
+    default:
+      return 0;
+    }
+  };
+
   for (auto& [ids, step] : step_map) {
     auto [job_id, step_id] = ids;
     auto ctld_status =
@@ -904,23 +937,57 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
       }
       continue;
     }
-    if (supv_status == StepStatus::Configured) {
+
+    int ctld_priority = GetStatusPriority(ctld_status);
+    int supv_priority = GetStatusPriority(supv_status);
+
+    if (supv_status == ctld_status) {
+      // Status match, no action needed
+      continue;
+    }
+
+    if (supv_priority >= 100 && ctld_priority < 100) {
+      // Craned reports terminal state - task actually finished
+      // Report this status to Ctld
+      CRANE_INFO(
+          "[Step #{}.{}] Craned has terminal status {} (Ctld has {}), "
+          "will report to Ctld",
+          job_id, step_id, supv_status, ctld_status);
+      steps_to_sync[job_id][step_id] = supv_status;
+    } else if (supv_priority > ctld_priority) {
+      // Craned has more advanced state
+      CRANE_INFO(
+          "[Step #{}.{}] Craned has more advanced status {} (Ctld has {}), "
+          "will report to Ctld",
+          job_id, step_id, supv_status, ctld_status);
+      steps_to_sync[job_id][step_id] = supv_status;
+    } else if (supv_status == StepStatus::Running &&
+               ctld_status == StepStatus::Completing) {
+      // Special case: Ctld thinks it's completing but Craned still reports
+      // running. Let Ctld's Completing win - keep Craned state, Ctld will
+      // terminate it
+      CRANE_INFO(
+          "[Step #{}.{}] Ctld has Completing status, Craned reports Running. "
+          "Keeping Craned's state, Ctld will handle termination.",
+          job_id, step_id);
+    } else if (supv_status == StepStatus::Configured) {
       CRANE_ASSERT(!step->IsDaemonStep());
-      // For configured but not running step, remove this, ctld will consider it
-      // failed
+      // For configured but not running step, terminate it
       failed_steps[job_id].insert(step_id);
       CRANE_TRACE("[Step #{}.{}] is configured but not running, mark as failed",
                   job_id, step_id);
-      continue;
-    }
-    if (supv_status != ctld_status) {
-      CRANE_TRACE(
-          "[Step #{}.{}] status inconsistency, ctld: {}, supervisor: {}, "
-          "mark as failed.",
+    } else {
+      // Ctld has higher/equal priority - this indicates inconsistency
+      // Terminate the step to maintain consistency
+      CRANE_WARN(
+          "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
+          "Terminating step to maintain consistency.",
           job_id, step_id, ctld_status, supv_status);
       failed_steps[job_id].insert(step_id);
     }
   }
+
+  // Terminate failed steps
   for (auto [job_id, step_ids] : failed_steps) {
     for (auto step_id : step_ids) {
       auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
@@ -936,6 +1003,20 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   }
 
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
+
+  // Report status changes to Ctld for steps that need synchronization
+  for (const auto& [job_id, step_status_map] : steps_to_sync) {
+    for (const auto& [step_id, status] : step_status_map) {
+      uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+      CRANE_INFO(
+          "[Step #{}.{}] Reporting status {} to Ctld during recovery sync",
+          job_id, step_id, status);
+      g_ctld_client->StepStatusChangeAsync(
+          job_id, step_id, status, exit_code,
+          "Status synced from Craned during recovery");
+    }
+  }
+
   for (const auto& [job_id, step_ids] : invalid_steps)
     for (auto step_id : step_ids)
       g_supervisor_keeper->RemoveSupervisor(job_id, step_id);

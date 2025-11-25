@@ -556,6 +556,20 @@ void CtldClient::StepStatusChangeAsync(
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
 }
 
+void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                                       crane::grpc::TaskStatus new_status,
+                                       uint32_t exit_code,
+                                       std::optional<std::string> reason) {
+  StepStatusChangeQueueElem elem{
+      .job_id = job_id,
+      .step_id = step_id,
+      .new_status = new_status,
+      .exit_code = exit_code,
+      .reason = std::move(reason),
+      .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
+  StepStatusChangeAsync(std::move(elem));
+}
+
 std::map<job_id_t, std::map<step_id_t, StepStatus>>
 CtldClient::GetAllStepStatusChange() {
   absl::MutexLock lock(&m_step_status_change_mtx_);
@@ -627,24 +641,6 @@ bool CtldClient::CranedRegister_(
 
   for (const auto& interface : g_config.CranedMeta.NetworkInterfaces) {
     *grpc_meta->add_network_interfaces() = interface;
-  }
-
-  // Collect current step statuses from Craned
-  auto allocated_steps = g_job_mgr->GetAllocatedJobSteps();
-  auto& grpc_step_statuses = *grpc_meta->mutable_craned_step_statuses();
-  for (const auto& [job_id, step_map] : allocated_steps) {
-    auto& job_step_statuses = grpc_step_statuses[job_id];
-    auto& step_statuses_map = *job_step_statuses.mutable_step_statuses();
-    for (const auto& [step_id, status] : step_map) {
-      uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
-      auto& step_status_info = step_statuses_map[step_id];
-      step_status_info.set_status(status);
-      step_status_info.set_exit_code(exit_code);
-      CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
-                         "[Step #{}.{}] Reporting status {} with exit code {} "
-                         "in CranedRegister",
-                         job_id, step_id, status, exit_code);
-    }
   }
 
   grpc::ClientContext context;

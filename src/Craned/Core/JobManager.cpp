@@ -970,6 +970,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
             step_it != job_ptr->step_map.end()) {
           step_it->second->status = status_change.new_status;
           step_it->second->exit_code = status_change.exit_code;
+          step_it->second->end_time = status_change.timestamp;
         }
       }
     }
@@ -1049,6 +1050,18 @@ uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
   if (step_it == job_ptr->step_map.end()) return 0;
 
   return step_it->second->exit_code;
+}
+
+google::protobuf::Timestamp JobManager::GetStepEndTime(job_id_t job_id,
+                                                       step_id_t step_id) {
+  auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_ptr) return {};
+
+  absl::MutexLock lk(job_ptr->step_map_mtx.get());
+  auto step_it = job_ptr->step_map.find(step_id);
+  if (step_it == job_ptr->step_map.end()) return {};
+
+  return step_it->second->end_time;
 }
 
 std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
