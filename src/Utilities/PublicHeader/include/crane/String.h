@@ -65,7 +65,6 @@ bool ParseHostList(const std::string& host_str,
 
 bool FoundFirstNumberWithoutBrackets(const std::string& input, int* start,
                                      int* end);
-bool ParseLicensesList(const std::string& licenses_str, std::unordered_map<std::string, uint32_t> *licenses_map);
 
 std::string RemoveBracketsWithoutDashOrComma(const std::string& input);
 
