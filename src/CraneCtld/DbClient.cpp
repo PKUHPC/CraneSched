@@ -1179,6 +1179,74 @@ void MongodbClient::SelectTxns(
   }
 }
 
+bool MongodbClient::InsertResource(const LicenseResource& resource) {
+  document doc = ResourceToDocument_(resource);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_resource_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  return ret != bsoncxx::stdx::nullopt;
+}
+
+bool MongodbClient::UpdateResource(const LicenseResource& resource) {
+  document doc = ResourceToDocument_(resource), set_document, filter;
+
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+  set_document.append(kvp("$set", doc));
+
+  filter.append(kvp("name", resource.name));
+  filter.append(kvp("server", resource.server));
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        (*GetClient_())[m_db_name_][m_resource_collection_name_].update_one(
+            *GetSession_(), filter.view(), set_document.view());
+
+    if (!update_result || update_result->modified_count() == 0) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+  return true;
+}
+
+bool MongodbClient::DeleteResource(const std::string& resource_name,
+                                   const std::string& server) {
+  document filter;
+  filter.append(kvp("name", resource_name));
+  filter.append(kvp("server", server));
+
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
+        (*GetClient_())[m_db_name_][m_resource_collection_name_].delete_one(
+            filter.view());
+
+    if (result && result.value().deleted_count() == 1) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return false;
+}
+
+void MongodbClient::SelectAllResource(
+    std::list<LicenseResource>* resource_list) {
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_resource_collection_name_].find({});
+    for (auto view : cursor) {
+      LicenseResource resource;
+      ViewToResource_(view, &resource);
+      resource_list->emplace_back(resource);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
 bool MongodbClient::CommitTransaction(
     const mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
@@ -1741,6 +1809,53 @@ MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
   };
   std::tuple<int64_t, std::string, std::string, int32_t, std::string> values{
       txn.creation_time, txn.actor, txn.target, txn.action, txn.info};
+
+  return DocumentConstructor_(fields, values);
+}
+
+void MongodbClient::ViewToResource_(
+    const bsoncxx::document::view& resource_view, LicenseResource* resource) {
+  try {
+    resource->name = ViewValueOr_(resource_view["name"], std::string{});
+    resource->server = ViewValueOr_(resource_view["server"], std::string{});
+    resource->server_type =
+        ViewValueOr_(resource_view["server_type"], std::string{});
+    resource->type =
+        static_cast<crane::grpc::LicenseResource::Type>(ViewValueOr_(
+            resource_view["type"], crane::grpc::LicenseResource_Type_NotSet));
+
+    for (auto&& elem :
+         ViewValueOr_(resource_view["cluster_resources"],
+                      bsoncxx::builder::basic::make_document().view())) {
+      resource->cluster_resources.emplace(elem.key(), elem.get_int32().value);
+    }
+
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+MongodbClient::document MongodbClient::ResourceToDocument_(
+    const LicenseResource& resource) {
+  std::array<std::string, 11> fields{
+      "name",      "server",        "server_type",       "type",
+      "allocated", "last_consumed", "cluster_resources", "count",
+      "flags",     "last_update",   "description"};
+
+  std::tuple<std::string, std::string, std::string, uint32_t, uint32_t,
+             uint32_t, std::unordered_map<std::string, uint32_t>, uint32_t,
+             uint32_t, uint64_t, std::string>
+      values{resource.name,
+             resource.server,
+             resource.server_type,
+             static_cast<uint32_t>(resource.type),
+             resource.allocated,
+             resource.last_consumed,
+             resource.cluster_resources,
+             resource.count,
+             static_cast<uint32_t>(resource.flags),
+             resource.last_update,
+             resource.description};
 
   return DocumentConstructor_(fields, values);
 }
