@@ -778,7 +778,8 @@ void CreateRequiredDirectories() {
   if (!ok) std::exit(1);
 }
 
-void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
+std::unordered_map<job_id_t, std::unordered_map<step_id_t, Craned::StepStatus>>
+Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
 
@@ -1004,19 +1005,6 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
 
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
-  // Report status changes to Ctld for steps that need synchronization
-  for (const auto& [job_id, step_status_map] : steps_to_sync) {
-    for (const auto& [step_id, status] : step_status_map) {
-      uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
-      CRANE_INFO(
-          "[Step #{}.{}] Reporting status {} to Ctld during recovery sync",
-          job_id, step_id, status);
-      g_ctld_client->StepStatusChangeAsync(
-          job_id, step_id, status, exit_code,
-          "Status synced from Craned during recovery");
-    }
-  }
-
   for (const auto& [job_id, step_ids] : invalid_steps)
     for (auto step_id : step_ids)
       g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
@@ -1028,6 +1016,9 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   g_job_mgr->FreeJobs(std::move(completing_jobs));
   g_job_mgr->FreeSteps(std::move(completing_steps));
   g_server->MarkSupervisorAsRecovered();
+
+  // Return steps that need status synchronization
+  return steps_to_sync;
 }
 
 void GlobalVariableInit() {
@@ -1087,7 +1078,23 @@ void GlobalVariableInit() {
 
   g_ctld_client_sm->AddActionConfigureCb(
       [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
-        Recover(arg.req);
+        // Recover jobs and steps, get steps that need status synchronization
+        auto steps_to_sync = Recover(arg.req);
+
+        // Report status changes to Ctld for steps that need synchronization
+        // This is done after recovery completes to ensure JobManager is ready
+        for (const auto& [job_id, step_status_map] : steps_to_sync) {
+          for (const auto& [step_id, status] : step_status_map) {
+            uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+            CRANE_INFO(
+                "[Step #{}.{}] Reporting status {} to Ctld during recovery "
+                "sync",
+                job_id, step_id, status);
+            g_ctld_client->StepStatusChangeAsync(
+                job_id, step_id, status, exit_code,
+                "Status synced from Craned during recovery");
+          }
+        }
       },
       Craned::CallbackInvokeMode::SYNC, true);
 
