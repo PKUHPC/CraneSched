@@ -9,6 +9,14 @@ on:
       - ready_for_review
     branches:
       - master
+    paths:
+      - 'dependencies/**'
+      - 'CMakeModule/**'
+      - 'protos/**'
+      - 'src/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'VERSION'
 
 jobs:
   format:
