@@ -24,6 +24,7 @@
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/PluginClient.h"
+#include "DbClient.h"
 
 namespace Ctld {
 
@@ -59,13 +60,13 @@ class LicensesManager {
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  bool MallocLicenseResource(
+  bool MallocLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void MallocLicenseResourceWhenRecoverRunning(
+  void MallocLicenseWhenRecoverRunning(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void FreeLicenseResource(
+  void FreeLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
   CraneExpected<void> AddRemoteLicense(LicenseResource &&new_license);

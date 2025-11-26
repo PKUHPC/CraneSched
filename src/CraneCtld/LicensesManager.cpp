@@ -25,6 +25,33 @@ LicensesManager::LicensesManager() {}
 int LicensesManager::Init(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   HashMap<LicenseId, License> licenses_map;
+  std::list<LicenseResource> resource_list;
+
+  g_db_client->SelectAllResource(&resource_list);
+
+  util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+  for (const auto& resource : resource_list) {
+    if (resource.type == crane::grpc::LicenseResource_Type_License) {
+      auto iter = resource.cluster_resources.find(g_config.CraneClusterName);
+      if (iter != resource.cluster_resources.end()) {
+        auto license_id = std::format("%s@%s", resource.name, resource.server);
+        licenses_map.emplace(license_id,
+                             License{.license_id = license_id,
+                                     .total = iter->second,
+                                     .used = 0,
+                                     .free = iter->second,
+                                     .reserved = 0,
+                                     .remote = true,
+                                     .server = resource.server,
+                                     .last_consumed = resource.last_consumed,
+                                     .last_deficit = 0,
+                                     .last_update = resource.last_update});
+      }
+    }
+    auto key = std::make_pair(resource.name, resource.server);
+    m_license_resource_map_.emplace(
+        key, std::make_unique<LicenseResource>(std::move(resource)));
+  }
 
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     licenses_map.insert({lic_id, License{.license_id = lic_id,
@@ -179,7 +206,7 @@ void LicensesManager::FreeReserved(
   }
 }
 
-bool LicensesManager::MallocLicenseResource(
+bool LicensesManager::MallocLicense(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -222,7 +249,7 @@ bool LicensesManager::MallocLicenseResource(
   return true;
 }
 
-void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
+void LicensesManager::MallocLicenseWhenRecoverRunning(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -259,7 +286,7 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
   }
 }
 
-void LicensesManager::FreeLicenseResource(
+void LicensesManager::FreeLicense(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
 
@@ -301,16 +328,45 @@ CraneExpected<void> LicensesManager::AddRemoteLicense(
 
   auto key = std::make_pair(new_license.name, new_license.server);
 
-  if (m_license_resource_map_.contains(key))
+  if (m_license_resource_map_.contains(key))  // TODO:
     return std::unexpected(CraneErrCode::ERR_LICENSE_NOT_FOUND);
 
-  for (const auto& allowed : new_license.cluster_resources | std::views::values) {
+  for (const auto& allowed :
+       new_license.cluster_resources | std::views::values) {
     new_license.allocated += allowed;
   }
 
-  // TODO: insert db
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->InsertResource(new_license);
+      };
 
-  m_license_resource_map_[key] = std::make_unique<LicenseResource>(std::move(new_license));
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  if (new_license.type == crane::grpc::LicenseResource_Type_License) {
+    auto iter = new_license.cluster_resources.find(g_config.CraneClusterName);
+    if (iter != new_license.cluster_resources.end()) {
+      auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+      auto license_id =
+          std::format("%s@%s", new_license.name, new_license.server);
+      m_licenses_map_.Emplace(
+          license_id, License{.license_id = license_id,
+                              .total = iter->second,
+                              .used = 0,
+                              .free = iter->second,
+                              .reserved = 0,
+                              .remote = true,
+                              .server = new_license.server,
+                              .last_consumed = new_license.last_consumed,
+                              .last_deficit = 0,
+                              .last_update = new_license.last_update});
+    }
+  }
+
+  m_license_resource_map_[key] =
+      std::make_unique<LicenseResource>(std::move(new_license));
 
   return {};
 }
@@ -332,53 +388,92 @@ CraneExpected<void> LicensesManager::ModifyRemoteLicense(
     try {
       res_resource.count = std::stoul(value);
     } catch (std::exception& e) {
-      CRANE_ERROR("Failed to parse 'count' from value '{}': {}", value, e.what());
+      CRANE_ERROR("Failed to parse 'count' from value '{}': {}", value,
+                  e.what());
       return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
     }
-      break;
-    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
-      for (const auto& cluster : clusters) {
-        std::unordered_map<std::string, uint32_t>::iterator iter;
-        if (cluster == "local") {
-          iter = res_resource.cluster_resources.find(g_config.CraneClusterName);
-        } else {
-          iter = res_resource.cluster_resources.find(cluster);
-        }
-        if (iter == res_resource.cluster_resources.end())
-          return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
-        try {
-          res_resource.allocated -= iter->second;
-          iter->second = std::stoul(value);
-          res_resource.allocated += iter->second;
-        } catch (std::exception& e) {
-          CRANE_ERROR("Failed to parse 'allowed' for cluster '{}' from value '{}': {}", cluster, value, e.what());
-          return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
-        }
+    break;
+  case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
+    for (const auto& cluster : clusters) {
+      std::unordered_map<std::string, uint32_t>::iterator iter;
+      if (cluster == "local") {
+        iter = res_resource.cluster_resources.find(g_config.CraneClusterName);
+      } else {
+        iter = res_resource.cluster_resources.find(cluster);
       }
-      break;
+      if (iter == res_resource.cluster_resources.end())
+        return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
+      try {
+        res_resource.allocated -= iter->second;
+        iter->second = std::stoul(value);
+        res_resource.allocated += iter->second;
+      } catch (std::exception& e) {
+        CRANE_ERROR(
+            "Failed to parse 'allowed' for cluster '{}' from value '{}': {}",
+            cluster, value, e.what());
+        return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
+      }
+    }
+    break;
   case crane::grpc::LicenseResource_Field_LastConsumed:
     try {
       res_resource.last_consumed = std::stoul(value);
     } catch (std::exception& e) {
-      CRANE_ERROR("Failed to parse 'last_consumed' from value '{}': {}", value, e.what());
+      CRANE_ERROR("Failed to parse 'last_consumed' from value '{}': {}", value,
+                  e.what());
       return std::unexpected(CraneErrCode::ERR_INVALID_ARGUMENT);
     }
     break;
-    case crane::grpc::LicenseResource_Field_Description:
-      res_resource.description = value;
-      break;
+  case crane::grpc::LicenseResource_Field_Description:
+    res_resource.description = value;
+    break;
   case crane::grpc::LicenseResource_Field_Flags:
     break;
   case crane::grpc::LicenseResource_Field_ServerType:
     res_resource.server_type = value;
     break;
   default:
-    CRANE_ERROR("Unrecognized LicenseResource field: {}", std::to_string(field));
+    CRANE_ERROR("Unrecognized LicenseResource field: {}",
+                std::to_string(field));
+  }
+  res_resource.last_update = static_cast<uint64_t>(std::time(nullptr));
+
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateResource(res_resource);
+      };
+
+  if (!g_db_client->CommitTransaction(callback))
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+
+  // update license
+  if (res_resource.type == crane::grpc::LicenseResource_Type_License) {
+    auto cluster_iter =
+        res_resource.cluster_resources.find(g_config.CraneClusterName);
+    if (cluster_iter != res_resource.cluster_resources.end()) {
+      auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+      auto license_id =
+          std::format("%s@%s", res_resource.name, res_resource.server);
+      auto lic_iter = licenses_map->find(license_id);
+      if (lic_iter == licenses_map->end()) {
+        CRANE_ERROR("");
+      } else {
+        auto lic = lic_iter->second.GetExclusivePtr();
+        lic->total = cluster_iter->second;
+        auto external = res_resource.count - lic->total;
+        lic->last_consumed = res_resource.last_consumed;
+        if (lic->last_consumed <= (external + lic->used))
+          lic->last_deficit = 0;
+        else {
+          lic->last_deficit = lic->last_consumed - external - lic->used;
+        }
+        lic->last_update = res_resource.last_update;
+      }
+    }
   }
 
-  // TODO: update db
-
-  m_license_resource_map_[key] = std::make_unique<LicenseResource>(std::move(res_resource));
+  m_license_resource_map_[key] =
+      std::make_unique<LicenseResource>(std::move(res_resource));
 
   return {};
 }
@@ -390,32 +485,57 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
 
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
-  if (iter == m_license_resource_map_.end())
+  if (iter == m_license_resource_map_.end())  // TODO: ERR_RESOURCE_NOT_FOUND
     return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
 
-  // TODO: remove on db
   auto* license_resource = iter->second.get();
+
+  for (const auto& cluster : clusters) {
+    std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
+    if (cluster == "local") {
+      cluster_iter =
+          license_resource->cluster_resources.find(g_config.CraneClusterName);
+    } else {
+      cluster_iter = license_resource->cluster_resources.find(cluster);
+    }
+    if (cluster_iter == license_resource->cluster_resources.end())
+      return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
+  }
+
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        if (clusters.empty()) {
+          g_db_client->DeleteResource(name, server);
+        } else {
+          for (const auto& cluster : clusters) {
+            // TODO:
+          }
+        }
+      };
+
+  if (!g_db_client->CommitTransaction(callback))
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+
   if (clusters.empty()) {
     m_license_resource_map_.erase(key);
   } else {
     for (const auto& cluster : clusters) {
       std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
-      if (cluster == "local") {
-        cluster_iter = license_resource->cluster_resources.find(g_config.CraneClusterName);
-        // TODO: remove license
+      if (cluster == "local" || cluster == g_config.CraneClusterName) {
+        cluster_iter =
+            license_resource->cluster_resources.find(g_config.CraneClusterName);
+
+        auto license_id = std::format("%s@%s", license_resource->name,
+                                     license_resource->server);
+        m_licenses_map_.Erase(license_id);
       } else {
         cluster_iter = license_resource->cluster_resources.find(cluster);
       }
-      if (cluster_iter == license_resource->cluster_resources.end())
-        return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
 
       license_resource->allocated -= cluster_iter->second;
       license_resource->cluster_resources.erase(cluster_iter);
     }
   }
-
-
-  // TODO: remove on license map
 
   return {};
 }
