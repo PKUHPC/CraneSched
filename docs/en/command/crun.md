@@ -36,6 +36,7 @@ crun only supports request parameters via command line. Supported command-line o
 - **-v/--version**: crun version
 - **--x11**: Enable X11 support, default is false. If not used with --x11-forwarding, direct X11 is used (insecure)
 - **--x11-forwarding**: Enable X11 forwarding by CraneSched (secure), default is false
+- **--L/--licenses**: The licenses that the job requires to use, format: `lic1:2,lic2:4` or `lic1:2|lic2:4`
 
 ## Usage Examples
 
