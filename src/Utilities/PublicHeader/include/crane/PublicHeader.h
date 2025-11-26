@@ -70,6 +70,16 @@ inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 
+inline constexpr uint64_t kDefaultCraneCtldMaxLogFileSize =
+    1024 * 1024 * 50;  // 50 MB
+inline constexpr uint64_t kDefaultCraneCtldMaxLogFileNum = 3;
+inline constexpr uint64_t kDefaultCranedMaxLogFileSize =
+    1024 * 1024 * 50;  // 50 MB
+inline constexpr uint64_t kDefaultCranedMaxLogFileNum = 3;
+inline constexpr uint64_t kDefaultSupervisorMaxLogFileSize =
+    1024 * 1024 * 50;  // 50 MB
+inline constexpr uint64_t kDefaultSupervisorMaxLogFileNum = 3;
+
 inline constexpr uint64_t kDefaultCertExpirationMinutes = 30;
 
 inline const char* const kDefaultCraneBaseDir = "/var/crane/";
@@ -241,7 +251,15 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         // 75 - 79
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
-        "Invalid username"
+        "Invalid username",
+        "Reserved for future use",
+        "Reserved for future use",
+  
+        // 80 - 84
+        "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
+        "CRI support is disabled in the cluster.",
+        "Task is pending or container is not ready.",
+        "Invalid memory format"
     };
 // clang-format on
 }  // namespace Internal

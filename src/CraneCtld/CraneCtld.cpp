@@ -48,7 +48,24 @@ void ParseCtldConfig(const YAML::Node& config) {
     auto ctld_cfg = config["CraneCtld"];
     if (ctld_cfg["CranedTimeout"])
       ctld_config.CranedTimeout = ctld_cfg["CranedTimeout"].as<uint32_t>();
+
+    if (ctld_cfg["MaxLogFileSize"]) {
+      auto file_size =
+          util::ParseMemory(ctld_cfg["MaxLogFileSize"].as<std::string>());
+      if (file_size.has_value()) {
+        ctld_config.MaxLogFileSize = file_size.value();
+      } else {
+        CRANE_ERROR("Illegal memory format.");
+        std::exit(1);
+      }
+    } else {
+      ctld_config.MaxLogFileSize = kDefaultCraneCtldMaxLogFileSize;
+    }
+
+    ctld_config.MaxLogFileNum = YamlValueOr<uint64_t>(
+        ctld_cfg["MaxLogFileNum"], kDefaultCraneCtldMaxLogFileNum);
   }
+
   g_config.CtldConf = std::move(ctld_config);
 }
 
@@ -114,10 +131,14 @@ void ParseConfig(int argc, char** argv) {
       g_config.CraneCtldDebugLevel =
           YamlValueOr(config["CraneCtldDebugLevel"], "info");
 
+      ParseCtldConfig(config);
+
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
-        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true);
+        InitLogger(log_level.value(), g_config.CraneCtldLogFile, true,
+                   g_config.CtldConf.MaxLogFileSize,
+                   g_config.CtldConf.MaxLogFileNum);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
@@ -141,8 +162,6 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CraneCtldForInternalListenPort =
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
-
-      ParseCtldConfig(config);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -391,23 +410,13 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["memory"]) {
-            auto memory = node["memory"].as<std::string>();
-            std::regex mem_regex(R"((\d+)([KMBG]))");
-            std::smatch mem_group;
-            if (!std::regex_search(memory, mem_group, mem_regex)) {
+            auto mem = util::ParseMemory(node["memory"].as<std::string>());
+            if (mem.has_value()) {
+              node_ptr->memory_bytes = mem.value();
+            } else {
               CRANE_ERROR("Illegal memory format.");
               std::exit(1);
             }
-
-            uint64_t memory_bytes = std::stoul(mem_group[1]);
-            if (mem_group[2] == "K")
-              memory_bytes *= 1024;
-            else if (mem_group[2] == "M")
-              memory_bytes *= 1024 * 1024;
-            else if (mem_group[2] == "G")
-              memory_bytes *= 1024 * 1024 * 1024;
-
-            node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
 

@@ -77,6 +77,8 @@ constexpr bool kDefaultJobFileOpenModeAppend = false;
 struct Config {
   struct CraneCtldConf {
     uint32_t CranedTimeout;
+    uint64_t MaxLogFileSize;
+    uint64_t MaxLogFileNum;
   };
   CraneCtldConf CtldConf;
 
