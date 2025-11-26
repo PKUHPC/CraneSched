@@ -155,6 +155,20 @@ void ParseCranedConfig(const YAML::Node& config) {
       conf.PingIntervalSec = craned_config["PingInterval"].as<uint32_t>();
     if (craned_config["CraneCtldTimeout"])
       conf.CtldTimeoutSec = craned_config["CraneCtldTimeout"].as<uint32_t>();
+    if (craned_config["MaxLogFileSize"]) {
+      auto file_size =
+          util::ParseMemory(craned_config["MaxLogFileSize"].as<std::string>());
+      if (file_size.has_value()) {
+        conf.MaxLogFileSize = file_size.value();
+      } else {
+        CRANE_ERROR("Illegal memory format.");
+        std::exit(1);
+      }
+    } else {
+      conf.MaxLogFileSize = kDefaultCranedMaxLogFileSize;
+    }
+    conf.MaxLogFileNum = YamlValueOr<uint64_t>(craned_config["MaxLogFileNum"],
+                                               kDefaultCranedMaxLogFileNum);
   }
   g_config.CranedConf = std::move(conf);
 }
@@ -180,6 +194,22 @@ void ParseSupervisorConfig(const YAML::Node& supervisor_config) {
   g_config.Supervisor.LogDir =
       g_config.CraneBaseDir /
       YamlValueOr(supervisor_config["LogDir"], "supervisor");
+
+  if (supervisor_config["MaxLogFileSize"]) {
+    auto file_size = util::ParseMemory(
+        supervisor_config["MaxLogFileSize"].as<std::string>());
+    if (file_size.has_value()) {
+      g_config.Supervisor.MaxLogFileSize = file_size.value();
+    } else {
+      CRANE_ERROR("Illegal memory format.");
+      std::exit(1);
+    }
+  } else {
+    g_config.Supervisor.MaxLogFileSize = kDefaultSupervisorMaxLogFileSize;
+  }
+
+  g_config.Supervisor.MaxLogFileNum = YamlValueOr<uint64_t>(
+      supervisor_config["MaxLogFileNum"], kDefaultSupervisorMaxLogFileNum);
 }
 
 void ParseConfig(int argc, char** argv) {
@@ -276,10 +306,14 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
+      ParseCranedConfig(config);
+
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
-        InitLogger(log_level.value(), g_config.CranedLogFile, true);
+        InitLogger(log_level.value(), g_config.CranedLogFile, true,
+                   g_config.CranedConf.MaxLogFileSize,
+                   g_config.CranedConf.MaxLogFileNum);
         Craned::g_runtime_status.conn_logger =
             AddLogger("conn", log_level.value(), true);
       } else {
@@ -322,8 +356,6 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
-
-      ParseCranedConfig(config);
 
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
@@ -398,24 +430,15 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["memory"]) {
-            auto memory = node["memory"].as<std::string>();
-            std::regex mem_regex(R"((\d+)([KMBG]))");
-            std::smatch mem_group;
-            if (!std::regex_search(memory, mem_group, mem_regex)) {
+            auto memory_bytes =
+                util::ParseMemory(node["memory"].as<std::string>());
+            if (memory_bytes.has_value()) {
+              node_res->allocatable_res.memory_bytes = memory_bytes.value();
+              node_res->allocatable_res.memory_sw_bytes = memory_bytes.value();
+            } else {
               CRANE_ERROR("Illegal memory format.");
               std::exit(1);
             }
-
-            uint64_t memory_bytes = std::stoul(mem_group[1]);
-            if (mem_group[2] == "K")
-              memory_bytes *= 1024;
-            else if (mem_group[2] == "M")
-              memory_bytes *= 1024 * 1024;
-            else if (mem_group[2] == "G")
-              memory_bytes *= 1024 * 1024 * 1024;
-
-            node_res->allocatable_res.memory_bytes = memory_bytes;
-            node_res->allocatable_res.memory_sw_bytes = memory_bytes;
           } else
             std::exit(1);
 

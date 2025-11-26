@@ -9,6 +9,16 @@ on:
       - ready_for_review
     branches:
       - master
+    paths:
+      - '.clang-format*'
+      - '.github/workflows/**'
+      - 'dependencies/**'
+      - 'CMakeModule/**'
+      - 'protos/**'
+      - 'src/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'VERSION'
 
 jobs:
   format:

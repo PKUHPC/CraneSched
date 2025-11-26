@@ -3711,7 +3711,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -3719,7 +3719,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
@@ -3889,7 +3889,7 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& task,
   if (!step->StepToCtld().nodelist().empty() && step->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_NODE_LIST);
 
     for (auto&& node : nodes) step->included_nodes.emplace(std::move(node));
   }
@@ -3897,7 +3897,7 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(const TaskInCtld& task,
   if (!step->StepToCtld().excludes().empty() && step->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(step->StepToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVALID_EX_NODE_LIST);
 
     for (auto&& node : nodes) step->excluded_nodes.emplace(std::move(node));
   }
