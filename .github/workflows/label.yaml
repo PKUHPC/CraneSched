@@ -64,7 +64,7 @@ jobs:
 
   manage-docs-label:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event.workflow_run.event == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
     steps:
       - name: Get PR number for workflow_run
         if: github.event_name == 'workflow_run'
@@ -90,7 +90,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const pr = ${{ github.event_name == 'pull_request' && steps['pr-context-direct'].outputs.pr || steps['pr-context-workflow'].outputs.pr }};
+            const pr = '${{ github.event_name }}' === 'pull_request' 
+              ? ${{ steps['pr-context-direct'].outputs.pr }} 
+              : ${{ steps['pr-context-workflow'].outputs.pr }};
             console.log(`Checking docs changes for PR #${pr}`);
             
             // Get list of files changed in the PR
