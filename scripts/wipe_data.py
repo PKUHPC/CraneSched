@@ -59,7 +59,7 @@ def wipe_collection(db, collection: Collection):
         raise e
 
 
-def wipe_embedded(embedded_db_path: str):
+def wipe_embedded(embedded_db_path: str, keep_id: bool):
     """Remove embedded database files."""
 
     # Try to preserve task ID
@@ -90,7 +90,7 @@ def wipe_embedded(embedded_db_path: str):
                 raise e
 
     # Restore task ID
-    if next_task_id_val is not None:
+    if keep_id and next_task_id_val is not None:
         try:
             if not db_dir.exists():
                 db_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +134,10 @@ def parse_arguments():
         choices=["mongo", "embedded", "all"],
         help="Mode of operation: 'mongo' (MongoDB only), 'embedded' (embedded DB only), 'all' (both MongoDB and embedded DB).",
     )
+    parser.add_argument("--keep-id",
+                        action="store_true",
+                        default="Keep embedded DB task ID(default: false).")
+    parser.set_defaults(keep_id=False)
     parser.add_argument(
         "-C",
         "--config",
@@ -229,7 +233,7 @@ def _main():
 
     # Handle embedded database cleanup
     if args.mode in ["embedded", "all"]:
-        wipe_embedded(embedded_db_path)
+        wipe_embedded(embedded_db_path, args.keep_id)
 
     logger.info("Done.")
 
