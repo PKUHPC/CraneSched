@@ -38,6 +38,10 @@ CraneCtldForeground: true
 CraneCtld:
   # ping timeout in seconds
   CranedTimeout: 30
+  # max size of cranectld log file
+  MaxLogFileSize: 50M
+  # max files of cranectld log file
+  MaxLogFileNum: 3
 
 # Craned settings
 # the listening address of control machine
@@ -59,7 +63,10 @@ Craned:
   PingInterval: 15
   # register operation timeout in seconds
   CraneCtldTimeout: 5
-
+  # max size of craned log file
+  MaxLogFileSize: 50M
+  # max files of craned log file
+  MaxLogFileNum: 3
 
 # Scheduling settings
 # Current implemented scheduling algorithms are:
@@ -119,7 +126,6 @@ Partitions:
 
 DefaultPartition: CPU
 
-
 # Advanced options:
 
 # Maximum size of Pending Queue and must <=900000.
@@ -155,6 +161,10 @@ Supervisor:
   DebugLevel: trace
   # Relate to CraneBaseDir
   LogDir: supervisor
+  # max size of supervisor log file
+  MaxLogFileSize: 50M
+  # max files of supervisor log file
+  MaxLogFileNum: 3
 
 Container:
   # Toggle the container support in CraneSched

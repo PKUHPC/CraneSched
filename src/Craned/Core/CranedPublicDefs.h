@@ -77,6 +77,8 @@ struct Config {
   struct CranedConfig {
     uint32_t PingIntervalSec;
     uint32_t CtldTimeoutSec;
+    uint64_t MaxLogFileSize;
+    uint64_t MaxLogFileNum;
   };
   CranedConfig CranedConf;
   struct CranedListenConf {
@@ -114,6 +116,8 @@ struct Config {
     std::filesystem::path Path;
     std::string DebugLevel;
     std::filesystem::path LogDir;
+    uint64_t MaxLogFileSize;
+    uint64_t MaxLogFileNum;
   };
   SupervisorConfig Supervisor;
 
