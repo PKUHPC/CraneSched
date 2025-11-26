@@ -949,23 +949,9 @@ void GlobalVariableInit() {
 
   g_ctld_client_sm->AddActionConfigureCb(
       [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
-        // Recover jobs and steps, get steps that need status synchronization
-        auto steps_to_sync = Recover(arg.req);
-
-        // Report status changes to Ctld for steps that need synchronization
-        // This is done after recovery completes to ensure JobManager is ready
-        for (const auto& [job_id, step_status_map] : steps_to_sync) {
-          for (const auto& [step_id, status] : step_status_map) {
-            uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
-            CRANE_INFO(
-                "[Step #{}.{}] Reporting status {} to Ctld during recovery "
-                "sync",
-                job_id, step_id, status);
-            g_ctld_client->StepStatusChangeAsync(
-                job_id, step_id, status, exit_code,
-                "Status synced from Craned during recovery");
-          }
-        }
+        // Recover jobs and steps
+        // Status synchronization is handled in CtldClient.cpp
+        Recover(arg.req);
       },
       Craned::CallbackInvokeMode::SYNC, true);
 
