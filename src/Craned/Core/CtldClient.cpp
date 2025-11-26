@@ -515,14 +515,7 @@ void CtldClient::Init() {
             int ctld_priority = GetStatusPriority(ctld_status);
             int craned_priority = GetStatusPriority(craned_status);
 
-            if (craned_priority >= 100 && ctld_priority < 100) {
-              // Craned reports terminal state - task actually finished
-              CRANE_INFO(
-                  "[Step #{}.{}] Craned has terminal status {} (Ctld has {}), "
-                  "will report to Ctld",
-                  job_id, step_id, craned_status, ctld_status);
-              steps_to_sync[job_id][step_id] = craned_status;
-            } else if (craned_priority > ctld_priority) {
+            if (craned_priority > ctld_priority) {
               // Craned has more advanced state
               CRANE_INFO(
                   "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
@@ -531,12 +524,15 @@ void CtldClient::Init() {
               steps_to_sync[job_id][step_id] = craned_status;
             } else if (craned_status == StepStatus::Running &&
                        ctld_status == StepStatus::Completing) {
-              // Special case: Ctld thinks it's completing but Craned still
-              // reports running. Let Ctld's Completing win
+              // Special case: This occurs when Craned goes offline and comes
+              // back online after task timeout. Ctld detected timeout and
+              // marked the task as Completing, but Craned was offline and
+              // still reports it as Running. Let Ctld's Completing status win
+              // - Ctld will handle the termination.
               CRANE_INFO(
-                  "[Step #{}.{}] Ctld has Completing status, Craned reports "
-                  "Running. Keeping Craned's state, Ctld will handle "
-                  "termination.",
+                  "[Step #{}.{}] Ctld has Completing status (likely due to "
+                  "timeout during offline), Craned reports Running. Keeping "
+                  "Craned's state, Ctld will handle termination.",
                   job_id, step_id);
             } else if (craned_status == StepStatus::Configured) {
               // For configured but not running step, terminate it

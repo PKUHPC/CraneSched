@@ -2673,7 +2673,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                     }),
                 ","),
             craned_id);
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
+            craned_meta->craned_down_time);
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
@@ -2715,7 +2717,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_rpc_worker_pool_->detach_task([this, &exec_step_latch, craned_id,
                                      &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         CraneExpected failed_steps =
@@ -2723,6 +2724,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         if (failed_steps.has_value() && !failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
           for (const auto& [job_id, step_ids] : failed_steps.value()) {
             for (const auto& step_id : step_ids)
               StepStatusChangeWithReasonAsync(
@@ -2735,6 +2737,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
             util::JobStepsToString(context.craned_step_exec_map.at(craned_id)),
             craned_id);
+        auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
+            craned_meta->craned_down_time);
         for (const auto& [job_id, step_ids] :
              context.craned_step_exec_map.at(craned_id)) {
           for (const auto& step_id : step_ids)
@@ -2808,7 +2813,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           success = true;
       }
       if (!success) {
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
+        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
+            craned_meta->craned_down_time);
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
@@ -2888,9 +2895,12 @@ void TaskScheduler::QueryTasksInRam(
         ToInt64Seconds(now - task.StartTime()));
 
     // Check if task has exceeded time limit
-    if (task.Status() == crane::grpc::TaskStatus::Running &&
+    if ((task.Status() == crane::grpc::TaskStatus::Running ||
+         task.Status() == crane::grpc::TaskStatus::Configuring) &&
         task.StartTime() + task.time_limit < now) {
       task_it->set_status(crane::grpc::TaskStatus::Completing);
+      task_it->mutable_end_time()->set_seconds(
+          ToUnixSeconds(task.StartTime() + task.time_limit));
     }
   };
 
