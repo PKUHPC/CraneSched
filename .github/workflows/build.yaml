@@ -22,6 +22,7 @@ on:
       - 'src/**'
       - 'test/**'
       - 'CMakeLists.txt'
+      - 'VERSION'
   workflow_dispatch:
     inputs:
       backend_ref:
