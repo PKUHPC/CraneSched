@@ -25,6 +25,7 @@ ccontrol <ACTION> <ENTITY> [OPTIONS]
 - **partition** - Node partitions
 - **job** - Jobs/tasks
 - **reservation** - Resource reservations
+- **lic** - License
 
 ## Global Options
 
@@ -116,6 +117,30 @@ ccontrol show reservation my_reservation
 ```
 
 ![ccontrol](../../images/ccontrol/ccontrol_showreservation.png)
+
+#### Show License
+
+Display information about the license.
+
+```bash
+# Show all licenses
+ccontrol show lic
+
+#  Show specific license
+ccontrol show lic <license_name>
+```
+
+**Example:**
+```bash
+ccontrol show lic
+ccontrol show lic my_lic
+```
+```
+LicenseName=ansys
+        Total=100 Used=0  Free=100
+LicenseName=fluent
+        Total=30 Used=0  Free=30
+```
 
 ### Update Commands
 

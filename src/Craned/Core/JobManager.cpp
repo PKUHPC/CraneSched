@@ -692,9 +692,6 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     close(craned_supervisor_fd);
     close(supervisor_craned_fd);
 
-    // Close stdin for batch tasks.
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
     // Prepare the command line arguments.
@@ -704,6 +701,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
     argv.emplace_back(supv_name.c_str());
     argv.push_back(nullptr);
+    fmt::print(
+        stderr, "[{}] [Step #{}.{}]: Executing supervisor\n",
+        std::chrono::current_zone()->to_local(std::chrono::system_clock::now()),
+        job_id, step_id);
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),

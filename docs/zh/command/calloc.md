@@ -15,6 +15,7 @@ calloc 必须在运行 `cfored` 的节点上启动。当任务启动时，会进
 - **--ntasks-per-node uint32**: 每个节点的任务数量（默认：1）
 - **--mem string**: 每个节点的最大内存。支持 GB（G，g）、MB（M，m）、KB（K，k）和字节（B），默认单位是 MB
 - **--gres string**: 每个任务所需的通用资源，格式：`gpu:a100:1` 或 `gpu:1`
+- **--L, --licenses**: 作业要使用的许可证，格式：`lic1:2,lic2:4`或`lic1:2|lic2:4`
 
 ### 作业信息
 - **-J, --job-name string**: 作业名称
