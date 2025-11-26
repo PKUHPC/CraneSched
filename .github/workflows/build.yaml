@@ -15,6 +15,13 @@ on:
     branches:
       - master
       - release/*
+    paths:
+      - 'dependencies/**'
+      - 'CMakeModule/**'
+      - 'protos/**'
+      - 'src/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
   workflow_dispatch:
     inputs:
       backend_ref:
