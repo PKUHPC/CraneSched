@@ -136,8 +136,12 @@ ccontrol show lic <许可证名称>
 ccontrol show lic
 ccontrol show lic my_lic
 ```
-
-![ccontrol](../../images/ccontrol/ccontrol_showlic.png)
+```
+LicenseName=ansys
+        Total=100 Used=0  Free=100
+LicenseName=fluent
+        Total=30 Used=0  Free=30
+```
 
 ### Update 命令
 

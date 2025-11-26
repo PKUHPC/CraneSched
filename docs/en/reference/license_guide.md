@@ -24,9 +24,12 @@ Licenses:
 
 You can use the ccontrol command to view the configured licenses.
 ```bash
-ccontrol show lic
+$ ccontrol show lic
+LicenseName=ansys
+        Total=100 Used=0  Free=100
+LicenseName=fluent
+        Total=30 Used=0  Free=30
 ```
-![ccontrol](../../images/ccontrol/ccontrol_showlic.png)
 
 Use the `-L` or `--licenses` submission option to request licenses.
 Multiple licenses can be requested at the same time.

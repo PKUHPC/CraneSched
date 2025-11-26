@@ -24,9 +24,12 @@ Licenses:
 
 可以使用 ccontrol 命令查看已配置的许可证。
 ```bash
-ccontrol show lic
+$ ccontrol show lic
+LicenseName=ansys
+        Total=100 Used=0  Free=100
+LicenseName=fluent
+        Total=30 Used=0  Free=30
 ```
-![ccontrol](../../images/ccontrol/ccontrol_showlic.png)
 
 
 通过提交选项 `-L` 或 `--licenses` 来请求许可证，支持同时请求多个许可证。
