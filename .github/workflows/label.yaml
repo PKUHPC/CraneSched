@@ -35,7 +35,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const pr = ${{ steps.pr-context.outputs.pr }} ;
+            const pr = ${{ steps['pr-context'].outputs.pr }} ;
             const conclusion = "${{ github.event.workflow_run.conclusion }}";
             console.log(`Managing test labels for PR #${pr} , conclusion: ${conclusion}`);
             try {
@@ -65,6 +65,10 @@ jobs:
   manage-docs-label:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
     steps:
       - name: Get PR number for workflow_run
         if: github.event_name == 'workflow_run'
@@ -91,15 +95,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const pr = '${{ github.event_name }}' === 'pull_request' 
-              ? ${{ steps['pr-context-direct'].outputs.pr }} 
-              : ${{ steps['pr-context-workflow'].outputs.pr }};
-            console.log(`Checking docs changes for PR #${pr}`);
+              ? '${{ steps['pr-context-direct'].outputs.pr }}' 
+              : '${{ steps['pr-context-workflow'].outputs.pr }}';
+            const prNumber = parseInt(pr, 10);
+            console.log(`Checking docs changes for PR #${prNumber}`);
             
             // Get list of files changed in the PR
             const files = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: pr,
+              pull_number: prNumber,
             });
             
             // Check if any file is in the docs directory
@@ -113,10 +118,10 @@ jobs:
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: pr,
+                  issue_number: prNumber,
                   labels: ["docs"],
                 });
-                console.log(`Added docs label to PR #${pr}`);
+                console.log(`Added docs label to PR #${prNumber}`);
               } catch (error) {
                 console.log(`Error adding docs label: ${error.message}`);
               }
@@ -126,10 +131,10 @@ jobs:
                 await github.rest.issues.removeLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: pr,
+                  issue_number: prNumber,
                   name: "docs",
                 });
-                console.log(`Removed docs label from PR #${pr}`);
+                console.log(`Removed docs label from PR #${prNumber}`);
               } catch (error) {
                 if (error.status !== 404) {
                   console.log(`Error removing docs label: ${error.message}`);
