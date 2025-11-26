@@ -2674,8 +2674,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                 ","),
             craned_id);
         auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
-            craned_meta->craned_down_time);
+        google::protobuf::Timestamp now;
+        now.set_seconds(ToUnixSeconds(craned_meta->craned_down_time));
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
@@ -2738,8 +2738,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             util::JobStepsToString(context.craned_step_exec_map.at(craned_id)),
             craned_id);
         auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
-            craned_meta->craned_down_time);
+        google::protobuf::Timestamp now;
+        now.set_seconds(ToUnixSeconds(craned_meta->craned_down_time));
         for (const auto& [job_id, step_ids] :
              context.craned_step_exec_map.at(craned_id)) {
           for (const auto& step_id : step_ids)
@@ -2814,8 +2814,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
       if (!success) {
         auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-        auto now = google::protobuf::util::TimeUtil::FromAbslTime(
-            craned_meta->craned_down_time);
+        google::protobuf::Timestamp now;
+        now.set_seconds(ToUnixSeconds(craned_meta->craned_down_time));
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
