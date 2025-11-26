@@ -458,8 +458,120 @@ void CtldClient::Init() {
         std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
+        std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
+            steps_to_sync{};
+
+        // Define status priority for intelligent merging
+        auto GetStatusPriority = [](StepStatus status) -> int {
+          switch (status) {
+          case StepStatus::Completed:
+          case StepStatus::Failed:
+          case StepStatus::ExceedTimeLimit:
+          case StepStatus::Cancelled:
+          case StepStatus::OutOfMemory:
+            return 100;  // Terminal states - highest priority
+
+          case StepStatus::Completing:
+            return 90;  // Almost terminal
+
+          case StepStatus::Running:
+            return 50;  // Active execution
+
+          case StepStatus::Configured:
+            return 30;  // Configuration completed
+
+          case StepStatus::Configuring:
+            return 20;  // Being configured
+
+          case StepStatus::Pending:
+            return 10;  // Lowest priority
+
+          default:
+            return 0;
+          }
+        };
+
+        // Intelligent status synchronization for valid steps
+        for (const auto& [job_id, steps] : valid_job_steps) {
+          for (const auto& step_id : steps) {
+            auto ctld_status =
+                arg.req.job_steps().at(job_id).step_status().at(step_id);
+            auto craned_status = exact_job_steps.at(job_id).at(step_id);
+            CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
+                        job_id, step_id, ctld_status, craned_status);
+
+            // Handle Completing status from Ctld
+            if (ctld_status == StepStatus::Completing) {
+              CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+              completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            if (craned_status == ctld_status) {
+              // Status match, no action needed
+              continue;
+            }
+
+            int ctld_priority = GetStatusPriority(ctld_status);
+            int craned_priority = GetStatusPriority(craned_status);
+
+            if (craned_priority >= 100 && ctld_priority < 100) {
+              // Craned reports terminal state - task actually finished
+              CRANE_INFO(
+                  "[Step #{}.{}] Craned has terminal status {} (Ctld has {}), "
+                  "will report to Ctld",
+                  job_id, step_id, craned_status, ctld_status);
+              steps_to_sync[job_id][step_id] = craned_status;
+            } else if (craned_priority > ctld_priority) {
+              // Craned has more advanced state
+              CRANE_INFO(
+                  "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
+                  "{}) , will report to Ctld",
+                  job_id, step_id, craned_status, ctld_status);
+              steps_to_sync[job_id][step_id] = craned_status;
+            } else if (craned_status == StepStatus::Running &&
+                       ctld_status == StepStatus::Completing) {
+              // Special case: Ctld thinks it's completing but Craned still
+              // reports running. Let Ctld's Completing win
+              CRANE_INFO(
+                  "[Step #{}.{}] Ctld has Completing status, Craned reports "
+                  "Running. Keeping Craned's state, Ctld will handle "
+                  "termination.",
+                  job_id, step_id);
+            } else if (craned_status == StepStatus::Configured) {
+              // For configured but not running step, terminate it
+              CRANE_TRACE(
+                  "[Step #{}.{}] is configured but not running, mark as "
+                  "invalid",
+                  job_id, step_id);
+              invalid_steps[job_id].insert(step_id);
+            } else {
+              // Ctld has higher/equal priority - terminate to maintain
+              // consistency
+              CRANE_WARN(
+                  "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
+                  "Terminating step to maintain consistency.",
+                  job_id, step_id, ctld_status, craned_status);
+              invalid_steps[job_id].insert(step_id);
+            }
+          }
+        }
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+
+        // Report status changes to Ctld for steps that need synchronization
+        for (const auto& [job_id, step_status_map] : steps_to_sync) {
+          for (const auto& [step_id, status] : step_status_map) {
+            uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+            CRANE_INFO(
+                "[Step #{}.{}] Reporting status {} to Ctld during recovery "
+                "sync",
+                job_id, step_id, status);
+            g_ctld_client->StepStatusChangeAsync(
+                job_id, step_id, status, exit_code,
+                "Status synced from Craned during recovery");
+          }
+        }
 
         // Only terminate truly invalid steps (those not in Ctld's view at all)
         // Don't kill steps that exist in both but may have status differences

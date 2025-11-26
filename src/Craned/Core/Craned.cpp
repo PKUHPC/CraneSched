@@ -778,8 +778,7 @@ void CreateRequiredDirectories() {
   if (!ok) std::exit(1);
 }
 
-std::unordered_map<job_id_t, std::unordered_map<step_id_t, Craned::StepStatus>>
-Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
+void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   // FIXME: Ctld cancel job after Configure Request sent, will keep invalid jobs
   // FIXME: Add API InitAndRetryToRecoverJobs(Expected Job List) -> Result
 
@@ -880,129 +879,6 @@ Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   /******************* Recover job cgroup info *******************/
   RecoverCgForJobs(job_map);
 
-  /******************* Handle step status inconsistency *******************/
-  using Craned::StepStatus;
-  std::set<job_id_t> completing_jobs{};
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-      completing_steps{};
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> failed_steps{};
-  std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
-      steps_to_sync{};
-
-  // Define status priority for intelligent merging
-  auto GetStatusPriority = [](StepStatus status) -> int {
-    switch (status) {
-    case StepStatus::Completed:
-    case StepStatus::Failed:
-    case StepStatus::ExceedTimeLimit:
-    case StepStatus::Cancelled:
-    case StepStatus::OutOfMemory:
-      return 100;  // Terminal states - highest priority
-
-    case StepStatus::Completing:
-      return 90;  // Almost terminal
-
-    case StepStatus::Running:
-      return 50;  // Active execution
-
-    case StepStatus::Configured:
-      return 30;  // Configuration completed
-
-    case StepStatus::Configuring:
-      return 20;  // Being configured
-
-    case StepStatus::Pending:
-      return 10;  // Lowest priority
-
-    default:
-      return 0;
-    }
-  };
-
-  for (auto& [ids, step] : step_map) {
-    auto [job_id, step_id] = ids;
-    auto ctld_status =
-        config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
-    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).second;
-    CRANE_TRACE("[Step #{}.{}] Ctld status: {}, supervisor reported: {}",
-                job_id, step_id, ctld_status, supv_status);
-
-    // For ctld completing step, cleanup
-    if (ctld_status == StepStatus::Completing) {
-      if (step->IsDaemonStep()) {
-        CRANE_TRACE("[Job #{}] is completing", job_id);
-        completing_jobs.insert(job_id);
-      } else {
-        CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
-        completing_steps[job_id].insert(step_id);
-      }
-      continue;
-    }
-
-    int ctld_priority = GetStatusPriority(ctld_status);
-    int supv_priority = GetStatusPriority(supv_status);
-
-    if (supv_status == ctld_status) {
-      // Status match, no action needed
-      continue;
-    }
-
-    if (supv_priority >= 100 && ctld_priority < 100) {
-      // Craned reports terminal state - task actually finished
-      // Report this status to Ctld
-      CRANE_INFO(
-          "[Step #{}.{}] Craned has terminal status {} (Ctld has {}), "
-          "will report to Ctld",
-          job_id, step_id, supv_status, ctld_status);
-      steps_to_sync[job_id][step_id] = supv_status;
-    } else if (supv_priority > ctld_priority) {
-      // Craned has more advanced state
-      CRANE_INFO(
-          "[Step #{}.{}] Craned has more advanced status {} (Ctld has {}), "
-          "will report to Ctld",
-          job_id, step_id, supv_status, ctld_status);
-      steps_to_sync[job_id][step_id] = supv_status;
-    } else if (supv_status == StepStatus::Running &&
-               ctld_status == StepStatus::Completing) {
-      // Special case: Ctld thinks it's completing but Craned still reports
-      // running. Let Ctld's Completing win - keep Craned state, Ctld will
-      // terminate it
-      CRANE_INFO(
-          "[Step #{}.{}] Ctld has Completing status, Craned reports Running. "
-          "Keeping Craned's state, Ctld will handle termination.",
-          job_id, step_id);
-    } else if (supv_status == StepStatus::Configured) {
-      CRANE_ASSERT(!step->IsDaemonStep());
-      // For configured but not running step, terminate it
-      failed_steps[job_id].insert(step_id);
-      CRANE_TRACE("[Step #{}.{}] is configured but not running, mark as failed",
-                  job_id, step_id);
-    } else {
-      // Ctld has higher/equal priority - this indicates inconsistency
-      // Terminate the step to maintain consistency
-      CRANE_WARN(
-          "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
-          "Terminating step to maintain consistency.",
-          job_id, step_id, ctld_status, supv_status);
-      failed_steps[job_id].insert(step_id);
-    }
-  }
-
-  // Terminate failed steps
-  for (auto [job_id, step_ids] : failed_steps) {
-    for (auto step_id : step_ids) {
-      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-      if (stub) {
-        auto err = stub->TerminateTask(true, false);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("[Supervisor] Failed to terminate task #{}.{}", job_id,
-                      step_id);
-        }
-      }
-      step_map.erase({job_id, step_id});
-    }
-  }
-
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
 
   for (const auto& [job_id, step_ids] : invalid_steps)
@@ -1013,12 +889,7 @@ Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
                util::JobStepsToString(invalid_steps));
   }
-  g_job_mgr->FreeJobs(std::move(completing_jobs));
-  g_job_mgr->FreeSteps(std::move(completing_steps));
   g_server->MarkSupervisorAsRecovered();
-
-  // Return steps that need status synchronization
-  return steps_to_sync;
 }
 
 void GlobalVariableInit() {
