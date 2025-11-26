@@ -57,10 +57,10 @@ std::string ReadFileIntoString(std::filesystem::path const& p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
 
-CraneExpected<uint64_t> ParseMemory(const std::string &mem);
+CraneExpected<uint64_t> ParseMemory(const std::string& mem);
 
-bool ParseHostList(const std::string &host_str,
-                   std::list<std::string> *host_list);
+bool ParseHostList(const std::string& host_str,
+                   std::list<std::string>* host_list);
 
 bool FoundFirstNumberWithoutBrackets(const std::string& input, int* start,
                                      int* end);
@@ -71,9 +71,8 @@ bool HostNameListToStr_(std::list<std::string>& host_list,
                         std::list<std::string>* res_list);
 
 template <std::ranges::range T>
-std::string HostNameListToStr(T const& host_list)
   requires std::same_as<std::ranges::range_value_t<T>, std::string>
-{
+std::string HostNameListToStr(T const& host_list) {
   std::list<std::string> source_list{host_list.begin(), host_list.end()};
   while (true) {
     std::list<std::string> res_list;
