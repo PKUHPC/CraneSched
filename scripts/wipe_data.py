@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 
-import os
-import sys
 import argparse
 import logging
-import yaml
-import pymongo
-
-from pathlib import Path
+import os
+import sys
 from enum import Enum
+from pathlib import Path
+
+import pymongo
+import yaml
+from unqlite import UnQLite
 
 logger = logging.getLogger()
 # Suppress overly verbose logs from pymongo
 logging.getLogger("pymongo").setLevel(logging.INFO)
+
 
 class Collection(Enum):
     ACCT = "acct_table"
@@ -57,8 +59,24 @@ def wipe_collection(db, collection: Collection):
         raise e
 
 
-def wipe_embedded(embedded_db_path: str):
+def wipe_embedded(embedded_db_path: str, keep_id: bool):
     """Remove embedded database files."""
+
+    # Try to preserve task ID
+    var_db_path = embedded_db_path + "var"
+    next_task_id_key = "NI"
+    next_task_id_val = None
+
+    if os.path.exists(var_db_path):
+        try:
+            db = UnQLite(var_db_path)
+            if next_task_id_key in db:
+                next_task_id_val = db[next_task_id_key]
+                logger.info(f"Found existing task ID data (len={len(next_task_id_val)})")
+            db.close()
+        except Exception as e:
+            logger.warning(f"Failed to read task ID from {var_db_path}: {e}")
+
     db_dir = Path(embedded_db_path).parent
     db_filename = Path(embedded_db_path).name
 
@@ -70,6 +88,20 @@ def wipe_embedded(embedded_db_path: str):
             except Exception as e:
                 logger.error(f"Error removing file {file}: {e}")
                 raise e
+
+    # Restore task ID
+    if keep_id and next_task_id_val is not None:
+        try:
+            if not db_dir.exists():
+                db_dir.mkdir(parents=True, exist_ok=True)
+
+            db = UnQLite(var_db_path)
+            db[next_task_id_key] = next_task_id_val
+            db.close()
+            logger.info(f"Restored task ID to {var_db_path}")
+        except Exception as e:
+            logger.error(f"Error restoring task ID to {var_db_path}: {e}")
+            raise e
 
 
 def wipe_mongo(db, collections: list[Collection]):
@@ -102,6 +134,10 @@ def parse_arguments():
         choices=["mongo", "embedded", "all"],
         help="Mode of operation: 'mongo' (MongoDB only), 'embedded' (embedded DB only), 'all' (both MongoDB and embedded DB).",
     )
+    parser.add_argument("--keep-id",
+                        action="store_true",
+                        default="Keep embedded DB task ID(default: false).")
+    parser.set_defaults(keep_id=False)
     parser.add_argument(
         "-C",
         "--config",
@@ -197,7 +233,7 @@ def _main():
 
     # Handle embedded database cleanup
     if args.mode in ["embedded", "all"]:
-        wipe_embedded(embedded_db_path)
+        wipe_embedded(embedded_db_path, args.keep_id)
 
     logger.info("Done.")
 
