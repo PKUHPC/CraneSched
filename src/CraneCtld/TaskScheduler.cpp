@@ -598,7 +598,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
   if (!task->licenses_count.empty())
-    g_licenses_manager->MallocLicenseResourceWhenRecoverRunning(
+    g_licenses_manager->MallocLicenseWhenRecoverRunning(
         task->licenses_count);
 
   // The order of LockGuards matters.
@@ -894,7 +894,7 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           if (!job_in_scheduler->actual_licenses.empty()) {
-            if (!g_licenses_manager->MallocLicenseResource(
+            if (!g_licenses_manager->MallocLicense(
                     job_in_scheduler->actual_licenses)) {
               job->pending_reason = "Licenses";
               continue;
@@ -1211,7 +1211,7 @@ void TaskScheduler::ScheduleThread_() {
                                                    job->TaskId());
           g_account_meta_container->FreeQosResource(*job);
           if (!job->licenses_count.empty())
-            g_licenses_manager->FreeLicenseResource(job->licenses_count);
+            g_licenses_manager->FreeLicense(job->licenses_count);
         }
 
         // Move failed jobs to the completed queue.
@@ -2624,7 +2624,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                                                task->TaskId());
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
-        g_licenses_manager->FreeLicenseResource(task->licenses_count);
+        g_licenses_manager->FreeLicense(task->licenses_count);
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 
