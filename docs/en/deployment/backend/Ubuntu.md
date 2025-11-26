@@ -252,34 +252,26 @@ Refer to the [Cluster Configuration Guide](../configuration/config.md) for confi
 
 ## 6. Start CraneSched
 
-Run manually in the foreground:
+### Using systemd (Recommended)
+
+**Control node only**: Create crane user (automatic with DEB packages):
 
 ```bash
-cranectld
-craned
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
 ```
 
-Or via systemd:
+Then start services:
 
 ```bash
 systemctl daemon-reload
-systemctl enable cranectld --now
-systemctl enable craned --now
+systemctl enable cranectld --now  # Control node
+systemctl enable craned --now     # Compute node
 ```
 
-## 6. Start CraneSched
-
-Run manually (foreground):
+### Running manually (foreground)
 
 ```bash
-cranectld
-craned
-```
-
-Or use systemd:
-
-```bash
-systemctl daemon-reload
-systemctl enable cranectld --now
-systemctl enable craned --now
+cranectld  # Control node
+craned     # Compute node
 ```
