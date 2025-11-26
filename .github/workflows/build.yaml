@@ -16,6 +16,7 @@ on:
       - master
       - release/*
     paths:
+      - '.github/workflows/**'
       - 'dependencies/**'
       - 'CMakeModule/**'
       - 'protos/**'
