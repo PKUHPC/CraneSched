@@ -55,12 +55,31 @@ EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
+  auto nodelist = daemon_step_to_d.nodelist();
+  auto node_id_to_str = [nodelist]() -> std::string {
+    auto it = std::ranges::find(nodelist, g_config.Hostname);
+    if (it == nodelist.end()) {
+      return "-1";
+    }
+    return std::to_string(static_cast<uint32_t>(it - nodelist.begin()));
+  };
+
+  auto alloc_node_num = daemon_step_to_d.nodelist().size();
+  auto mem_in_node =
+      daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
+      (static_cast<uint64_t>(1024 * 1024));
+
+  auto cpus_on_node =
+      daemon_step_to_d.res().allocatable_res_in_node().cpu_core_limit();
+  auto mem_per_cpu = (std::abs(cpus_on_node) > 1e-8)
+                         ? (static_cast<double>(mem_in_node) / cpus_on_node)
+                         : 0.0;
+
   env_map.emplace("CRANE_JOB_ACCOUNT", job_to_d.account());
 
   auto time_limit_dur =
       std::chrono::seconds(daemon_step_to_d.time_limit().seconds()) +
       std::chrono::nanoseconds(daemon_step_to_d.time_limit().nanos());
-
   env_map.emplace(
       "CRANE_JOB_END_TIME",
       std::to_string((std::chrono::system_clock::now() + time_limit_dur)
@@ -74,7 +93,22 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
-
+  env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.submit_dir());
+  env_map.emplace("CRANE_CPUS_PER_TASK",
+                  std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
+  env_map.insert_or_assign("CRANE_MEM_PER_NODE",
+                           std::format("{}M", mem_in_node));
+  env_map.emplace("CRANE_NTASKS_PER_NODE",
+                  std::to_string(daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
+  env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
+  env_map.emplace(
+      "CRANE_NTASKS",
+      std::to_string(alloc_node_num * daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
+  env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
+  env_map.emplace("CRANE_NODEID", node_id_to_str());
+  env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
   return env_map;
 }
 
