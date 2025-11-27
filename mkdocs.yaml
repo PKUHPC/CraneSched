@@ -73,6 +73,7 @@ nav:
         - cinfo: command/cinfo.md
         - ceff: command/ceff.md
         - cacct: command/cacct.md
+        - creport: command/creport.md
     - Job Control:
         - ccancel: command/ccancel.md
         - ccontrol: command/ccontrol.md

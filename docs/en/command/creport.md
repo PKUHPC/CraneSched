@@ -100,7 +100,7 @@ creport cluster userutilizationbyaccount [--start-time=...] [--end-time=...] [--
 - **-E, --end-time string**: Specify the query end time (default is 23:59:59 of the previous day), format: `2023-03-14T10:00:00`
 
 #### Other Options
-- **-C, --config string**: Path to configuration file（default: `/etc/crane/config.yaml`）
+- **-C, --config string**: Path to configuration file (default: `/etc/crane/config.yaml`)
 - **-h, --help**: Show help information
 
 ## Display User-WCKEY Resource Utilization
@@ -116,7 +116,7 @@ creport cluster userutilizationbywckey [--start-time=...] [--end-time=...] [--us
 - **CLUSTER**: Cluster name
 - **LOGIN**: Username
 - **PROPER NAME**: Full Linux system name
-- **WCKEY**:wckey name
+- **WCKEY**: wckey name
 - **USED**: The sum of total CPUs * runtime for each job under the user
 
 ### Command Line Options

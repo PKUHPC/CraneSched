@@ -1566,6 +1566,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
   // 35 mem_alloc     device_map     meta_container has_job_info licenses_alloc 
   // 40 nodename_list
+
   // clang-format off
   std::array<std::string, 40> fields{
     // 0 - 4

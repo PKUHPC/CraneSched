@@ -2085,6 +2085,9 @@ grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
     ::crane::grpc::ActiveAggregationManuallyReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return {grpc::StatusCode::UNAVAILABLE, "CraneCtld Server is not ready"};
+  // TLS + UID binding
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   if (request->uid() != 0) {
     response->set_ok(false);
     response->set_reason("Only the root user can perform this operation");
