@@ -754,7 +754,6 @@ message StreamCrunRequest {
     string craned_id = 4;
   }
 
-
   CrunRequestType type = 1;
 
   oneof payload {
