@@ -319,6 +319,10 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     LicenseResource&& new_license) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
 
+  if (new_license.name.empty() || new_license.server.empty())
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "Name or server is empty"));
+
   auto key = std::make_pair(new_license.name, new_license.server);
 
   if (m_license_resource_map_.contains(key))
