@@ -128,7 +128,9 @@ EnvMap JobInD::GetJobEnvMap() {
   env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
   env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
   env_map.emplace("CRANE_NODEID", node_id_to_str());
-  // env_map.emplace("CRANE_SUBMIT_HOST", daemon_step_to_d.submit_hostname());
+  CRANE_INFO("Add env");
+  // env_map.emplace("CRANE_SUBMIT_HOST",
+  // daemon_step_to_d.submit_hostname());
 
   return env_map;
 }
