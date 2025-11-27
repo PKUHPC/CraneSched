@@ -69,19 +69,19 @@ class LicensesManager {
   void FreeLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  CraneExpected<void> AddRemoteLicense(LicenseResource &&new_license);
+  CraneExpectedRich<void> AddLicenseResource(LicenseResource &&new_license);
 
-  CraneExpected<void> ModifyRemoteLicense(
+  CraneExpectedRich<void> ModifyLicenseResource(
       const std::string &name, const std::vector<std::string> &clusters,
       const std::string &server,
       const crane::grpc::LicenseResource_Field &field,
       const std::string &value);
 
-  CraneExpected<void> RemoveRemoteLicense(
+  CraneExpectedRich<void> RemoveLicenseResource(
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters);
 
-  CraneExpected<void> QueryRemoteLicense(
+  CraneExpectedRich<void> QueryLicenseResource(
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters, std::list<LicenseResource>* res_licenses);
 

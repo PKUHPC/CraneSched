@@ -1851,7 +1851,9 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
   auto result = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!result) {
     response->set_ok(false);
-    response->set_code(result.error());
+    auto *new_err_record = response->mutable_rich_err();
+    new_err_record->set_code(result.error());
+    new_err_record->set_description("");
     return grpc::Status::OK;
   }
 
@@ -1877,10 +1879,10 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
     }
   }
 
-  auto add_result = g_licenses_manager->AddRemoteLicense(std::move(resource));
+  auto add_result = g_licenses_manager->AddLicenseResource(std::move(resource));
   if (!add_result) {
     response->set_ok(false);
-    response->set_code(result.error());
+    response->mutable_rich_err()->CopyFrom(add_result.error());
   } else {
     response->set_ok(true);
   }
@@ -1901,19 +1903,19 @@ grpc::Status CraneCtldServiceImpl::ModifyLicenseResource(
   auto result = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!result) {
     response->set_ok(false);
-    response->set_code(result.error());
+    response->mutable_rich_err()->set_code(result.error());
     return grpc::Status::OK;
   }
 
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
 
-  auto modify_result = g_licenses_manager->ModifyRemoteLicense(
+  auto modify_result = g_licenses_manager->ModifyLicenseResource(
       request->resource_name(), clusters, request->server(),
       request->operator_field(), request->value());
   if (!modify_result) {
     response->set_ok(false);
-    response->set_code(modify_result.error());
+    response->mutable_rich_err()->CopyFrom(modify_result.error());
   } else {
     response->set_ok(true);
   }
@@ -1934,17 +1936,17 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
   auto result = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!result) {
     response->set_ok(false);
-    response->set_code(result.error());
+    response->mutable_rich_err()->set_code(result.error());
     return grpc::Status::OK;
   }
 
   std::vector<std::string> clusters{request->clusters().begin(),
                                       request->clusters().end()};
-  auto del_result = g_licenses_manager->RemoveRemoteLicense(
+  auto del_result = g_licenses_manager->RemoveLicenseResource(
       request->resource_name(), request->server(), clusters);
   if (!del_result) {
     response->set_ok(false);
-    response->set_code(del_result.error());
+    response->mutable_rich_err()->CopyFrom(del_result.error());
   } else {
     response->set_ok(true);
   }
@@ -1964,12 +1966,12 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
 
   std::vector<std::string> clusters{request->clusters().begin(), request->clusters().end()};
   std::list<LicenseResource> res_resources;
-  auto result = g_licenses_manager->QueryRemoteLicense(
+  auto result = g_licenses_manager->QueryLicenseResource(
       request->resource_name(), request->server(), clusters, &res_resources);
 
   if (!result) {
     response->set_ok(false);
-    response->set_code(result.error());
+    response->mutable_rich_err()->CopyFrom(result.error());
     return grpc::Status::OK;
   } else {
     response->set_ok(true);
