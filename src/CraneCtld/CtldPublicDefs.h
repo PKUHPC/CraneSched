@@ -1068,7 +1068,6 @@ struct User {
 };
 
 struct LicenseResource {
-  std::string license_id;
   std::string name;
   std::string server;
   std::string server_type;
@@ -1082,12 +1081,10 @@ struct LicenseResource {
   std::string description;
 };
 
-// TODO: not use free, only total and used
 struct License {
   LicenseId license_id; /* license id */
   uint32_t total;       /* The total number of configured license */
   uint32_t used;        /* Number of license in use */
-  uint32_t free;        /* Number of license in free */
   uint32_t reserved;
   bool remote;
   std::string server;
