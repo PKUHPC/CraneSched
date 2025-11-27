@@ -1862,13 +1862,8 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
   resource.count = request->license_resource().count();
   resource.allocated = request->license_resource().allocated();
   resource.last_consumed = request->license_resource().last_consumed();
-  if (request->license_resource().server().empty()) {
-    resource.server = "db";
-    resource.server_type = "db";
-  } else {
-    resource.server = request->license_resource().server();
-    resource.server_type = request->license_resource().server_type();
-  }
+  resource.server = request->license_resource().server();
+  resource.server_type = request->license_resource().server_type();
   resource.type = request->license_resource().type();
 
   for (const auto &[cluster, allowed] : request->license_resource().cluster_resource_info()) {

@@ -956,7 +956,7 @@ message LicenseInfo {
   bool remote = 6;
   uint32 LastConsumed = 7;
   uint32 LastDeficit = 8;
-  uint64 LastUpdate = 9;
+  int64 LastUpdate = 9;
 }
 
 message LicenseResourceInfo {
