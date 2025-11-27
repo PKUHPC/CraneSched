@@ -462,6 +462,19 @@ void CtldClient::Init() {
             steps_to_sync{};
 
         // Define status priority for intelligent merging
+        // Ctld valid status:
+        //   - Completing
+        //   - Running
+        //   - Configured
+        //   - Configuring
+        // Craned valid status:
+        //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
+        //     OutOfMemory)
+        //   - Completing (All task finished on CommonStep / Asked to exit on
+        //     DaemonStep, during Epilog)
+        //   - Running
+        //   - Configured (Only for CommonStep)
+        //   - Configuring
         auto GetStatusPriority = [](StepStatus status) -> int {
           switch (status) {
           case StepStatus::Completed:
@@ -519,20 +532,24 @@ void CtldClient::Init() {
               // Craned has more advanced state
               CRANE_INFO(
                   "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
-                  "{}) , will report to Ctld",
+                  "{}), sent a statuschange to kick ctld step status machine",
                   job_id, step_id, craned_status, ctld_status);
               steps_to_sync[job_id][step_id] = craned_status;
             } else if (craned_status == StepStatus::Running &&
                        ctld_status == StepStatus::Completing) {
               // Special case: This occurs when Craned goes offline and comes
-              // back online after task timeout. Ctld detected timeout and
-              // marked the task as Completing, but Craned was offline and
-              // still reports it as Running. Let Ctld's Completing status win
-              // - Ctld will handle the termination.
+              // back online after task timeout. Only DaemonStep can be Running
+              // here because:
+              // - DaemonStep waits for Epilog to complete before terminating
+              // - CommonSteps should already be killed by Timer and in terminal
+              //   state
+              // Ctld detected timeout and marked as Completing. Let Ctld handle
+              // the termination.
               CRANE_INFO(
                   "[Step #{}.{}] Ctld has Completing status (likely due to "
-                  "timeout during offline), Craned reports Running. Keeping "
-                  "Craned's state, Ctld will handle termination.",
+                  "timeout during offline), Craned reports Running (should be "
+                  "DaemonStep). Keeping Craned's state, Ctld will handle "
+                  "termination.",
                   job_id, step_id);
             } else if (craned_status == StepStatus::Configured) {
               // For configured but not running step, terminate it
@@ -544,6 +561,15 @@ void CtldClient::Init() {
             } else {
               // Ctld has higher/equal priority - terminate to maintain
               // consistency
+              // This branch handles cases where craned_priority <=
+              // ctld_priority and not covered by special cases above,
+              // including:
+              // - Craned: Configuring, Ctld: Running/Configured/Completing
+              //   (Craned is still configuring, Ctld moved ahead)
+              // - Craned: Running, Ctld: Completing (non-DaemonStep case,
+              //   though this should rarely happen as CommonSteps should be
+              //   killed by timer)
+              // - Other cases where Ctld has equal or higher priority
               CRANE_WARN(
                   "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
                   "Terminating step to maintain consistency.",
