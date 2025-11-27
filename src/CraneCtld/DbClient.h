@@ -101,7 +101,6 @@ class MongodbClient {
     ACCOUNT = 0,
     USER = 1,
     QOS = 2,
-    RESOURCE = 3,
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
@@ -218,9 +217,6 @@ class MongodbClient {
       break;
     case EntityType::QOS:
       coll_name = m_qos_collection_name_;
-      break;
-    case EntityType::RESOURCE:
-      coll_name = m_resource_collection_name_;
       break;
     }
 
