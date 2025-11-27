@@ -1256,7 +1256,7 @@ struct LicenseResource {
   std::unordered_map<std::string, uint32_t> /* cluster, allowed */cluster_resources;
   uint32_t count{0};
   uint32_t flags;
-  uint64_t last_update;
+  int64_t  last_update;
   std::string description;
 };
 
@@ -1269,7 +1269,7 @@ struct License {
   std::string server;
   uint32_t last_consumed;
   uint32_t last_deficit;
-  uint64_t last_update;
+  int64_t last_update;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
