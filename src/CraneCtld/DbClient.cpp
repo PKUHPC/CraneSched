@@ -1564,7 +1564,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     meta_container has_job_info licenses_alloc 
+  // 35 mem_alloc     device_map     meta_container has_job_info licenses_alloc
   // 40 nodename_list
 
   // clang-format off
@@ -1637,7 +1637,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              true /* Mark the document having complete job info */,
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()},  bsoncxx::array::value{nodename_list_array.view()}};
+                 runtime_attr.actual_licenses().end()},
+             bsoncxx::array::value{nodename_list_array.view()}};
 
   return DocumentConstructor_(fields, values);
 }
