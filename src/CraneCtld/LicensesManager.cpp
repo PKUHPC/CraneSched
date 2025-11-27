@@ -488,18 +488,21 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
   if (iter == m_license_resource_map_.end())  // TODO: ERR_RESOURCE_NOT_FOUND
     return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
 
-  auto* license_resource = iter->second.get();
-
+  LicenseResource res_resource(*iter->second.get());
+  bool is_local = false;
   for (const auto& cluster : clusters) {
     std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
-    if (cluster == "local") {
+    if (cluster == "local" || cluster == g_config.CraneClusterName) {
       cluster_iter =
-          license_resource->cluster_resources.find(g_config.CraneClusterName);
+          res_resource.cluster_resources.find(g_config.CraneClusterName);
+      is_local = true;
     } else {
-      cluster_iter = license_resource->cluster_resources.find(cluster);
+      cluster_iter = res_resource.cluster_resources.find(cluster);
     }
-    if (cluster_iter == license_resource->cluster_resources.end())
+    if (cluster_iter == res_resource.cluster_resources.end())
       return std::unexpected(CraneErrCode::ERR_CLUSTER_LICENSE_NOT_FOUND);
+      res_resource.allocated -= cluster_iter->second;
+      res_resource.cluster_resources.erase(cluster_iter);
   }
 
   mongocxx::client_session::with_transaction_cb callback =
@@ -507,34 +510,24 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
         if (clusters.empty()) {
           g_db_client->DeleteResource(name, server);
         } else {
-          for (const auto& cluster : clusters) {
-            // TODO:
-          }
+          g_db_client->UpdateResource(res_resource);
         }
       };
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
 
+  if (clusters.empty() || is_local) {
+    auto license_id = std::format("%s@%s", res_resource.name,
+                                     res_resource.server);
+    m_licenses_map_.Erase(license_id);
+  }
+
   if (clusters.empty()) {
     m_license_resource_map_.erase(key);
   } else {
-    for (const auto& cluster : clusters) {
-      std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
-      if (cluster == "local" || cluster == g_config.CraneClusterName) {
-        cluster_iter =
-            license_resource->cluster_resources.find(g_config.CraneClusterName);
-
-        auto license_id = std::format("%s@%s", license_resource->name,
-                                     license_resource->server);
-        m_licenses_map_.Erase(license_id);
-      } else {
-        cluster_iter = license_resource->cluster_resources.find(cluster);
-      }
-
-      license_resource->allocated -= cluster_iter->second;
-      license_resource->cluster_resources.erase(cluster_iter);
-    }
+    m_license_resource_map_[key] = std::make_unique<LicenseResource>(
+        std::move(res_resource));
   }
 
   return {};
