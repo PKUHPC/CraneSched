@@ -181,6 +181,7 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+  string submit_hostname = 42;
 }
 
 message TaskInEmbeddedDb {
@@ -336,6 +337,9 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  string submit_hostname = 26;
+  //uint32 total_gpus = 27;
+  repeated string exclude_nodelist = 28;
 
   // Not used now.
   string extra_attr = 29;
