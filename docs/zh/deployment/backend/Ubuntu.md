@@ -251,17 +251,26 @@ PAM 模块配置是可选的，但建议用于生产集群以控制用户访问�
 
 ## 6. 启动鹤思
 
-手动运行（前台）：
+### 使用 systemd 启动（推荐）
+
+**仅控制节点**需要先创建 crane 用户（DEB 包安装时自动创建）：
 
 ```bash
-cranectld
-craned
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
 ```
 
-或使用 systemd：
+然后启动服务：
 
 ```bash
 systemctl daemon-reload
-systemctl enable cranectld --now
-systemctl enable craned --now
+systemctl enable cranectld --now  # 控制节点
+systemctl enable craned --now     # 计算节点
+```
+
+### 手动运行（前台）
+
+```bash
+cranectld  # 控制节点
+craned     # 计算节点
 ```

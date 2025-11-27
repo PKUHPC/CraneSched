@@ -143,6 +143,7 @@ cd CraneSched
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc \
                -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+               -DCRANE_USE_SYSTEM_LIBCGROUP=ON \
                -DCRANE_ENABLE_CGROUP_V2=OFF ..
 cmake --build .
 ninja install
@@ -172,15 +173,28 @@ Please follow the [PAM Module Configuration Guide](../configuration/pam.md) for 
 
 For cluster configuration details, see the [Cluster Configuration Guide](../configuration/config.md).
 
-After configuring, start the services:
+After configuring, choose your startup method:
+
+### Using systemd (Recommended)
+
+**Control node only**: Create crane user (automatic with RPM packages):
 
 ```bash
-# If using systemd:
-systemctl start cranectld
-systemctl start craned
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
+```
 
-# If using executables directly:
+Then start services:
+
+```bash
+systemctl start cranectld  # Control node
+systemctl start craned     # Compute node
+```
+
+### Running binaries directly
+
+```bash
 cd build/src
-CraneCtld/cranectld
-Craned/craned
+CraneCtld/cranectld  # Control node
+Craned/craned        # Compute node
 ```

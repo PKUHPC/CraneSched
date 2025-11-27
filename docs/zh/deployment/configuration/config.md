@@ -32,6 +32,20 @@ Partitions:
 DefaultPartition: compute
 ```
 
+## 前置条件：Crane 系统用户
+
+**仅控制节点**使用 systemd 启动时需要 `crane` 用户（软件包安装时自动创建）：
+
+```bash
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
+```
+
+!!! note
+    - 计算节点的 craned 服务以 root 运行，无需 crane 用户
+    - 直接运行二进制文件时以当前用户身份运行，无需 crane 用户
+    - 如果使用统一账号系统管理，需确保 `crane` 用户对 `CraneBaseDir` 目录有写权限
+
 ## 基本配置
 
 ### 集群设置
