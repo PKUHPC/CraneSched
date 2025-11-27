@@ -39,7 +39,6 @@ int LicensesManager::Init(
                              License{.license_id = license_id,
                                      .total = iter->second,
                                      .used = 0,
-                                     .free = iter->second,
                                      .reserved = 0,
                                      .remote = true,
                                      .server = resource.server,
@@ -57,7 +56,6 @@ int LicensesManager::Init(
     licenses_map.insert({lic_id, License{.license_id = lic_id,
                                          .total = count,
                                          .used = 0,
-                                         .free = count,
                                          .reserved = 0}});
   }
 
@@ -94,7 +92,7 @@ void LicensesManager::GetLicensesInfo(
       lic_info->set_name(lic->license_id);
       lic_info->set_total(lic->total);
       lic_info->set_used(lic->used);
-      lic_info->set_free(lic->free);
+      lic_info->set_free(lic->total - lic->used);
     }
   } else {
     for (auto& license_name : request->license_name_list()) {
@@ -105,7 +103,7 @@ void LicensesManager::GetLicensesInfo(
         lic_info->set_name(lic->license_id);
         lic_info->set_total(lic->total);
         lic_info->set_used(lic->used);
-        lic_info->set_free(lic->free);
+        lic_info->set_free(lic->total - lic->used);
       }
     }
   }
@@ -156,7 +154,7 @@ bool LicensesManager::CheckLicenseCountSufficient(
       auto iter = licenses_map->find(license.key());
       if (iter != licenses_map->end()) {
         auto lic = iter->second.GetExclusivePtr();
-        if (license.count() + lic->reserved <= lic->free) {
+        if (license.count() + lic->reserved + lic->used + lic->last_deficit <= lic->total) {
           actual_licenses->emplace(license.key(), license.count());
           break;
         }
@@ -170,7 +168,7 @@ bool LicensesManager::CheckLicenseCountSufficient(
         return false;
       }
       auto lic = iter->second.GetExclusivePtr();
-      if (license.count() + lic->reserved > lic->free) {
+      if (license.count() + lic->reserved + lic->used + lic->last_deficit > lic->total) {
         actual_licenses->clear();
         return false;
       }
@@ -214,21 +212,12 @@ bool LicensesManager::MallocLicense(
     auto iter = licenses_map->find(lic_id);
     if (iter == licenses_map->end()) return false;
     auto lic = iter->second.GetExclusivePtr();
-    if (lic->used + count > lic->total) return false;
+    if (lic->used + count + lic->reserved + lic->last_deficit > lic->total) return false;
   }
 
   for (auto& [lic_id, count] : actual_license) {
     auto lic = licenses_map->at(lic_id).GetExclusivePtr();
     lic->used += count;
-    if (lic->free < count) {
-      CRANE_ERROR(
-          "MallocLicenseResource: license [{}] requested={}, free={}, will set "
-          "free=0",
-          lic_id, count, lic->free);
-      lic->free = 0;
-    } else {
-      lic->free -= count;
-    }
   }
 
   if (g_config.Plugin.Enabled) {
@@ -258,16 +247,6 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
     if (iter == licenses_map->end()) continue;
     auto lic = iter->second.GetExclusivePtr();
     lic->used += count;
-    if (lic->free < count) {
-      CRANE_ERROR(
-          "MallocLicenseResourceWhenRecoverRunning: license [{}] requested={}, "
-          "free={}, will set "
-          "free=0",
-          lic_id, count, lic->free);
-      lic->free = 0;
-    } else {
-      lic->free -= count;
-    }
   }
 
   if (g_config.Plugin.Enabled) {
@@ -296,14 +275,13 @@ void LicensesManager::FreeLicense(
     auto lic = iter->second.GetExclusivePtr();
     if (lic->used < count) {
       CRANE_ERROR(
-          "FreeLicenseResource: license [{}] used < freeing count ({} < {}), "
+          "FreeLicense: license [{}] used < freeing count ({} < {}), "
           "will set used=0",
           lic_id, lic->used, count);
       lic->used = 0;
     } else {
       lic->used -= count;
     }
-    lic->free += count;
   }
 
   if (g_config.Plugin.Enabled) {
@@ -328,13 +306,15 @@ CraneExpected<void> LicensesManager::AddRemoteLicense(
 
   auto key = std::make_pair(new_license.name, new_license.server);
 
-  if (m_license_resource_map_.contains(key))  // TODO:
+  if (m_license_resource_map_.contains(key))  // TODO: ERR_RESOURCE_ALREADY_EXIST
     return std::unexpected(CraneErrCode::ERR_LICENSE_NOT_FOUND);
 
   for (const auto& allowed :
        new_license.cluster_resources | std::views::values) {
     new_license.allocated += allowed;
   }
+
+  new_license.last_update = absl::ToUnixSeconds(absl::Now());
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -355,7 +335,6 @@ CraneExpected<void> LicensesManager::AddRemoteLicense(
           license_id, License{.license_id = license_id,
                               .total = iter->second,
                               .used = 0,
-                              .free = iter->second,
                               .reserved = 0,
                               .remote = true,
                               .server = new_license.server,
@@ -436,7 +415,8 @@ CraneExpected<void> LicensesManager::ModifyRemoteLicense(
     CRANE_ERROR("Unrecognized LicenseResource field: {}",
                 std::to_string(field));
   }
-  res_resource.last_update = static_cast<uint64_t>(std::time(nullptr));
+
+  res_resource.last_update = absl::ToUnixSeconds(absl::Now());
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -488,7 +468,7 @@ CraneExpected<void> LicensesManager::RemoveRemoteLicense(
   if (iter == m_license_resource_map_.end())  // TODO: ERR_RESOURCE_NOT_FOUND
     return std::unexpected(CraneErrCode::ERR_USER_ALREADY_EXISTS);
 
-  LicenseResource res_resource(*iter->second.get());
+  LicenseResource res_resource(*iter->second);
   bool is_local = false;
   for (const auto& cluster : clusters) {
     std::unordered_map<std::string, uint32_t>::iterator cluster_iter;

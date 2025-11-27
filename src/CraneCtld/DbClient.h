@@ -227,9 +227,6 @@ class MongodbClient {
     case EntityType::QOS:
       coll_name = m_qos_collection_name_;
       break;
-    case EntityType::RESOURCE:
-      coll_name = m_resource_collection_name_;
-      break;
     case EntityType::WCKEY:
       CRANE_ERROR(
           "UpdateEntityOne does not support WCKEY. Use UpdateEntityOneByFields "
