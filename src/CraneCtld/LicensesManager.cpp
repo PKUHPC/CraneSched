@@ -323,6 +323,8 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM, "Name or server is empty"));
 
+  CRANE_TRACE("Add License Resource {}@{}...", new_license.name, new_license.server);
+
   auto key = std::make_pair(new_license.name, new_license.server);
 
   if (m_license_resource_map_.contains(key))
@@ -341,7 +343,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
                       new_license.allocated, new_license.count));
   }
 
-  new_license.last_update = absl::ToUnixSeconds(absl::Now());
+  new_license.last_update = absl::ToUnixMillis(absl::Now());
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -381,6 +383,8 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
     const std::string& server, const crane::grpc::LicenseResource_Field& field,
     const std::string& value) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  CRANE_TRACE("Modify license resource: {}@{}...", name, server);
 
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
@@ -474,7 +478,7 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
                 std::to_string(field));
   }
 
-  res_resource.last_update = absl::ToUnixSeconds(absl::Now());
+  res_resource.last_update = absl::ToUnixMillis(absl::Now());
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -522,6 +526,8 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
+
+  CRANE_TRACE("Remove license resource{}@{}....", name, server);
 
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
