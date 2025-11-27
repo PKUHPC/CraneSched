@@ -800,6 +800,7 @@ enum ErrCode {
   ERR_LICENSE_NOT_FOUND = 93;
   ERR_INVALID_ARGUMENT = 94;
   ERR_CLUSTER_LICENSE_NOT_FOUND = 95;
+  ERR_RESOURCE_ALREADY_EXIST = 96;
 }
 
 enum EntityType {
@@ -948,6 +949,11 @@ message LicenseInfo {
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+  uint32 reserved = 5;
+  bool remote = 6;
+  uint32 LastConsumed = 7;
+  uint32 LastDeficit = 8;
+  uint64 LastUpdate = 9;
 }
 
 message LicenseResourceInfo {
