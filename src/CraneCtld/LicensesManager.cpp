@@ -470,6 +470,13 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
     break;
   case crane::grpc::LicenseResource_Field_Flags:
     break;
+  case crane::grpc::LicenseResource_Field_ResourceType:
+    if (absl::AsciiStrToLower(value) == "license") {
+      res_resource.type = crane::grpc::LicenseResource_Type_License;
+    } else {
+      res_resource.type = crane::grpc::LicenseResource_Type_NotSet;
+    }
+    break;
   case crane::grpc::LicenseResource_Field_ServerType:
     res_resource.server_type = value;
     break;
