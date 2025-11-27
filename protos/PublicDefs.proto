@@ -694,10 +694,9 @@ enum ErrCode {
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
-  ERR_LICENSE_NOT_FOUND = 84;
+  ERR_RESOURCE_NOT_FOUND = 84;
 
-  ERR_INVALID_ARGUMENT = 85;
-  ERR_CLUSTER_LICENSE_NOT_FOUND = 86;
+  ERR_RESOURCE_ALREADY_EXIST = 85;
 }
 
 enum EntityType {
@@ -831,6 +830,11 @@ message LicenseInfo {
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+  uint32 reserved = 5;
+  bool remote = 6;
+  uint32 LastConsumed = 7;
+  uint32 LastDeficit = 8;
+  uint64 LastUpdate = 9;
 }
 
 message LicenseResourceInfo {
