@@ -1210,6 +1210,7 @@ bool MongodbClient::UpdateResource(const LicenseResource& resource) {
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
+
   return true;
 }
 
@@ -1822,12 +1823,12 @@ void MongodbClient::ViewToResource_(
         ViewValueOr_(resource_view["server_type"], std::string{});
     resource->type =
         static_cast<crane::grpc::LicenseResource::Type>(ViewValueOr_(
-            resource_view["type"], crane::grpc::LicenseResource_Type_NotSet));
+            resource_view["type"], 0));
 
     for (auto&& elem :
          ViewValueOr_(resource_view["cluster_resources"],
                       bsoncxx::builder::basic::make_document().view())) {
-      resource->cluster_resources.emplace(elem.key(), elem.get_int32().value);
+      resource->cluster_resources.emplace(std::string(elem.key()), elem.get_int32().value);
     }
 
   } catch (const bsoncxx::exception& e) {
@@ -1842,18 +1843,18 @@ MongodbClient::document MongodbClient::ResourceToDocument_(
       "allocated", "last_consumed", "cluster_resources", "count",
       "flags",     "last_update",   "description"};
 
-  std::tuple<std::string, std::string, std::string, uint32_t, uint32_t,
-             uint32_t, std::unordered_map<std::string, uint32_t>, uint32_t,
-             uint32_t, uint64_t, std::string>
+  std::tuple<std::string, std::string, std::string, int32_t,
+             int32_t, int32_t, std::unordered_map<std::string, uint32_t>, int32_t,
+             int32_t, int64_t, std::string>
       values{resource.name,
              resource.server,
              resource.server_type,
-             static_cast<uint32_t>(resource.type),
+             static_cast<int32_t>(resource.type),
              resource.allocated,
              resource.last_consumed,
              resource.cluster_resources,
              resource.count,
-             static_cast<uint32_t>(resource.flags),
+             static_cast<int32_t>(resource.flags),
              resource.last_update,
              resource.description};
 
