@@ -55,7 +55,7 @@ env:
   LOCAL_CACHE_DIR: /opt/actions-runner-external/runner_cache
 
   # Cache buster for forcing rebuilds on workflow_dispatch
-  CACHE_BUSTER: ${{ inputs.cache_buster || '' }}
+  CACHE_BUSTER: ${{ github.event.inputs.cache_buster || '' }}
 
   # CI image tag (digest resolved at runtime)
   CI_IMAGE_TAG: ghcr.io/nativu5/cranedev:ci
