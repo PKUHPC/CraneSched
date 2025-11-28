@@ -1025,11 +1025,13 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
 
-      // Job primary steps
+      // Map for AllocJobs rpc.
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
+      // Map for AllocSteps rpc.
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
+
       std::vector<StepInCtld*> step_in_ctld_vec;
 
       Mutex thread_pool_mtx;
@@ -2893,7 +2895,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         job_finished_status{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
-    if (task->DaemonStep() && step_id == task->DaemonStep()->StepId()) {
+    if (task->DaemonStep() != nullptr &&
+        step_id == task->DaemonStep()->StepId()) {
       CRANE_TRACE(
           "[Step #{}.{}] Daemon step status change received, status: {}.",
           task->TaskId(), step_id, new_status);
