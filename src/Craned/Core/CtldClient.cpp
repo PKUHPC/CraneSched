@@ -564,12 +564,15 @@ void CtldClient::Init() {
               // This branch handles cases where craned_priority <=
               // ctld_priority and not covered by special cases above,
               // including:
-              // - Craned: Configuring, Ctld: Running/Configured/Completing
-              //   (Craned is still configuring, Ctld moved ahead)
               // - Craned: Running, Ctld: Completing (non-DaemonStep case,
               //   though this should rarely happen as CommonSteps should be
               //   killed by timer)
               // - Other cases where Ctld has equal or higher priority
+              // Craned: Configuring with Ctld: Running/Configured should
+              // not occur in the normal state machine flow, as Configuring
+              // means Ctld hasn't received the Configured status yet. The only
+              // valid case for Ctld to be ahead is when Ctld marks it as
+              // Completing (handled above).
               CRANE_WARN(
                   "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
                   "Terminating step to maintain consistency.",
