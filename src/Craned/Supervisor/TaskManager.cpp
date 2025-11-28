@@ -41,6 +41,9 @@ using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
 CraneErrCode StepInstance::Prepare() {
+  // No need to write script for calloc or container tasks
+  if (IsCalloc() || IsContainer()) return CraneErrCode::SUCCESS;
+
   auto sh_path = g_config.CraneScriptDir /
                  fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
 
@@ -626,87 +629,101 @@ void ContainerInstance::InitEnvMap() {
 }
 
 CraneErrCode ContainerInstance::Prepare() {
-  const auto& ca_meta = m_parent_step_inst_->GetStep().container_meta();
-
-  // For container, there is only one task in a step. So we use step_id and
-  // job_id here.
-  step_id_t step_id = m_parent_step_inst_->step_id;
-  job_id_t job_id = g_config.JobId;
+  const auto& step_to_supv = m_parent_step_inst_->GetStep();
+  const auto& ca_meta = GetParentStep().container_meta();
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   // Generate log pathes
-  m_log_dir_ = std::filesystem::path(m_parent_step_inst_->GetStep().cwd()) /
-               std::format(kContainerLogDirPattern, job_id);
-  m_log_file_ =
-      m_log_dir_ / std::format(kContainerLogFilePattern, job_id, step_id);
+  m_log_dir_ = std::filesystem::path(step_to_supv.cwd()) /
+               std::format(kContainerLogDirPattern, g_config.JobId);
+  m_log_file_ = m_log_dir_ / std::format(kContainerLogFilePattern,
+                                         g_config.JobId, g_config.StepId);
 
   // Create private directory for container task
   if (!util::os::CreateFoldersForFileEx(m_log_file_,
                                         m_parent_step_inst_->pwd.Uid(),
                                         m_parent_step_inst_->pwd.Gid(), 0700)) {
     CRANE_ERROR("Failed to create log directory {} for container #{}.{}",
-                m_log_file_, job_id, step_id);
+                m_log_file_, g_config.JobId, g_config.StepId);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // Create the log file and chmod/chown it
-  std::ofstream(m_log_file_).close();
-  if (chmod(m_log_file_.c_str(), 0600) != 0) {
-    CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
-            m_parent_step_inst_->pwd.Gid()) != 0) {
-    CRANE_ERROR("Failed to chown log file {}", m_log_file_);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // Pull image according to pull policy
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
-  auto image_id_opt = cri_client->PullImage(
-      ca_meta.image().image(), ca_meta.image().username(),
-      ca_meta.image().password(), ca_meta.image().server_address(),
-      ca_meta.image().pull_policy());
-
-  if (!image_id_opt.has_value()) {
-    CRANE_ERROR("Failed to pull image {} for container #{}.{}",
-                ca_meta.image().image(), job_id, step_id);
-    return CraneErrCode::ERR_SYSTEM_ERR;
+  // Create the log file before container runtime and chmod/chown it,
+  // so the log file is always owned by the user, not root.
+  if (m_type_ == ContainerType::CONTAINER) {
+    std::ofstream(m_log_file_).close();
+    if (chmod(m_log_file_.c_str(), 0600) != 0) {
+      CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+    if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
+              m_parent_step_inst_->pwd.Gid()) != 0) {
+      CRANE_ERROR("Failed to chown log file {}", m_log_file_);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   }
 
-  m_image_id_ = std::move(image_id_opt.value());
+  // Prepare environment variables for both POD and CONTAINER
   InitEnvMap();
 
-  // Launch the pod after all configurations are set
-  if (auto err = SetPodSandboxConfig_(); err != CraneErrCode::SUCCESS)
-    return err;
-  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
-  if (!pod_id_expt.has_value()) {
-    const auto& rich_err = pod_id_expt.error();
-    CRANE_ERROR("Failed to run pod sandbox for container #{}: {}", job_id,
-                rich_err.description());
-    return rich_err.code();
-  }
-  m_pod_id_ = std::move(pod_id_expt.value());
-  // TODO: Fix Pod here. Pod should only related to job instead of step.
-  CRANE_DEBUG("Pod {} created for container #{}.{}", m_pod_id_, job_id,
-              step_id);
+  if (m_type_ == ContainerType::POD) {
+    // For POD type, directly launch pod at this stage.
+    // NOTE: Pod is solely associated with job, not step.
+    if (auto err = SetPodSandboxConfig_(); err != CraneErrCode::SUCCESS)
+      return err;
 
-  // Create the container but not start here
-  if (auto err = SetContainerConfig_(); err != CraneErrCode::SUCCESS)
-    return err;
-  auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
-                                                       &m_container_config_);
-  if (!container_id_expt.has_value()) {
-    const auto& rich_err = container_id_expt.error();
-    CRANE_ERROR("Failed to create container for #{}.{}: {}", job_id, step_id,
-                rich_err.description());
-    return rich_err.code();
-  }
-  m_container_id_ = std::move(container_id_expt.value());
-  CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_, job_id,
-              step_id);
+    auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
+    if (!pod_id_expt.has_value()) {
+      const auto& rich_err = pod_id_expt.error();
+      CRANE_ERROR("Failed to run pod sandbox for container job #{}: {}",
+                  g_config.JobId, rich_err.description());
+      return rich_err.code();
+    }
 
-  return CraneErrCode::SUCCESS;
+    m_pod_id_ = std::move(pod_id_expt.value());
+    CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, g_config.JobId);
+
+    return CraneErrCode::SUCCESS;
+
+  } else if (m_type_ == ContainerType::CONTAINER) {
+    // For CONTAINER type, pull image and create container here.
+    // Pull image according to pull policy
+    auto image_id_opt = cri_client->PullImage(
+        ca_meta.image().image(), ca_meta.image().username(),
+        ca_meta.image().password(), ca_meta.image().server_address(),
+        ca_meta.image().pull_policy());
+
+    if (!image_id_opt.has_value()) {
+      CRANE_ERROR("Failed to pull image {} for container step #{}.{}",
+                  ca_meta.image().image(), g_config.JobId, g_config.StepId);
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    m_image_id_ = std::move(image_id_opt.value());
+
+    // FIXME: Query PodSandbox ID from CRI.
+
+    // Create the container but not start here
+    if (auto err = SetContainerConfig_(); err != CraneErrCode::SUCCESS)
+      return err;
+    auto container_id_expt = cri_client->CreateContainer(
+        m_pod_id_, m_pod_config_, &m_container_config_);
+    if (!container_id_expt.has_value()) {
+      const auto& rich_err = container_id_expt.error();
+      CRANE_ERROR("Failed to create container for #{}.{}: {}", g_config.JobId,
+                  g_config.StepId, rich_err.description());
+      return rich_err.code();
+    }
+    m_container_id_ = std::move(container_id_expt.value());
+    CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_,
+                g_config.JobId, g_config.StepId);
+    return CraneErrCode::SUCCESS;
+
+  } else {
+    CRANE_ERROR("Unknown container type for container step #{}.{}",
+                g_config.JobId, g_config.StepId);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
 }
 
 CraneErrCode ContainerInstance::Spawn() {
@@ -880,7 +897,7 @@ CraneErrCode ContainerInstance::SetPodSandboxConfig_() {
   }
 
   // FIXME: This is just a workaround before we have CgroupManager refactored
-  // into a public library.
+  // for multi-step support.
   {
     // set cgroup parent
     auto* linux_config = m_pod_config_.mutable_linux();
@@ -943,8 +960,8 @@ CraneErrCode ContainerInstance::SetContainerConfig_() {
   using cri::kCriLabelUidKey;
 
   // There is only one task in a step. So we use step_id and job_id here.
-  job_id_t job_id = GetParentStep().job_id();
-  step_id_t step_id = m_parent_step_inst_->step_id;
+  job_id_t job_id = g_config.JobId;
+  step_id_t step_id = g_config.StepId;
 
   const auto& ca_meta = GetParentStep().container_meta();
   const std::string& step_name = GetParentStep().name();
@@ -1987,14 +2004,16 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     g_runtime_status.Status = StepStatus::Running;
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
+
     auto* task = m_step_.GetTaskInstance(task_id);
-    if (m_step_.Prepare() != CraneErrCode::SUCCESS) {
+    if (auto err = m_step_.Prepare(); err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to prepare step for task execution.");
-      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
+      elem.ok_prom.set_value(err);
       TaskFinish_(elem.instance->task_id, crane::grpc::TaskStatus::Failed,
                   ExitCode::EC_FILE_NOT_FOUND, "");
       continue;
     }
+
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
