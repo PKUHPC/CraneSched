@@ -218,14 +218,13 @@ message StepToCtld {
   google.protobuf.Duration time_limit = 1;
   // account, qos from job
   uint32 job_id = 2;
-  ResourceView req_resources = 3;
+  ResourceView req_resources_per_task = 3;
   TaskType type = 5;
   uint32 uid = 6;  // Only for authorization
   string name = 7;
 
-  uint32 node_num = 9;
-  uint32 ntasks_per_node = 10;
-  double cpus_per_task = 11;
+  optional uint32 node_num = 8;
+  optional uint32 ntasks_per_node = 9;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
@@ -447,8 +446,8 @@ message TaskInfo {
   // This is only used when querying Container tasks.
   // For other types of tasks, this field is ignored.
   optional ContainerTaskAdditionalMeta container_meta = 23;
-
-  /* 26-29 Reserved */
+  repeated StepInfo step_info_list = 24;
+  /* 25-29 Reserved */
 
   // Dynamic task information
   bool held = 30;
@@ -474,17 +473,18 @@ message TaskInfo {
 message StepInfo {
   // Static step information
   TaskType type = 1;
-  uint32 job_id = 2;
-  uint32 step_id = 3;
-  string name = 4;
+  StepType step_type = 2;
+  uint32 job_id = 3;
+  uint32 step_id = 4;
+  string name = 5;
 
-  uint32 uid = 5;
-  repeated uint32 gid = 6;
+  uint32 uid = 6;
+  repeated uint32 gid = 7;
 
-  google.protobuf.Duration time_limit = 7;
-  google.protobuf.Timestamp start_time = 8;
-  google.protobuf.Timestamp end_time = 9;
-  google.protobuf.Timestamp submit_time = 10;
+  google.protobuf.Duration time_limit = 8;
+  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp end_time = 10;
+  google.protobuf.Timestamp submit_time = 11;
 
   uint32 node_num = 12;
   string cmd_line = 13;
@@ -495,7 +495,7 @@ message StepInfo {
 
   string extra_attr = 21;
 
-  string container = 23;
+  optional ContainerTaskAdditionalMeta container_meta = 23;
   /* 24-29 Reserved */
 
   // Dynamic step information
@@ -503,11 +503,7 @@ message StepInfo {
   TaskStatus status = 31;
 
   uint32 exit_code = 33;
-  uint32 priority = 34;
-  oneof pending_reason_or_craned_list {
-    string pending_reason = 35;
-    string craned_list = 36;
-  }
+  string craned_list = 36;
 
   // The time of different nodes across the whole cluster might not always be synchronized.
   // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
@@ -689,11 +685,13 @@ enum ErrCode {
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
   ERR_LICENSE_LEGAL_FAILED = 78;
+  ERR_INVALID_JOB_ID = 79;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
+  ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
 }
 
 enum EntityType {
