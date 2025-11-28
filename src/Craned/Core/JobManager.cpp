@@ -355,7 +355,9 @@ bool JobManager::EvCheckSupervisorRunning_() {
             .job_id = job_id,
             .step_id = step_id,
             .new_status = StepStatus::Failed,
-            .reason = "Supervisor not responding during step completion"});
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding during step completion",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       } else {
         if (exists) continue;
       }
@@ -1212,7 +1214,9 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
               .job_id = step->job_id,
               .step_id = step->step_id,
               .new_status = StepStatus::Failed,
-              .reason = "Supervisor not responding during step completion"});
+              .exit_code = ExitCode::EC_RPC_ERR,
+              .reason = "Supervisor not responding during step completion",
+              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         }
       }
       g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
