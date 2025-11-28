@@ -18,14 +18,11 @@
 
 #include "JobManager.h"
 
-#include <google/protobuf/io/zero_copy_stream_impl.h>
-#include <google/protobuf/util/delimited_message_util.h>
 #include <pty.h>
 #include <sys/wait.h>
 
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
-#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
@@ -35,21 +32,6 @@ namespace Craned {
 
 using Common::kStepRequestCheckIntervalMs;
 using namespace std::chrono_literals;
-
-StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
-    : job_id(step_to_d.job_id()),
-      step_id(step_to_d.step_id()),
-      step_to_d(step_to_d),
-      supv_pid(0),
-      status(StepStatus::Configuring) {}
-
-StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
-                           pid_t supv_pid, StepStatus status)
-    : job_id(step_to_d.job_id()),
-      step_id(step_to_d.step_id()),
-      step_to_d(step_to_d),
-      supv_pid(supv_pid),
-      status(status) {}
 
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
@@ -159,7 +141,7 @@ JobManager::JobManager() {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
           }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+          std::this_thread::sleep_for(50ms);
         });
     if (idle_handle->start() != 0) {
       CRANE_ERROR("Failed to start the idle event in JobManager loop.");
@@ -339,6 +321,10 @@ bool JobManager::EvCheckSupervisorRunning_() {
     std::vector<StepInstance*> exit_steps;
     absl::MutexLock lk(&m_free_job_step_mtx_);
     for (auto& [step, retry_count] : m_completing_step_retry_map_) {
+      if (step->err_before_supv_start) {
+        exit_steps.push_back(step);
+        continue;
+      }
       job_id_t job_id = step->job_id;
       step_id_t step_id = step->step_id;
       auto exists = kill(step->supv_pid, 0) == 0;
@@ -367,11 +353,11 @@ bool JobManager::EvCheckSupervisorRunning_() {
       auto& job = m_completing_job_.at(step->job_id);
       if (!job.step_map.contains(step->step_id)) {
         // The step is considered completing before the job considered
-        // completing, already remove form step map.
-        steps_to_clean.emplace_back(std::move(step));
+        // completing, already removed form step map.
+        steps_to_clean.emplace_back(step);
         continue;
       }
-      steps_to_clean.emplace_back(std::move(job.step_map.at(step->step_id)));
+      steps_to_clean.emplace_back(job.step_map.at(step->step_id).release());
       job.step_map.erase(step->step_id);
       if (job.step_map.empty()) {
         jobs_to_clean.emplace_back(std::move(job));
@@ -381,12 +367,13 @@ bool JobManager::EvCheckSupervisorRunning_() {
   }
 
   if (!steps_to_clean.empty()) {
-    CRANE_TRACE(
-        "Supervisor for Step [{}] found to be exited",
-        absl::StrJoin(steps_to_clean | std::views::transform([](auto& step) {
-                        return std::make_pair(step->job_id, step->step_id);
-                      }) | std::views::transform(util::StepIdPairToString),
-                      ","));
+    CRANE_TRACE("Supervisor for Step [{}] found to be exited",
+                absl::StrJoin(steps_to_clean |
+                                  std::views::transform(
+                                      [](std::unique_ptr<StepInstance>& step) {
+                                        return step->StepIdString();
+                                      }),
+                              ","));
     FreeStepAllocation_(std::move(steps_to_clean));
     if (!jobs_to_clean.empty()) FreeJobAllocation_(std::move(jobs_to_clean));
   }
@@ -446,282 +433,8 @@ void JobManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-CraneErrCode JobManager::KillPid_(pid_t pid, int signum) {
-  // TODO: Add timer which sends SIGTERM for those tasks who
-  //  will not quit when receiving SIGINT.
-  CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
-
-  // Send the signal to the whole process group.
-  int err = kill(-pid, signum);
-
-  if (err == 0)
-    return CraneErrCode::SUCCESS;
-  else {
-    std::error_code ec(errno, std::system_category());
-    CRANE_TRACE("kill failed. error: {}", ec.message());
-    return CraneErrCode::ERR_GENERIC_FAILURE;
-  }
-}
-
 void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
-}
-
-CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-
-  using crane::grpc::supervisor::CanStartMessage;
-  using crane::grpc::supervisor::ChildProcessReady;
-
-  job_id_t job_id = step->job_id;
-  step_id_t step_id = step->step_id;
-
-  std::array<int, 2> supervisor_craned_pipe{};
-  std::array<int, 2> craned_supervisor_pipe{};
-
-  if (pipe(supervisor_craned_pipe.data()) == -1) {
-    CRANE_ERROR("Pipe creation failed!");
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  if (pipe(craned_supervisor_pipe.data()) == -1) {
-    close(supervisor_craned_pipe[0]);
-    close(supervisor_craned_pipe[1]);
-    CRANE_ERROR("Pipe creation failed!");
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // The ResourceInNode structure should be copied here if being accessed in
-  // the child process.
-  // Note that CgroupManager acquires a lock for this.
-  // If the lock is held in the parent process during fork, the forked thread
-  // in the child proc will block forever.
-  // auto res_in_node = job->job_spec.cgroup_spec.res_in_node;
-
-  pid_t child_pid = fork();
-
-  if (child_pid == -1) {
-    CRANE_ERROR("[Step #{}.{}] fork() failed: {}", job_id, step_id,
-                strerror(errno));
-
-    close(craned_supervisor_pipe[0]);
-    close(craned_supervisor_pipe[1]);
-    close(supervisor_craned_pipe[0]);
-    close(supervisor_craned_pipe[1]);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  if (child_pid > 0) {  // Parent proc
-    CRANE_DEBUG("[Step #{}.{}] Subprocess was created, pid: {}", job_id,
-                step_id, child_pid);
-
-    bool ok;
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    int craned_supervisor_fd = craned_supervisor_pipe[1];
-    close(craned_supervisor_pipe[0]);
-    int supervisor_craned_fd = supervisor_craned_pipe[0];
-    close(supervisor_craned_pipe[1]);
-
-    FileInputStream istream(supervisor_craned_fd);
-    FileOutputStream ostream(craned_supervisor_fd);
-
-    // Before exec, we need to make sure that the cgroup is ready.
-    if (!job->cgroup->MigrateProcIn(child_pid)) {
-      CRANE_ERROR(
-          "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
-          "migration.",
-          job_id, step->step_id);
-
-      job->err_before_supervisor_ready = CraneErrCode::ERR_CGROUP;
-
-      KillPid_(child_pid, SIGKILL);
-
-      close(craned_supervisor_fd);
-      close(supervisor_craned_fd);
-      return CraneErrCode::ERR_CGROUP;
-    }
-
-    // Do Supervisor Init
-    crane::grpc::supervisor::InitSupervisorRequest init_req;
-    init_req.set_job_id(job_id);
-    init_req.set_step_id(step_id);
-    init_req.set_debug_level(g_config.Supervisor.DebugLevel);
-    init_req.set_craned_id(g_config.CranedIdOfThisNode);
-    init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
-    init_req.set_crane_base_dir(g_config.CraneBaseDir);
-    init_req.set_crane_script_dir(g_config.CranedScriptDir);
-    init_req.mutable_step_spec()->CopyFrom(step->step_to_d);
-    init_req.set_log_dir(g_config.Supervisor.LogDir);
-    init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
-    init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
-    auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
-    cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
-    cfored_listen_conf->set_domain_suffix(
-        g_config.ListenConf.TlsConfig.DomainSuffix);
-    auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
-    tls_certs->set_cert_content(
-        g_config.ListenConf.TlsConfig.TlsCerts.CertContent);
-    tls_certs->set_ca_content(g_config.ListenConf.TlsConfig.CaContent);
-    tls_certs->set_key_content(
-        g_config.ListenConf.TlsConfig.TlsCerts.KeyContent);
-
-    // Pass job env to supervisor
-    EnvMap res_env_map = job->GetJobEnvMap();
-    init_req.mutable_env()->clear();
-    init_req.mutable_env()->insert(res_env_map.begin(), res_env_map.end());
-
-    std::string cgroup_path_str = job->cgroup->CgroupPath().string();
-    init_req.set_cgroup_path(cgroup_path_str);
-    CRANE_TRACE("[Step #{}.{}] Setting cgroup path: {}", job_id, step_id,
-                cgroup_path_str);
-
-    if (g_config.Container.Enabled) {
-      auto* container_conf = init_req.mutable_container_config();
-      container_conf->set_temp_dir(g_config.Container.TempDir);
-      container_conf->set_runtime_endpoint(g_config.Container.RuntimeEndpoint);
-      container_conf->set_image_endpoint(g_config.Container.ImageEndpoint);
-    }
-
-    if (g_config.Plugin.Enabled) {
-      auto* plugin_conf = init_req.mutable_plugin_config();
-      plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
-    }
-
-    ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
-    if (!ok) {
-      CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
-                  job_id, step_id, strerror(ostream.GetErrno()));
-    }
-
-    if (ok) ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
-                  job_id, step_id, strerror(ostream.GetErrno()));
-
-      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
-      KillPid_(child_pid, SIGKILL);
-
-      close(craned_supervisor_fd);
-      close(supervisor_craned_fd);
-      return CraneErrCode::ERR_PROTOBUF;
-    }
-
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg send.", job_id, step_id);
-
-    crane::grpc::supervisor::SupervisorReady supervisor_ready;
-    bool clean_eof{false};
-    ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream,
-                                          &clean_eof);
-    if (!ok || !supervisor_ready.ok()) {
-      if (!ok)
-        CRANE_ERROR("[Step #{}.{}] Pipe child endpoint failed: {},{}", job_id,
-                    step_id,
-                    std::error_code(istream.GetErrno(), std::generic_category())
-                        .message(),
-                    clean_eof);
-      if (!supervisor_ready.ok())
-        CRANE_ERROR("[Step #{}.{}] False from subprocess {}.", job_id, step_id,
-                    child_pid);
-
-      job->err_before_supervisor_ready = CraneErrCode::ERR_PROTOBUF;
-      KillPid_(child_pid, SIGKILL);
-
-      close(craned_supervisor_fd);
-      close(supervisor_craned_fd);
-      return CraneErrCode::ERR_PROTOBUF;
-    }
-
-    close(craned_supervisor_fd);
-    close(supervisor_craned_fd);
-
-    CRANE_TRACE("[Step #{}.{}] Supervisor init msg received.", job_id, step_id);
-    g_supervisor_keeper->AddSupervisor(job_id, step_id);
-
-    step->supv_pid = child_pid;
-    return CraneErrCode::SUCCESS;
-  } else {  // Child proc, NOLINT(readability-else-after-return)
-    // Disable SIGABRT backtrace from child processes.
-    signal(SIGABRT, SIG_DFL);
-
-    int craned_supervisor_fd = craned_supervisor_pipe[0];
-    close(craned_supervisor_pipe[1]);
-    int supervisor_craned_fd = supervisor_craned_pipe[1];
-    close(supervisor_craned_pipe[0]);
-
-    // Message will send to stdin of Supervisor for its init.
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(craned_supervisor_fd, STDIN_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdin: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdin: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(supervisor_craned_fd, STDOUT_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdout: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdout: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-    close(craned_supervisor_fd);
-    close(supervisor_craned_fd);
-
-    util::os::CloseFdFrom(3);
-
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-
-    // Argv[0] is the program name which can be anything.
-    auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
-    argv.emplace_back(supv_name.c_str());
-    argv.push_back(nullptr);
-    fmt::print(
-        stderr, "[{}] [Step #{}.{}]: Executing supervisor\n",
-        std::chrono::current_zone()->to_local(std::chrono::system_clock::now()),
-        job_id, step_id);
-
-    // Use execvp to search the kSupervisorPath in the PATH.
-    execvp(g_config.Supervisor.Path.c_str(),
-           const_cast<char* const*>(argv.data()));
-
-    // Error occurred since execvp returned. At this point, errno is set.
-    // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess] Failed to execvp {}. Error: {}\n",
-               g_config.Supervisor.Path.c_str(), strerror(errno));
-
-    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return
-    // standard
-    //  exit codes
-    abort();
-  }
 }
 
 CraneErrCode JobManager::ExecuteStepAsync(
@@ -751,6 +464,51 @@ CraneErrCode JobManager::ExecuteStepAsync(
   return CraneErrCode::SUCCESS;
 }
 
+CraneExpected<void> JobManager::ChangeStepTimelimit(job_id_t job_id,
+                                                    step_id_t step_id,
+                                                    int64_t new_timelimit_sec) {
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job) {
+    CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
+    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  }
+  absl::MutexLock lock(job->step_map_mtx.get());
+  auto step_it = job->step_map.find(step_id);
+  if (step_it == job->step_map.end()) {
+    CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
+                step_id);
+    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  }
+  auto& stub = step_it->second->supervisor_stub;
+  auto err = stub->ChangeTaskTimeLimit(absl::Seconds(new_timelimit_sec));
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR(
+        "[Step #{}.{}] Failed to change step timelimit to {} seconds via "
+        "supervisor RPC",
+        job_id, step_id, new_timelimit_sec);
+    return std::unexpected{err};
+  }
+  return {};
+}
+
+CraneExpected<EnvMap> JobManager::QuerySshStepEnvVariables(job_id_t job_id,
+                                                           step_id_t step_id) {
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job) {
+    CRANE_ERROR("[Step #{}.{}] Failed to find job allocation", job_id, step_id);
+    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  }
+  absl::MutexLock lock(job->step_map_mtx.get());
+  auto step_it = job->step_map.find(step_id);
+  if (step_it == job->step_map.end()) {
+    CRANE_ERROR("[Step #{}.{}] Failed to find step allocation", job_id,
+                step_id);
+    return std::unexpected{CraneErrCode::ERR_NON_EXISTENT};
+  }
+  auto& stub = step_it->second->supervisor_stub;
+  return stub->QueryStepEnv();
+}
+
 void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
   EvQueueExecuteStepElem elem;
 
@@ -773,30 +531,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       elem.ok_prom.set_value(CraneErrCode::ERR_NON_EXISTENT);
       continue;
     }
-    if (step_it->second->status != StepStatus::Configured) {
-      CRANE_WARN(
-          "[Step #{}.{}] Step status is not 'Configured' when executing step, "
-          "current status: {}.",
-          job_id, step_id, static_cast<int>(step_it->second->status));
-    }
-    step_it->second->status = StepStatus::Running;
+    step_it->second->ExecuteStepAsync();
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-
-    g_thread_pool->detach_task([job_id, step_id] {
-      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-      if (!stub) {
-        CRANE_ERROR("[Step #{}.{}] Failed to find supervisor stub.", job_id,
-                    step_id);
-        return;
-      }
-      auto code = stub->ExecuteStep();
-      if (code != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
-                    job_id, step_id, static_cast<int>(code));
-        // Ctld will send ShutdownSupervisor after status change from
-        // supervisor.
-      }
-    });
   }
 }
 
@@ -862,7 +598,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
           break;
         }
 
-        cgroup->KillAllProcesses();
+        cgroup->KillAllProcesses(SIGKILL);
         ++cnt;
         std::this_thread::sleep_for(std::chrono::milliseconds{100ms});
       }
@@ -877,6 +613,7 @@ bool JobManager::FreeJobAllocation_(std::vector<JobInD>&& jobs) {
 void JobManager::FreeStepAllocation_(
     std::vector<std::unique_ptr<StepInstance>>&& steps) {
   for (auto& step : steps) {
+    step->CleanUp();
     step.reset();
   }
   // TODO: delete cgroup
@@ -942,8 +679,20 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErrCode err = SpawnSupervisor_(job, step_ptr);
+  CraneErrCode err = step_ptr->CreateCg();
   if (err != CraneErrCode::SUCCESS) {
+    step_ptr->err_before_supv_start = true;
+    ActivateTaskStatusChangeAsync_(
+        job_id, step_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::EC_CGROUP_ERR,
+        fmt::format("Cannot create cgroup for the instance of step {}.{}",
+                    job_id, step_id),
+        google::protobuf::util::TimeUtil::GetCurrentTime());
+    return;
+  }
+  err = step_ptr->SpawnSupervisor(job->GetJobEnvMap());
+  if (err != CraneErrCode::SUCCESS) {
+    step_ptr->err_before_supv_start = true;
     ActivateTaskStatusChangeAsync_(
         job_id, step_id, crane::grpc::TaskStatus::Failed,
         ExitCode::EC_SPAWN_FAILED,
@@ -971,7 +720,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
         absl::MutexLock lk(job_ptr->step_map_mtx.get());
         if (auto step_it = job_ptr->step_map.find(status_change.step_id);
             step_it != job_ptr->step_map.end()) {
-          step_it->second->status = status_change.new_status;
+          step_it->second->GotNewStatus(status_change.new_status);
         }
       }
     }
@@ -1008,21 +757,32 @@ void JobManager::ActivateTaskStatusChangeAsync_(
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   auto job = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job) {
-    CRANE_TRACE("Job #{} does not exist when querying its cgroup.", job_id);
+    CRANE_DEBUG("Job #{} does not exist when querying its cgroup.", job_id);
     return false;
   }
-  if (job->cgroup) {
-    return job->cgroup->MigrateProcIn(pid);
+  absl::MutexLock lk(job->step_map_mtx.get());
+  auto daemon_step_it = job->step_map.find(kDaemonStepId);
+  if (daemon_step_it == job->step_map.end()) {
+    CRANE_DEBUG(
+        "[Step #{}.{}] Daemon step not found when migrating pid {} to "
+        "cgroup of job#{}.",
+        job_id, kDaemonStepId, pid, job_id);
   }
-
-  auto cg_expt = CgroupManager::AllocateAndGetCgroup(
-      CgroupManager::CgroupStrByJobId(job->job_id), job->job_to_d.res(), false);
-  if (cg_expt.has_value()) {
-    job->cgroup = std::move(cg_expt.value());
-    return job->cgroup->MigrateProcIn(pid);
+  auto& daemon_step = daemon_step_it->second;
+  auto stub = daemon_step->supervisor_stub;
+  if (!stub) {
+    CRANE_ERROR(
+        "[Job #{}] Daemon step sSupervisor stub is null when migrating pid {} "
+        "to "
+        "cgroup of job#{}.",
+        job_id, kDaemonStepId, pid, job_id);
   }
-
-  CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
+  auto err = stub->MigrateSshProcToCg(pid);
+  if (err == CraneErrCode::SUCCESS) {
+    return true;
+  }
+  CRANE_ERROR("[Job #{}] Failed to migrate pid {} to cgroup of job.", job_id,
+              pid);
   return false;
 }
 
@@ -1063,6 +823,7 @@ std::optional<TaskInfoOfUid> JobManager::QueryTaskInfoOfUid(uid_t uid) {
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
   StepTerminateQueueElem elem;
+  std::vector<StepTerminateQueueElem> not_ready_elems;
 
   std::unordered_map<job_id_t, std::unordered_set<step_id_t>> job_step_ids;
 
@@ -1075,6 +836,10 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
     std::vector<StepInstance*> steps_to_clean;
     std::vector<JobInD> job_to_clean;
     {
+      CRANE_INFO(
+          "[Step #{}.{}] Terminating step, orphaned:{} terminated_by_user:{}.",
+          elem.job_id, elem.step_id, elem.mark_as_orphaned,
+          elem.terminated_by_user);
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
@@ -1092,6 +857,15 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
 
         continue;
       }
+      auto& step = job_instance->step_map.at(elem.step_id);
+      if (!step->IsRunning()) {
+        not_ready_elems.emplace_back(std::move(elem));
+        CRANE_DEBUG(
+            "[Step #{}.{}] Step not running, current: {}, cannot terminate "
+            "now.",
+            elem.job_id, elem.step_id, step->status);
+        continue;
+      }
 
       std::set<step_id_t> terminate_step_ids;
       if (terminate_job) {
@@ -1102,13 +876,8 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       }
 
       for (auto step_id : terminate_step_ids) {
-        auto stub = g_supervisor_keeper->GetStub(elem.job_id, step_id);
-        if (!stub) {
-          CRANE_ERROR("[Step #{}.{}] Supervisor not found", elem.job_id,
-                      step_id);
-          continue;
-        }
-
+        auto& step_instance = job_instance->step_map.at(step_id);
+        auto stub = step_instance->supervisor_stub;
         auto err =
             stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
         if (err != CraneErrCode::SUCCESS) {
@@ -1120,47 +889,45 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
                 {.job_id = elem.job_id,
                  .step_id = step_id,
                  .new_status = crane::grpc::TaskStatus::Cancelled,
-                 .exit_code = ExitCode::EC_TERMINATED,
-                 .reason = "Terminated failed."});
+                 .exit_code = 0U,
+                 .reason = "Termination failed."});
         }
         CRANE_TRACE("[Step #{}.{}] Terminated.", elem.job_id, step_id);
       }
 
       if (elem.mark_as_orphaned) {
-        for (auto step_id : terminate_step_ids) {
-          CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
-                      step_id);
-          auto* step = job_instance->step_map.at(step_id).release();
-          steps_to_clean.push_back(step);
-          job_instance->step_map.erase(step_id);
-        }
-      }
-      if (terminate_job) {
-        bool job_empty{false};
-        {
-          if (!map_ptr->contains(elem.job_id)) {
-            CRANE_ERROR(
-                "Job #{} not found when trying to remove orphaned step.",
-                elem.job_id);
-          }
-          auto job_ptr = map_ptr->at(elem.job_id).RawPtr();
-          job_empty = job_ptr->step_map.empty();
-        }
-        if (job_empty) {
+        if (terminate_job) {
           auto uid_map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
           auto job_opt = FreeJobInfoNoLock_(elem.job_id, map_ptr, uid_map_ptr);
           if (job_opt.has_value()) {
             job_to_clean.emplace_back(std::move(job_opt.value()));
+            for (auto& [step_id, step] : job_instance->step_map) {
+              CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
+                          step_id);
+              auto* step_ptr = step.get();
+              steps_to_clean.push_back(step_ptr);
+            }
           } else {
-            CRANE_DEBUG(
-                "Job #{} not found when trying to remove orphaned step.",
-                elem.job_id);
+            CRANE_DEBUG("Trying to terminate a not existed job #{}.",
+                        elem.job_id);
+          }
+        } else {
+          for (auto step_id : terminate_step_ids) {
+            CRANE_DEBUG("[Step #{}.{}] Removed orphaned step.", elem.job_id,
+                        step_id);
+            auto it = job_instance->step_map.find(step_id);
+            auto* step = it->second.release();
+            steps_to_clean.push_back(step);
+            job_instance->step_map.erase(it);
           }
         }
       }
     }
     CleanUpJobAndStepsAsync(std::move(job_to_clean), std::move(steps_to_clean));
   }
+  m_step_terminate_queue_.enqueue_bulk(
+      std::make_move_iterator(not_ready_elems.begin()), not_ready_elems.size());
+  not_ready_elems.clear();
 }
 
 void JobManager::TerminateStepAsync(job_id_t job_id, step_id_t step_id) {
@@ -1184,27 +951,27 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                                          std::vector<StepInstance*>&& steps) {
   std::latch shutdown_step_latch(steps.size());
   for (auto* step : steps) {
-    if (!step->IsDaemonStep()) {
-      g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
+    // Only daemon step needs manual shutdown, others will shut down itself when
+    // all task finished.
+    if (!step->IsDaemonStep() || step->err_before_supv_start) {
       shutdown_step_latch.count_down();
       continue;
     }
+    step->GotNewStatus(StepStatus::Completed);
 
     g_thread_pool->detach_task([&shutdown_step_latch, step] {
-      auto stub = g_supervisor_keeper->GetStub(step->job_id, step->step_id);
-      if (!stub) {
-        CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
-                    step->step_id);
-      } else {
-        CRANE_TRACE("[Step #{}.{}] Shutting down supervisor.", step->job_id,
-                    step->step_id);
-        auto err = stub->ShutdownSupervisor();
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("[Step #{}.{}] Failed to shutdown supervisor.",
-                      step->job_id, step->step_id);
-        }
+      auto stub = step->supervisor_stub;
+      CRANE_TRACE("[Step #{}.{}] Shutting down supervisor.", step->job_id,
+                  step->step_id);
+      auto err = stub->ShutdownSupervisor();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("[Step #{}.{}] Failed to shutdown supervisor.",
+                    step->job_id, step->step_id);
+        g_job_mgr->StepStatusChangeAsync(
+            step->job_id, step->step_id, crane::grpc::TaskStatus::Failed,
+            ExitCode::EC_RPC_ERR, "Failed to shutdown supervisor.",
+            google::protobuf::util::TimeUtil::GetCurrentTime());
       }
-      g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
 
       shutdown_step_latch.count_down();
     });
