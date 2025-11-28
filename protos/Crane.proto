@@ -1088,17 +1088,7 @@ message ExecInContainerStepReply {
   string url = 3;
 }
 
-message AddLicenseResourceRequest {
-  uint32 uid = 1;
-  LicenseResourceInfo license_resource = 2;
-}
-
-message AddLicenseResourceReply {
-  bool ok = 1;
-  RichError rich_err = 2;
-}
-
-message ModifyLicenseResourceRequest {
+message AddOrModifyLicenseResourceRequest {
   uint32 uid = 1;
   string resource_name = 2;
   string server = 3;
@@ -1108,9 +1098,10 @@ message ModifyLicenseResourceRequest {
     string value = 2;
   }
   repeated Operator operators = 5;
+  bool is_add = 6;
 }
 
-message ModifyLicenseResourceReply {
+message AddOrModifyLicenseResourceReply {
   bool ok = 1;
   RichError rich_err = 2;
 }
@@ -1191,9 +1182,8 @@ service CraneCtld {
 
   rpc QueryTxnLog(QueryTxnLogRequest) returns (QueryTxnLogReply);
 
-  rpc AddLicenseResource(AddLicenseResourceRequest) returns (AddLicenseResourceReply);
-  rpc ModifyLicenseResource(ModifyLicenseResourceRequest) returns (ModifyLicenseResourceReply);
   rpc DeleteLicenseResource(DeleteLicenseResourceRequest) returns (DeleteLicenseResourceReply);
+  rpc AddOrModifyLicenseResource(AddOrModifyLicenseResourceRequest) returns (AddOrModifyLicenseResourceReply);
   rpc QueryLicenseResource(QueryLicenseResourceRequest) returns (QueryLicenseResourceReply);
 
   /* RPCs called from cinfo */

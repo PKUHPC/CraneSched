@@ -1838,58 +1838,11 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
 
   return grpc::Status::OK;
 }
-grpc::Status CraneCtldServiceImpl::AddLicenseResource(
+
+grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
     grpc::ServerContext *context,
-    const crane::grpc::AddLicenseResourceRequest *request,
-    crane::grpc::AddLicenseResourceReply *response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-
-  auto result = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (!result) {
-    response->set_ok(false);
-    auto *new_err_record = response->mutable_rich_err();
-    new_err_record->set_code(result.error());
-    new_err_record->set_description("");
-    return grpc::Status::OK;
-  }
-
-  LicenseResource resource;
-  resource.name = request->license_resource().resource_name();
-  resource.count = request->license_resource().count();
-  resource.allocated = request->license_resource().allocated();
-  resource.last_consumed = request->license_resource().last_consumed();
-  resource.server = request->license_resource().server();
-  resource.server_type = request->license_resource().server_type();
-  resource.type = request->license_resource().type();
-
-  for (const auto &[cluster, allowed] :
-       request->license_resource().cluster_resource_info()) {
-    if (cluster == "local") {
-      resource.cluster_resources.emplace(g_config.CraneClusterName, allowed);
-    } else {
-      resource.cluster_resources.emplace(cluster, allowed);
-    }
-  }
-
-  auto add_result = g_licenses_manager->AddLicenseResource(std::move(resource));
-  if (!add_result) {
-    response->set_ok(false);
-    response->mutable_rich_err()->CopyFrom(add_result.error());
-  } else {
-    response->set_ok(true);
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::ModifyLicenseResource(
-    grpc::ServerContext *context,
-    const crane::grpc::ModifyLicenseResourceRequest *request,
-    crane::grpc::ModifyLicenseResourceReply *response) {
+    const crane::grpc::AddOrModifyLicenseResourceRequest *request,
+    crane::grpc::AddOrModifyLicenseResourceReply *response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1911,12 +1864,18 @@ grpc::Status CraneCtldServiceImpl::ModifyLicenseResource(
     operators.emplace(operator_.operator_field(), operator_.value());
   }
 
-  auto modify_result = g_licenses_manager->ModifyLicenseResource(
-      request->resource_name(), request->server(), clusters,
-      operators);
-  if (!modify_result) {
+  CraneExpectedRich<void> operator_result;
+
+  if (request->is_add())
+    operator_result = g_licenses_manager->AddLicenseResource(
+        request->resource_name(), request->server(), clusters, operators);
+  else
+    operator_result = g_licenses_manager->ModifyLicenseResource(
+        request->resource_name(), request->server(), clusters, operators);
+
+  if (!operator_result) {
     response->set_ok(false);
-    response->mutable_rich_err()->CopyFrom(modify_result.error());
+    response->mutable_rich_err()->CopyFrom(operator_result.error());
   } else {
     response->set_ok(true);
   }
