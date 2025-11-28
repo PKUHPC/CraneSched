@@ -1196,6 +1196,40 @@ bool MongodbClient::CommitTransaction(
   return true;
 }
 
+bool MongodbClient::StartTransaction() {
+  try {
+    mongocxx::options::transaction opts;
+    opts.write_concern(m_wc_majority_);
+    opts.read_concern(m_rc_local_);
+    opts.read_preference(m_rp_primary_);
+    GetSession_()->start_transaction(opts);
+  } catch (const mongocxx::exception& e) {
+    CRANE_ERROR("Database start transaction failed: {}", e.what());
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::CommitTransactionWithoutCallback() {
+  try {
+    GetSession_()->commit_transaction();
+  } catch (const mongocxx::exception& e) {
+    CRANE_ERROR("Database commit transaction failed: {}", e.what());
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::AbortTransaction() {
+  try {
+    GetSession_()->abort_transaction();
+  } catch (const mongocxx::exception& e) {
+    CRANE_ERROR("Database abort transaction failed: {}", e.what());
+    return false;
+  }
+  return true;
+}
+
 template <typename V>
 void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
                                         const V& value) {

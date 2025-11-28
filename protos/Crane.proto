@@ -428,7 +428,7 @@ message ModifyQosRequest {
 
 message ModifyQosReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyDefaultWckeyRequest {
