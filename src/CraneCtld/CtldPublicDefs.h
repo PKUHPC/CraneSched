@@ -945,6 +945,24 @@ struct Qos {
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
         max_cpus_per_account);
   }
+
+  static const std::string GetModifyFieldStr(
+      const crane::grpc::ModifyField& modify_field) {
+    switch (modify_field) {
+    case crane::grpc::ModifyField::Description:
+      return "description";
+    case crane::grpc::ModifyField::Priority:
+      return "priority";
+    case crane::grpc::ModifyField::MaxJobsPerUser:
+      return "max_jobs_per_user";
+    case crane::grpc::ModifyField::MaxCpusPerUser:
+      return "max_cpus_per_user";
+    case crane::grpc::ModifyField::MaxTimeLimitPerTask:
+      return "max_time_limit_per_task";
+    default:
+      std::unreachable();
+    }
+  }
 };
 
 struct Account {
