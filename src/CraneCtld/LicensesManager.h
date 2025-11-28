@@ -72,10 +72,10 @@ class LicensesManager {
   CraneExpectedRich<void> AddLicenseResource(LicenseResource &&new_license);
 
   CraneExpectedRich<void> ModifyLicenseResource(
-      const std::string &name, const std::vector<std::string> &clusters,
-      const std::string &server,
-      const crane::grpc::LicenseResource_Field &field,
-      const std::string &value);
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
 
   CraneExpectedRich<void> RemoveLicenseResource(
       const std::string &name, const std::string &server,
@@ -83,7 +83,8 @@ class LicensesManager {
 
   CraneExpectedRich<void> QueryLicenseResource(
       const std::string &name, const std::string &server,
-      const std::vector<std::string> &clusters, std::list<LicenseResource>* res_licenses);
+      const std::vector<std::string> &clusters,
+      std::list<LicenseResource> *res_licenses);
 
  private:
   struct LicenseIdServerPairHash {

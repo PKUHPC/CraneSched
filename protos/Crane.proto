@@ -1103,8 +1103,11 @@ message ModifyLicenseResourceRequest {
   string resource_name = 2;
   string server = 3;
   repeated string clusters = 4;
-  LicenseResource.Field operator_field = 5;
-  string value = 6;
+  message Operator {
+    LicenseResource.Field operator_field = 1;
+    string value = 2;
+  }
+  repeated Operator operators = 5;
 }
 
 message ModifyLicenseResourceReply {
