@@ -1801,7 +1801,8 @@ grpc::Status CraneCtldServiceImpl::AddLicenseResource(
   resource.server_type = request->license_resource().server_type();
   resource.type = request->license_resource().type();
 
-  for (const auto &[cluster, allowed] : request->license_resource().cluster_resource_info()) {
+  for (const auto &[cluster, allowed] :
+       request->license_resource().cluster_resource_info()) {
     if (cluster == "local") {
       resource.cluster_resources.emplace(g_config.CraneClusterName, allowed);
     } else {
@@ -1840,9 +1841,14 @@ grpc::Status CraneCtldServiceImpl::ModifyLicenseResource(
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
 
+  std::unordered_map<crane::grpc::LicenseResource_Field, std::string> operators;
+  for (const auto &operator_ : request->operators()) {
+    operators.emplace(operator_.operator_field(), operator_.value());
+  }
+
   auto modify_result = g_licenses_manager->ModifyLicenseResource(
-      request->resource_name(), clusters, request->server(),
-      request->operator_field(), request->value());
+      request->resource_name(), request->server(), clusters,
+      operators);
   if (!modify_result) {
     response->set_ok(false);
     response->mutable_rich_err()->CopyFrom(modify_result.error());
@@ -1871,7 +1877,7 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
   }
 
   std::vector<std::string> clusters{request->clusters().begin(),
-                                      request->clusters().end()};
+                                    request->clusters().end()};
   auto del_result = g_licenses_manager->RemoveLicenseResource(
       request->resource_name(), request->server(), clusters);
   if (!del_result) {
@@ -1894,7 +1900,8 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  std::vector<std::string> clusters{request->clusters().begin(), request->clusters().end()};
+  std::vector<std::string> clusters{request->clusters().begin(),
+                                    request->clusters().end()};
   std::list<LicenseResource> res_resources;
   auto result = g_licenses_manager->QueryLicenseResource(
       request->resource_name(), request->server(), clusters, &res_resources);
@@ -1907,9 +1914,9 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
     response->set_ok(true);
   }
 
-  auto* mutable_license_resources = response->mutable_license_resource_list();
-  for (const auto& license_resource : res_resources) {
-    auto* mutable_license_resource = mutable_license_resources->Add();
+  auto *mutable_license_resources = response->mutable_license_resource_list();
+  for (const auto &license_resource : res_resources) {
+    auto *mutable_license_resource = mutable_license_resources->Add();
     mutable_license_resource->set_resource_name(license_resource.name);
     mutable_license_resource->set_server(license_resource.server);
     mutable_license_resource->set_server_type(license_resource.server_type);
@@ -1919,8 +1926,10 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
     mutable_license_resource->set_last_consumed(license_resource.last_consumed);
     mutable_license_resource->set_allocated(license_resource.allocated);
 
-    auto* mutable_cluster_resources = mutable_license_resource->mutable_cluster_resource_info();
-    for (const auto& [cluster_name, allowed] : license_resource.cluster_resources) {
+    auto *mutable_cluster_resources =
+        mutable_license_resource->mutable_cluster_resource_info();
+    for (const auto &[cluster_name, allowed] :
+         license_resource.cluster_resources) {
       mutable_cluster_resources->emplace(cluster_name, allowed);
     }
   }
