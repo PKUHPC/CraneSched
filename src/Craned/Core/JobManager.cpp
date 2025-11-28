@@ -53,15 +53,13 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
 
 EnvMap JobInD::GetJobEnvMap() {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
+
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   auto nodelist = daemon_step_to_d.nodelist();
   auto node_id_to_str = [nodelist, this]() -> std::string {
     uint32_t node_idx = 0;
 
     std::array<char, HOST_NAME_MAX + 1> host_name{};
-  auto node_id_to_str = [this]() -> std::string {
-    uint32_t node_idx = 0;
-    std::array<char, HOST_NAME_MAX> host_name{};
     if (gethostname(host_name.data(), host_name.size()) != 0) {
       return std::to_string(-1);  // invalid
     }
@@ -100,7 +98,6 @@ EnvMap JobInD::GetJobEnvMap() {
   auto time_limit_dur =
       std::chrono::seconds(daemon_step_to_d.time_limit().seconds()) +
       std::chrono::nanoseconds(daemon_step_to_d.time_limit().nanos());
-
   env_map.emplace(
       "CRANE_JOB_END_TIME",
       std::to_string((std::chrono::system_clock::now() + time_limit_dur)
@@ -622,9 +619,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     init_req.set_log_dir(g_config.Supervisor.LogDir);
     init_req.set_max_log_file_size(g_config.Supervisor.MaxLogFileSize);
     init_req.set_max_log_file_num(g_config.Supervisor.MaxLogFileNum);
-
     auto* cfored_listen_conf = init_req.mutable_cfored_listen_conf();
     cfored_listen_conf->set_use_tls(g_config.ListenConf.TlsConfig.Enabled);
+    cfored_listen_conf->set_domain_suffix(
+        g_config.ListenConf.TlsConfig.DomainSuffix);
     auto* tls_certs = cfored_listen_conf->mutable_tls_certs();
     tls_certs->set_cert_content(
         g_config.ListenConf.TlsConfig.TlsCerts.CertContent);

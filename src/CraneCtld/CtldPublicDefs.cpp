@@ -420,10 +420,6 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   job_to_d.set_account(job->account);
   job_to_d.set_qos(job->qos);
   job_to_d.set_partition(job->partition_id);
-<<<<<<< HEAD
-=======
-
->>>>>>> 76168279 (rebase)
   *job_to_d.mutable_res() =
       crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
   return job_to_d;

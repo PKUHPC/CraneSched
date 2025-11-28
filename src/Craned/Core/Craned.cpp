@@ -418,17 +418,6 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      if (config["ClusterName"]) {
-        g_config.CraneClusterName = config["ClusterName"].as<std::string>();
-        if (g_config.CraneClusterName.empty()) {
-          CRANE_ERROR("Cluster name is empty.");
-          std::exit(1);
-        }
-      } else {
-        CRANE_ERROR("Cluster name is empty.");
-        std::exit(1);
-      }
-
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
