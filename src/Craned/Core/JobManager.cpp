@@ -52,6 +52,7 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       status(status) {}
 
 EnvMap JobInD::GetJobEnvMap() {
+  CRANE_INFO("Env Init");
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
