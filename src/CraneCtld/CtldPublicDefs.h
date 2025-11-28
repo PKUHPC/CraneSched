@@ -385,10 +385,7 @@ struct InteractiveMeta {
   std::string cfored_name;
 };
 
-// The ultimate structure of container info in Ctld.
-// In JobInCtld, this is the submitted container info.
-// In DaemonStep, we launch pod using part of this info.
-// In CommonStep, we launch container using most of this info.
+// TODO: Refactor this to reflect the new design of container/pod meta.
 struct ContainerMetaInTask {
   struct ImageInfo {
     std::string image;
