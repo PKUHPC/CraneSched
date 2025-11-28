@@ -316,65 +316,72 @@ void LicensesManager::FreeLicense(
 }
 
 CraneExpectedRich<void> LicensesManager::AddLicenseResource(
-    LicenseResource&& new_license) {
+    const std::string& name, const std::string& server,
+    const std::vector<std::string>& clusters,
+    const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
+        operators) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
 
-  if (new_license.name.empty() || new_license.server.empty())
+  CRANE_TRACE("Add License Resource {}@{}...", name, server);
+
+  if (name.empty() || server.empty())
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                                          "Name or server is empty"));
 
-  CRANE_TRACE("Add License Resource {}@{}...", new_license.name,
-              new_license.server);
-
-  auto key = std::make_pair(new_license.name, new_license.server);
-
-  if (m_license_resource_map_.contains(key))
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
-
-  if (new_license.allocated > new_license.count) {
-    CRANE_TRACE(
-        "License Resource {}@{}: Allocated resources {} exceed total available "
-        "count {}",
-        new_license.name, new_license.server, new_license.allocated,
-        new_license.count);
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                      "Allocated resources {} exceed total available count {}",
-                      new_license.allocated, new_license.count));
+  LicenseResource res_resource{.name = name, .server = server};
+  bool is_exist = false;
+  auto key = std::make_pair(name, server);
+  auto iter = m_license_resource_map_.find(key);
+  if (iter != m_license_resource_map_.end()) {
+    for (const auto& cluster : clusters) {
+      if (iter->second->cluster_resources.contains(cluster)) {
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
+      }
+    }
+    res_resource = *iter->second;
+    is_exist = true;
   }
 
-  new_license.last_update = absl::ToUnixMillis(absl::Now());
+  for (const auto& cluster : clusters) {
+    res_resource.cluster_resources.emplace(cluster, 0);
+  }
+
+  auto result = CheckAndUpdateFields_(clusters, operators, &res_resource);
+  if (!result) return result;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->InsertResource(new_license);
+        if (is_exist)
+          g_db_client->UpdateResource(res_resource);
+        else
+          g_db_client->InsertResource(res_resource);
       };
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
-  if (new_license.type == crane::grpc::LicenseResource_Type_License) {
-    auto iter = new_license.cluster_resources.find(g_config.CraneClusterName);
-    if (iter != new_license.cluster_resources.end()) {
+  if (res_resource.type == crane::grpc::LicenseResource_Type_License) {
+    auto iter = res_resource.cluster_resources.find(g_config.CraneClusterName);
+    if (iter != res_resource.cluster_resources.end()) {
       auto license_id =
-          std::format("{}@{}", new_license.name, new_license.server);
+          std::format("{}@{}", res_resource.name, res_resource.server);
       m_licenses_map_.Emplace(
           license_id, License{.license_id = license_id,
                               .total = iter->second,
                               .used = 0,
                               .reserved = 0,
                               .remote = true,
-                              .server = new_license.server,
-                              .last_consumed = new_license.last_consumed,
+                              .server = res_resource.server,
+                              .last_consumed = res_resource.last_consumed,
                               .last_deficit = 0,
-                              .last_update = new_license.last_update});
+                              .last_update = res_resource.last_update});
     }
   }
 
   m_license_resource_map_[key] =
-      std::make_unique<LicenseResource>(std::move(new_license));
+      std::make_unique<LicenseResource>(std::move(res_resource));
 
   return {};
 }
@@ -395,107 +402,8 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
         FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND, ""));
 
   LicenseResource res_resource(*(iter->second));
-  for (const auto& [field, value] : operators) {
-    switch (field) {
-    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
-      try {
-        uint32_t new_count = std::stoul(value);
-        if (new_count < res_resource.allocated) {
-          CRANE_TRACE(
-              "License Resource {}@{}: new count {} is less than allocated "
-              "resources {}, which is not allowed",
-              res_resource.name, res_resource.server, new_count,
-              res_resource.allocated);
-          return std::unexpected(
-              FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                            "New count {} cannot be less than currently "
-                            "allocated resources {}",
-                            new_count, res_resource.allocated));
-        }
-        res_resource.count = new_count;
-      } catch (std::exception& e) {
-        CRANE_TRACE("Failed to parse 'count' from value '{}': {}", value,
-                    e.what());
-        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                                             "Invalid count parameter"));
-      }
-      break;
-    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
-      if (clusters.empty())
-        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                                             "No cluster specified"));
-
-      for (const auto& cluster : clusters) {
-        std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
-        if (cluster == "local") {
-          cluster_iter =
-              res_resource.cluster_resources.find(g_config.CraneClusterName);
-        } else {
-          cluster_iter = res_resource.cluster_resources.find(cluster);
-        }
-        if (cluster_iter == res_resource.cluster_resources.end())
-          return std::unexpected(
-              FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND,
-                            "Resources {}@{} not found in cluster {}",
-                            res_resource.name, res_resource.server, cluster));
-        try {
-          res_resource.allocated -= cluster_iter->second;
-          cluster_iter->second = std::stoul(value);
-          res_resource.allocated += cluster_iter->second;
-        } catch (std::exception& e) {
-          CRANE_TRACE(
-              "Failed to parse 'allowed' for cluster '{}' from value '{}': {}",
-              cluster, value, e.what());
-          return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                                               "Invalid allowed parameter"));
-        }
-      }
-      if (res_resource.allocated > res_resource.count) {
-        CRANE_TRACE(
-            "License Resource {}@{}: Allocated resources {} exceed total "
-            "available "
-            "count {}",
-            res_resource.name, res_resource.server, res_resource.allocated,
-            res_resource.count);
-        return std::unexpected(FormatRichErr(
-            CraneErrCode::ERR_INVALID_PARAM,
-            "Allocated resources {} exceed total available count {}",
-            res_resource.allocated, res_resource.count));
-      }
-      break;
-    case crane::grpc::LicenseResource_Field_LastConsumed:
-      try {
-        res_resource.last_consumed = std::stoul(value);
-      } catch (std::exception& e) {
-        CRANE_TRACE("Failed to parse 'last_consumed' from value '{}': {}",
-                    value, e.what());
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                          "Invalid last_consumed parameter"));
-      }
-      break;
-    case crane::grpc::LicenseResource_Field_Description:
-      res_resource.description = value;
-      break;
-    case crane::grpc::LicenseResource_Field_Flags:
-      break;
-    case crane::grpc::LicenseResource_Field_ResourceType:
-      if (absl::AsciiStrToLower(value) == "license") {
-        res_resource.type = crane::grpc::LicenseResource_Type_License;
-      } else {
-        res_resource.type = crane::grpc::LicenseResource_Type_NotSet;
-      }
-      break;
-    case crane::grpc::LicenseResource_Field_ServerType:
-      res_resource.server_type = value;
-      break;
-    default:
-      CRANE_ERROR("Unrecognized LicenseResource field: {}",
-                  std::to_string(field));
-    }
-  }
-
-  res_resource.last_update = absl::ToUnixMillis(absl::Now());
+  auto result = CheckAndUpdateFields_(clusters, operators, &res_resource);
+  if (!result) return result;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -516,8 +424,19 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
           std::format("{}@{}", res_resource.name, res_resource.server);
       auto lic_iter = licenses_map->find(license_id);
       if (lic_iter == licenses_map->end()) {
-        CRANE_ERROR("License resource {} not found in license map.",
-                    license_id);
+        CRANE_ERROR(
+            "License resource {} not found in license map. now adding...",
+            license_id);
+        m_licenses_map_.Emplace(
+            license_id, License{.license_id = license_id,
+                                .total = cluster_iter->second,
+                                .used = 0,
+                                .reserved = 0,
+                                .remote = true,
+                                .server = res_resource.server,
+                                .last_consumed = res_resource.last_consumed,
+                                .last_deficit = 0,
+                                .last_update = res_resource.last_update});
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
         lic->total = cluster_iter->second;
@@ -638,6 +557,90 @@ CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
     }
     res_licenses->emplace_back(*iter->second);
   }
+
+  return {};
+}
+
+CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
+    const std::vector<std::string>& clusters,
+    const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
+        operators,
+    LicenseResource* res_resource) {
+  for (const auto& [field, value] : operators) {
+    switch (field) {
+    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
+      try {
+        res_resource->count = std::stoul(value);
+      } catch (std::exception& e) {
+        CRANE_TRACE("Failed to parse 'count' from value '{}': {}", value,
+                    e.what());
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                             "Invalid count parameter"));
+      }
+      break;
+    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
+      if (clusters.empty())
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                             "No cluster specified"));
+      for (const auto& cluster : clusters) {
+        std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
+        if (cluster == "local") {
+          cluster_iter =
+              res_resource->cluster_resources.find(g_config.CraneClusterName);
+        } else {
+          cluster_iter = res_resource->cluster_resources.find(cluster);
+        }
+        if (cluster_iter == res_resource->cluster_resources.end())
+          return std::unexpected(
+              FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND,
+                            "Resources {}@{} not found in cluster {}",
+                            res_resource->name, res_resource->server, cluster));
+        try {
+          res_resource->allocated -= cluster_iter->second;
+          cluster_iter->second = std::stoul(value);
+          res_resource->allocated += cluster_iter->second;
+        } catch (std::exception& e) {
+          CRANE_TRACE(
+              "Failed to parse 'allowed' for cluster '{}' from value '{}': {}",
+              cluster, value, e.what());
+          return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                               "Invalid allowed parameter"));
+        }
+      }
+      break;
+    case crane::grpc::LicenseResource_Field_LastConsumed:
+      try {
+        res_resource->last_consumed = std::stoul(value);
+      } catch (std::exception& e) {
+        CRANE_TRACE("Failed to parse 'last_consumed' from value '{}': {}",
+                    value, e.what());
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                          "Invalid last_consumed parameter"));
+      }
+      break;
+    case crane::grpc::LicenseResource_Field_Description:
+      res_resource->description = value;
+      break;
+    case crane::grpc::LicenseResource_Field_Flags:
+      break;
+    case crane::grpc::LicenseResource_Field_ResourceType:
+      if (absl::AsciiStrToLower(value) == "license") {
+        res_resource->type = crane::grpc::LicenseResource_Type_License;
+      } else {
+        res_resource->type = crane::grpc::LicenseResource_Type_NotSet;
+      }
+      break;
+    case crane::grpc::LicenseResource_Field_ServerType:
+      res_resource->server_type = value;
+      break;
+    default:
+      CRANE_ERROR("Unrecognized LicenseResource field: {}",
+                  std::to_string(field));
+    }
+  }
+
+  res_resource->last_update = absl::ToUnixMillis(absl::Now());
 
   return {};
 }
