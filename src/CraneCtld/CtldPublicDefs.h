@@ -383,9 +383,13 @@ struct InteractiveMeta {
   // (triggered by either normal shell exit or ccancel).
   std::atomic<bool> has_been_cancelled_on_front_end{false};
   std::atomic<bool> has_been_terminated_on_craned{false};
-  std::string cfored_name{};
+  std::string cfored_name;
 };
 
+// The ultimate structure of container info in Ctld.
+// In JobInCtld, this is the submitted container info.
+// In DaemonStep, we launch pod using part of this info.
+// In CommonStep, we launch container using most of this info.
 struct ContainerMetaInTask {
   struct ImageInfo {
     std::string image;
@@ -395,12 +399,20 @@ struct ContainerMetaInTask {
     std::string pull_policy;
   };
 
-  ImageInfo image_info{};
-
-  std::string name;
+  // Both available in pod and container
   std::unordered_map<std::string, std::string> labels;
   std::unordered_map<std::string, std::string> annotations;
 
+  bool userns{true};
+  uid_t run_as_user{0};
+  gid_t run_as_group{0};
+
+  // Below are only available in pod
+  std::string name;  // for hostname generation
+  std::unordered_map<uint32_t, uint32_t> port_mappings;
+
+  // Below are only available in container
+  ImageInfo image_info{};
   std::string command;
   std::vector<std::string> args;
   std::string workdir;
@@ -411,12 +423,7 @@ struct ContainerMetaInTask {
   bool stdin{false};
   bool stdin_once{false};
 
-  bool userns{true};
-  uid_t run_as_user{0};
-  gid_t run_as_group{0};
-
   std::unordered_map<std::string, std::string> mounts;
-  std::unordered_map<uint32_t, uint32_t> port_mappings;
 
  public:
   ContainerMetaInTask() = default;
@@ -503,7 +510,9 @@ struct StepInCtld {
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
-  // TODO: Find somewhere else to put this field?
+  // In daemon step, this stands for the pod meta.
+  // In common step, this stands for the container meta.
+  // For convenience, we use the same name here.
   std::optional<ContainerMetaInTask> container_meta;
 
  protected:
@@ -650,7 +659,7 @@ struct DaemonStepInCtld : StepInCtld {
   std::optional<std::pair<crane::grpc::TaskStatus, uint32_t /*exit code*/>>
   StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
                    const std::string& reason, const CranedId& craned_id,
-                   google::protobuf::Timestamp timestamp,
+                   const google::protobuf::Timestamp& timestamp,
                    StepStatusChangeContext* context);
 
   void RecoverFromDb(const TaskInCtld& job,
@@ -683,7 +692,7 @@ struct CommonStepInCtld : StepInCtld {
 
   void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         const std::string& reason, const CranedId& craned_id,
-                        google::protobuf::Timestamp timestamp,
+                        const google::protobuf::Timestamp& timestamp,
                         StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
@@ -755,7 +764,7 @@ struct TaskInCtld {
   bool held{false};
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
-  // BATCH or INTERACTIVE step
+  // BATCH or INTERACTIVE or CONTAINER step
   std::unique_ptr<CommonStepInCtld> m_primary_step_;
   // COMMON steps
   std::unordered_map<step_id_t, std::unique_ptr<CommonStepInCtld>> m_steps_;

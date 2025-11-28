@@ -98,6 +98,7 @@ struct RuntimeStatus {
   }
 };
 
+// Current supervisor status
 inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 

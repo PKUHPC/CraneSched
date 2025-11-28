@@ -283,7 +283,7 @@ void JobManager::AllocSteps(std::vector<StepToD>&& steps) {
   CRANE_TRACE("Allocating step [{}].",
               absl::StrJoin(steps | std::views::transform(GetStepIdStr), ","));
 
-  for (const auto& step : steps) {
+  for (auto& step : steps) {
     auto job_ptr = m_job_map_.GetValueExclusivePtr(step.job_id());
     if (!job_ptr) {
       CRANE_WARN("Try to allocate step for nonexistent job#{}, ignoring it.",
@@ -916,7 +916,8 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   auto* job = job_ptr.get();
 
   // Check if the step is acceptable.
-  // TODO: Is this check necessary?
+  // We keep this container check here in case we support enabling/disabling
+  // container functionality on parts of nodes in the future.
   if (step->IsContainer() && !g_config.Container.Enabled) {
     CRANE_ERROR("Container support is disabled but job #{} requires it.",
                 job_id);
@@ -966,11 +967,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         google::protobuf::util::TimeUtil::GetCurrentTime());
   } else {
     // kOk means that SpawnSupervisor_ has successfully forked a child
-    // process. Now we put the child pid into index maps. SIGCHLD sent just
-    // after fork() and before putting pid into maps will repeatedly be sent
-    // by timer and eventually be handled once the SIGCHLD processing callback
-    // sees the pid in index maps. Now we do not support launch multiple tasks
-    // in a job.
+    // process.
     CRANE_TRACE("[Step #{}.{}] Supervisor spawned successfully.", job_id,
                 step_id);
   }

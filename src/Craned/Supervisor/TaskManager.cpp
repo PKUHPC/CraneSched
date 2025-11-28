@@ -1541,6 +1541,7 @@ void TaskManager::Wait() {
 void TaskManager::ShutdownSupervisor() {
   CRANE_INFO("All tasks finished, exiting...");
   if (m_step_.IsDaemonStep()) {
+    // TODO: Add Pod deletion for daemon step.
     CRANE_DEBUG("Sending a completed status as daemon step.");
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
                                            0, "");
@@ -1603,7 +1604,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 }
 
 std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
-  CRANE_INFO("[Job #{}] Executing task.", m_step_.job_id);
+  CRANE_INFO("[Job #{}.{}] Executing task.", m_step_.job_id, m_step_.step_id);
 
   std::promise<CraneErrCode> ok_promise;
   std::future ok_future = ok_promise.get_future();

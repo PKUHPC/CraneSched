@@ -467,7 +467,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                                    uint32_t exit_code,
                                    const std::string& reason,
                                    const CranedId& craned_id,
-                                   google::protobuf::Timestamp timestamp,
+                                   const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
   bool job_finished{false};
 
@@ -482,19 +482,24 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
+
     if (this->AllNodesConfigured()) {
-      if (this->PrevErrorStatus())
+      if (this->PrevErrorStatus()) {
         job_finished = true;
-      else {
-        CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", job_id,
+      } else {
+        CRANE_TRACE("[Step #{}.{}] CONFIGURING->RUNNING", job_id,
                     this->StepId());
+
         this->SetStatus(crane::grpc::TaskStatus::Running);
         this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-        this->SetErrorExitCode(0u);
+        this->SetErrorExitCode(0U);
 
+        // After all daemon steps running, create the primary step from the
+        // submitted job.
         context->rn_step_raw_ptrs.insert(this);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
+
         // TODO: Aggregate this operation
         if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
           this->SetStatus(crane::grpc::TaskStatus::Failed);
@@ -504,6 +509,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           context->rn_step_raw_ptrs.erase(this);
           break;
         }
+
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
           meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
@@ -513,19 +519,20 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                   job->allocated_craneds_regex,
                   job->CranedIds() | std::ranges::to<std::unordered_set>())}});
         }
+
         job->SetPrimaryStep(std::move(primary_step));
-        for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
+        for (const auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
           context->craned_step_alloc_map[node_id].emplace_back(
               job->PrimaryStep()->GetStepToD(node_id));
         }
       }
     }
+
     break;
 
   case crane::grpc::TaskStatus::Running:
   case crane::grpc::TaskStatus::Completing:
     // Completing -> Completed / Failed
-
     this->StepOnNodeFinish(craned_id);
     if (new_status != crane::grpc::TaskStatus::Completed) {
       this->SetErrorStatus(new_status);
@@ -745,7 +752,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
 
   SetRequeueCount(0);
   SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-  SetErrorExitCode(0u);
+  SetErrorExitCode(0U);
   SetStatus(crane::grpc::TaskStatus::Pending);
   SetHeld(false);
   SetStartTime(absl::Now());
@@ -802,12 +809,11 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   return step_to_d;
 }
 
-void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
-                                        uint32_t exit_code,
-                                        const std::string& reason,
-                                        const CranedId& craned_id,
-                                        google::protobuf::Timestamp timestamp,
-                                        StepStatusChangeContext* context) {
+void CommonStepInCtld::StepStatusChange(
+    crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    const std::string& reason, const CranedId& craned_id,
+    const google::protobuf::Timestamp& timestamp,
+    StepStatusChangeContext* context) {
   /**
    * Step final status
    * finished: step configured successfully, got all step execution status

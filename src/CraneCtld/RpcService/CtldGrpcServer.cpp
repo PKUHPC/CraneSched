@@ -452,7 +452,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  // Check task type
+  // Check job type
   if (request->task().type() == crane::grpc::TaskType::Container &&
       !g_config.Container.Enabled) {
     response->set_ok(false);
