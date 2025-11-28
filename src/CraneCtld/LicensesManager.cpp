@@ -368,15 +368,17 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
       auto license_id =
           std::format("{}@{}", res_resource.name, res_resource.server);
       m_licenses_map_.Emplace(
-          license_id, License{.license_id = license_id,
-                              .total = iter->second,
-                              .used = 0,
-                              .reserved = 0,
-                              .remote = true,
-                              .server = res_resource.server,
-                              .last_consumed = res_resource.last_consumed,
-                              .last_deficit = 0,
-                              .last_update = res_resource.last_update});
+          license_id,
+          License{.license_id = license_id,
+                  .total = (res_resource.count * iter->second) / 100,
+                  .used = 0,
+                  .reserved = 0,
+                  .remote = true,
+                  .server = res_resource.server,
+                  .last_consumed = res_resource.last_consumed,
+                  .last_deficit = 0,
+                  .last_update = res_resource.last_update});
+      // TODO: flag absolute
     }
   }
 
@@ -428,26 +430,49 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
             "License resource {} not found in license map. now adding...",
             license_id);
         m_licenses_map_.Emplace(
-            license_id, License{.license_id = license_id,
-                                .total = cluster_iter->second,
-                                .used = 0,
-                                .reserved = 0,
-                                .remote = true,
-                                .server = res_resource.server,
-                                .last_consumed = res_resource.last_consumed,
-                                .last_deficit = 0,
-                                .last_update = res_resource.last_update});
+            license_id,
+            License{.license_id = license_id,
+                    .total = (res_resource.count * cluster_iter->second) / 100,
+                    .used = 0,
+                    .reserved = 0,
+                    .remote = true,
+                    .server = res_resource.server,
+                    .last_consumed = res_resource.last_consumed,
+                    .last_deficit = 0,
+                    .last_update = res_resource.last_update});
+        // TODO: flag absolute
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
-        lic->total = cluster_iter->second;
-        auto external = res_resource.count - lic->total;
+        lic->total = (res_resource.count * cluster_iter->second) / 100;
+        uint32_t external = 0;
+        if (res_resource.count < lic->total)
+          CRANE_ERROR(
+              "allocated more licenses than exist total ({} > {}). this should "
+              "not happen.",
+              lic->total, res_resource.count);
+        else
+          external = res_resource.count - lic->total;
         lic->last_consumed = res_resource.last_consumed;
-        if (lic->last_consumed <= (external + lic->used))
+        if (lic->last_consumed <= (external + lic->used)) {
+          /*
+           * "Normal" operation - license consumption is below what the
+           * local cluster, plus possible use from other clusters,
+           * have assigned out. No deficit in this case.
+           */
           lic->last_deficit = 0;
-        else {
+        } else {
+          /*
+           * "Deficit" operation. Someone is using licenses that aren't
+           * included in our local tracking, and exceed that available
+           * to other clusters. So... we need to adjust our scheduling
+           * behavior here to avoid over-allocating licenses.
+           */
           lic->last_deficit = lic->last_consumed - external - lic->used;
         }
         lic->last_update = res_resource.last_update;
+        if (lic->used > lic->total) {
+          CRANE_DEBUG("license {} total decreased", lic->license_id);
+        }
       }
     }
   }
@@ -641,6 +666,34 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   }
 
   res_resource->last_update = absl::ToUnixMillis(absl::Now());
+
+  uint32_t allocated = (res_resource->count*res_resource->allocated)/100;
+  if (res_resource->allocated > 100) {
+      CRANE_TRACE(
+      "License Resource {}@{}: Allocated resources {} exceed total "
+      "available "
+      "count {}",
+      res_resource->name, res_resource->server, allocated,
+      res_resource->count);
+  return std::unexpected(FormatRichErr(
+      CraneErrCode::ERR_INVALID_PARAM,
+      "Allocated resources {} exceed total available count {}",
+      allocated, res_resource->count));
+  }
+
+  // TODO: flag absolute
+  // if (res_resource->allocated > res_resource->count) {
+  //   CRANE_TRACE(
+  //       "License Resource {}@{}: Allocated resources {} exceed total "
+  //       "available "
+  //       "count {}",
+  //       res_resource->name, res_resource->server, res_resource->allocated,
+  //       res_resource->count);
+  //   return std::unexpected(FormatRichErr(
+  //       CraneErrCode::ERR_INVALID_PARAM,
+  //       "Allocated resources {} exceed total available count {}",
+  //       res_resource->allocated, res_resource->count));
+  // }
 
   return {};
 }
