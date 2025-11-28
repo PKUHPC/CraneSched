@@ -32,6 +32,20 @@ Partitions:
 DefaultPartition: compute
 ```
 
+## Prerequisite: Crane System User
+
+**Control node only**: The `crane` user is required when starting with systemd (automatic with packages):
+
+```bash
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
+```
+
+!!! note
+    - Compute nodes run craned as root, no crane user needed
+    - Running binaries directly uses the current user, no crane user needed
+    - When using centralized user management, ensure the `crane` user has write access to the `CraneBaseDir` directory
+
 ## Essential Configuration
 
 ### Cluster Settings

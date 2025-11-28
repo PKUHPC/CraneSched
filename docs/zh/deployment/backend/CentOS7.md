@@ -139,6 +139,7 @@ cd CraneSched
 mkdir build && cd build
 cmake -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc \
                -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+               -DCRANE_USE_SYSTEM_LIBCGROUP=ON \
                -DCRANE_ENABLE_CGROUP_V2=OFF ..
 cmake --build .
 ninja install
@@ -168,15 +169,28 @@ PAM 模块配置是可选的，但建议用于生产集群。
 
 有关集群配置详细信息，请参阅[集群配置指南](../configuration/config.md)。
 
-配置完成后，启动服务：
+配置完成后，根据启动方式选择：
+
+### 使用 systemd 启动（推荐）
+
+**仅控制节点**需要先创建 crane 用户（RPM 包安装时自动创建）：
 
 ```bash
-# 如果使用 systemd：
-systemctl start cranectld
-systemctl start craned
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
+```
 
-# 如果直接使用可执行文件：
+然后启动服务：
+
+```bash
+systemctl start cranectld  # 控制节点
+systemctl start craned     # 计算节点
+```
+
+### 直接运行二进制文件
+
+```bash
 cd build/src
-CraneCtld/cranectld
-Craned/craned
+CraneCtld/cranectld  # 控制节点
+Craned/craned        # 计算节点
 ```

@@ -179,17 +179,26 @@ For cluster configuration details, see the [Cluster Configuration Guide](../conf
 
 ## 6. Start CraneSched
 
-Run manually (foreground):
+### Using systemd (Recommended)
+
+**Control node only**: Create crane user (automatic with RPM packages):
 
 ```bash
-cranectld
-craned
+sudo groupadd --system crane 2>/dev/null || true
+sudo useradd --system --gid crane --shell /usr/sbin/nologin --create-home crane 2>/dev/null || true
 ```
 
-Or use systemd:
+Then start services:
 
 ```bash
 systemctl daemon-reload
-systemctl enable cranectld --now
-systemctl enable craned --now
+systemctl enable cranectld --now  # Control node
+systemctl enable craned --now     # Compute node
+```
+
+### Running manually (foreground)
+
+```bash
+cranectld  # Control node
+craned     # Compute node
 ```
