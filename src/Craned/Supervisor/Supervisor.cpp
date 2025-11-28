@@ -18,6 +18,7 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
+#include <fcntl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 
 #include <cxxopts.hpp>
@@ -27,6 +28,7 @@
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
+#include "crane/PublicHeader.h"
 
 using Craned::Supervisor::g_config;
 
@@ -249,11 +251,25 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
-  CRANE_INFO("Supervisor started step type: {}.",
+  CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
+
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
     ::Craned::Supervisor::g_runtime_status.Status =
         Craned::Supervisor::StepStatus::Running;
+    // For container jobs, the daemon step need to setup a pod per node,
+    // then the following common steps will launch containers inside the pod.
+    if (g_config.Container.Enabled && g_config.StepSpec.has_container_meta()) {
+      auto ok = g_task_mgr->ExecuteTaskAsync();
+      auto err = ok.get();
+      // Just wait here for pod setup. if pod failed, daemon step failed.
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to start daemon step, code: {}",
+                    static_cast<int>(err));
+        ::Craned::Supervisor::g_runtime_status.Status =
+            Craned::Supervisor::StepStatus::Failed;
+      }
+    }
   } else {
     ::Craned::Supervisor::g_runtime_status.Status =
         Craned::Supervisor::StepStatus::Configured;
@@ -261,6 +277,7 @@ void StartServer() {
 
   g_craned_client->StepStatusChangeAsync(
       ::Craned::Supervisor::g_runtime_status.Status, 0, std::nullopt);
+
   g_server->Wait();
   g_server.reset();
   g_task_mgr->Wait();
