@@ -91,6 +91,8 @@ class StepInstance {
   StepInstance& operator=(StepInstance&&) = delete;
 
   ~StepInstance() = default;
+
+  // Do some preparation needed by all tasks.
   CraneErrCode Prepare();
   void CleanUp();
 
@@ -243,9 +245,16 @@ class ITaskInstance {
 };
 
 class ContainerInstance : public ITaskInstance {
+  enum class ContainerType : uint8_t {
+    POD = 0,        // only create pod sandbox (common step)
+    CONTAINER = 1,  // create container inside a pod (daemon step)
+  };
+
  public:
   explicit ContainerInstance(StepInstance* step_spec)
-      : ITaskInstance(step_spec) {}
+      : ITaskInstance(step_spec),
+        m_type_(step_spec->IsDaemonStep() ? ContainerType::POD
+                                          : ContainerType::CONTAINER) {}
   ~ContainerInstance() override = default;
 
   ContainerInstance(const ContainerInstance&) = delete;
@@ -292,6 +301,8 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
                                      cri::api::PodSandboxConfig* config);
   CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
+
+  ContainerType m_type_{ContainerType::CONTAINER};
 
   std::string m_image_id_;
   std::string m_pod_id_;
