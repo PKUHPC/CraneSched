@@ -69,7 +69,12 @@ class LicensesManager {
   void FreeLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  CraneExpectedRich<void> AddLicenseResource(LicenseResource &&new_license);
+  /* TODO：multi-cluster synchronization */
+  CraneExpectedRich<void> AddLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
 
   CraneExpectedRich<void> ModifyLicenseResource(
       const std::string &name, const std::string &server,
@@ -87,6 +92,11 @@ class LicensesManager {
       std::list<LicenseResource> *res_licenses);
 
  private:
+  CraneExpectedRich<void> CheckAndUpdateFields_(const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators,
+      LicenseResource *res_resource);
+
   struct LicenseIdServerPairHash {
     std::size_t operator()(const std::pair<LicenseId, std::string> &p) const {
       std::size_t h1 = std::hash<LicenseId>{}(p.first);
