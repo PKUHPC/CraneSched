@@ -259,7 +259,7 @@ void StartServer() {
         Craned::Supervisor::StepStatus::Running;
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
-    if (g_config.Container.Enabled && g_config.StepSpec.has_container_meta()) {
+    if (g_config.Container.Enabled && g_config.StepSpec.has_pod_meta()) {
       auto ok = g_task_mgr->ExecuteTaskAsync();
       auto err = ok.get();
       // Just wait here for pod setup. if pod failed, daemon step failed.

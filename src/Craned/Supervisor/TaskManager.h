@@ -293,8 +293,11 @@ class ContainerInstance : public ITaskInstance {
                                         const std::string& job_name,
                                         const std::string& node_name);
 
-  CraneErrCode SetPodSandboxConfig_();
-  CraneErrCode SetContainerConfig_();
+  CraneErrCode SetPodSandboxConfig_(
+      const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+  CraneErrCode SetContainerConfig_(
+      const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
+      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
 
   CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
                                      cri::api::ContainerConfig* config);

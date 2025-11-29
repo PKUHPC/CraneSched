@@ -53,7 +53,7 @@ struct StepInstance {
   }
 
   [[nodiscard]] bool IsContainer() const noexcept {
-    return step_to_d.has_container_meta();
+    return step_to_d.type() == crane::grpc::TaskType::Container;
   }
 
   [[nodiscard]] std::string StepIdString() const noexcept {
