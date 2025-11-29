@@ -146,14 +146,30 @@ std::string StepIdsToString(const job_id_t job_id, const step_id_t step_id);
 std::string StepIdPairToString(const std::pair<job_id_t, step_id_t> &step);
 
 std::string StepToDIdString(const crane::grpc::StepToD &step_to_d);
-template <typename Range>
-std::string StepToDRangeIdString(const Range &step_to_d_range) {
+template <std::ranges::range R>
+  requires std::same_as<std::ranges::range_value_t<R>, crane::grpc::StepToD>
+std::string StepToDRangeIdString(const R &step_to_d_range) {
   return absl::StrJoin(step_to_d_range | std::views::transform(StepToDIdString),
                        ",");
 }
+template <typename R>
+concept MapRange = std::ranges::range<R> && requires {
+  typename R::key_type;
+  typename R::mapped_type;
+};
 
-template <typename Map>
+template <typename T>
+concept StepIdRange = std::ranges::range<T> &&
+                      std::same_as<std::ranges::range_value_t<T>, step_id_t>;
+
+template <MapRange Map>
+  requires std::ranges::range<Map> && requires(Map m) {
+    requires std::ranges::range<typename Map::mapped_type>;
+    requires std::same_as<std::ranges::range_value_t<typename Map::mapped_type>,
+                          step_id_t>;
+  }
 std::string JobStepsToString(const Map &m) {
+  typename std::ranges::range_value_t<Map>::second_type values;
   auto step_strs_view =
       m | std::views::transform([](const auto &kv) {
         return kv.second |
@@ -179,7 +195,7 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
         "Cancelled",
         "OutOfMemory",
         "Configuring",
-        "Configured",
+        "Starting",
         "Completing",
         // 10 - 14
         "Invalid",
