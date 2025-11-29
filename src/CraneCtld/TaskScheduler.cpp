@@ -2673,7 +2673,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                     }),
                 ","),
             craned_id);
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        google::protobuf::Timestamp now =
+            google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& steps : context.craned_step_alloc_map.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               steps.job_id(), steps.step_id(), craned_id,
@@ -2715,7 +2716,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_rpc_worker_pool_->detach_task([this, &exec_step_latch, craned_id,
                                      &context]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
         CraneExpected failed_steps =
@@ -2723,6 +2723,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         if (failed_steps.has_value() && !failed_steps.value().empty()) {
           CRANE_ERROR("Failed to ExecuteStep for [{}] steps on Node {}",
                       util::JobStepsToString(failed_steps.value()), craned_id);
+          auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
           for (const auto& [job_id, step_ids] : failed_steps.value()) {
             for (const auto& step_id : step_ids)
               StepStatusChangeWithReasonAsync(
@@ -2735,6 +2736,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             "Failed to ExecuteStep for [{}] steps on Node {}, craned down.",
             util::JobStepsToString(context.craned_step_exec_map.at(craned_id)),
             craned_id);
+        google::protobuf::Timestamp now =
+            google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& [job_id, step_ids] :
              context.craned_step_exec_map.at(craned_id)) {
           for (const auto& step_id : step_ids)
@@ -2808,7 +2811,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           success = true;
       }
       if (!success) {
-        auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+        google::protobuf::Timestamp now =
+            google::protobuf::util::TimeUtil::GetCurrentTime();
         for (const auto& job_id : context.craned_jobs_to_free.at(craned_id)) {
           StepStatusChangeWithReasonAsync(
               job_id, kDaemonStepId, craned_id, crane::grpc::TaskStatus::Failed,
@@ -2886,6 +2890,15 @@ void TaskScheduler::QueryTasksInRam(
     task.SetFieldsOfTaskInfo(task_it);
     task_it->mutable_elapsed_time()->set_seconds(
         ToInt64Seconds(now - task.StartTime()));
+
+    // Check if task has exceeded time limit
+    if ((task.Status() == crane::grpc::TaskStatus::Running ||
+         task.Status() == crane::grpc::TaskStatus::Configuring) &&
+        task.StartTime() + task.time_limit < now) {
+      task_it->set_status(crane::grpc::TaskStatus::Completing);
+      task_it->mutable_end_time()->set_seconds(
+          ToUnixSeconds(task.StartTime() + task.time_limit));
+    }
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -3041,24 +3054,42 @@ void TaskScheduler::QueryRnJobOnCtldForNodeConfig(
   if (it == m_node_to_tasks_map_.end()) return;
 
   auto& job_steps = *req->mutable_job_steps();
+  absl::Time now = absl::Now();
 
   for (const auto& job_id : it->second) {
     auto job_it = m_running_task_map_.find(job_id);
     if (job_it == m_running_task_map_.end()) continue;
-    auto* daemon_step = job_it->second->DaemonStep();
+
+    TaskInCtld* job = job_it->second.get();
+    auto* daemon_step = job->DaemonStep();
+
+    // Check if task has exceeded time limit during craned offline
+    if (job->Status() == crane::grpc::TaskStatus::Running &&
+        job->StartTime() + job->time_limit < now) {
+      CRANE_INFO(
+          "[Job #{}] Task exceeded time limit during craned {} offline. "
+          "StartTime: {}, TimeLimit: {}s, Current: {}. "
+          "State will be updated when craned reconnects.",
+          job_id, craned_id, absl::FormatTime(job->StartTime()),
+          absl::ToInt64Seconds(job->time_limit), absl::FormatTime(now));
+    }
+
     *job_steps[job_id].mutable_job() = daemon_step->GetJobToD(craned_id);
     auto& steps = *job_steps[job_id].mutable_steps();
     auto& step_status = *job_steps[job_id].mutable_step_status();
     steps[daemon_step->StepId()] = daemon_step->GetStepToD(craned_id);
+
+    // Send the current (possibly updated) status to craned
     step_status[daemon_step->StepId()] = daemon_step->Status();
-    if (job_it->second->PrimaryStep() &&
-        std::ranges::contains(job_it->second->PrimaryStep()->ExecutionNodes(),
+
+    if (job->PrimaryStep() &&
+        std::ranges::contains(job->PrimaryStep()->ExecutionNodes(),
                               craned_id)) {
-      const auto* step = job_it->second->PrimaryStep();
+      const auto* step = job->PrimaryStep();
       steps[step->StepId()] = step->GetStepToD(craned_id);
       step_status[step->StepId()] = step->Status();
     }
-    for (const auto& step : job_it->second->Steps() | std::views::values)
+    for (const auto& step : job->Steps() | std::views::values)
       if (std::ranges::contains(step->ExecutionNodes(), craned_id)) {
         steps[step->StepId()] = step->GetStepToD(craned_id);
         step_status[step->StepId()] = step->Status();
