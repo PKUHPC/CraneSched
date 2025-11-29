@@ -76,7 +76,7 @@ option(CRANE_ENABLE_BPF "Enable eBPF support for Cgroup V2 device management" OF
 option(CRANE_FULL_DYNAMIC "Enable dynamic linking for most libraries" OFF)
 option(CRANE_USE_LIBCXX "Force libc++ when using the Clang toolchain" OFF)
 
-option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" ON)
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
