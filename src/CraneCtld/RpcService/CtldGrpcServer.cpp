@@ -1498,21 +1498,20 @@ grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
+  std::unordered_set<std::string> wckey_list{request->wckey_list().begin(),
+                                             request->wckey_list().end()};
   std::vector<Wckey> res_wckey_list;
-  auto res = g_account_manager->QueryAllWckeyInfo(request->uid());
+  auto res = g_account_manager->QueryAllWckeyInfo(request->uid(), wckey_list);
   if (!res) {
-    auto *new_err_record = response->mutable_rich_error_list()->Add();
-    new_err_record->set_code(res.error());
-    new_err_record->set_description("");
-  } else {
-    res_wckey_list = std::move(res.value());
-  }
-
-  if (response->rich_error_list().empty()) {
-    response->set_ok(true);
-  } else {
     response->set_ok(false);
+    response->set_code(res.error());
+
+  } else {
+    response->set_ok(true);
+    res_wckey_list = std::move(res.value());
   }
 
   for (const auto &wckey : res_wckey_list) {

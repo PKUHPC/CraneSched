@@ -69,7 +69,8 @@ class AccountManager {
 
   CraneExpected<std::set<User>> QueryAllUserInfo(uint32_t uid);
 
-  CraneExpected<std::vector<Wckey>> QueryAllWckeyInfo(uint32_t uid);
+  CraneExpected<std::vector<Wckey>> QueryAllWckeyInfo(
+      uint32_t uid, std::unordered_set<std::string> wckey_list);
 
   CraneExpected<User> QueryUserInfo(uint32_t uid, const std::string& username);
 

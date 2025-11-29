@@ -454,7 +454,7 @@ CraneExpected<std::set<User>> AccountManager::QueryAllUserInfo(uint32_t uid) {
 }
 
 CraneExpected<std::vector<Wckey>> AccountManager::QueryAllWckeyInfo(
-    uint32_t uid) {
+    uint32_t uid, std::unordered_set<std::string> wckey_list) {
   std::vector<Wckey> res_wckey_list;
 
   util::read_lock_guard wckey_guard(m_rw_wckey_mutex_);
@@ -466,9 +466,17 @@ CraneExpected<std::vector<Wckey>> AccountManager::QueryAllWckeyInfo(
 
   // Operators and above can query all wckeys.
   if (CheckIfUserHasHigherPrivThan_(*op_user, User::None)) {
-    for (const auto& wckey : m_wckey_map_ | std::views::values) {
-      if (wckey->deleted) continue;
-      res_wckey_list.emplace_back(*wckey);
+    if (wckey_list.empty()) {
+      for (const auto& wckey : m_wckey_map_ | std::views::values) {
+        if (wckey->deleted) continue;
+        res_wckey_list.emplace_back(*wckey);
+      }
+    } else {
+      for (const auto& wckey : m_wckey_map_ | std::views::values) {
+        if (wckey->deleted) continue;
+        if (wckey_list.find(wckey->name) != wckey_list.end())
+          res_wckey_list.emplace_back(*wckey);
+      }
     }
   } else {
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);

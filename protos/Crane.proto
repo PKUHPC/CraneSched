@@ -461,7 +461,7 @@ message QueryWckeyInfoRequest {
 message QueryWckeyInfoReply {
   bool ok = 1;
   repeated WckeyInfo wckey_list = 2;
-  repeated RichError rich_error_list = 3;
+  ErrCode code = 3;
 }
 
 message QueryQosInfoRequest {
