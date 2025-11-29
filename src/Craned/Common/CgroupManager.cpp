@@ -1082,7 +1082,7 @@ bool CgroupV1::KillAllProcesses() {
       }
       free(pids);
     } else {
-      CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\" controller: {}",
+      CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\" controller {}:{}",
                   cg_name, controller_str, cgroup_strerror(rc));
     }
   }
