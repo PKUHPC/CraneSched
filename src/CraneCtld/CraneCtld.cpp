@@ -641,6 +641,27 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
+      if (config["AccountingStorageEnforce"]) {
+        auto item_list = config["AccountingStorageEnforce"].as<std::string>();
+        std::unordered_set<std::string> items;
+        for (absl::string_view item : absl::StrSplit(item_list, ',')) {
+          item = absl::StripAsciiWhitespace(item);
+          if (!item.empty()) items.emplace(item);
+        }
+        if (items.contains("wckeys")) g_config.MustNeedWckey = true;
+      }
+      if (config["TrackWCKey"]) {
+        auto val = config["TrackWCKey"].as<std::string>();
+        val = absl::AsciiStrToLower(val);
+        if (val == "yes") {
+          g_config.WckeyValid = true;
+        } else if (val == "no") {
+          g_config.WckeyValid = false;
+        } else {
+          CRANE_ERROR("Illegal TrackWCKey val format, Please input yes or no");
+          std::exit(1);
+        }
+      }
 
       if (config["IgnoreConfigInconsistency"] &&
           !config["IgnoreConfigInconsistency"].IsNull())

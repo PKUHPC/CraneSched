@@ -3701,6 +3701,25 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     }
   }
 
+  if (g_config.MustNeedWckey) {
+    if (task->MutableTaskToCtld()->has_wckey()) {
+      task->wckey = task->MutableTaskToCtld()->wckey();
+      auto wckey_scoped_ptr = g_account_manager->GetExistedWckeyInfo(
+          task->wckey, g_config.CraneClusterName, task->Username());
+      if (!wckey_scoped_ptr) {
+        CRANE_DEBUG("Wckey '{}' not found in the wckey database", task->wckey);
+        return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
+      }
+    } else {
+      auto result = g_account_manager->GetExistedDefaultWckeyName(
+          g_config.CraneClusterName, task->Username());
+      if (!result) return std::unexpected(result.error());
+      task->wckey = "*" + result.value();
+    }
+  } else {
+    task->wckey = "";
+  }
+
   return {};
 }
 
