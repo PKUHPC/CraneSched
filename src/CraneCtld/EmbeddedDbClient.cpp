@@ -698,19 +698,18 @@ bool EmbeddedDbClient::RetrieveStepInfo(StepDbSnapshot* snapshot) {
   }
   CRANE_INFO(
       "Restored [{}] steps from embedded db.",
-      absl::StrJoin(snapshot->steps | std::views::transform([](auto kv) {
-                      auto& [job_id, steps] = kv;
-                      return steps |
-                             std::views::transform(
-                                 [job_id](const StepInEmbeddedDb& step_in_db) {
-                                   return std::make_pair(
-                                       job_id,
-                                       step_in_db.runtime_attr().step_id());
-                                 });
-                    }) | std::views::join |
-                        std::views::transform(util::StepIdPairToString) |
-                        std::ranges::to<std::vector>(),
-                    ","));
+      fmt::join(snapshot->steps | std::views::transform([](auto& kv) {
+                  auto& [job_id, steps] = kv;
+                  return steps |
+                         std::views::transform(
+                             [job_id](const StepInEmbeddedDb& step_in_db) {
+                               return std::make_pair(
+                                   job_id, step_in_db.runtime_attr().step_id());
+                             });
+                }) | std::views::join |
+                    std::views::transform(util::StepIdPairToString) |
+                    std::views::common,
+                ","));
 
   return true;
 }

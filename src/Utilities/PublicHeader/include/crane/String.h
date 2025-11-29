@@ -23,6 +23,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <re2/re2.h>
+#include <spdlog/fmt/bundled/ranges.h>
 #include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
 #include <zlib.h>
@@ -161,8 +162,8 @@ std::string JobStepsToString(const Map &m) {
                  return StepIdsToString(key, step_id);
                });
       }) |
-      std::views::join | std::ranges::to<std::vector>();
-  return absl::StrJoin(step_strs_view, ",");
+      std::views::join;
+  return fmt::to_string(fmt::join(step_strs_view, ","));
 }
 
 namespace Internal {

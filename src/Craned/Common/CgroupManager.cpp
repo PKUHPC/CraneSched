@@ -1052,29 +1052,41 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 bool CgroupV1::KillAllProcesses() {
   using namespace CgConstant::Internal;
 
-  const char *controller = CgConstant::GetControllerStringView(
-                               CgConstant::Controller::CPU_CONTROLLER)
-                               .data();
-
   const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
-
-  int size, rc;
-  pid_t *pids;
-
-  rc = cgroup_get_procs(const_cast<char *>(cg_name),
-                        const_cast<char *>(controller), &pids, &size);
-
-  if (rc == 0) {
-    for (int i = 0; i < size; ++i) {
-      kill(pids[i], SIGKILL);
-    }
-    free(pids);
-    return true;
+  auto controller_count =
+      cgroup_get_controller_count(m_cgroup_info_.NativeHandle());
+  if (controller_count == -1) {
+    CRANE_ERROR("Failed to get controller count for cgroup \"{}\"", cg_name);
+    return false;
   }
 
-  CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
-              cgroup_strerror(rc));
-  return false;
+  for (int i = 0; i < controller_count; ++i) {
+    struct cgroup_controller *controller =
+        cgroup_get_controller_by_index(m_cgroup_info_.NativeHandle(), i);
+    if (controller == nullptr) {
+      CRANE_ERROR("Failed to get controller by index {} for cgroup \"{}\"", i,
+                  cg_name);
+      continue;
+    }
+    const char *controller_str = cgroup_get_controller_name(controller);
+
+    int size, rc;
+    pid_t *pids;
+
+    rc = cgroup_get_procs(const_cast<char *>(cg_name),
+                          const_cast<char *>(controller_str), &pids, &size);
+
+    if (rc == 0) {
+      for (int j = 0; j < size; ++j) {
+        kill(pids[j], SIGKILL);
+      }
+      free(pids);
+    } else {
+      CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\" controller {}:{}",
+                  cg_name, controller_str, cgroup_strerror(rc));
+    }
+  }
+  return true;
 }
 
 bool CgroupV1::Empty() {
