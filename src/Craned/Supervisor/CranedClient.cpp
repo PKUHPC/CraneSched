@@ -107,9 +107,9 @@ void CranedClient::AsyncSendThread_() {
               context.debug_error_string(), int(status.error_code()));
           break;
         }
-        elems.pop_front();
         CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
                     elem.new_status, reply.ok());
+        elems.pop_front();
       }
       m_mutex_.Lock();
       if (!elems.empty()) {

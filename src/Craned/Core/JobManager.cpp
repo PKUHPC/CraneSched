@@ -799,8 +799,16 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       if (code != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
                     job_id, step_id, static_cast<int>(code));
+        g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+            .job_id = job_id,
+            .step_id = step_id,
+            .new_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding when execute task",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         // Ctld will send ShutdownSupervisor after status change from
-        // supervisor.
+        // daemon supervisor, for common step, will shut down itself when all
+        // task in local step finished.
       }
     });
   }
