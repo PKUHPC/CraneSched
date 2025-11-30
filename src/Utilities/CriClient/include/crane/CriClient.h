@@ -141,6 +141,18 @@ class CriClient {
                                        const std::string& pull_policy) const;
 
   // ==== Helpers ====
+
+  // Setup mapping for kid <-> uid. For kernel id and userspace id, See:
+  // https://www.kernel.org/doc/html/next/filesystems/idmappings.html
+  static cri::api::IDMapping MakeIdMapping(uid_t kernel_id, uid_t userspace_id,
+                                           size_t size) {
+    cri::api::IDMapping mapping{};
+    mapping.set_host_id(kernel_id);
+    mapping.set_container_id(userspace_id);
+    mapping.set_length(size);
+    return mapping;
+  }
+
   // Parse and compare numeric labels (using std::from_chars)
   template <typename T>
     requires requires(const char* first, const char* last, T& value) {
