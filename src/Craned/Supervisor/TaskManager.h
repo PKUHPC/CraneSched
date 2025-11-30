@@ -96,13 +96,30 @@ class StepInstance {
   CraneErrCode Prepare();
   void CleanUp();
 
-  [[nodiscard]] bool IsContainer() const noexcept;
-  [[nodiscard]] bool IsBatch() const noexcept;
+  /*
+  A Step can be classified from multiple perspectives:
+
+  1. Interactivity: whether the Step is interactive (IsInteractive()), and for
+  interactive Steps, its subtypes (IsCrun / IsCalloc).
+  2. Role in a Job: whether it is a Common Step or a Daemon Step (IsDaemon()).
+  3. Container support: whether it runs as a Pod or a Container (IsPod(),
+  IsContainer()).
+
+  Across different perspectives, these Is-methods are not mutually exclusive.
+  When adding new methods, please ensure they are orthogonal to existing ones.
+  */
+
+  // Perspective 1: Interactivity
   [[nodiscard]] bool IsInteractive() const noexcept;
   [[nodiscard]] bool IsCrun() const noexcept;
   [[nodiscard]] bool IsCalloc() const noexcept;
 
-  [[nodiscard]] bool IsDaemonStep() const noexcept;
+  // Perspective 2: Role in a Job
+  [[nodiscard]] bool IsDaemon() const noexcept;
+
+  // Perspective 3: Container support
+  [[nodiscard]] bool IsPod() const noexcept;
+  [[nodiscard]] bool IsContainer() const noexcept;
 
   const StepToSupv& GetStep() const { return m_step_to_supv_; }
 
@@ -244,17 +261,58 @@ class ITaskInstance {
   EnvMap m_env_;
 };
 
-class ContainerInstance : public ITaskInstance {
-  enum class ContainerType : uint8_t {
-    POD = 0,        // only create pod sandbox (common step)
-    CONTAINER = 1,  // create container inside a pod (daemon step)
-  };
+class PodInstance : public ITaskInstance {
+ public:
+  explicit PodInstance(StepInstance* step_spec) : ITaskInstance(step_spec) {}
+  ~PodInstance() override = default;
 
+  PodInstance(const PodInstance&) = delete;
+  PodInstance(PodInstance&&) = delete;
+
+  PodInstance& operator=(PodInstance&&) = delete;
+  PodInstance& operator=(const PodInstance&) = delete;
+
+  CraneErrCode Prepare() override;
+  CraneErrCode Spawn() override;
+  CraneErrCode Kill(int signum) override;
+  CraneErrCode Cleanup() override;
+
+  std::optional<TaskExecId> GetExecId() const override {
+    if (m_pod_id_.empty()) return std::nullopt;
+    return m_pod_id_;
+  }
+
+  const cri::api::PodSandboxConfig& PodConfig() const { return m_pod_config_; }
+  const std::string& PodId() const { return m_pod_id_; }
+
+ private:
+  // NOTE: Should be consistent with ContainerInstance.
+  // We use this to get a consistent data dir for pod/containers.
+  static constexpr std::string_view kPodLogDirPattern = "{}.out";
+  // NOTE: Should be consistent with ContainerInstance.
+  // We get PodSandboxConfig from this file in another common steps.
+  static constexpr std::string_view kPodConfigFilePattern = "{}.conf";
+  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
+
+  static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
+                                 const std::string& node_name);
+  static CraneErrCode InjectFakeRootConfig_(
+      const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
+
+  CraneErrCode SetPodSandboxConfig_(
+      const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+
+  cri::api::PodSandboxConfig m_pod_config_;
+
+  std::string m_pod_id_;
+  std::filesystem::path m_log_dir_;
+  std::filesystem::path m_config_file_;
+};
+
+class ContainerInstance : public ITaskInstance {
  public:
   explicit ContainerInstance(StepInstance* step_spec)
-      : ITaskInstance(step_spec),
-        m_type_(step_spec->IsDaemonStep() ? ContainerType::POD
-                                          : ContainerType::CONTAINER) {}
+      : ITaskInstance(step_spec) {}
   ~ContainerInstance() override = default;
 
   ContainerInstance(const ContainerInstance&) = delete;
@@ -281,7 +339,6 @@ class ContainerInstance : public ITaskInstance {
  private:
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
-
   static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
@@ -304,8 +361,6 @@ class ContainerInstance : public ITaskInstance {
   CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
                                      cri::api::PodSandboxConfig* config);
   CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
-
-  ContainerType m_type_{ContainerType::CONTAINER};
 
   std::string m_image_id_;
   std::string m_pod_id_;
