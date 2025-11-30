@@ -257,17 +257,25 @@ void StartServer() {
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
     ::Craned::Supervisor::g_runtime_status.Status =
         Craned::Supervisor::StepStatus::Running;
+
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
-    if (g_config.Container.Enabled && g_config.StepSpec.has_pod_meta()) {
-      auto ok = g_task_mgr->ExecuteTaskAsync();
-      auto err = ok.get();
-      // Just wait here for pod setup. if pod failed, daemon step failed.
-      if (err != CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to start daemon step, code: {}",
-                    static_cast<int>(err));
+    if (g_config.StepSpec.has_pod_meta()) {
+      if (!g_config.Container.Enabled) {
+        CRANE_ERROR(
+            "Container config is required for daemon step with pod spec.");
         ::Craned::Supervisor::g_runtime_status.Status =
             Craned::Supervisor::StepStatus::Failed;
+      } else {
+        auto ok = g_task_mgr->ExecuteTaskAsync();
+        auto err = ok.get();
+        // Just wait here for pod setup. if pod failed, daemon step failed.
+        if (err != CraneErrCode::SUCCESS) {
+          CRANE_ERROR("Failed to start daemon step, code: {}",
+                      static_cast<int>(err));
+          ::Craned::Supervisor::g_runtime_status.Status =
+              Craned::Supervisor::StepStatus::Failed;
+        }
       }
     }
   } else {

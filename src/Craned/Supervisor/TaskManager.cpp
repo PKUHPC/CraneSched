@@ -41,8 +41,8 @@ using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
 CraneErrCode StepInstance::Prepare() {
-  // No need to write script for calloc or container tasks
-  if (IsCalloc() || IsContainer()) return CraneErrCode::SUCCESS;
+  // No need to write script for calloc or container steps
+  if (IsCalloc() || IsContainer() || IsPod()) return CraneErrCode::SUCCESS;
 
   auto sh_path = g_config.CraneScriptDir /
                  fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
@@ -53,10 +53,10 @@ CraneErrCode StepInstance::Prepare() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (this->IsBatch())
-    fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
-  else  // Crun
+  if (this->IsCrun())
     fputs(m_step_to_supv_.interactive_meta().sh_script().c_str(), fptr);
+  else
+    fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
 
   fclose(fptr);
 
@@ -73,14 +73,6 @@ void StepInstance::CleanUp() {
   if (script_path.has_value()) util::os::DeleteFile(script_path.value());
 }
 
-bool StepInstance::IsContainer() const noexcept {
-  return m_step_to_supv_.has_container_meta();
-}
-
-bool StepInstance::IsBatch() const noexcept {
-  return !interactive_type.has_value();
-}
-
 bool StepInstance::IsInteractive() const noexcept {
   return interactive_type.has_value();
 }
@@ -95,7 +87,15 @@ bool StepInstance::IsCalloc() const noexcept {
          interactive_type.value() == crane::grpc::Calloc;
 }
 
-bool StepInstance::IsDaemonStep() const noexcept {
+bool StepInstance::IsPod() const noexcept {
+  return IsDaemon() && m_step_to_supv_.has_pod_meta();
+}
+
+bool StepInstance::IsContainer() const noexcept {
+  return m_step_to_supv_.has_container_meta();
+}
+
+bool StepInstance::IsDaemon() const noexcept {
   return m_step_to_supv_.step_type() == crane::grpc::StepType::DAEMON;
 }
 
@@ -620,6 +620,277 @@ std::vector<std::string> ProcInstance::GetChildProcExecArgv_() const {
   return argv;
 }
 
+std::string PodInstance::MakeHashId_(job_id_t job_id,
+                                     const std::string& job_name,
+                                     const std::string& node_name) {
+  std::string h_msg =
+      std::format("{}\x1f{}\x1f{}", job_id, node_name, job_name);
+  uint64_t h64 =
+      (static_cast<uint64_t>(util::Crc32Of(h_msg, 0xA5A5A5A5U)) << 32) |
+      util::Adler32Of(h_msg, 0x3C3C3C3CU);
+  return std::format("{:016x}", h64);  // 16 hex chars, lowercase
+}
+
+CraneErrCode PodInstance::InjectFakeRootConfig_(
+    const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx) {
+  using cri::CriClient;
+
+  auto subuid = pwd.SubUidRanges();
+  auto subgid = pwd.SubGidRanges();
+
+  if (!subuid.Valid() || !subgid.Valid()) {
+    CRANE_ERROR("SubUID/SubGID ranges are not valid for uid: {}, gid: {}",
+                pwd.Uid(), pwd.Gid());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // K8s/Containerd currently assume only one continuous range is set for
+  // userns. Otherwise, netns in userns will fail.
+  auto uid_mapping =
+      CriClient::MakeIdMapping(subuid[0].start, 0, subuid[0].count);
+  auto gid_mapping =
+      CriClient::MakeIdMapping(subgid[0].start, 0, subgid[0].count);
+
+  // Use idmapped mounts for fake root.
+  // Code below could be unintuitive. See vfsuid for details.
+  // m_mount_uid_mapping_ = CriClient::MakeIdMapping(subuid[0].start, pwd.Uid(),
+  // 1);
+  // m_mount_gid_mapping_ = CriClient::MakeIdMapping(subgid[0].start,
+  // pwd.Gid(), 1);
+
+  auto* userns_options =
+      sec_ctx->mutable_namespace_options()->mutable_userns_options();
+
+  // NOTE: Always use POD mode for userns.
+  userns_options->set_mode(cri::api::NamespaceMode::POD);
+  userns_options->clear_uids();
+  userns_options->clear_gids();
+
+  // This is a workaround for CRI which only supports only one id mapping in
+  // user namespace. See:
+  // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
+  // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
+  userns_options->mutable_uids()->Add(std::move(uid_mapping));
+  userns_options->mutable_gids()->Add(std::move(gid_mapping));
+
+  // Set id as faked root(0) in userns
+  sec_ctx->mutable_run_as_user()->set_value(0);
+  sec_ctx->mutable_run_as_group()->set_value(0);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::SetPodSandboxConfig_(
+    const crane::grpc::PodTaskAdditionalMeta& pod_meta) {
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelUidKey;
+
+  // All steps in a job share the same pod.
+  job_id_t job_id = g_config.JobId;
+
+  // FIXME: Replace this with job name
+  const std::string& job_name = g_config.StepSpec.name();
+  const std::string& node_name = g_config.CranedIdOfThisNode;
+
+  uid_t uid = m_parent_step_inst_->pwd.Uid();
+  gid_t gid = m_parent_step_inst_->pwd.Gid();
+
+  // Generate hash for pod name and uid.
+  std::string h16 = MakeHashId_(job_id, job_name, node_name);
+  // Hostname: job-<job_id>-<node_name>
+  std::string hostname = util::SlugDns1123(
+      std::format("job-{}-{}", job_id, node_name), kCriDnsMaxLabelLen);
+
+  // metadata
+  auto* metadata = m_pod_config_.mutable_metadata();
+  // pod name：same as hostname; pod uid: <h16>
+  metadata->set_name(hostname);
+  metadata->set_uid(std::move(h16));
+
+  // hostname
+  m_pod_config_.set_hostname(std::move(hostname));
+
+  // labels
+  m_pod_config_.mutable_labels()->insert(
+      {{std::string(kCriLabelUidKey), std::to_string(uid)},
+       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+       {std::string(kCriLabelJobNameKey), job_name}});
+  m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
+                                         pod_meta.labels().end());
+  m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
+                                              pod_meta.annotations().end());
+
+  // log directory
+  m_pod_config_.set_log_directory(m_log_dir_);
+
+  if (pod_meta.has_ports()) {
+    // FIXME: Add repeated ports support in PodTaskAdditionalMeta
+    const auto& ports = pod_meta.ports();
+    auto* p = m_pod_config_.add_port_mappings();
+    p->set_protocol(static_cast<cri::api::Protocol>(ports.protocol()));
+    p->set_host_port(ports.host_port());
+    p->set_container_port(ports.container_port());
+    p->set_host_ip(ports.host_ip());
+  }
+
+  // FIXME: This is just a workaround before we have seperated level of step.
+  // set cgroup parent
+  auto* linux_config = m_pod_config_.mutable_linux();
+  linux_config->set_cgroup_parent(
+      std::filesystem::path(g_config.CgroupPath).parent_path().string());
+
+  // security context
+  auto* sec_ctx = linux_config->mutable_security_context();
+  auto* ns_options = sec_ctx->mutable_namespace_options();
+  ns_options->set_network(
+      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().network()));
+  ns_options->set_pid(
+      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().pid()));
+  ns_options->set_ipc(
+      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().ipc()));
+  ns_options->set_target_id(pod_meta.namespace_().target_id());
+
+  // user namespace
+  if (uid != 0) {
+    // Non-root user can use userns or run_as_user/run_as_group.
+    if (pod_meta.userns()) {
+      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, sec_ctx) !=
+          CraneErrCode::SUCCESS) {
+        CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
+                    job_id);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+
+      // If user want to use other uid/gid inside userns, it's also ok.
+      if (pod_meta.run_as_user() != 0 || pod_meta.run_as_group() != 0) {
+        sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
+        sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+      }
+    } else if (pod_meta.run_as_user() == uid &&
+               pod_meta.run_as_group() == gid) {
+      // If Non-root user using host userns, uid/gid is limited to its own.
+      sec_ctx->mutable_run_as_user()->set_value(uid);
+      sec_ctx->mutable_run_as_group()->set_value(gid);
+    } else {
+      CRANE_ERROR("Unsupported identity setting for pod of job #{}", job_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+  } else {
+    // root user always using host userns. However, run_as_* could apply.
+    if (pod_meta.run_as_user() != 0 || pod_meta.run_as_group() != 0) {
+      sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
+      sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+    }
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Prepare() {
+  const auto& step_to_supv = m_parent_step_inst_->GetStep();
+  const auto* pod_meta =
+      step_to_supv.has_pod_meta() ? &step_to_supv.pod_meta() : nullptr;
+
+  if (pod_meta == nullptr) {
+    CRANE_ERROR("Missing pod meta for container job #{}", g_config.JobId);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  // Generate log pathes
+  m_log_dir_ = std::filesystem::path(step_to_supv.cwd()) /
+               std::format(kPodLogDirPattern, g_config.JobId);
+  m_config_file_ = m_log_dir_ / std::format(kPodConfigFilePattern,
+                                            g_config.CranedIdOfThisNode);
+
+  // Create private directory for container task
+  if (!util::os::CreateFoldersForFileEx(m_config_file_,
+                                        m_parent_step_inst_->pwd.Uid(),
+                                        m_parent_step_inst_->pwd.Gid(), 0700)) {
+    CRANE_ERROR("Failed to create log directory {} for container #{}.{}",
+                m_log_dir_, g_config.JobId, g_config.StepId);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // If already exists, launch failed.
+  if (std::filesystem::exists(m_config_file_)) {
+    CRANE_ERROR("Pod config file {} already exists for container #{}.{}",
+                m_config_file_, g_config.JobId, g_config.StepId);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  // Pod is solely associated with job, not step.
+  if (auto err = SetPodSandboxConfig_(*pod_meta); err != CraneErrCode::SUCCESS)
+    return err;
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Spawn() {
+  // Write pod config to file to persist.
+  std::ofstream output(m_config_file_,
+                       std::ios::out | std::ios::trunc | std::ios::binary);
+  if (!output) {
+    CRANE_ERROR("Failed to open config file {}: {}", m_config_file_,
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (!m_pod_config_.SerializeToOstream(&output)) {
+    CRANE_ERROR("Failed to write config to file {}: {}", m_config_file_,
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
+  if (!pod_id_expt.has_value()) {
+    const auto& rich_err = pod_id_expt.error();
+    CRANE_ERROR("Failed to run pod sandbox for container job #{}: {}",
+                g_config.JobId, rich_err.description());
+
+    // Clean up the config file on failure
+    std::error_code ec;
+    bool ok = std::filesystem::remove(m_config_file_, ec);
+    if (!ok)
+      CRANE_ERROR("Failed to remove pod config file {} for job #{}: {}",
+                  m_config_file_, g_config.JobId, ec.message());
+
+    return rich_err.code();
+  }
+
+  m_pod_id_ = std::move(pod_id_expt.value());
+  CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, g_config.JobId);
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Kill(int signum) {
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto result = cri_client->RemovePodSandbox(m_pod_id_);
+  if (!result.has_value()) {
+    const auto& rich_err = result.error();
+    CRANE_ERROR("Failed to remove pod sandbox {} for job #{}: {}", m_pod_id_,
+                g_config.JobId, rich_err.description());
+    return rich_err.code();
+  }
+
+  CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Cleanup() {
+  g_thread_pool->detach_task([p = m_config_file_]() {
+    std::error_code ec;
+    bool ok = std::filesystem::remove(p, ec);
+    if (!ok)
+      CRANE_ERROR("Failed to remove pod config file {}: {}", p, ec.message());
+  });
+
+  return CraneErrCode::SUCCESS;
+}
+
 void ContainerInstance::InitEnvMap() {
   ITaskInstance::InitEnvMap();
   if (!GetParentStep().has_container_meta()) return;
@@ -636,7 +907,13 @@ CraneErrCode ContainerInstance::Prepare() {
   const auto* ca_meta = step_to_supv.has_container_meta()
                             ? &step_to_supv.container_meta()
                             : nullptr;
+
   auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  if (ca_meta == nullptr) {
+    CRANE_ERROR("Missing container meta for container job #{}", g_config.JobId);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
 
   // Generate log pathes
   m_log_dir_ = std::filesystem::path(step_to_supv.cwd()) /
@@ -655,91 +932,52 @@ CraneErrCode ContainerInstance::Prepare() {
 
   // Create the log file before container runtime and chmod/chown it,
   // so the log file is always owned by the user, not root.
-  if (m_type_ == ContainerType::CONTAINER) {
-    std::ofstream(m_log_file_).close();
-    if (chmod(m_log_file_.c_str(), 0600) != 0) {
-      CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-    if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
-              m_parent_step_inst_->pwd.Gid()) != 0) {
-      CRANE_ERROR("Failed to chown log file {}", m_log_file_);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
+  std::ofstream(m_log_file_).close();
+  if (chmod(m_log_file_.c_str(), 0600) != 0) {
+    CRANE_ERROR("Failed to chmod log file {}", m_log_file_);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (chown(m_log_file_.c_str(), m_parent_step_inst_->pwd.Uid(),
+            m_parent_step_inst_->pwd.Gid()) != 0) {
+    CRANE_ERROR("Failed to chown log file {}", m_log_file_);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // Prepare environment variables for both POD and CONTAINER
   InitEnvMap();
 
-  if (m_type_ == ContainerType::POD) {
-    if (pod_meta == nullptr) {
-      CRANE_ERROR("Missing pod meta for container job #{}", g_config.JobId);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
-    // For POD type, directly launch pod at this stage.
-    // NOTE: Pod is solely associated with job, not step.
-    if (auto err = SetPodSandboxConfig_(*pod_meta);
-        err != CraneErrCode::SUCCESS)
-      return err;
+  // Pull image according to pull policy
+  auto image_id_opt = cri_client->PullImage(
+      ca_meta->image().image(), ca_meta->image().username(),
+      ca_meta->image().password(), ca_meta->image().server_address(),
+      ca_meta->image().pull_policy());
 
-    auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
-    if (!pod_id_expt.has_value()) {
-      const auto& rich_err = pod_id_expt.error();
-      CRANE_ERROR("Failed to run pod sandbox for container job #{}: {}",
-                  g_config.JobId, rich_err.description());
-      return rich_err.code();
-    }
-
-    m_pod_id_ = std::move(pod_id_expt.value());
-    CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, g_config.JobId);
-
-    return CraneErrCode::SUCCESS;
-
-  } else if (m_type_ == ContainerType::CONTAINER) {
-    if (ca_meta == nullptr) {
-      CRANE_ERROR("Missing container meta for container step #{}.{}",
-                  g_config.JobId, g_config.StepId);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
-    // For CONTAINER type, pull image and create container here.
-    // Pull image according to pull policy
-    auto image_id_opt = cri_client->PullImage(
-        ca_meta->image().image(), ca_meta->image().username(),
-        ca_meta->image().password(), ca_meta->image().server_address(),
-        ca_meta->image().pull_policy());
-
-    if (!image_id_opt.has_value()) {
-      CRANE_ERROR("Failed to pull image {} for container step #{}.{}",
-                  ca_meta->image().image(), g_config.JobId, g_config.StepId);
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-
-    m_image_id_ = std::move(image_id_opt.value());
-
-    // FIXME: Query PodSandbox ID from CRI.
-
-    // Create the container but not start here
-    if (auto err = SetContainerConfig_(*ca_meta, pod_meta);
-        err != CraneErrCode::SUCCESS)
-      return err;
-    auto container_id_expt = cri_client->CreateContainer(
-        m_pod_id_, m_pod_config_, &m_container_config_);
-    if (!container_id_expt.has_value()) {
-      const auto& rich_err = container_id_expt.error();
-      CRANE_ERROR("Failed to create container for #{}.{}: {}", g_config.JobId,
-                  g_config.StepId, rich_err.description());
-      return rich_err.code();
-    }
-    m_container_id_ = std::move(container_id_expt.value());
-    CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_,
-                g_config.JobId, g_config.StepId);
-    return CraneErrCode::SUCCESS;
-
-  } else {
-    CRANE_ERROR("Unknown container type for container step #{}.{}",
-                g_config.JobId, g_config.StepId);
+  if (!image_id_opt.has_value()) {
+    CRANE_ERROR("Failed to pull image {} for container step #{}.{}",
+                ca_meta->image().image(), g_config.JobId, g_config.StepId);
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
+
+  m_image_id_ = std::move(image_id_opt.value());
+
+  // FIXME: Query PodSandbox ID from CRI.
+
+  // Create the container but not start here
+  if (auto err = SetContainerConfig_(*ca_meta, pod_meta);
+      err != CraneErrCode::SUCCESS)
+    return err;
+  auto container_id_expt = cri_client->CreateContainer(m_pod_id_, m_pod_config_,
+                                                       &m_container_config_);
+  if (!container_id_expt.has_value()) {
+    const auto& rich_err = container_id_expt.error();
+    CRANE_ERROR("Failed to create container for #{}.{}: {}", g_config.JobId,
+                g_config.StepId, rich_err.description());
+    return rich_err.code();
+  }
+  m_container_id_ = std::move(container_id_expt.value());
+  CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_,
+              g_config.JobId, g_config.StepId);
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::Spawn() {
@@ -862,129 +1100,6 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
   return m_exit_info_;
 }
 
-CraneErrCode ContainerInstance::SetPodSandboxConfig_(
-    const crane::grpc::PodTaskAdditionalMeta& pod_meta) {
-  using cri::kCriLabelJobIdKey;
-  using cri::kCriLabelJobNameKey;
-  using cri::kCriLabelUidKey;
-
-  // All steps in a job share the same pod.
-  job_id_t job_id = g_config.JobId;
-
-  // FIXME: Use job_name. Here is step_name actually.
-  const std::string& job_name = GetParentStep().name();
-  const std::string& node_name = g_config.CranedIdOfThisNode;
-
-  uid_t uid = m_parent_step_inst_->pwd.Uid();
-  gid_t gid = m_parent_step_inst_->pwd.Gid();
-
-  // Generate hash for pod name and uid.
-  std::string h16 = MakeHashId_(job_id, job_name, node_name);
-  std::string hsuffix = h16.substr(0, kCriPodSuffixLen);
-
-  std::string pod_name_base = util::SlugDns1123(
-      job_name.empty() ? std::format("job-{}", job_id) : job_name,
-      kCriDnsMaxLabelLen - /*'-'*/ 1 - kCriPodSuffixLen);
-
-  // metadata
-  auto* metadata = m_pod_config_.mutable_metadata();
-  // pod name：<pod_name_base>-<hsuffix>; pod uid: <h16>
-  metadata->set_name(pod_name_base + "-" + hsuffix);
-  metadata->set_uid(std::move(h16));
-
-  // hostname
-  m_pod_config_.set_hostname(util::SlugDns1123(
-      metadata->name() + "-" + node_name, kCriDnsMaxLabelLen));
-
-  // labels
-  m_pod_config_.mutable_labels()->insert(
-      {{std::string(kCriLabelUidKey), std::to_string(uid)},
-       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-       {std::string(kCriLabelJobNameKey), job_name}});
-  m_pod_config_.mutable_labels()->insert(pod_meta.labels().begin(),
-                                         pod_meta.labels().end());
-  m_pod_config_.mutable_annotations()->insert(pod_meta.annotations().begin(),
-                                              pod_meta.annotations().end());
-
-  // log directory
-  m_pod_config_.set_log_directory(m_log_dir_);
-
-  if (pod_meta.has_ports()) {
-    const auto& ports = pod_meta.ports();
-    auto* p = m_pod_config_.add_port_mappings();
-    p->set_protocol(static_cast<cri::api::Protocol>(ports.protocol()));
-    p->set_host_port(ports.host_port());
-    p->set_container_port(ports.container_port());
-    p->set_host_ip(ports.host_ip());
-  }
-
-  // FIXME: This is just a workaround before we have CgroupManager refactored
-  // for multi-step support.
-  {
-    // set cgroup parent
-    auto* linux_config = m_pod_config_.mutable_linux();
-    std::ifstream cgroup_file("/proc/self/cgroup");
-    std::string line;
-    std::filesystem::path cgroup_path;
-
-    while (std::getline(cgroup_file, line)) {
-      // cgroup v1: 10:memory:/user.slice
-      // cgroup v2: 0::/user.slice
-      auto pos = line.rfind(':');
-      if (pos != std::string::npos && pos + 1 < line.size()) {
-        cgroup_path = line.substr(pos + 1);
-        if (!cgroup_path.empty()) {
-          break;
-        }
-      }
-    }
-
-    if (cgroup_path.empty()) {
-      CRANE_ERROR("Failed to determine cgroup path from /proc/self/cgroup");
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
-    linux_config->set_cgroup_parent(cgroup_path.parent_path().string());
-  }
-
-  // security context
-  auto* sec_ctx = m_pod_config_.mutable_linux()->mutable_security_context();
-  auto* ns_options = sec_ctx->mutable_namespace_options();
-  ns_options->set_network(
-      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().network()));
-  ns_options->set_pid(
-      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().pid()));
-  ns_options->set_ipc(
-      static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().ipc()));
-  ns_options->set_target_id(pod_meta.namespace_().target_id());
-
-  if (uid != 0) {
-    // Non root task can use userns or run_as_user/run_as_group.
-    if (pod_meta.userns()) {
-      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, &m_pod_config_) !=
-          CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
-                    job_id);
-        return CraneErrCode::ERR_SYSTEM_ERR;
-      }
-    } else if (pod_meta.run_as_user() == uid &&
-               pod_meta.run_as_group() == gid) {
-      // Set run_as_user and run_as_group if not using userns.
-      // TODO: egid and supplemental groups?
-      sec_ctx->mutable_run_as_user()->set_value(uid);
-      sec_ctx->mutable_run_as_group()->set_value(gid);
-    } else {
-      CRANE_ERROR("Unsupported identity setting for pod of job #{}", job_id);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
-  } else {
-    // Root task will not use userns but can set run_as_user/run_as_group.
-    sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
-  }
-
-  return CraneErrCode::SUCCESS;
-}
-
 CraneErrCode ContainerInstance::SetContainerConfig_(
     const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
     const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
@@ -1094,74 +1209,6 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   return CraneErrCode::SUCCESS;
 }
 
-// Setup mapping for kid <-> uid. For kernel id and userspace id, See:
-// https://www.kernel.org/doc/html/next/filesystems/idmappings.html
-cri::api::IDMapping ContainerInstance::MakeIdMapping_(uid_t kernel_id,
-                                                      uid_t userspace_id,
-                                                      size_t size) {
-  cri::api::IDMapping mapping{};
-  mapping.set_host_id(kernel_id);
-  mapping.set_container_id(userspace_id);
-  mapping.set_length(size);
-  return mapping;
-}
-
-std::string ContainerInstance::MakeHashId_(job_id_t job_id,
-                                           const std::string& job_name,
-                                           const std::string& node_name) {
-  std::string h_msg =
-      std::format("{}\x1f{}\x1f{}", job_id, node_name, job_name);
-  uint64_t h64 =
-      (static_cast<uint64_t>(util::Crc32Of(h_msg, 0xA5A5A5A5U)) << 32) |
-      util::Adler32Of(h_msg, 0x3C3C3C3CU);
-  return std::format("{:016x}", h64);  // 16 hex chars, lowercase
-}
-
-CraneErrCode ContainerInstance::SetSubIdMappings_(const PasswordEntry& pwd) {
-  auto subuid = pwd.SubUidRanges();
-  auto subgid = pwd.SubGidRanges();
-
-  if (!subuid.Valid() || !subgid.Valid()) {
-    CRANE_ERROR("SubUID/SubGID ranges are not valid for user {}", pwd.Uid());
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // K8s/Containerd currently assume only one continuous range is set for
-  // userns. Otherwise, netns in userns will fail.
-  m_userns_uid_mapping_ = MakeIdMapping_(subuid[0].start, 0, subuid[0].count);
-  m_userns_gid_mapping_ = MakeIdMapping_(subgid[0].start, 0, subgid[0].count);
-
-  // Use idmapped mounts for fake root.
-  // Code below could be unintuitive. See vfsuid for details.
-  m_mount_uid_mapping_ = MakeIdMapping_(subuid[0].start, pwd.Uid(), 1);
-  m_mount_gid_mapping_ = MakeIdMapping_(subgid[0].start, pwd.Gid(), 1);
-
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode ContainerInstance::InjectFakeRootConfig_(
-    const PasswordEntry& pwd, cri::api::PodSandboxConfig* config) {
-  if (m_userns_uid_mapping_.length() == 0 &&
-      SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  // set linux pod options
-  auto* linux_sec_context = config->mutable_linux()->mutable_security_context();
-  auto* userns_options =
-      linux_sec_context->mutable_namespace_options()->mutable_userns_options();
-
-  // Fake root
-  userns_options->set_mode(cri::api::NamespaceMode::POD);
-  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
-  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
-
-  linux_sec_context->mutable_run_as_user()->set_value(0);
-  linux_sec_context->mutable_run_as_group()->set_value(0);
-
-  return CraneErrCode::SUCCESS;
-}
-
 CraneErrCode ContainerInstance::InjectFakeRootConfig_(
     const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
   if (m_userns_uid_mapping_.length() == 0 &&
@@ -1193,7 +1240,10 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 
 CraneErrCode ProcInstance::Prepare() {
   // Write m_meta_
-  if (m_parent_step_inst_->IsBatch()) {
+
+  if (m_parent_step_inst_->IsCrun()) {
+    m_meta_ = std::make_unique<CrunInstanceMeta>();
+  } else {
     // Prepare file output name for batch tasks.
     /* Perform file name substitutions
      * %j - Job ID
@@ -1214,20 +1264,19 @@ CraneErrCode ProcInstance::Prepare() {
     }
 
     m_meta_ = std::move(meta);
-  } else {
-    m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
+
   std::filesystem::path sh_path = m_parent_step_inst_->script_path.value();
   m_meta_->parsed_sh_script_path = sh_path;
 
   // If interpreter is not set, let system decide.
   m_executable_ = sh_path.string();
-  if (m_parent_step_inst_->IsBatch() &&
+  if (!m_parent_step_inst_->IsInteractive() &&
       !GetParentStep().batch_meta().interpreter().empty()) {
     m_executable_ = fmt::format(
         "{} {}", GetParentStep().batch_meta().interpreter(), sh_path.string());
   }
-  // TODO: Currently we don't support arguments in batch scripts.
+  // TODO: Currently we don't support arguments in scripts.
   // m_arguments_ = std::list<std::string>{};
 
   return CraneErrCode::SUCCESS;
@@ -1261,13 +1310,13 @@ CraneErrCode ProcInstance::Spawn() {
   }
 
   pid_t child_pid = -1;
-  if (m_parent_step_inst_->IsBatch())
-    child_pid = fork();
-  else {
+  if (m_parent_step_inst_->IsCrun()) {
     auto pid_expt = ForkCrunAndInitMeta_();
     if (!pid_expt) return pid_expt.error();
 
     child_pid = pid_expt.value();
+  } else {
+    child_pid = fork();
   }
 
   if (child_pid == -1) {
@@ -1380,10 +1429,10 @@ CraneErrCode ProcInstance::Spawn() {
       std::abort();
     }
 
-    if (m_parent_step_inst_->IsBatch()) {
-      if (SetChildProcBatchFd_() != CraneErrCode::SUCCESS) std::abort();
-    } else if (m_parent_step_inst_->IsCrun()) {
+    if (m_parent_step_inst_->IsCrun()) {
       SetupCrunFwdAtChild_();
+    } else if (SetChildProcBatchFd_() != CraneErrCode::SUCCESS) {
+      std::abort();
     }
 
     child_process_ready.set_ok(true);
@@ -1396,10 +1445,10 @@ CraneErrCode ProcInstance::Spawn() {
 
     close(ctrl_fd);
 
-    // Close stdin for batch tasks.
+    // Close stdin for non-interactive(batch) tasks.
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
-    if (m_parent_step_inst_->IsBatch()) close(0);
+    if (!m_parent_step_inst_->IsInteractive()) close(0);
     util::os::CloseFdFrom(3);
 
     if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {
@@ -1453,7 +1502,8 @@ CraneErrCode ProcInstance::Kill(int signum) {
 }
 
 CraneErrCode ProcInstance::Cleanup() {
-  if (m_parent_step_inst_->IsBatch() || m_parent_step_inst_->IsCrun()) {
+  // No cleanup for calloc.
+  if (!m_parent_step_inst_->IsCalloc()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
     if (!path.empty())
       g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
@@ -1596,7 +1646,7 @@ void TaskManager::Wait() {
 
 void TaskManager::ShutdownSupervisor() {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemonStep()) {
+  if (m_step_.IsDaemon()) {
     // TODO: Add Pod deletion for daemon step.
     CRANE_DEBUG("Sending a completed status as daemon step.");
     g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
@@ -1667,7 +1717,10 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 
   auto elem = ExecuteTaskElem{.ok_prom = std::move(ok_promise)};
 
-  if (m_step_.IsContainer()) {
+  if (m_step_.IsPod()) {
+    // Pod
+    elem.instance = std::make_unique<PodInstance>(&m_step_);
+  } else if (m_step_.IsContainer()) {
     // Container
     elem.instance = std::make_unique<ContainerInstance>(&m_step_);
   } else {
@@ -1681,8 +1734,11 @@ std::future<CraneErrCode> TaskManager::ExecuteTaskAsync() {
 }
 
 CraneErrCode TaskManager::LaunchExecution_(ITaskInstance* task) {
+  // Prepare/Spawn should not be called for Calloc steps.
+  CRANE_ASSERT_MSG(!m_step_.IsCalloc(), "Calloc step should not launch tasks");
+
   // Init CriClient before preparation
-  if (m_step_.IsContainer()) m_step_.InitCriClient();
+  if (m_step_.IsPod() || m_step_.IsContainer()) m_step_.InitCriClient();
 
   // Prepare for execution
   CRANE_INFO("[Task #{}] Preparing task", task->task_id);
@@ -1950,7 +2006,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
-    int sig = (m_step_.IsBatch() || m_step_.IsContainer()) ? SIGTERM : SIGHUP;
+    int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
     if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
