@@ -259,15 +259,14 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
-        "Invalid memory format"
-        "The entered wckey does not exist or no input wckey",
+        "Invalid memory format",
+        "The specified wckey does not exist",
 
         // 85 - 89
-        "The wckey already exists in the crane",
+        "The wckey already exists in crane",
         "The entered cluster does not exist",
-        "The wckey is default wckey, please modify default wckey then delete wckey",
-        "No default wckey, please submit job by wckey or set default wckey"
-
+        "Cannot delete the default wckey. Please set a different default wckey first",
+        "No default wckey is set. Please specify a wckey or set a default wckey"
     };
 // clang-format on
 }  // namespace Internal

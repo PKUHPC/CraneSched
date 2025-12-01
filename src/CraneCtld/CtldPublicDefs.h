@@ -1115,7 +1115,8 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
- std::unordered_map<std::string/*cluster*/, std::string/*wckey_name*/> default_wckey_map;
+  std::unordered_map<std::string /*cluster*/, std::string /*wckey_name*/>
+      default_wckey_map;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
@@ -1185,7 +1186,6 @@ struct Wckey {
            user_name == other.user_name && is_default == other.is_default;
   }
 };
-
 
 // TODO: not use free, only total and used
 struct License {
