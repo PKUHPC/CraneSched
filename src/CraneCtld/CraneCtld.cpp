@@ -326,11 +326,11 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightPartition = 0;
 
-      if (config["PriorityWeightQ0S"])
-        g_config.PriorityConfig.WeightQOS =
-            config["PriorityWeightQ0S"].as<uint32_t>();
+      if (config["PriorityWeightQoS"])
+        g_config.PriorityConfig.WeightQoS =
+            config["PriorityWeightQoS"].as<uint32_t>();
       else
-        g_config.PriorityConfig.WeightQOS = 0;
+        g_config.PriorityConfig.WeightQoS = 0;
 
       if (config["PendingQueueMaxSize"]) {
         g_config.PendingQueueMaxSize =

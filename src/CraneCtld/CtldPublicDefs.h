@@ -144,7 +144,7 @@ struct Config {
     uint32_t WeightFairShare;
     uint32_t WeightJobSize;
     uint32_t WeightPartition;
-    uint32_t WeightQOS;
+    uint32_t WeightQoS;
   };
 
   struct PluginConfig {
