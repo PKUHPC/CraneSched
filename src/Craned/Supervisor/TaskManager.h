@@ -279,8 +279,7 @@ class PodInstance : public ITaskInstance {
     return m_pod_id_;
   }
 
-  const cri::api::PodSandboxConfig& PodConfig() const { return m_pod_config_; }
-  const std::string& PodId() const { return m_pod_id_; }
+  const TaskExitInfo& HandlePodExited(const cri::api::ContainerStatus& status);
 
  private:
   // NOTE: Should be consistent with ContainerInstance.
@@ -520,6 +519,8 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, TerminatedBy terminated_by);
 
+  void SetActivelyShutdown() { m_active_shutdown_ = true; }
+
   void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
@@ -594,6 +595,10 @@ class TaskManager {
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
+
+  // For daemon step, only shutdown at explicit request from craned.
+  // Otherwise, task manager will exit when all tasks are finished.
+  std::atomic_bool m_active_shutdown_{false};
 
   StepInstance m_step_;
   std::unordered_map<TaskExecId, task_id_t> m_exec_id_task_id_map_;
