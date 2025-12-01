@@ -197,7 +197,6 @@ struct Config {
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
   bool MustNeedWckey{false};
-  bool WckeyValid{false};
 };
 
 struct RunTimeStatus {
