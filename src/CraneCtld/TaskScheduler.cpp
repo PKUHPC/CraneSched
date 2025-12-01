@@ -4175,8 +4175,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
           result && task->wckey == result.value()) {
         task->wckey = "*" + task->wckey;
       }
-    // Note: Ignore error from GetExistedDefaultWckeyName since the user's
-    // wckey was already validated; the default check is only for marking
+      // Note: Ignore error from GetExistedDefaultWckeyName since the user's
+      // wckey was already validated; the default check is only for marking
     } else {
       // No wckey provided; use the default
       auto result = g_account_manager->GetExistedDefaultWckeyName(

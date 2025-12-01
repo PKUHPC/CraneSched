@@ -837,7 +837,7 @@ bool MongodbClient::InsertWckey(const Ctld::Wckey& new_wckey) {
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
-    return false;
+  return false;
 }
 
 bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
