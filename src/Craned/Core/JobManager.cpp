@@ -999,7 +999,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
 void JobManager::ActivateTaskStatusChangeAsync_(
     job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
     uint32_t exit_code, std::optional<std::string> reason,
-    google::protobuf::Timestamp timestamp) {
+    const google::protobuf::Timestamp& timestamp) {
   StepStatusChangeQueueElem status_change{.job_id = job_id,
                                           .step_id = step_id,
                                           .new_status = new_status,
@@ -1247,8 +1247,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
         CRANE_ERROR("[Step #{}.{}] Failed to get stub.", step->job_id,
                     step->step_id);
       } else {
-        CRANE_TRACE("[Step #{}.{}] Shutting down supervisor.", step->job_id,
-                    step->step_id);
+        CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
+                    step->job_id, step->step_id);
         auto err = stub->ShutdownSupervisor();
         if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR(
@@ -1291,11 +1291,10 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
   }
 }
 
-void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
-                                       crane::grpc::TaskStatus new_status,
-                                       uint32_t exit_code,
-                                       std::optional<std::string> reason,
-                                       google::protobuf::Timestamp timestamp) {
+void JobManager::StepStatusChangeAsync(
+    job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+    uint32_t exit_code, std::optional<std::string> reason,
+    const google::protobuf::Timestamp& timestamp) {
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,

@@ -891,6 +891,16 @@ CraneErrCode PodInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
+const TaskExitInfo& PodInstance::HandlePodExited(
+    const cri::api::ContainerStatus& status) {
+  // TODO: Use PodStatus.
+  m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
+  m_exit_info_.value = m_exit_info_.is_terminated_by_signal
+                           ? status.exit_code() - 128
+                           : status.exit_code();
+  return m_exit_info_;
+}
+
 void ContainerInstance::InitEnvMap() {
   ITaskInstance::InitEnvMap();
   if (!GetParentStep().has_container_meta()) return;
@@ -1645,18 +1655,20 @@ void TaskManager::Wait() {
 }
 
 void TaskManager::ShutdownSupervisor() {
-  CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemon()) {
-    // TODO: Add Pod deletion for daemon step.
-    CRANE_DEBUG("Sending a completed status as daemon step.");
-    g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
-                                           0, "");
-    g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
+  if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
+    CRANE_WARN("Daemon step not shutting down unless explicitly requested.");
+    return;
   }
-  m_step_.CleanUp();
 
-  // Explicitly release CriClient
-  m_step_.StopCriClient();
+  if (m_step_.IsDaemon()) {
+    // For daemon steps, always send a Completed status when shutting down.
+    CRANE_DEBUG("Sending a completed status as daemon step.");
+    g_craned_client->StepStatusChangeAsync(StepStatus::Completed, 0, "");
+    g_runtime_status.Status = StepStatus::Completed;
+  }
+
+  CRANE_INFO("All tasks finished, exiting...");
+  m_step_.CleanUp();
 
   g_craned_client->Shutdown();
   g_server->Shutdown();
@@ -1701,6 +1713,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   if (m_step_.AllTaskFinished()) {
     DelTerminationTimer_();
     m_step_.StopCforedClient();
+    m_step_.StopCriClient();
     if (!orphaned) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
@@ -1873,14 +1886,36 @@ void TaskManager::EvCleanCriEventQueueCb_() {
   cri::api::ContainerStatus status;
   while (m_cri_event_queue_.try_dequeue(status)) {
     // NOTE: a CRI event comes at LEAST once.
-    // For container steps, task_id always equals to 0.
+    // For container related steps, task_id always equals to 0.
     auto* t = m_step_.GetTaskInstance(0);
     if (t == nullptr) continue;  // Duplicated event
-    auto* task = dynamic_cast<ContainerInstance*>(t);
 
-    const auto& exit_info = task->HandleContainerExited(status);
-    CRANE_INFO("Receiving container exited event: {}. Signaled: {}, Value: {}",
-               status.id(), exit_info.is_terminated_by_signal, exit_info.value);
+    if (m_step_.IsPod()) {
+      auto* task = dynamic_cast<PodInstance*>(t);
+      const auto& exit_info = task->HandlePodExited(status);
+
+      if (!m_active_shutdown_.load()) {
+        CRANE_ERROR(
+            "Pod exited prematurely. Hold status change till active shutdown "
+            "is requested.");
+        m_step_.orphaned = true;
+      }
+
+      CRANE_INFO("Receiving pod exited event: {}. Signaled: {}, Value: {}",
+                 status.id(), exit_info.is_terminated_by_signal,
+                 exit_info.value);
+
+    } else if (m_step_.IsContainer()) {
+      auto* task = dynamic_cast<ContainerInstance*>(t);
+      const auto& exit_info = task->HandleContainerExited(status);
+
+      CRANE_INFO(
+          "Receiving container exited event: {}. Signaled: {}, Value: {}",
+          status.id(), exit_info.is_terminated_by_signal, exit_info.value);
+
+    } else {
+      std::unreachable();
+    }
 
     TaskStopAndDoStatusChange(0);
   }
@@ -2019,8 +2054,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
         task->terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT;
-      }
-      if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
+      } else if (elem.termination_reason == TerminatedBy::CANCELLED_BY_USER) {
         // If termination request is sent by user, send SIGKILL to ensure that
         // even freezing processes will be terminated immediately.
         sig = SIGKILL;
@@ -2028,13 +2062,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       }
 
       if (task->GetExecId().has_value()) {
-        // Will kill in 3 cases:
-        // 1. Container Task
-        // 2. Batch Task
-        // 3. Interactive Task having running process
+        // Will kill the following types of tasks:
+        // 1. Non-interactive Task
+        // 2. Interactive Task with a process running
         task->Kill(sig);
-      } else if (m_step_.interactive_type.has_value()) {
-        // For an Interactive task with no process running, it ends immediately.
+      } else if (m_step_.IsInteractive()) {
+        // For an Interactive task with no process running, it ends
+        // immediately.
         TaskFinish_(task_id, crane::grpc::TaskStatus::Completed,
                     ExitCode::EC_TERMINATED, std::nullopt);
       } else {

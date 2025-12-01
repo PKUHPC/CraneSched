@@ -2878,8 +2878,8 @@ void TaskScheduler::StepStatusChangeAsync(
                                        .exit_code = exit_code,
                                        .new_status = new_status,
                                        .craned_index = craned_index,
-                                       .reason = reason,
-                                       .timestamp = timestamp});
+                                       .reason = std::move(reason),
+                                       .timestamp = std::move(timestamp)});
   m_task_status_change_async_handle_->send();
 }
 

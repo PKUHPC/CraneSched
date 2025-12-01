@@ -789,7 +789,7 @@ class TaskScheduler {
                                        google::protobuf::Timestamp timestamp) {
     // TODO: Add reason implementation here!
     StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""), timestamp);
+                          reason.value_or(""), std::move(timestamp));
   }
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
