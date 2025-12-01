@@ -969,6 +969,7 @@ message LicenseResourceInfo {
   string description = 7;
   uint32 last_consumed = 8;
   uint32 allocated = 9;
+  uint32 flags = 10;
 }
 
 message LicenseResource {

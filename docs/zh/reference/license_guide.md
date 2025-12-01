@@ -88,23 +88,23 @@ $ cacctmgr show resource
 |---------|-----------|---------|-------|--------------|-----------|------------|-------|
 | NAME    | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | FLAGS |
 |---------|-----------|---------|-------|--------------|-----------|------------|-------|
-| matlab  | rlm_host  | License | 50    | 0            | 100       | rlm        |       |
-| nastran | flex_host | License | 100   | 0            | 100       | flexlm     |       |
+| matlab  | rlm_host  | License | 50    | 0            | 100%      | rlm        |       |
+| nastran | flex_host | License | 100   | 0            | 100%      | flexlm     |       |
 |---------|-----------|---------|-------|--------------|-----------|------------|-------|
 $ cacctmgr show resource withclusters
 |---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
 | NAME    | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | CLUSTERS | ALLOWED | FLAGS |
 |---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
-| matlab  | rlm_host  | License | 50    | 0            | 100       | rlm        | fluid    | 30      |       |
-| matlab  | rlm_host  | License | 50    | 0            | 100       | rlm        | pdf      | 70      |       |
-| nastran | flex_host | License | 100   | 0            | 100       | flexlm     | fluid    | 50      |       |
-| nastran | flex_host | License | 100   | 0            | 100       | flexlm     | pdf      | 50      |       |
+| matlab  | rlm_host  | License | 50    | 0            | 100%      | rlm        | fluid    | 30%     |       |
+| matlab  | rlm_host  | License | 50    | 0            | 100%      | rlm        | pdf      | 70%     |       |
+| nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | fluid    | 50%     |       |
+| nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | pdf      | 50%     |       |
 |---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
 ```
 配置好的许可证现在可以通过 scontrol 命令在两个集群上查看。
 ```bash
 # On cluster "pdf"
-$ scontrol show lic
+$ ccontrol show lic
 LicenseName=matlab@rlm_host
     Total=35 Used=0 Free=35 Reserved=0 Remote=yes
     LastConsumed=0 LastDeficit=0 LastUpdate=2025-11-28T13:05:44
@@ -136,14 +136,14 @@ $ cacctmgr modify resource name=matlab server=rlm_host \
   cluster=pdf set allowed=60
 Modify information succeeded
 $ cacctmgr show resource withclusters
-|---------|-----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
-| NAME    | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED(%) | SERVERTYPE | CLUSTERS | ALLOWED(%) | FLAGS |
-|---------|-----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
-| matlab  | rlm_host  | License | 200   | 0            | 90           | rlm        | pdf      | 60         |       |
-| matlab  | rlm_host  | License | 200   | 0            | 90           | rlm        | fluid    | 30         |       |
-| nastran | flex_host | License | 100   | 0            | 100          | flexlm     | fluid    | 50         |       |
-| nastran | flex_host | License | 100   | 0            | 100          | flexlm     | pdf      | 50         |       |
-|---------|-----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
+|---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
+| NAME    | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | CLUSTERS | ALLOWED | FLAGS |
+|---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
+| matlab  | rlm_host  | License | 200   | 0            | 90%       | rlm        | pdf      | 60%     |       |
+| matlab  | rlm_host  | License | 200   | 0            | 90%       | rlm        | fluid    | 30%     |       |
+| nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | fluid    | 50%     |       |
+| nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | pdf      | 50%     |       |
+|---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
 ```
 
 许可证可以按如下方式在某个集群上删除，也可以全部一起删除：
@@ -153,11 +153,11 @@ Successfully deleted Resource 'matlab@rlm_host'.
 $ cacctmgr delete resource nastran server=flex_host
 Successfully deleted Resource 'nastran@flex_host'.
 $ cacctmgr show resource withclusters
-|--------|----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
-| NAME   | SERVER   | TYPE    | COUNT | LASTCONSUMED | ALLOCATED(%) | SERVERTYPE | CLUSTERS | ALLOWED(%) | FLAGS |
-|--------|----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
-| matlab | rlm_host | License | 200   | 0            | 60           | rlm        | pdf      | 60         |       |
-|--------|----------|---------|-------|--------------|--------------|------------|----------|------------|-------|
+|--------|----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
+| NAME   | SERVER   | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | CLUSTERS | ALLOWED | FLAGS |
+|--------|----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
+| matlab | rlm_host | License | 200   | 0            | 60%       | rlm        | pdf      | 60%     |       |
+|--------|----------|---------|-------|--------------|-----------|------------|----------|---------|-------
 ```
 
 如果设置 Absolute 标志，表示每个集群的许可证 allowed 值将被视为绝对数量，而不是百分比。
@@ -166,14 +166,24 @@ $ cacctmgr show resource withclusters
 
 ```bash
 $ cacctmgr add resource deluxe cluster=fluid,pdf count=150 allowed=70 \
-  server=flex_host servertype=flexlm flags=absolute
-
+  server=flex_host servertype=flexlm flags=absolute type=license
+Resource added successfully
 $ cacctmgr show resource withclusters
-
-$ cacctmgr update resource deluxe set allowed=25 where cluster=fluid
-
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
+| NAME   | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | CLUSTERS | ALLOWED | FLAGS    |
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
+| deluxe | flex_host | License | 150   | 0            | 140       | flexlm     | pdf      | 70      | Absolute |
+| deluxe | flex_host | License | 150   | 0            | 140       | flexlm     | fluid    | 70      | Absolute |
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
+$ cacctmgr update resource name=deluxe server=flex_host cluster=fluid set allowed=25
+Modify information succeeded.
 $ cacctmgr show resource withclusters
-
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
+| NAME   | SERVER    | TYPE    | COUNT | LASTCONSUMED | ALLOCATED | SERVERTYPE | CLUSTERS | ALLOWED | FLAGS    |
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
+| deluxe | flex_host | License | 150   | 0            | 95        | flexlm     | fluid    | 25      | Absolute |
+| deluxe | flex_host | License | 150   | 0            | 95        | flexlm     | pdf      | 70      | Absolute |
+|--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
 ```
 你也可以通过在 `/etc/crane/config.yaml` 中添加 `AllLicenseResourcesAbsolute=yes`，
 将其设为所有新建许可证的默认设置（并重启 CraneCtld 使更改生效）。
@@ -188,11 +198,12 @@ $ cacctmgr show resource withclusters
 set -euxo pipefail
 
 LMSTAT=/opt/foobar/bin/lmstat
-LICENSE=foobar@db
+LICENSE=foobar
+SERVER=db
 
 consumed=$(${LMSTAT} | grep "Users of ${LICENSE}"|sed "s/.*Total of \([0-9]\+\) licenses in use)/\1/")
 
-cacctmgr update resource ${LICENSE} set lastconsumed=${consumed}
+cacctmgr update resource name=${LICENSE} server=${SERVER} set lastconsumed=${consumed}
 ```
 
 当通过 `cacctmgr` 修改 `LastConsumed` 值时，更新会自动推送到 `Crane` 控制器。
@@ -200,19 +211,21 @@ cacctmgr update resource ${LICENSE} set lastconsumed=${consumed}
 
 例如，在该集群上有 100 个 "foobar" 许可证可用，我们正在为 "blackhole" 集群分配其中的 80 个许可证：
 ```bash
-$ cacctmgr add resource foobar server=db count=100 flags=absolute cluster=blackhole allowed=80
-
+$ cacctmgr add resource foobar server=db count=100 flags=absolute cluster=blackhole allowed=80 type=license
+Resource added successfully
 $ ccontrol show lic
-
+LicenseName=foobar@db 
+        Total=80 Used=0 Free=80 Reserved=0 Remote=yes
+        LastConsumed=0 LastDeficit=0 LastUpdated=2025-12-01 11:02:23
 ```
 现在，我们的定时任务（cron job）将 LastConsumed 值更新为 30，而集群尚未为作业分配任何许可证：
 ```bash
-$ cacctmgr update resource foobar@db set lastconsumed=30
-
+$ cacctmgr update resource name=foobar server=db set lastconsumed=30
+Modify information succeeded.
 $ ccontrol show lic
-LicenseName=foobar@db
-    Total=80 Used=0 Free=70 Reserved=0 Remote=yes
-    LastConsumed=30 LastDeficit=10 LastUpdate=2025-11-28T16:39:27
+LicenseName=foobar@db 
+        Total=80 Used=0 Free=70 Reserved=0 Remote=yes
+        LastConsumed=30 LastDeficit=10 LastUpdated=2025-12-01 11:03:0
 ```
 
 请注意，集群现在已经计算出有 10 个许可证的缺口，并且已经意识到目前最多只能调度 70 个许可证。
@@ -226,10 +239,10 @@ LicenseName=foobar@db
 集群会再次将全部 80 个分配的许可证开放使用：
 
 ```bash
-$ scacctmgr update resource foobar@db set lastconsumed=20
-
+$ cacctmgr update resource name=foobar server=db set lastconsumed=20
+Modify information succeeded.
 $ ccontrol show lic
-LicenseName=foobar@db
-    Total=80 Used=0 Free=80 Reserved=0 Remote=yes
-    LastConsumed=20 LastDeficit=0 LastUpdate=2025-11-28T16:44:26
+LicenseName=foobar@db 
+        Total=80 Used=0 Free=80 Reserved=0 Remote=yes
+        LastConsumed=20 LastDeficit=0 LastUpdated=2025-12-01 11:10:48
 ```

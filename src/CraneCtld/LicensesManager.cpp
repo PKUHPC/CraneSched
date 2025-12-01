@@ -35,9 +35,14 @@ int LicensesManager::Init(
       auto iter = resource.cluster_resources.find(g_config.CraneClusterName);
       if (iter != resource.cluster_resources.end()) {
         auto license_id = std::format("{}@{}", resource.name, resource.server);
+        uint32_t total = 0;
+        if (resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+          total = iter->second;
+        else
+          total = (resource.count * iter->second) / 100;
         licenses_map.emplace(license_id,
                              License{.license_id = license_id,
-                                     .total = iter->second,
+                                     .total = total,
                                      .used = 0,
                                      .reserved = 0,
                                      .remote = true,
@@ -367,15 +372,15 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     if (iter != res_resource.cluster_resources.end()) {
       auto license_id =
           std::format("{}@{}", res_resource.name, res_resource.server);
-      uint32_t allocated = 0;
+      uint32_t total = 0;
       if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-        allocated = res_resource.allocated;
+        total = iter->second;
       else
-        allocated = (res_resource.count * res_resource.allocated) / 100;
+        total = (res_resource.count * iter->second) / 100;
       m_licenses_map_.Emplace(
           license_id,
           License{.license_id = license_id,
-                  .total = allocated,
+                  .total = total,
                   .used = 0,
                   .reserved = 0,
                   .remote = true,
@@ -434,16 +439,16 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
             "License resource {} not found in license map. now adding...",
             license_id);
 
-        uint32_t allocated = 0;
+        uint32_t total = 0;
         if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-          allocated = res_resource.allocated;
+          total = cluster_iter->second;
         else
-          allocated = (res_resource.count * res_resource.allocated) / 100;
+          total = (res_resource.count * cluster_iter->second) / 100;
 
         m_licenses_map_.Emplace(
             license_id,
             License{.license_id = license_id,
-                    .total = allocated,
+                    .total = total,
                     .used = 0,
                     .reserved = 0,
                     .remote = true,
@@ -454,9 +459,9 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
         if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-          lic->total = res_resource.allocated;
+          lic->total = cluster_iter->second;
         else
-          lic->total = (res_resource.count * res_resource.allocated) / 100;
+          lic->total = (res_resource.count * cluster_iter->second) / 100;
         uint32_t external = 0;
         if (res_resource.count < lic->total)
           CRANE_ERROR(
@@ -661,14 +666,17 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
       res_resource->description = value;
       break;
     case crane::grpc::LicenseResource_Field_Flags: {
-      std::string lower_str = absl::AsciiStrToLower(value);
-      if (lower_str == "absolute") {
-        res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
-      } else if (lower_str == "none") {
-        res_resource->flags = crane::grpc::LicenseResource_Flag_None;
-      } else
-        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
-                                             "Invalid flags parameter"));
+      for (const auto& flag : absl::StrSplit(value, ',')) {
+        std::string lower_str = absl::AsciiStrToLower(value);
+        if (lower_str == "absolute") {
+          res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
+        } else if (lower_str == "none") {
+          res_resource->flags = crane::grpc::LicenseResource_Flag_None;
+          break;
+        } else {
+          CRANE_DEBUG("Invalid flags parameter: {}", lower_str);
+        }
+      }
       break;
     }
     case crane::grpc::LicenseResource_Field_ResourceType: {
