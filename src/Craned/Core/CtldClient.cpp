@@ -588,13 +588,20 @@ void CtldClient::Init() {
         for (const auto& [job_id, step_status_map] : steps_to_sync) {
           for (const auto& [step_id, status] : step_status_map) {
             uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+            google::protobuf::Timestamp end_time =
+                g_job_mgr->GetStepEndTime(job_id, step_id);
             CRANE_INFO(
                 "[Step #{}.{}] Reporting status {} to Ctld during recovery "
                 "sync",
                 job_id, step_id, status);
-            g_ctld_client->StepStatusChangeAsync(
-                job_id, step_id, status, exit_code,
-                "Status synced from Craned during recovery");
+            StepStatusChangeQueueElem elem{
+                .job_id = job_id,
+                .step_id = step_id,
+                .new_status = status,
+                .exit_code = exit_code,
+                .reason = "Status synced from Craned during recovery",
+                .timestamp = end_time};
+            g_ctld_client->StepStatusChangeAsync(std::move(elem));
           }
         }
 

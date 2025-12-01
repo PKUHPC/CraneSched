@@ -1052,11 +1052,19 @@ JobManager::GetAllocatedJobSteps() {
 
 uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_ptr) return 0;
+  if (!job_ptr) {
+    CRANE_WARN("[Step #{}.{}] Job not found when getting exit code", job_id,
+               step_id);
+    return 0;
+  }
 
   absl::MutexLock lk(job_ptr->step_map_mtx.get());
   auto step_it = job_ptr->step_map.find(step_id);
-  if (step_it == job_ptr->step_map.end()) return 0;
+  if (step_it == job_ptr->step_map.end()) {
+    CRANE_WARN("[Step #{}.{}] Step not found when getting exit code", job_id,
+               step_id);
+    return 0;
+  }
 
   return step_it->second->exit_code;
 }
@@ -1064,11 +1072,19 @@ uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
 google::protobuf::Timestamp JobManager::GetStepEndTime(job_id_t job_id,
                                                        step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-  if (!job_ptr) return {};
+  if (!job_ptr) {
+    CRANE_WARN("[Step #{}.{}] Job not found when getting end time", job_id,
+               step_id);
+    return {};
+  }
 
   absl::MutexLock lk(job_ptr->step_map_mtx.get());
   auto step_it = job_ptr->step_map.find(step_id);
-  if (step_it == job_ptr->step_map.end()) return {};
+  if (step_it == job_ptr->step_map.end()) {
+    CRANE_WARN("[Step #{}.{}] Step not found when getting end time", job_id,
+               step_id);
+    return {};
+  }
 
   return step_it->second->end_time;
 }
