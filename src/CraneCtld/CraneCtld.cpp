@@ -326,9 +326,9 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightPartition = 0;
 
-      if (config["PriorityWeightQ0S"])
+      if (config["PriorityWeightQOS"])
         g_config.PriorityConfig.WeightQOS =
-            config["PriorityWeightQ0S"].as<uint32_t>();
+            config["PriorityWeightQOS"].as<uint32_t>();
       else
         g_config.PriorityConfig.WeightQOS = 0;
 
