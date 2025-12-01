@@ -194,5 +194,4 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
 };  // namespace Internal
 
 std::string StepStatusToString(const crane::grpc::TaskStatus &status);
-
 }  // namespace util
