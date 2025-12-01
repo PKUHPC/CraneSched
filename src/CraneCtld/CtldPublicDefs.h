@@ -196,6 +196,8 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+
+  bool AllLicenseResourceAbsolute{false};
 };
 
 struct RunTimeStatus {
