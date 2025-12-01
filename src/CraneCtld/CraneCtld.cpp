@@ -414,6 +414,8 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      g_config.AllLicenseResourceAbsolute = YamlValueOr<bool>(config["AllLicenseResourcesAbsolute"], false);
+
       g_config.RejectTasksBeyondCapacity =
           YamlValueOr<bool>(config["RejectJobsBeyondCapacity"],
                             Ctld::kDefaultRejectTasksBeyondCapacity);
