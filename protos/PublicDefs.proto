@@ -986,4 +986,9 @@ message LicenseResource {
     ServerType = 5;
     ResourceType = 6;
   }
+
+  enum Flag {
+    None = 0;
+    Absolute = 1;
+  }
 }
