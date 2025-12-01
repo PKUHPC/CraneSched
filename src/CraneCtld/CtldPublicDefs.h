@@ -212,6 +212,8 @@ struct Config {
     std::filesystem::path CraneCtldAliveFile;
   };
   KeepalivedConfig KeepalivedConfig;
+
+  bool AllLicenseResourceAbsolute{false};
 };
 
 struct RunTimeStatus {
