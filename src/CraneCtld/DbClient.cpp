@@ -620,14 +620,15 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
 bool MongodbClient::InsertWckey(const Ctld::Wckey& new_wckey) {
   document doc = WckeyToDocument_(new_wckey);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_wckey_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_wckey_collection_name_].insert_one(
-          *GetSession_(), doc.view());
-
-  if (ret != bsoncxx::stdx::nullopt)
-    return true;
-  else
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
     return false;
 }
 
@@ -730,12 +731,16 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
 }
 
 void MongodbClient::SelectAllWckey(std::list<Ctld::Wckey>* wckey_list) {
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_wckey_collection_name_].find({});
-  for (auto view : cursor) {
-    Ctld::Wckey wckey;
-    ViewToWckey_(view, &wckey);
-    wckey_list->emplace_back(wckey);
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_wckey_collection_name_].find({});
+    for (auto view : cursor) {
+      Ctld::Wckey wckey;
+      ViewToWckey_(view, &wckey);
+      wckey_list->emplace_back(wckey);
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
 }
 
@@ -798,12 +803,16 @@ bool MongodbClient::UpdateWckey(const Wckey& wckey) {
   filter.append(kvp("cluster", wckey.cluster));
   filter.append(kvp("user_name", wckey.user_name));
 
-  auto update_result =
-      (*GetClient_())[m_db_name_][m_wckey_collection_name_].update_one(
-          *GetSession_(), filter.view(), set_document.view());
+  try {
+    auto update_result =
+        (*GetClient_())[m_db_name_][m_wckey_collection_name_].update_one(
+            *GetSession_(), filter.view(), set_document.view());
 
-  if (!update_result || !update_result->modified_count()) {
-    return false;
+    if (!update_result || !update_result->modified_count()) {
+      return false;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
   return true;
 }
@@ -1283,7 +1292,8 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "cert_number",
                                     "default_wckey_map"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>, std::string, std::unordered_map<std::string, std::string>>
+             User::AccountToAttrsMap, std::list<std::string>, std::string,
+             std::unordered_map<std::string, std::string>>
       values{user.deleted,
              user.uid,
              user.default_account,
@@ -1735,7 +1745,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              true /* Mark the document having complete job info */,
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()}, task_to_ctld.wckey()};
+                 runtime_attr.actual_licenses().end()},
+             task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1800,7 +1811,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
              bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
-              std::string>                                           /*40-44*/
+             std::string>                                            /*40-44*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
