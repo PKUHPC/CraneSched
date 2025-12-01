@@ -367,10 +367,15 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     if (iter != res_resource.cluster_resources.end()) {
       auto license_id =
           std::format("{}@{}", res_resource.name, res_resource.server);
+      uint32_t allocated = 0;
+      if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+        allocated = res_resource.allocated;
+      else
+        allocated = (res_resource.count * res_resource.allocated) / 100;
       m_licenses_map_.Emplace(
           license_id,
           License{.license_id = license_id,
-                  .total = (res_resource.count * iter->second) / 100,
+                  .total = allocated,
                   .used = 0,
                   .reserved = 0,
                   .remote = true,
@@ -378,7 +383,6 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
                   .last_consumed = res_resource.last_consumed,
                   .last_deficit = 0,
                   .last_update = res_resource.last_update});
-      // TODO: flag absolute
     }
   }
 
@@ -429,10 +433,17 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
         CRANE_ERROR(
             "License resource {} not found in license map. now adding...",
             license_id);
+
+        uint32_t allocated = 0;
+        if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+          allocated = res_resource.allocated;
+        else
+          allocated = (res_resource.count * res_resource.allocated) / 100;
+
         m_licenses_map_.Emplace(
             license_id,
             License{.license_id = license_id,
-                    .total = (res_resource.count * cluster_iter->second) / 100,
+                    .total = allocated,
                     .used = 0,
                     .reserved = 0,
                     .remote = true,
@@ -440,10 +451,12 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
                     .last_consumed = res_resource.last_consumed,
                     .last_deficit = 0,
                     .last_update = res_resource.last_update});
-        // TODO: flag absolute
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
-        lic->total = (res_resource.count * cluster_iter->second) / 100;
+        if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+          lic->total = res_resource.allocated;
+        else
+          lic->total = (res_resource.count * res_resource.allocated) / 100;
         uint32_t external = 0;
         if (res_resource.count < lic->total)
           CRANE_ERROR(
@@ -647,15 +660,29 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     case crane::grpc::LicenseResource_Field_Description:
       res_resource->description = value;
       break;
-    case crane::grpc::LicenseResource_Field_Flags:
+    case crane::grpc::LicenseResource_Field_Flags: {
+      std::string lower_str = absl::AsciiStrToLower(value);
+      if (lower_str == "absolute") {
+        res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
+      } else if (lower_str == "none") {
+        res_resource->flags = crane::grpc::LicenseResource_Flag_None;
+      } else
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                             "Invalid flags parameter"));
       break;
-    case crane::grpc::LicenseResource_Field_ResourceType:
-      if (absl::AsciiStrToLower(value) == "license") {
+    }
+    case crane::grpc::LicenseResource_Field_ResourceType: {
+      std::string lower_str = absl::AsciiStrToLower(value);
+      if (lower_str == "license") {
         res_resource->type = crane::grpc::LicenseResource_Type_License;
-      } else {
+      } else if (lower_str == "notset") {
         res_resource->type = crane::grpc::LicenseResource_Type_NotSet;
+      } else {
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                                             "Invalid type parameter"));
       }
       break;
+    }
     case crane::grpc::LicenseResource_Field_ServerType:
       res_resource->server_type = value;
       break;
@@ -667,33 +694,24 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
 
   res_resource->last_update = absl::ToUnixMillis(absl::Now());
 
-  uint32_t allocated = (res_resource->count*res_resource->allocated)/100;
-  if (res_resource->allocated > 100) {
-      CRANE_TRACE(
-      "License Resource {}@{}: Allocated resources {} exceed total "
-      "available "
-      "count {}",
-      res_resource->name, res_resource->server, allocated,
-      res_resource->count);
-  return std::unexpected(FormatRichErr(
-      CraneErrCode::ERR_INVALID_PARAM,
-      "Allocated resources {} exceed total available count {}",
-      allocated, res_resource->count));
-  }
+  uint32_t allocated = 0;
+  if (res_resource->flags & crane::grpc::LicenseResource_Flag_Absolute)
+    allocated = res_resource->allocated;
+  else
+    allocated = (res_resource->count * res_resource->allocated) / 100;
 
-  // TODO: flag absolute
-  // if (res_resource->allocated > res_resource->count) {
-  //   CRANE_TRACE(
-  //       "License Resource {}@{}: Allocated resources {} exceed total "
-  //       "available "
-  //       "count {}",
-  //       res_resource->name, res_resource->server, res_resource->allocated,
-  //       res_resource->count);
-  //   return std::unexpected(FormatRichErr(
-  //       CraneErrCode::ERR_INVALID_PARAM,
-  //       "Allocated resources {} exceed total available count {}",
-  //       res_resource->allocated, res_resource->count));
-  // }
+  if (allocated > res_resource->count) {
+    CRANE_TRACE(
+        "License Resource {}@{}: Allocated resources {} exceed total "
+        "available "
+        "count {}",
+        res_resource->name, res_resource->server, allocated,
+        res_resource->count);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
+                      "Allocated resources {} exceed total available count {}",
+                      allocated, res_resource->count));
+  }
 
   return {};
 }
