@@ -469,8 +469,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
-  bool wckey_valid = 41;
-  string wckey = 42;
+  string wckey = 41;
 }
 
 message StepInfo {
@@ -728,6 +727,8 @@ enum ModifyField {
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  // wckey
+  DefaultWckey = 40;
 }
 
 message AccountInfo {
