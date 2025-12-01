@@ -1505,12 +1505,12 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
 bsoncxx::builder::basic::document MongodbClient::WckeyToDocument_(
     const Ctld::Wckey& wckey) {
   std::array<std::string, 6> fields{
-      "deleted", "name", "cluster", "uid", "user_name", "is_def",
+      "deleted", "name", "cluster", "uid", "user_name", "is_default",
   };
   std::tuple<bool, std::string, std::string, int64_t, std::string, bool> values{
       wckey.deleted,   wckey.name,
       wckey.cluster,   static_cast<int64_t>(wckey.uid),
-      wckey.user_name, wckey.is_def};
+      wckey.user_name, wckey.is_default};
   return DocumentConstructor_(fields, values);
 }
 
@@ -1522,7 +1522,7 @@ void MongodbClient::ViewToWckey_(const bsoncxx::document::view& wckey_view,
     wckey->cluster = wckey_view["cluster"].get_string().value;
     wckey->uid = wckey_view["uid"].get_int64().value;
     wckey->user_name = wckey_view["user_name"].get_string().value;
-    wckey->is_def = wckey_view["is_def"].get_bool().value;
+    wckey->is_default = wckey_view["is_default"].get_bool().value;
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }

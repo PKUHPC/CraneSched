@@ -1061,7 +1061,8 @@ grpc::Status CraneCtldServiceImpl::AddWckey(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   Wckey wckey;
   const crane::grpc::WckeyInfo *wckey_info = &request->wckey();
 
@@ -1318,6 +1319,8 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   auto modify_res = g_account_manager->ModifyDefaultWckey(
       request->uid(), request->name(), request->cluster(),
       request->user_name());
@@ -1519,7 +1522,7 @@ grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
     wckey_info->set_name(wckey.name);
     wckey_info->set_cluster(wckey.cluster);
     wckey_info->set_user_name(wckey.user_name);
-    wckey_info->set_is_def(wckey.is_def);
+    wckey_info->set_is_default(wckey.is_default);
   }
 
   return grpc::Status::OK;
@@ -1695,7 +1698,8 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
-
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   auto res =
       g_account_manager->DeleteWckey(request->uid(), request->name(),
                                      request->cluster(), request->user_name());

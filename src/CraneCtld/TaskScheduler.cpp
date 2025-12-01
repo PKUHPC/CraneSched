@@ -4168,6 +4168,12 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
         CRANE_DEBUG("Wckey '{}' not found in the wckey database", task->wckey);
         return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
       }
+      auto result = g_account_manager->GetExistedDefaultWckeyName(
+          g_config.CraneClusterName, task->Username());
+      if (!result) return std::unexpected(result.error());
+      if (task->wckey == result.value()) {
+        task->wckey = "*" + task->wckey;
+      }
     } else {
       auto result = g_account_manager->GetExistedDefaultWckeyName(
           g_config.CraneClusterName, task->Username());

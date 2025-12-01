@@ -2218,7 +2218,7 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
   } else {
     res_wckey = wckey;
   }
-  res_wckey.is_def = true;
+  res_wckey.is_default = true;
 
   std::string old_def_wckey;
   bool update_wckey = false;
@@ -2246,7 +2246,7 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
                              {"user_name", res_wckey.user_name}};
             g_db_client->UpdateEntityOneByFields(
                 MongodbClient::EntityType::WCKEY, "$set", filter_fields,
-                "is_def", false);
+                "is_default", false);
           }
 
           g_db_client->UpdateEntityOne(
@@ -2261,7 +2261,7 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
                 {"user_name", res_wckey.user_name}};
             g_db_client->UpdateEntityOneByFields(
                 MongodbClient::EntityType::WCKEY, "$set", filter_fields,
-                "is_def", false);
+                "is_default", false);
           }
 
           g_db_client->UpdateEntityOne(
@@ -2275,7 +2275,7 @@ CraneExpected<void> AccountManager::AddWckey_(const Wckey& wckey,
 
   if (update_wckey)
     m_wckey_map_[{old_def_wckey, res_wckey.cluster, res_wckey.user_name}]
-        ->is_def = false;
+        ->is_default = false;
 
   m_wckey_map_[{res_wckey.name, res_wckey.cluster, res_wckey.user_name}] =
       std::make_unique<Wckey>(res_wckey);
@@ -2581,7 +2581,8 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
   WckeyKey new_wckey_key = {.name = new_def_wckey,
                             .cluster = cluster,
                             .user_name = user_name};
-  if (m_wckey_map_[new_wckey_key] && m_wckey_map_[new_wckey_key]->is_def) {
+  auto it = m_wckey_map_.find(new_wckey_key);
+  if (it != m_wckey_map_.end() && it->second && it->second->is_default) {
     return {};
   }
 
@@ -2606,15 +2607,15 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
                                                      {"cluster", cluster},
                                                      {"user_name", user_name}};
         g_db_client->UpdateEntityOneByFields(MongodbClient::EntityType::WCKEY,
-                                             "$set", filter_fields, "is_def",
-                                             true);
+                                             "$set", filter_fields,
+                                             "is_default", true);
         if (need_update_table) {
           filter_fields = {{"name", old_def_wckey},
                            {"cluster", cluster},
                            {"user_name", user_name}};
           g_db_client->UpdateEntityOneByFields(MongodbClient::EntityType::WCKEY,
-                                               "$set", filter_fields, "is_def",
-                                               false);
+                                               "$set", filter_fields,
+                                               "is_default", false);
         }
       };
 
@@ -2622,10 +2623,10 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_wckey_map_[new_wckey_key]->is_def = true;
+  m_wckey_map_[new_wckey_key]->is_default = true;
   m_user_map_[user_name]->default_wckey_map[cluster] = new_def_wckey;
   if (need_update_table) {
-    m_wckey_map_[{old_def_wckey, cluster, user_name}]->is_def = false;
+    m_wckey_map_[{old_def_wckey, cluster, user_name}]->is_default = false;
   }
 
   return {};

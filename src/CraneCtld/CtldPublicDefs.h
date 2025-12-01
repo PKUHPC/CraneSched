@@ -1178,11 +1178,11 @@ struct Wckey {
   std::string cluster; /* cluster associated */
   uid_t uid;
   std::string user_name; /* user name */
-  bool is_def = false;
+  bool is_default = false;
 
   bool operator==(const Wckey& other) const {
     return name == other.name && cluster == other.cluster && uid == other.uid &&
-           user_name == other.user_name && is_def == other.is_def;
+           user_name == other.user_name && is_default == other.is_default;
   }
 };
 
