@@ -252,8 +252,8 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "User information does not match, unable to submit the task.",
         "You need to set --force for this operation.",
         "Invalid username",
+        "License legality check failed",
         "Lua script validation failed",
-        "Reserved for future use",
 
         // 80 - 84
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
