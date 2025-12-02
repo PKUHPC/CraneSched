@@ -4146,7 +4146,7 @@ double MultiFactorPriority::CalculatePriority_(PdJobInScheduler* job,
       g_config.PriorityConfig.WeightPartition * partition_factor +
       g_config.PriorityConfig.WeightJobSize * job_size_factor +
       g_config.PriorityConfig.WeightFairShare * fair_share_factor +
-      g_config.PriorityConfig.WeightQOS * qos_factor;
+      g_config.PriorityConfig.WeightQoS * qos_factor;
 
   return priority;
 }

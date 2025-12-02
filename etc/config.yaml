@@ -84,7 +84,7 @@ PriorityWeightFairShare: 10000
 PriorityWeightJobSize: 0
 
 PriorityWeightPartition: 1000
-PriorityWeightQ0S: 1000000
+PriorityWeightQoS: 1000000
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
