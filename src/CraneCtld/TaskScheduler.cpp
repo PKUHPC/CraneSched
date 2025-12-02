@@ -842,6 +842,7 @@ void TaskScheduler::ScheduleThread_() {
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_to_run;
       LockGuard pending_guard(&m_pending_task_map_mtx_);
+      LockGuard running_guard(&m_running_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
         if (!job_in_scheduler->actual_licenses.empty())
@@ -981,7 +982,32 @@ void TaskScheduler::ScheduleThread_() {
       std::vector<StepInCtld*> step_in_ctld_vec;
 
       Mutex thread_pool_mtx;
-      HashSet<task_id_t> failed_task_id_set;
+      HashSet<task_id_t> failed_job_id_set;
+
+      std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
+
+      // Move jobs into running queue.
+      txn_id_t txn_id{0};
+      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+      if (!ok) {
+        CRANE_ERROR(
+            "TaskScheduler failed to start transaction when scheduling.");
+        jobs_failed = std::move(jobs_to_run);
+      }
+
+      for (auto& job : jobs_to_run) {
+        // IMPORTANT: job must be put into running_task_map before any
+        // time-consuming operation, otherwise TaskStatusChange RPC will come
+        // earlier before job is put into running_task_map.
+        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
+                                                      job->RuntimeAttr());
+      }
+
+      ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+      if (!ok) {
+        CRANE_ERROR("Embedded database failed to commit manual transaction.");
+        jobs_failed = std::move(jobs_to_run);
+      }
 
       for (auto& job : jobs_to_run) {
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
@@ -992,9 +1018,9 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
-        for (auto& job : jobs_to_run) {
-          failed_task_id_set.insert(job->TaskId());
-        }
+        jobs_failed.insert(jobs_failed.end(),
+                           std::make_move_iterator(jobs_to_run.begin()),
+                           std::make_move_iterator(jobs_to_run.end()));
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
@@ -1009,6 +1035,8 @@ void TaskScheduler::ScheduleThread_() {
         }
       }
 
+      // FIXME: Put jobs to running map before sending RPC to craned, or
+      // StatusChange will unable to lookup the jobs.
       std::latch alloc_job_latch(craned_alloc_job_map.size());
       for (auto&& iter : craned_alloc_job_map) {
         CranedId const& craned_id = iter.first;
@@ -1030,7 +1058,7 @@ void TaskScheduler::ScheduleThread_() {
                 craned_id);
             absl::MutexLock lk(&thread_pool_mtx);
             for (const auto& job_to_d : jobs)
-              failed_task_id_set.emplace(job_to_d.job_id());
+              failed_job_id_set.emplace(job_to_d.job_id());
             alloc_job_latch.count_down();
             return;
           }
@@ -1051,7 +1079,7 @@ void TaskScheduler::ScheduleThread_() {
 
           thread_pool_mtx.Lock();
           for (const auto& job_to_d : jobs)
-            failed_task_id_set.emplace(job_to_d.job_id());
+            failed_job_id_set.emplace(job_to_d.job_id());
           thread_pool_mtx.Unlock();
 
           // If jobs in task_uid_pairs failed to start, they will be moved to
@@ -1077,7 +1105,7 @@ void TaskScheduler::ScheduleThread_() {
           if (stub == nullptr || stub->Invalid()) {
             thread_pool_mtx.Lock();
             for (const auto& step_to_d : steps)
-              failed_task_id_set.emplace(step_to_d.job_id());
+              failed_job_id_set.emplace(step_to_d.job_id());
             thread_pool_mtx.Unlock();
 
             CRANE_DEBUG("AllocSteps for steps [{}] to {} failed: Craned down.",
@@ -1097,7 +1125,7 @@ void TaskScheduler::ScheduleThread_() {
 
           thread_pool_mtx.Lock();
           for (const auto& step_to_d : steps)
-            failed_task_id_set.emplace(step_to_d.job_id());
+            failed_job_id_set.emplace(step_to_d.job_id());
           thread_pool_mtx.Unlock();
 
           // If tasks in task_uid_pairs failed to start,
@@ -1114,10 +1142,8 @@ void TaskScheduler::ScheduleThread_() {
       alloc_step_latch.wait();
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
-      std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
-
       for (auto& job : jobs_to_run) {
-        if (failed_task_id_set.contains(job->TaskId())) {
+        if (failed_job_id_set.contains(job->TaskId())) {
           jobs_failed.emplace_back(std::move(job));
         } else {
           jobs_created.emplace_back(std::move(job));
@@ -1138,27 +1164,6 @@ void TaskScheduler::ScheduleThread_() {
       // For failed jobs, free all the resource and move them to the completed
       // queue.
 
-      // Move jobs into running queue.
-      txn_id_t txn_id{0};
-      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-      if (!ok) {
-        CRANE_ERROR(
-            "TaskScheduler failed to start transaction when scheduling.");
-      }
-
-      for (auto& job : jobs_created) {
-        // IMPORTANT: job must be put into running_task_map before any
-        // time-consuming operation, otherwise TaskStatusChange RPC will come
-        // earlier before job is put into running_task_map.
-        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, job->TaskDbId(),
-                                                      job->RuntimeAttr());
-      }
-
-      ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
-      if (!ok) {
-        CRANE_ERROR("Embedded database failed to commit manual transaction.");
-      }
-
       // Set succeed tasks status and do callbacks.
       for (auto& job : jobs_created) {
         if (job->type == crane::grpc::Interactive) {
@@ -1168,9 +1173,7 @@ void TaskScheduler::ScheduleThread_() {
         }
 
         // The ownership of TaskInCtld is transferred to the running queue.
-        m_running_task_map_mtx_.Lock();
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
-        m_running_task_map_mtx_.Unlock();
       }
 
       end = std::chrono::steady_clock::now();
@@ -1212,6 +1215,13 @@ void TaskScheduler::ScheduleThread_() {
           g_account_meta_container->FreeQosResource(*job);
           if (!job->licenses_count.empty())
             g_licenses_manager->FreeLicenseResource(job->licenses_count);
+          LockGuard indexes_guard(&m_task_indexes_mtx_);
+          for (const CranedId& craned_id : job->CranedIds()) {
+            m_node_to_tasks_map_[craned_id].erase(job->TaskId());
+            if (m_node_to_tasks_map_[craned_id].empty()) {
+              m_node_to_tasks_map_.erase(craned_id);
+            }
+          }
         }
 
         // Move failed jobs to the completed queue.
@@ -1234,7 +1244,6 @@ void TaskScheduler::ScheduleThread_() {
             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                 .count());
       }
-
     } else {
       m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                        std::memory_order::release);

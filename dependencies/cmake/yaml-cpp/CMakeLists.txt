@@ -14,6 +14,6 @@ FetchContent_Declare(
         yaml-cpp
         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
         GIT_TAG a83cd31548b19d50f3f983b069dceb4f4d50756d
-        GIT_SHALLOW TRUE
+        GIT_SHALLOW FALSE
 )
 FetchContent_MakeAvailable(yaml-cpp)
