@@ -87,6 +87,7 @@ nav:
     - Pending Reason: reference/pending_reason.md
     - License Usage Guide: reference/license_guide.md
     - Keepalived Guide: reference/keepalived.md
+    - Lua Guide: reference/lua_guide.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -128,6 +129,7 @@ plugins:
             Pending Reason: 作业排队原因
             License Usage Guide: 许可证使用指南
             Keepalived Guide: Keepalived 使用指南
+            Lua Guide: Lua脚本配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
