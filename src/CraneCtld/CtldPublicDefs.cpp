@@ -285,8 +285,10 @@ void StepInCtld::RecoverFromDb(
 
   if (job.IsContainer()) {
     if (runtime_attr.step_type() == crane::grpc::StepType::DAEMON) {
+      // For daemon step, only recover pod_meta.
       pod_meta = job.pod_meta;
     } else if (step_to_ctld.has_container_meta()) {
+      // For common step, recover both container_meta and pod_meta.
       container_meta =
           static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
       pod_meta = job.pod_meta;
