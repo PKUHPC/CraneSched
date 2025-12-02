@@ -827,7 +827,67 @@ CraneErrCode PodInstance::Prepare() {
 }
 
 CraneErrCode PodInstance::Spawn() {
-  // Write pod config to file to persist.
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
+  if (!pod_id_expt.has_value()) {
+    const auto& rich_err = pod_id_expt.error();
+    CRANE_ERROR("Failed to run pod sandbox for container job #{}: {}",
+                g_config.JobId, rich_err.description());
+    return rich_err.code();
+  }
+
+  m_pod_id_ = std::move(pod_id_expt.value());
+  CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, g_config.JobId);
+
+  if (auto err = PersistPodSandboxInfo_(); err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to persist pod sandbox config for job #{}",
+                g_config.JobId);
+    return err;
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Kill(int signum) {
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+
+  auto result = cri_client->StopPodSandbox(m_pod_id_);
+  if (!result.has_value()) {
+    const auto& rich_err = result.error();
+    CRANE_ERROR("Failed to stop pod sandbox {} for job #{}: {}", m_pod_id_,
+                g_config.JobId, rich_err.description());
+    // Try best effort to remove pod sandbox, continue even if stopping fails.
+  }
+
+  result = cri_client->RemovePodSandbox(m_pod_id_);
+  if (!result.has_value()) {
+    const auto& rich_err = result.error();
+    CRANE_ERROR("Failed to remove pod sandbox {} for job #{}: {}", m_pod_id_,
+                g_config.JobId, rich_err.description());
+    return rich_err.code();
+  }
+
+  CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::Cleanup() {
+  g_thread_pool->detach_task([cfg = m_config_file_, lock = m_lock_file_]() {
+    std::error_code ec;
+    bool ok = std::filesystem::remove(cfg, ec);
+    if (!ok)
+      CRANE_ERROR("Failed to remove pod config file {}: {}", cfg, ec.message());
+
+    ok = std::filesystem::remove(lock, ec);
+    if (!ok)
+      CRANE_ERROR("Failed to remove pod lock file {}: {}", lock, ec.message());
+  });
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::PersistPodSandboxInfo_() {
   std::ofstream output(m_config_file_,
                        std::ios::out | std::ios::trunc | std::ios::binary);
   if (!output) {
@@ -841,52 +901,16 @@ CraneErrCode PodInstance::Spawn() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
-
-  auto pod_id_expt = cri_client->RunPodSandbox(&m_pod_config_);
-  if (!pod_id_expt.has_value()) {
-    const auto& rich_err = pod_id_expt.error();
-    CRANE_ERROR("Failed to run pod sandbox for container job #{}: {}",
-                g_config.JobId, rich_err.description());
-
-    // Clean up the config file on failure
-    std::error_code ec;
-    bool ok = std::filesystem::remove(m_config_file_, ec);
-    if (!ok)
-      CRANE_ERROR("Failed to remove pod config file {} for job #{}: {}",
-                  m_config_file_, g_config.JobId, ec.message());
-
-    return rich_err.code();
+  m_lock_file_ = m_log_dir_ / std::format(kPodIdLockFilePattern,
+                                          g_config.CranedIdOfThisNode);
+  std::ofstream pid_output(m_lock_file_, std::ios::out | std::ios::trunc);
+  if (!pid_output) {
+    CRANE_WARN("Failed to open pod id file {}: {}", m_lock_file_,
+               strerror(errno));
+    // Not a critical error; container path can still fall back to label query.
+  } else {
+    pid_output << m_pod_id_;
   }
-
-  m_pod_id_ = std::move(pod_id_expt.value());
-  CRANE_DEBUG("Pod {} created for job #{}", m_pod_id_, g_config.JobId);
-
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode PodInstance::Kill(int signum) {
-  auto* cri_client = m_parent_step_inst_->GetCriClient();
-
-  auto result = cri_client->RemovePodSandbox(m_pod_id_);
-  if (!result.has_value()) {
-    const auto& rich_err = result.error();
-    CRANE_ERROR("Failed to remove pod sandbox {} for job #{}: {}", m_pod_id_,
-                g_config.JobId, rich_err.description());
-    return rich_err.code();
-  }
-
-  CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode PodInstance::Cleanup() {
-  g_thread_pool->detach_task([p = m_config_file_]() {
-    std::error_code ec;
-    bool ok = std::filesystem::remove(p, ec);
-    if (!ok)
-      CRANE_ERROR("Failed to remove pod config file {}: {}", p, ec.message());
-  });
 
   return CraneErrCode::SUCCESS;
 }
@@ -953,6 +977,9 @@ CraneErrCode ContainerInstance::Prepare() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
+  if (auto err = LoadPodSandboxInfo_(pod_meta); err != CraneErrCode::SUCCESS)
+    return err;
+
   // Prepare environment variables for both POD and CONTAINER
   InitEnvMap();
 
@@ -969,8 +996,6 @@ CraneErrCode ContainerInstance::Prepare() {
   }
 
   m_image_id_ = std::move(image_id_opt.value());
-
-  // FIXME: Query PodSandbox ID from CRI.
 
   // Create the container but not start here
   if (auto err = SetContainerConfig_(*ca_meta, pod_meta);
@@ -1108,6 +1133,96 @@ const TaskExitInfo& ContainerInstance::HandleContainerExited(
                            ? status.exit_code() - 128
                            : status.exit_code();
   return m_exit_info_;
+}
+
+CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
+    const crane::grpc::PodTaskAdditionalMeta* pod_meta) {
+  using cri::kCriDefaultLabel;
+  using cri::kCriLabelJobIdKey;
+  using cri::kCriLabelJobNameKey;
+  using cri::kCriLabelUidKey;
+
+  auto* cri_client = m_parent_step_inst_->GetCriClient();
+  auto pod_config_file = m_log_dir_ / std::format(kPodConfigFilePattern,
+                                                  g_config.CranedIdOfThisNode);
+  if (!std::filesystem::exists(pod_config_file)) {
+    CRANE_ERROR("Pod config file {} does not exist for container #{}.{}",
+                pod_config_file, g_config.JobId, g_config.StepId);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  std::ifstream input(pod_config_file, std::ios::in | std::ios::binary);
+  if (!input) {
+    CRANE_ERROR("Failed to open pod config file {}: {}", pod_config_file,
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (!m_pod_config_.ParseFromIstream(&input)) {
+    CRANE_ERROR("Failed to parse pod config from file {}", pod_config_file);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  auto lock_file = m_log_dir_ / std::format(kPodIdLockFilePattern,
+                                            g_config.CranedIdOfThisNode);
+
+  std::string pod_id;
+  if (std::filesystem::exists(lock_file)) {
+    std::ifstream pid_input(lock_file);
+    if (!pid_input) {
+      CRANE_WARN("Failed to open pod id file {}: {}", lock_file,
+                 strerror(errno));
+    } else if (!(pid_input >> pod_id)) {
+      CRANE_WARN("Pod id file {} is empty for container #{}.{}", lock_file,
+                 g_config.JobId, g_config.StepId);
+      pod_id.clear();
+    } else {
+      CRANE_DEBUG("Read pod id {} from lock file {}", pod_id, lock_file);
+    }
+  }
+
+  if (pod_id.empty()) {
+    std::unordered_map<std::string, std::string> label_selector{
+        {std::string(kCriDefaultLabel), "true"},
+        {std::string(kCriLabelJobIdKey), std::to_string(g_config.JobId)},
+        {std::string(kCriLabelUidKey),
+         std::to_string(m_parent_step_inst_->pwd.Uid())},
+        {std::string(kCriLabelJobNameKey), g_config.StepSpec.name()}};
+
+    if (pod_meta != nullptr) {
+      label_selector.insert(pod_meta->labels().begin(),
+                            pod_meta->labels().end());
+    }
+
+    auto pod_id_expt = cri_client->GetPodSandboxId(label_selector);
+    if (!pod_id_expt.has_value()) {
+      const auto& rich_err = pod_id_expt.error();
+      CRANE_ERROR("Failed to find pod sandbox for #{}.{}: {}", g_config.JobId,
+                  g_config.StepId, rich_err.description());
+      return rich_err.code();
+    }
+
+    pod_id = std::move(pod_id_expt.value());
+    CRANE_DEBUG("Resolved pod id {} via label selector for #{}.{}", pod_id,
+                g_config.JobId, g_config.StepId);
+  }
+
+  auto status_expt = cri_client->GetPodSandboxStatus(pod_id);
+  if (!status_expt.has_value()) {
+    const auto& rich_err = status_expt.error();
+    CRANE_ERROR("Failed to get status for pod {}: {}", pod_id,
+                rich_err.description());
+    return rich_err.code();
+  }
+
+  const auto& status = status_expt.value();
+  if (status.state() != cri::api::PodSandboxState::SANDBOX_READY) {
+    CRANE_ERROR("Pod {} state is {} (expected READY)", pod_id,
+                cri::api::PodSandboxState_Name(status.state()));
+    return CraneErrCode::ERR_CRI_GENERIC;
+  }
+
+  m_pod_id_ = std::move(pod_id);
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::SetContainerConfig_(

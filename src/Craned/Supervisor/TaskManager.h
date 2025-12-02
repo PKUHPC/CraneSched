@@ -182,32 +182,6 @@ class StepInstance {
   std::unordered_map<task_id_t, std::unique_ptr<ITaskInstance>> m_task_map_;
 };
 
-struct TaskInstanceMeta {
-  virtual ~TaskInstanceMeta() = default;
-
-  std::string parsed_sh_script_path;
-};
-
-struct BatchInstanceMeta : TaskInstanceMeta {
-  ~BatchInstanceMeta() override = default;
-
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
-};
-
-struct CrunInstanceMeta : TaskInstanceMeta {
-  ~CrunInstanceMeta() override = default;
-
-  int stdin_write;
-  int stdout_write;
-  int stdin_read;
-  int stdout_read;
-
-  std::string x11_target;
-  uint16_t x11_port;
-  std::string x11_auth_path;
-};
-
 struct TaskExitInfo {
   pid_t pid{0};
   bool is_terminated_by_signal{false};
@@ -287,7 +261,8 @@ class PodInstance : public ITaskInstance {
   static constexpr std::string_view kPodLogDirPattern = "{}.out";
   // NOTE: Should be consistent with ContainerInstance.
   // We get PodSandboxConfig from this file in another common steps.
-  static constexpr std::string_view kPodConfigFilePattern = "{}.conf";
+  static constexpr std::string_view kPodConfigFilePattern = "{}.bin";
+  static constexpr std::string_view kPodIdLockFilePattern = "{}.lock";
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
 
   static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
@@ -297,12 +272,14 @@ class PodInstance : public ITaskInstance {
 
   CraneErrCode SetPodSandboxConfig_(
       const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+  CraneErrCode PersistPodSandboxInfo_();
 
   cri::api::PodSandboxConfig m_pod_config_;
-
   std::string m_pod_id_;
+
   std::filesystem::path m_log_dir_;
   std::filesystem::path m_config_file_;
+  std::filesystem::path m_lock_file_;
 };
 
 class ContainerInstance : public ITaskInstance {
@@ -333,6 +310,11 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
+  // Should be consistent with PodInstance.
+  static constexpr std::string_view kPodConfigFilePattern = "{}.bin";
+  static constexpr std::string_view kPodIdLockFilePattern = "{}.lock";
+
+  // Container related constants
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
   static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
@@ -346,8 +328,8 @@ class ContainerInstance : public ITaskInstance {
                                         const std::string& job_name,
                                         const std::string& node_name);
 
-  CraneErrCode SetPodSandboxConfig_(
-      const crane::grpc::PodTaskAdditionalMeta& pod_meta);
+  CraneErrCode LoadPodSandboxInfo_(
+      const crane::grpc::PodTaskAdditionalMeta* pod_meta);
   CraneErrCode SetContainerConfig_(
       const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
       const crane::grpc::PodTaskAdditionalMeta* pod_meta);
@@ -378,6 +360,32 @@ class ContainerInstance : public ITaskInstance {
 
   std::filesystem::path m_log_dir_;
   std::filesystem::path m_log_file_;
+};
+
+struct ProcInstanceMeta {
+  virtual ~ProcInstanceMeta() = default;
+
+  std::string parsed_sh_script_path;
+};
+
+struct BatchInstanceMeta final : ProcInstanceMeta {
+  ~BatchInstanceMeta() override = default;
+
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
+};
+
+struct CrunInstanceMeta final : ProcInstanceMeta {
+  ~CrunInstanceMeta() override = default;
+
+  int stdin_write;
+  int stdout_write;
+  int stdin_read;
+  int stdout_read;
+
+  std::string x11_target;
+  uint16_t x11_port;
+  std::string x11_auth_path;
 };
 
 class ProcInstance : public ITaskInstance {
@@ -442,7 +450,7 @@ class ProcInstance : public ITaskInstance {
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd) const;
 
-  std::unique_ptr<TaskInstanceMeta> m_meta_;
+  std::unique_ptr<ProcInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid
 
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"

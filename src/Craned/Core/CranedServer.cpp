@@ -382,7 +382,7 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
       {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
       {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
   };
-  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
     const auto &rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
@@ -461,7 +461,7 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
       {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
       {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
   };
-  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
     const auto &rich_err = container_expt.error();
     CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
