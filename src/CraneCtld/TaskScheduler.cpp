@@ -992,6 +992,7 @@ void TaskScheduler::ScheduleThread_() {
       if (!ok) {
         CRANE_ERROR(
             "TaskScheduler failed to start transaction when scheduling.");
+        jobs_failed = std::move(jobs_to_run);
       }
 
       for (auto& job : jobs_to_run) {
