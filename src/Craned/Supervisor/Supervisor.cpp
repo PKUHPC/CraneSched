@@ -74,6 +74,7 @@ void InitFromStdin(int argc, char** argv) {
   auto recv_init_msg_time = std::chrono::system_clock::now();
 
   g_config.JobId = msg.job_id();
+  g_config.JobName = msg.job_name();
   g_config.StepId = msg.step_id();
   g_config.StepSpec = msg.step_spec();
   g_config.CranedIdOfThisNode = msg.craned_id();

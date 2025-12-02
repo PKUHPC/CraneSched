@@ -299,6 +299,8 @@ message JobToD {
   string account = 6;
   string qos = 7;
   StepToD daemon_step = 8;
+
+  string name = 9;
 }
 
 enum StepType {
@@ -412,6 +414,9 @@ message PodTaskAdditionalMeta {
 
   NamespaceOption namespace = 4;
 
+  // Runtimes only support userns in Pod level.
+  // RunAsUser and RunAsGroup is also limited to Pod.
+  // (But can be extended to Container level)
   bool userns = 5;
   uint32 run_as_user = 6;
   uint32 run_as_group = 7;

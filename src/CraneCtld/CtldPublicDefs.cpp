@@ -412,7 +412,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetEndTime(job.EndTime());
 
   SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-  SetErrorExitCode(0u);
+  SetErrorExitCode(0U);
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
@@ -451,6 +451,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
 crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
     const CranedId& craned_id) const {
   crane::grpc::JobToD job_to_d;
+  job_to_d.set_name(job->name);
   job_to_d.set_job_id(job_id);
   job_to_d.set_uid(uid);
   *job_to_d.mutable_res() =
