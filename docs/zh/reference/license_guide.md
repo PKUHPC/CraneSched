@@ -113,12 +113,12 @@ LicenseName=nastran@flex_host
     LastConsumed=0 LastDeficit=0 LastUpdate=2025-11-28T13:05:44
     
 # On cluster "fluid"
-$ scontrol show lic
+$ ccontrol show lic
 LicenseName=matlab@rlm_host
     Total=15 Used=0 Free=15 Reserved=0 Remote=yes
     LastConsumed=0 LastDeficit=0 LastUpdate=2025-11-28T13:05:44
 LicenseName=nastran@flex_host
-    Total= Used=0 Free=50 Reserved=0 Remote=yes
+    Total=50 Used=0 Free=50 Reserved=0 Remote=yes
     LastConsumed=0 LastDeficit=0 LastUpdate=2025-11-28T13:05:44
 ```
 

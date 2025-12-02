@@ -686,7 +686,7 @@ cacctmgr add resource <名称> [选项]
 - **Allocated=<数量>**: 已分配的资源数
 - **Flags=<标志>**: 资源标志（None、Absolute）
 - **Allowed=<数量>**: 集群可使用的资源数
-- **cluster=<分区>**: 集群名
+- **Cluster=<分区>**: 集群名
 
 **示例：**
 
@@ -766,8 +766,8 @@ cacctmgr show resource [withclusters] where [选项]
 
 - **Name=<名称>**: 仅显示特定资源
 - **Server=<服务器地址>**: 资源服务器地址
-- **cluster=<分区>**: 集群名
-- 
+- **Cluster=<分区>**: 集群名
+
 **示例：**
 
 显示所有资源：
