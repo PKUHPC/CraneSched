@@ -469,6 +469,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  bool my_test = 41;
 }
 
 message StepInfo {
