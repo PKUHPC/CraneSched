@@ -20,6 +20,9 @@
 
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+
+#include "CtldClient.h"
+
 namespace Craned {
 using namespace std::literals::chrono_literals;
 StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d)
@@ -417,6 +420,16 @@ void StepInstance::ExecuteStepAsync() {
     if (code != CraneErrCode::SUCCESS) {
       CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
                   job_id, step_id, static_cast<int>(code));
+      g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+          .job_id = job_id,
+          .step_id = step_id,
+          .new_status = StepStatus::Failed,
+          .exit_code = ExitCode::EC_RPC_ERR,
+          .reason = "Supervisor not responding when execute task",
+          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
+      // Ctld will send ShutdownSupervisor after status change from
+      // daemon supervisor, for common step, will shut down itself when all
+      // task in local step finished.
     }
   });
 }
