@@ -113,7 +113,6 @@ struct Config {
   };
 
   JobLogHookConfig JobLogHook;
-
 };
 
 inline Config g_config;

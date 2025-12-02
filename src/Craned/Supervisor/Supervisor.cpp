@@ -162,27 +162,34 @@ int InitFromStdin(int argc, char** argv) {
       fmt::format("step_{}.{}.sock", g_config.JobId, g_config.StepId);
 
   if (msg.has_job_log_hook_config()) {
-    g_config.JobLogHook.TaskPrologs.reserve(msg.job_log_hook_config().task_prologs_size());
+    g_config.JobLogHook.TaskPrologs.reserve(
+        msg.job_log_hook_config().task_prologs_size());
     for (const auto& task_prolog : msg.job_log_hook_config().task_prologs()) {
       g_config.JobLogHook.TaskPrologs.emplace_back(task_prolog);
     }
-    g_config.JobLogHook.TaskEpilogs.reserve(msg.job_log_hook_config().task_epilogs_size());
+    g_config.JobLogHook.TaskEpilogs.reserve(
+        msg.job_log_hook_config().task_epilogs_size());
     for (const auto& task_epilog : msg.job_log_hook_config().task_epilogs()) {
       g_config.JobLogHook.TaskEpilogs.emplace_back(task_epilog);
     }
 
-    g_config.JobLogHook.Prologs.reserve(msg.job_log_hook_config().prologs_size());
+    g_config.JobLogHook.Prologs.reserve(
+        msg.job_log_hook_config().prologs_size());
     for (const auto& prolog : msg.job_log_hook_config().prologs()) {
       g_config.JobLogHook.Prologs.emplace_back(prolog);
     }
-    g_config.JobLogHook.Epilogs.reserve(msg.job_log_hook_config().epilogs_size());
+    g_config.JobLogHook.Epilogs.reserve(
+        msg.job_log_hook_config().epilogs_size());
     for (const auto& epilog : msg.job_log_hook_config().epilogs()) {
       g_config.JobLogHook.Epilogs.emplace_back(epilog);
     }
 
-    g_config.JobLogHook.PrologTimeout = msg.job_log_hook_config().prologtimeout();
-    g_config.JobLogHook.EpilogTimeout = msg.job_log_hook_config().epilogtimeout();
-    g_config.JobLogHook.PrologEpilogTimeout = msg.job_log_hook_config().prologepilogtimeout();
+    g_config.JobLogHook.PrologTimeout =
+        msg.job_log_hook_config().prologtimeout();
+    g_config.JobLogHook.EpilogTimeout =
+        msg.job_log_hook_config().epilogtimeout();
+    g_config.JobLogHook.PrologEpilogTimeout =
+        msg.job_log_hook_config().prologepilogtimeout();
   }
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);

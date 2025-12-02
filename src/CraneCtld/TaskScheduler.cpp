@@ -1149,15 +1149,17 @@ void TaskScheduler::ScheduleThread_() {
         for (auto& job : jobs_to_run) {
           g_thread_pool->detach_task([&]() {
             // run prolog ctld script
-            RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.ProLogs,
-                                           .envs = job->env,
-                                           .run_uid = 0,
-                                           .run_gid = 0,
-                                           .is_prolog = true};
+            RunLogHookArgs run_prolog_args{
+                .scripts = g_config.JobLogHook.ProLogs,
+                .envs = job->env,
+                .run_uid = 0,
+                .run_gid = 0,
+                .is_prolog = true};
             if (g_config.JobLogHook.PrologTimeout) {
               run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
             } else {
-              run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+              run_prolog_args.timeout_sec =
+                  g_config.JobLogHook.PrologEpilogTimeout;
             }
             CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
                         job->TaskId(), run_prolog_args.run_uid,
@@ -3405,15 +3407,18 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (!g_config.JobLogHook.EpiLogs.empty()) {
         auto env_copy = task->env;
         g_thread_pool->detach_task([env_copy]() {
-          RunLogHookArgs run_epilog_ctld_args{.scripts = g_config.JobLogHook.EpiLogs,
-                                              .envs = env_copy,
-                                              .run_uid = 0,
-                                              .run_gid = 0,
-                                              .is_prolog = false};
+          RunLogHookArgs run_epilog_ctld_args{
+              .scripts = g_config.JobLogHook.EpiLogs,
+              .envs = env_copy,
+              .run_uid = 0,
+              .run_gid = 0,
+              .is_prolog = false};
           if (g_config.JobLogHook.EpilogTimeout) {
-            run_epilog_ctld_args.timeout_sec = g_config.JobLogHook.EpilogTimeout;
+            run_epilog_ctld_args.timeout_sec =
+                g_config.JobLogHook.EpilogTimeout;
           } else {
-            run_epilog_ctld_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+            run_epilog_ctld_args.timeout_sec =
+                g_config.JobLogHook.PrologEpilogTimeout;
           }
           CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
                       run_epilog_ctld_args.run_uid,

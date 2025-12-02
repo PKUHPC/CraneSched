@@ -168,8 +168,8 @@ struct Config {
   ContainerConfig Container;
 
   struct JobLogHookConfig {
-    std::vector<std::string> ProLogs; // ctld prologs
-    std::vector<std::string> EpiLogs; // ctld epilogs
+    std::vector<std::string> ProLogs;  // ctld prologs
+    std::vector<std::string> EpiLogs;  // ctld epilogs
     uint32_t PrologTimeout{0};
     uint32_t EpilogTimeout{0};
     uint32_t PrologEpilogTimeout{0};

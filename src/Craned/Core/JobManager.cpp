@@ -644,8 +644,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
 
-    if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob
-      || !g_config.JobLogHook.TaskPrologs.empty() || !g_config.JobLogHook.TaskEpilogs.empty()) {
+    if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob ||
+        !g_config.JobLogHook.TaskPrologs.empty() ||
+        !g_config.JobLogHook.TaskEpilogs.empty()) {
       auto* log_hook_conf = init_req.mutable_job_log_hook_config();
 
       for (const auto& prolog : g_config.JobLogHook.TaskPrologs) {
@@ -666,7 +667,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
 
       log_hook_conf->set_prologtimeout(g_config.JobLogHook.PrologTimeout);
       log_hook_conf->set_epilogtimeout(g_config.JobLogHook.EpilogTimeout);
-      log_hook_conf->set_prologepilogtimeout(g_config.JobLogHook.PrologEpilogTimeout);
+      log_hook_conf->set_prologepilogtimeout(
+          g_config.JobLogHook.PrologEpilogTimeout);
     }
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);

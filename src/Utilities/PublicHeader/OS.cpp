@@ -452,18 +452,18 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
 
     int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
     if (pipe(stdout_pipe) == -1) {
-      CRANE_ERROR("{} pipe stdout creation failed: {}", script, strerror(errno));
-      if (args.is_prolog)
-        return std::nullopt;
+      CRANE_ERROR("{} pipe stdout creation failed: {}", script,
+                  strerror(errno));
+      if (args.is_prolog) return std::nullopt;
       is_failed = true;
     }
 
     if (pipe(stderr_pipe) == -1) {
-      CRANE_ERROR("{} pipe stderr creation failed: {}", script, strerror(errno));
+      CRANE_ERROR("{} pipe stderr creation failed: {}", script,
+                  strerror(errno));
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
-      if (args.is_prolog)
-        return std::nullopt;
+      if (args.is_prolog) return std::nullopt;
       is_failed = true;
     }
 
@@ -473,8 +473,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       close(stdout_pipe[1]);
       close(stderr_pipe[0]);
       close(stderr_pipe[1]);
-      if (args.is_prolog)
-        return std::nullopt;
+      if (args.is_prolog) return std::nullopt;
       is_failed = true;
     }
 

@@ -867,7 +867,8 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   auto craned_meta = craned_meta_map_[craned_id];
 
   if (!craned_meta->alive) {
-    CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.", craned_id);
+    CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.",
+                craned_id);
     return false;
   }
 
@@ -881,7 +882,7 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   craned_meta->state_reason = reason;
 
   AddResReduceEventsAndUnlock(
-          {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+      {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
 
   CRANE_DEBUG("Update node '{}' drain state to {}", craned_id, is_drain);
 
