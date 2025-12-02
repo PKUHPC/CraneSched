@@ -1143,6 +1143,7 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());
+  task_info->set_my_test(true);
 }
 
 }  // namespace Ctld
