@@ -977,15 +977,13 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
             "[Step #{}.{}] Failed to shutdown supervisor sending a status "
             "change with FAILED status.",
             step->job_id, step->step_id);
-        g_job_mgr->StepStatusChangeAsync(
         g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
-          .job_id = step->job_id,
-          .step_id = step->step_id,
-          .new_status = StepStatus::Failed,
-          .exit_code = ExitCode::EC_RPC_ERR,
-          .reason = "Supervisor not responding during step completion",
-          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
-
+            .job_id = step->job_id,
+            .step_id = step->step_id,
+            .new_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding during step completion",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       }
 
       shutdown_step_latch.count_down();
