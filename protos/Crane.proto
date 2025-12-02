@@ -1131,7 +1131,6 @@ message QueryLicenseResourceReply {
   repeated LicenseResourceInfo license_resource_list = 3;
 }
 
-
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication

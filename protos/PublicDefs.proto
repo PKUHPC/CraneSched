@@ -973,7 +973,7 @@ message LicenseResourceInfo {
 }
 
 message LicenseResource {
-  enum Type{
+  enum Type {
     NotSet = 0;
     License = 1;
   }

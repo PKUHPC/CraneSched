@@ -1302,10 +1302,11 @@ struct LicenseResource {
   crane::grpc::LicenseResource_Type type;
   uint32_t allocated{0};
   uint32_t last_consumed{0};
-  std::unordered_map<std::string, uint32_t> /* cluster, allowed */cluster_resources;
+  std::unordered_map<std::string, uint32_t> /* cluster, allowed */
+      cluster_resources;
   uint32_t count{0};
   uint32_t flags;
-  int64_t  last_update;
+  int64_t last_update;
   std::string description;
 };
 

@@ -718,8 +718,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
   if (!task->licenses_count.empty())
-    g_licenses_manager->MallocLicenseWhenRecoverRunning(
-        task->licenses_count);
+    g_licenses_manager->MallocLicenseWhenRecoverRunning(task->licenses_count);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
