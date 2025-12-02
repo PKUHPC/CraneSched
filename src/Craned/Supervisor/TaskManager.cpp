@@ -109,6 +109,7 @@ CraneErrCode StepInstance::Prepare() {
     }
     x11_meta.x11_auth_path = x11_auth_path;
     this->x11_meta = std::move(x11_meta);
+    close(xauth_fd);
   }
 
   return CraneErrCode::SUCCESS;
@@ -2123,14 +2124,19 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (m_step_.IsDaemonStep()) {
       if (elem.mark_as_orphaned)
         g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
-      continue;
+      else {
+        CRANE_WARN(
+            "Terminate request for a daemon step without orphaned is ignored.");
+        continue;
+      }
     }
 
     int sig = (m_step_.IsBatch() || m_step_.IsContainer()) ? SIGTERM : SIGHUP;
 
-    if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
-      CRANE_DEBUG("No task is running, shutting down...");
-      g_task_mgr->ShutdownSupervisorAsync();
+    if (m_exec_id_task_id_map_.empty() || elem.mark_as_orphaned) {
+      CRANE_DEBUG(
+          "No task is running or terminated as orphaned, shutting down...");
+      g_task_mgr->ShutdownSupervisorAsync(StepStatus::Cancelled, 0U, "");
       continue;
     }
 
@@ -2274,31 +2280,22 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
-    absl::Mutex thread_pool_mutex;
     CraneErrCode err = CraneErrCode::SUCCESS;
-    std::latch latch(m_step_.task_ids.size());
     for (auto task_id : m_step_.task_ids) {
       auto* task = m_step_.GetTaskInstance(task_id);
-      g_thread_pool->detach_task(
-          [this, task, task_id, &thread_pool_mutex, &latch, &err] {
-            auto task_err = LaunchExecution_(task);
-            if (task_err != CraneErrCode::SUCCESS) {
-              CRANE_WARN("[task #{}] Failed to launch process.", task_id);
-              absl::MutexLock lock(&thread_pool_mutex);
-              err = task_err;
-            } else {
-              auto exec_id = task->GetExecId().value();
-              CRANE_INFO(
-                  "[task #{}] Launched exection, id: {}.", task_id,
-                  std::visit([](auto&& arg) { return std::format("{}", arg); },
-                             exec_id));
-              absl::MutexLock lock(&thread_pool_mutex);
-              m_exec_id_task_id_map_[exec_id] = task_id;
-            }
-            latch.count_down();
-          });
+      // TODO: Maybe we can launch tasks in parallel
+      auto task_err = LaunchExecution_(task);
+      if (task_err != CraneErrCode::SUCCESS) {
+        CRANE_WARN("[task #{}] Failed to launch process.", task_id);
+        err = task_err;
+      } else {
+        auto exec_id = task->GetExecId().value();
+        CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+                   std::visit([](auto&& arg) { return std::format("{}", arg); },
+                              exec_id));
+        m_exec_id_task_id_map_[exec_id] = task_id;
+      }
     }
-    latch.wait();
 
     elem.ok_prom.set_value(err);
   }

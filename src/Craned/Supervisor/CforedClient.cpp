@@ -191,6 +191,7 @@ uint16_t CforedClient::SetupX11forwarding_() {
 
     x11_fd_info->fd = sock->fd();
     x11_fd_info->sock = sock;
+    absl::MutexLock lock(&m_mtx_);
     m_x11_fd_info_map_[x11_local_id] = x11_fd_info;
     sock->read();
   });
@@ -774,6 +775,7 @@ void CforedClient::TaskX11OutPutForward(x11_local_id_t x11_local_id,
 }
 
 void CforedClient::TaskX11OutputFinish(x11_local_id_t x11_local_id) {
+  absl::MutexLock lock(&m_mtx_);
   CRANE_INFO("Receive TaskX11OutputFinish id:{} .", x11_local_id);
   m_task_fwd_req_queue_.enqueue(
       FwdRequest{.type = StreamTaskIORequest::TASK_X11_EOF,
