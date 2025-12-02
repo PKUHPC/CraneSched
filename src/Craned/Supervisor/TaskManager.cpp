@@ -37,7 +37,6 @@
 
 namespace Craned::Supervisor {
 
-using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
 CraneErrCode StepInstance::Prepare() {
@@ -108,7 +107,7 @@ EnvMap StepInstance::GetStepProcessEnv() const {
   }
 
   // Crane env will override user task env;
-  for (auto& [name, value] : m_step_to_supv_.env()) {
+  for (const auto& [name, value] : m_step_to_supv_.env()) {
     env_map.emplace(name, value);
   }
 
@@ -631,7 +630,7 @@ std::string PodInstance::MakeHashId_(job_id_t job_id,
   return std::format("{:016x}", h64);  // 16 hex chars, lowercase
 }
 
-CraneErrCode PodInstance::InjectFakeRootConfig_(
+CraneErrCode PodInstance::ResolveUserNsMapping_(
     const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx) {
   using cri::CriClient;
 
@@ -644,19 +643,11 @@ CraneErrCode PodInstance::InjectFakeRootConfig_(
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  // K8s/Containerd currently assume only one continuous range is set for
-  // userns. Otherwise, netns in userns will fail.
+  // NOTE: Using 0 as the start of the range no matter run_as_user is 0 or not.
   auto uid_mapping =
       CriClient::MakeIdMapping(subuid[0].start, 0, subuid[0].count);
   auto gid_mapping =
       CriClient::MakeIdMapping(subgid[0].start, 0, subgid[0].count);
-
-  // Use idmapped mounts for fake root.
-  // Code below could be unintuitive. See vfsuid for details.
-  // m_mount_uid_mapping_ = CriClient::MakeIdMapping(subuid[0].start, pwd.Uid(),
-  // 1);
-  // m_mount_gid_mapping_ = CriClient::MakeIdMapping(subgid[0].start,
-  // pwd.Gid(), 1);
 
   auto* userns_options =
       sec_ctx->mutable_namespace_options()->mutable_userns_options();
@@ -666,16 +657,12 @@ CraneErrCode PodInstance::InjectFakeRootConfig_(
   userns_options->clear_uids();
   userns_options->clear_gids();
 
-  // This is a workaround for CRI which only supports only one id mapping in
-  // user namespace. See:
+  // K8s/Containerd currently assume only one continuous range is set for
+  // userns. Otherwise, netns in userns will fail. See:
   // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
   // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
   userns_options->mutable_uids()->Add(std::move(uid_mapping));
   userns_options->mutable_gids()->Add(std::move(gid_mapping));
-
-  // Set id as faked root(0) in userns
-  sec_ctx->mutable_run_as_user()->set_value(0);
-  sec_ctx->mutable_run_as_group()->set_value(0);
 
   return CraneErrCode::SUCCESS;
 }
@@ -689,8 +676,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   // All steps in a job share the same pod.
   job_id_t job_id = g_config.JobId;
 
-  // FIXME: Replace this with job name
-  const std::string& job_name = g_config.StepSpec.name();
+  const std::string& job_name = g_config.JobName;
   const std::string& node_name = g_config.CranedIdOfThisNode;
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
@@ -751,37 +737,72 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
       static_cast<cri::api::NamespaceMode>(pod_meta.namespace_().ipc()));
   ns_options->set_target_id(pod_meta.namespace_().target_id());
 
-  // user namespace
-  if (uid != 0) {
-    // Non-root user can use userns or run_as_user/run_as_group.
-    if (pod_meta.userns()) {
-      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd, sec_ctx) !=
-          CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
-                    job_id);
-        return CraneErrCode::ERR_SYSTEM_ERR;
-      }
-
-      // If user want to use other uid/gid inside userns, it's also ok.
-      if (pod_meta.run_as_user() != 0 || pod_meta.run_as_group() != 0) {
-        sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-        sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
-      }
-    } else if (pod_meta.run_as_user() == uid &&
-               pod_meta.run_as_group() == gid) {
-      // If Non-root user using host userns, uid/gid is limited to its own.
-      sec_ctx->mutable_run_as_user()->set_value(uid);
-      sec_ctx->mutable_run_as_group()->set_value(gid);
-    } else {
-      CRANE_ERROR("Unsupported identity setting for pod of job #{}", job_id);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
+  // Setup run_as_user / run_as_group
+  if (uid == 0 || pod_meta.userns() ||
+      (pod_meta.run_as_user() == uid && pod_meta.run_as_group() == gid)) {
+    // If user is root or using userns, run_as_* is always allowed.
+    // Non-root user w/o userns cannot use run_as_* other than its own.
+    sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
   } else {
-    // root user always using host userns. However, run_as_* could apply.
-    if (pod_meta.run_as_user() != 0 || pod_meta.run_as_group() != 0) {
-      sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-      sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+    CRANE_ERROR(
+        "Pod #{} is not allowed to use other identities when not "
+        "using userns",
+        job_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  // Setup userns
+  // Setup run_as_user / run_as_group
+  if (uid == 0 || pod_meta.userns() ||
+      (pod_meta.run_as_user() == uid && pod_meta.run_as_group() == gid)) {
+    // If user is root or using userns, run_as_* is always allowed.
+    // Non-root user w/o userns cannot use run_as_* other than its own.
+    sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
+  } else {
+    CRANE_ERROR(
+        "Pod #{} is not allowed to use other identities when not "
+        "using userns",
+        job_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  if (pod_meta.userns()) {
+    if (ResolveUserNsMapping_(m_parent_step_inst_->pwd, sec_ctx) !=
+        CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
+                  job_id);
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
+  }
+
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode PodInstance::PersistPodSandboxInfo_() {
+  std::ofstream output(m_config_file_,
+                       std::ios::out | std::ios::trunc | std::ios::binary);
+  if (!output) {
+    CRANE_ERROR("Failed to open config file {}: {}", m_config_file_,
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+  if (!m_pod_config_.SerializeToOstream(&output)) {
+    CRANE_ERROR("Failed to write config to file {}: {}", m_config_file_,
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  m_lock_file_ = m_log_dir_ / std::format(kPodIdLockFilePattern,
+                                          g_config.CranedIdOfThisNode);
+  std::ofstream pid_output(m_lock_file_, std::ios::out | std::ios::trunc);
+  if (!pid_output) {
+    CRANE_WARN("Failed to open pod id file {}: {}", m_lock_file_,
+               strerror(errno));
+    // Not a critical error; container path can still fall back to label query.
+  } else {
+    pid_output << m_pod_id_;
   }
 
   return CraneErrCode::SUCCESS;
@@ -849,7 +870,7 @@ CraneErrCode PodInstance::Spawn() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode PodInstance::Kill(int signum) {
+CraneErrCode PodInstance::Kill(int /*signum*/) {
   auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   auto result = cri_client->StopPodSandbox(m_pod_id_);
@@ -883,34 +904,6 @@ CraneErrCode PodInstance::Cleanup() {
     if (!ok)
       CRANE_ERROR("Failed to remove pod lock file {}: {}", lock, ec.message());
   });
-
-  return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode PodInstance::PersistPodSandboxInfo_() {
-  std::ofstream output(m_config_file_,
-                       std::ios::out | std::ios::trunc | std::ios::binary);
-  if (!output) {
-    CRANE_ERROR("Failed to open config file {}: {}", m_config_file_,
-                strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-  if (!m_pod_config_.SerializeToOstream(&output)) {
-    CRANE_ERROR("Failed to write config to file {}: {}", m_config_file_,
-                strerror(errno));
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  m_lock_file_ = m_log_dir_ / std::format(kPodIdLockFilePattern,
-                                          g_config.CranedIdOfThisNode);
-  std::ofstream pid_output(m_lock_file_, std::ios::out | std::ios::trunc);
-  if (!pid_output) {
-    CRANE_WARN("Failed to open pod id file {}: {}", m_lock_file_,
-               strerror(errno));
-    // Not a critical error; container path can still fall back to label query.
-  } else {
-    pid_output << m_pod_id_;
-  }
 
   return CraneErrCode::SUCCESS;
 }
@@ -980,9 +973,6 @@ CraneErrCode ContainerInstance::Prepare() {
   if (auto err = LoadPodSandboxInfo_(pod_meta); err != CraneErrCode::SUCCESS)
     return err;
 
-  // Prepare environment variables for both POD and CONTAINER
-  InitEnvMap();
-
   // Pull image according to pull policy
   auto image_id_opt = cri_client->PullImage(
       ca_meta->image().image(), ca_meta->image().username(),
@@ -996,6 +986,9 @@ CraneErrCode ContainerInstance::Prepare() {
   }
 
   m_image_id_ = std::move(image_id_opt.value());
+
+  // Prepare environment variables, will be used in SetContainerConfig_
+  InitEnvMap();
 
   // Create the container but not start here
   if (auto err = SetContainerConfig_(*ca_meta, pod_meta);
@@ -1038,7 +1031,6 @@ CraneErrCode ContainerInstance::Spawn() {
 
           CRANE_TRACE("Received CRI event: {}", ev.ShortDebugString());
 
-          // TODO: Add handler for pod status changes?
           auto changes =
               ev.containers_statuses() |
               std::views::filter([](const auto& status) {
@@ -1069,9 +1061,9 @@ CraneErrCode ContainerInstance::Spawn() {
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ContainerInstance::Kill(int signum) {
+CraneErrCode ContainerInstance::Kill(int /*signum*/) {
   // For containers, we ignore the signum parameter and use CRI to stop/cleanup
-  // Stop Container -> Remove Container -> Stop Pod -> Remove Pod
+  // Stop Container -> Remove Container. Pod is cleaned up in PodInstance.
   auto* cri_client = m_parent_step_inst_->GetCriClient();
 
   // Step 1: Stop Container
@@ -1079,41 +1071,19 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     auto stop_ret = cri_client->StopContainer(m_container_id_, 10);
     if (!stop_ret.has_value()) {
       const auto& rich_err = stop_ret.error();
-      CRANE_DEBUG("Failed to stop container {}: {}", m_container_id_,
+      CRANE_ERROR("Failed to stop container {}: {}", m_container_id_,
                   rich_err.description());
-      // Continue with cleanup even if stop fails
+      // Try best effort to remove container, continue even if stopping fails.
     }
 
     // Step 2: Remove Container
     auto remove_ret = cri_client->RemoveContainer(m_container_id_);
     if (!remove_ret.has_value()) {
       const auto& rich_err = remove_ret.error();
-      CRANE_DEBUG("Failed to remove container {}: {}", m_container_id_,
-                  rich_err.description());
-      // Continue with pod cleanup even if container removal fails
-    }
-  }
-
-  // Step 3: Stop Pod
-  if (!m_pod_id_.empty()) {
-    auto stop_pod_ret = cri_client->StopPodSandbox(m_pod_id_);
-    if (!stop_pod_ret.has_value()) {
-      const auto& rich_err = stop_pod_ret.error();
-      CRANE_DEBUG("Failed to stop pod {}: {}", m_pod_id_,
-                  rich_err.description());
-      // Continue with pod removal even if stop fails
-    }
-
-    // Step 4: Remove Pod
-    auto remove_pod_ret = cri_client->RemovePodSandbox(m_pod_id_);
-    if (!remove_pod_ret.has_value()) {
-      const auto& rich_err = remove_pod_ret.error();
-      CRANE_ERROR("Failed to remove pod {}: {}", m_pod_id_,
+      CRANE_ERROR("Failed to remove container {}: {}", m_container_id_,
                   rich_err.description());
       return rich_err.code();
     }
-
-    CRANE_DEBUG("Pod {} removed successfully", m_pod_id_);
   }
 
   return CraneErrCode::SUCCESS;
@@ -1121,7 +1091,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
 
 CraneErrCode ContainerInstance::Cleanup() {
   // For container tasks, Kill() is idempotent.
-  // It's ok to call it (at most) twice to remove pod and container.
+  // It's ok to call it (at most) twice to remove container.
   CraneErrCode err = Kill(0);
   return err;
 }
@@ -1231,14 +1201,15 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   using cri::kCriLabelJobIdKey;
   using cri::kCriLabelJobNameKey;
   using cri::kCriLabelStepIdKey;
+  using cri::kCriLabelStepNameKey;
   using cri::kCriLabelUidKey;
 
-  // There is only one task in a step. So we use step_id and job_id here.
+  // There is only one container in a step. So we use step_id and job_id here.
   job_id_t job_id = g_config.JobId;
   step_id_t step_id = g_config.StepId;
 
+  const std::string& job_name = g_config.JobName;
   const std::string& step_name = GetParentStep().name();
-  const std::string& node_name = g_config.CranedIdOfThisNode;
 
   uid_t uid = m_parent_step_inst_->pwd.Uid();
   gid_t gid = m_parent_step_inst_->pwd.Gid();
@@ -1248,11 +1219,13 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
       std::format("job-{}-{}", job_id, step_id));
 
   // labels
-  m_container_config_.mutable_labels()->insert(
-      {{std::string(kCriLabelUidKey), std::to_string(uid)},
-       {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
-       {std::string(kCriLabelStepIdKey), std::to_string(step_id)},
-       {std::string(kCriLabelJobNameKey), step_name}});
+  m_container_config_.mutable_labels()->insert({
+      {std::string(kCriLabelUidKey), std::to_string(uid)},
+      {std::string(kCriLabelJobIdKey), std::to_string(job_id)},
+      {std::string(kCriLabelStepIdKey), std::to_string(step_id)},
+      {std::string(kCriLabelJobNameKey), job_name},
+      {std::string(kCriLabelStepNameKey), step_name},
+  });
 
   // log_path (a relative path to pod log dir)
   m_container_config_.set_log_path(m_log_file_.filename());
@@ -1281,37 +1254,35 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   // security context
   auto* sec_ctx =
       m_container_config_.mutable_linux()->mutable_security_context();
-  if (uid != 0) {
-    // Non root task can use userns or run_as_user/run_as_group.
-    if (pod_meta != nullptr && pod_meta->userns()) {
-      if (InjectFakeRootConfig_(m_parent_step_inst_->pwd,
-                                &m_container_config_) !=
-          CraneErrCode::SUCCESS) {
-        CRANE_ERROR("Failed to inject fake root config for #{}.{}", job_id,
-                    step_id);
-        return CraneErrCode::ERR_SYSTEM_ERR;
-      }
-    } else if (pod_meta != nullptr && pod_meta->run_as_user() == uid &&
-               pod_meta->run_as_group() == gid) {
-      // Set run_as_user and run_as_group if not using userns
-      // TODO: egid and supplemental groups?
-      sec_ctx->mutable_run_as_user()->set_value(uid);
-      sec_ctx->mutable_run_as_group()->set_value(gid);
-    } else if (pod_meta == nullptr) {
-      sec_ctx->mutable_run_as_user()->set_value(uid);
-      sec_ctx->mutable_run_as_group()->set_value(gid);
-    } else {
-      CRANE_ERROR(
-          "Container #{}.{} is not allowed to use other identities when not "
-          "using userns",
-          job_id, step_id);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
+
+  // Currently we don't support setting namespace mode per container.
+  sec_ctx->mutable_namespace_options()->CopyFrom(
+      m_pod_config_.mutable_linux()
+          ->mutable_security_context()
+          ->namespace_options());
+
+  // Setup run_as_user / run_as_group
+  if (uid == 0 || pod_meta->userns() ||
+      (pod_meta->run_as_user() == uid && pod_meta->run_as_group() == gid)) {
+    // If user is root or using userns, run_as_* is always allowed.
+    // Non-root user w/o userns cannot use run_as_* other than its own.
+    sec_ctx->mutable_run_as_user()->set_value(pod_meta->run_as_user());
+    sec_ctx->mutable_run_as_group()->set_value(pod_meta->run_as_group());
   } else {
-    // Root task will not use userns but can set run_as_user/run_as_group.
-    if (pod_meta != nullptr) {
-      sec_ctx->mutable_run_as_user()->set_value(pod_meta->run_as_user());
-      sec_ctx->mutable_run_as_group()->set_value(pod_meta->run_as_group());
+    CRANE_ERROR(
+        "Container #{}.{} is not allowed to use other identities when not "
+        "using userns",
+        job_id, step_id);
+    return CraneErrCode::ERR_INVALID_PARAM;
+  }
+
+  // Setup idmapped mounts if using userns.
+  if (pod_meta->userns()) {
+    if (ResolveMountIdMapping_(m_parent_step_inst_->pwd,
+                               &m_container_config_) != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Failed to inject fake root config for #{}.{}", job_id,
+                  step_id);
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
   }
 
@@ -1334,30 +1305,31 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ContainerInstance::InjectFakeRootConfig_(
+CraneErrCode ContainerInstance::ResolveMountIdMapping_(
     const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
-  if (m_userns_uid_mapping_.length() == 0 &&
-      SetSubIdMappings_(pwd) != CraneErrCode::SUCCESS) {
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
+  using cri::CriClient;
 
-  // set linux container options
-  auto* linux_sec_context = config->mutable_linux()->mutable_security_context();
-  auto* userns_options =
-      linux_sec_context->mutable_namespace_options()->mutable_userns_options();
+  const auto& sec_ctx = config->mutable_linux()->mutable_security_context();
+  uid_t run_as_user = sec_ctx->run_as_user().value();
+  gid_t run_as_group = sec_ctx->run_as_group().value();
 
-  // fake root
-  userns_options->set_mode(cri::api::NamespaceMode::POD);
-  userns_options->mutable_uids()->Add()->CopyFrom(m_userns_uid_mapping_);
-  userns_options->mutable_gids()->Add()->CopyFrom(m_userns_gid_mapping_);
+  const auto& uid_mapping =
+      sec_ctx->mutable_namespace_options()->mutable_userns_options()->uids(0);
+  const auto& gid_mapping =
+      sec_ctx->mutable_namespace_options()->mutable_userns_options()->gids(0);
 
-  linux_sec_context->mutable_run_as_user()->set_value(0);
-  linux_sec_context->mutable_run_as_group()->set_value(0);
+  // Use idmapped mounts for user ns.
+  // Code below could be unintuitive. Check vfsuid for details.
+  auto kuid = run_as_user + uid_mapping.host_id();
+  auto kgid = run_as_group + gid_mapping.host_id();
+
+  auto mount_uid_mapping = CriClient::MakeIdMapping(kuid, pwd.Uid(), 1);
+  auto mount_gid_mapping = CriClient::MakeIdMapping(kgid, pwd.Gid(), 1);
 
   // modify mounts, see comments regarding *mapping members
   for (auto& mount : *config->mutable_mounts()) {
-    mount.mutable_uidmappings()->Add()->CopyFrom(m_mount_uid_mapping_);
-    mount.mutable_gidmappings()->Add()->CopyFrom(m_mount_gid_mapping_);
+    mount.mutable_uidmappings()->Add(std::move(mount_uid_mapping));
+    mount.mutable_gidmappings()->Add(std::move(mount_gid_mapping));
   }
 
   return CraneErrCode::SUCCESS;
@@ -2145,7 +2117,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
-      not_ready_elems.emplace_back(std::move(elem));
+      not_ready_elems.emplace_back(elem);
       CRANE_DEBUG("Task is not ready to terminate, will check next time.");
       continue;
     }
@@ -2179,7 +2151,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         // Will kill the following types of tasks:
         // 1. Non-interactive Task
         // 2. Interactive Task with a process running
-        task->Kill(sig);
+        task->Kill(sig);  // NOTE: retval discarded
       } else if (m_step_.IsInteractive()) {
         // For an Interactive task with no process running, it ends
         // immediately.
@@ -2191,7 +2163,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
   }
   for (auto& not_ready_elem : not_ready_elems) {
-    m_task_terminate_queue_.enqueue(std::move(not_ready_elem));
+    m_task_terminate_queue_.enqueue(not_ready_elem);
   }
 }
 
