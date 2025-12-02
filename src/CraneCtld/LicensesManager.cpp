@@ -509,7 +509,7 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
     const std::vector<std::string>& clusters) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
 
-  CRANE_TRACE("Remove license resource{}@{}....", name, server);
+  CRANE_TRACE("Remove license resource {}@{}....", name, server);
 
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
@@ -670,7 +670,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
       break;
     case crane::grpc::LicenseResource_Field_Flags: {
       for (const auto& flag : absl::StrSplit(value, ',')) {
-        std::string lower_str = absl::AsciiStrToLower(value);
+        std::string lower_str = absl::AsciiStrToLower(flag);
         if (lower_str == "absolute") {
           res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
         } else if (lower_str == "none") {
