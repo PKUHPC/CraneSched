@@ -853,6 +853,11 @@ struct TaskInCtld {
   // =================== Get Attr ==================
   bool IsBatch() const { return type == crane::grpc::Batch; }
   bool IsInteractive() const { return type == crane::grpc::Interactive; }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           task_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
+  }
   bool IsCalloc() const {
     return type == crane::grpc::TaskType::Interactive &&
            task_to_ctld.interactive_meta().interactive_type() ==

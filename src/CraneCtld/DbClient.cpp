@@ -381,7 +381,8 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit      time_submit   work_dir
   // 25 submit_line   exit_code      username       qos           get_user_env
   // 30 type          extra_attr     reservation    exclusive     cpus_alloc
-  // 35 mem_alloc     device_map     meta_container has_job_info  nodename_list
+  // 35 mem_alloc     device_map     meta_pod       meta_container has_job_info
+  // 40 nodename_list
 
   try {
     for (auto view : cursor) {
@@ -1906,8 +1907,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   auto const& runtime_attr = task.runtime_attr();
 
   std::optional<PodMetaInTask> pod_meta{std::nullopt};
+  std::optional<ContainerMetaInTask> container_meta{std::nullopt};
   if (task_to_ctld.type() == crane::grpc::TaskType::Container) {
     pod_meta = static_cast<PodMetaInTask>(task_to_ctld.pod_meta());
+    container_meta =
+        static_cast<ContainerMetaInTask>(task_to_ctld.container_meta());
   }
 
   auto resources = static_cast<ResourceV2>(runtime_attr.allocated_res());
@@ -1934,11 +1938,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     meta_pod      has_job_info licenses_alloc
-  // 40 nodename_list
+  // 35 mem_alloc     device_map     meta_pod      meta_container has_job_info
+  // 40 licenses_alloc nodename_list
 
   // clang-format off
-  std::array<std::string, 41> fields{
+  std::array<std::string, 42> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1954,23 +1958,24 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 30 - 34
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
-    "mem_alloc", "device_map", "meta_pod", "has_job_info", "licenses_alloc",
+    "mem_alloc", "device_map", "meta_pod","meta_container", "has_job_info", 
     // 40 - 44
-    "nodename_list"
+    "licenses_alloc", "nodename_list"
   };
   // clang-format on
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,      /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,     /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string,    /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,            /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string,    /*20-24*/
-             std::string, int32_t, std::string, std::string, bool,   /*25-29*/
-             int32_t, std::string, std::string, bool, double,        /*30-34*/
-             int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
-             bsoncxx::array::value>                                  /*40-44*/
-      values{                                                        // 0-4
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
+             std::string, int32_t, std::string, std::string, bool, /*25-29*/
+             int32_t, std::string, std::string, bool, double,      /*30-34*/
+             int64_t, DeviceMap, std::optional<PodMetaInTask>,     /*35-37*/
+             std::optional<ContainerMetaInTask>, bool,             /*38-39*/
+             std::unordered_map<std::string, uint32_t>,            /*40*/
+             bsoncxx::array::value>                                /*41*/
+      values{                                                      // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
              task_to_ctld.account(),
@@ -2001,14 +2006,14 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.type(), task_to_ctld.extra_attr(),
              task_to_ctld.reservation(), task_to_ctld.exclusive(),
              allocated_res_view.CpuCount(),
-             // 35-39
+             // 35-40
              static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             allocated_res_view.GetDeviceMap(), pod_meta,
+             allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
              true /* Mark the document having complete job info */,
+             // 40-44
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
-             // 40-44
              bsoncxx::array::value{nodename_list_array.view()}};
 
   return DocumentConstructor_(fields, values);
@@ -2068,9 +2073,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info", "licenses_alloc",
+      "mem_alloc", "device_map", "meta_pod", "meta_container", "has_job_info", 
       // 40 - 44
-      "nodename_list"
+      "licenses_alloc", "nodename_list"
   };
   // clang-format on
 
