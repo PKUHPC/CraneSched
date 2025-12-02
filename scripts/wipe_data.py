@@ -22,6 +22,8 @@ class Collection(Enum):
     TASK = "task_table"
     USER = "user_table"
     WCKEY = "wckey_table"
+    RESOURCE = "resource_table"
+
 
 def load_config(crane_path: str, db_path: str = None):
     """Load and validate configurations."""
@@ -180,6 +182,12 @@ def parse_arguments():
         action="store_true",
         help="Include wckey_table in MongoDB wipe.",
     )
+    parser.add_argument(
+        "-r",
+        "--resource_table",
+        action="store_true",
+        help="Include resource_table in MongoDB wipe.",
+    )
     return parser.parse_args()
 
 
@@ -219,13 +227,14 @@ def _main():
     if args.mode in ["mongo", "all"]:
         db = connect_to_mongo(username, password, host, port, dbname)
         to_wipe = []
-        if not any([args.acct_table, args.qos_table, args.task_table, args.user_table, args.wckey_table]):
+        if not any([args.acct_table, args.qos_table, args.task_table, args.user_table, args.wckey_table, args.resource_table]):
             to_wipe = [
                 Collection.ACCT,
                 Collection.QOS,
                 Collection.TASK,
                 Collection.USER,
                 Collection.WCKEY,
+                Collection.RESOURCE
             ]  # Default to all
         else:
             if args.acct_table:
@@ -238,6 +247,8 @@ def _main():
                 to_wipe.append(Collection.USER)
             if args.wckey_table:
                 to_wipe.append(Collection.WCKEY)
+            if args.resource_table:
+                to_wipe.append(Collection.RESOURCE)
         wipe_mongo(db, to_wipe)
 
     # Handle embedded database cleanup
