@@ -460,6 +460,7 @@ class TaskManager {
     }
   }
 
+  // Should called in uvw thread, otherwise data race may happen.
   void TaskFinish_(task_id_t task_id, crane::grpc::TaskStatus new_status,
                    uint32_t exit_code, std::optional<std::string> reason);
   CraneErrCode LaunchExecution_(ITaskInstance* task);

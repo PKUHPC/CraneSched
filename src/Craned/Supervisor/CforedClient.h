@@ -163,7 +163,7 @@ class CforedClient {
 
   x11_local_id_t next_x11_id_{0};
   std::unordered_map<x11_local_id_t, std::shared_ptr<X11FdInfo>>
-      m_x11_fd_info_map_;
+      m_x11_fd_info_map_ ABSL_GUARDED_BY(m_mtx_);
 
   std::shared_ptr<grpc::Channel> m_cfored_channel_;
   std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;

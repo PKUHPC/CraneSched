@@ -773,6 +773,7 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
         "[Step #{}.{}] Daemon step not found when migrating pid {} to "
         "cgroup of job#{}.",
         job_id, kDaemonStepId, pid, job_id);
+    return false;
   }
   auto& daemon_step = daemon_step_it->second;
   auto stub = daemon_step->supervisor_stub;
@@ -782,6 +783,7 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
         "to "
         "cgroup of job#{}.",
         job_id, kDaemonStepId, pid, job_id);
+    return false;
   }
   auto err = stub->MigrateSshProcToCg(pid);
   if (err == CraneErrCode::SUCCESS) {

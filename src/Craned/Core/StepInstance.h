@@ -71,6 +71,7 @@ struct StepInstance {
 
   void ExecuteStepAsync();
 
+  // Not implemented yet.
   CraneExpected<void> TerminateStep(bool mark_as_orphaned,
                                     bool terminated_by_user);
 
