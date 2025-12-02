@@ -691,7 +691,7 @@ cacctmgr add resource <name> [options]
 - **Allocated=<number>**: Number of allocated resources
 - **Flags=<flags>**: Resource flags (None, Absolute)
 - **Allowed=<number>**: Amount available to the cluster
-- **cluster=<cluster>**: Cluster name
+- **Cluster=<cluster>**: Cluster name
 
 **Examples:**
 

@@ -1183,11 +1183,17 @@ bool MongodbClient::InsertResource(const LicenseResource& resource) {
   document doc = ResourceToDocument_(resource);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_resource_collection_name_].insert_one(
-          *GetSession_(), doc.view());
+  try {
+    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+        (*GetClient_())[m_db_name_][m_resource_collection_name_].insert_one(
+            *GetSession_(), doc.view());
 
-  return ret != bsoncxx::stdx::nullopt;
+    if (ret != bsoncxx::stdx::nullopt) return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  return false;
 }
 
 bool MongodbClient::UpdateResource(const LicenseResource& resource) {
@@ -1821,19 +1827,21 @@ void MongodbClient::ViewToResource_(
     resource->server = ViewValueOr_(resource_view["server"], std::string{});
     resource->server_type =
         ViewValueOr_(resource_view["server_type"], std::string{});
-    resource->type =
-        static_cast<crane::grpc::LicenseResource::Type>(ViewValueOr_(
-            resource_view["type"], 0));
+    resource->type = static_cast<crane::grpc::LicenseResource::Type>(
+        ViewValueOr_(resource_view["type"], 0));
     resource->allocated = ViewValueOr_(resource_view["allocated"], 0);
     resource->count = ViewValueOr_(resource_view["count"], 0);
     resource->flags = ViewValueOr_(resource_view["flags"], 0);
     resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], 0);
     resource->last_update = ViewValueOr_(resource_view["last_update"], 0);
+    resource->description =
+        ViewValueOr_(resource_view["description"], std::string{});
 
     for (auto&& elem :
          ViewValueOr_(resource_view["cluster_resources"],
                       bsoncxx::builder::basic::make_document().view())) {
-      resource->cluster_resources.emplace(std::string(elem.key()), elem.get_int32().value);
+      resource->cluster_resources.emplace(std::string(elem.key()),
+                                          elem.get_int32().value);
     }
 
   } catch (const bsoncxx::exception& e) {
@@ -1848,9 +1856,9 @@ MongodbClient::document MongodbClient::ResourceToDocument_(
       "allocated", "last_consumed", "cluster_resources", "count",
       "flags",     "last_update",   "description"};
 
-  std::tuple<std::string, std::string, std::string, int32_t,
-             int32_t, int32_t, std::unordered_map<std::string, uint32_t>, int32_t,
-             int32_t, int64_t, std::string>
+  std::tuple<std::string, std::string, std::string, int32_t, int32_t, int32_t,
+             std::unordered_map<std::string, uint32_t>, int32_t, int32_t,
+             int64_t, std::string>
       values{resource.name,
              resource.server,
              resource.server_type,
