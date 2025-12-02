@@ -1047,7 +1047,7 @@ JobManager::GetAllocatedJobSteps() {
 uint32_t JobManager::GetStepExitCode(job_id_t job_id, step_id_t step_id) {
   auto job_ptr = m_job_map_.GetValueExclusivePtr(job_id);
   if (!job_ptr) {
-    CRANE_WARN("[Step #{}.{}] Job not found when getting exit code", job_id,
+    CRANE_WARN("[Step #{}.{}] Job not found when get exit code", job_id,
                step_id);
     return 0;
   }
