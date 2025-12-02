@@ -270,7 +270,7 @@ class PodInstance : public ITaskInstance {
 
   static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
                                  const std::string& node_name);
-  static CraneErrCode InjectFakeRootConfig_(
+  static CraneErrCode ResolveUserNsMapping_(
       const PasswordEntry& pwd, cri::api::LinuxSandboxSecurityContext* sec_ctx);
 
   CraneErrCode SetPodSandboxConfig_(
@@ -324,24 +324,20 @@ class ContainerInstance : public ITaskInstance {
   static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
 
-  inline static cri::api::IDMapping MakeIdMapping_(uid_t kernel_id,
-                                                   uid_t userspace_id,
-                                                   size_t size);
   inline static std::string MakeHashId_(job_id_t job_id,
                                         const std::string& job_name,
                                         const std::string& node_name);
+
+  // Setup id-mapped mounts in rootless containers.
+  // NOTE: Called only after userns, run_as_* fields are set in config.
+  static CraneErrCode ResolveMountIdMapping_(const PasswordEntry& pwd,
+                                             cri::api::ContainerConfig* config);
 
   CraneErrCode LoadPodSandboxInfo_(
       const crane::grpc::PodTaskAdditionalMeta* pod_meta);
   CraneErrCode SetContainerConfig_(
       const crane::grpc::ContainerTaskAdditionalMeta& ca_meta,
       const crane::grpc::PodTaskAdditionalMeta* pod_meta);
-
-  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
-                                     cri::api::ContainerConfig* config);
-  CraneErrCode InjectFakeRootConfig_(const PasswordEntry& pwd,
-                                     cri::api::PodSandboxConfig* config);
-  CraneErrCode SetSubIdMappings_(const PasswordEntry& pwd);
 
   std::string m_image_id_;
   std::string m_pod_id_;
@@ -350,29 +346,28 @@ class ContainerInstance : public ITaskInstance {
   cri::api::PodSandboxConfig m_pod_config_;
   cri::api::ContainerConfig m_container_config_;
 
-  // These are used for keep-id mounts in rootless containers.
-  cri::api::IDMapping m_mount_uid_mapping_;
-  cri::api::IDMapping m_mount_gid_mapping_;
-
-  // This is a workaround for CRI which only supports only one id
-  // mapping in user namespace. See:
-  // https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/
-  // https://github.com/containerd/containerd/blob/release/2.1/internal/cri/server/sandbox_run_linux.go#L51
-  cri::api::IDMapping m_userns_uid_mapping_;
-  cri::api::IDMapping m_userns_gid_mapping_;
-
   std::filesystem::path m_log_dir_;
   std::filesystem::path m_log_file_;
 };
 
 struct ProcInstanceMeta {
   virtual ~ProcInstanceMeta() = default;
+  ProcInstanceMeta() = default;
+  ProcInstanceMeta(const ProcInstanceMeta&) = delete;
+  ProcInstanceMeta(ProcInstanceMeta&&) = delete;
+  ProcInstanceMeta& operator=(const ProcInstanceMeta&) = delete;
+  ProcInstanceMeta& operator=(ProcInstanceMeta&&) = delete;
 
   std::string parsed_sh_script_path;
 };
 
 struct BatchInstanceMeta final : ProcInstanceMeta {
   ~BatchInstanceMeta() override = default;
+  BatchInstanceMeta() = default;
+  BatchInstanceMeta(const BatchInstanceMeta&) = delete;
+  BatchInstanceMeta(BatchInstanceMeta&&) = delete;
+  BatchInstanceMeta& operator=(const BatchInstanceMeta&) = delete;
+  BatchInstanceMeta& operator=(BatchInstanceMeta&&) = delete;
 
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
@@ -380,6 +375,11 @@ struct BatchInstanceMeta final : ProcInstanceMeta {
 
 struct CrunInstanceMeta final : ProcInstanceMeta {
   ~CrunInstanceMeta() override = default;
+  CrunInstanceMeta() = default;
+  CrunInstanceMeta(const CrunInstanceMeta&) = delete;
+  CrunInstanceMeta(CrunInstanceMeta&&) = delete;
+  CrunInstanceMeta& operator=(const CrunInstanceMeta&) = delete;
+  CrunInstanceMeta& operator=(CrunInstanceMeta&&) = delete;
 
   int stdin_write;
   int stdout_write;
@@ -437,7 +437,7 @@ class ProcInstance : public ITaskInstance {
   CraneErrCode SetChildProcBatchFd_();
 
   // Methods shared by Batch/Crun
-  void ResetChildProcSigHandler_();
+  static void ResetChildProcSigHandler_();
 
   CraneErrCode SetChildProcProperty_();
 
@@ -479,7 +479,7 @@ class TaskManager {
   void AddTerminationTimer_(Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
           EvTaskTimerCb_();
         });
     termination_handel->start(
@@ -491,7 +491,7 @@ class TaskManager {
   void AddTerminationTimer_(int64_t secs) {
     auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handle->on<uvw::timer_event>(
-        [this](const uvw::timer_event&, uvw::timer_handle& h) {
+        [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
           EvTaskTimerCb_();
         });
     termination_handle->start(std::chrono::seconds(secs),
