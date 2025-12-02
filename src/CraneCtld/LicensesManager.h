@@ -92,7 +92,8 @@ class LicensesManager {
       std::list<LicenseResource> *res_licenses);
 
  private:
-  CraneExpectedRich<void> CheckAndUpdateFields_(const std::vector<std::string> &clusters,
+  CraneExpectedRich<void> CheckAndUpdateFields_(
+      const std::vector<std::string> &clusters,
       const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
           &operators,
       LicenseResource *res_resource);

@@ -381,16 +381,15 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
       else
         total = (res_resource.count * iter->second) / 100;
       m_licenses_map_.Emplace(
-          license_id,
-          License{.license_id = license_id,
-                  .total = total,
-                  .used = 0,
-                  .reserved = 0,
-                  .remote = true,
-                  .server = res_resource.server,
-                  .last_consumed = res_resource.last_consumed,
-                  .last_deficit = 0,
-                  .last_update = res_resource.last_update});
+          license_id, License{.license_id = license_id,
+                              .total = total,
+                              .used = 0,
+                              .reserved = 0,
+                              .remote = true,
+                              .server = res_resource.server,
+                              .last_consumed = res_resource.last_consumed,
+                              .last_deficit = 0,
+                              .last_update = res_resource.last_update});
     }
   }
 
@@ -449,16 +448,15 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
           total = (res_resource.count * cluster_iter->second) / 100;
 
         m_licenses_map_.Emplace(
-            license_id,
-            License{.license_id = license_id,
-                    .total = total,
-                    .used = 0,
-                    .reserved = 0,
-                    .remote = true,
-                    .server = res_resource.server,
-                    .last_consumed = res_resource.last_consumed,
-                    .last_deficit = 0,
-                    .last_update = res_resource.last_update});
+            license_id, License{.license_id = license_id,
+                                .total = total,
+                                .used = 0,
+                                .reserved = 0,
+                                .remote = true,
+                                .server = res_resource.server,
+                                .last_consumed = res_resource.last_consumed,
+                                .last_deficit = 0,
+                                .last_update = res_resource.last_update});
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
         if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)

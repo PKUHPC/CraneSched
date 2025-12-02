@@ -334,9 +334,10 @@ class MongodbClient {
       const std::unordered_map<std::string, std::string>& conditions,
       int64_t start_time, int64_t end_time, std::list<Txn>* res_txn);
 
-  bool InsertResource(const LicenseResource&  resource);
+  bool InsertResource(const LicenseResource& resource);
   bool UpdateResource(const LicenseResource& resource);
-  bool DeleteResource(const std::string& resource_name, const std::string& server);
+  bool DeleteResource(const std::string& resource_name,
+                      const std::string& server);
   void SelectAllResource(std::list<LicenseResource>* resource_list);
 
   bool CommitTransaction(
