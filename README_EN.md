@@ -1,5 +1,7 @@
 ## CraneSched Latest Updates
 
+[2025/11/11] v1.1.3: Added partition default/max memory configuration, multiple GID support; optimized job script permissions and resource management; improved English documentation and multi-language support; enhanced performance and stability.
+
 [2025/04/08] v1.1.2: Upgraded toolchains to GCC 15 / Clang 20; added node drain/resume events, partition-based account control; integrated HashiCorp Vault.
 
 [2025/01/24] v1.1.0: Added X11 forwarding, user QoS limits, multiple GID support; support for cgroup v2 and Ascend NPU; improved scheduler and event library.
