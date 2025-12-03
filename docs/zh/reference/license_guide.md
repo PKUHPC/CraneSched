@@ -101,7 +101,7 @@ $ cacctmgr show resource withclusters
 | nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | pdf      | 50%     |       |
 |---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
 ```
-配置好的许可证现在可以通过 scontrol 命令在两个集群上查看。
+配置好的许可证现在可以通过 ccontrol 命令在两个集群上查看。
 ```bash
 # On cluster "pdf"
 $ ccontrol show lic
