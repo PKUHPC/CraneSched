@@ -63,7 +63,7 @@ struct StepInstance {
     return std::format("{}.{}", job_id, step_id);
   }
 
-  CraneErrCode CreateCg();
+  CraneErrCode Prepare();
 
   CraneErrCode SpawnSupervisor(const EnvMap& job_env_map);
 
@@ -74,18 +74,5 @@ struct StepInstance {
   // Not implemented yet.
   CraneExpected<void> TerminateStep(bool mark_as_orphaned,
                                     bool terminated_by_user);
-
- private:
-  /**
-   * Send a signal to the process group of pid. For kill uninitialized
-   * Supervisor only.
-   * This function ASSUMES that ALL processes belongs to the
-   * process group with the PGID set to the PID of the first process in this
-   * TaskExecutionInstance.
-   * @param signum the value of signal.
-   * @return if the signal is sent successfully, kOk is returned.
-   * otherwise, kGenericFailure is returned.
-   */
-  static CraneErrCode KillPid_(pid_t pid, int signum);
 };
 }  // namespace Craned
