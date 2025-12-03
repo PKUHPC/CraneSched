@@ -256,7 +256,7 @@ jobs:
         if: steps.local_cache.outputs.hit != 'true'
         run: |
           podman run --rm \
-              -e CCACHE_NODIRECT=1
+              -e CCACHE_NODIRECT=1 \
               -v ./CraneSched:/Workspace/CraneSched \
               -v ./CraneSched-FrontEnd:/Workspace/CraneSched-FrontEnd \
               -v ./output:/Workspace/output \
