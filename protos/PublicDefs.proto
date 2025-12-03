@@ -457,6 +457,8 @@ enum ErrCode {
   ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
   ERR_EBPF = 69;
   ERR_SUPERVISOR = 70;
+
+  ERR_CN_KUNPENG_F_38_CORES = 71;
 }
 
 enum EntityType {

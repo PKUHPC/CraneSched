@@ -203,7 +203,12 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 65 - 67
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
-        "User has insufficient privilege"
+        "User has insufficient privilege",
+        "",
+        "",
+        "",
+        "",
+        "cnkunpengf partition requires the cpu count to be a multiple of 38",
     };
 // clang-format on
 }  // namespace Internal

@@ -3034,6 +3034,26 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  // FIXME: HOTFIX for cnkunpengf partition
+  if (task->partition_id == "cnkunpengf") {
+    double intpart = 0.0;
+    if (std::modf(task->requested_node_res_view.CpuCount(), &intpart) != 0.0) {
+      CRANE_TRACE(
+          "Task #{} requests fractional CPU count {} in partition "
+          "cnkunpengf, which is not allowed.",
+          task->TaskId(), task->requested_node_res_view.CpuCount());
+      return std::unexpected(CraneErrCode::ERR_CN_KUNPENG_F_38_CORES);
+    }
+
+    if (intpart == 0 || static_cast<uint64_t>(intpart) % 38 != 0) {
+      CRANE_TRACE(
+          "Task #{} requests CPU count {} not multiple of 38 in partition "
+          "cnkunpengf, which is not allowed.",
+          task->TaskId(), static_cast<uint64_t>(intpart));
+      return std::unexpected(CraneErrCode::ERR_CN_KUNPENG_F_38_CORES);
+    }
+  }
+
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
   {
