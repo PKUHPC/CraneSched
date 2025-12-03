@@ -524,6 +524,81 @@ cacctmgr show transaction where Target=PKU
 
 ---
 
+## 5. Wckey 管理
+
+### 5.1 添加 Wckey
+
+**语法：**
+```bash
+cacctmgr add wckey <名称> [选项]
+```
+
+**选项：**
+
+- **User=<用户名>**: 用户名 （必需）
+- **cluster=<集群名>**: 集群名 （必需）
+
+**示例：**
+
+添加 Wckey
+```bash
+cacctmgr add wckey hpcgroup user=zhangsan cluster=pkuhpc_test
+```
+### 5.2 删除 Wckey
+
+**语法：**
+```bash
+cacctmgr delete wckey <名称> [选项]
+```
+
+**选项：**
+
+- **User=<用户名>**: 用户名 （必需）
+- **cluster=<集群名>**: 集群名 （必需）
+
+**示例：**
+```bash
+cacctmgr delete wckey hpcgroup user=zhangsan cluster=pkuhpc_test
+```
+
+### 5.3 修改默认Wckey
+
+**语法：**
+```bash
+cacctmgr modify wckey where User=<name> Cluster=<cluster> set <defaultwckey>=<wckey>
+```
+
+**属性：**
+
+- **User=<用户名>**: 用户名 （必需）
+- **cluster=<集群名>**: 集群名 （必需）
+- **defaultwckey=<Wckey名>**）: 存在的wckey名 （必需）
+
+**示例：**
+
+修改默认Wckey
+```bash
+cacctmgr modify wckey where user=zhangsan cluster=pkuhpc_test set defaultwckey=hpcgroup
+```
+
+### 5.4 显示 Wckey
+
+**语法：**
+```bash
+cacctmgr show wckey [名称]
+```
+
+**选项：**
+
+- **Name=<名称1,名称2,...>**: 仅显示特定Wckey（逗号分隔）
+
+**示例：**
+
+显示所有 Wckey
+```bash
+cacctmgr show wckey
+```
+
 ## 使用示例
 
 ### 完整工作流示例

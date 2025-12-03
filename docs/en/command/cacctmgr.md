@@ -524,6 +524,81 @@ cacctmgr show transaction where Target=PKU
 
 ---
 
+## 5. Wckey Management
+
+### 5.1 Add Wckey
+
+**Syntax:**
+```bash
+cacctmgr add wckey <name> [options]
+```
+
+**Options:**
+
+- **User=<username>**: Username (required)
+- **Cluster=<cluster name>**: Cluster name (required)
+
+**Example:**
+
+Add Wckey
+```bash
+cacctmgr add wckey hpcgroup user=zhangsan cluster=pkuhpc_test
+```
+### 5.2 Delete Wckey
+
+**Syntax:**
+```bash
+cacctmgr delete wckey <name> [options]
+```
+
+**Options:**
+
+- **User=<username>**: Username (required)
+- **Cluster=<cluster name>**: Cluster name (required)
+
+**Example:**
+```bash
+cacctmgr delete wckey hpcgroup user=zhangsan cluster=pkuhpc_test
+```
+
+### 5.3 Modify Default Wckey
+
+**Syntax:**
+```bash
+cacctmgr modify wckey where User=<name> Cluster=<cluster> set <defaultwckey>=<wckey>
+```
+
+**Options:**
+
+- **User=<username>**: Username (required)
+- **Cluster=<cluster name>**: Cluster name (required)
+- **defaultwckey=<Wckey name>**: Existing Wckey name (required)
+
+**Example:**
+
+Modify default Wckey
+```bash
+cacctmgr modify wckey where user=zhangsan cluster=pkuhpc_test set defaultwckey=hpcgroup
+```
+
+### 5.4 Show Wckey
+
+**Syntax:**
+```bash
+cacctmgr show wckey [name]
+```
+
+**Options:**
+
+- **Name=<name1,name2,...>**: Show specific Wckeys only (comma-separated)
+
+**Example:**
+
+Show all Wckeys
+```bash
+cacctmgr show wckey
+```
+
 ## Usage Examples
 
 ### Complete Workflow Example
