@@ -1,14 +1,14 @@
 # License Usage Guide
 
-Crane can help manage software licenses by allocating available licenses to jobs during scheduling.  
-If licenses are unavailable, jobs will remain in the queue until licenses become available.  
-In Crane, licenses are essentially shared resources, meaning they are not bound to a specific host,  
+Crane can help manage software licenses by allocating available licenses to jobs during scheduling. 
+If licenses are unavailable, jobs will remain in the queue until licenses become available. 
+In Crane, licenses are essentially shared resources, meaning they are not bound to a specific host, 
 but are associated with the entire cluster.
 
 Crane currently supports configuring licenses in the following ways:
 
 * **Local licenses:** Defined in the `/etc/crane/config.yaml` file of a specific cluster, and only valid locally for that cluster.
-* **Remote licenses:** Remote licenses are stored in the database and configured using the `cacctmgr` command.  
+* **Remote licenses:** Remote licenses are stored in the database and configured using the `cacctmgr` command. 
   Remote licenses are dynamic.
 
 ## Local Licenses
@@ -46,11 +46,11 @@ cbatch -L fluent:2|ansys:1 script.sh
 
 ## Remote Licenses
 
-Remote licenses do not include any built-in integration with third-party license managers.  
-The "Server" and "ServerType" parameters specified during creation serve informational purposes only—  
+Remote licenses do not include any built-in integration with third-party license managers. 
+The `Server` and `ServerType` parameters specified during creation serve informational purposes only 
 they **do not** mean Crane will interact with those servers automatically.
 
-It is the system administrator’s responsibility to implement integration with external systems.  
+It is the system administrator’s responsibility to implement integration with external systems. 
 This includes ensuring that:
 
 - Only users who request remote licenses through Crane can check out licenses from the license server.
@@ -58,14 +58,15 @@ This includes ensuring that:
 
 ### Use Case
 
-A site has two license servers: one provides 100 Nastran licenses via FlexNet,  
-and another provides 50 Matlab licenses via Reprise License Management.  
-The site has two clusters, “fluid” and “pdf”, used for simulation jobs requiring both software packages.  
-The administrator wants to split the Nastran licenses evenly between the two clusters,  
-and allocate 70% of the Matlab licenses to the “pdf” cluster and the remaining 30% to the “fluid” cluster.
+A site has two license servers: one provides 100 Nastran licenses via FlexNet, 
+and another provides 50 Matlab licenses via Reprise License Management. 
+The site has two clusters, fluid and pdf, used for simulation jobs requiring both software packages. 
+The administrator wants to split the Nastran licenses evenly between the two clusters, 
+and allocate 70% of the Matlab licenses to the pdf cluster and the remaining 30% to the fluid cluster.
 
-When adding licenses using `cacctmgr`, the admin must specify the license count  
-and the percentage allocation for each cluster. This can be done in one step or multiple steps.
+When adding licenses using `cacctmgr`, the admin must specify the license count 
+and the percentage allocation for each cluster. 
+This can be done in one step or multiple steps.
 
 **Single step:**
 
@@ -200,16 +201,16 @@ $ cacctmgr show resource withclusters
 |--------|-----------|---------|-------|--------------|-----------|------------|----------|---------|----------|
 ```
 
-You may also set `AllLicenseResourcesAbsolute=yes` in `/etc/crane/config.yaml`  
-to make all newly created licenses use Absolute mode by default  
+You may also set `AllLicenseResourcesAbsolute=yes` in `/etc/crane/config.yaml` 
+to make all newly created licenses use Absolute mode by default 
 (CraneCtld restart required).
 
 ## Dynamic Licenses
 
-The `LastConsumed` field of remote licenses is designed to be periodically updated  
+The `LastConsumed` field of remote licenses is designed to be periodically updated 
 with the actual consumption from the license server.
 
-Below is an example script for FlexLM’s `lmstat` command;  
+Below is an example script for FlexLM’s `lmstat` command; 
 similar scripts can be written for other license systems.
 
 ```bash
@@ -226,11 +227,11 @@ consumed=$(${LMSTAT} | grep "Users of ${LICENSE}"|sed "s/.*Total of \([0-9]\+\) 
 cacctmgr update resource name=${LICENSE} server=${SERVER} set lastconsumed=${consumed}
 ```
 
-When `cacctmgr` updates `LastConsumed`, the new value is automatically pushed to the Crane controller.  
-The controller uses this value to compute the `LastDeficit`—  
+When `cacctmgr` updates `LastConsumed`, the new value is automatically pushed to the Crane controller. 
+The controller uses this value to compute the `LastDeficit`
 the number of licenses “missing” from the cluster’s perspective that must be reserved.
 
-For example, suppose a cluster is allocated 80 out of 100 available "foobar" licenses:
+For example, suppose a cluster is allocated 80 out of 100 available foobar licenses:
 
 ```bash
 $ cacctmgr add resource foobar server=db count=100 flags=absolute cluster=blackhole allowed=80 type=license
@@ -241,7 +242,7 @@ LicenseName=foobar@db
         LastConsumed=0 LastDeficit=0 LastUpdated=2025-12-01 11:02:23
 ```
 
-Now suppose a cron job updates `LastConsumed` to 30,  
+Now suppose a cron job updates `LastConsumed` to 30, 
 even though the cluster itself has not allocated any licenses:
 
 ```bash
@@ -253,13 +254,13 @@ LicenseName=foobar@db
         LastConsumed=30 LastDeficit=10 LastUpdated=2025-12-01 11:03:0
 ```
 
-Note that the cluster now sees a deficit of 10 licenses,  
-and thus will only schedule up to 70 licenses.  
-Even though 80 licenses are allocated to the cluster,  
-10 licenses appear to be missing and untrackable.  
+Note that the cluster now sees a deficit of 10 licenses, 
+and thus will only schedule up to 70 licenses. 
+Even though 80 licenses are allocated to the cluster, 
+10 licenses appear to be missing and untrackable. 
 Crane cannot allocate these licenses to jobs because jobs might fail if they attempt to check out unavailable licenses.
 
-If the next script update reduces `LastConsumed` to 20, the deficit disappears,  
+If the next script update reduces `LastConsumed` to 20, the deficit disappears, 
 and all 80 allocated licenses become available again:
 
 ```bash
