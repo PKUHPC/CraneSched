@@ -80,7 +80,7 @@ void StepInstance::CleanUp() {
   }
 }
 
-CraneErrCode StepInstance::CreateCg() {
+CraneErrCode StepInstance::Prepare() {
   auto cg_expt = CgroupManager::AllocateAndGetCgroup(
       CgroupManager::CgroupStrByStepId(job_id, step_id, true), step_to_d.res(),
       false);
@@ -149,20 +149,6 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     FileInputStream istream(supervisor_craned_fd);
     FileOutputStream ostream(craned_supervisor_fd);
 
-    // Before exec, we need to make sure that the cgroup is ready.
-    if (!this->crane_cgroup->MigrateProcIn(child_pid)) {
-      CRANE_ERROR(
-          "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
-          "migration.",
-          job_id, step_id);
-
-      KillPid_(child_pid, SIGKILL);
-
-      close(craned_supervisor_fd);
-      close(supervisor_craned_fd);
-      return CraneErrCode::ERR_CGROUP;
-    }
-
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(job_id);
@@ -219,7 +205,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
       CRANE_ERROR("[Step #{}.{}] Failed to send init msg to supervisor: {}",
                   job_id, step_id, strerror(ostream.GetErrno()));
 
-      KillPid_(child_pid, SIGKILL);
+      crane_cgroup->KillAllProcesses(SIGKILL);
 
       close(craned_supervisor_fd);
       close(supervisor_craned_fd);
@@ -243,7 +229,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
         CRANE_ERROR("[Step #{}.{}] False from subprocess {}.", job_id, step_id,
                     child_pid);
 
-      KillPid_(child_pid, SIGKILL);
+      crane_cgroup->KillAllProcesses(SIGKILL);
 
       close(craned_supervisor_fd);
       close(supervisor_craned_fd);
@@ -262,6 +248,17 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
+    // Before exec, we need to make sure that the cgroup is ready.
+    if (!this->crane_cgroup->MigrateProcIn(child_pid)) {
+      fmt::print(
+          stderr,
+          "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "
+          "migration.",
+          job_id, step_id);
+
+      std::abort();
+    }
+
     int craned_supervisor_fd = craned_supervisor_pipe[0];
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
@@ -279,8 +276,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
           continue;
         }
         std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdin: {}.", job_id, step_id,
-                   ec.message());
+        fmt::print(stderr, "[Step #{}.{}] Failed to dup2 stdin: {}.", job_id,
+                   step_id, ec.message());
         std::abort();
       }
 
@@ -298,8 +295,8 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
           continue;
         }
         std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdout: {}.", job_id, step_id,
-                   ec.message());
+        fmt::print(stderr, "[Step #{}.{}] Failed to dup2 stdout: {}.", job_id,
+                   step_id, ec.message());
         std::abort();
       }
 
@@ -432,23 +429,6 @@ void StepInstance::ExecuteStepAsync() {
       // task in local step finished.
     }
   });
-}
-
-CraneErrCode StepInstance::KillPid_(pid_t pid, int signum) {
-  // TODO: Add timer which sends SIGTERM for those tasks who
-  //  will not quit when receiving SIGINT.
-  CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
-
-  // Send the signal to the whole process group.
-  int err = kill(-pid, signum);
-
-  if (err == 0)
-    return CraneErrCode::SUCCESS;
-  else {
-    std::error_code ec(errno, std::system_category());
-    CRANE_TRACE("kill failed. error: {}", ec.message());
-    return CraneErrCode::ERR_GENERIC_FAILURE;
-  }
 }
 
 }  // namespace Craned

@@ -685,7 +685,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErrCode err = step_ptr->CreateCg();
+  CraneErrCode err = step_ptr->Prepare();
   if (err != CraneErrCode::SUCCESS) {
     step_ptr->err_before_supv_start = true;
     ActivateTaskStatusChangeAsync_(

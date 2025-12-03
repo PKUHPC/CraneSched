@@ -1084,6 +1084,10 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   return ok;
 }
 
+// FIXME: Potential risk
+// We need to freeze the cgroup before killing processes to avoid new processes
+// being created during the kill operation or some processes dead before we kill
+// them.
 bool CgroupV1::KillAllProcesses(int signum) {
   using namespace CgConstant::Internal;
 
