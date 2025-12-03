@@ -8,7 +8,7 @@ Crane 可以通过在调度时为作业分配可用的许可证来帮助管理�
 在 Crane 中，许可证目前可以通过下面方式进行配置：
 
 * 本地许可证：指在某个 `/etc/crane/config.yaml` 中配置的许可证，只在使用该 `/etc/crane/config.yaml` 的集群内本地有效。
-* 远程许可证：远程许可证由数据库提供，并通过 cacctmgr 命令进行配置。
+* 远程许可证：远程许可证由数据库提供，并通过 `cacctmgr` 命令进行配置。
 远程许可证具有动态特性。
 
 ## 本地许可证
@@ -23,7 +23,7 @@ Licenses:
     quantity: 100
 ```
 
-可以使用 ccontrol 命令查看已配置的许可证。
+可以使用 `ccontrol` 命令查看已配置的许可证。
 ```bash
 $ ccontrol show lic
 LicenseName=ansys
@@ -45,7 +45,7 @@ cbatch -L fluent:2|ansys:1 script.sh
 
 ## 远程许可证
 远程许可证（Remote licenses）本身不提供与第三方许可证管理器的任何集成。
-在创建这些许可证时使用 "Server" 和 "ServerType" 参数仅用于信息记录，
+在创建这些许可证时使用 `Server` 和 `ServerType` 参数仅用于信息记录，
 并不意味着 Crane 会与这些服务器进行任何自动的许可证管理。
 系统管理员有责任自行实现与这些系统的集成。 
 例如，这包括确保只有通过 Crane 请求远程许可证的用户才能从许可证服务器检出许可证，
@@ -54,11 +54,11 @@ cbatch -L fluent:2|ansys:1 script.sh
 ### 使用场景
 某站点有两个许可证服务器，一个由 FlexNet 提供 100 个 Nastran 许可证，
 另一个由 Reprise License Management 提供 50 个 Matlab 许可证。
-该站点有两个集群 “fluid” 和 “pdf”，用于运行两个软件的模拟作业。
+该站点有两个集群 fluid 和 pdf，用于运行两个软件的模拟作业。
 管理员希望将 Nastran 许可证在两个集群之间平均分配，
-而 Matlab 许可证的 70% 分配给 “pdf” 集群，剩下的 30% 分配给 “fluid” 集群。
+而 Matlab 许可证的 70% 分配给 pdf 集群，剩下的 30% 分配给 fluid 集群。
 
-使用 cacctmgr 命令添加许可证时，需要指定许可证总数，
+使用 `cacctmgr` 命令添加许可证时，需要指定许可证总数，
 以及应当分配给每个集群的百分比。此操作可以一步完成，也可以多步完成。
 
 **一步方式：**
@@ -82,7 +82,7 @@ $ cacctmgr add resource matlab server=rlm_host \
 Resource added successfully
 ```
 
-cacctmgr 命令现在将显示许可证的总数。
+`cacctmgr` 命令现在将显示许可证的总数。
 ```bash
 $ cacctmgr show resource
 |---------|-----------|---------|-------|--------------|-----------|------------|-------|
@@ -101,7 +101,7 @@ $ cacctmgr show resource withclusters
 | nastran | flex_host | License | 100   | 0            | 100%      | flexlm     | pdf      | 50%     |       |
 |---------|-----------|---------|-------|--------------|-----------|------------|----------|---------|-------|
 ```
-配置好的许可证现在可以通过 ccontrol 命令在两个集群上查看。
+配置好的许可证现在可以通过 `ccontrol` 命令在两个集群上查看。
 ```bash
 # On cluster "pdf"
 $ ccontrol show lic
@@ -160,7 +160,7 @@ $ cacctmgr show resource withclusters
 |--------|----------|---------|-------|--------------|-----------|------------|----------|---------|-------
 ```
 
-如果设置 Absolute 标志，表示每个集群的许可证 allowed 值将被视为绝对数量，而不是百分比。
+如果设置 `Absolute` 标志，表示每个集群的许可证 `allowed` 值将被视为绝对数量，而不是百分比。
 
 以下是一些使用该标志进行许可证管理的简单示例。
 
