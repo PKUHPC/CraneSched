@@ -351,7 +351,13 @@ bool JobManager::EvCheckSupervisorRunning_() {
             "[Step #{}.{}] Supervisor is still running after {} checks, will "
             "clean up now!",
             job_id, step_id, kMaxSupervisorCheckRetryCount);
-        // TODO: Send status change for dead step
+        g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+            .job_id = job_id,
+            .step_id = step_id,
+            .new_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding during step completion",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       } else {
         if (exists) continue;
       }
@@ -793,8 +799,16 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
       if (code != CraneErrCode::SUCCESS) {
         CRANE_ERROR("[Step #{}.{}] Supervisor failed to execute task, code:{}.",
                     job_id, step_id, static_cast<int>(code));
+        g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+            .job_id = job_id,
+            .step_id = step_id,
+            .new_status = StepStatus::Failed,
+            .exit_code = ExitCode::EC_RPC_ERR,
+            .reason = "Supervisor not responding when execute task",
+            .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         // Ctld will send ShutdownSupervisor after status change from
-        // supervisor.
+        // daemon supervisor, for common step, will shut down itself when all
+        // task in local step finished.
       }
     });
   }
@@ -1240,8 +1254,17 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
                     step->step_id);
         auto err = stub->ShutdownSupervisor();
         if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("[Step #{}.{}] Failed to shutdown supervisor.",
-                      step->job_id, step->step_id);
+          CRANE_ERROR(
+              "[Step #{}.{}] Failed to shutdown supervisor sending a status "
+              "change with FAILED status.",
+              step->job_id, step->step_id);
+          g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+              .job_id = step->job_id,
+              .step_id = step->step_id,
+              .new_status = StepStatus::Failed,
+              .exit_code = ExitCode::EC_RPC_ERR,
+              .reason = "Supervisor not responding during step completion",
+              .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         }
       }
       g_supervisor_keeper->RemoveSupervisor(step->job_id, step->step_id);
