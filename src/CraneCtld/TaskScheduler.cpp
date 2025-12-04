@@ -2335,13 +2335,37 @@ void TaskScheduler::CleanCancelQueueCb_() {
   }
 
   auto now = google::protobuf::util::TimeUtil::GetCurrentTime();
+  absl::Time current_time =
+      absl::FromUnixSeconds(now.seconds()) + absl::Nanoseconds(now.nanos());
+
+  LockGuard running_guard_for_cancel(&m_running_task_map_mtx_);
   for (auto&& [craned_id, steps] : running_task_craned_id_map) {
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       for (auto [job_id, step_ids] : steps) {
+        // Check if the task has exceeded time limit
+        auto job_it = m_running_task_map_.find(job_id);
+        google::protobuf::Timestamp end_timestamp = now;
+
+        if (job_it != m_running_task_map_.end()) {
+          TaskInCtld* job = job_it->second.get();
+          absl::Time timeout_time = job->StartTime() + job->time_limit;
+
+          // If task exceeded time limit, use timeout time as end_time
+          if (current_time > timeout_time) {
+            end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
+            end_timestamp.set_nanos(0);
+            CRANE_DEBUG(
+                "[Job #{}] Task exceeded time limit during craned {} offline. "
+                "Using timeout time {} as end_time instead of cancel time {}.",
+                job_id, craned_id, absl::FormatTime(timeout_time),
+                absl::FormatTime(current_time));
+          }
+        }
+
         for (auto step_id : step_ids)
           StepStatusChangeAsync(job_id, step_id, craned_id,
                                 crane::grpc::TaskStatus::Cancelled,
-                                ExitCode::EC_TERMINATED, "", now);
+                                ExitCode::EC_TERMINATED, "", end_timestamp);
       }
       continue;
     }
@@ -2353,6 +2377,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
       if (stub && !stub->Invalid()) stub->TerminateSteps(steps_to_cancel);
     });
   }
+  m_running_task_map_mtx_.Unlock();
 
   if (pending_task_ptr_vec.empty()) return;
 
@@ -2600,8 +2625,26 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
-      task->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
-                       absl::Nanoseconds(timestamp.nanos()));
+
+      // Validate and adjust end_time to prevent it from exceeding time_limit
+      // by too much. Allow 5 seconds of floating tolerance.
+      absl::Time reported_end_time =
+          absl::FromUnixSeconds(timestamp.seconds()) +
+          absl::Nanoseconds(timestamp.nanos());
+      absl::Time expected_end_time = task->StartTime() + task->time_limit;
+      constexpr int64_t kEndTimeToleranceSec = 5;
+
+      if (reported_end_time >
+          expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
+        CRANE_WARN(
+            "[Job #{}] Reported end_time {} exceeds expected end_time {} by "
+            "more than {}s. Adjusting to expected end_time.",
+            task->TaskId(), absl::FormatTime(reported_end_time),
+            absl::FormatTime(expected_end_time), kEndTimeToleranceSec);
+        task->SetEndTime(expected_end_time);
+      } else {
+        task->SetEndTime(reported_end_time);
+      }
 
       for (CranedId const& craned_id : task->CranedIds()) {
         auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
