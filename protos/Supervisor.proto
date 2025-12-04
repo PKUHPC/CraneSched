@@ -95,9 +95,9 @@ message InitSupervisorRequest {
     repeated string task_epilogs = 2;
     repeated string prologs = 3;
     repeated string epilogs = 4;
-    uint32 PrologTimeout = 5;
-    uint32 EpilogTimeout = 6;
-    uint32 PrologEpilogTimeout = 7;
+    uint32 prolog_timeout = 5;
+    uint32 epilog_timeout = 6;
+    uint32 prolog_epilog_timeout = 7;
   };
   JobLogHookConfig job_log_hook_config = 30;
 }

@@ -3,11 +3,11 @@
 Crane supports multiple `prolog` and `epilog` programs. Note that for security reasons, these programs do **not** have a search path set. You must either specify fully qualified paths in the programs or set the `PATH` environment variable. The table below explains the prolog and epilog programs available during job allocation, including when and where they run.
 
 | Parameter               | Location              | Invoked by | User                        | Execution Timing                                                                 |
-|-------------------------|-----------------------|-------------|------------------------------|----------------------------------------------------------------------------------|
-| Prolog (config.yaml)    | Compute node          | craned      | CranedUser (usually root)    | When a job or job step first starts on the node (default); `PrologFlags=Alloc` forces execution at allocation time |
-| PrologCtld (config.yaml)| Controller node       | cranectld   | CranectldUser                | At job allocation                                                                 |
-| Epilog (config.yaml)    | Compute node          | cranectld   | CranedUser (usually root)    | At job completion                                                                 |
-| EpilogCtld (config.yaml)| Controller node       | cranectld   | CranectldUser                | At job completion                                                                 |
+|-------------------------|-----------------------|------------|------------------------------|----------------------------------------------------------------------------------|
+| Prolog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | When a job or job step first starts on the node (default); `PrologFlags=Alloc` forces execution at allocation time |
+| PrologCtld (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job allocation                                                                 |
+| Epilog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | At job completion                                                                 |
+| EpilogCtld (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job completion                                                                 |
 
 The table below describes the prolog and epilog programs available during job step execution, including when and where they run.
 
@@ -77,7 +77,7 @@ JobLogHook:
 # Prolog Flags
 
 ### **Alloc**
-Runs Prolog at allocation time. Increases startup time. Required on some Cray systems.
+Runs Prolog at allocation time. Increases startup time.
 
 ### **Contain**
 Runs Prolog inside job cgroup at allocation time.  

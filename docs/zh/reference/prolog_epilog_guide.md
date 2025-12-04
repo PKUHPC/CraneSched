@@ -8,8 +8,8 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因
 |--------|-------------------|-----------|----------------------|-------------------------------------------------------------------|
 | Prolog（config.yaml）| 计算节点              | craned    | CranedUser（通常为 root） | 该节点首次启动作业或作业步骤时（默认）；PrologFlags=Alloc 可强制在作业分配时执行脚本 |
 | PrologCtld（config.yaml）| 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业分配时                                                        |
-| Epilog（config.yaml） | 计算节点              | cranectld | CranedUser（通常为 root） | 作业结束时                                                        |
-| EpilogCtld（config.yaml）| 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业结束时    
+| Epilog（config.yaml） | 计算节点              | craned    | CranedUser（通常为 root） | 作业结束时                                                        |
+| EpilogCtld（config.yaml）| 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业结束时    |
 
 下表说明了在作业步骤分配时可用的 `prolog` 和 `epilog` 及其运行的时间和位置。
 
@@ -95,7 +95,6 @@ JobLogHook:
 - **Alloc**  
   如果设置该标志，Prolog 脚本将在作业分配时执行。默认情况下，Prolog 只会在任务启动前执行。 
   因此，当启动 calloc 时，不会执行 Prolog。Alloc 标志适用于在用户开始使用任何分配资源前进行准备。
-  特别是在启用集群兼容模式的 Cray 系统上需要设置此标志。  
   **注意：** 使用 Alloc 标志会增加作业启动所需的时间。
 
 - **Contain**  
