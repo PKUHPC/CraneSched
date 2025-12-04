@@ -219,6 +219,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::SubmitBatchTaskRequest *request,
       crane::grpc::SubmitBatchTaskReply *response) override;
 
+  grpc::Status SubmitContainerStep(
+      grpc::ServerContext *context,
+      const crane::grpc::SubmitContainerStepRequest *request,
+      crane::grpc::SubmitContainerStepReply *response) override;
+
   // This gRPC is for testing purposes only
   grpc::Status SubmitBatchTasks(
       grpc::ServerContext *context,
