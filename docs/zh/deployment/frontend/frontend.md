@@ -173,6 +173,9 @@ systemctl status cplugind
 
 ## 可选：安装 CLI 别名
 
+!!! tip
+    为了方便熟悉 Slurm 的用户迁移到鹤思（CraneSched），我们实现了 cwrapper 工具，管理员可以通过以下教程提供 Slurm 命令的别名。
+
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOCWRAPPER'
 alias sbatch='cwrapper sbatch'
@@ -189,6 +192,8 @@ EOCWRAPPER
 pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
 pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
+
+请注意，cwrapper 别名仅提供**基本的兼容性**，如需体验高级特性，请使用鹤思的命令行工具。
 
 ## GitHub Action 构建产物（测试用途）
 
