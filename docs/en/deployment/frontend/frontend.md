@@ -173,6 +173,9 @@ systemctl status cplugind
 
 ## Optional: install CLI aliases
 
+!!! tip
+    To make it easier for users familiar with Slurm to migrate to CraneSched, we provide the cwrapper tool. Administrators can follow the instructions below to set up aliases for Slurm commands.
+
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOCWRAPPER'
 alias sbatch='cwrapper sbatch'
@@ -189,6 +192,8 @@ EOCWRAPPER
 pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
 pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
+
+Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
 
 ## GitHub Action artifacts (testing only)
 
