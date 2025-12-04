@@ -171,7 +171,10 @@ systemctl status cplugind
 !!! note "Installation paths"
     Source installations default to the `/usr/local/` prefix. Package installations place files under `/usr/bin/`, `/usr/lib/crane/plugin/`, and `/usr/lib/systemd/system/`. When updating `/etc/crane/plugin.yaml`, make sure the `.so` paths match the installation method you used.
 
-## Optional: install CLI aliases
+## Optional: Slurm Command Compatibility
+
+!!! tip
+    To make it easier for users familiar with Slurm to migrate to CraneSched, we provide the cwrapper tool. Administrators can follow the instructions below to set up aliases for Slurm commands.
 
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOCWRAPPER'
@@ -189,6 +192,8 @@ EOCWRAPPER
 pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
 pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
+
+Note: cwrapper aliases only offer **basic compatibility**. To access advanced features, please use CraneSched’s command-line tools directly.
 
 ## GitHub Action artifacts (testing only)
 
