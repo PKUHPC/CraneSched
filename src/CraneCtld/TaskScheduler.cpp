@@ -2347,27 +2347,30 @@ void TaskScheduler::CleanCancelQueueCb_() {
   absl::Time current_time =
       absl::FromUnixSeconds(now.seconds()) + absl::Nanoseconds(now.nanos());
 
-  LockGuard running_guard_for_cancel(&m_running_task_map_mtx_);
+  // Process offline craned nodes with timeout check
   for (auto&& [craned_id, steps] : running_task_craned_id_map) {
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       for (auto [job_id, step_ids] : steps) {
         // Check if the task has exceeded time limit
-        auto job_it = m_running_task_map_.find(job_id);
         google::protobuf::Timestamp end_timestamp = now;
+        
+        {
+          LockGuard running_guard_for_cancel(&m_running_task_map_mtx_);
+          auto job_it = m_running_task_map_.find(job_id);
+          if (job_it != m_running_task_map_.end()) {
+            TaskInCtld* job = job_it->second.get();
+            absl::Time timeout_time = job->StartTime() + job->time_limit;
 
-        if (job_it != m_running_task_map_.end()) {
-          TaskInCtld* job = job_it->second.get();
-          absl::Time timeout_time = job->StartTime() + job->time_limit;
-
-          // If task exceeded time limit, use timeout time as end_time
-          if (current_time > timeout_time) {
-            end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
-            end_timestamp.set_nanos(0);
-            CRANE_DEBUG(
-                "[Job #{}] Task exceeded time limit during craned {} offline. "
-                "Using timeout time {} as end_time instead of cancel time {}.",
-                job_id, craned_id, absl::FormatTime(timeout_time),
-                absl::FormatTime(current_time));
+            // If task exceeded time limit, use timeout time as end_time
+            if (current_time > timeout_time) {
+              end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
+              end_timestamp.set_nanos(0);
+              CRANE_DEBUG(
+                  "[Job #{}] Task exceeded time limit during craned {} offline. "
+                  "Using timeout time {} as end_time instead of cancel time {}.",
+                  job_id, craned_id, absl::FormatTime(timeout_time),
+                  absl::FormatTime(current_time));
+            }
           }
         }
 
@@ -2386,7 +2389,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
       if (stub && !stub->Invalid()) stub->TerminateSteps(steps_to_cancel);
     });
   }
-  m_running_task_map_mtx_.Unlock();
 
   if (pending_task_ptr_vec.empty()) return;
 
