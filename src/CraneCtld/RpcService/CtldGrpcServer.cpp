@@ -482,6 +482,53 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
+    grpc::ServerContext *context,
+    const crane::grpc::SubmitContainerStepRequest *request,
+    crane::grpc::SubmitContainerStepReply *response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->step().uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // Only container steps are accepted here.
+  if (request->step().type() != crane::grpc::TaskType::Container) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  if (!request->step().has_container_meta()) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  // Check container feature flag.
+  if (!g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
+  auto step = std::make_unique<CommonStepInCtld>();
+  step->SetFieldsByStepToCtld(request->step());
+
+  auto submit_future = g_task_scheduler->SubmitStepAsync(std::move(step));
+  auto submit_result = submit_future.get();
+
+  if (submit_result.has_value()) {
+    response->set_ok(true);
+    response->set_step_id(submit_result.value());
+  } else {
+    response->set_ok(false);
+    response->set_code(submit_result.error());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,

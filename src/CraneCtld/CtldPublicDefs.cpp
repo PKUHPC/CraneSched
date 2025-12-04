@@ -782,6 +782,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
     util::ParseHostList(step_to_ctld.excludes(), &excluded_list);
     excluded_nodes = excluded_list | std::ranges::to<std::unordered_set>();
   }
+
   if (step_to_ctld.type() == crane::grpc::TaskType::Container)
     container_meta =
         static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());

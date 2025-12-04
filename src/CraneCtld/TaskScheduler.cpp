@@ -4250,9 +4250,21 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  if (job->uid != step->uid) {
+    return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
+  }
+
+  if (step->type == crane::grpc::TaskType::Container) {
+    // Check if step is send to a job not supporting container
+    if (job->type != crane::grpc::TaskType::Container)
+      return std::unexpected{CraneErrCode::ERR_INVALID_PARAM};
+    // Copy pod_meta for step
+    step->pod_meta = job->pod_meta;
+  }
+
   std::unordered_set<std::string> avail_nodes;
   for (const auto& craned_id : job->CranedIds()) {
-    auto& job_res = job->AllocatedRes();
+    const auto& job_res = job->AllocatedRes();
     if (step->requested_task_res_view <= job_res.at(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
@@ -4262,6 +4274,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
 
     if (avail_nodes.size() >= step->node_num) break;
   }
+
   if (step->node_num > avail_nodes.size()) {
     CRANE_TRACE(
         "Resource not enough. Step #{}.{} needs {} nodes, while only {} "
@@ -4273,9 +4286,6 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   // TODO: Check ntasks with job ntasks
   // All step res request must be less than or equal to job res request
 
-  if (job->uid != step->uid) {
-    return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
-  }
   // step->requested_task_res_view <= job->requested_task_res_view
   // TODO: migrate job to req_task_res_view
   auto node_res_view = step->requested_task_res_view;
@@ -4287,10 +4297,12 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
       count *= step->ntasks_per_node;
     }
   }
+
   step->requested_node_res_view = node_res_view;
   if (!(step->requested_node_res_view * step->ntasks_per_node <=
         job->requested_node_res_view))
     return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
+
   return {};
 }
 
