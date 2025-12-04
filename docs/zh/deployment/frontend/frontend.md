@@ -171,7 +171,10 @@ systemctl status cplugind
 !!! note "安装路径"
     源代码安装默认使用 `/usr/local/` 前缀，而软件包安装将文件放置在 `/usr/bin/`、`/usr/lib/crane/plugin/` 和 `/usr/lib/systemd/system/`。在 `/etc/crane/plugin.yaml` 中注册插件时，请根据实际安装方式填写 `.so` 路径。
 
-## 可选：安装 CLI 别名
+## 可选：Slurm 命令兼容
+
+!!! tip
+    为了方便熟悉 Slurm 的用户迁移到鹤思（CraneSched），我们实现了 cwrapper 工具，管理员可以通过以下教程提供 Slurm 命令的别名。
 
 ```bash
 cat > /etc/profile.d/cwrapper.sh << 'EOCWRAPPER'
@@ -189,6 +192,8 @@ EOCWRAPPER
 pdcp -w login01,crane[01-04] /etc/profile.d/cwrapper.sh /etc/profile.d/cwrapper.sh
 pdsh -w login01,crane[01-04] chmod 644 /etc/profile.d/cwrapper.sh
 ```
+
+请注意，cwrapper 别名仅提供**基本的兼容性**，如需体验高级特性，请使用鹤思的命令行工具。
 
 ## GitHub Action 构建产物（测试用途）
 
