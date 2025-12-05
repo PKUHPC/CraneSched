@@ -33,6 +33,9 @@
 #include <absl/cleanup/cleanup.h>
 
 #include <future>
+#include <sys/wait.h>
+#include <grp.h>
+#include <pwd.h>
 
 #include "absl/strings/str_split.h"
 #include "re2/re2.h"

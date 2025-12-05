@@ -3385,18 +3385,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicense(task->licenses_count);
-      context.job_raw_ptrs.insert(task.get());
-      context.job_ptrs.emplace(std::move(task));
 
-      // As for now, task status change includes only
-      // Pending / Running -> Completed / Failed / Cancelled.
-      // It means all task status changes will put the task into mongodb,
-      // so we don't have any branch code here and just put it into mongodb.
-
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
-      m_running_task_map_.erase(iter);
-      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.JobLifecycleHook.EpiLogs,
+      RunLogHookArgs run_epilog_ctld_args{.scripts = g_config.JobLifecycleHook.EpiLogs,
                                           .envs = task->env,
                                           .run_uid = 0, .run_gid = 0, .is_prolog = false};
       if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
@@ -3421,6 +3411,18 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
         });
       }
+
+      context.job_raw_ptrs.insert(task.get());
+      context.job_ptrs.emplace(std::move(task));
+
+      // As for now, task status change includes only
+      // Pending / Running -> Completed / Failed / Cancelled.
+      // It means all task status changes will put the task into mongodb,
+      // so we don't have any branch code here and just put it into mongodb.
+
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  job_finished_status.value());
+      m_running_task_map_.erase(iter);
     }
   }
 

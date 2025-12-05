@@ -174,8 +174,6 @@ void ParseConfig(int argc, char** argv) {
           YamlValueOr(config["CraneCtldForInternalListenPort"],
                       kCtldForInternalDefaultPort);
 
-      ParseCtldConfig(config);
-
       if (config["JobLifecycleHook"]) {
         const auto& hook_config = config["JobLifecycleHook"];
         if (hook_config["PrologCranectld"])
