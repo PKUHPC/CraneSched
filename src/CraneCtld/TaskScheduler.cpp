@@ -2353,7 +2353,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
       for (auto [job_id, step_ids] : steps) {
         // Check if the task has exceeded time limit
         google::protobuf::Timestamp end_timestamp = now;
-        
+
         {
           LockGuard running_guard_for_cancel(&m_running_task_map_mtx_);
           auto job_it = m_running_task_map_.find(job_id);
@@ -2366,8 +2366,10 @@ void TaskScheduler::CleanCancelQueueCb_() {
               end_timestamp.set_seconds(ToUnixSeconds(timeout_time));
               end_timestamp.set_nanos(0);
               CRANE_DEBUG(
-                  "[Job #{}] Task exceeded time limit during craned {} offline. "
-                  "Using timeout time {} as end_time instead of cancel time {}.",
+                  "[Job #{}] Task exceeded time limit during craned {} "
+                  "offline. "
+                  "Using timeout time {} as end_time instead of cancel time "
+                  "{}.",
                   job_id, craned_id, absl::FormatTime(timeout_time),
                   absl::FormatTime(current_time));
             }
