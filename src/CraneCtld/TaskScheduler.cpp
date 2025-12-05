@@ -1026,7 +1026,7 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       Mutex thread_pool_mtx;
-      HashSet<task_id_t> failed_task_id_set;
+      HashSet<task_id_t> failed_job_id_set;
 
       if (!g_config.JobLogHook.ProLogs.empty()) {
         // TODO: cbatch job must be requeue
@@ -1054,7 +1054,7 @@ void TaskScheduler::ScheduleThread_() {
                 util::os::RunPrologOrEpiLog(run_prolog_args);
             if (!run_prolog_result) {
               thread_pool_mtx.Lock();
-              failed_task_id_set.emplace(job->TaskId());
+              failed_job_id_set.emplace(job->TaskId());
               thread_pool_mtx.Unlock();
             }
             prolog_bl.DecrementCount();
@@ -1075,9 +1075,6 @@ void TaskScheduler::ScheduleThread_() {
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
       std::vector<StepInCtld*> step_in_ctld_vec;
-
-      Mutex thread_pool_mtx;
-      HashSet<task_id_t> failed_job_id_set;
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
 
@@ -1105,7 +1102,6 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       for (auto& job : jobs_to_run) {
-        if (failed_task_id_set.contains(job->TaskId())) continue;
         job->SetPrimaryStepStatus(crane::grpc::TaskStatus::Invalid);
         std::unique_ptr daemon_step = std::make_unique<DaemonStepInCtld>();
         daemon_step->InitFromJob(*job);
@@ -1120,7 +1116,6 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_ERROR("Failed to append steps to embedded database.");
       } else {
         for (auto& job : jobs_to_run) {
-          if (failed_task_id_set.contains(job->TaskId())) continue;
           auto* daemon_step = job->DaemonStep();
           for (CranedId const& craned_id : job->CranedIds()) {
             craned_alloc_job_map[craned_id].push_back(
@@ -3047,7 +3042,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
                   job_finished_status.value());
       m_running_task_map_.erase(iter);
-      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.EpiLogs,
+      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.JobLogHook.EpiLogs,
                                           .envs = task->env,
                                           .run_uid = 0, .run_gid = 0, .is_prolog = false};
       if (!g_config.JobLogHook.EpiLogs.empty()) {
