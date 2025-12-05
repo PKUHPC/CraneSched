@@ -27,6 +27,8 @@
 namespace Craned {
 using namespace std::chrono_literals;
 
+using namespace std::chrono_literals;
+
 CtldClientStateMachine::CtldClientStateMachine() {
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
@@ -808,6 +810,7 @@ bool CtldClient::CranedRegister_(
 }
 
 void CtldClient::AsyncSendThread_() {
+  util::SetCurrentThreadName("SendCtldThr");
   // Wait Craned grpc server initialization.
   m_connection_start_notification_.WaitForNotification();
 
@@ -824,9 +827,16 @@ void CtldClient::AsyncSendThread_() {
       &m_step_status_change_list_);
 
   while (true) {
-    {
-      absl::MutexLock lock(&m_step_status_change_mtx_);
-      if (m_step_status_change_list_.empty() && m_stopping_) break;
+    if (m_stopping_) {
+      bool has_elem = false;
+      {
+        absl::MutexLock lock(&m_step_status_change_mtx_);
+        has_elem = !m_step_status_change_list_.empty();
+      }
+      if (!has_elem)
+        break;
+      else
+        std::this_thread::sleep_for(100ms);
     }
 
     grpc_state = m_ctld_channel_->GetState(true);
