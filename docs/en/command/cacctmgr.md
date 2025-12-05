@@ -44,6 +44,7 @@ cacctmgr <ACTION> <ENTITY> [ID] [OPTIONS]
 - **user**: Individual user
 - **qos**: Quality of Service settings
 - **transaction**: Transaction log (for show action only)
+- **resource**: Resource (License Resource)
 
 ---
 
@@ -524,6 +525,125 @@ cacctmgr show transaction where Target=PKU
 
 ---
 
+## 5. Resource Management
+
+### 5.1 Add Resource
+
+**Syntax:**
+```bash
+cacctmgr add resource <name> [options]
+```
+
+**Options:**
+
+- **Description=<text>**: Resource description
+- **Name=<name>**: Resource name
+- **Server=<server>**: Resource server
+- **ServerType=<type>**: Type of resource server
+- **Type=<type>**: Resource type (License, NotSet)
+- **Count=<number>**: Total amount of the resource
+- **LastConsumed=<number>**: Usage count obtained from external source
+- **Allocated=<number>**: Number of allocated resources
+- **Flags=<flags>**: Resource flags (None, Absolute)
+- **Allowed=<number>**: Amount available to the cluster
+- **Cluster=<cluster>**: Cluster name
+
+**Examples:**
+
+Create a resource:
+```bash
+cacctmgr add resource matlab count=50 server=rlm_host \
+  servertype=rlm type=license
+```
+
+Create a resource and assign it to clusters:
+```bash
+cacctmgr add resource nastran cluster=fluid,pdf \
+  server=flex_host servertype=flexlm \
+  count=100 allowed=50 type=license
+```
+
+### 5.2 Delete Resource
+
+**Syntax:**
+```bash
+cacctmgr delete resource <name>
+```
+
+**Options:**
+
+- **Name=<name>**: Resource name to delete
+- **Server=<server>**: Resource server
+- **Cluster=<cluster1,cluster2,..>**: Target clusters
+
+**Examples:**
+```bash
+cacctmgr delete resource matlab server=rlm_host cluster=fluid
+
+cacctmgr delete resource nastran server=flex_host
+```
+
+### 5.3 Modify Resource
+
+**Syntax:**
+```bash
+cacctmgr modify resource where Name=<resource> Server=<server> Cluster=<cluster1,cluster2,..> set <attribute>=<value>
+```
+
+**Attributes:**
+
+- **Description=<text>**: Resource description
+- **ServerType=<type>**: Resource server type
+- **Type=<type>**: Resource type (License, NotSet)
+- **Count=<number>**: Resource quantity
+- **LastConsumed=<number>**: External usage count
+- **Allocated=<number>**: Allocated resource amount
+- **Flags=<flags>**: Resource flags (None, Absolute)
+- **Allowed=<number>**: Amount allowed for the cluster (cluster must be specified)
+
+**Examples:**
+
+Modify resource count:
+```bash
+cacctmgr modify resource name=matlab server=rlm_host set \
+  count=200
+```
+
+Update resource allocation for a cluster:
+```bash
+cacctmgr modify resource name=matlab server=rlm_host \
+  cluster=pdf set allowed=60
+```
+
+### 5.4 Show Resources
+
+**Syntax:**
+```bash
+cacctmgr show resource [withclusters] where [options]
+```
+
+**Options:**
+
+- **Name=<name>**: Show only the specified resource
+- **Server=<server>**: Show resources for a specific server
+- **cluster=<cluster>**: Cluster name
+
+**Examples:**
+
+Show all resources:
+```bash
+cacctmgr show resource
+
+cacctmgr show resource withclusters
+```
+
+Show a specific resource:
+```bash
+cacctmgr show resource where name=matlab server=rlm_host cluster=fluid
+```
+
+---
+
 ## Usage Examples
 
 ### Complete Workflow Example
@@ -590,6 +710,10 @@ cacctmgr show qos --json
 | Modify QoS | ✓ | ✓ | ✗ | ✗ |
 | Show (Query) | ✓ | ✓ | ✓ | ✓ (own account) |
 | Block/Unblock | ✓ | ✓ | Same account | ✗ |
+| Add Resource    | ✓ | ✓ | ✗ | ✗ |
+| Delete Resource | ✓ | ✓ | ✗ | ✗ |
+| Modify Resource | ✓ | ✓ | ✗ | ✗ |
+
 
 ---
 

@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "DbClient.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 
@@ -58,16 +59,57 @@ class LicensesManager {
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  bool MallocLicenseResource(
+  bool MallocLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void MallocLicenseResourceWhenRecoverRunning(
+  void MallocLicenseWhenRecoverRunning(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
-  void FreeLicenseResource(
+  void FreeLicense(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
+
+  /* TODO：multi-cluster synchronization */
+  CraneExpectedRich<void> AddLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
+
+  CraneExpectedRich<void> ModifyLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators);
+
+  CraneExpectedRich<void> RemoveLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters);
+
+  CraneExpectedRich<void> QueryLicenseResource(
+      const std::string &name, const std::string &server,
+      const std::vector<std::string> &clusters,
+      std::list<LicenseResource> *res_licenses);
 
  private:
+  CraneExpectedRich<void> CheckAndUpdateFields_(
+      const std::vector<std::string> &clusters,
+      const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
+          &operators,
+      LicenseResource *res_resource);
+
+  struct LicenseIdServerPairHash {
+    std::size_t operator()(const std::pair<LicenseId, std::string> &p) const {
+      std::size_t h1 = std::hash<LicenseId>{}(p.first);
+      std::size_t h2 = std::hash<std::string>{}(p.second);
+      return h1 ^ (h2 << 1);
+    }
+  };
+  std::unordered_map<std::pair<LicenseId, std::string>,
+                     std::unique_ptr<LicenseResource>, LicenseIdServerPairHash>
+      m_license_resource_map_;
+
+  util::rw_mutex m_rw_resource_mutex_;
+
   LicensesAtomicMap m_licenses_map_;
 };
 
