@@ -252,7 +252,9 @@ void GlobalVariableInit() {
       run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
 
     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
-      std::exit(1);
+      SerializeDelimitedToZeroCopyStream(msg, &ostream);
+      ostream.Close();
+      std::abort();
     }
   }
 
