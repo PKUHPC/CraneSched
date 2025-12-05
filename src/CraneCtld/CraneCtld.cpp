@@ -176,28 +176,28 @@ void ParseConfig(int argc, char** argv) {
 
       ParseCtldConfig(config);
 
-      if (config["JobLogHook"]) {
-        const auto& hook_config = config["JobLogHook"];
+      if (config["JobLifecycleHook"]) {
+        const auto& hook_config = config["JobLifecycleHook"];
         if (hook_config["PrologCranectld"])
           util::ParseLogHookPaths(
               hook_config["PrologCranectld"].as<std::string>(), config_path,
-              &g_config.JobLogHook.ProLogs);
+              &g_config.JobLifecycleHook.ProLogs);
 
         if (hook_config["EpilogCranectld"])
           util::ParseLogHookPaths(
               hook_config["EpilogCranectld"].as<std::string>(), config_path,
-              &g_config.JobLogHook.EpiLogs);
+              &g_config.JobLifecycleHook.EpiLogs);
 
         if (hook_config["PrologTimeout"]) {
-          g_config.JobLogHook.PrologTimeout =
+          g_config.JobLifecycleHook.PrologTimeout =
               hook_config["PrologTimeout"].as<uint32_t>();
         }
         if (hook_config["EpilogTimeout"]) {
-          g_config.JobLogHook.EpilogTimeout =
+          g_config.JobLifecycleHook.EpilogTimeout =
               hook_config["EpilogTimeout"].as<uint32_t>();
         }
         if (hook_config["PrologEpilogTimeout"]) {
-          g_config.JobLogHook.PrologEpilogTimeout =
+          g_config.JobLifecycleHook.PrologEpilogTimeout =
               hook_config["PrologEpilogTimeout"].as<uint32_t>();
         }
       }

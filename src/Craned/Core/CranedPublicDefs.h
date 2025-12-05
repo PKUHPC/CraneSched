@@ -169,7 +169,7 @@ struct Config {
   std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
 
-  struct JobLogHookConfig {
+  struct JobLifecycleHookConfig {
     std::vector<std::string> ProLogs;
     std::vector<std::string> EpiLogs;
     uint32_t PrologTimeout{0};
@@ -181,7 +181,7 @@ struct Config {
     std::vector<std::string> TaskEpilogs;
   };
 
-  JobLogHookConfig JobLogHook;
+  JobLifecycleHookConfig JobLifecycleHook;
 };
 
 inline Config g_config{};

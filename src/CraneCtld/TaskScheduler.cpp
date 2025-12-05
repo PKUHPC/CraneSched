@@ -1142,7 +1142,7 @@ void TaskScheduler::ScheduleThread_() {
       Mutex thread_pool_mtx;
       HashSet<task_id_t> failed_job_id_set;
 
-      if (!g_config.JobLogHook.ProLogs.empty()) {
+      if (!g_config.JobLifecycleHook.ProLogs.empty()) {
         // TODO: cbatch job must be requeue
         begin = std::chrono::steady_clock::now();
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
@@ -1150,16 +1150,16 @@ void TaskScheduler::ScheduleThread_() {
           g_thread_pool->detach_task([&]() {
             // run prolog ctld script
             RunLogHookArgs run_prolog_args{
-                .scripts = g_config.JobLogHook.ProLogs,
+                .scripts = g_config.JobLifecycleHook.ProLogs,
                 .envs = job->env,
                 .run_uid = 0,
                 .run_gid = 0,
                 .is_prolog = true};
-            if (g_config.JobLogHook.PrologTimeout) {
-              run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+            if (g_config.JobLifecycleHook.PrologTimeout) {
+              run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
             } else {
               run_prolog_args.timeout_sec =
-                  g_config.JobLogHook.PrologEpilogTimeout;
+                  g_config.JobLifecycleHook.PrologEpilogTimeout;
             }
             CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
                         job->TaskId(), run_prolog_args.run_uid,
@@ -3396,24 +3396,24 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
                   job_finished_status.value());
       m_running_task_map_.erase(iter);
-      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.JobLogHook.EpiLogs,
+      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.JobLifecycleHook.EpiLogs,
                                           .envs = task->env,
                                           .run_uid = 0, .run_gid = 0, .is_prolog = false};
-      if (!g_config.JobLogHook.EpiLogs.empty()) {
+      if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
         auto env_copy = task->env;
         g_thread_pool->detach_task([env_copy]() {
           RunLogHookArgs run_epilog_ctld_args{
-              .scripts = g_config.JobLogHook.EpiLogs,
+              .scripts = g_config.JobLifecycleHook.EpiLogs,
               .envs = env_copy,
               .run_uid = 0,
               .run_gid = 0,
               .is_prolog = false};
-          if (g_config.JobLogHook.EpilogTimeout) {
+          if (g_config.JobLifecycleHook.EpilogTimeout) {
             run_epilog_ctld_args.timeout_sec =
-                g_config.JobLogHook.EpilogTimeout;
+                g_config.JobLifecycleHook.EpilogTimeout;
           } else {
             run_epilog_ctld_args.timeout_sec =
-                g_config.JobLogHook.PrologEpilogTimeout;
+                g_config.JobLifecycleHook.PrologEpilogTimeout;
           }
           CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
                       run_epilog_ctld_args.run_uid,

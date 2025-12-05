@@ -102,7 +102,7 @@ struct Config {
   std::atomic_int TaskCount;
   std::string CgroupPath;  // resolved cgroup path for OOM monitoring
 
-  struct JobLogHookConfig {
+  struct JobLifecycleHookConfig {
     std::vector<std::string> Prologs;
     std::vector<std::string> Epilogs;
     std::vector<std::string> TaskPrologs;
@@ -112,7 +112,7 @@ struct Config {
     uint32_t PrologEpilogTimeout{0};
   };
 
-  JobLogHookConfig JobLogHook;
+  JobLifecycleHookConfig JobLifecycleHook;
 };
 
 inline Config g_config;

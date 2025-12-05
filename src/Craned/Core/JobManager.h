@@ -87,7 +87,6 @@ struct JobInD {
 
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
-  std::atomic<bool> is_prolog_run{false};
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};

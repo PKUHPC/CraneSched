@@ -427,13 +427,27 @@ absl::Time GetSystemBootTime() {
 std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
   bool is_failed = false;
 
-  auto read_stream = [](int fd) {
+  auto read_stream = [](int fd, uint32_t max_size) {
     std::string out;
+    out.reserve(max_size);
+
     char buf[4096];
     ssize_t bytes_read;
+
     while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
+      size_t space_left = max_size - out.size();
+      if (bytes_read > static_cast<ssize_t>(space_left)) {
+        out.append(buf, space_left);
+        break;
+      }
+
       out.append(buf, bytes_read);
+
+      if (out.size() >= max_size) {
+        break;
+      }
     }
+
     return out;
   };
 
@@ -454,8 +468,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     if (pipe(stdout_pipe) == -1) {
       CRANE_ERROR("{} pipe stdout creation failed: {}", script,
                   strerror(errno));
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
+      return std::nullopt;
     }
 
     if (pipe(stderr_pipe) == -1) {
@@ -463,18 +476,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
                   strerror(errno));
       close(stdout_pipe[0]);
       close(stdout_pipe[1]);
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
-    }
-
-    if (pipe(sync_pipe) == -1) {
-      CRANE_ERROR("{} pipe sync creation failed: {}", script, strerror(errno));
-      close(stdout_pipe[0]);
-      close(stdout_pipe[1]);
-      close(stderr_pipe[0]);
-      close(stderr_pipe[1]);
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
+      return std::nullopt;
     }
 
     pid_t pid = fork();
@@ -482,30 +484,16 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     if (pid == -1) {
       CRANE_ERROR("{} subprocess creation failed: {}.", script,
                   strerror(errno));
-      if (args.is_prolog) return std::nullopt;
-      is_failed = true;
-      continue;
+      return std::nullopt;
     }
 
     if (pid > 0) {
-      if (args.callback) {
-        bool result = args.callback(pid);
-        if (!result) {
-          CRANE_ERROR("subprocess callback failed");
-          return std::nullopt;
-        }
-      }
-
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
       int status = 0;
       auto fut = std::async(std::launch::async, [pid, &status]() {
         return waitpid(pid, &status, 0);
       });
-
-      write(sync_pipe[1], "x", 1);
-      close(sync_pipe[0]);
-      close(sync_pipe[1]);
 
       auto now = std::chrono::steady_clock::now();
       auto elapsed_now =
@@ -527,23 +515,30 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       if (!child_exited) {
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
-        CRANE_ERROR("{} Timeout. stdout: {}, stderr: {}", script,
-                    read_stream(stdout_pipe[0]), read_stream(stderr_pipe[0]));
-        if (args.is_prolog) return std::nullopt;
-        is_failed = true;
-        continue;
+        CRANE_TRACE("{} Timeout.", script);
+        return std::nullopt;
       }
 
       if (status != 0) {
-        CRANE_ERROR("{} Failed (exit code:{}). stdout: {}, stderr: {}", script,
-                    status, read_stream(stdout_pipe[0]),
-                    read_stream(stderr_pipe[0]));
+        CRANE_TRACE("{} Failed (exit code:{}).", script, status);
         if (args.is_prolog) return std::nullopt;
         is_failed = true;
         continue;
       }
 
-      output.append(read_stream(stdout_pipe[0]));
+      if (output.size() < args.output_size) {
+        auto tmp = read_stream(stdout_pipe[0], args.output_size);
+        if (!tmp.empty()) {
+          size_t remaining = args.output_size - output.size();
+          if (remaining > 0) {
+            if (tmp.size() > remaining) {
+              output.append(tmp, 0, remaining);
+            } else {
+              output.append(tmp);
+            }
+          }
+        }
+      }
 
       CRANE_DEBUG("{} finished successfully.", script);
 
@@ -555,10 +550,13 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
 
-      char buf;
-      read(sync_pipe[0], &buf, 1);
-      close(sync_pipe[1]);
-      close(sync_pipe[0]);
+      if (args.at_child_setup_cb) {
+        bool result = args.at_child_setup_cb(pid);
+        if (!result) {
+          fmt::print(stderr, "[Subprocess] Error: subprocess callback failed\n");
+          exit(EXIT_FAILURE);
+        }
+      }
 
       if (setgid(args.run_gid) != 0) {
         fmt::print(stderr, "[Subprocess] Error: setgid({}) failed: {}\n",

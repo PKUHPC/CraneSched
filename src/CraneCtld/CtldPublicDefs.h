@@ -167,7 +167,7 @@ struct Config {
   };
   ContainerConfig Container;
 
-  struct JobLogHookConfig {
+  struct JobLifecycleHookConfig {
     std::vector<std::string> ProLogs;  // ctld prologs
     std::vector<std::string> EpiLogs;  // ctld epilogs
     uint32_t PrologTimeout{0};
@@ -175,7 +175,7 @@ struct Config {
     uint32_t PrologEpilogTimeout{0};
   };
 
-  JobLogHookConfig JobLogHook;
+  JobLifecycleHookConfig JobLifecycleHook;
 
   bool CompressedRpc{};
 
