@@ -196,6 +196,12 @@ class CtldClient {
 
   void StepStatusChangeAsync(StepStatusChangeQueueElem&& task_status_change);
 
+  // Convenience method for reporting status changes
+  void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                             crane::grpc::TaskStatus new_status,
+                             uint32_t exit_code,
+                             std::optional<std::string> reason = std::nullopt);
+
   [[nodiscard]] std::map<job_id_t, std::map<step_id_t, StepStatus>>
   GetAllStepStatusChange();
 
