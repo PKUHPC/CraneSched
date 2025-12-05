@@ -2243,6 +2243,8 @@ void TaskManager::EvTaskTimerCb_() {
   }
 }
 
+// 除了config taskprolog,还有step taskprolog
+// TODO: taskprolog 在child execv前执行， task epilog在作业进程结束时执行
 void TaskManager::EvCleanTaskStopQueueCb_() {
   task_id_t task_id;
   while (m_task_stopped_queue_.try_dequeue(task_id)) {

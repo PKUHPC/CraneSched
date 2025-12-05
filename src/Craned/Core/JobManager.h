@@ -56,6 +56,11 @@ struct StepInstance {
     return step_to_d.type() == crane::grpc::TaskType::Container;
   }
 
+  [[nodiscard]] bool IsCalloc() const noexcept {
+    return step_to_d.interactive_meta().interactive_type() ==
+            crane::grpc::Calloc;
+  }
+
   [[nodiscard]] std::string StepIdString() const noexcept {
     return std::format("{}.{}", job_id, step_id);
   }
@@ -82,7 +87,7 @@ struct JobInD {
 
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
-  bool is_prolog_run{false};
+  std::atomic<bool> is_prolog_run{false};
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};

@@ -665,9 +665,9 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
         }
       }
 
-      log_hook_conf->set_prologtimeout(g_config.JobLogHook.PrologTimeout);
-      log_hook_conf->set_epilogtimeout(g_config.JobLogHook.EpilogTimeout);
-      log_hook_conf->set_prologepilogtimeout(
+      log_hook_conf->set_prolog_timeout(g_config.JobLogHook.PrologTimeout);
+      log_hook_conf->set_epilog_timeout(g_config.JobLogHook.EpilogTimeout);
+      log_hook_conf->set_prolog_epilog_timeout(
           g_config.JobLogHook.PrologEpilogTimeout);
     }
 
@@ -829,36 +829,35 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
 
     // By default, Prolog is executed just before the task is launched.
     if (!g_config.JobLogHook.ProLogs.empty() &&
-        ((g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc) == 0) &&
-        !job->is_prolog_run &&
-        step_it->second->step_to_d.interactive_meta().interactive_type() !=
-            crane::grpc::Calloc) {
-      CRANE_DEBUG("#{}: Running prologs....", job_id);
-      job->is_prolog_run = true;
-      bool script_lock = false;
-      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
+        (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc) == 0) {
+      if (!job->is_prolog_run.exchange(true) && !step_it->second->IsCalloc()) {
+        CRANE_DEBUG("#{}: Running prologs....", job_id);
 
-      RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.ProLogs,
-                                     .envs = job->GetJobEnvMap(),
-                                     .run_uid = 0,
-                                     .run_gid = 0,
-                                     .is_prolog = true};
-      if (g_config.JobLogHook.PrologTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
-      else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
-        run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+        bool script_lock = false;
+        if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
+          m_prolog_serial_mutex_.Lock();
+          script_lock = true;
+        }
 
-      if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+        RunLogHookArgs run_prolog_args{.scripts = g_config.JobLogHook.ProLogs,
+                                       .envs = job->GetJobEnvMap(),
+                                       .run_uid = 0,
+                                       .run_gid = 0,
+                                       .is_prolog = true};
+        if (g_config.JobLogHook.PrologTimeout > 0)
+          run_prolog_args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+        else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+          run_prolog_args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+
+        if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+          if (script_lock) m_prolog_serial_mutex_.Unlock();
+          g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+          elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
+          continue;
+        }
+
         if (script_lock) m_prolog_serial_mutex_.Unlock();
-        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-        elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
-        continue;
       }
-
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
     }
 
     step_it->second->status = StepStatus::Running;
@@ -1029,69 +1028,70 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     job->step_map.emplace(step->step_id, std::move(step));
   }
 
-  // force the script to be executed at job allocation
+  // force the script to be executed at step allocation
   if (!g_config.JobLogHook.ProLogs.empty() &&
-      g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc &&
-      !(g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob) &&
-      !job->is_prolog_run) {
-    job->is_prolog_run = true;
-    auto run_prolog = [this, job](task_id_t job_id, EnvMap env_map) -> bool {
-      bool script_lock = false;
+      ((g_config.JobLogHook.PrologFlags & PrologFlagEnum::Alloc) != 0) &&
+      ((g_config.JobLogHook.PrologFlags & PrologFlagEnum::RunInJob) == 0)) {
+    if (job->is_prolog_run.exchange(true)) {
+      auto run_prolog = [this, job](EnvMap env_map) -> bool {
+        bool script_lock = false;
 
-      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
-        m_prolog_serial_mutex_.Lock();
-        script_lock = true;
-      }
+        if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Serial) {
+          m_prolog_serial_mutex_.Lock();
+          script_lock = true;
+        }
 
-      RunLogHookArgs args{
-          .scripts = g_config.JobLogHook.ProLogs,
-          .envs = env_map,
-          .run_uid = 0,
-          .run_gid = 0,
-          .is_prolog = true,
+        RunLogHookArgs args{
+            .scripts = g_config.JobLogHook.ProLogs,
+            .envs = env_map,
+            .run_uid = 0,
+            .run_gid = 0,
+            .is_prolog = true,
+        };
+
+        if (g_config.JobLogHook.PrologTimeout > 0)
+          args.timeout_sec = g_config.JobLogHook.PrologTimeout;
+        else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
+          args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
+
+        if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Contain) {
+          args.callback = [job](pid_t pid) {
+            if (!job || !job->cgroup) return false;
+            return job->cgroup->MigrateProcIn(pid);
+          };
+        }
+
+        auto ok = util::os::RunPrologOrEpiLog(args);
+
+        if (script_lock) m_prolog_serial_mutex_.Unlock();
+
+        return ok ? true : false;
       };
 
-      if (g_config.JobLogHook.PrologTimeout > 0)
-        args.timeout_sec = g_config.JobLogHook.PrologTimeout;
-      else if (g_config.JobLogHook.PrologEpilogTimeout > 0)
-        args.timeout_sec = g_config.JobLogHook.PrologEpilogTimeout;
-
-      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::Contain) {
-        args.callback = [this, job](pid_t pid) {
-          return job->cgroup->MigrateProcIn(pid);
-        };
-      }
-
-      auto ok = util::os::RunPrologOrEpiLog(args);
-
-      if (script_lock) m_prolog_serial_mutex_.Unlock();
-
-      return ok ? true : false;
-    };
-
-    CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
-    if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::NoHold) {
-      EnvMap env_map = job->GetJobEnvMap();
-      g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
-                                  env_map]() {
-        if (!run_prolog(job_id, env_map)) {
-          g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
+      CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
+      if (g_config.JobLogHook.PrologFlags & PrologFlagEnum::NoHold) {
+        EnvMap env_map = job->GetJobEnvMap();
+        g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
+                                    env_map]() {
+          if (!run_prolog(env_map)) {
+            g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
+            ActivateTaskStatusChangeAsync_(
+                job_id, step_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::EC_PROLOG_ERR,
+                fmt::format("Failed to run prolog for job#{} ", job_id),
+                google::protobuf::util::TimeUtil::GetCurrentTime());
+          }
+        });
+      } else {
+        if (!run_prolog(job->GetJobEnvMap())) {
+          g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
           ActivateTaskStatusChangeAsync_(
               job_id, step_id, crane::grpc::TaskStatus::Failed,
               ExitCode::EC_PROLOG_ERR,
               fmt::format("Failed to run prolog for job#{} ", job_id),
               google::protobuf::util::TimeUtil::GetCurrentTime());
+          return;
         }
-      });
-    } else {
-      if (!run_prolog(job_id, job->GetJobEnvMap())) {
-        g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
-        ActivateTaskStatusChangeAsync_(
-            job_id, step_id, crane::grpc::TaskStatus::Failed,
-            ExitCode::EC_PROLOG_ERR,
-            fmt::format("Failed to run prolog for job#{} ", job_id),
-            google::protobuf::util::TimeUtil::GetCurrentTime());
-        return;
       }
     }
   }
