@@ -88,7 +88,8 @@ CPU效率表示您的作业对分配的CPU资源的有效利用程度：
 
 ## 相关命令
 
-- [cacct](cacct.md) - 查询已完成作业的计费信息
-- [cqueue](cqueue.md) - 查看队列中的活动作业
-- [cbatch](cbatch.md) - 提交批处理作业
-- [crun](crun.md) - 运行交互式作业
+- [cacct](cacct.zh.md) - 查询已完成作业的计费信息
+- [cqueue](cqueue.zh.md) - 查看队列中的活动作业
+- [cbatch](cbatch.zh.md) - 提交批处理作业
+- [crun](crun.zh.md) - 运行交互式作业
+- [creport](creport.md) - 查询作业相关统计信息

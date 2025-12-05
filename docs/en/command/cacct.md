@@ -274,3 +274,4 @@ cacct -o="%.8j %20n %-10P %.15U %t"
 - [cbatch](cbatch.md) - Submit batch jobs
 - [ccancel](ccancel.md) - Cancel jobs
 - [ceff](ceff.md) - View job efficiency statistics
+- [creport](creport.md) - Query job-related statistics

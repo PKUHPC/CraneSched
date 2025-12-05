@@ -374,7 +374,7 @@ bool MongodbClient::FetchJobRecords(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
+  // 35 mem_alloc     device_map     meta_container has_job_info  nodename_list
 
   try {
     for (auto view : cursor) {
@@ -1552,6 +1552,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  bsoncxx::builder::basic::array nodename_list_array;
+  for (const auto& name : runtime_attr.craned_ids()) {
+    nodename_list_array.append(name);
+  }
+
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
@@ -1559,11 +1564,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc
-  // 35 mem_alloc     device_map     meta_container     has_job_info
-  // req_licenses 40 licenses_alloc
+  // 35 mem_alloc     device_map     meta_container has_job_info licenses_alloc
+  // 40 nodename_list
 
   // clang-format off
-  std::array<std::string, 40> fields{
+  std::array<std::string, 41> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1580,6 +1585,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
     "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
+    //40-44
+    "nodename_list"
   };
   // clang-format on
 
@@ -1591,7 +1598,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
+             bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
+             bsoncxx::array::value>                                  /*40*/
       values{                                                        // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
@@ -1629,7 +1637,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              true /* Mark the document having complete job info */,
              std::unordered_map<std::string, uint32_t>{
                  runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()}};
+                 runtime_attr.actual_licenses().end()},
+             bsoncxx::array::value{nodename_list_array.view()}};
 
   return DocumentConstructor_(fields, values);
 }
@@ -1652,6 +1661,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
+  bsoncxx::builder::basic::array nodename_list_array;
+  for (const auto& name : task->CranedIds()) {
+    nodename_list_array.append(name);
+  }
+
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
@@ -1659,11 +1673,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
   // 30 type          extra_attr     reservation    exclusive  cpus_alloc
-  // 35 mem_alloc     device_map     meta_container      has_job_info
-  // licenses_alloc
+  // 35 mem_alloc     device_map     meta_container  has_job_info licenses_alloc
+  // 40 nodename_list
 
   // clang-format off
-  std::array<std::string, 40> fields{
+  std::array<std::string, 41> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -1679,7 +1693,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 30 - 34
       "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc"
+      "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
+      //40-44
+      "nodename_list"
   };
   // clang-format on
 
@@ -1691,7 +1707,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool,   /*25-29*/
              int32_t, std::string, std::string, bool, double,        /*30-34*/
              int64_t, DeviceMap, std::optional<ContainerMetaInTask>, /*35-37*/
-             bool, std::unordered_map<std::string, uint32_t>>        /*39*/
+             bool, std::unordered_map<std::string, uint32_t>,        /*38-39*/
+             bsoncxx::array::value>                                  /*40*/
       values{                                                        // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -1719,8 +1736,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
              task->allocated_res_view.GetDeviceMap(), container_meta,
              true /* Mark the document having complete job info */,
-             task->licenses_count};
-
+             task->licenses_count,
+             bsoncxx::array::value{nodename_list_array.view()}};
   return DocumentConstructor_(fields, values);
 }
 
@@ -1877,6 +1894,1167 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   return DocumentConstructor_(fields, values);
 }
 
+inline std::string MongodbClient::RollupTypeToString(RollupType rollup_type) {
+  switch (rollup_type) {
+  case RollupType::HOUR:
+    return "hour";
+  case RollupType::DAY:
+    return "day";
+  case RollupType::MONTH:
+    return "month";
+  default:
+    return "unknown";
+  }
+}
+
+bool MongodbClient::UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
+                                                    int64_t last_success_sec) {
+  try {
+    auto summary_coll =
+        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto update_sec = static_cast<int64_t>(std::time(nullptr));
+
+    auto filter = bsoncxx::builder::stream::document{}
+                  << "_id" << RollupTypeToString(rollup_type)
+                  << bsoncxx::builder::stream::finalize;
+
+    // Build the update document:
+    // - $max: only update last_success_time if last_success_sec is greater than
+    // the current value
+    // - $set: always update update_time to the current timestamp
+    auto update = bsoncxx::builder::stream::document{}
+                  << "$max" << bsoncxx::builder::stream::open_document
+                  << "last_success_time" << last_success_sec
+                  << bsoncxx::builder::stream::close_document << "$set"
+                  << bsoncxx::builder::stream::open_document << "update_time"
+                  << update_sec << bsoncxx::builder::stream::close_document
+                  << bsoncxx::builder::stream::finalize;
+
+    // Execute the update operation with upsert=true (insert if not exists)
+    auto result = summary_coll.update_one(
+        filter.view(), update.view(), mongocxx::options::update{}.upsert(true));
+
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_,
+                       "Update summary last success time failed: {}, type={}",
+                       e.what(), RollupTypeToString(rollup_type));
+    return false;
+  }
+}
+
+bool MongodbClient::GetSummaryLastSuccessTimeTm(RollupType rollup_type,
+                                                std::tm& tm_last) {
+  // Set default time
+  std::tm default_time = {};
+  default_time.tm_year = 2023 - 1900;
+  default_time.tm_mon = 1 - 1;
+  default_time.tm_mday = 1;
+
+  try {
+    auto summary_coll =
+        (*GetClient_())[m_db_name_][m_summary_time_collection_name_];
+    auto filter = bsoncxx::builder::stream::document{}
+                  << "_id" << RollupTypeToString(rollup_type)
+                  << bsoncxx::builder::stream::finalize;
+    auto doc_opt = summary_coll.find_one(filter.view());
+    if (doc_opt) {
+      auto doc = doc_opt->view();
+      auto it = doc.find("last_success_time");
+      int64_t last_sec = 0;
+      if (it != doc.end()) {
+        if (it->type() == bsoncxx::type::k_int64) {
+          last_sec = it->get_int64().value;
+        } else if (it->type() == bsoncxx::type::k_int32) {
+          last_sec = it->get_int32().value;
+        } else {
+          tm_last = default_time;
+          return true;
+        }
+        auto tt = static_cast<std::time_t>(last_sec);
+        localtime_r(&tt, &tm_last);
+      } else {
+        tm_last = default_time;
+      }
+    } else {
+      tm_last = default_time;
+    }
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_,
+        fmt::format(
+            "Get summary last success time failed: {}, type={}, coll={}",
+            e.what(), RollupTypeToString(rollup_type),
+            m_summary_time_collection_name_));
+    tm_last = default_time;
+    return false;
+  }
+}
+
+bool MongodbClient::NeedRollup(const std::tm& tm_last, const std::tm& tm_now,
+                               RollupType rollup_type) {
+  if (tm_now.tm_year > tm_last.tm_year) return true;
+  if (tm_now.tm_year < tm_last.tm_year) return false;
+
+  switch (rollup_type) {
+  case RollupType::HOUR:
+    if (tm_now.tm_yday > tm_last.tm_yday) return true;
+    if (tm_now.tm_yday < tm_last.tm_yday) return false;
+    return tm_now.tm_hour > tm_last.tm_hour;
+  case RollupType::DAY:
+    return tm_now.tm_yday > tm_last.tm_yday;
+  case RollupType::MONTH:
+    return tm_now.tm_mon > tm_last.tm_mon;
+  default:
+    return false;
+  }
+}
+
+void MongodbClient::RollupSummary(RollupType rollup_type) {
+  std::tm tm_last{};
+  if (!GetSummaryLastSuccessTimeTm(rollup_type, tm_last)) {
+    CRANE_ERROR("Get summary last success time type {} error",
+                RollupTypeToString(rollup_type));
+    return;
+  }
+  std::time_t now =
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+  std::tm tm_now{};
+  localtime_r(&now, &tm_now);
+  tm_now.tm_min = 0;
+  tm_now.tm_sec = 0;
+
+  if (!NeedRollup(tm_last, tm_now, rollup_type)) {
+    auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
+    auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
+    return;
+  }
+
+  auto last_sec = static_cast<int64_t>(std::mktime(&tm_last));
+  auto now_sec = static_cast<int64_t>(std::mktime(&tm_now));
+  CRANE_TRACE("Aggregating {} from {} to {}", RollupTypeToString(rollup_type),
+              util::FormatTime(last_sec), util::FormatTime(now_sec));
+
+  if (rollup_type == RollupType::HOUR) {
+    AggregateJobSummaryByHour(last_sec, now_sec, m_task_collection_name_);
+  } else if (rollup_type == RollupType::DAY) {
+    AggregateJobSummaryByDayOrMonth(RollupType::HOUR, RollupType::DAY, last_sec,
+                                    now_sec);
+  } else if (rollup_type == RollupType::MONTH) {
+    AggregateJobSummaryByDayOrMonth(RollupType::DAY, RollupType::MONTH,
+                                    last_sec, now_sec);
+  }
+}
+
+void MongodbClient::ClusterRollupUsage() {
+  std::lock_guard<std::mutex> lock(cluster_rollup_mutex_);
+
+  auto start_total = std::chrono::steady_clock::now();
+  auto start = std::chrono::steady_clock::now();
+  RollupSummary(RollupType::HOUR);
+  auto end = std::chrono::steady_clock::now();
+  CRANE_TRACE("Rollup hour table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
+
+  start = std::chrono::steady_clock::now();
+  RollupSummary(RollupType::DAY);
+  end = std::chrono::steady_clock::now();
+  CRANE_TRACE("Rollup day table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
+
+  start = std::chrono::steady_clock::now();
+  RollupSummary(RollupType::MONTH);
+  end = std::chrono::steady_clock::now();
+  CRANE_TRACE("Rollup month table used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+                  .count());
+
+  auto end_total = std::chrono::steady_clock::now();
+  CRANE_TRACE("Rollup cluster usage total used {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end_total -
+                                                                    start_total)
+                  .count());
+}
+
+void MongodbClient::CreateCollectionIndex(
+    mongocxx::collection& coll, const std::vector<std::string>& fields) {
+  try {
+    bsoncxx::builder::stream::document index_builder;
+    for (const auto& field : fields) {
+      index_builder << field << 1;  // 1 for ascending order
+    }
+
+    // Generate a readable index name
+    std::string idx_name;
+    for (size_t i = 0; i < fields.size(); ++i) {
+      if (i > 0) idx_name += "_";
+      idx_name += fields[i] + "_1";
+    }
+
+    mongocxx::options::index index_options;
+    index_options.name(idx_name);
+    coll.create_index(index_builder.view(), index_options);
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error for collection {}: {}",
+                       coll.name(), e.what());
+  }
+}
+
+void MongodbClient::AggregateJobSummaryByHour(
+    std::time_t start, std::time_t end,
+    const std::string& task_collection_name) {
+  std::tm tm_start{};
+  localtime_r(&start, &tm_start);
+  tm_start.tm_min = 0;
+  tm_start.tm_sec = 0;
+  std::time_t cur_start = std::mktime(&tm_start);
+  std::time_t cur_end = cur_start + 3600;
+
+  try {
+    auto jobs = (*GetClient_())[m_db_name_][task_collection_name];
+
+    // Iterate through each hour interval within the specified range
+    while (cur_end <= end) {
+      mongocxx::pipeline pipeline;
+
+      // Match jobs whose 'time_end' falls within the current hour interval
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << "time_end" << bsoncxx::builder::stream::open_document
+                     << "$gte" << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      // Add the 'hour' field representing the current hour interval
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "hour" << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpus_alloc" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << "wckey" << bsoncxx::builder::stream::open_document
+                          << "$ifNull" << bsoncxx::builder::stream::open_array
+                          << "$wckey" << ""
+                          << bsoncxx::builder::stream::close_array
+                          << bsoncxx::builder::stream::close_document
+                          << bsoncxx::builder::stream::finalize);
+
+      // Compute the 'cpu_time' field as nodes_alloc * cpus_alloc * (time_end -
+      // time_start)
+      pipeline.add_fields(
+          bsoncxx::builder::stream::document{}
+          << "cpus_time" << bsoncxx::builder::stream::open_document
+          << "$multiply" << bsoncxx::builder::stream::open_array
+          << "$nodes_alloc"
+          << "$cpus_alloc" << bsoncxx::builder::stream::open_document
+          << "$subtract" << bsoncxx::builder::stream::open_array << "$time_end"
+          << "$time_start" << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::close_array
+          << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      // Group jobs by hour, account, username, qos, wckey, cpus_alloc,
+      // partition_name and calculate total CPU time and total job count for
+      // each group
+      pipeline.group(bsoncxx::builder::stream::document{}
+                     << "_id" << bsoncxx::builder::stream::open_document
+                     << "hour" << "$hour"
+                     << "account" << "$account"
+                     << "username" << "$username"
+                     << "qos" << "$qos"
+                     << "wckey" << "$wckey"
+                     << "cpus_alloc" << "$cpus_alloc"
+                     << "partition_name" << "$partition_name"
+                     << "nodename_list" << "$nodename_list"
+                     << bsoncxx::builder::stream::close_document
+                     << "total_cpu_time"
+                     << bsoncxx::builder::stream::open_document << "$sum"
+                     << "$cpus_time" << bsoncxx::builder::stream::close_document
+                     << "total_count" << bsoncxx::builder::stream::open_document
+                     << "$sum" << 1 << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      // Reshape the result document for easier downstream usage
+      pipeline.replace_root(bsoncxx::builder::stream::document{}
+                            << "newRoot"
+                            << bsoncxx::builder::stream::open_document << "hour"
+                            << "$_id.hour"
+                            << "account" << "$_id.account"
+                            << "username" << "$_id.username"
+                            << "qos" << "$_id.qos"
+                            << "wckey" << "$_id.wckey"
+                            << "cpus_alloc" << "$_id.cpus_alloc"
+                            << "partition_name" << "$_id.partition_name"
+                            << "nodename_list" << "$_id.nodename_list"
+                            << "total_cpu_time" << "$total_cpu_time"
+                            << "total_count" << "$total_count"
+                            << bsoncxx::builder::stream::close_document
+                            << bsoncxx::builder::stream::finalize);
+
+      // Merge the aggregation results into the summary collection
+      pipeline.merge(bsoncxx::builder::stream::document{}
+                     << "into" << m_hour_job_summary_collection_name_
+                     << "whenMatched" << "replace"
+                     << "whenNotMatched" << "insert"
+                     << bsoncxx::builder::stream::finalize);
+
+      auto cursor = jobs.aggregate(pipeline);
+      // Force execution of the aggregation pipeline (including $merge/$out) by
+      // iterating the cursor. No need to process the documents.
+      for (auto&& doc : cursor) {}
+      cur_start = cur_end;
+      cur_end += 3600;
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour error: {}",
+                       e.what());
+  }
+
+  UpdateSummaryLastSuccessTimeSec(RollupType::HOUR, cur_start);
+}
+
+void MongodbClient::AggregateJobSummaryByDayOrMonth(RollupType src_type,
+                                                    RollupType dst_type,
+                                                    std::time_t period_start,
+                                                    std::time_t period_end) {
+  std::string src_coll_str;
+  std::string dst_coll_str;
+  if (src_type == RollupType::HOUR && dst_type == RollupType::DAY) {
+    src_coll_str = m_hour_job_summary_collection_name_;
+    dst_coll_str = m_day_job_summary_collection_name_;
+  } else if (src_type == RollupType::DAY && dst_type == RollupType::MONTH) {
+    src_coll_str = m_day_job_summary_collection_name_;
+    dst_coll_str = m_month_job_summary_collection_name_;
+  } else {
+    CRANE_ERROR("Unsupported rollup: {} to {}", RollupTypeToString(src_type),
+                RollupTypeToString(dst_type));
+    return;
+  }
+
+  std::string src_time_field = RollupTypeToString(src_type);
+  std::string period_field = RollupTypeToString(dst_type);
+
+  std::time_t cur_start;
+  std::time_t cur_end = period_end;
+  std::tm tm_end = {};
+  std::tm tm_start = {};
+
+  try {
+    if (dst_type == RollupType::DAY) {
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday++;
+      cur_end = std::mktime(&tm_end);
+    } else if (dst_type == RollupType::MONTH) {
+      localtime_r(&period_start, &tm_start);
+      tm_start.tm_mday = 1;
+      tm_start.tm_hour = 0;
+      tm_start.tm_min = 0;
+      tm_start.tm_sec = 0;
+      cur_start = std::mktime(&tm_start);
+
+      localtime_r(&cur_start, &tm_end);
+      tm_end.tm_sec = 0;
+      tm_end.tm_min = 0;
+      tm_end.tm_hour = 0;
+      tm_end.tm_mday = 1;
+      tm_end.tm_mon++;
+      cur_end = std::mktime(&tm_end);
+    }
+
+    auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
+    while (cur_end <= period_end) {
+      std::string group_period_field_ref = "$" + period_field;
+      mongocxx::pipeline pipeline;
+      pipeline.match(bsoncxx::builder::stream::document{}
+                     << src_time_field
+                     << bsoncxx::builder::stream::open_document << "$gte"
+                     << static_cast<int64_t>(cur_start) << "$lt"
+                     << static_cast<int64_t>(cur_end)
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      pipeline.add_fields(bsoncxx::builder::stream::document{}
+                          << period_field << static_cast<int64_t>(cur_start)
+                          << bsoncxx::builder::stream::finalize);
+
+      pipeline.group(
+          bsoncxx::builder::stream::document{}
+          << "_id" << bsoncxx::builder::stream::open_document << period_field
+          << bsoncxx::types::b_string{group_period_field_ref} << "account"
+          << "$account"
+          << "username" << "$username" << "qos" << "$qos" << "wckey" << "$wckey"
+          << "cpus_alloc" << "$cpus_alloc" << "partition_name"
+          << "$partition_name"
+          << "nodename_list" << "$nodename_list"
+          << bsoncxx::builder::stream::close_document << "total_cpu_time"
+          << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_cpu_time" << bsoncxx::builder::stream::close_document
+          << "total_count" << bsoncxx::builder::stream::open_document << "$sum"
+          << "$total_count" << bsoncxx::builder::stream::close_document
+          << bsoncxx::builder::stream::finalize);
+
+      pipeline.replace_root(bsoncxx::builder::stream::document{}
+                            << "newRoot"
+                            << bsoncxx::builder::stream::open_document
+                            << period_field << "$_id." + period_field
+                            << "account" << "$_id.account"
+                            << "username" << "$_id.username"
+                            << "qos" << "$_id.qos"
+                            << "wckey" << "$_id.wckey"
+                            << "cpus_alloc" << "$_id.cpus_alloc"
+                            << "partition_name" << "$_id.partition_name"
+                            << "nodename_list" << "$_id.nodename_list"
+                            << "total_cpu_time" << "$total_cpu_time"
+                            << "total_count" << "$total_count"
+                            << bsoncxx::builder::stream::close_document
+                            << bsoncxx::builder::stream::finalize);
+
+      pipeline.merge(bsoncxx::builder::stream::document{}
+                     << "into" << dst_coll_str << "whenMatched" << "replace"
+                     << "whenNotMatched" << "insert"
+                     << bsoncxx::builder::stream::finalize);
+
+      auto cursor = src_coll.aggregate(pipeline);
+      for (auto&& doc : cursor) {}
+
+      // Advance window
+      if (dst_type == RollupType::DAY) {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday++;
+        cur_end = std::mktime(&tm_end);
+      } else if (dst_type == RollupType::MONTH) {
+        cur_start = cur_end;
+        localtime_r(&cur_end, &tm_end);
+        tm_end.tm_sec = 0;
+        tm_end.tm_min = 0;
+        tm_end.tm_hour = 0;
+        tm_end.tm_mday = 1;
+        tm_end.tm_mon++;
+        cur_end = std::mktime(&tm_end);
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(
+        m_logger_, "[mongodb] Aggregate job day or month summary exception: {}",
+        e.what());
+  }
+  UpdateSummaryLastSuccessTimeSec(dst_type, cur_start);
+}
+
+bool MongodbClient::QueryJobSizeSummaryByJobIds(
+    const crane::grpc::QueryJobSizeSummaryRequest* request,
+    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream) {
+  document filter;
+  auto grouping_list = request->filter_grouping_list();
+
+  if (request->has_filter_start_time()) {
+    int64_t start_time_sec = request->filter_start_time().seconds();
+    filter.append(kvp("time_start", [&](sub_document time_start_doc) {
+      time_start_doc.append(kvp("$gte", start_time_sec));
+    }));
+  }
+
+  if (request->has_filter_end_time()) {
+    int64_t end_time_sec = request->filter_end_time().seconds();
+    filter.append(kvp("time_end", [&](sub_document time_end_doc) {
+      time_end_doc.append(kvp("$lte", end_time_sec));
+    }));
+  }
+
+  bool has_accounts_constraint = !request->filter_accounts().empty();
+  if (has_accounts_constraint) {
+    filter.append(kvp("account", [&request](sub_document account_doc) {
+      array account_array;
+      for (const auto& account : request->filter_accounts()) {
+        account_array.append(account);
+      }
+      account_doc.append(kvp("$in", account_array));
+    }));
+  }
+
+  bool has_users_constraint = !request->filter_users().empty();
+  if (has_users_constraint) {
+    filter.append(kvp("username", [&request](sub_document user_doc) {
+      array user_array;
+      for (const auto& user : request->filter_users()) {
+        user_array.append(user);
+      }
+      user_doc.append(kvp("$in", user_array));
+    }));
+  }
+
+  bool has_qos_constraint = !request->filter_qoss().empty();
+  if (has_qos_constraint) {
+    filter.append(kvp("qos", [&request](sub_document qos_doc) {
+      array qos_array;
+      for (const auto& qos : request->filter_qoss()) {
+        qos_array.append(qos);
+      }
+      qos_doc.append(kvp("$in", qos_array));
+    }));
+  }
+
+  bool has_task_ids_constraint = !request->filter_job_ids().empty();
+  if (has_task_ids_constraint) {
+    filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
+      array task_id_array;
+      for (const auto& task_id : request->filter_job_ids()) {
+        task_id_array.append(static_cast<std::int32_t>(task_id));
+      }
+      task_id_doc.append(kvp("$in", task_id_array));
+    }));
+  }
+
+  bool has_partitions_constraint = !request->filter_partitions().empty();
+  if (has_partitions_constraint) {
+    filter.append(kvp("partition_name", [&request](sub_document partition_doc) {
+      array partition_array;
+      for (const auto& partition : request->filter_partitions()) {
+        partition_array.append(partition);
+      }
+      partition_doc.append(kvp("$in", partition_array));
+    }));
+  }
+
+  bool has_nodename_list_constraint = !request->filter_nodename_list().empty();
+  if (has_nodename_list_constraint) {
+    filter.append(
+        kvp("nodename_list", [&request](sub_document nodename_list_doc) {
+          array nodename_list_array;
+          for (const auto& nodename : request->filter_nodename_list()) {
+            nodename_list_array.append(nodename);
+          }
+          nodename_list_doc.append(kvp("$in", nodename_list_array));
+        }));
+  }
+
+  bool has_wckeys_constraint = !request->filter_wckeys().empty();
+  if (has_wckeys_constraint) {
+    filter.append(kvp("wckey", [&request](sub_document wckey_doc) {
+      array wckey_array;
+      for (const auto& wckey : request->filter_wckeys()) {
+        wckey_array.append(wckey);
+      }
+      wckey_doc.append(kvp("$in", wckey_array));
+    }));
+  }
+
+  absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult> agg_map;
+  try {
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].find(
+            filter.view());
+    for (auto view : cursor) {
+      std::string acc = std::string(view["account"].get_string().value);
+      std::string wk =
+          view["wckey"] ? std::string(view["wckey"].get_string().value) : "";
+      uint32_t cpus_alloc =
+          static_cast<uint32_t>(view["cpus_alloc"].get_double().value *
+                                view["nodes_alloc"].get_int32().value);
+      int64_t time_start = view["time_start"].get_int64().value;
+      int64_t time_end = view["time_end"].get_int64().value;
+      double total_cpu_time = (time_end - time_start) * cpus_alloc;
+      if (grouping_list.empty()) {
+        agg_map[{acc, wk, cpus_alloc}].total_cpu_time += total_cpu_time;
+        agg_map[{acc, wk, cpus_alloc}].total_count += 1;
+      } else {
+        int group_index = 0;
+        for (const auto group : grouping_list) {
+          if (cpus_alloc < group) {
+            break;
+          }
+          group_index++;
+        }
+        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
+        agg_map[{acc, wk, bucket}].total_cpu_time += total_cpu_time;
+        agg_map[{acc, wk, bucket}].total_count += 1;
+      }
+    }
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+
+  crane::grpc::QueryJobSizeSummaryReply reply;
+  for (const auto& kv : agg_map) {
+    crane::grpc::JobSizeSummaryItem item;
+    item.set_cluster(g_config.CraneClusterName);
+    item.set_account(kv.first.account);
+    item.set_wckey(kv.first.wckey);
+    item.set_cpus_alloc(kv.first.cpus_alloc);
+    item.set_total_cpu_time(kv.second.total_cpu_time);
+    item.set_total_count(kv.second.total_count);
+    reply.add_item_list()->CopyFrom(item);
+    if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
+      stream->Write(reply);
+      reply.clear_item_list();
+    }
+  }
+  if (reply.item_list_size() > 0) {
+    stream->Write(reply);
+  }
+  return true;
+}
+
+bsoncxx::document::value MongodbClient::JobQueryMatch(
+    const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+    const crane::grpc::QueryJobSummaryRequest* request) {
+  bsoncxx::builder::basic::document match_doc;
+  match_doc.append(bsoncxx::builder::basic::kvp(
+      time_field, bsoncxx::builder::basic::make_document(
+                      bsoncxx::builder::basic::kvp(
+                          "$gte", static_cast<int64_t>(range.first)),
+                      bsoncxx::builder::basic::kvp(
+                          "$lt", static_cast<int64_t>(range.second)))));
+
+  // account
+  if (request->filter_accounts_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& account : request->filter_accounts()) arr.append(account);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "account", bsoncxx::builder::basic::make_document(
+                       bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // username
+  if (request->filter_users_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& user : request->filter_users()) arr.append(user);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "username", bsoncxx::builder::basic::make_document(
+                        bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // qos
+  if (request->filter_qoss_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& qos : request->filter_qoss()) arr.append(qos);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "qos", bsoncxx::builder::basic::make_document(
+                   bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // wckey
+  if (request->filter_wckeys_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "wckey", bsoncxx::builder::basic::make_document(
+                     bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  return match_doc.extract();
+}
+
+bsoncxx::document::value MongodbClient::JobSizeQueryMatch(
+    const std::string& time_field, std::pair<std::time_t, std::time_t> range,
+    const crane::grpc::QueryJobSizeSummaryRequest* request) {
+  bsoncxx::builder::basic::document match_doc;
+  match_doc.append(bsoncxx::builder::basic::kvp(
+      time_field, bsoncxx::builder::basic::make_document(
+                      bsoncxx::builder::basic::kvp(
+                          "$gte", static_cast<int64_t>(range.first)),
+                      bsoncxx::builder::basic::kvp(
+                          "$lt", static_cast<int64_t>(range.second)))));
+  // account
+  if (request && request->filter_accounts_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& account : request->filter_accounts()) arr.append(account);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "account", bsoncxx::builder::basic::make_document(
+                       bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // username
+  if (request && request->filter_users_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& user : request->filter_users()) arr.append(user);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "username", bsoncxx::builder::basic::make_document(
+                        bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // qos
+  if (request && request->filter_qoss_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& qos : request->filter_qoss()) arr.append(qos);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "qos", bsoncxx::builder::basic::make_document(
+                   bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+  // wckey
+  if (request && request->filter_wckeys_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "wckey", bsoncxx::builder::basic::make_document(
+                     bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+
+  // partition
+  if (request && request->filter_partitions_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& partition : request->filter_partitions())
+      arr.append(partition);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "partition_name", bsoncxx::builder::basic::make_document(
+                              bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+
+  // nodename_list
+  if (request && request->filter_nodename_list_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& nodename : request->filter_nodename_list())
+      arr.append(nodename);
+    match_doc.append(bsoncxx::builder::basic::kvp(
+        "nodename_list", bsoncxx::builder::basic::make_document(
+                             bsoncxx::builder::basic::kvp("$in", arr))));
+  }
+
+  return match_doc.extract();
+}
+
+template <typename MatchFunc>
+void MongodbClient::AppendUnionWithRanges(
+    mongocxx::pipeline& pipeline, const std::string& coll,
+    const std::vector<std::pair<std::time_t, std::time_t>>& ranges,
+    MatchFunc match_fn, bool first_is_match) {
+  using namespace bsoncxx::builder::basic;
+  for (size_t idx = 0; idx < ranges.size(); ++idx) {
+    auto match_bson = match_fn(ranges[idx]);
+    if (first_is_match && idx == 0) {
+      pipeline.match(match_bson.view());
+    } else {
+      pipeline.append_stage(
+          make_document(
+              kvp("$unionWith",
+                  make_document(
+                      kvp("coll", coll),
+                      kvp("pipeline", make_array(make_document(
+                                          kvp("$match", match_bson.view())))))))
+              .view());
+    }
+  }
+}
+
+uint32_t MongodbClient::GetCpusAlloc(const bsoncxx::document::view& doc) {
+  auto elem = doc["cpus_alloc"];
+  if (!elem) return 0;
+  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<uint32_t>(elem.get_int64().value);
+  if (elem.type() == bsoncxx::type::k_double)
+    return static_cast<uint32_t>(elem.get_double().value);
+  return 0;
+}
+
+double MongodbClient::GetTotalCpuTime(const bsoncxx::document::view& doc) {
+  auto elem = doc["total_cpu_time"];
+  if (!elem) return 0.0;
+  if (elem.type() == bsoncxx::type::k_double) return elem.get_double().value;
+  if (elem.type() == bsoncxx::type::k_int32)
+    return static_cast<double>(elem.get_int32().value);
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<double>(elem.get_int64().value);
+  return 0.0;
+}
+
+int MongodbClient::GetTotalCount(const bsoncxx::document::view& doc) {
+  auto elem = doc["total_count"];
+  if (!elem) return 0;
+  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
+  if (elem.type() == bsoncxx::type::k_int64)
+    return static_cast<int>(elem.get_int64().value);
+  return 0;
+}
+
+void MongodbClient::WriteReply(
+    const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>& agg_map,
+    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
+    int max_data_size) {
+  crane::grpc::QueryJobSizeSummaryReply reply;
+  for (const auto& agg_val : agg_map) {
+    crane::grpc::JobSizeSummaryItem item;
+    item.set_cluster(g_config.CraneClusterName);
+    item.set_account(agg_val.first.account);
+    item.set_wckey(agg_val.first.wckey);
+    item.set_cpus_alloc(agg_val.first.cpus_alloc);
+    item.set_total_cpu_time(agg_val.second.total_cpu_time);
+    item.set_total_count(agg_val.second.total_count);
+    reply.add_item_list()->CopyFrom(item);
+    if (reply.item_list_size() >= max_data_size) {
+      stream->Write(reply);
+      reply.clear_item_list();
+    }
+  }
+  if (reply.item_list_size() > 0) {
+    stream->Write(reply);
+  }
+}
+
+void MongodbClient::QueryJobSummary(
+    const crane::grpc::QueryJobSummaryRequest* request,
+    grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream) {
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+  auto hour_job_summ_table =
+      (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+  auto day_job_summ_table =
+      (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+  auto month_job_summ_table =
+      (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+  auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
+
+  // Directly classify ranges
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
+  for (const auto& r : ranges) {
+    if (r.type == "hour")
+      hour_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "day")
+      day_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "month")
+      month_ranges.emplace_back(r.start, r.end);
+  }
+
+  mongocxx::collection* entry_table = nullptr;
+  mongocxx::pipeline pipeline;
+  try {
+    if (!hour_ranges.empty()) {
+      entry_table = &hour_job_summ_table;
+      AppendUnionWithRanges(
+          pipeline, m_hour_job_summary_collection_name_, hour_ranges,
+          [&](auto range) { return JobQueryMatch("hour", range, request); });
+      AppendUnionWithRanges(
+          pipeline, m_day_job_summary_collection_name_, day_ranges,
+          [&](auto range) { return JobQueryMatch("day", range, request); },
+          false);
+      AppendUnionWithRanges(
+          pipeline, m_month_job_summary_collection_name_, month_ranges,
+          [&](auto range) { return JobQueryMatch("month", range, request); },
+          false);
+    } else if (!day_ranges.empty()) {
+      entry_table = &day_job_summ_table;
+      AppendUnionWithRanges(
+          pipeline, m_day_job_summary_collection_name_, day_ranges,
+          [&](auto range) { return JobQueryMatch("day", range, request); });
+      AppendUnionWithRanges(
+          pipeline, m_month_job_summary_collection_name_, month_ranges,
+          [&](auto range) { return JobQueryMatch("month", range, request); },
+          false);
+    } else if (!month_ranges.empty()) {
+      entry_table = &month_job_summ_table;
+      AppendUnionWithRanges(
+          pipeline, m_month_job_summary_collection_name_, month_ranges,
+          [&](auto range) { return JobQueryMatch("month", range, request); });
+    } else {
+      CRANE_LOGGER_INFO(m_logger_, "No time ranges to query.");
+      return;
+    }
+
+    // Grouping
+    auto group_bson = bsoncxx::from_json(R"({
+      "$group": {
+        "_id": {
+          "account": "$account",
+          "username": "$username",
+          "qos": "$qos",
+          "wckey": "$wckey"
+        },
+        "total_cpu_time": { "$sum": "$total_cpu_time" },
+        "total_count": { "$sum": "$total_count" }
+      }
+    })");
+    pipeline.append_stage(group_bson.view());
+
+    mongocxx::options::aggregate agg_opts;
+    agg_opts.allow_disk_use(true);
+    auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    crane::grpc::QueryJobSummaryReply reply;
+    for (auto&& doc : cursor) {
+      auto id = doc["_id"].get_document().view();
+      crane::grpc::JobSummaryItem item;
+      item.set_cluster(g_config.CraneClusterName);
+      item.set_account(std::string(id["account"].get_string().value));
+      item.set_username(std::string(id["username"].get_string().value));
+      item.set_qos(std::string(id["qos"].get_string().value));
+      item.set_wckey(std::string(id["wckey"].get_string().value));
+      item.set_total_count(GetTotalCount(doc));
+      item.set_total_cpu_time(GetTotalCpuTime(doc));
+
+      reply.add_item_list()->CopyFrom(item);
+      if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
+        stream->Write(reply);
+        reply.clear_item_list();
+      }
+    }
+    if (reply.item_list_size() > 0) {
+      stream->Write(reply);
+    }
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+void MongodbClient::QueryJobSizeSummary(
+    const crane::grpc::QueryJobSizeSummaryRequest* request,
+    grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream) {
+  auto start_time = request->filter_start_time().seconds();
+  auto end_time = request->filter_end_time().seconds();
+  std::vector<std::uint32_t> grouping_list(
+      request->filter_grouping_list().begin(),
+      request->filter_grouping_list().end());
+  auto ranges = util::EfficientSplitTimeRange(start_time, end_time);
+
+  // Directly classify ranges
+  std::vector<std::pair<std::time_t, std::time_t>> hour_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> day_ranges;
+  std::vector<std::pair<std::time_t, std::time_t>> month_ranges;
+  for (const auto& r : ranges) {
+    if (r.type == "hour")
+      hour_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "day")
+      day_ranges.emplace_back(r.start, r.end);
+    else if (r.type == "month")
+      month_ranges.emplace_back(r.start, r.end);
+  }
+
+  auto hour_job_summ_table =
+      (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+  auto day_job_summ_table =
+      (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+  auto month_job_summ_table =
+      (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+
+  mongocxx::collection* entry_table = nullptr;
+  mongocxx::pipeline pipeline;
+
+  try {
+    if (!hour_ranges.empty()) {
+      entry_table = &hour_job_summ_table;
+      AppendUnionWithRanges(pipeline, m_hour_job_summary_collection_name_,
+                            hour_ranges, [&](auto range) {
+                              return JobSizeQueryMatch("hour", range, request);
+                            });
+      AppendUnionWithRanges(
+          pipeline, m_day_job_summary_collection_name_, day_ranges,
+          [&](auto range) { return JobSizeQueryMatch("day", range, request); },
+          false);
+      AppendUnionWithRanges(
+          pipeline, m_month_job_summary_collection_name_, month_ranges,
+          [&](auto range) {
+            return JobSizeQueryMatch("month", range, request);
+          },
+          false);
+    } else if (!day_ranges.empty()) {
+      entry_table = &day_job_summ_table;
+      AppendUnionWithRanges(
+          pipeline, m_day_job_summary_collection_name_, day_ranges,
+          [&](auto range) { return JobSizeQueryMatch("day", range, request); });
+      AppendUnionWithRanges(
+          pipeline, m_month_job_summary_collection_name_, month_ranges,
+          [&](auto range) {
+            return JobSizeQueryMatch("month", range, request);
+          },
+          false);
+    } else if (!month_ranges.empty()) {
+      entry_table = &month_job_summ_table;
+      AppendUnionWithRanges(pipeline, m_month_job_summary_collection_name_,
+                            month_ranges, [&](auto range) {
+                              return JobSizeQueryMatch("month", range, request);
+                            });
+    } else {
+      CRANE_INFO("No time ranges to query");
+      return;
+    }
+
+    // Grouping
+    auto group_bson = bsoncxx::from_json(R"({
+      "$group": {
+        "_id": {
+          "account": "$account",
+          "username": "$username",
+          "wckey": "$wckey",
+          "cpus_alloc": "$cpus_alloc"
+        },
+        "total_cpu_time": { "$sum": "$total_cpu_time" },
+        "total_count": { "$sum": "$total_count" }
+      }
+    })");
+    pipeline.append_stage(group_bson.view());
+
+    mongocxx::options::aggregate agg_opts;
+    agg_opts.allow_disk_use(true);
+    auto cursor = entry_table->aggregate(pipeline, agg_opts);
+
+    absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult> agg_map;
+    if (grouping_list.empty()) {
+      for (auto&& doc : cursor) {
+        auto id = doc["_id"].get_document().view();
+        JobSizeSummaryKey key{
+            .account = std::string(id["account"].get_string().value),
+            .wckey = std::string(id["wckey"].get_string().value),
+            .cpus_alloc = GetCpusAlloc(id)};
+        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
+        agg_map[key].total_count += GetTotalCount(doc);
+      }
+      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
+    } else {
+      for (auto&& doc : cursor) {
+        auto id = doc["_id"].get_document().view();
+        uint32_t cpus_alloc = GetCpusAlloc(id);
+        int group_index = 0;
+        for (const auto group : grouping_list) {
+          if (cpus_alloc < group) break;
+          group_index++;
+        }
+        uint32_t bucket = grouping_list[group_index == 0 ? 0 : group_index - 1];
+        JobSizeSummaryKey key{
+            .account = std::string(id["account"].get_string().value),
+            .wckey = std::string(id["wckey"].get_string().value),
+            .cpus_alloc = bucket};
+        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
+        agg_map[key].total_count += GetTotalCount(doc);
+      }
+      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
+    }
+  } catch (const bsoncxx::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, e.what());
+  }
+}
+
+uint64_t MongodbClient::MillisecondsToNextHour() {
+  auto now = std::chrono::system_clock::now();
+  auto now_time_t = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_now{};
+  localtime_r(&now_time_t, &tm_now);
+
+  // Set to next hour (minute and second to zero, increment hour by one)
+  tm_now.tm_min = 0;
+  tm_now.tm_sec = 0;
+  tm_now.tm_hour += 1;
+  time_t next_hour_time_t = mktime(&tm_now);
+
+  auto next_hour = std::chrono::system_clock::from_time_t(next_hour_time_t);
+
+  // Get time in milliseconds since epoch for both now and next hour
+  auto next_hour_ms =
+      std::chrono::time_point_cast<std::chrono::milliseconds>(next_hour)
+          .time_since_epoch()
+          .count();
+  auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now)
+                    .time_since_epoch()
+                    .count();
+
+  return next_hour_ms > now_ms ? static_cast<uint64_t>(next_hour_ms - now_ms)
+                               : 0;
+}
+
+bool MongodbClient::InitTableIndexes() {
+  try {
+    // Create index for the raw task table
+    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    CreateCollectionIndex(raw_table, {"time_end"});
+
+    // Create indexes for the hour summary table
+    auto hour_coll =
+        (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+    CreateCollectionIndex(hour_coll, {"hour"});
+    CreateCollectionIndex(
+        hour_coll, {"hour", "account", "username", "qos", "wckey", "cpus_alloc",
+                    "partition_name", "nodename_list"});
+
+    // Create indexes for the day summary table
+    auto day_coll =
+        (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+    CreateCollectionIndex(day_coll, {"day"});
+    CreateCollectionIndex(
+        day_coll, {"day", "account", "username", "qos", "wckey", "cpus_alloc",
+                   "partition_name", "nodename_list"});
+
+    // Create indexes for the month summary table
+    auto month_coll =
+        (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+    CreateCollectionIndex(month_coll, {"month"});
+    CreateCollectionIndex(month_coll,
+                          {"month", "account", "username", "qos", "wckey",
+                           "cpus_alloc", "partition_name", "nodename_list"});
+
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::Init() {
+  if (!InitTableIndexes()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
+    return false;
+  }
+  std::shared_ptr<uvw::loop> loop = uvw::loop::create();
+  mongodb_task_timer_handle = loop->resource<uvw::timer_handle>();
+
+  mongodb_task_timer_handle->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        ClusterRollupUsage();
+      });
+
+  uint64_t first_delay_ms = MillisecondsToNextHour();
+  uint64_t repeat_ms = 3600 * 1000;
+
+  mongodb_task_timer_handle->start(std::chrono::milliseconds(first_delay_ms),
+                                   std::chrono::milliseconds(repeat_ms));
+
+  m_mongodb_sum_thread_ =
+      std::thread([this, loop = std::move(loop)]() { MongoDbSumaryTh_(loop); });
+
+  return true;
+}
+
+void MongodbClient::MongoDbSumaryTh_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("MongoDbSumTh");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in reservation loop.");
+  }
+
+  uvw_loop->run();
+}
+
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
@@ -1901,6 +3079,11 @@ MongodbClient::MongodbClient() {
   m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
   m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
+}
+
+MongodbClient::~MongodbClient() {
+  m_thread_stop_ = true;
+  if (m_mongodb_sum_thread_.joinable()) m_mongodb_sum_thread_.join();
 }
 
 }  // namespace Ctld
