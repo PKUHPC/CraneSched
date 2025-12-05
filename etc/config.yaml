@@ -86,7 +86,7 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
 
-JobLogHook:
+JobLifecycleHook:
   Prolog: prolog1.sh,prolog2.sh
   PrologTimeout: 60
   # TODO: ForceRequeueOnFail
@@ -94,6 +94,7 @@ JobLogHook:
   Epilog: epilog1.sh,epilog2.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
+  MaxOutputSize: 100000
   PrologCranectld: prologctld.sh
   EpilogCranectld: epilogctld.sh
   CrunProlog: srun_prolog.sh
