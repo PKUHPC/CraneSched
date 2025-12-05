@@ -2720,15 +2720,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicenseResource(task->licenses_count);
-      // As for now, task status change includes only
-      // Pending / Running -> Completed / Failed / Cancelled.
-      // It means all task status changes will put the task into mongodb,
-      // so we don't have any branch code here and just put it into mongodb.
 
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
-      m_running_task_map_.erase(iter);
-      RunLogHookArgs run_epilog_ctld_args{ .scripts = g_config.JobLifecycleHook.EpiLogs,
+      RunLogHookArgs run_epilog_ctld_args{.scripts = g_config.JobLifecycleHook.EpiLogs,
                                           .envs = task->env,
                                           .run_uid = 0, .run_gid = 0, .is_prolog = false};
       if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
