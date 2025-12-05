@@ -181,6 +181,7 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+  optional string wckey = 42;
 }
 
 message TaskInEmbeddedDb {
@@ -469,6 +470,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  string wckey = 41;
 }
 
 message StepInfo {
@@ -694,6 +696,11 @@ enum ErrCode {
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
+  ERR_INVALID_WCKEY = 84;
+  ERR_WCKEY_ALREADY_EXISTS = 85;
+  ERR_INVALID_CLUSTER = 86;
+  ERR_DEL_DEFAULT_WCKEY = 87;
+  ERR_NO_DEFAULT_WCKEY = 88;
 }
 
 enum EntityType {
@@ -722,6 +729,8 @@ enum ModifyField {
   MaxJobsPerUser = 31;
   MaxCpusPerUser = 32;
   MaxTimeLimitPerTask = 33;
+  // wckey
+  DefaultWckey = 40;
 }
 
 message AccountInfo {
@@ -775,6 +784,13 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+}
+
+message WckeyInfo {
+  string name = 1;
+  string cluster = 2;
+  string user_name = 3;
+  bool is_default = 4;
 }
 
 message TimeInterval {

@@ -196,6 +196,7 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+  bool MustNeedWckey{false};
 };
 
 struct RunTimeStatus {
@@ -705,6 +706,7 @@ struct TaskInCtld {
   bool exclusive{false};
 
   std::unordered_map<std::string, uint32_t> licenses_count;
+  std::string wckey;
 
  private:
   /* ------------- [2] -------------
@@ -1013,6 +1015,8 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
+  std::unordered_map<std::string /*cluster*/, std::string /*wckey_name*/>
+      default_wckey_map;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
@@ -1064,6 +1068,20 @@ struct User {
     default:
       return "Unknown";
     }
+  }
+};
+
+struct Wckey {
+  bool deleted = false;
+  std::string name;
+  std::string cluster; /* cluster associated */
+  uid_t uid;
+  std::string user_name; /* user name */
+  bool is_default = false;
+
+  bool operator==(const Wckey& other) const {
+    return name == other.name && cluster == other.cluster && uid == other.uid &&
+           user_name == other.user_name && is_default == other.is_default;
   }
 };
 
