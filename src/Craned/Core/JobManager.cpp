@@ -598,6 +598,33 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
 
+    if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob ||
+        !g_config.JobLifecycleHook.TaskPrologs.empty() ||
+        !g_config.JobLifecycleHook.TaskEpilogs.empty()) {
+      auto* log_hook_conf = init_req.mutable_job_lifecycle_hook_config();
+
+      for (const auto& prolog : g_config.JobLifecycleHook.TaskPrologs) {
+        log_hook_conf->add_task_prologs(prolog);
+      }
+      for (const auto& epilog : g_config.JobLifecycleHook.TaskEpilogs) {
+        log_hook_conf->add_task_epilogs(epilog);
+      }
+
+      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
+        for (const auto& prolog : g_config.JobLifecycleHook.ProLogs) {
+          log_hook_conf->add_prologs(prolog);
+        }
+        for (const auto& epilog : g_config.JobLifecycleHook.EpiLogs) {
+          log_hook_conf->add_epilogs(epilog);
+        }
+      }
+
+      log_hook_conf->set_prolog_timeout(g_config.JobLifecycleHook.PrologTimeout);
+      log_hook_conf->set_epilog_timeout(g_config.JobLifecycleHook.EpilogTimeout);
+      log_hook_conf->set_prolog_epilog_timeout(
+          g_config.JobLifecycleHook.PrologEpilogTimeout);
+    }
+
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Step #{}.{}] Failed to serialize msg to ostream: {}",
@@ -785,6 +812,40 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
           "current status: {}.",
           job_id, step_id, static_cast<int>(step_it->second->status));
     }
+
+    // By default, Prolog is executed just before the task is launched.
+    // if (!g_config.JobLifecycleHook.ProLogs.empty() &&
+    //     (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) == 0) {
+    //   if (!job->is_prolog_run.exchange(true) && !step_it->second->IsCalloc()) {
+    //     CRANE_DEBUG("#{}: Running prologs....", job_id);
+    //
+    //     bool script_lock = false;
+    //     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+    //       m_prolog_serial_mutex_.Lock();
+    //       script_lock = true;
+    //     }
+    //
+    //     RunLogHookArgs run_prolog_args{.scripts = g_config.JobLifecycleHook.ProLogs,
+    //                                    .envs = job->GetJobEnvMap(),
+    //                                    .run_uid = 0,
+    //                                    .run_gid = 0,
+    //                                    .is_prolog = true};
+    //     if (g_config.JobLifecycleHook.PrologTimeout > 0)
+    //       run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+    //     else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+    //       run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+    //
+    //     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+    //       if (script_lock) m_prolog_serial_mutex_.Unlock();
+    //       g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+    //       elem.ok_prom.set_value(CraneErrCode::ERR_PROLOG);
+    //       continue;
+    //     }
+    //
+    //     if (script_lock) m_prolog_serial_mutex_.Unlock();
+    //   }
+    // }
+
     step_it->second->status = StepStatus::Running;
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
 
@@ -951,6 +1012,74 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
     absl::MutexLock lk(job->step_map_mtx.get());
     job->step_map.emplace(step->step_id, std::move(step));
   }
+
+  // force the script to be executed at step allocation
+  // if (!g_config.JobLifecycleHook.ProLogs.empty() &&
+  //     ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) != 0) &&
+  //     ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) == 0)) {
+  //   if (job->is_prolog_run.exchange(true)) {
+  //     auto run_prolog = [this, job](EnvMap env_map) -> bool {
+  //       bool script_lock = false;
+  //
+  //       if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+  //         m_prolog_serial_mutex_.Lock();
+  //         script_lock = true;
+  //       }
+  //
+  //       RunLogHookArgs args{
+  //           .scripts = g_config.JobLifecycleHook.ProLogs,
+  //           .envs = env_map,
+  //           .run_uid = 0,
+  //           .run_gid = 0,
+  //           .is_prolog = true,
+  //       };
+  //
+  //       if (g_config.JobLifecycleHook.PrologTimeout > 0)
+  //         args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
+  //       else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+  //         args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+  //
+  //       if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+  //         args.at_child_setup_cb = [job](pid_t pid) {
+  //           if (!job || !job->cgroup) return false;
+  //           return job->cgroup->MigrateProcIn(pid);
+  //         };
+  //       }
+  //
+  //       auto ok = util::os::RunPrologOrEpiLog(args);
+  //
+  //       if (script_lock) m_prolog_serial_mutex_.Unlock();
+  //
+  //       return ok ? true : false;
+  //     };
+  //
+  //     CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
+  //     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::NoHold) {
+  //       EnvMap env_map = job->GetJobEnvMap();
+  //       g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
+  //                                   env_map]() {
+  //         if (!run_prolog(env_map)) {
+  //           g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
+  //           ActivateTaskStatusChangeAsync_(
+  //               job_id, step_id, crane::grpc::TaskStatus::Failed,
+  //               ExitCode::EC_PROLOG_ERR,
+  //               fmt::format("Failed to run prolog for job#{} ", job_id),
+  //               google::protobuf::util::TimeUtil::GetCurrentTime());
+  //         }
+  //       });
+  //     } else {
+  //       if (!run_prolog(job->GetJobEnvMap())) {
+  //         g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
+  //         ActivateTaskStatusChangeAsync_(
+  //             job_id, step_id, crane::grpc::TaskStatus::Failed,
+  //             ExitCode::EC_PROLOG_ERR,
+  //             fmt::format("Failed to run prolog for job#{} ", job_id),
+  //             google::protobuf::util::TimeUtil::GetCurrentTime());
+  //         return;
+  //       }
+  //     }
+  //   }
+  // }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.

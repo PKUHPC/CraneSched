@@ -19,14 +19,15 @@
 #pragma once
 
 #include <fcntl.h>
+
 #include <sys/resource.h>
+
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
 
 #include "crane/Logger.h"
-#include "crane/OS.h"
 
 struct SystemRelInfo {
   std::string name;
@@ -40,10 +41,21 @@ struct NodeSpecInfo {
   double memory_gb;
 };
 
+// prolog or epilog
+struct RunLogHookArgs {
+  std::vector<std::string> scripts;
+  std::unordered_map<std::string, std::string> envs;
+  uint32_t timeout_sec;
+  uid_t run_uid;
+  gid_t run_gid;
+  bool is_prolog;
+  uint32_t output_size;
+  std::function<bool(pid_t)> at_child_setup_cb;
+};
+
 namespace util {
 
 namespace os {
-
 bool GetNodeInfo(NodeSpecInfo* info);
 
 bool DeleteFile(std::string const& p);
@@ -80,6 +92,12 @@ bool GetSystemReleaseInfo(SystemRelInfo* info);
 bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
+
+std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
+
+void ApplyPrologOutputToEnvAndStdout(
+    const std::string& output,
+    std::unordered_map<std::string, std::string>* env_map, int task_stdout_fd);
 
 }  // namespace os
 
