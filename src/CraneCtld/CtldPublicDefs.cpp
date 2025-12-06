@@ -392,6 +392,9 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   env = job.env;
   extra_attr = job.extra_attr;
 
+  // FIXME: Daemon Step should have cmd!!!
+  // Or we can't launch pod using it.
+
   time_limit = job.time_limit;
   requested_node_res_view = job.requested_node_res_view;
   node_num = job.node_num;
@@ -441,12 +444,12 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.set_get_user_env(get_user_env);
   step.mutable_gid()->Assign(gids.begin(), gids.end());
   // No batch or ia meta need to set
-  step.set_extra_attr(job.extra_attr);
-  // step.set_cmd_line(job.cmd_line);
-  // step.set_cwd();
+
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
+
+  step.set_extra_attr(job.extra_attr);
 
   *MutableStepToCtld() = std::move(step);
 }
