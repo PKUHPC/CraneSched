@@ -99,6 +99,18 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
+message SubmitContainerStepRequest {
+  StepToCtld step = 1;
+}
+
+message SubmitContainerStepReply {
+  bool ok = 1;
+  oneof payload {
+    uint32 step_id = 2;
+    ErrCode code = 3;
+  }
+}
+
 message AllocJobsRequest {
   repeated JobToD jobs = 1;
 }
@@ -1014,6 +1026,7 @@ service CraneCtld {
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
   rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+  rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
