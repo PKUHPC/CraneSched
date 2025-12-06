@@ -458,15 +458,13 @@ CraneErrCode JobManager::KillPid_(pid_t pid, int signum) {
   CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
 
   // Send the signal to the whole process group.
-  int err = kill(-pid, signum);
-
-  if (err == 0)
+  if (int err = kill(-pid, signum); err == 0) {
     return CraneErrCode::SUCCESS;
-  else {
-    std::error_code ec(errno, std::system_category());
-    CRANE_TRACE("kill failed. error: {}", ec.message());
-    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
+
+  std::error_code ec(errno, std::system_category());
+  CRANE_TRACE("kill failed. error: {}", ec.message());
+  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 void JobManager::SetSigintCallback(std::function<void()> cb) {

@@ -803,6 +803,9 @@ CraneErrCode PodInstance::PersistPodSandboxInfo_() {
     pid_output << m_pod_id_;
   }
 
+  CRANE_DEBUG("Pod config saved to {}, id saved to {}", m_config_file_,
+              m_lock_file_);
+
   return CraneErrCode::SUCCESS;
 }
 
