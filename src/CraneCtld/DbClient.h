@@ -104,7 +104,7 @@ class MongodbClient {
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
-
+  bool Init();
   bool Connect();
 
   /* ----- Method of operating the job table ----------- */
@@ -244,6 +244,9 @@ class MongodbClient {
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
+  void CreateCollectionIndex(mongocxx::collection& coll,
+                             const std::vector<std::string>& fields);
+  bool InitTableIndexes();
 
  private:
   bool CheckDefaultRootAccountUserAndInit_();
