@@ -415,7 +415,7 @@ struct PodMetaInTask {
   uid_t run_as_user{0};
   gid_t run_as_group{0};
 
-  std::optional<PortMapping> port_mapping;
+  std::vector<PortMapping> port_mappings;
 
   PodMetaInTask() = default;
   explicit PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs);

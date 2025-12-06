@@ -710,9 +710,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   // log directory
   m_pod_config_.set_log_directory(m_log_dir_);
 
-  if (pod_meta.has_ports()) {
-    // FIXME: Add repeated ports support in PodTaskAdditionalMeta
-    const auto& ports = pod_meta.ports();
+  for (const auto& ports : pod_meta.ports()) {
     auto* p = m_pod_config_.add_port_mappings();
     p->set_protocol(static_cast<cri::api::Protocol>(ports.protocol()));
     p->set_host_port(ports.host_port());
