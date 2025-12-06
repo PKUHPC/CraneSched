@@ -469,6 +469,7 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
+  map<string, string> env = 41;
 }
 
 message StepInfo {
@@ -689,6 +690,7 @@ enum ErrCode {
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
   ERR_LICENSE_LEGAL_FAILED = 78;
+  ERR_LUA_FAILED = 79;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
