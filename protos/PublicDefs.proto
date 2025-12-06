@@ -434,7 +434,7 @@ message PodTaskAdditionalMeta {
     string host_ip = 4;
   }
 
-  PortMapping ports = 11;
+  repeated PortMapping ports = 11;
   // DNSConfig dns_config = 12;
   // NOTE: DNSConfig is handled by backend only.
 }
@@ -872,6 +872,7 @@ enum TxnAction {
   ModifyQos = 7;
   DeleteQos = 8;
 }
+
 message LicenseInfo {
   string name = 1;
   uint32 total = 2;

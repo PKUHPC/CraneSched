@@ -53,11 +53,12 @@ PodMetaInTask::PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs)
   namespace_option.ipc = ns.ipc();
   namespace_option.target_id = ns.target_id();
 
-  if (rhs.has_ports()) {
-    port_mapping = PortMapping{.protocol = rhs.ports().protocol(),
-                               .container_port = rhs.ports().container_port(),
-                               .host_port = rhs.ports().host_port(),
-                               .host_ip = rhs.ports().host_ip()};
+  for (const auto& port : rhs.ports()) {
+    port_mappings.emplace_back(
+        PortMapping{.protocol = port.protocol(),
+                    .container_port = port.container_port(),
+                    .host_port = port.host_port(),
+                    .host_ip = port.host_ip()});
   }
 }
 
@@ -78,12 +79,12 @@ PodMetaInTask::operator crane::grpc::PodTaskAdditionalMeta() const {
   result.set_run_as_user(this->run_as_user);
   result.set_run_as_group(this->run_as_group);
 
-  if (port_mapping.has_value()) {
-    auto* ports = result.mutable_ports();
-    ports->set_protocol(port_mapping->protocol);
-    ports->set_container_port(port_mapping->container_port);
-    ports->set_host_port(port_mapping->host_port);
-    ports->set_host_ip(port_mapping->host_ip);
+  for (const auto& pm : port_mappings) {
+    auto* ports = result.add_ports();
+    ports->set_protocol(pm.protocol);
+    ports->set_container_port(pm.container_port);
+    ports->set_host_port(pm.host_port);
+    ports->set_host_ip(pm.host_ip);
   }
 
   return result;

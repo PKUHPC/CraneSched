@@ -1324,13 +1324,17 @@ void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
     pod_doc.append(kvp("run_as_user", static_cast<int32_t>(v.run_as_user)));
     pod_doc.append(kvp("run_as_group", static_cast<int32_t>(v.run_as_group)));
 
-    if (v.port_mapping.has_value()) {
-      pod_doc.append(kvp("ports", [&v](sub_document ports_doc) {
-        ports_doc.append(
-            kvp("protocol", static_cast<int32_t>(v.port_mapping->protocol)));
-        ports_doc.append(kvp("container_port", v.port_mapping->container_port));
-        ports_doc.append(kvp("host_port", v.port_mapping->host_port));
-        ports_doc.append(kvp("host_ip", v.port_mapping->host_ip));
+    if (!v.port_mappings.empty()) {
+      pod_doc.append(kvp("ports", [&v](sub_array ports_array) {
+        for (const auto& pm : v.port_mappings) {
+          ports_array.append([&pm](sub_document ports_doc) {
+            ports_doc.append(
+                kvp("protocol", static_cast<int32_t>(pm.protocol)));
+            ports_doc.append(kvp("container_port", pm.container_port));
+            ports_doc.append(kvp("host_port", pm.host_port));
+            ports_doc.append(kvp("host_ip", pm.host_ip));
+          });
+        }
       }));
     }
   }));
@@ -1875,7 +1879,29 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
     }
 
     if (auto ports_elem = pod_doc["ports"];
-        ports_elem && ports_elem.type() == bsoncxx::type::k_document) {
+        ports_elem && ports_elem.type() == bsoncxx::type::k_array) {
+      for (const auto& port_val : ports_elem.get_array().value) {
+        if (port_val.type() != bsoncxx::type::k_document) continue;
+        auto ports_doc = port_val.get_document().view();
+        PodMetaInTask::PortMapping mapping{};
+        if (auto proto_elem = ports_doc["protocol"]) {
+          mapping.protocol = static_cast<
+              crane::grpc::PodTaskAdditionalMeta::PortMapping::Protocol>(
+              proto_elem.get_int32().value);
+        }
+        if (auto container_port_elem = ports_doc["container_port"]) {
+          mapping.container_port = container_port_elem.get_int32().value;
+        }
+        if (auto host_port_elem = ports_doc["host_port"]) {
+          mapping.host_port = host_port_elem.get_int32().value;
+        }
+        if (auto host_ip_elem = ports_doc["host_ip"]) {
+          mapping.host_ip = host_ip_elem.get_string().value;
+        }
+        result.port_mappings.emplace_back(std::move(mapping));
+      }
+    } else if (ports_elem && ports_elem.type() == bsoncxx::type::k_document) {
+      // Backward compatibility with single-port schema.
       PodMetaInTask::PortMapping mapping{};
       auto ports_doc = ports_elem.get_document().view();
       if (auto proto_elem = ports_doc["protocol"]) {
@@ -1892,7 +1918,7 @@ PodMetaInTask MongodbClient::BsonToPodMeta(const bsoncxx::document::view& doc) {
       if (auto host_ip_elem = ports_doc["host_ip"]) {
         mapping.host_ip = host_ip_elem.get_string().value;
       }
-      result.port_mapping = mapping;
+      result.port_mappings.emplace_back(std::move(mapping));
     }
 
   } catch (const std::exception& e) {
