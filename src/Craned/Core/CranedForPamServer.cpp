@@ -240,14 +240,13 @@ CranedForPamServer::CranedForPamServer(
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   builder.RegisterService(m_service_impl_.get());
+  // Pam run as root
+  chmod(listen_conf.UnixSocketForPamListenAddr.c_str(), 0600);
 
   m_server_ = builder.BuildAndStart();
 
   CRANE_INFO("Craned for pam unix socket is listening on {}",
              listen_conf.UnixSocketForPamListenAddr);
-
-  // Pam run as root
-  chmod(listen_conf.UnixSocketForPamListenAddr.c_str(), 0600);
 }
 
 }  // namespace Craned

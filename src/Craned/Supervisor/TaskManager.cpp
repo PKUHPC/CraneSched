@@ -2248,7 +2248,19 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       continue;
     }
 
-    m_step_.Prepare();
+    auto err = m_step_.Prepare();
+    if (err != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
+                  m_step_.step_id, static_cast<int>(err));
+      for (auto task_id : m_step_.task_ids) {
+        g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
+                                ExitCode::EC_FILE_NOT_FOUND,
+                                fmt::format("Failed to prepare step, code: {}",
+                                            static_cast<int>(err)));
+      }
+      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+      continue;
+    }
 
     // TODO: We dont need to exec task for a calloc job
 
@@ -2323,6 +2335,7 @@ void TaskManager::EvGrpcMigrateSshProcToCgroupCb_() {
     if (!m_step_.IsDaemonStep()) {
       CRANE_ERROR("Trying to move pid {} to no daemon step", pid);
       prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      continue;
     }
     if (!m_step_.step_user_cg) {
       auto cg_expt = CgroupManager::AllocateAndGetCgroup(

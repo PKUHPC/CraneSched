@@ -249,7 +249,7 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     signal(SIGABRT, SIG_DFL);
 
     // Before exec, we need to make sure that the cgroup is ready.
-    if (!this->crane_cgroup->MigrateProcIn(child_pid)) {
+    if (!this->crane_cgroup->MigrateProcIn(getpid())) {
       fmt::print(
           stderr,
           "[Step #{}.{}] Terminate the subprocess due to failure of cgroup "

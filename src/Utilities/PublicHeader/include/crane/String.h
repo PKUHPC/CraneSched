@@ -159,10 +159,6 @@ concept MapRange = std::ranges::range<R> && requires {
   typename R::mapped_type;
 };
 
-template <typename T>
-concept StepIdRange = std::ranges::range<T> &&
-                      std::same_as<std::ranges::range_value_t<T>, step_id_t>;
-
 template <MapRange Map>
   requires std::ranges::range<Map> && requires(Map m) {
     requires std::ranges::range<typename Map::mapped_type>;
