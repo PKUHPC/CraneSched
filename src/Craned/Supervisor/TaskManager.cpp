@@ -2248,18 +2248,21 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       continue;
     }
 
-    auto err = m_step_.Prepare();
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
-                  m_step_.step_id, static_cast<int>(err));
-      for (auto task_id : m_step_.task_ids) {
-        g_task_mgr->TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
-                                ExitCode::EC_FILE_NOT_FOUND,
-                                fmt::format("Failed to prepare step, code: {}",
-                                            static_cast<int>(err)));
+    {
+      auto err = m_step_.Prepare();
+      if (err != CraneErrCode::SUCCESS) {
+        CRANE_ERROR("[Step #{}.{}] Failed to prepare step: {}", m_step_.job_id,
+                    m_step_.step_id, static_cast<int>(err));
+        for (auto task_id : m_step_.task_ids) {
+          g_task_mgr->TaskFinish_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::EC_FILE_NOT_FOUND,
+              fmt::format("Failed to prepare step, code: {}",
+                          static_cast<int>(err)));
+        }
+        elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
+        continue;
       }
-      elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
-      continue;
     }
 
     // TODO: We dont need to exec task for a calloc job
