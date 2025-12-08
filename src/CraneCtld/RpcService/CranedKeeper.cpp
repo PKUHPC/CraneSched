@@ -355,9 +355,10 @@ crane::grpc::ExecInContainerTaskReply CranedStub::ExecInContainerTask(
 
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
-    CRANE_INFO("Craned {} reports service unavailable. Considering it down.",
-               m_craned_id_);
-    g_meta_container->CranedDown(m_craned_id_);
+    CRANE_INFO(
+        "Craned {} reports service unavailable. Maybe it is connecting to "
+        "CTLD.",
+        m_craned_id_);
   }
 }
 
