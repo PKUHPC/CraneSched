@@ -54,18 +54,18 @@ CraneErrCode AccountMetaContainer::TryMallocQosSubmitResource(
   if (task.time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task.time_limit = qos->max_time_limit_per_task;
   } else if (task.time_limit > qos->max_time_limit_per_task) {
-    CRANE_WARN("time-limit beyond the user's limit");
+    CRANE_TRACE("time-limit beyond the user's limit");
     return CraneErrCode::ERR_TIME_TIMIT_BEYOND;
-  }
-
-  std::set<int> account_stripes;
-  for (const auto& account_name : task.account_chain) {
-    account_stripes.insert(StripeForKey_(account_name));
   }
 
   // Lock the specified user/account to minimize the impact on other users and
   // accounts.
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
+  std::set<int> account_stripes;
+  for (const auto& account_name : task.account_chain) {
+    account_stripes.insert(StripeForKey_(account_name));
+  }
   std::vector<std::unique_lock<std::mutex>> account_locks;
   account_locks.reserve(account_stripes.size());
   for (const auto account_stripe : account_stripes) {
@@ -139,7 +139,25 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
     TaskInCtld& task) {
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
   // Under normal circumstances, QoS must exist.
-  CRANE_ASSERT(qos);
+  if (!qos) {
+    CRANE_ERROR("Try to malloc resource from an unknown qos {}",
+                task.qos);
+    return ;
+  }
+
+  // Lock the specified user/account to minimize the impact on other users and
+  // accounts.
+  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
+  std::set<int> account_stripes;
+  for (const auto& account_name : task.account_chain) {
+    account_stripes.insert(StripeForKey_(account_name));
+  }
+  std::vector<std::unique_lock<std::mutex>> account_locks;
+  account_locks.reserve(account_stripes.size());
+  for (const auto account_stripe : account_stripes) {
+    account_locks.emplace_back(m_account_stripes_[account_stripe]);
+  }
 
   CRANE_DEBUG(
       "Malloc QOS {} resource for recover task {} of user {} and account {}.",
@@ -194,10 +212,10 @@ void AccountMetaContainer::MallocQosResourceToRecoveredRunningTask(
   }
 }
 
-std::optional<std::string> AccountMetaContainer::CheckQosResource(
+std::expected<void, std::string> AccountMetaContainer::CheckQosResource(
     const TaskInCtld& task) {
   auto qos = g_account_manager->GetExistedQosInfo(task.qos);
-  if (!qos) return "InvalidQOS";
+  if (!qos) return std::unexpected("InvalidQOS");
 
   std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
 
@@ -212,50 +230,32 @@ std::optional<std::string> AccountMetaContainer::CheckQosResource(
     account_locks.emplace_back(m_account_stripes_[account_stripe]);
   }
 
-  if (!m_user_meta_map_.contains(task.Username())) {
-    CRANE_ERROR("User '{}' not found in m_user_meta_map_.", task.Username());
-  }
+  if (!CheckQosResource_(*qos, task))
+    return std::unexpected("QOSResourceLimit");
 
-  bool result = true;
-
-  m_user_meta_map_.if_contains(
-      task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& val = pair.second.at(task.qos);
-        if (val.jobs_count + 1 > qos->max_jobs_per_user) result = false;
-
-        if (val.resource.CpuCount() + task.allocated_res_view.CpuCount() >
-            qos->max_cpus_per_user)
-          result = false;
-      });
-
-  if (!result) return "QOSResourceLimit";
-
-  for (const auto& account_name : task.account_chain) {
-    if (!m_account_meta_map_.contains(account_name)) {
-      CRANE_ERROR("Account '{}' not found in m_account_meta_map_.", account_name);
-    }
-    m_account_meta_map_.if_contains(
-        account_name,
-        [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& val = pair.second.at(task.qos);
-          if (val.jobs_count + 1 > qos->max_jobs_per_account) result = false;
-        });
-    if (!result) break;
-  }
-
-  if (!result) return "QOSResourceLimit";
-
-  return std::nullopt;
+  return {};
 }
 
-void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
-  CRANE_DEBUG("Malloc QOS {} resource for task {} of user {} and account {}.",
-              task.qos, task.TaskId(), task.Username(), task.account);
+std::expected<void, std::string> AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
 
-  if (!m_user_meta_map_.contains(task.Username())) {
-    CRANE_ERROR("User '{}' not found in m_user_meta_map_.", task.Username());
+  auto qos = g_account_manager->GetExistedQosInfo(task.qos);
+  if (!qos) return std::unexpected("InvalidQOS");
+
+  std::lock_guard user_lock(m_user_stripes_[StripeForKey_(task.Username())]);
+
+  std::set<int> account_stripes;
+  for (const auto& account : task.account_chain) {
+    account_stripes.insert(StripeForKey_(account));
   }
+
+  std::vector<std::unique_lock<std::mutex>> account_locks;
+  account_locks.reserve(account_stripes.size());
+  for (const auto account_stripe : account_stripes) {
+    account_locks.emplace_back(m_account_stripes_[account_stripe]);
+  }
+
+  if (!CheckQosResource_(*qos, task))
+    return std::unexpected("QOSResourceLimit");
 
   m_user_meta_map_.if_contains(
       task.Username(),
@@ -267,9 +267,6 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
       });
 
   for (const auto& account_name : task.account_chain) {
-    if (!m_account_meta_map_.contains(account_name)) {
-      CRANE_ERROR("Account '{}' not found in m_account_meta_map_.", account_name);
-    }
     m_account_meta_map_.if_contains(
         account_name,
         [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -277,6 +274,11 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
           val.jobs_count++;
         });
   }
+
+  CRANE_DEBUG("Malloc QOS {} resource for task {} of user {} and account {}.",
+            task.qos, task.TaskId(), task.Username(), task.account);
+
+  return {};
 }
 
 void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
@@ -444,6 +446,47 @@ CraneErrCode AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (val.submit_jobs_count + 1 > qos.max_submit_jobs_per_account)
             result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT;
         });
+  }
+
+  return result;
+}
+
+bool AccountMetaContainer::CheckQosResource_(const Qos& qos, const TaskInCtld& task) {
+  if (!m_user_meta_map_.contains(task.Username())) {
+    CRANE_ERROR("task #{}: User '{}' not found in m_user_meta_map_.", task.TaskId(), task.Username());
+    return false;
+  }
+
+  for (const auto& account_name : task.account_chain) {
+    if (!m_account_meta_map_.contains(account_name)) {
+      CRANE_ERROR("task #{}: Account '{}' not found in m_account_meta_map_.", task.TaskId(), account_name);
+      return false;
+    }
+  }
+
+  bool result = true;
+
+  m_user_meta_map_.if_contains(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& val = pair.second.at(task.qos);
+        if (val.jobs_count + 1 > qos.max_jobs_per_user) result = false;
+
+        if (val.resource.CpuCount() + task.allocated_res_view.CpuCount() >
+            qos.max_cpus_per_user)
+          result = false;
+      });
+
+  if (!result) return false;;
+
+  for (const auto& account_name : task.account_chain) {
+    m_account_meta_map_.if_contains(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second.at(task.qos);
+          if (val.jobs_count + 1 > qos.max_jobs_per_account) result = false;
+        });
+    if (!result) break;
   }
 
   return result;
