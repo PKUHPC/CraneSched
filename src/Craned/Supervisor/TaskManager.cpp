@@ -1732,7 +1732,7 @@ CraneErrCode ProcInstance::Spawn() {
         run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
       if (!result) {
-        fmt::print(stderr, "[Subprocess] Error: Failed to run task prolog");
+        fmt::print(stderr, "[Subprocess] Error: Failed to run task prolog\n");
         std::abort();
       }
       util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, 1);
@@ -1750,7 +1750,7 @@ CraneErrCode ProcInstance::Spawn() {
         run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
       auto result = util::os::RunPrologOrEpiLog(run_prolog_args);
       if (!result) {
-        fmt::print(stderr, "[Subprocess] Error: Failed to run step task prolog");
+        fmt::print(stderr, "[Subprocess] Error: Failed to run step task prolog\n");
         std::abort();
       }
       util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, 1);

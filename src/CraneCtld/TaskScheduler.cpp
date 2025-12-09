@@ -3386,9 +3386,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicense(task->licenses_count);
 
-      RunLogHookArgs run_epilog_ctld_args{.scripts = g_config.JobLifecycleHook.EpiLogs,
-                                          .envs = task->env,
-                                          .run_uid = 0, .run_gid = 0, .is_prolog = false};
       if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
         auto env_copy = task->env;
         g_thread_pool->detach_task([env_copy]() {
