@@ -83,6 +83,8 @@ nav:
     - Error Codes: reference/error_code.md
     - Job Environment Variables: reference/job_env_vars.md
     - Job Steps: reference/job_steps.md
+    - Job Dependency: reference/job_dependency.md
+    - Pending Reason: reference/pending_reason.md
     - License Usage Guide: reference/license_guide.md
     - Keepalived Guide: reference/keepalived.md
     - Use Cases:
@@ -122,6 +124,8 @@ plugins:
             Error Codes: 系统错误提示和解决方法
             Job Environment Variables: 作业环境变量
             Job Steps: 作业步
+            Job Dependency: 作业依赖
+            Pending Reason: 作业排队原因
             License Usage Guide: 许可证使用指南
             Keepalived Guide: Keepalived 使用指南
             Use Cases: 使用案例

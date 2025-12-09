@@ -320,9 +320,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
               g_task_scheduler->SubmitTaskToScheduler(std::move(task));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
           if (submit_result.has_value()) {
-            job_id_t job_id = submit_result.value().get();
-            result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                std::pair(job_id, kPrimaryStepId)};
+            CraneExpected<task_id_t> job_result = submit_result.value().get();
+            if (job_result.has_value()) {
+              result =
+                  std::expected<std::pair<job_id_t, step_id_t>, std::string>{
+                      std::pair(job_result.value(), kPrimaryStepId)};
+            } else {
+              result = std::unexpected(CraneErrStr(job_result.error()));
+            }
           } else {
             result = std::unexpected(CraneErrStr(submit_result.error()));
           }
@@ -465,13 +470,13 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
-    task_id_t id = result.value().get();
-    if (id != 0) {
+    CraneExpected<task_id_t> task_result = result.value().get();
+    if (task_result.has_value()) {
       response->set_ok(true);
-      response->set_task_id(id);
+      response->set_task_id(task_result.value());
     } else {
       response->set_ok(false);
-      response->set_code(CraneErrCode::ERR_BEYOND_TASK_ID);
+      response->set_code(task_result.error());
     }
   } else {
     response->set_ok(false);
@@ -549,7 +554,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     return grpc::Status::OK;
   }
 
-  std::vector<CraneExpected<std::future<task_id_t>>> results;
+  std::vector<CraneExpected<std::future<CraneExpected<task_id_t>>>> results;
 
   uint32_t task_count = request->count();
   const auto& task_to_ctld = request->task();
@@ -564,10 +569,18 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   }
 
   for (auto& res : results) {
-    if (res.has_value())
-      response->mutable_task_id_list()->Add(res.value().get());
-    else
-      response->mutable_code_list()->Add(std::move(res.error()));
+    if (res.has_value()) {
+      CraneExpected<task_id_t> task_result = res.value().get();
+      if (task_result.has_value()) {
+        response->mutable_task_id_list()->Add(task_result.value());
+      } else {
+        response->mutable_task_id_list()->Add(0);
+        response->mutable_code_list()->Add(task_result.error());
+      }
+    } else {
+      response->mutable_task_id_list()->Add(0);
+      response->mutable_code_list()->Add(res.error());
+    }
   }
 
   return grpc::Status::OK;

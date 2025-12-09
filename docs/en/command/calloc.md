@@ -34,6 +34,7 @@ calloc must be started on a node where `cfored` is running. When the task starts
 - **--export string**: Propagate environment variables
 
 ### Scheduling Options
+- **-d, --dependency string**: Job dependency. Format: `<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` or `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`. Supported types: `after`, `afterok`, `afternotok`, `afterany`
 - **--exclusive**: Request exclusive node resources
 - **-H, --hold**: Submit job in held state
 - **-r, --reservation string**: Use reserved resources

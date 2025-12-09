@@ -395,6 +395,96 @@ bool TaskScheduler::Init() {
   for (auto& [job_id, job] : recovered_running_tasks)
     PutRecoveredTaskIntoRunningQueueLock_(std::move(job));
 
+  {
+    std::unordered_map<
+        task_id_t,
+        std::vector<std::pair<task_id_t, crane::grpc::DependencyType>>>
+        dependee_to_dependents;
+
+    for (const auto& [job_id, job] : m_pending_task_map_) {
+      for (const auto& [dep_id, dep_info] : job->Dependencies().deps) {
+        const auto& [dep_type, delay_seconds] = dep_info;
+        dependee_to_dependents[dep_id].emplace_back(job_id, dep_type);
+      }
+    }
+
+    std::unordered_set<task_id_t> missing_dependee_ids;
+
+    for (const auto& [dependee_id, dependents] : dependee_to_dependents) {
+      if (m_pending_task_map_.contains(dependee_id)) {
+        for (const auto& dep_info : dependents) {
+          m_pending_task_map_.at(dependee_id)
+              ->AddDependent(dep_info.second, dep_info.first);
+        }
+      } else if (m_running_task_map_.contains(dependee_id)) {
+        for (const auto& dep_info : dependents) {
+          m_running_task_map_.at(dependee_id)
+              ->AddDependent(dep_info.second, dep_info.first);
+        }
+        continue;
+      } else {
+        missing_dependee_ids.insert(dependee_id);
+      }
+    }
+
+    if (!missing_dependee_ids.empty()) {
+      CRANE_INFO("Querying MongoDB for {} missing dependee job(s)",
+                 missing_dependee_ids.size());
+
+      auto dependee_status_map =
+          g_db_client->FetchJobStatus(missing_dependee_ids);
+
+      for (auto& [job_id, job] : m_pending_task_map_) {
+        for (const auto& [dep_id, dep_info] : job->Dependencies().deps) {
+          if (!missing_dependee_ids.contains(dep_id)) continue;
+
+          const auto& [dep_type, delay_seconds] = dep_info;
+          absl::Time event_time = absl::InfiniteFuture();
+          auto it = dependee_status_map.find(dep_id);
+          if (it != dependee_status_map.end()) {
+            const auto& [status, exit_code, time_end, time_start] = it->second;
+
+            switch (dep_type) {
+            case crane::grpc::DependencyType::AFTER:
+              if (time_start != 0) {
+                event_time = absl::FromUnixSeconds(time_start);
+              } else if (status == crane::grpc::Cancelled) {
+                event_time = absl::FromUnixSeconds(time_end);
+              } else {
+                CRANE_ERROR(
+                    "Dependee Job #{} ended without start or cancel time.",
+                    dep_id);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_ANY:
+              if (time_end != 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              } else {
+                event_time = absl::Now();
+                CRANE_ERROR("Dependee Job #{} ended without end time.", dep_id);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_OK:
+              if (status == crane::grpc::Completed && exit_code == 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              }
+              break;
+            case crane::grpc::DependencyType::AFTER_NOT_OK:
+              if (exit_code != 0) {
+                event_time = absl::FromUnixSeconds(time_end);
+              }
+              break;
+            }
+          } else {
+            CRANE_WARN("Dependee Job #{} not found in database.", dep_id);
+          }
+
+          AddDependencyEvent(job_id, dep_id, event_time);
+        }
+      }
+    }
+  }
+
   std::vector<step_db_id_t> purged_step_db_ids;
   for (auto& steps : invalid_steps | std::views::values) {
     for (auto& step_info : steps)
@@ -801,6 +891,23 @@ void TaskScheduler::ScheduleThread_() {
       // We use the time now as the base time across the whole algorithm.
       absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
+      std::vector<DependencyEvent> dep_events;
+      size_t approx_size = m_dependency_event_queue_.size_approx();
+      if (approx_size > 0) {
+        dep_events.resize(approx_size);
+        size_t actual_size = m_dependency_event_queue_.try_dequeue_bulk(
+            dep_events.begin(), approx_size);
+        dep_events.resize(actual_size);
+
+        for (const auto& event : dep_events) {
+          auto it = m_pending_task_map_.find(event.dependent_job_id);
+          if (it != m_pending_task_map_.end()) {
+            it->second->UpdateDependency(event.dependee_job_id,
+                                         event.event_time);
+          }
+        }
+      }
+
       std::vector<std::unique_ptr<PdJobInScheduler>> pending_jobs;
       pending_jobs.reserve(m_pending_task_map_.size());
       for (auto& it : m_pending_task_map_) {
@@ -811,6 +918,14 @@ void TaskScheduler::ScheduleThread_() {
         }
         if (job->begin_time > now) {
           job->pending_reason = "BeginTime";
+          continue;
+        }
+        if (!job->Dependencies().is_met(now)) {
+          if (job->Dependencies().is_failed()) {
+            job->pending_reason = "DependencyNeverSatisfied";
+          } else {
+            job->pending_reason = "Dependency";
+          }
           continue;
         }
 
@@ -1220,6 +1335,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // Set succeed tasks status and do callbacks.
       for (auto& job : jobs_created) {
+        job->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                     job->StartTime());
         // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_.emplace(job->TaskId(), std::move(job));
       }
@@ -1406,10 +1523,10 @@ void TaskScheduler::StepScheduleThread_() {
   }
 }
 
-std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
+std::future<CraneExpected<task_id_t>> TaskScheduler::SubmitTaskAsync(
     std::unique_ptr<TaskInCtld> task) {
-  std::promise<task_id_t> promise;
-  std::future<task_id_t> future = promise.get_future();
+  std::promise<CraneExpected<task_id_t>> promise;
+  std::future<CraneExpected<task_id_t>> future = promise.get_future();
 
   m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
@@ -1562,8 +1679,8 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
   return CraneErrCode::SUCCESS;
 }
 
-CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
-    std::unique_ptr<TaskInCtld> task) {
+CraneExpected<std::future<CraneExpected<task_id_t>>>
+TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!task->password_entry->Valid()) {
     CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
     return std::unexpected(CraneErrCode::ERR_INVALID_UID);
@@ -1623,7 +1740,7 @@ CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
       CRANE_ERROR("The requested QoS resources have reached the user's limit.");
       return std::unexpected(res);
     }
-    std::future<task_id_t> future =
+    std::future<CraneExpected<task_id_t>> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
@@ -2720,11 +2837,22 @@ void TaskScheduler::CleanCancelQueueCb_() {
     });
   }
 
+  absl::Time end_time = absl::Now();
+
   if (!pending_task_ptr_vec.empty()) {
     for (auto& task : pending_task_ptr_vec) {
       task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
+      task->SetEndTime(end_time);
       g_account_meta_container->FreeQosResource(*task);
+
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER,
+                                    end_time);
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                                    end_time);
+      task->TriggerDependencyEvents(crane::grpc::AFTER_OK,
+                                    absl::InfiniteFuture());
+      task->TriggerDependencyEvents(crane::grpc::AFTER_NOT_OK,
+                                    absl::InfiniteFuture());
 
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMeta>(task->meta);
@@ -2799,8 +2927,8 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanSubmitQueueCb_() {
-  using SubmitQueueElem =
-      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
+  using SubmitQueueElem = std::pair<std::unique_ptr<TaskInCtld>,
+                                    std::promise<CraneExpected<task_id_t>>>;
 
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
@@ -2850,17 +2978,55 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
         g_account_meta_container->FreeQosResource(*pair.first);
-        pair.second /*promise*/.set_value(0);
+        pair.second /*promise*/.set_value(
+            std::unexpected(CraneErrCode::ERR_DB_INSERT_FAILED));
       }
       break;
     }
 
     m_pending_task_map_mtx_.Lock();
 
+    std::unordered_map<job_id_t, task_db_id_t> tasks_to_purge;
+
     for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
       uint32_t pos = accepted_tasks.size() - 1 - i;
       task_id_t id = accepted_tasks[pos].first->TaskId();
       auto& task_id_promise = accepted_tasks[pos].second;
+      auto* job = accepted_tasks[pos].first.get();
+      std::vector<std::pair<crane::grpc::DependencyType, task_id_t>>
+          running_deps;
+      for (const auto& [dep_job_id, dep_info] : job->Dependencies().deps) {
+        const auto& [dep_type, delay_seconds] = dep_info;
+        auto dep_job_it = m_pending_task_map_.find(dep_job_id);
+        if (dep_job_it != m_pending_task_map_.end()) {
+          dep_job_it->second->AddDependent(dep_type, id);
+          continue;
+        }
+        running_deps.emplace_back(dep_type, dep_job_id);
+      }
+      if (!running_deps.empty()) {
+        bool missing_deps = false;
+        {
+          LockGuard running_guard(&m_running_task_map_mtx_);
+          for (const auto& [dep_type, dep_job_id] : running_deps) {
+            auto dep_job_it = m_running_task_map_.find(dep_job_id);
+            if (dep_job_it != m_running_task_map_.end()) {
+              dep_job_it->second->AddDependent(dep_type, id);
+            } else {
+              missing_deps = true;
+              break;
+            }
+          }
+        }
+        if (missing_deps) {
+          CRANE_WARN("Job #{} rejected: missing dependencies.", id);
+          g_account_meta_container->FreeQosResource(*job);
+          task_id_promise.set_value(
+              std::unexpected(CraneErrCode::ERR_MISSING_DEPENDENCY));
+          tasks_to_purge[id] = job->TaskDbId();
+          continue;
+        }
+      }
 
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
       task_id_promise.set_value(id);
@@ -2869,6 +3035,15 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                      std::memory_order_release);
     m_pending_task_map_mtx_.Unlock();
+
+    if (!tasks_to_purge.empty()) {
+      if (!g_embedded_db_client->PurgeEndedTasks(tasks_to_purge)) {
+        CRANE_ERROR(
+            "Failed to purge {} task(s) with missing dependencies from "
+            "embedded db.",
+            tasks_to_purge.size());
+      }
+    }
   } while (false);
 
   // Reject tasks beyond queue capacity
@@ -2883,7 +3058,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
       g_account_meta_container->FreeQosResource(*rejected_tasks[i].first);
-      rejected_tasks[i].second.set_value(0);
+      rejected_tasks[i].second.set_value(
+          std::unexpected(CraneErrCode::ERR_BEYOND_TASK_ID));
     }
   } while (false);
 }
@@ -3064,22 +3240,29 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       // Validate and adjust end_time to prevent it from exceeding time_limit
       // by too much. Allow 5 seconds of floating tolerance.
-      absl::Time reported_end_time =
-          absl::FromUnixSeconds(timestamp.seconds()) +
-          absl::Nanoseconds(timestamp.nanos());
+      absl::Time end_time = absl::FromUnixSeconds(timestamp.seconds()) +
+                            absl::Nanoseconds(timestamp.nanos());
       absl::Time expected_end_time = task->StartTime() + task->time_limit;
 
-      if (reported_end_time >
-          expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
+      if (end_time > expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
         CRANE_WARN(
             "[Job #{}] Reported end_time {} exceeds expected end_time {} by "
             "more than {}s. Adjusting to expected end_time.",
-            task->TaskId(), absl::FormatTime(reported_end_time),
+            task->TaskId(), absl::FormatTime(end_time),
             absl::FormatTime(expected_end_time), kEndTimeToleranceSec);
-        task->SetEndTime(expected_end_time);
-      } else {
-        task->SetEndTime(reported_end_time);
+        end_time = expected_end_time;
       }
+      task->SetEndTime(end_time);
+
+      uint32_t task_exit_code = job_finished_status.value().second;
+      task->TriggerDependencyEvents(crane::grpc::DependencyType::AFTER_ANY,
+                                    end_time);
+      task->TriggerDependencyEvents(
+          crane::grpc::DependencyType::AFTER_OK,
+          task_exit_code == 0 ? end_time : absl::InfiniteFuture());
+      task->TriggerDependencyEvents(
+          crane::grpc::DependencyType::AFTER_NOT_OK,
+          task_exit_code != 0 ? end_time : absl::InfiniteFuture());
 
       for (CranedId const& craned_id : task->CranedIds()) {
         auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);

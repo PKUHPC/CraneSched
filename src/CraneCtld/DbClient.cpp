@@ -698,6 +698,58 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   return false;
 }
 
+std::unordered_map<
+    task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t, int64_t, int64_t>>
+MongodbClient::FetchJobStatus(const std::unordered_set<task_id_t>& job_ids) {
+  std::unordered_map<task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t,
+                                           int64_t, int64_t>>
+      result;
+
+  if (job_ids.empty()) {
+    return result;
+  }
+
+  try {
+    document filter;
+    filter.append(kvp("task_id", [&job_ids](sub_document task_id_doc) {
+      array task_id_array;
+      for (const auto& job_id : job_ids) {
+        task_id_array.append(static_cast<std::int32_t>(job_id));
+      }
+      task_id_doc.append(kvp("$in", task_id_array));
+    }));
+
+    mongocxx::options::find options;
+    document projection;
+    projection.append(kvp("task_id", 1));
+    projection.append(kvp("state", 1));
+    projection.append(kvp("exit_code", 1));
+    projection.append(kvp("time_end", 1));
+    projection.append(kvp("time_start", 1));
+    options.projection(projection.view());
+
+    mongocxx::cursor cursor =
+        (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
+                                                                  options);
+
+    for (auto view : cursor) {
+      task_id_t task_id = view["task_id"].get_int32().value;
+      crane::grpc::TaskStatus status =
+          static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value);
+      uint32_t exit_code = view["exit_code"].get_int32().value;
+      int64_t time_end = view["time_end"].get_int64().value;
+      int64_t time_start = view["time_start"].get_int64().value;
+
+      result.emplace(task_id,
+                     std::make_tuple(status, exit_code, time_end, time_start));
+    }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to fetch job status by IDs: {}", e.what());
+  }
+
+  return result;
+}
+
 bool MongodbClient::InsertRecoveredStep(
     crane::grpc::StepInEmbeddedDb const& step_in_embedded_db) {
   document step_doc = StepInEmbeddedDbToDocument_(step_in_embedded_db);

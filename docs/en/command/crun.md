@@ -27,6 +27,11 @@ Display crun version information.
 :   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
+**-d, --dependency=&lt;string&gt;**
+
+:   **Applies to:** `job`  
+Job dependency. Format: `<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` or `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`. Supported types: `after`, `afterok`, `afternotok`, `afterany`.
+
 **--debug-level=&lt;level&gt;**
 
 :   **Applies to:** `job`, `step`  

@@ -468,6 +468,24 @@ struct ContainerMetaInTask {
   explicit operator crane::grpc::ContainerTaskAdditionalMeta() const;
 };
 
+struct DependenciesInJob {
+  std::unordered_map<task_id_t,
+                     std::pair<crane::grpc::DependencyType, uint64_t>>
+      deps;
+  bool is_or{false};
+  absl::Time ready_time{absl::InfinitePast()};
+
+  bool is_met(absl::Time now) const {
+    return (is_or || deps.empty()) && ready_time <= now;
+  }
+
+  bool is_failed() const {
+    return ready_time >= absl::InfiniteFuture() && (!is_or || deps.empty());
+  }
+
+  void update(task_id_t job_id, absl::Time event_time);
+};
+
 struct TaskInCtld;
 struct StepInCtld;
 
@@ -795,6 +813,7 @@ struct TaskInCtld {
   task_id_t task_id{0};
   task_db_id_t task_db_id{0};
   std::string username;
+  std::vector<task_id_t> dependents[crane::grpc::DependencyType_ARRAYSIZE];
 
   /* ----------- [3] ----------------
    * Fields that may change at run time.
@@ -807,6 +826,7 @@ struct TaskInCtld {
   uint32_t primary_exit_code{};
   uint32_t exit_code{};
   bool held{false};
+  DependenciesInJob dependencies;
   // DAEMON step
   std::unique_ptr<DaemonStepInCtld> m_daemon_step_;
   // BATCH or INTERACTIVE or CONTAINER step
@@ -1058,6 +1078,13 @@ struct TaskInCtld {
 
   void SetAllocatedRes(ResourceV2&& val);
   ResourceV2 const& AllocatedRes() const { return allocated_res; }
+
+  void SetDependency(const crane::grpc::Dependencies& grpc_deps);
+  void UpdateDependency(task_id_t dep_job_id, absl::Time event_time);
+  DependenciesInJob const& Dependencies() const { return dependencies; }
+  void AddDependent(crane::grpc::DependencyType dep_type, task_id_t dep_job_id);
+  void TriggerDependencyEvents(const crane::grpc::DependencyType& dep_type,
+                               absl::Time event_time);
 
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val);
 
