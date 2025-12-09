@@ -69,6 +69,7 @@ cbatch cbatch_test.sh
 
 ### 调度选项
 - **--begin string**: 作业的开始时间。格式：`YYYY-MM-DDTHH:MM:SS`
+- **-d, --dependency string**: 作业依赖关系。格式：`<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` 或 `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`。支持的类型：`after`、`afterok`、`afternotok`、`afterany`
 - **--exclusive**: 请求独占节点资源
 - **-H, --hold**: 以挂起状态提交作业
 - **-r, --reservation string**: 使用预留资源
