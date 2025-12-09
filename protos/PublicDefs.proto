@@ -132,6 +132,35 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+enum DependencyType {
+  AFTER = 0;
+  AFTER_ANY = 1;
+  AFTER_OK = 2;
+  AFTER_NOT_OK = 3;
+}
+
+message DependencyCondition {
+  uint32 job_id = 1;
+  DependencyType type = 2;
+  uint64 delay_seconds = 3;
+}
+
+message Dependencies {
+  repeated DependencyCondition deps = 1;
+  bool is_or = 2;
+}
+
+message DependencyStatus {
+  repeated DependencyCondition pending = 1;
+  bool is_or = 2;
+
+  oneof ready_time_type {
+    google.protobuf.Timestamp ready_time = 3;
+    bool infinite_future = 4;
+    bool infinite_past = 5;
+  }
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -153,6 +182,8 @@ message TaskToCtld {
   bool get_user_env = 13;
 
   uint32 gid = 14;  // egid
+
+  Dependencies dependencies = 15;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -447,9 +478,10 @@ message TaskInfo {
   // For other types of tasks, this field is ignored.
   optional ContainerTaskAdditionalMeta container_meta = 23;
   repeated StepInfo step_info_list = 24;
-  /* 25-29 Reserved */
+  /* 25-28 Reserved */
 
   // Dynamic task information
+  optional DependencyStatus dependency_status = 29;
   bool held = 30;
   TaskStatus status = 31;
 
@@ -692,6 +724,9 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+
+  ERR_MISSING_DEPENDENCY = 85;
+  ERR_DB_INSERT_FAILED = 86;
 }
 
 enum EntityType {
