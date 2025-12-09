@@ -578,6 +578,7 @@ void CtldClient::Init() {
                   "Terminating step to maintain consistency.",
                   job_id, step_id, ctld_status, craned_status);
               invalid_steps[job_id].insert(step_id);
+              lost_steps[job_id].insert(step_id);
             }
           }
         }

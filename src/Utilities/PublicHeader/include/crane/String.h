@@ -174,8 +174,8 @@ std::string JobStepsWithStatusToString(const Map& m) {
                  return StepIdsToString(key, step_kv.first);
                });
       }) |
-      std::views::join | std::ranges::to<std::vector>();
-  return absl::StrJoin(step_strs_view, ",");
+      std::views::join;
+  return fmt::to_string(fmt::join(step_strs_view, ","));
 }
 
 namespace Internal {
