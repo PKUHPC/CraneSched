@@ -515,9 +515,12 @@ struct StepInCtld {
   std::vector<gid_t> gids;
   std::string name;
 
+  std::string cwd;
+
   uint32_t ntasks_per_node{0};
 
   bool requeue_if_failed{false};
+
   bool get_user_env{false};
   std::unordered_map<std::string, std::string> env;
   std::string extra_attr;
@@ -695,8 +698,6 @@ struct DaemonStepInCtld : StepInCtld {
 struct CommonStepInCtld : StepInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   std::string cmd_line;
-  std::string cwd;
-
   std::optional<StepInteractiveMeta> ia_meta;
 
   /* -----------

@@ -256,7 +256,7 @@ class PodInstance : public ITaskInstance {
     return m_pod_id_;
   }
 
-  const TaskExitInfo& HandlePodExited(const cri::api::ContainerStatus& status);
+  const TaskExitInfo& HandlePodExited();
 
  private:
   // NOTE: Should be consistent with ContainerInstance.
@@ -264,8 +264,8 @@ class PodInstance : public ITaskInstance {
   static constexpr std::string_view kPodLogDirPattern = "{}.out";
   // NOTE: Should be consistent with ContainerInstance.
   // We get PodSandboxConfig from this file in another common steps.
-  static constexpr std::string_view kPodConfigFilePattern = "{}.bin";
-  static constexpr std::string_view kPodIdLockFilePattern = "{}.lock";
+  static constexpr std::string_view kPodConfigFilePattern = ".{}.bin";
+  static constexpr std::string_view kPodIdLockFilePattern = ".{}.lock";
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
 
   static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
@@ -314,8 +314,8 @@ class ContainerInstance : public ITaskInstance {
 
  private:
   // Should be consistent with PodInstance.
-  static constexpr std::string_view kPodConfigFilePattern = "{}.bin";
-  static constexpr std::string_view kPodIdLockFilePattern = "{}.lock";
+  static constexpr std::string_view kPodConfigFilePattern = ".{}.bin";
+  static constexpr std::string_view kPodIdLockFilePattern = ".{}.lock";
 
   // Container related constants
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";

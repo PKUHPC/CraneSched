@@ -461,6 +461,7 @@ bool MongodbClient::FetchJobRecords(
               view["reservation"].get_string().value.data());
         }
         job_info.set_exclusive(view["exclusive"].get_bool().value);
+
         if (job_info.type() == crane::grpc::Container) {
           if (auto pod_elem = view["meta_pod"];
               pod_elem && pod_elem.type() == bsoncxx::type::k_document) {
@@ -472,6 +473,7 @@ bool MongodbClient::FetchJobRecords(
                         job_id);
           }
         }
+
         auto [it, present] = job_info_map->emplace(job_id, std::move(job_info));
         job_info_ptr = &it->second;
       } else {
@@ -2377,7 +2379,9 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
   step_info->set_step_type(
       static_cast<crane::grpc::StepType>(view["step_type"].get_int32().value));
 
-  if (step_info->type() == crane::grpc::Container) {
+  // NOTE: type == Container doesn't necessarily means it's a container!
+  if (step_info->type() == crane::grpc::Container &&
+      view["meta_container"].type() != bsoncxx::type::k_null) {
     auto* meta_info = step_info->mutable_container_meta();
     auto container_meta = BsonToContainerMeta(view);
     *meta_info = std::move(

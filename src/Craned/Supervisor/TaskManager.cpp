@@ -868,6 +868,8 @@ CraneErrCode PodInstance::Spawn() {
     return err;
   }
 
+  // TODO: Add monitoring for pod status, preferably in Craned, not here.
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -890,7 +892,12 @@ CraneErrCode PodInstance::Kill(int /*signum*/) {
     return rich_err.code();
   }
 
+  // TODO: Currently pod status monitoring is missing. So we had to call
+  // TaskStopAndDoStatusChange() here. See Spawn() for details.
   CRANE_DEBUG("Pod {} stopped for job #{}", m_pod_id_, g_config.JobId);
+  HandlePodExited();
+  g_task_mgr->TaskStopAndDoStatusChange(0);
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -909,13 +916,14 @@ CraneErrCode PodInstance::Cleanup() {
   return CraneErrCode::SUCCESS;
 }
 
-const TaskExitInfo& PodInstance::HandlePodExited(
-    const cri::api::ContainerStatus& status) {
-  // TODO: Use PodStatus.
-  m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
-  m_exit_info_.value = m_exit_info_.is_terminated_by_signal
-                           ? status.exit_code() - 128
-                           : status.exit_code();
+const TaskExitInfo& PodInstance::HandlePodExited() {
+  // m_exit_info_.is_terminated_by_signal = status.exit_code() > 128;
+  // m_exit_info_.value = m_exit_info_.is_terminated_by_signal
+  //                          ? status.exit_code() - 128
+  //                          : status.exit_code();
+  // TODO: See PodInstance::Spawn() TODO.
+  m_exit_info_.is_terminated_by_signal = false;
+  m_exit_info_.value = 0;
   return m_exit_info_;
 }
 
@@ -1971,6 +1979,7 @@ void TaskManager::EvCleanSigchldQueueCb_() {
 }
 
 void TaskManager::EvCleanCriEventQueueCb_() {
+  // TODO: Refactor this to Craned.
   cri::api::ContainerStatus status;
   while (m_cri_event_queue_.try_dequeue(status)) {
     // NOTE: a CRI event comes at LEAST once.
@@ -1980,7 +1989,7 @@ void TaskManager::EvCleanCriEventQueueCb_() {
 
     if (m_step_.IsPod()) {
       auto* task = dynamic_cast<PodInstance*>(t);
-      const auto& exit_info = task->HandlePodExited(status);
+      const auto& exit_info = task->HandlePodExited();
 
       if (!m_active_shutdown_.load()) {
         CRANE_ERROR(
