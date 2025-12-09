@@ -63,10 +63,10 @@ echo "print This message has been printed with TaskProlog"
 
 - 如果 `Prolog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态且作业会被重新排队。
   如果 `Epilog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态。
-- 如果 `PrologCraneCtld` 失败（返回非零退出码），
+- 如果 `PrologCtld` 失败（返回非零退出码），
   作业会被重新排队。只有批处理作业能被重新排队。交互式作业（`calloc` 和 `crun`）
-  在 `PrologCraneCtld` 失败时会被取消。
-  如果 `EpilogCraneCtld` 失败（返回非零退出码），仅会记录日志。
+  在 `PrologCtld` 失败时会被取消。
+  如果 `EpilogCtld` 失败（返回非零退出码），仅会记录日志。
 - 如果 `task prolog` 失败（返回非零退出码），
   该任务会被取消。如果 `crun prolog` 失败（返回非零退出码），
   该步骤会被取消。如果 `task epilog` 或 `crun epilog` 失败（返回非零退出码），
@@ -124,7 +124,7 @@ JobLifecycleHook:
 
 ## 示例
 **prolog.sh** 
-需先保证脚本有可执行权限，并确保脚本运行正确
+需先保证脚本有可执行权限，并确保脚本正确
 ```bash
 #!/bin/bash
 
