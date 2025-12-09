@@ -496,6 +496,9 @@ struct StepInCtld {
   // TODO: Find somewhere else to put this field?
   std::optional<ContainerMetaInTask> container_meta;
 
+  std::string task_prolog;
+  std::string task_epilog;
+
  protected:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
