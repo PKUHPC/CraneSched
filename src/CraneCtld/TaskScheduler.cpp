@@ -4360,20 +4360,12 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
-  // step->requested_task_res_view <= job->requested_task_res_view
-  // TODO: migrate job to req_task_res_view
+  // mem/gres for whole step,only CPU is allocated per task, currently multiply
+  // cpu by ntasks_per_node
   auto node_res_view = step->requested_task_res_view;
   node_res_view.GetAllocatableRes().cpu_count *= step->ntasks_per_node;
-  for (auto& type_count_map :
-       node_res_view.GetDeviceMap() | std::views::values) {
-    type_count_map.first *= step->ntasks_per_node;
-    for (auto& count : type_count_map.second | std::views::values) {
-      count *= step->ntasks_per_node;
-    }
-  }
   step->requested_node_res_view = node_res_view;
-  if (!(step->requested_node_res_view * step->ntasks_per_node <=
-        job->requested_node_res_view))
+  if (!(step->requested_node_res_view <= job->requested_node_res_view))
     return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
   return {};
 }

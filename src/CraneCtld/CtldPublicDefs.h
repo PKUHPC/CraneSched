@@ -492,8 +492,12 @@ struct StepInCtld {
   std::string extra_attr;
 
   absl::Duration time_limit;
-  // FIXME: Used for backward compatibility, remove it later.
+
+  // For now, its cpu is ntasks_per_node * cpus_per_task in
+  // requested_task_res_view other parts are same as requested_task_res_view
   ResourceView requested_node_res_view;
+  // Set by user request and should not be used now, without support for
+  // task-based-resources-request.
   ResourceView requested_task_res_view;
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
