@@ -46,8 +46,8 @@ echo "print This message has been printed with TaskProlog"
 
 - **If a Prolog fails (non-zero exit)** → the node is set to **DRAIN** and the job is **requeued**.
 - **If an Epilog fails** → the node is set to **DRAIN**.
-- **If PrologCraneCtld fails** → the job is **requeued**. Interactive jobs (`calloc`, `crun`) are **canceled**.
-- **If EpilogCraneCtld fails** → a **log is written**.
+- **If PrologCtld fails** → the job is **requeued**. Interactive jobs (`calloc`, `crun`) are **canceled**.
+- **If EpilogCtld fails** → a **log is written**.
 - **If task prolog fails** → the **task is canceled**.
 - **If crun prolog fails** → the **step is canceled**.
 - **If task epilog or crun epilog fails** → a **log is written**.
@@ -57,19 +57,19 @@ echo "print This message has been printed with TaskProlog"
 # Prolog/Epilog Configuration
 
 ```yaml
-JobLogHook:
-  Prolog: prolog1.sh,prolog2.sh
+JobLifecycleHook:
+  Prolog: /pash/to/prolog.sh
   PrologTimeout: 60
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
-  Epilog: epilog1.sh,epilog2.sh
+  Epilog: /path/to/epilog1.sh,/path/to/epilog2.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
-  PrologCranectld: prologctld.sh
-  EpilogCranectld: epilogctld.sh
-  CrunProlog: srun_prolog.sh
-  CrunEpilog: srun_epilog.sh
-  TaskProlog: task_prolog.sh
-  TaskEpilog: task_epilog.sh
+  PrologCranectld: /path/to/prologctld.sh
+  EpilogCranectld: /path/to/epilogctld.sh
+  CrunProlog: /path/to/srun_prolog.sh
+  CrunEpilog: /path/to/srun_epilog.sh
+  TaskProlog: /path/to/task_prolog.sh
+  TaskEpilog: /path/to/task_epilog.sh
 ```
 
 ---
@@ -87,7 +87,7 @@ Implies **Alloc**.
 Must be used with **Alloc**.  
 Allows `calloc` to proceed without waiting for all Prologs.  
 Faster with `crun`.  
-Incompatible with **Contain** and **X11**.
+Incompatible with **Contain**.
 
 ### **ForceRequeueOnFail**
 Requeue batch jobs that fail due to Prolog errors, even if not requested.  
