@@ -976,6 +976,8 @@ void TaskScheduler::ScheduleThread_() {
             }
           }
 
+          // TODO: check and malloc qos resource - allocated_res
+
           PartitionId const& partition_id = job->partition_id;
 
           job->SetEndTime(end_time);
@@ -3942,6 +3944,8 @@ void SchedulerAlgo::NodeSelect(
         continue;
       }
     }
+    // TODO: check qos resource req_resource
+
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
       auto it = part_scheduler_map.find(job->partition_id);
