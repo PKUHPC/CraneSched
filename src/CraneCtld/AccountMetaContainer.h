@@ -22,6 +22,7 @@
 // Precompiled header comes first!
 
 #include "AccountManager.h"
+#include "TaskScheduler.h"
 
 namespace Ctld {
 
@@ -54,9 +55,9 @@ class AccountMetaContainer final {
 
   void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
 
-  std::optional<std::string> CheckQosResource(const TaskInCtld& task);
+  std::expected<void, std::string> CheckQosResource(const TaskInCtld& task);
 
-  void MallocQosResource(const TaskInCtld& task);
+  std::expected<void, std::string> MallocQosResource(const TaskInCtld& task);
 
   void FreeQosSubmitResource(const TaskInCtld& task);
 
@@ -83,6 +84,8 @@ class AccountMetaContainer final {
 
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
+
+  bool CheckQosResource_(const Qos& qos, const TaskInCtld& task);
 
 
   template<typename T>
