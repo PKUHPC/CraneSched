@@ -732,7 +732,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The newly modified QoS resource limits do not apply to tasks that have
   // already been evaluated, which is the same as before the restart.
-  g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
+  // g_account_meta_container->MallocQosResourceToRecoveredRunningTask(*task);
 
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
@@ -741,7 +741,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     g_meta_container->MallocResourceFromResv(task->reservation, task->TaskId(),
                                              task->AllocatedRes());
   }
-  g_account_meta_container->MallocQosResource(*task);
+  // g_account_meta_container->MallocQosResource(*task);
   if (!task->licenses_count.empty())
     g_licenses_manager->MallocLicenseWhenRecoverRunning(task->licenses_count);
 
