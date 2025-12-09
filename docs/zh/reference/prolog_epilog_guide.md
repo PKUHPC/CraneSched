@@ -74,19 +74,19 @@ echo "print This message has been printed with TaskProlog"
 
 ## Prolog 和 Epilog 配置
 ```yaml
-JobLogHook:
-  Prolog: prolog1.sh,prolog2.sh
+JobLifecycleHook:
+  Prolog: /pash/to/prolog.sh
   PrologTimeout: 60
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
-  Epilog: epilog1.sh,epilog2.sh
+  Epilog: /path/to/epilog1.sh,/path/to/epilog2.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
-  PrologCranectld: prologctld.sh
-  EpilogCranectld: epilogctld.sh
-  CrunProlog: srun_prolog.sh
-  CrunEpilog: srun_epilog.sh
-  TaskProlog: task_prolog.sh
-  TaskEpilog: task_epilog.sh
+  PrologCranectld: /path/to/prologctld.sh
+  EpilogCranectld: /path/to/epilogctld.sh
+  CrunProlog: /path/to/srun_prolog.sh
+  CrunEpilog: /path/to/srun_epilog.sh
+  TaskProlog: /path/to/task_prolog.sh
+  TaskEpilog: /path/to/task_epilog.sh
 ```
 
 ## Prolog 标志
@@ -121,3 +121,40 @@ JobLogHook:
   默认情况下，Prolog 和 Epilog 脚本会在每个节点上并发运行。
   此标志会强制这些脚本在每个节点上串行运行，但会显著降低每个节点上的作业吞吐量。  
   **注意：** 这与 RunInJob 不兼容。
+
+## 示例
+**prolog.sh** 
+需先保证脚本有可执行权限，并确保脚本运行正确
+```bash
+#!/bin/bash
+
+LOG_FILE="/var/crane/prolog.log"
+JOB_ID=$CRANE_JOB_ID
+ACCOUNT=$CRANE_JOB_ACCOUNT
+NODE_NAME=$CRANE_JOB_NODELIST
+DATE=$(date "+%Y-%m-%d %H:%M:%S")
+
+echo "[$DATE] === Prolog Start ===" >> $LOG_FILE
+echo "JOB_ID: $JOB_ID" >> $LOG_FILE
+echo "ACCOUNT: $ACCOUNT" >> $LOG_FILE
+echo "NODE: $NODE_NAME" >> $LOG_FILE
+
+# 检查节点健康状况（示例）
+FREE_MEM_MB=$(free -m | awk 'NR==2 {print $4}')
+if (( FREE_MEM_MB < 200 )); then
+    echo "Node memory low: ${FREE_MEM_MB}MB → reject job" >> $LOG_FILE
+    exit 1  # 非 0 → 阻止作业执行
+fi
+
+# 5. 输出结束标识
+echo "=== Prolog End ===" >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+exit 0
+```
+
+**`/etc/crane/config.yaml`配置**
+```
+JobLifecycleHook:
+  Prolog: /prolog.sh
+```
