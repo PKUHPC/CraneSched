@@ -101,3 +101,41 @@ Implies **Contain** and **Alloc**.
 Runs Prolog/Epilog serially per node.  
 Reduces throughput.  
 Incompatible with **RunInJob**.
+
+## Example
+**prolog.sh**
+Make sure the script has executable permission and that the script itself is correct.
+```bash
+#!/bin/bash
+
+LOG_FILE="/var/crane/prolog.log"
+JOB_ID=$CRANE_JOB_ID
+ACCOUNT=$CRANE_JOB_ACCOUNT
+NODE_NAME=$CRANE_JOB_NODELIST
+DATE=$(date "+%Y-%m-%d %H:%M:%S")
+
+echo "[$DATE] === Prolog Start ===" >> $LOG_FILE
+echo "JOB_ID: $JOB_ID" >> $LOG_FILE
+echo "ACCOUNT: $ACCOUNT" >> $LOG_FILE
+echo "NODE: $NODE_NAME" >> $LOG_FILE
+
+# Check node health (example)
+FREE_MEM_MB=$(free -m | awk 'NR==2 {print $4}')
+if (( FREE_MEM_MB < 200 )); then
+    echo "Node memory low: ${FREE_MEM_MB}MB → reject job" >> $LOG_FILE
+    exit 1  # Non-zero → block job execution
+fi
+
+# Output ending flag
+echo "=== Prolog End ===" >> $LOG_FILE
+echo "" >> $LOG_FILE
+
+exit 0
+
+```
+
+**/etc/crane/config.yaml Configuration**
+```
+JobLifecycleHook:
+  Prolog: /prolog.sh
+```

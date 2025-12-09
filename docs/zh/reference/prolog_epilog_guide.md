@@ -122,9 +122,9 @@ JobLifecycleHook:
   此标志会强制这些脚本在每个节点上串行运行，但会显著降低每个节点上的作业吞吐量。  
   **注意：** 这与 RunInJob 不兼容。
 
-## Example
-**prolog.sh**
-Make sure the script has executable permission and that the script itself is correct.
+## 示例
+**prolog.sh** 
+需先保证脚本有可执行权限，并确保脚本正确
 ```bash
 #!/bin/bash
 
@@ -139,22 +139,21 @@ echo "JOB_ID: $JOB_ID" >> $LOG_FILE
 echo "ACCOUNT: $ACCOUNT" >> $LOG_FILE
 echo "NODE: $NODE_NAME" >> $LOG_FILE
 
-# Check node health (example)
+# 检查节点健康状况（示例）
 FREE_MEM_MB=$(free -m | awk 'NR==2 {print $4}')
 if (( FREE_MEM_MB < 200 )); then
     echo "Node memory low: ${FREE_MEM_MB}MB → reject job" >> $LOG_FILE
-    exit 1  # Non-zero → block job execution
+    exit 1  # 非 0 → 阻止作业执行
 fi
 
-# Output ending flag
+# 5. 输出结束标识
 echo "=== Prolog End ===" >> $LOG_FILE
 echo "" >> $LOG_FILE
 
 exit 0
-
 ```
 
-**/etc/crane/config.yaml Configuration**
+**`/etc/crane/config.yaml`配置**
 ```
 JobLifecycleHook:
   Prolog: /prolog.sh
