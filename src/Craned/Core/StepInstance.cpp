@@ -314,10 +314,9 @@ CraneErrCode StepInstance::SpawnSupervisor(const EnvMap& job_env_map) {
     auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
     argv.emplace_back(supv_name.c_str());
     argv.push_back(nullptr);
-    fmt::print(
-        stderr, "[{}] [Step #{}.{}]: Executing supervisor\n",
-        std::chrono::current_zone()->to_local(std::chrono::system_clock::now()),
-        job_id, step_id);
+    fmt::print(stderr,
+               "[{:%Y-%m-%d %H:%M:%S}] [Step #{}.{}]: Executing supervisor\n",
+               std::chrono::system_clock::now(), job_id, step_id);
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),
