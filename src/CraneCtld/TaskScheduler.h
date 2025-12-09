@@ -98,8 +98,11 @@ struct PdJobInScheduler {
 
   absl::Time submit_time;
   uint32_t partition_priority;
+  std::string qos;
+  std::string username;
   uint32_t qos_priority;
   std::string account;
+   std::list<std::string> account_chain;
 
   double priority;
 
@@ -132,7 +135,10 @@ struct PdJobInScheduler {
         account(job->account),
         priority(job->mandated_priority),
         req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()) {}
+        is_license_or(job->TaskToCtld().is_licenses_or()),
+        qos(job->qos),
+        username(job->Username()),
+        account_chain(job->account_chain) {}
 };
 
 class IPrioritySorter {
