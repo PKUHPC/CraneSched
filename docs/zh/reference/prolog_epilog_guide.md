@@ -105,7 +105,7 @@ JobLifecycleHook:
   如果设置该标志，也应设置 Alloc 标志。这将允许 calloc 不会在每个节点上等待 prolog 完成后才继续。
   阻塞会在步骤到达 Craned 并且在任何执行发生前进行。
   这是一种更快的工作方式，如果你使用 crun 启动作业任务，建议使用此标志。
-  此标志不能与 Contain 或 X11 标志同时使用。
+  此标志不能与 Contain 标志同时使用。
 
 - **ForceRequeueOnFail**  
   当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。  
@@ -122,9 +122,9 @@ JobLifecycleHook:
   此标志会强制这些脚本在每个节点上串行运行，但会显著降低每个节点上的作业吞吐量。  
   **注意：** 这与 RunInJob 不兼容。
 
-## 示例
-**prolog.sh** 
-需先保证脚本有可执行权限，并确保脚本正确
+## Example
+**prolog.sh**
+Make sure the script has executable permission and that the script itself is correct.
 ```bash
 #!/bin/bash
 
@@ -139,21 +139,22 @@ echo "JOB_ID: $JOB_ID" >> $LOG_FILE
 echo "ACCOUNT: $ACCOUNT" >> $LOG_FILE
 echo "NODE: $NODE_NAME" >> $LOG_FILE
 
-# 检查节点健康状况（示例）
+# Check node health (example)
 FREE_MEM_MB=$(free -m | awk 'NR==2 {print $4}')
 if (( FREE_MEM_MB < 200 )); then
     echo "Node memory low: ${FREE_MEM_MB}MB → reject job" >> $LOG_FILE
-    exit 1  # 非 0 → 阻止作业执行
+    exit 1  # Non-zero → block job execution
 fi
 
-# 5. 输出结束标识
+# Output ending flag
 echo "=== Prolog End ===" >> $LOG_FILE
 echo "" >> $LOG_FILE
 
 exit 0
+
 ```
 
-**`/etc/crane/config.yaml`配置**
+**/etc/crane/config.yaml Configuration**
 ```
 JobLifecycleHook:
   Prolog: /prolog.sh
