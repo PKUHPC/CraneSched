@@ -858,9 +858,13 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
                                                bool is_drain,
                                                const std::string& reason) {
+
+  if (is_drain) LockResReduceEvents();
+
   if (!craned_meta_map_.Contains(craned_id)) {
     CRANE_ERROR("unknown craned_id '{}', cannot update drain state.",
                 craned_id);
+    if (is_drain) UnlockResReduceEvents();
     return false;
   }
 
@@ -869,20 +873,22 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   if (!craned_meta->alive) {
     CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.",
                 craned_id);
+    if (is_drain) UnlockResReduceEvents();
     return false;
   }
 
-  if (craned_meta->drain == is_drain) return true;
-
-  if (is_drain == true) {
-    LockResReduceEvents();
+  if (craned_meta->drain == is_drain) {
+    if (is_drain) UnlockResReduceEvents();
+    return true;
   }
 
   craned_meta->drain = is_drain;
   craned_meta->state_reason = reason;
 
-  AddResReduceEventsAndUnlock(
-      {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+  if (is_drain) {
+    AddResReduceEventsAndUnlock(
+    {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+  }
 
   CRANE_DEBUG("Update node '{}' drain state to {}", craned_id, is_drain);
 
