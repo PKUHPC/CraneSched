@@ -149,6 +149,9 @@ void ParseCranedConfig(const YAML::Node& config) {
   using util::YamlValueOr;
   conf.PingIntervalSec = kCranedPingIntervalSec;
   conf.CtldTimeoutSec = Craned::kCtldClientTimeoutSec;
+  conf.MaxLogFileSize = kDefaultCranedMaxLogFileSize;
+  conf.MaxLogFileNum = kDefaultCranedMaxLogFileNum;
+
   if (config["Craned"]) {
     auto craned_config = config["Craned"];
     if (craned_config["PingInterval"])
@@ -164,11 +167,10 @@ void ParseCranedConfig(const YAML::Node& config) {
         CRANE_ERROR("Illegal memory format.");
         std::exit(1);
       }
-    } else {
-      conf.MaxLogFileSize = kDefaultCranedMaxLogFileSize;
     }
-    conf.MaxLogFileNum = YamlValueOr<uint64_t>(craned_config["MaxLogFileNum"],
-                                               kDefaultCranedMaxLogFileNum);
+    if (craned_config["MaxLogFileNum"]) {
+      conf.MaxLogFileNum = craned_config["MaxLogFileNum"].as<uint64_t>();
+    }
   }
   g_config.CranedConf = std::move(conf);
 }
