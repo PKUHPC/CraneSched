@@ -98,6 +98,7 @@ message InitSupervisorRequest {
     uint32 prolog_timeout = 5;
     uint32 epilog_timeout = 6;
     uint32 prolog_epilog_timeout = 7;
+    uint64 max_output_size = 8;
   };
   JobLifecycleHookConfig job_lifecycle_hook_config = 30;
 }

@@ -198,6 +198,8 @@ void ParseConfig(int argc, char** argv) {
           g_config.JobLifecycleHook.PrologEpilogTimeout =
               hook_config["PrologEpilogTimeout"].as<uint32_t>();
         }
+        g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
+              hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
       }
 
       if (config["CompressedRpc"])

@@ -173,6 +173,7 @@ struct Config {
     uint32_t PrologTimeout{0};
     uint32_t EpilogTimeout{0};
     uint32_t PrologEpilogTimeout{0};
+    uint64_t MaxOutputSize;
   };
 
   JobLifecycleHookConfig JobLifecycleHook;

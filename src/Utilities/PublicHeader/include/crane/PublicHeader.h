@@ -128,6 +128,8 @@ enum PrologFlagEnum : std::uint8_t {
   Serial = 1 << 6,              // 0100 0000 = 64
 };
 
+constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;

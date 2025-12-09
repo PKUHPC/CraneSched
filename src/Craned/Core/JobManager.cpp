@@ -669,6 +669,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       log_hook_conf->set_epilog_timeout(g_config.JobLifecycleHook.EpilogTimeout);
       log_hook_conf->set_prolog_epilog_timeout(
           g_config.JobLifecycleHook.PrologEpilogTimeout);
+      log_hook_conf->set_max_output_size(g_config.JobLifecycleHook.MaxOutputSize);
     }
 
     ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
@@ -831,7 +832,8 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     if (!g_config.JobLifecycleHook.ProLogs.empty() &&
         (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) == 0) {
       if (!job->is_prolog_run && !step_it->second->IsCalloc()) {
-        CRANE_DEBUG("#{}: Running prologs....", job_id);
+        job->is_prolog_run = true;
+        CRANE_TRACE("#{}: Running prologs....", job_id);
 
         bool script_lock = false;
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
@@ -843,7 +845,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
                                        .envs = job->GetJobEnvMap(),
                                        .run_uid = 0,
                                        .run_gid = 0,
-                                       .is_prolog = true};
+                                       .is_prolog = true, .output_size = g_config.JobLifecycleHook.MaxOutputSize};
         if (g_config.JobLifecycleHook.PrologTimeout > 0)
           run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
         else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
@@ -1033,6 +1035,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
       ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) != 0) &&
       ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) == 0)) {
     if (!job->is_prolog_run) {
+      job->is_prolog_run = true;
       auto run_prolog = [this, job](EnvMap env_map) -> bool {
         bool script_lock = false;
 
@@ -1430,6 +1433,22 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       CRANE_DEBUG("[Job #{}] is already completing, ignore clean up.", job_id);
       continue;
     }
+
+    if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
+      CRANE_TRACE("Running Epilogs...");
+      RunLogHookArgs run_epilog_args{.scripts = g_config.JobLifecycleHook.EpiLogs,
+                                     .envs = job.GetJobEnvMap(),
+                                     .run_uid = 0,
+                                     .run_gid = 0,
+                                     .is_prolog = false, .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+
+      util::os::RunPrologOrEpiLog(run_epilog_args);
+    }
+
     m_completing_job_.emplace(job_id, std::move(job));
   }
 }

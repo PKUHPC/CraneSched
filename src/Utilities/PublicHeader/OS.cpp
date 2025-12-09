@@ -462,7 +462,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start_time);
     if (args.timeout_sec > 0 && elapsed.count() >= args.timeout_sec) {
-      CRANE_ERROR("Total timeout ({}s) reached before running {}.",
+      CRANE_TRACE("Total timeout ({}s) reached before running {}.",
                   args.timeout_sec, script);
       return std::nullopt;
     }
@@ -529,7 +529,6 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
         continue;
       }
 
-      if (output.size() < args.output_size) {
         auto tmp = read_stream(stdout_pipe[0], args.output_size);
         if (!tmp.empty()) {
           size_t remaining = args.output_size - output.size();
@@ -541,9 +540,11 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
             }
           }
         }
-      }
 
-      CRANE_DEBUG("{} finished successfully.", script);
+      close(stdout_pipe[0]);
+      close(stderr_pipe[0]);
+
+      CRANE_TRACE("{} finished successfully.", script);
 
     } else {  // child proc
       close(stdout_pipe[0]);

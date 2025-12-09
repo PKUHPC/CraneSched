@@ -190,6 +190,7 @@ int InitFromStdin(int argc, char** argv) {
         msg.job_lifecycle_hook_config().epilog_timeout();
     g_config.JobLifecycleHook.PrologEpilogTimeout =
         msg.job_lifecycle_hook_config().prolog_epilog_timeout();
+    g_config.JobLifecycleHook.MaxOutputSize = msg.job_lifecycle_hook_config().max_output_size();
   }
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
@@ -311,7 +312,7 @@ void GlobalVariableInit(int grpc_output_fd) {
                                    .envs = g_config.JobEnv,
                                    .run_uid = 0,
                                    .run_gid = 0,
-                                   .is_prolog = true};
+                                   .is_prolog = true, .output_size = g_config.JobLifecycleHook.MaxOutputSize};
     if (g_config.JobLifecycleHook.PrologTimeout > 0)
       run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
     else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)

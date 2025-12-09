@@ -51,7 +51,7 @@ struct RunLogHookArgs {
   uid_t run_uid;
   gid_t run_gid;
   bool is_prolog;
-  uint32_t output_size;
+  uint64_t output_size;
   std::function<bool(pid_t)> at_child_setup_cb;
 };
 
