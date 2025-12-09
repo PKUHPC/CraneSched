@@ -823,6 +823,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
+  step.set_task_prolog(job.TaskToCtld().task_prolog());
+  step.set_task_epilog(job.TaskToCtld().task_epilog());
 
   *MutableStepToCtld() = std::move(step);
 }
