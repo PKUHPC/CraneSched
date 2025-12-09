@@ -1090,6 +1090,8 @@ void TaskScheduler::ScheduleThread_() {
             }
           }
 
+          // TODO: check and malloc qos resource - allocated_res
+
           PartitionId const& partition_id = job->partition_id;
 
           job->SetEndTime(end_time);
@@ -4318,7 +4320,15 @@ void SchedulerAlgo::NodeSelect(
   // Schedule pending tasks
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
-    if (!job->reason.empty()) continue;
+    // ctld only virtual resource;
+    if (!job->req_licenses.empty()) {
+      if (!g_licenses_manager->CheckLicenseCountSufficient(
+              job->req_licenses, job->is_license_or, &job->actual_licenses)) {
+        job->reason = "License";
+        continue;
+      }
+    }
+    // TODO: check qos resource req_resource
 
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
