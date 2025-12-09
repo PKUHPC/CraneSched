@@ -181,6 +181,9 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+
+  string task_prolog = 42;
+  string task_epilog = 43;
 }
 
 message TaskInEmbeddedDb {
@@ -247,6 +250,9 @@ message StepToCtld {
   string excludes = 34;
   string nodelist = 35;
   string container = 26;
+
+  string task_prolog = 27;
+  string task_epilog = 28;
 }
 
 message RuntimeAttrOfStep {
@@ -339,6 +345,9 @@ message StepToD {
 
   // Not used now.
   string extra_attr = 29;
+
+  string task_prolog = 30;
+  string task_epilog = 31;
 }
 
 message JobStepsToD {
