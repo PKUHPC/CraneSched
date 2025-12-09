@@ -513,15 +513,34 @@ void CtldClient::Init() {
             CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
                         job_id, step_id, ctld_status, craned_status);
 
+            if (craned_status == ctld_status) {
+              // Status match, no action needed
+              continue;
+            }
+
+            // Special case: Handle timeout-during-offline scenario
+            // This occurs when Craned goes offline and comes back online after
+            // task timeout. Only DaemonStep can be Running here because:
+            // - DaemonStep waits for Epilog to complete before terminating
+            // - CommonSteps should already be killed by Timer and in terminal
+            //   state
+            // Ctld detected timeout and marked as Completing. Let Ctld handle
+            // the termination.
+            if (craned_status == StepStatus::Running &&
+                ctld_status == StepStatus::Completing) {
+              CRANE_INFO(
+                  "[Step #{}.{}] Ctld has Completing status (likely due to "
+                  "timeout during offline), Craned reports Running (should be "
+                  "DaemonStep). Keeping Craned's state, Ctld will handle "
+                  "termination.",
+                  job_id, step_id);
+              continue;
+            }
+
             // Handle Completing status from Ctld
             if (ctld_status == StepStatus::Completing) {
               CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
               completing_steps[job_id].insert(step_id);
-              continue;
-            }
-
-            if (craned_status == ctld_status) {
-              // Status match, no action needed
               continue;
             }
 
@@ -535,22 +554,6 @@ void CtldClient::Init() {
                   "{}), sent a statuschange to kick ctld step status machine",
                   job_id, step_id, craned_status, ctld_status);
               steps_to_sync[job_id][step_id] = craned_status;
-            } else if (craned_status == StepStatus::Running &&
-                       ctld_status == StepStatus::Completing) {
-              // Special case: This occurs when Craned goes offline and comes
-              // back online after task timeout. Only DaemonStep can be Running
-              // here because:
-              // - DaemonStep waits for Epilog to complete before terminating
-              // - CommonSteps should already be killed by Timer and in terminal
-              //   state
-              // Ctld detected timeout and marked as Completing. Let Ctld handle
-              // the termination.
-              CRANE_INFO(
-                  "[Step #{}.{}] Ctld has Completing status (likely due to "
-                  "timeout during offline), Craned reports Running (should be "
-                  "DaemonStep). Keeping Craned's state, Ctld will handle "
-                  "termination.",
-                  job_id, step_id);
             } else if (craned_status == StepStatus::Configured) {
               // For configured but not running step, terminate it
               CRANE_TRACE(
