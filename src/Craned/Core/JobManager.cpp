@@ -1049,7 +1049,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
             .envs = env_map,
             .run_uid = 0,
             .run_gid = 0,
-            .is_prolog = true,
+            .is_prolog = true,.output_size = g_config.JobLifecycleHook.MaxOutputSize
         };
 
         if (g_config.JobLifecycleHook.PrologTimeout > 0)
@@ -1446,7 +1446,9 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
         run_epilog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
 
-      util::os::RunPrologOrEpiLog(run_epilog_args);
+      if (!util::os::RunPrologOrEpiLog(run_epilog_args)) {
+        g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
+      }
     }
 
     m_completing_job_.emplace(job_id, std::move(job));

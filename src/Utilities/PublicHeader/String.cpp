@@ -605,18 +605,19 @@ void ParseLogHookPaths(const std::string &log_hook_config,
                        const std::string &config_file_path,
                        std::vector<std::string> *result) {
   auto path_list = absl::StrSplit(log_hook_config, ",");
+  std::filesystem::path base_dir =
+      std::filesystem::path(config_file_path).parent_path();
+
   for (const auto &path : path_list) {
-    if (path.empty()) continue;
-    bool is_absolute = path[0] == '/';
-    if (is_absolute) {
-      result->emplace_back(absl::StripAsciiWhitespace(path));
-      continue;
-    }
-    std::string real_path =
-        std::filesystem::path(config_file_path).parent_path() /
-        absl::StripAsciiWhitespace(path);
-    if (real_path.find('*') != std::string::npos ||
-        real_path.find('?') != std::string::npos) {
+    absl::string_view trimmed = absl::StripAsciiWhitespace(path);
+    if (trimmed.empty()) continue;
+
+    std::filesystem::path p(trimmed);
+    if (!p.is_absolute()) p = base_dir / p;
+    std::string real_path = p.string();
+
+    if (real_path.contains('*') ||
+        real_path.contains('?')) {
       glob_t globbuf;
       if (glob(real_path.c_str(), 0, nullptr, &globbuf) == 0) {
         for (size_t i = 0; i < globbuf.gl_pathc; ++i) {

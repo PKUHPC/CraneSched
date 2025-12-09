@@ -1147,11 +1147,13 @@ void TaskScheduler::ScheduleThread_() {
         begin = std::chrono::steady_clock::now();
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
         for (auto& job : jobs_to_run) {
-          g_thread_pool->detach_task([&]() {
+          const task_id_t job_id = job->TaskId();
+          auto env_copy = job->env;
+          g_thread_pool->detach_task([&, job_id, env = std::move(env_copy)]() {
             // run prolog ctld script
             RunLogHookArgs run_prolog_args{
                 .scripts = g_config.JobLifecycleHook.ProLogs,
-                .envs = job->env,
+                .envs = env,
                 .run_uid = 0,
                 .run_gid = 0,
                 .is_prolog = true, .output_size = g_config.JobLifecycleHook.MaxOutputSize};
@@ -1162,13 +1164,13 @@ void TaskScheduler::ScheduleThread_() {
                   g_config.JobLifecycleHook.PrologEpilogTimeout;
             }
             CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
-                        job->TaskId(), run_prolog_args.run_uid,
+                        job_id, run_prolog_args.run_uid,
                         run_prolog_args.timeout_sec);
             auto run_prolog_result =
                 util::os::RunPrologOrEpiLog(run_prolog_args);
             if (!run_prolog_result) {
               thread_pool_mtx.Lock();
-              failed_job_id_set.emplace(job->TaskId());
+              failed_job_id_set.emplace(job_id);
               thread_pool_mtx.Unlock();
             }
             prolog_bl.DecrementCount();
