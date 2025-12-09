@@ -691,6 +691,9 @@ void ParseConfig(int argc, char** argv) {
           g_config.JobLifecycleHook.PrologEpilogTimeout =
               job_log_hook_config["PrologEpilogTimeout"].as<uint32_t>();
 
+        g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
+              job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
+
         if (job_log_hook_config["PrologFlags"]) {
           auto prolog_flags =
               job_log_hook_config["PrologFlags"].as<std::string>();
@@ -716,7 +719,8 @@ void ParseConfig(int argc, char** argv) {
           }
           if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::NoHold) {
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
-            if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+            if (g_config.JobLifecycleHook.PrologFlags &
+                PrologFlagEnum::Contain) {
               CRANE_ERROR("Cannot set NoHold, Contain flags at the same time.");
               std::exit(1);
             }
@@ -725,10 +729,12 @@ void ParseConfig(int argc, char** argv) {
               PrologFlagEnum::ForceRequeueOnFail) {
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
           }
-          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
+          if (g_config.JobLifecycleHook.PrologFlags &
+              PrologFlagEnum::RunInJob) {
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
-            if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+            if (g_config.JobLifecycleHook.PrologFlags &
+                PrologFlagEnum::Serial) {
               CRANE_ERROR(
                   "Cannot set RunInJob and Serial flags at the same time.");
               std::exit(1);
