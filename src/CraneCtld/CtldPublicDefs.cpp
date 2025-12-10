@@ -747,6 +747,7 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   SetErrorExitCode(0u);
   SetStatus(crane::grpc::TaskStatus::Pending);
   SetHeld(false);
+  SetStartTime(absl::Now());
   *MutableStepToCtld() = step_to_ctld;
 }
 

@@ -1901,6 +1901,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
+    CRANE_TRACE("Terminating all running tasks...");
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {

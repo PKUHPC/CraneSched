@@ -132,7 +132,10 @@ class StepInstance {
   void StopCriClient() { m_cri_client_.reset(); }
 
   // Just a convenient method for iteration on the map.
-  auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
+  std::unordered_set<task_id_t> GetTaskIds() const {
+    return m_task_map_ | std::views::keys |
+           std::ranges::to<std::unordered_set>();
+  }
 
   ITaskInstance* GetTaskInstance(task_id_t task_id) {
     if (!m_task_map_.contains(task_id)) return nullptr;
