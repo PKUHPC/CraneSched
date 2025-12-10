@@ -467,8 +467,6 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   step_to_d.set_ntasks_per_node(this->job->ntasks_per_node);
   step_to_d.set_cpus_per_task(this->job->TaskToCtld().cpus_per_task());
 
-  for (const auto& hostname : this->job->excluded_nodes)
-    step_to_d.mutable_exclude_nodelist()->Add()->assign(hostname);
   return step_to_d;
 }
 
