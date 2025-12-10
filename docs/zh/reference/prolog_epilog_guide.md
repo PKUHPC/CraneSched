@@ -73,14 +73,21 @@ echo "print This message has been printed with TaskProlog"
   仅会记录日志。
 
 ## Prolog 和 Epilog 配置
+* PrologTimeout: Prolog 脚本的运行超时时间（秒）。
+* EpilogTimeout： Epilog 脚本的运行超时时间（秒）。
+* PrologEpilogTimeout: Prolog 和 Epilog 脚本的运行超时时间（秒）。
+当同时设置时，此参数会覆盖 PrologTimeout 和 EpilogTimeout。
+* PrologFlags：用于控制 Prolog 脚本的执行方式，通过不同的标志实现更灵活的作业生命周期管理。可配置一个或多个标志，多个标志用逗号分隔。
+
+配置示例：
 ```yaml
 JobLifecycleHook:
-  Prolog: /pash/to/prolog.sh
+  Prolog: /path/to/prolog.sh
   PrologTimeout: 60
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
-  Epilog: /path/to/epilog1.sh,/path/to/epilog2.sh
-  EpilogTimeout: 60
-  PrologEpilogTimeout: 120
+  Epilog: /path/to/epilog.sh
+  EpilogTimeout: 60 
+  PrologEpilogTimeout: 120 
   PrologCranectld: /path/to/prologctld.sh
   EpilogCranectld: /path/to/epilogctld.sh
   CrunProlog: /path/to/srun_prolog.sh
@@ -123,7 +130,7 @@ JobLifecycleHook:
   **注意：** 这与 RunInJob 不兼容。
 
 ## 示例
-**prolog.sh** 
+**/etc/crane/prolog.sh** 
 需先保证脚本有可执行权限，并确保脚本正确
 ```bash
 #!/bin/bash
@@ -154,7 +161,7 @@ exit 0
 ```
 
 **`/etc/crane/config.yaml`配置**
-```
+```yaml
 JobLifecycleHook:
-  Prolog: /prolog.sh
+  Prolog: /etc/crane/prolog.sh
 ```
