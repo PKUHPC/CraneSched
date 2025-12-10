@@ -896,6 +896,7 @@ class TaskScheduler {
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
+  static CraneExpected<void> HandleUnsetOptionalInStepToCtld(StepInCtld* step);
   static CraneExpected<void> AcquireStepAttributes(StepInCtld* step);
   static CraneExpected<void> CheckStepValidity(StepInCtld* step);
 
@@ -911,7 +912,6 @@ class TaskScheduler {
       std::unique_ptr<TaskInCtld> task);
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
-  void HandleFailToRecoverRngJob_(task_id_t task_id);
 
   static void ProcessFinalSteps_(std::unordered_set<StepInCtld*> const& steps);
   static void PersistAndTransferStepsToMongodb_(

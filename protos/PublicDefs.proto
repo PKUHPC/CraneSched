@@ -159,6 +159,8 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
     ContainerTaskAdditionalMeta container_meta = 23;
   }
+  TaskIoMeta io_meta = 24;
+  string sh_script = 25; // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -236,6 +238,9 @@ message StepToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
     ContainerTaskAdditionalMeta container_meta = 23;
   }
+
+  TaskIoMeta io_meta = 24;
+  string sh_script = 25;
 
   string extra_attr = 30;
 
@@ -317,6 +322,8 @@ message StepToD {
   optional BatchTaskAdditionalMeta batch_meta = 9;
   optional InteractiveTaskAdditionalMeta interactive_meta = 10;
   optional ContainerTaskAdditionalMeta container_meta = 11;
+  TaskIoMeta io_meta = 12;
+  string sh_script = 13;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -351,12 +358,16 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message BatchTaskAdditionalMeta {
-  string sh_script = 1;
-  optional bool open_mode_append = 2;
+message TaskIoMeta{
+  // Append mode for output and error files
+  optional bool open_mode_append = 1;
+  string input_file_pattern = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
-  string interpreter = 5;
+}
+
+message BatchTaskAdditionalMeta {
+  string interpreter = 1;
 }
 
 message X11Meta {
@@ -369,7 +380,6 @@ message X11Meta {
 
 message InteractiveTaskAdditionalMeta {
   string cfored_name = 1;
-  string sh_script = 2;
   string term_env = 3;
   InteractiveTaskType interactive_type = 4;
 

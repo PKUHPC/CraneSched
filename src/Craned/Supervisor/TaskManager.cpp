@@ -50,10 +50,7 @@ CraneErrCode StepInstance::Prepare() {
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  if (this->IsBatch())
-    fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
-  else  // Crun
-    fputs(m_step_to_supv_.interactive_meta().sh_script().c_str(), fptr);
+  fputs(m_step_to_supv_.sh_script().c_str(), fptr);
 
   fclose(fptr);
 
@@ -458,27 +455,119 @@ void ProcInstance::InitEnvMap() {
 }
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
-                                                const std::string& cwd) const {
-  std::filesystem::path resolved_path(pattern);
+                                                const std::string& cwd,
+                                                bool is_stdout) const {
+  if (pattern.empty()) {
+    if (is_stdout) {
+      std::filesystem::path default_path = cwd;
 
-  // If not specified, use cwd.
-  if (resolved_path.empty())
-    resolved_path = cwd;
-  else if (resolved_path.is_relative())
-    resolved_path = cwd / resolved_path;
+      // Path ends with a directory, append default stdout/err file name
+      // `Crane-<Job ID>.out` to the path.
+      if (std::filesystem::is_directory(default_path))
+        default_path =
+            default_path /
+            fmt::format("Crane-{}.{}.out", g_config.JobId, g_config.StepId);
+      return default_path;
+    } else
+      return "";
+  }
 
-  // Path ends with a directory, append default stdout/err file name
-  // `Crane-<Job ID>.out` to the path.
-  if (std::filesystem::is_directory(resolved_path))
-    resolved_path = resolved_path / fmt::format("Crane-{}.out", g_config.JobId);
+  auto path_to_parse = pattern;
+  if (absl::StrContains(path_to_parse, "\\")) {
+    absl::StrReplaceAll({{"\\", ""}}, &path_to_parse);
+    return path_to_parse;
+  }
 
-  std::string resolved_path_pattern = resolved_path.string();
-  absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
-                       {"%u", m_parent_step_inst_->pwd.Username()},
-                       {"%x", m_parent_step_inst_->GetStep().name()}},
-                      &resolved_path_pattern);
+  auto hostname_expt = util::os::GetHostname();
+  if (!hostname_expt) {
+    return path_to_parse;
+  }
+  auto& full_hostname = hostname_expt.value();
+  auto short_hostname = full_hostname.substr(0, full_hostname.find('.'));
+  auto& grpc_nodelist = m_parent_step_inst_->GetStep().nodelist();
+  auto node_it = std::ranges::find(grpc_nodelist, g_config.CranedIdOfThisNode);
+  if (node_it == grpc_nodelist.end()) {
+    CRANE_ERROR("Failed to find current node {} in nodelist",
+                g_config.CranedIdOfThisNode);
+    return path_to_parse;
+  }
+  int node_index = std::distance(grpc_nodelist.begin(), node_it);
+  //clang-format off
+  std::unordered_map<char, std::string> replacement_map{
+      {'%', "%"},
+      // Job array's master job allocation number.
+      //  {'A', ""}
+      // Job array ID (index) number.
+      {'a', "0"},
+      // jobid.stepid of the running job (e.g. "128.0")
+      {'J', fmt::format("{}.{}", g_config.JobId, g_config.StepId)},
+      // job id
+      {'j', std::to_string(g_config.JobId)},
+      // step id
+      {'s', std::to_string(g_config.StepId)},
+      // short hostname
+      {'N', std::move(short_hostname)},
+      // Node identifier relative to current job (e.g. "0" is the first node of
+      // the running job)
+      {'n', std::to_string(node_index)},
+      // task identifier (rank) relative to current step.
+      {'t', std::to_string(task_id)},
+      // User name
+      {'u', m_parent_step_inst_->pwd.Username()},
+      // Job name
+      {'x', m_parent_step_inst_->GetStep().name()},
+  };
+  //clang-format on
 
-  return resolved_path_pattern;
+  static constexpr re2::LazyRE2 kPatternRe = {"%%|%(\\d*)([AajJsNntuUx])"};
+  std::string result;
+  result.reserve(path_to_parse.size() + 128);
+
+  re2::StringPiece input(path_to_parse);
+  re2::StringPiece groups[3];  // 0: full match, 1: padding, 2: specifier
+  size_t cursor = 0;
+
+  while (cursor < input.size() &&
+         kPatternRe->Match(input, cursor, input.size(), re2::RE2::UNANCHORED,
+                           groups, 3)) {
+    size_t prefix_len =
+        std::distance(input.begin() + cursor, groups[0].begin());
+    absl::StrAppend(&result, input.substr(cursor, prefix_len));
+
+    re2::StringPiece full_match = groups[0];  //  "%5j" or "%%"
+
+    // Case 1: "%%"
+    if (full_match == "%%") {
+      result.push_back('%');
+    }  // Case 2: "%5j" or "%j"
+    else {
+      re2::StringPiece padding_str = groups[1];  // "5"
+      char specifier = groups[2][0];             // "j"
+
+      auto it = replacement_map.find(specifier);
+      if (it == replacement_map.end()) {
+        result.append(full_match.data(), full_match.size());
+      } else {
+        const std::string& value = it->second;
+        int width = 0;
+        bool is_numeric_field =
+            !(specifier == 'N' || specifier == 'u' || specifier == 'x');
+
+        if (is_numeric_field && !padding_str.empty() &&
+            absl::SimpleAtoi(padding_str, &width)) {
+          absl::StrAppend(&result, fmt::format("{:0>{}}", value, width));
+        } else {
+          absl::StrAppend(&result, value);
+        }
+      }
+    }
+    cursor += prefix_len + full_match.size();
+  }
+
+  if (cursor < input.size()) {
+    absl::StrAppend(&result, input.substr(cursor));
+  }
+  return result;
 }
 
 CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
@@ -637,32 +726,60 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
   int stdout_fd, stderr_fd;
 
   auto* meta = dynamic_cast<BatchInstanceMeta*>(m_meta_.get());
+  const std::string& stdin_file_path = meta->parsed_input_file_pattern;
   const std::string& stdout_file_path = meta->parsed_output_file_pattern;
   const std::string& stderr_file_path = meta->parsed_error_file_pattern;
 
   int open_mode =
-      GetParentStep().batch_meta().open_mode_append() ? O_APPEND : O_TRUNC;
+      GetParentStep().io_meta().open_mode_append() ? O_APPEND : O_TRUNC;
+  if (stdin_file_path.empty()) {
+    // Close stdin for batch tasks.
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    if (m_parent_step_inst_->IsBatch()) close(STDIN_FILENO);
+    fmt::println(stderr, "[Task #{}] Subprocess stdin: closed", task_id);
+  } else {
+    int stdin_fd = open(stdin_file_path.c_str(), O_RDONLY);
+    if (stdin_fd == -1) {
+      fmt::println(stderr, "[Task #{}] Subprocess error: open stdin: {}. {}\n",
+                   task_id, stdin_file_path, strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+    fmt::println(stderr, "[Task #{}] Subprocess stdin: {}", task_id,
+                 stdin_file_path);
+    // STDIN -> input file
+    if (dup2(stdin_fd, STDIN_FILENO) == -1) std::exit(1);
+  }
+
   stdout_fd =
       open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
   if (stdout_fd == -1) {
-    fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stdout_file_path,
-               strerror(errno));
+    fmt::println(stderr, "[Task #{}] Subprocess Error: open {}. {}", task_id,
+                 stdout_file_path, strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  if (dup2(stdout_fd, 1) == -1) std::exit(1);  // stdout -> output file
+  if (dup2(stdout_fd, STDOUT_FILENO) == -1)
+    std::exit(1);  // stdout -> output file
+  fmt::println(stderr, "[Task #{}] Subprocess stdout: {}", task_id,
+               stdout_file_path);
 
   if (stderr_file_path.empty()) {
+    fmt::println(stderr, "[Task #{}] Subprocess stderr: {}", task_id,
+                 stdout_file_path);
     // if stderr file is not set, redirect stderr to stdout
-    if (dup2(stdout_fd, 2) == -1) std::exit(1);
+    if (dup2(stdout_fd, STDERR_FILENO) == -1) std::exit(1);
   } else {
     stderr_fd =
         open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
     if (stderr_fd == -1) {
-      fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stderr_file_path,
-                 strerror(errno));
+      fmt::println(stderr, "[Task #{}] Subprocess error: open {}. {}", task_id,
+                   stderr_file_path, strerror(errno));
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
-    if (dup2(stderr_fd, 2) == -1) std::exit(1);  // stderr -> error file
+    fmt::println(stderr, "[Task #{}] Subprocess stderr: {}", task_id,
+                 stderr_file_path);
+    if (dup2(stderr_fd, STDERR_FILENO) == -1)
+      std::exit(1);  // stderr -> error file
     close(stderr_fd);
   }
   close(stdout_fd);
@@ -1307,27 +1424,26 @@ CraneErrCode ProcInstance::Prepare() {
   // Write m_meta_
   if (m_parent_step_inst_->IsBatch()) {
     // Prepare file output name for batch tasks.
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
     auto meta = std::make_unique<BatchInstanceMeta>();
-    meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        GetParentStep().batch_meta().output_file_pattern(),
-        GetParentStep().cwd());
-
-    // If -e / --error is not defined, leave
-    // batch_meta.parsed_error_file_pattern empty;
-    if (!GetParentStep().batch_meta().error_file_pattern().empty()) {
-      meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          GetParentStep().batch_meta().error_file_pattern(),
-          GetParentStep().cwd());
-    }
-
     m_meta_ = std::move(meta);
   } else {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
+  }
+  m_meta_->parsed_output_file_pattern =
+      ParseFilePathPattern_(GetParentStep().io_meta().output_file_pattern(),
+                            GetParentStep().cwd(), true);
+
+  // If -e / --error is not defined, leave
+  // parsed_error_file_pattern empty;
+  if (!GetParentStep().io_meta().error_file_pattern().empty()) {
+    m_meta_->parsed_error_file_pattern =
+        ParseFilePathPattern_(GetParentStep().io_meta().error_file_pattern(),
+                              GetParentStep().cwd(), false);
+  }
+  if (!GetParentStep().io_meta().input_file_pattern().empty()) {
+    m_meta_->parsed_input_file_pattern =
+        ParseFilePathPattern_(GetParentStep().io_meta().input_file_pattern(),
+                              GetParentStep().cwd(), false);
   }
 
   // If interpreter is not set, let system decide.
@@ -1502,11 +1618,6 @@ CraneErrCode ProcInstance::Spawn() {
     }
 
     close(ctrl_fd);
-
-    // Close stdin for batch tasks.
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    if (m_parent_step_inst_->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
     if (m_parent_step_inst_->IsCrun() && m_parent_step_inst_->x11) {

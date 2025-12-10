@@ -2825,19 +2825,15 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
     if (it != m_running_task_map_.end()) {
       step->job = it->second.get();
       step->SetSubmitTime(now);
-      auto err = AcquireStepAttributes(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
+      auto ok = HandleUnsetOptionalInStepToCtld(step.get());
+      if (ok) ok = AcquireStepAttributes(step.get());
+      if (ok) ok = CheckStepValidity(step.get());
+      if (ok) {
+        valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
+      } else {
+        elems[pos].second.set_value(std::unexpected{ok.error()});
         step.reset();
-        continue;
       }
-      err = CheckStepValidity(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
-        step.reset();
-        continue;
-      }
-      valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
     } else {
       elems[pos].second.set_value(
           std::unexpected(CraneErrCode::ERR_INVALID_JOB_ID));
@@ -4081,9 +4077,9 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
   if (task->IsBatch()) {
-    auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
-    if (!batch_meta->has_open_mode_append())
-      batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+    auto* io_meta = task->MutableTaskToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
   return {};
@@ -4273,6 +4269,16 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
+  return {};
+}
+
+CraneExpected<void> TaskScheduler::HandleUnsetOptionalInStepToCtld(
+    StepInCtld* step) {
+  if (step->StepToCtld().has_io_meta()) {
+    auto* io_meta = step->MutableStepToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  }
   return {};
 }
 
