@@ -469,7 +469,8 @@ message TaskInfo {
   repeated string execution_node = 38;
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
-  string wckey = 41;
+  bool wckey_valid = 41;
+  string wckey = 42;
 }
 
 message StepInfo {
