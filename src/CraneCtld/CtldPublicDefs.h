@@ -259,6 +259,7 @@ struct CranedMeta {
   bool drain{false};
   std::string state_reason;
   absl::Time last_busy_time;
+  absl::Time craned_down_time;
 
   absl::flat_hash_map<task_id_t, ResourceInNode> rn_task_res_map;
 

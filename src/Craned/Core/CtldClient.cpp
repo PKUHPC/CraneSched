@@ -458,21 +458,128 @@ void CtldClient::Init() {
         std::set<job_id_t> completing_jobs{};
         std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
             completing_steps{};
+        std::unordered_map<job_id_t, std::unordered_map<step_id_t, StepStatus>>
+            steps_to_sync{};
+
+        // Define status priority for intelligent merging
+        // Ctld valid status:
+        //   - Completing
+        //   - Running
+        //   - Configured
+        //   - Configuring
+        // Craned valid status:
+        //   - Terminal states (Completed, Failed, ExceedTimeLimit, Cancelled,
+        //     OutOfMemory)
+        //   - Completing (All task finished on CommonStep / Asked to exit on
+        //     DaemonStep, during Epilog)
+        //   - Running
+        //   - Configured (Only for CommonStep)
+        //   - Configuring
+        auto GetStatusPriority = [](StepStatus status) -> int {
+          switch (status) {
+          case StepStatus::Completed:
+          case StepStatus::Failed:
+          case StepStatus::ExceedTimeLimit:
+          case StepStatus::Cancelled:
+          case StepStatus::OutOfMemory:
+            return 100;  // Terminal states - highest priority
+
+          case StepStatus::Completing:
+            return 90;  // Almost terminal
+
+          case StepStatus::Running:
+            return 50;  // Active execution
+
+          case StepStatus::Configured:
+            return 30;  // Configuration completed
+
+          case StepStatus::Configuring:
+            return 20;  // Being configured
+
+          case StepStatus::Pending:
+            return 10;  // Lowest priority
+
+          default:
+            return 0;
+          }
+        };
+
+        // Intelligent status synchronization for valid steps
         for (const auto& [job_id, steps] : valid_job_steps) {
           for (const auto& step_id : steps) {
-            auto status =
+            auto ctld_status =
                 arg.req.job_steps().at(job_id).step_status().at(step_id);
-            auto exact_status = exact_job_steps.at(job_id).at(step_id);
-            CRANE_TRACE("[Step #{}.{}] is craned: {},ctld: {}.", job_id,
-                        step_id, exact_status, status);
-            // TODO: Craned status must be the real status of the step, maybe we
-            // can send a step status change in craned status to kick step
-            // status change in Ctld. Then we will not lose step whose status
-            // changed during craned and ctld connection failure.
-            if (status != exact_status) {
-              CRANE_DEBUG(
-                  "[Step #{}.{}] status inconsistent, craned: {} ,ctld: {} .",
-                  job_id, step_id, exact_status, status);
+            auto craned_status = exact_job_steps.at(job_id).at(step_id);
+            CRANE_TRACE("[Step #{}.{}] Ctld status: {}, Craned status: {}.",
+                        job_id, step_id, ctld_status, craned_status);
+
+            if (craned_status == ctld_status) {
+              // Status match, no action needed
+              continue;
+            }
+
+            // Special case: Handle timeout-during-offline scenario
+            // This occurs when Craned goes offline and comes back online after
+            // task timeout. Only DaemonStep can be Running here because:
+            // - DaemonStep waits for Epilog to complete before terminating
+            // - CommonSteps should already be killed by Timer and in terminal
+            //   state
+            // Ctld detected timeout and marked as Completing. Let Ctld handle
+            // the termination.
+            if (craned_status == StepStatus::Running &&
+                ctld_status == StepStatus::Completing) {
+              CRANE_INFO(
+                  "[Step #{}.{}] Ctld has Completing status (likely due to "
+                  "timeout during offline), Craned reports Running (should be "
+                  "DaemonStep). Keeping Craned's state, Ctld will handle "
+                  "termination.",
+                  job_id, step_id);
+              continue;
+            }
+
+            // Handle Completing status from Ctld
+            if (ctld_status == StepStatus::Completing) {
+              CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
+              completing_steps[job_id].insert(step_id);
+              continue;
+            }
+
+            int ctld_priority = GetStatusPriority(ctld_status);
+            int craned_priority = GetStatusPriority(craned_status);
+
+            if (craned_priority > ctld_priority) {
+              // Craned has more advanced state
+              CRANE_INFO(
+                  "[Step #{}.{}] Craned has more advanced status {} (Ctld has "
+                  "{}), sent a statuschange to kick ctld step status machine",
+                  job_id, step_id, craned_status, ctld_status);
+              steps_to_sync[job_id][step_id] = craned_status;
+            } else if (craned_status == StepStatus::Configured) {
+              // For configured but not running step, terminate it
+              CRANE_TRACE(
+                  "[Step #{}.{}] is configured but not running, mark as "
+                  "invalid",
+                  job_id, step_id);
+              invalid_steps[job_id].insert(step_id);
+            } else {
+              // Ctld has higher/equal priority - terminate to maintain
+              // consistency
+              // This branch handles cases where craned_priority <=
+              // ctld_priority and not covered by special cases above,
+              // including:
+              // - Craned: Running, Ctld: Completing (non-DaemonStep case,
+              //   though this should rarely happen as CommonSteps should be
+              //   killed by timer)
+              // - Other cases where Ctld has equal or higher priority
+              // Craned: Configuring with Ctld: Running/Configured should
+              // not occur in the normal state machine flow, as Configuring
+              // means Ctld hasn't received the Configured status yet. The only
+              // valid case for Ctld to be ahead is when Ctld marks it as
+              // Completing (handled above).
+              CRANE_WARN(
+                  "[Step #{}.{}] Status mismatch: Ctld has {}, Craned has {}. "
+                  "Terminating step to maintain consistency.",
+                  job_id, step_id, ctld_status, craned_status);
               invalid_steps[job_id].insert(step_id);
               lost_steps[job_id].insert(step_id);
             }
@@ -480,8 +587,33 @@ void CtldClient::Init() {
         }
 
         g_ctld_client_sm->EvConfigurationDone(lost_jobs, lost_steps);
+
+        // Report status changes to Ctld for steps that need synchronization
+        for (const auto& [job_id, step_status_map] : steps_to_sync) {
+          for (const auto& [step_id, status] : step_status_map) {
+            uint32_t exit_code = g_job_mgr->GetStepExitCode(job_id, step_id);
+            google::protobuf::Timestamp end_time =
+                g_job_mgr->GetStepEndTime(job_id, step_id);
+            CRANE_INFO(
+                "[Step #{}.{}] Reporting status {} to Ctld during recovery "
+                "sync",
+                job_id, step_id, status);
+            StepStatusChangeQueueElem elem{
+                .job_id = job_id,
+                .step_id = step_id,
+                .new_status = status,
+                .exit_code = exit_code,
+                .reason = "Status synced from Craned during recovery",
+                .timestamp = end_time};
+            g_ctld_client->StepStatusChangeAsync(std::move(elem));
+          }
+        }
+
+        // Only terminate truly invalid steps (those not in Ctld's view at all)
+        // Don't kill steps that exist in both but may have status differences
+        // - Ctld will handle status synchronization via intelligent merging
         if (!invalid_steps.empty()) {
-          CRANE_INFO("Terminating invalid step as orphaned : [{}].",
+          CRANE_INFO("Terminating invalid steps (not tracked by Ctld): [{}].",
                      util::JobStepsToString(invalid_steps));
           for (auto [job_id, steps] : invalid_steps) {
             for (auto step_id : steps)
@@ -570,6 +702,20 @@ void CtldClient::StepStatusChangeAsync(
       task_status_change.job_id, task_status_change.step_id,
       task_status_change.new_status, task_status_change.exit_code);
   m_step_status_change_list_.emplace_back(std::move(task_status_change));
+}
+
+void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
+                                       crane::grpc::TaskStatus new_status,
+                                       uint32_t exit_code,
+                                       std::optional<std::string> reason) {
+  StepStatusChangeQueueElem elem{
+      .job_id = job_id,
+      .step_id = step_id,
+      .new_status = new_status,
+      .exit_code = exit_code,
+      .reason = std::move(reason),
+      .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()};
+  StepStatusChangeAsync(std::move(elem));
 }
 
 std::map<job_id_t, std::map<step_id_t, StepStatus>>

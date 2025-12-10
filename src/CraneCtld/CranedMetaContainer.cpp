@@ -96,6 +96,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
     return;
   }
   node_meta->alive = false;
+  node_meta->craned_down_time = absl::Now();
 
   AddResReduceEventsAndUnlock(
       {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});

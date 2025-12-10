@@ -904,63 +904,8 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
   /******************* Recover job cgroup info *******************/
   RecoverCgForJobs(job_map);
 
-  /******************* Handle step status inconsistency *******************/
-  using Craned::StepStatus;
-  std::set<job_id_t> completing_jobs{};
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>>
-      completing_steps{};
-  std::unordered_map<job_id_t, std::unordered_set<step_id_t>> failed_steps{};
-  for (auto& [ids, step] : step_map) {
-    auto [job_id, step_id] = ids;
-    auto ctld_status =
-        config_from_ctld.job_steps().at(job_id).step_status().at(step_id);
-    auto supv_status = step_supv_map.at(std::make_pair(job_id, step_id)).second;
-    CRANE_TRACE("[Step #{}.{}] Ctld status: {}, supervisor reported: {}",
-                job_id, step_id, ctld_status, supv_status);
-
-    // For ctld completing step, cleanup
-    if (ctld_status == StepStatus::Completing) {
-      if (step->IsDaemonStep()) {
-        CRANE_TRACE("[Job #{}] is completing", job_id);
-        completing_jobs.insert(job_id);
-      } else {
-        CRANE_TRACE("[Step #{}.{}] is completing", job_id, step_id);
-        completing_steps[job_id].insert(step_id);
-      }
-      continue;
-    }
-    if (supv_status == StepStatus::Configured) {
-      CRANE_ASSERT(!step->IsDaemonStep());
-      // For configured but not running step, remove this, ctld will consider it
-      // failed
-      failed_steps[job_id].insert(step_id);
-      CRANE_TRACE("[Step #{}.{}] is configured but not running, mark as failed",
-                  job_id, step_id);
-      continue;
-    }
-    if (supv_status != ctld_status) {
-      CRANE_TRACE(
-          "[Step #{}.{}] status inconsistency, ctld: {}, supervisor: {}, "
-          "mark as failed.",
-          job_id, step_id, ctld_status, supv_status);
-      failed_steps[job_id].insert(step_id);
-    }
-  }
-  for (auto [job_id, step_ids] : failed_steps) {
-    for (auto step_id : step_ids) {
-      auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
-      if (stub) {
-        auto err = stub->TerminateTask(true, false);
-        if (err != CraneErrCode::SUCCESS) {
-          CRANE_ERROR("[Supervisor] Failed to terminate task #{}.{}", job_id,
-                      step_id);
-        }
-      }
-      step_map.erase({job_id, step_id});
-    }
-  }
-
   g_job_mgr->Recover(std::move(job_map), std::move(step_map));
+
   for (const auto& [job_id, step_ids] : invalid_steps)
     for (auto step_id : step_ids)
       g_supervisor_keeper->RemoveSupervisor(job_id, step_id);
@@ -969,8 +914,6 @@ void Recover(const crane::grpc::ConfigureCranedRequest& config_from_ctld) {
     CRANE_INFO("[Supervisor] step [{}] is not recorded in Ctld.",
                util::JobStepsToString(invalid_steps));
   }
-  g_job_mgr->FreeJobs(std::move(completing_jobs));
-  g_job_mgr->FreeSteps(std::move(completing_steps));
   g_server->MarkSupervisorAsRecovered();
 }
 
@@ -1031,6 +974,8 @@ void GlobalVariableInit() {
 
   g_ctld_client_sm->AddActionConfigureCb(
       [](const Craned::CtldClientStateMachine::ConfigureArg& arg) {
+        // Recover jobs and steps
+        // Status synchronization is handled in CtldClient.cpp
         Recover(arg.req);
       },
       Craned::CallbackInvokeMode::SYNC, true);

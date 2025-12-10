@@ -42,6 +42,8 @@ struct StepInstance {
 
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
+  uint32_t exit_code{0};
+  google::protobuf::Timestamp end_time;  // Actual end time when step finished
   // TODO: Move supervisor stub to here.
   explicit StepInstance(const crane::grpc::StepToD& step_to_d);
   explicit StepInstance(const crane::grpc::StepToD& step_to_d, pid_t supv_pid,
@@ -134,6 +136,10 @@ class JobManager {
   }
 
   std::map<job_id_t, std::map<step_id_t, StepStatus>> GetAllocatedJobSteps();
+
+  uint32_t GetStepExitCode(job_id_t job_id, step_id_t step_id);
+  google::protobuf::Timestamp GetStepEndTime(job_id_t job_id,
+                                             step_id_t step_id);
 
   void TerminateStepAsync(job_id_t job_id, step_id_t step_id);
 
