@@ -616,8 +616,7 @@ void ParseLogHookPaths(const std::string &log_hook_config,
     if (!p.is_absolute()) p = base_dir / p;
     std::string real_path = p.string();
 
-    if (real_path.contains('*') ||
-        real_path.contains('?')) {
+    if (real_path.contains('*') || real_path.contains('?')) {
       glob_t globbuf;
       if (glob(real_path.c_str(), 0, nullptr, &globbuf) == 0) {
         for (size_t i = 0; i < globbuf.gl_pathc; ++i) {

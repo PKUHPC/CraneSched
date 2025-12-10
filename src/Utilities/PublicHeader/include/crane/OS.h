@@ -20,9 +20,7 @@
 
 #include <absl/time/time.h>
 #include <fcntl.h>
-
 #include <sys/resource.h>
-
 #include <unistd.h>
 
 #include <filesystem>

@@ -31,11 +31,11 @@
 #include "crane/Logger.h"
 
 #include <absl/cleanup/cleanup.h>
-
-#include <future>
-#include <sys/wait.h>
 #include <grp.h>
 #include <pwd.h>
+#include <sys/wait.h>
+
+#include <future>
 
 #include "absl/strings/str_split.h"
 #include "re2/re2.h"
@@ -529,17 +529,17 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
         continue;
       }
 
-        auto tmp = read_stream(stdout_pipe[0], args.output_size);
-        if (!tmp.empty()) {
-          size_t remaining = args.output_size - output.size();
-          if (remaining > 0) {
-            if (tmp.size() > remaining) {
-              output.append(tmp, 0, remaining);
-            } else {
-              output.append(tmp);
-            }
+      auto tmp = read_stream(stdout_pipe[0], args.output_size);
+      if (!tmp.empty()) {
+        size_t remaining = args.output_size - output.size();
+        if (remaining > 0) {
+          if (tmp.size() > remaining) {
+            output.append(tmp, 0, remaining);
+          } else {
+            output.append(tmp);
           }
         }
+      }
 
       close(stdout_pipe[0]);
       close(stderr_pipe[0]);
@@ -557,7 +557,8 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       if (args.at_child_setup_cb) {
         bool result = args.at_child_setup_cb(pid);
         if (!result) {
-          fmt::print(stderr, "[Subprocess] Error: subprocess callback failed\n");
+          fmt::print(stderr,
+                     "[Subprocess] Error: subprocess callback failed\n");
           exit(EXIT_FAILURE);
         }
       }

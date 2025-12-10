@@ -164,12 +164,14 @@ int InitFromStdin(int argc, char** argv) {
   if (msg.has_job_lifecycle_hook_config()) {
     g_config.JobLifecycleHook.TaskPrologs.reserve(
         msg.job_lifecycle_hook_config().task_prologs_size());
-    for (const auto& task_prolog : msg.job_lifecycle_hook_config().task_prologs()) {
+    for (const auto& task_prolog :
+         msg.job_lifecycle_hook_config().task_prologs()) {
       g_config.JobLifecycleHook.TaskPrologs.emplace_back(task_prolog);
     }
     g_config.JobLifecycleHook.TaskEpilogs.reserve(
         msg.job_lifecycle_hook_config().task_epilogs_size());
-    for (const auto& task_epilog : msg.job_lifecycle_hook_config().task_epilogs()) {
+    for (const auto& task_epilog :
+         msg.job_lifecycle_hook_config().task_epilogs()) {
       g_config.JobLifecycleHook.TaskEpilogs.emplace_back(task_epilog);
     }
 
@@ -190,7 +192,8 @@ int InitFromStdin(int argc, char** argv) {
         msg.job_lifecycle_hook_config().epilog_timeout();
     g_config.JobLifecycleHook.PrologEpilogTimeout =
         msg.job_lifecycle_hook_config().prolog_epilog_timeout();
-    g_config.JobLifecycleHook.MaxOutputSize = msg.job_lifecycle_hook_config().max_output_size();
+    g_config.JobLifecycleHook.MaxOutputSize =
+        msg.job_lifecycle_hook_config().max_output_size();
   }
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
@@ -308,15 +311,18 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   if (!g_config.JobLifecycleHook.Prologs.empty()) {
     CRANE_TRACE("Running Prologs...");
-    RunLogHookArgs run_prolog_args{.scripts = g_config.JobLifecycleHook.Prologs,
-                                   .envs = g_config.JobEnv,
-                                   .run_uid = 0,
-                                   .run_gid = 0,
-                                   .is_prolog = true, .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+    RunLogHookArgs run_prolog_args{
+        .scripts = g_config.JobLifecycleHook.Prologs,
+        .envs = g_config.JobEnv,
+        .run_uid = 0,
+        .run_gid = 0,
+        .is_prolog = true,
+        .output_size = g_config.JobLifecycleHook.MaxOutputSize};
     if (g_config.JobLifecycleHook.PrologTimeout > 0)
       run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
     else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-      run_prolog_args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
+      run_prolog_args.timeout_sec =
+          g_config.JobLifecycleHook.PrologEpilogTimeout;
 
     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
       SerializeDelimitedToZeroCopyStream(msg, &ostream);

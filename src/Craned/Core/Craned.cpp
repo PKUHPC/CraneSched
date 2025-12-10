@@ -733,7 +733,7 @@ void ParseConfig(int argc, char** argv) {
               job_log_hook_config["PrologEpilogTimeout"].as<uint32_t>();
 
         g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
-              job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
+            job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
 
         if (job_log_hook_config["PrologFlags"]) {
           auto prolog_flags =
