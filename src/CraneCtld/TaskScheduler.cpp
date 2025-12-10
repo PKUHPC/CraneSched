@@ -1308,6 +1308,7 @@ void TaskScheduler::StepScheduleThread_() {
       absl::MutexLock running_lk(&m_running_task_map_mtx_);
       absl::MutexLock step_lk(&m_step_num_mutex_);
       if (!m_job_pending_step_num_map_.empty()) {
+        std::vector<job_id_t> jobs_to_remove;
         std::vector<CommonStepInCtld*> scheduled_steps;
         for (auto& [job_id, step_num] : m_job_pending_step_num_map_) {
           // TODO: schedule here
@@ -1316,10 +1317,13 @@ void TaskScheduler::StepScheduleThread_() {
             auto& job = rn_iter->second;
             job->SchedulePendingSteps(&scheduled_steps);
           } else {
+            jobs_to_remove.push_back(job_id);
             CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
           }
         }
-
+        for (auto job_id : jobs_to_remove) {
+          m_job_pending_step_num_map_.erase(job_id);
+        }
         CRANE_TRACE("StepScheduleThread_ scheduled {} steps",
                     scheduled_steps.size());
 

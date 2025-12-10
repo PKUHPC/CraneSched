@@ -930,6 +930,7 @@ struct TaskInCtld {
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
   void SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
+    auto now = absl::Now();
     while (!pending_step_ids_.empty()) {
       const step_id_t& step_id = pending_step_ids_.front();
       const auto& step = GetStep(step_id);
@@ -968,6 +969,7 @@ struct TaskInCtld {
       step->SetCranedIds(step_craned_ids);
       step->SetConfiguringNodes(step_craned_ids);
       step->SetExecutionNodes(step_craned_ids);
+      step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
       const auto& meta = step->ia_meta.value();
       meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
