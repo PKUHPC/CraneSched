@@ -55,13 +55,19 @@ echo "print This message has been printed with TaskProlog"
 ---
 
 # Prolog/Epilog Configuration
+* PrologTimeout: Timeout (in seconds) for the execution of the Prolog script. 
+* EpilogTimeout: Timeout (in seconds) for the execution of the Epilog script. 
+* PrologEpilogTimeout: Timeout (in seconds) for the execution of both Prolog and Epilog scripts.
+  When this parameter is set together with PrologTimeout and EpilogTimeout, it will override both of them. 
+* PrologFlags: Controls how the Prolog script is executed. Multiple flags can be specified, separated by commas, to provide more flexible job lifecycle management.
 
+Configuration Example:
 ```yaml
 JobLifecycleHook:
-  Prolog: /pash/to/prolog.sh
+  Prolog: /path/to/prolog.sh
   PrologTimeout: 60
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
-  Epilog: /path/to/epilog1.sh,/path/to/epilog2.sh
+  Epilog: /path/to/epilog.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
   PrologCranectld: /path/to/prologctld.sh
@@ -103,7 +109,7 @@ Reduces throughput.
 Incompatible with **RunInJob**.
 
 ## Example
-**prolog.sh**
+**/etc/crane/prolog.sh**
 Make sure the script has executable permission and that the script itself is correct.
 ```bash
 #!/bin/bash
@@ -135,7 +141,7 @@ exit 0
 ```
 
 **/etc/crane/config.yaml Configuration**
-```
+```yaml
 JobLifecycleHook:
-  Prolog: /prolog.sh
+  Prolog: /etc/crane/prolog.sh
 ```
