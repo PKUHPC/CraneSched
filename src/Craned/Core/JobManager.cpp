@@ -79,11 +79,7 @@ EnvMap JobInD::GetJobEnvMap() {
     return std::to_string(node_idx);
   };
 
-  uint64_t gpus_per_node = 0;
   auto alloc_node_num = daemon_step_to_d.nodelist().size();
-  if (alloc_node_num != 0) {
-    gpus_per_node = daemon_step_to_d.total_gpus() / alloc_node_num;
-  }
   auto mem_in_node =
       daemon_step_to_d.res().allocatable_res_in_node().memory_limit_bytes() /
       (static_cast<uint64_t>(1024 * 1024));
@@ -112,16 +108,14 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
-  env_map.emplace("CRANE_EXCLUDES",
-                  absl::StrJoin(daemon_step_to_d.exclude_nodelist(), ";"));
   env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.cwd());
   env_map.emplace("CRANE_CPUS_PER_TASK",
                   std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
-  env_map.emplace("CRANE_MEM_PER_NODE", std::to_string(mem_in_node));
+  env_map.insert_or_assign("CRANE_MEM_PER_NODE",
+                           std::format("{}M", mem_in_node));
   env_map.emplace("CRANE_NTASKS_PER_NODE",
                   std::to_string(daemon_step_to_d.ntasks_per_node()));
   env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
-  env_map.emplace("CRANE_GPUS_PER_NODE", std::to_string(gpus_per_node));
   env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
   env_map.emplace(
       "CRANE_NTASKS",
