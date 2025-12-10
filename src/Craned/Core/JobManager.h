@@ -58,7 +58,7 @@ struct StepInstance {
 
   [[nodiscard]] bool IsCalloc() const noexcept {
     return step_to_d.interactive_meta().interactive_type() ==
-            crane::grpc::Calloc;
+           crane::grpc::Calloc;
   }
 
   [[nodiscard]] std::string StepIdString() const noexcept {
