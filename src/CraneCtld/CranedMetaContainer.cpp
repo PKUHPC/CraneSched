@@ -853,7 +853,6 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
                                                bool is_drain,
                                                const std::string& reason) {
-
   if (is_drain) LockResReduceEvents();
 
   if (!craned_meta_map_.Contains(craned_id)) {
@@ -881,8 +880,8 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
   craned_meta->state_reason = reason;
 
   if (is_drain) {
-    AddResReduceEventsAndUnlock(
-    {std::make_pair(absl::InfinitePast(), std::vector<CranedId>{craned_id})});
+    AddResReduceEventsAndUnlock({std::make_pair(
+        absl::InfinitePast(), std::vector<CranedId>{craned_id})});
   }
 
   CRANE_DEBUG("Update node '{}' drain state to {}", craned_id, is_drain);

@@ -19,9 +19,7 @@
 #pragma once
 
 #include <fcntl.h>
-
 #include <sys/resource.h>
-
 #include <unistd.h>
 
 #include <algorithm>
