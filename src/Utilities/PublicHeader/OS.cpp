@@ -284,10 +284,10 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
+std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
   bool is_failed = false;
 
-  auto read_stream = [](int fd, uint32_t max_size) {
+  auto read_stream = [](int fd, uint64_t max_size) {
     std::string out;
     out.reserve(max_size);
 
@@ -324,7 +324,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
       return std::nullopt;
     }
 
-    int stdout_pipe[2], stderr_pipe[2], sync_pipe[2];
+    int stdout_pipe[2], stderr_pipe[2];
     if (pipe(stdout_pipe) == -1) {
       CRANE_ERROR("{} pipe stdout creation failed: {}", script,
                   strerror(errno));
@@ -350,6 +350,10 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
     if (pid > 0) {
       close(stdout_pipe[1]);
       close(stderr_pipe[1]);
+      absl::Cleanup close_pipes = [&]() {
+        close(stdout_pipe[0]);
+        close(stderr_pipe[0]);
+      };
       int status = 0;
       auto fut = std::async(std::launch::async, [pid, &status]() {
         return waitpid(pid, &status, 0);
@@ -397,9 +401,6 @@ std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args) {
           }
         }
       }
-
-      close(stdout_pipe[0]);
-      close(stderr_pipe[0]);
 
       CRANE_TRACE("{} finished successfully.", script);
 

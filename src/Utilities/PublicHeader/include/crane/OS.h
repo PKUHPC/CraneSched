@@ -40,7 +40,7 @@ struct NodeSpecInfo {
 };
 
 // prolog or epilog
-struct RunLogHookArgs {
+struct RunPrologEpilogArgs {
   std::vector<std::string> scripts;
   std::unordered_map<std::string, std::string> envs;
   uint32_t timeout_sec;
@@ -91,7 +91,7 @@ bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
 
-std::optional<std::string> RunPrologOrEpiLog(const RunLogHookArgs& args);
+std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args);
 
 void ApplyPrologOutputToEnvAndStdout(
     const std::string& output,
