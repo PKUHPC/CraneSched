@@ -170,13 +170,13 @@ struct TaskInstanceMeta {
   virtual ~TaskInstanceMeta() = default;
 
   std::string parsed_sh_script_path;
+  std::string parsed_input_file_pattern;
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 struct BatchInstanceMeta : TaskInstanceMeta {
   ~BatchInstanceMeta() override = default;
-
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
 };
 
 struct CrunInstanceMeta : TaskInstanceMeta {
@@ -375,7 +375,8 @@ class ProcInstance : public ITaskInstance {
    * %x - Job name
    */
   std::string ParseFilePathPattern_(const std::string& pattern,
-                                    const std::string& cwd) const;
+                                    const std::string& cwd,
+                                    bool is_stdout) const;
 
   std::unique_ptr<TaskInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid

@@ -546,6 +546,17 @@ struct StepInCtld {
 
  public:
   virtual ~StepInCtld() = default;
+  bool IsBatch() const { return type == crane::grpc::Batch; }
+  bool IsCalloc() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Calloc;
+  }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -819,6 +830,11 @@ struct TaskInCtld {
     return type == crane::grpc::TaskType::Interactive &&
            task_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveTaskType::Calloc;
+  }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           task_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
   }
   bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;

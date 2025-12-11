@@ -397,7 +397,8 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   step.set_requeue_if_failed(requeue_if_failed);
   step.set_get_user_env(get_user_env);
   step.mutable_gid()->Assign(gids.begin(), gids.end());
-  // No batch or ia meta need to set
+  // No batch/ia/io meta need to set
+  // No script to set
   step.set_extra_attr(job.extra_attr);
   // step.set_cmd_line(job.cmd_line);
   // step.set_cwd();
@@ -442,6 +443,7 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+  // No need to set batch/ia/io meta and script
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
   step_to_d.set_get_user_env(this->get_user_env);
   step_to_d.set_extra_attr(extra_attr);
@@ -677,6 +679,10 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   } else if (job.IsContainer()) {
     step.mutable_container_meta()->CopyFrom(job.TaskToCtld().container_meta());
   }
+  if (job.TaskToCtld().has_io_meta()) {
+    step.mutable_io_meta()->CopyFrom(job.TaskToCtld().io_meta());
+  }
+  step.set_sh_script(job.TaskToCtld().sh_script());
 
   step.set_extra_attr(job.extra_attr);
   step.set_cmd_line(job.cmd_line);
@@ -797,6 +803,11 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     auto* mutable_meta = step_to_d.mutable_container_meta();
     mutable_meta->CopyFrom(StepToCtld().container_meta());
   }
+  if (StepToCtld().has_io_meta()) {
+    auto* mutable_meta = step_to_d.mutable_io_meta();
+    mutable_meta->CopyFrom(StepToCtld().io_meta());
+  }
+  step_to_d.set_sh_script(StepToCtld().sh_script());
 
   return step_to_d;
 }
