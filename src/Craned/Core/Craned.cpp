@@ -700,19 +700,19 @@ void ParseConfig(int argc, char** argv) {
       if (config["JobLifecycleHook"]) {
         const auto& job_log_hook_config = config["JobLifecycleHook"];
 
-        util::ParseLogHookPaths(YamlValueOr(job_log_hook_config["Prolog"], ""),
+        util::ParsePrologEpilogHookPaths(YamlValueOr(job_log_hook_config["Prolog"], ""),
                                 config_path,
                                 &g_config.JobLifecycleHook.ProLogs);
 
-        util::ParseLogHookPaths(YamlValueOr(job_log_hook_config["Epilog"], ""),
+        util::ParsePrologEpilogHookPaths(YamlValueOr(job_log_hook_config["Epilog"], ""),
                                 config_path,
                                 &g_config.JobLifecycleHook.EpiLogs);
 
-        util::ParseLogHookPaths(
+        util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["TaskProlog"], ""), config_path,
             &g_config.JobLifecycleHook.TaskPrologs);
 
-        util::ParseLogHookPaths(
+        util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["TaskEpilog"], ""), config_path,
             &g_config.JobLifecycleHook.TaskEpilogs);
 

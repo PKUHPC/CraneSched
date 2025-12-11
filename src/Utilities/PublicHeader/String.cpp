@@ -601,7 +601,7 @@ int TimeStr2Mins(absl::string_view input) {
   return (days * 1440) + hours * 60 + mins + (secs > 0 ? 1 : 0);
 }
 
-void ParseLogHookPaths(const std::string &log_hook_config,
+void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
                        const std::string &config_file_path,
                        std::vector<std::string> *result) {
   auto path_list = absl::StrSplit(log_hook_config, ",");

@@ -177,12 +177,12 @@ void ParseConfig(int argc, char** argv) {
       if (config["JobLifecycleHook"]) {
         const auto& hook_config = config["JobLifecycleHook"];
 
-          util::ParseLogHookPaths(
+          util::ParsePrologEpilogHookPaths(
               YamlValueOr(hook_config["PrologCranectld"], ""), config_path,
               &g_config.JobLifecycleHook.ProLogCtlds);
 
         if (hook_config["EpilogCranectld"])
-          util::ParseLogHookPaths(
+          util::ParsePrologEpilogHookPaths(
               hook_config["EpilogCranectld"].as<std::string>(), config_path,
               &g_config.JobLifecycleHook.EpiLogCtlds);
 
