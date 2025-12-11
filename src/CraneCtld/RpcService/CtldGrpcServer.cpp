@@ -1067,7 +1067,6 @@ grpc::Status CraneCtldServiceImpl::AddWckey(
   const crane::grpc::WckeyInfo *wckey_info = &request->wckey();
 
   wckey.user_name = wckey_info->user_name();
-  wckey.cluster = wckey_info->cluster();
   wckey.name = wckey_info->name();
 
   CraneExpected<void> result =
@@ -1322,8 +1321,7 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   auto modify_res = g_account_manager->ModifyDefaultWckey(
-      request->uid(), request->name(), request->cluster(),
-      request->user_name());
+      request->uid(), request->name(), request->user_name());
   if (modify_res) {
     response->set_ok(true);
   } else {
@@ -1520,7 +1518,7 @@ grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
   for (const auto &wckey : res_wckey_list) {
     auto *wckey_info = response->mutable_wckey_list()->Add();
     wckey_info->set_name(wckey.name);
-    wckey_info->set_cluster(wckey.cluster);
+    wckey_info->set_cluster(g_config.CraneClusterName);
     wckey_info->set_user_name(wckey.user_name);
     wckey_info->set_is_default(wckey.is_default);
   }
@@ -1700,9 +1698,8 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto res =
-      g_account_manager->DeleteWckey(request->uid(), request->name(),
-                                     request->cluster(), request->user_name());
+  auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
+                                            request->user_name());
   if (!res) {
     auto *new_err_record = response->mutable_rich_error();
     new_err_record->set_description("");

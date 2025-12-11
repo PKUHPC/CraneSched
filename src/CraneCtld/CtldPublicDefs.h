@@ -1115,8 +1115,7 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
-  std::unordered_map<std::string /*cluster*/, std::string /*wckey_name*/>
-      default_wckey_map;
+  std::string default_wckey;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
@@ -1176,13 +1175,12 @@ struct User {
 struct Wckey {
   bool deleted = false;
   std::string name;
-  std::string cluster; /* cluster associated */
   uid_t uid;
   std::string user_name; /* user name */
   bool is_default = false;
 
-  bool operator==(const Wckey& other) const {
-    return name == other.name && cluster == other.cluster && uid == other.uid &&
+  bool operator==(const Wckey& other) const noexcept {
+    return name == other.name && uid == other.uid &&
            user_name == other.user_name && is_default == other.is_default;
   }
 };

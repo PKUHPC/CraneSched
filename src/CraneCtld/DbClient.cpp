@@ -665,11 +665,7 @@ bool MongodbClient::FetchJobStepRecords(
                                   elem.get_int32().value);
       }
 
-      if (view["wckey"] && view["wckey"].type() == bsoncxx::type::k_utf8) {
-        task->set_wckey(view["wckey"].get_string().value.data());
-      } else {
-        task->set_wckey("");
-      }
+      task->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -1008,7 +1004,6 @@ bool MongodbClient::UpdateWckey(const Wckey& wckey) {
   set_document.append(kvp("$set", doc));
 
   filter.append(kvp("name", wckey.name));
-  filter.append(kvp("cluster", wckey.cluster));
   filter.append(kvp("user_name", wckey.user_name));
 
   try {
@@ -1470,17 +1465,8 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
     user->cert_number = ViewValueOr_(user_view["cert_number"], std::string{""});
 
-    user->default_wckey_map.clear();
-    if (auto elem = user_view["default_wckey_map"];
-        elem && elem.type() == bsoncxx::type::k_document) {
-      auto doc_view = elem.get_document().view();
-      for (auto&& kv : doc_view) {
-        std::string k = std::string(kv.key());
-        if (kv.type() == bsoncxx::type::k_utf8) {
-          user->default_wckey_map[k] = std::string(kv.get_string().value);
-        }
-      }
-    }
+    user->default_wckey =
+        ViewValueOr_(user_view["default_wckey"], std::string{""});
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
   }
@@ -1496,10 +1482,10 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "account_to_attrs_map",
                                     "coordinator_accounts",
                                     "cert_number",
-                                    "default_wckey_map"};
+                                    "default_wckey"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>, std::string,
-             std::unordered_map<std::string, std::string>>
+             std::string>
       values{user.deleted,
              user.uid,
              user.default_account,
@@ -1508,19 +1494,20 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
              user.account_to_attrs_map,
              user.coordinator_accounts,
              user.cert_number,
-             user.default_wckey_map};
+             user.default_wckey};
   return DocumentConstructor_(fields, values);
 }
 
 bsoncxx::builder::basic::document MongodbClient::WckeyToDocument_(
     const Ctld::Wckey& wckey) {
-  std::array<std::string, 6> fields{
-      "deleted", "name", "cluster", "uid", "user_name", "is_default",
+  std::array<std::string, 4> fields{
+      "deleted",
+      "name",
+      "user_name",
+      "is_default",
   };
-  std::tuple<bool, std::string, std::string, int64_t, std::string, bool> values{
-      wckey.deleted,   wckey.name,
-      wckey.cluster,   static_cast<int64_t>(wckey.uid),
-      wckey.user_name, wckey.is_default};
+  std::tuple<bool, std::string, std::string, bool> values{
+      wckey.deleted, wckey.name, wckey.user_name, wckey.is_default};
   return DocumentConstructor_(fields, values);
 }
 
@@ -1529,8 +1516,6 @@ void MongodbClient::ViewToWckey_(const bsoncxx::document::view& wckey_view,
   try {
     wckey->deleted = wckey_view["deleted"].get_bool().value;
     wckey->name = wckey_view["name"].get_string().value;
-    wckey->cluster = wckey_view["cluster"].get_string().value;
-    wckey->uid = wckey_view["uid"].get_int64().value;
     wckey->user_name = wckey_view["user_name"].get_string().value;
     wckey->is_default = wckey_view["is_default"].get_bool().value;
   } catch (const bsoncxx::exception& e) {

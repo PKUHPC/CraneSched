@@ -536,13 +536,12 @@ cacctmgr add wckey <名称> [选项]
 **选项：**
 
 - **User=<用户名>**: 用户名 （必需）
-- **Cluster=<集群名>**: 集群名 （必需）
 
 **示例：**
 
 添加 Wckey
 ```bash
-cacctmgr add wckey hpcgroup User=zhangsan Cluster=pkuhpc_test
+cacctmgr add wckey hpcgroup User=zhangsan
 ```
 ### 5.2 删除 Wckey
 
@@ -554,31 +553,29 @@ cacctmgr delete wckey <名称> [选项]
 **选项：**
 
 - **User=<用户名>**: 用户名 （必需）
-- **Cluster=<集群名>**: 集群名 （必需）
 
 **示例：**
 ```bash
-cacctmgr delete wckey hpcgroup User=zhangsan Cluster=pkuhpc_test
+cacctmgr delete wckey hpcgroup User=zhangsan
 ```
 
 ### 5.3 修改默认Wckey
 
 **语法：**
 ```bash
-cacctmgr modify wckey where User=<name> Cluster=<cluster> set <DefaultWckey>=<wckey>
+cacctmgr modify wckey where User=<name> set DefaultWckey=<wckey>
 ```
 
 **属性：**
 
 - **User=<用户名>**: 用户名 （必需）
-- **Cluster=<集群名>**: 集群名 （必需）
 - **DefaultWckey=<Wckey名>**: 存在的wckey名 （必需）
 
 **示例：**
 
 修改默认Wckey
 ```bash
-cacctmgr modify wckey where User=zhangsan Cluster=pkuhpc_test set DefaultWckey=hpcgroup
+cacctmgr modify wckey where User=zhangsan set DefaultWckey=hpcgroup
 ```
 
 ### 5.4 显示 Wckey

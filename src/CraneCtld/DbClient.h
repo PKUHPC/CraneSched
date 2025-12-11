@@ -284,6 +284,12 @@ class MongodbClient {
       break;
     }
 
+    auto count =
+        (*GetClient_())[m_db_name_][coll_name].count_documents(filter.view());
+    if (count == 0) {
+      return false;
+    }
+
     bsoncxx::stdx::optional<mongocxx::result::update> result =
         (*GetClient_())[m_db_name_][coll_name].update_one(
             *GetSession_(), filter.view(), updateItem.view());

@@ -63,8 +63,7 @@ class AccountManager {
 
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
-    CraneExpected<void> DeleteWckey(uint32_t uid, const std::string& name,
-                                  const std::string& cluster,
+  CraneExpected<void> DeleteWckey(uint32_t uid, const std::string& name,
                                   const std::string& user_name);
 
   CraneExpected<std::set<User>> QueryAllUserInfo(uint32_t uid);
@@ -93,10 +92,8 @@ class AccountManager {
   QosMapMutexSharedPtr GetAllQosInfo();
 
   WckeyMutexSharedPtr GetExistedWckeyInfo(const std::string& name,
-                                          const std::string& cluster,
                                           const std::string& user_name);
-  CraneExpected<std::string> GetExistedDefaultWckeyName(
-      const std::string& cluster, const std::string& user_name);
+  CraneExpected<std::string> GetExistedDefaultWckeyName(const std::string& user_name);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions
@@ -159,7 +156,6 @@ class AccountManager {
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
   CraneExpected<void> ModifyDefaultWckey(uint32_t uid, const std::string& name,
-                                         const std::string& cluster,
                                          const std::string& user_name);
 
   CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
@@ -210,10 +206,8 @@ class AccountManager {
   const User* GetExistedUserInfoNoLock_(const std::string& name);
 
   const Wckey* GetExistedWckeyInfoNoLock_(const std::string& name,
-                                          const std::string& cluster,
                                           const std::string& user_name);
   const Wckey* GetWckeyInfoNoLock_(const std::string& name,
-                                   const std::string& cluster,
                                    const std::string& user_name);
 
   const Account* GetAccountInfoNoLock_(const std::string& name);
@@ -336,7 +330,6 @@ class AccountManager {
                                                const Account& account,
                                                const std::string& partition);
   CraneExpected<void> DeleteWckey_(const std::string& name,
-                                   const std::string& cluster,
                                    const std::string& user_name);
   CraneExpected<void> AddUserAllowedQos_(const std::string& actor_name,
                                          const User& user,
@@ -358,7 +351,6 @@ class AccountManager {
                                          const std::string& partition,
                                          const std::string& qos);
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
-                                           const std::string& cluster,
                                            const std::string& user);
   CraneExpectedRich<void> SetUserAllowedPartition_(
       const std::string& actor_name, const User& user, const Account& account,
@@ -445,16 +437,14 @@ class AccountManager {
                                const std::string& child);
   struct WckeyKey {
     std::string name;
-    std::string cluster;
     std::string user_name;
 
     template <typename H>
     friend H AbslHashValue(H h, const WckeyKey& key) {
-      return H::combine(std::move(h), key.name, key.cluster, key.user_name);
+      return H::combine(std::move(h), key.name, key.user_name);
     }
     bool operator==(const WckeyKey& other) const {
-      return name == other.name && cluster == other.cluster &&
-             user_name == other.user_name;
+      return name == other.name && user_name == other.user_name;
     }
   };
 

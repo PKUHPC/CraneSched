@@ -367,8 +367,7 @@ message DeleteQosReply {
 message DeleteWckeyRequest {
   uint32 uid = 1;
   string name = 2;
-  string cluster = 3;
-  string user_name = 4;
+  string user_name = 3;
 }
 
 message DeleteWckeyReply {
@@ -421,8 +420,7 @@ message ModifyQosReply {
 message ModifyDefaultWckeyRequest {
   uint32 uid = 1;
   string name = 2;
-  string cluster = 3;
-  string user_name = 4;
+  string user_name = 3;
 }
 
 message ModifyDefaultWckeyReply {
@@ -460,7 +458,7 @@ message QueryWckeyInfoRequest {
 
 message QueryWckeyInfoReply {
   bool ok = 1;
-  repeated WckeyInfo wckey_list = 2;
+  repeated QueryWckeyInfo wckey_list = 2;
   ErrCode code = 3;
 }
 

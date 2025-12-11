@@ -785,11 +785,17 @@ message QosInfo {
   uint64 max_time_limit_per_task = 6;
 }
 
-message WckeyInfo {
+message QueryWckeyInfo {
   string name = 1;
   string cluster = 2;
   string user_name = 3;
   bool is_default = 4;
+}
+
+message WckeyInfo {
+  string name = 1;
+  string user_name = 2;
+  bool is_default = 3;
 }
 
 message TimeInterval {

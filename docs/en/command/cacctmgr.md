@@ -536,13 +536,12 @@ cacctmgr add wckey <name> [options]
 **Options:**
 
 - **User=<username>**: Username (required)
-- **Cluster=<cluster name>**: Cluster name (required)
 
 **Example:**
 
 Add Wckey
 ```bash
-cacctmgr add wckey hpcgroup User=zhangsan Cluster=pkuhpc_test
+cacctmgr add wckey hpcgroup User=zhangsan
 ```
 ### 5.2 Delete Wckey
 
@@ -554,31 +553,29 @@ cacctmgr delete wckey <name> [options]
 **Options:**
 
 - **User=<username>**: Username (required)
-- **Cluster=<cluster name>**: Cluster name (required)
 
 **Example:**
 ```bash
-cacctmgr delete wckey hpcgroup User=zhangsan Cluster=pkuhpc_test
+cacctmgr delete wckey hpcgroup User=zhangsan
 ```
 
 ### 5.3 Modify Default Wckey
 
 **Syntax:**
 ```bash
-cacctmgr modify wckey where User=<name> Cluster=<cluster> set <DefaultWckey>=<wckey>
+cacctmgr modify wckey where User=<name> set DefaultWckey=<wckey>
 ```
 
 **Options:**
 
 - **User=<username>**: Username (required)
-- **Cluster=<cluster name>**: Cluster name (required)
 - **DefaultWckey=<Wckey name>**: Existing Wckey name (required)
 
 **Example:**
 
 Modify default Wckey
 ```bash
-cacctmgr modify wckey where User=zhangsan Cluster=pkuhpc_test set DefaultWckey=hpcgroup
+cacctmgr modify wckey where User=zhangsan set DefaultWckey=hpcgroup
 ```
 
 ### 5.4 Show Wckey
