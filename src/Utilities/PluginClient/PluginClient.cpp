@@ -224,6 +224,22 @@ grpc::Status PluginClient::SendRegisterCranedHook_(
   return m_stub_->RegisterCranedHook(context, *request, &reply);
 }
 
+grpc::Status PluginClient::SendUpdateLicensesHook_(
+    grpc::ClientContext* context, google::protobuf::Message* msg) {
+  using crane::grpc::plugin::UpdateLicensesHookReply;
+  using crane::grpc::plugin::UpdateLicensesHookRequest;
+
+  auto* request = dynamic_cast<UpdateLicensesHookRequest*>(msg);
+  if (!request) {
+    CRANE_ERROR("UpdateLicensesHookRequest is nullptr");
+    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                        "UpdateLicensesHookRequest is nullptr");
+  }
+
+  UpdateLicensesHookReply reply;
+  return m_stub_->UpdateLicensesHook(context, *request, &reply);
+}
+
 void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
@@ -320,6 +336,20 @@ void PluginClient::RegisterCranedHookAsync(
   }
 
   HookEvent e{HookType::REGISTER_CRANED,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
+
+void PluginClient::UpdateLicensesHookAsync(
+    const std::vector<crane::grpc::LicenseInfo>& licenses) {
+  auto request =
+      std::make_unique<crane::grpc::plugin::UpdateLicensesHookRequest>();
+  auto* mutable_lic = request->mutable_license_info();
+  for (auto& lic : licenses) {
+    mutable_lic->Add()->CopyFrom(lic);
+  }
+
+  HookEvent e{HookType::UPDATE_LICENSES,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }

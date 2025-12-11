@@ -56,6 +56,7 @@ class PluginClient {
     INSERT_EVENT,
     UPDATE_POWER_STATE,
     REGISTER_CRANED,
+    UPDATE_LICENSES,
     HookTypeCount,
   };
 
@@ -86,6 +87,9 @@ class PluginClient {
       const std::string& craned_id,
       const std::vector<crane::NetworkInterface>& interfaces);
 
+  void UpdateLicensesHookAsync(
+      const std::vector<crane::grpc::LicenseInfo>& licenses);
+
  private:
   // HookDispatchFunc is a function pointer type that handles different
   // event.
@@ -105,6 +109,10 @@ class PluginClient {
                                          google::protobuf::Message* msg);
   grpc::Status SendRegisterCranedHook_(grpc::ClientContext* context,
                                        google::protobuf::Message* msg);
+
+  grpc::Status SendUpdateLicensesHook_(grpc::ClientContext* context,
+                                       google::protobuf::Message* msg);
+
   void AsyncSendThread_();
 
   std::shared_ptr<Channel> m_channel_;
@@ -123,7 +131,8 @@ class PluginClient {
            &PluginClient::SendCreateCgroupHook_,
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
-           &PluginClient::SendRegisterCranedHook_}};
+           &PluginClient::SendRegisterCranedHook_,
+           &PluginClient::SendUpdateLicensesHook_}};
 };
 
 }  // namespace plugin
