@@ -53,7 +53,7 @@ struct StepInstance {
   }
 
   [[nodiscard]] bool IsContainer() const noexcept {
-    return step_to_d.has_container_meta();
+    return step_to_d.type() == crane::grpc::TaskType::Container;
   }
 
   [[nodiscard]] std::string StepIdString() const noexcept {
@@ -157,7 +157,7 @@ class JobManager {
                              crane::grpc::TaskStatus new_status,
                              uint32_t exit_code,
                              std::optional<std::string> reason,
-                             google::protobuf::Timestamp timestamp);
+                             const google::protobuf::Timestamp& timestamp);
 
   // Wait internal libuv base loop to exit...
   void Wait();
@@ -230,11 +230,10 @@ class JobManager {
    * 3. A task cannot be created because of various reasons.
    *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
    */
-  void ActivateTaskStatusChangeAsync_(job_id_t job_id, step_id_t step_id,
-                                      crane::grpc::TaskStatus new_status,
-                                      uint32_t exit_code,
-                                      std::optional<std::string> reason,
-                                      google::protobuf::Timestamp timestamp);
+  void ActivateTaskStatusChangeAsync_(
+      job_id_t job_id, step_id_t step_id, crane::grpc::TaskStatus new_status,
+      uint32_t exit_code, std::optional<std::string> reason,
+      const google::protobuf::Timestamp& timestamp);
 
   /**
    * Send a signal to the process group of pid. For kill uninitialized

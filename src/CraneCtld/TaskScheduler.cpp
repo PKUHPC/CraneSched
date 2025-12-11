@@ -1026,11 +1026,13 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
 
-      // Job primary steps
+      // Map for AllocJobs rpc.
+      HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
+      // Map for AllocSteps rpc.
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
+
       std::vector<StepInCtld*> step_in_ctld_vec;
 
       Mutex thread_pool_mtx;
@@ -1321,6 +1323,7 @@ void TaskScheduler::StepScheduleThread_() {
             CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
           }
         }
+
         for (auto job_id : jobs_to_remove) {
           m_job_pending_step_num_map_.erase(job_id);
         }
@@ -2875,8 +2878,8 @@ void TaskScheduler::StepStatusChangeAsync(
                                        .exit_code = exit_code,
                                        .new_status = new_status,
                                        .craned_index = craned_index,
-                                       .reason = reason,
-                                       .timestamp = timestamp});
+                                       .reason = std::move(reason),
+                                       .timestamp = std::move(timestamp)});
   m_task_status_change_async_handle_->send();
 }
 
@@ -2929,7 +2932,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         job_finished_status{std::nullopt};
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
-    if (task->DaemonStep() && step_id == task->DaemonStep()->StepId()) {
+    if (task->DaemonStep() != nullptr &&
+        step_id == task->DaemonStep()->StepId()) {
       CRANE_TRACE(
           "[Step #{}.{}] Daemon step status change received, status: {}.",
           task->TaskId(), step_id, new_status);
@@ -4340,9 +4344,21 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (!CheckIfTimeLimitIsValid(step->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
+  if (job->uid != step->uid) {
+    return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
+  }
+
+  if (step->type == crane::grpc::TaskType::Container) {
+    // Check if step is send to a job not supporting container
+    if (job->type != crane::grpc::TaskType::Container)
+      return std::unexpected{CraneErrCode::ERR_INVALID_PARAM};
+    // Copy pod_meta for step
+    step->pod_meta = job->pod_meta;
+  }
+
   std::unordered_set<std::string> avail_nodes;
   for (const auto& craned_id : job->CranedIds()) {
-    auto& job_res = job->AllocatedRes();
+    const auto& job_res = job->AllocatedRes();
     if (step->requested_task_res_view <= job_res.at(craned_id) &&
         (step->included_nodes.empty() ||
          step->included_nodes.contains(craned_id)) &&
@@ -4352,6 +4368,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
 
     if (avail_nodes.size() >= step->node_num) break;
   }
+
   if (step->node_num > avail_nodes.size()) {
     CRANE_TRACE(
         "Resource not enough. Step #{}.{} needs {} nodes, while only {} "
@@ -4366,6 +4383,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   if (job->uid != step->uid) {
     return std::unexpected{CraneErrCode::ERR_PERMISSION_DENIED};
   }
+
   // mem/gres for whole step,only CPU is allocated per task, currently multiply
   // cpu by ntasks_per_node
   auto node_res_view = step->requested_task_res_view;
@@ -4373,6 +4391,7 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   step->requested_node_res_view = node_res_view;
   if (!(step->requested_node_res_view <= job->requested_node_res_view))
     return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
+
   return {};
 }
 
