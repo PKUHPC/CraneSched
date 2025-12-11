@@ -176,9 +176,9 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["JobLifecycleHook"]) {
         const auto& hook_config = config["JobLifecycleHook"];
-        if (hook_config["PrologCranectld"])
+
           util::ParseLogHookPaths(
-              hook_config["PrologCranectld"].as<std::string>(), config_path,
+              YamlValueOr(hook_config["PrologCranectld"], ""), config_path,
               &g_config.JobLifecycleHook.ProLogs);
 
         if (hook_config["EpilogCranectld"])
@@ -186,18 +186,12 @@ void ParseConfig(int argc, char** argv) {
               hook_config["EpilogCranectld"].as<std::string>(), config_path,
               &g_config.JobLifecycleHook.EpiLogs);
 
-        if (hook_config["PrologTimeout"]) {
-          g_config.JobLifecycleHook.PrologTimeout =
-              hook_config["PrologTimeout"].as<uint32_t>();
-        }
-        if (hook_config["EpilogTimeout"]) {
-          g_config.JobLifecycleHook.EpilogTimeout =
-              hook_config["EpilogTimeout"].as<uint32_t>();
-        }
-        if (hook_config["PrologEpilogTimeout"]) {
-          g_config.JobLifecycleHook.PrologEpilogTimeout =
-              hook_config["PrologEpilogTimeout"].as<uint32_t>();
-        }
+        g_config.JobLifecycleHook.PrologTimeout =
+            YamlValueOr<uint32_t>(hook_config["PrologTimeout"], 0);
+        g_config.JobLifecycleHook.EpilogTimeout =
+            YamlValueOr<uint32_t>(hook_config["EpilogTimeout"], 0);
+        g_config.JobLifecycleHook.PrologEpilogTimeout =
+            YamlValueOr<uint32_t>(hook_config["PrologEpilogTimeout"], 0);
         g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
             hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
       }
