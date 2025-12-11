@@ -860,8 +860,10 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
                                                const std::string& reason) {
   if (is_drain) LockResReduceEvents();
 
+  CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain, reason);
+
   if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("unknown craned_id '{}', cannot update drain state.",
+    CRANE_ERROR("Unknown craned_id '{}', cannot update drain state.",
                 craned_id);
     if (is_drain) UnlockResReduceEvents();
     return false;
@@ -888,8 +890,6 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
     AddResReduceEventsAndUnlock({std::make_pair(
         absl::InfinitePast(), std::vector<CranedId>{craned_id})});
   }
-
-  CRANE_DEBUG("Update node '{}' drain state to {}", craned_id, is_drain);
 
   return true;
 }

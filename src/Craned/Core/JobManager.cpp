@@ -844,7 +844,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
           script_lock = true;
         }
 
-        RunLogHookArgs run_prolog_args{
+        RunPrologEpilogArgs run_prolog_args{
             .scripts = g_config.JobLifecycleHook.ProLogs,
             .envs = job->GetJobEnvMap(),
             .run_uid = 0,
@@ -1051,7 +1051,7 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           script_lock = true;
         }
 
-        RunLogHookArgs args{
+        RunPrologEpilogArgs args{
             .scripts = g_config.JobLifecycleHook.ProLogs,
             .envs = env_map,
             .run_uid = 0,
@@ -1443,7 +1443,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
       CRANE_TRACE("Running Epilogs...");
-      RunLogHookArgs run_epilog_args{
+      RunPrologEpilogArgs run_epilog_args{
           .scripts = g_config.JobLifecycleHook.EpiLogs,
           .envs = job.GetJobEnvMap(),
           .run_uid = 0,

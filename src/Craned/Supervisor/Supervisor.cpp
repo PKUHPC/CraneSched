@@ -311,7 +311,7 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   if (!g_config.JobLifecycleHook.Prologs.empty()) {
     CRANE_TRACE("Running Prologs...");
-    RunLogHookArgs run_prolog_args{
+    RunPrologEpilogArgs run_prolog_args{
         .scripts = g_config.JobLifecycleHook.Prologs,
         .envs = g_config.JobEnv,
         .run_uid = 0,
@@ -325,6 +325,7 @@ void GlobalVariableInit(int grpc_output_fd) {
           g_config.JobLifecycleHook.PrologEpilogTimeout;
 
     if (!util::os::RunPrologOrEpiLog(run_prolog_args)) {
+      msg.set_ok(false);
       SerializeDelimitedToZeroCopyStream(msg, &ostream);
       ostream.Close();
       std::abort();

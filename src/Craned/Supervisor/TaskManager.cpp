@@ -1721,7 +1721,7 @@ CraneErrCode ProcInstance::Spawn() {
     InitEnvMap();
 
     if (!g_config.JobLifecycleHook.TaskPrologs.empty()) {
-      RunLogHookArgs run_prolog_args{
+      RunPrologEpilogArgs run_prolog_args{
           .scripts = g_config.JobLifecycleHook.TaskPrologs,
           .envs = m_env_,
           .run_uid = m_parent_step_inst_->uid,
@@ -1742,7 +1742,7 @@ CraneErrCode ProcInstance::Spawn() {
     }
 
     if (!m_parent_step_inst_->GetStep().task_prolog().empty()) {
-      RunLogHookArgs run_prolog_args{
+      RunPrologEpilogArgs run_prolog_args{
           .scripts =
               std::vector<std::string>{
                   m_parent_step_inst_->GetStep().task_prolog()},
@@ -1954,7 +1954,7 @@ TaskManager::~TaskManager() {
 
   if (!g_config.JobLifecycleHook.Epilogs.empty()) {
     CRANE_TRACE("Running Epilogs...");
-    RunLogHookArgs run_epilog_args{
+    RunPrologEpilogArgs run_epilog_args{
         .scripts = g_config.JobLifecycleHook.Epilogs,
         .envs = g_config.JobEnv,
         .run_uid = 0,
@@ -2290,7 +2290,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     if (!m_step_.GetStep().task_epilog().empty()) {
       CRANE_TRACE("[Task #{}] Running step task_epilog...", task_id);
-      RunLogHookArgs run_epilog_args{
+      RunPrologEpilogArgs run_epilog_args{
           .scripts = std::vector<std::string>{m_step_.GetStep().task_epilog()},
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
                                      task->GetParentStep().env().end()},
@@ -2308,7 +2308,7 @@ void TaskManager::EvCleanTaskStopQueueCb_() {
 
     if (!g_config.JobLifecycleHook.TaskEpilogs.empty()) {
       CRANE_TRACE("[Task #{}] Running task_epilog...", task_id);
-      RunLogHookArgs run_epilog_args{
+      RunPrologEpilogArgs run_epilog_args{
           .scripts = g_config.JobLifecycleHook.TaskEpilogs,
           .envs = std::unordered_map{task->GetParentStep().env().begin(),
                                      task->GetParentStep().env().end()},
