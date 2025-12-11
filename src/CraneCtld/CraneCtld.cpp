@@ -168,19 +168,19 @@ void ParseConfig(int argc, char** argv) {
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-      // Keepalive
+      // Keepalived
       if (config["Keepalived"]) {
         auto& g_keepalived_config = g_config.KeepalivedConfig;
-        const auto& keepalived_config = config["Keepalive"];
+        const auto& keepalived_config = config["Keepalived"];
         if (keepalived_config["CraneNFSBaseDir"]) {
           g_keepalived_config.CraneNFSBaseDir = keepalived_config["CraneNFSBaseDir"].as<std::string>();
         } else {
-          CRANE_ERROR("Keepalive.CraneNFSBaseDir is not set in configuration file.");
+          CRANE_ERROR("Keepalived.CraneNFSBaseDir is not set in configuration file.");
           exit(1);
         }
         g_keepalived_config.CraneCtldAliveFile = g_keepalived_config.CraneNFSBaseDir /
-          YamlValueOr(config["CraneCtldAliveFile"], kDefaultCraneCtldAlivePath);
-        // When keepalive is set, the mutex file directory is located in CraneNFSBaseDir.
+          YamlValueOr(keepalived_config["CraneCtldAliveFile"], kDefaultCraneCtldAlivePath);
+        // When keepalived is set, the mutex file directory is located in CraneNFSBaseDir.
         g_config.CraneCtldMutexFilePath =
           g_keepalived_config.CraneNFSBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
                                               kDefaultCraneCtldMutexFile);
@@ -1009,9 +1009,11 @@ int StartServer() {
     int fd = open(g_config.KeepalivedConfig.CraneCtldAliveFile.c_str(), O_CREAT | O_WRONLY, 0666);
     if (fd == -1) {
       CRANE_ERROR("Failed to create alive file: {}", strerror(errno));
-    } else {
-      close(fd);
+      DestroyCtldGlobalVariables();
+      std::exit(1);
     }
+
+    close(fd);
   }
 
   g_ctld_server->Wait();
