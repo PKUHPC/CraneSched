@@ -836,7 +836,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
         (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) == 0) {
       if (!job->is_prolog_run && !step_it->second->IsCalloc()) {
         job->is_prolog_run = true;
-        CRANE_TRACE("#{}: Running prologs....", job_id);
+        CRANE_TRACE("[Step #{}.{}] Running prologs....", job_id, step_id);
 
         bool script_lock = false;
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
@@ -1442,7 +1442,7 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
     }
 
     if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
-      CRANE_TRACE("Running Epilogs...");
+      CRANE_TRACE("#{}: Running epilogs...", job_id);
       RunPrologEpilogArgs run_epilog_args{
           .scripts = g_config.JobLifecycleHook.EpiLogs,
           .envs = job.GetJobEnvMap(),
