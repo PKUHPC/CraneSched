@@ -860,7 +860,8 @@ bool CranedMetaContainer::UpdateNodeDrainState(const std::string& craned_id,
                                                const std::string& reason) {
   if (is_drain) LockResReduceEvents();
 
-  CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain, reason);
+  CRANE_DEBUG("Updating node '{}' state to {}, reason {}.", craned_id, is_drain,
+              reason);
 
   if (!craned_meta_map_.Contains(craned_id)) {
     CRANE_ERROR("Unknown craned_id '{}', cannot update drain state.",

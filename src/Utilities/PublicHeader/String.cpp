@@ -602,8 +602,8 @@ int TimeStr2Mins(absl::string_view input) {
 }
 
 void ParsePrologEpilogHookPaths(const std::string &log_hook_config,
-                       const std::string &config_file_path,
-                       std::vector<std::string> *result) {
+                                const std::string &config_file_path,
+                                std::vector<std::string> *result) {
   auto path_list = absl::StrSplit(log_hook_config, ",");
   std::filesystem::path base_dir =
       std::filesystem::path(config_file_path).parent_path();

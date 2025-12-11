@@ -182,9 +182,9 @@ grpc::Status CtldForInternalServiceImpl::CranedPing(
 }
 
 grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
-    grpc::ServerContext *context,
-    const crane::grpc::UpdateNodeDrainStateRequest *request,
-    crane::grpc::UpdateNodeDrainStateReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::UpdateNodeDrainStateRequest* request,
+    crane::grpc::UpdateNodeDrainStateReply* response) {
   bool result = g_meta_container->UpdateNodeDrainState(
       request->craned_id(), request->drain(), request->reason());
 
