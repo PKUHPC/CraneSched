@@ -167,13 +167,11 @@ struct Config {
   uint32_t ConfigCrcVal;
   std::string CraneCtldDebugLevel;
   std::filesystem::path CraneCtldLogFile;
-  std::filesystem::path CraneCtldAliveFile;
 
   std::string CraneEmbeddedDbBackend;
   std::filesystem::path CraneCtldDbPath;
 
   std::filesystem::path CraneBaseDir;
-  std::filesystem::path CraneNFSBaseDir;
   std::filesystem::path CraneCtldMutexFilePath;
 
   bool CraneCtldForeground{};
@@ -202,6 +200,12 @@ struct Config {
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
   bool WckeyValid{false};
+
+  struct KeepalivedConfig {
+    std::filesystem::path CraneNFSBaseDir;
+    std::filesystem::path CraneCtldAliveFile;
+  };
+  KeepalivedConfig KeepalivedConfig;
 };
 
 struct RunTimeStatus {

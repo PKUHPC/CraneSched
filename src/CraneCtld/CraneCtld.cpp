@@ -125,14 +125,10 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.CraneBaseDir =
           YamlValueOr(config["CraneBaseDir"], kDefaultCraneBaseDir);
-      g_config.CraneNFSBaseDir = YamlValueOr(
-          config["CraneNFSBaseDir"], kDefaultCraneBaseDir);
 
       g_config.CraneCtldLogFile =
           g_config.CraneBaseDir /
           YamlValueOr(config["CraneCtldLogFile"], kDefaultCraneCtldLogPath);
-      g_config.CraneCtldAliveFile = g_config.CraneBaseDir /
-          YamlValueOr(config["CraneCtldAliveFile"], kDefaultCraneCtldAlivePath);
 
       g_config.CraneCtldDebugLevel =
           YamlValueOr(config["CraneCtldDebugLevel"], "info");
@@ -156,7 +152,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       g_config.CraneCtldMutexFilePath =
-          g_config.CraneNFSBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
+          g_config.CraneBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
                                               kDefaultCraneCtldMutexFile);
 
       g_config.ListenConf.CraneCtldListenAddr =
@@ -171,6 +167,24 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
+
+      // Keepalive
+      if (config["Keepalived"]) {
+        auto& g_keepalived_config = g_config.KeepalivedConfig;
+        const auto& keepalived_config = config["Keepalive"];
+        if (keepalived_config["CraneNFSBaseDir"]) {
+          g_keepalived_config.CraneNFSBaseDir = keepalived_config["CraneNFSBaseDir"].as<std::string>();
+        } else {
+          CRANE_ERROR("Keepalive.CraneNFSBaseDir is not set in configuration file.");
+          exit(1);
+        }
+        g_keepalived_config.CraneCtldAliveFile = g_keepalived_config.CraneNFSBaseDir /
+          YamlValueOr(config["CraneCtldAliveFile"], kDefaultCraneCtldAlivePath);
+        // When keepalive is set, the mutex file directory is located in CraneNFSBaseDir.
+        g_config.CraneCtldMutexFilePath =
+          g_keepalived_config.CraneNFSBaseDir / YamlValueOr(config["CraneCtldMutexFilePath"],
+                                              kDefaultCraneCtldMutexFile);
+      }
 
       if (config["TLS"]) {
         auto& g_tls_config = g_config.ListenConf.TlsConfig;
@@ -693,15 +707,19 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneEmbeddedDbBackend = "Unqlite";
 
+      std::filesystem::path db_base_dir = g_config.CraneBaseDir;
+      if (!g_config.KeepalivedConfig.CraneNFSBaseDir.empty())
+        db_base_dir = g_config.KeepalivedConfig.CraneNFSBaseDir;
+
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull()) {
         std::filesystem::path path(config["CraneCtldDbPath"].as<std::string>());
         if (path.is_absolute())
           g_config.CraneCtldDbPath = path;
         else
-          g_config.CraneCtldDbPath = g_config.CraneNFSBaseDir / path;
+          g_config.CraneCtldDbPath = db_base_dir / path;
       } else
         g_config.CraneCtldDbPath =
-            g_config.CraneNFSBaseDir / kDefaultCraneCtldDbPath;
+            db_base_dir / kDefaultCraneCtldDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -838,9 +856,10 @@ void DestroyCtldGlobalVariables() {
   g_thread_pool.reset();
   g_plugin_client.reset();
 
-  if (!util::os::DeleteFile(g_config.CraneCtldAliveFile))
-    CRANE_ERROR("Failed to delete folders for CraneCtld alive file!");
-
+  if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
+    if (!util::os::DeleteFile(g_config.KeepalivedConfig.CraneCtldAliveFile))
+      CRANE_ERROR("Failed to delete folders for CraneCtld alive file!");
+  }
 }
 
 void InitializeCtldGlobalVariables() {
@@ -963,10 +982,12 @@ void CreateFolders() {
     std::exit(1);
   }
 
-  ok = util::os::CreateFoldersForFile(g_config.CraneCtldAliveFile);
-  if (!ok) {
-    CRANE_ERROR("Failed to create folders for CraneCtld alive file!");
-    std::exit(1);
+  if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
+    ok = util::os::CreateFoldersForFile(g_config.KeepalivedConfig.CraneCtldAliveFile);
+    if (!ok) {
+      CRANE_ERROR("Failed to create folders for CraneCtld alive file!");
+      std::exit(1);
+    }
   }
 }
 
@@ -984,11 +1005,13 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  int fd = open(g_config.CraneCtldAliveFile.c_str(), O_CREAT | O_WRONLY, 0666);
-  if (fd == -1) {
-    CRANE_ERROR("Failed to create alive file: {}", strerror(errno));
-  } else {
-    close(fd);
+  if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
+    int fd = open(g_config.KeepalivedConfig.CraneCtldAliveFile.c_str(), O_CREAT | O_WRONLY, 0666);
+    if (fd == -1) {
+      CRANE_ERROR("Failed to create alive file: {}", strerror(errno));
+    } else {
+      close(fd);
+    }
   }
 
   g_ctld_server->Wait();
