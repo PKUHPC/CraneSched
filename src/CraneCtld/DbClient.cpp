@@ -352,10 +352,6 @@ bool MongodbClient::FetchJobRecords(
         }));
   }
 
-  // Only query documents with complete job information
-  // Documents created by InsertSteps only have task_id and steps array
-  filter.append(kvp("has_job_info", true));
-
   bool has_task_types_constraint = !request->filter_task_types().empty();
   if (has_task_types_constraint) {
     filter.append(kvp("type", [&request](sub_document type_doc) {

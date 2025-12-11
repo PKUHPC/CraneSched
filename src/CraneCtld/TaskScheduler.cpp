@@ -2817,12 +2817,14 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
                         std::promise<CraneExpected<step_id_t>>>>
       valid_steps;
   absl::MutexLock lk(&m_running_task_map_mtx_);
+  auto now = absl::Now();
   for (uint32_t i = 0; i < elems.size(); i++) {
     uint32_t pos = elems.size() - 1 - i;
     auto& step = elems[pos].first;
     auto it = m_running_task_map_.find(step->job_id);
     if (it != m_running_task_map_.end()) {
       step->job = it->second.get();
+      step->SetSubmitTime(now);
       auto err = AcquireStepAttributes(step.get());
       if (!err.has_value()) {
         elems[pos].second.set_value(std::unexpected{err.error()});
