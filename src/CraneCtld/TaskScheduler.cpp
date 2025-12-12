@@ -3749,23 +3749,32 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(task_alloc_res.cpu_count);
-
-  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
-  if (task_alloc_res.memory_bytes == 0) {
-    // If a task leaves its memory bytes to 0,
-    // use the partition's default value.
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
-  } else if (part_meta.max_mem_per_cpu != 0) {
-    // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
+  double task_mem_per_cpu = 0.0;
+  if (task->TaskToCtld().has_mem_per_cpu()) {
+    task_mem_per_cpu = task->TaskToCtld().mem_per_cpu();
+  } else if (task_alloc_res.memory_bytes > 0) {
+    // Otherwise, calculate from memory_bytes and number of cores.
     task_mem_per_cpu =
-        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
+        static_cast<double>(task_alloc_res.memory_bytes) / core_double;
+  } else {
+    // User specified memory bytes is zero, will use the partition's default
   }
+
+  // If still zero, use the partition's default value.
+  if (task_mem_per_cpu == 0.0) {
+    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+  }
+
+  // Enforce the partition's maximum if set.
+  if (part_meta.max_mem_per_cpu > 0) {
+    task_mem_per_cpu = std::min(task_mem_per_cpu,
+                                static_cast<double>(part_meta.max_mem_per_cpu));
+  }
+
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+  task_alloc_res.memory_bytes = mem_bytes;
+  task_alloc_res.memory_sw_bytes = mem_bytes;
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);
