@@ -650,7 +650,7 @@ void ParseConfig(int argc, char** argv) {
           item = absl::StripAsciiWhitespace(item);
           if (!item.empty()) items.emplace(item);
         }
-        if (items.contains("wckeys")) g_config.MustNeedWckey = true;
+        g_config.MustNeedWckey = items.contains("wckeys");
       }
       if (config["TrackWCKey"]) {
         auto val = config["TrackWCKey"].as<std::string>();

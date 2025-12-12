@@ -4160,7 +4160,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   }
 
   if (g_config.MustNeedWckey) {
-    if (task->MutableTaskToCtld()->has_wckey()) {
+    if (task->MutableTaskToCtld()->has_wckey() && !task->MutableTaskToCtld()->wckey().empty()) {
       task->wckey = task->MutableTaskToCtld()->wckey();
       auto wckey_scoped_ptr =
           g_account_manager->GetExistedWckeyInfo(task->wckey, task->Username());

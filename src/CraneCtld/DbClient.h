@@ -286,9 +286,7 @@ class MongodbClient {
 
     auto count =
         (*GetClient_())[m_db_name_][coll_name].count_documents(filter.view());
-    if (count == 0) {
-      return false;
-    }
+    if (count != 1) return false; // or switch to update_many if intended
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
         (*GetClient_())[m_db_name_][coll_name].update_one(

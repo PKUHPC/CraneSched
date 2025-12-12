@@ -195,7 +195,7 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
   // validate user existence under write lock
   user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
   if (user_exist == nullptr) {
-    return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
+    return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   }
   const Wckey* find_wckey =
       GetWckeyInfoNoLock_(new_wckey.name, new_wckey.user_name);
@@ -2565,7 +2565,7 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
   std::string old_def_wckey;
   bool need_update_table = false;
   auto& user = *(m_user_map_[user_name]);
-  if (user.default_wckey != new_def_wckey) {
+  if (!user.default_wckey.empty() && user.default_wckey != new_def_wckey) {
     need_update_table = true;
     old_def_wckey = user.default_wckey;
   }
@@ -2596,7 +2596,9 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
   m_wckey_map_[new_wckey_key]->is_default = true;
   m_user_map_[user_name]->default_wckey = new_def_wckey;
   if (need_update_table) {
-    m_wckey_map_[{old_def_wckey, user_name}]->is_default = false;
+    auto old_it = m_wckey_map_.find({old_def_wckey, user_name});
+    if (old_it != m_wckey_map_.end() && old_it->second)
+      old_it->second->is_default = false;
   }
 
   return {};

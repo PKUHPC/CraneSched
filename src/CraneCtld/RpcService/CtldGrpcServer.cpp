@@ -1056,15 +1056,15 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 }
 
 grpc::Status CraneCtldServiceImpl::AddWckey(
-    grpc::ServerContext *context, const crane::grpc::AddWckeyRequest *request,
-    crane::grpc::AddWckeyReply *response) {
+    grpc::ServerContext* context, const crane::grpc::AddWckeyRequest *request,
+    crane::grpc::AddWckeyReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   Wckey wckey;
-  const crane::grpc::WckeyInfo *wckey_info = &request->wckey();
+  const crane::grpc::WckeyInfo* wckey_info = &request->wckey();
 
   wckey.user_name = wckey_info->user_name();
   wckey.name = wckey_info->name();
