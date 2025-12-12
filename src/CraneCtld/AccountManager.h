@@ -314,7 +314,7 @@ class AccountManager {
                               const Qos* stale_qos);
 
   CraneExpected<void> AddWckey_(const Wckey& wckey, const Wckey* stale_wckey,
-                                const User* user_exit);
+                                const User* user);
 
   CraneExpected<void> DeleteUser_(const std::string& actor_name,
                                   const User& user, const std::string& account);

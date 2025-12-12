@@ -1697,7 +1697,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 35 - 39
     "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
     // 40 - 44
-    "nodename_list"   "wckey"
+    "nodename_list", "wckey"
   };
   // clang-format on
 
@@ -1808,7 +1808,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 35 - 39
       "mem_alloc", "device_map", "meta_container", "has_job_info", "licenses_alloc",
       // 40 - 44
-      "nodename_list" "wckey"
+      "nodename_list", "wckey"
   };
   // clang-format on
 
