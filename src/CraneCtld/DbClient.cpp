@@ -1998,8 +1998,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
                  runtime_attr.actual_licenses().begin(),
                  runtime_attr.actual_licenses().end()},
              // 40-44
-             bsoncxx::array::value{nodename_list_array.view()}, task_to_ctld.wckey()
-            };
+             bsoncxx::array::value{nodename_list_array.view()},
+             task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -2099,8 +2099,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              true /* Mark the document having complete job info */,
              task->licenses_count,
              // 40-44
-             bsoncxx::array::value{nodename_list_array.view()}, task->wckey
-            };
+             bsoncxx::array::value{nodename_list_array.view()}, task->wckey};
 
   return DocumentConstructor_(fields, values);
 }

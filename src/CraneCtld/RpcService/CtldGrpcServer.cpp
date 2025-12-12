@@ -1056,7 +1056,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 }
 
 grpc::Status CraneCtldServiceImpl::AddWckey(
-    grpc::ServerContext* context, const crane::grpc::AddWckeyRequest *request,
+    grpc::ServerContext* context, const crane::grpc::AddWckeyRequest* request,
     crane::grpc::AddWckeyReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
@@ -1312,9 +1312,9 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
 }
 
 grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
-    grpc::ServerContext *context,
-    const crane::grpc::ModifyDefaultWckeyRequest *request,
-    crane::grpc::ModifyDefaultWckeyReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::ModifyDefaultWckeyRequest* request,
+    crane::grpc::ModifyDefaultWckeyReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1493,9 +1493,9 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
 }
 
 grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryWckeyInfoRequest *request,
-    crane::grpc::QueryWckeyInfoReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QueryWckeyInfoRequest* request,
+    crane::grpc::QueryWckeyInfoReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1515,8 +1515,8 @@ grpc::Status CraneCtldServiceImpl::QueryWckeyInfo(
     res_wckey_list = std::move(res.value());
   }
 
-  for (const auto &wckey : res_wckey_list) {
-    auto *wckey_info = response->mutable_wckey_list()->Add();
+  for (const auto& wckey : res_wckey_list) {
+    auto* wckey_info = response->mutable_wckey_list()->Add();
     wckey_info->set_name(wckey.name);
     wckey_info->set_cluster(g_config.CraneClusterName);
     wckey_info->set_user_name(wckey.user_name);
@@ -1690,9 +1690,9 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
 }
 
 grpc::Status CraneCtldServiceImpl::DeleteWckey(
-    grpc::ServerContext *context,
-    const crane::grpc::DeleteWckeyRequest *request,
-    crane::grpc::DeleteWckeyReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::DeleteWckeyRequest* request,
+    crane::grpc::DeleteWckeyReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1701,7 +1701,7 @@ grpc::Status CraneCtldServiceImpl::DeleteWckey(
   auto res = g_account_manager->DeleteWckey(request->uid(), request->name(),
                                             request->user_name());
   if (!res) {
-    auto *new_err_record = response->mutable_rich_error();
+    auto* new_err_record = response->mutable_rich_error();
     new_err_record->set_description("");
     new_err_record->set_code(res.error());
     response->set_ok(false);
