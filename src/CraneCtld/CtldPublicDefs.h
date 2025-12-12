@@ -1174,13 +1174,12 @@ struct User {
 struct Wckey {
   bool deleted = false;
   std::string name;
-  uid_t uid;
   std::string user_name; /* user name */
   bool is_default = false;
 
   bool operator==(const Wckey& other) const noexcept {
-    return name == other.name && uid == other.uid &&
-           user_name == other.user_name && is_default == other.is_default;
+    return name == other.name && user_name == other.user_name &&
+           is_default == other.is_default && deleted == other.deleted;
   }
 };
 
