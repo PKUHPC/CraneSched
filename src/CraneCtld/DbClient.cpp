@@ -1679,7 +1679,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 40 nodename_list wckey
 
   // clang-format off
-  std::array<std::string, 41> fields{
+  std::array<std::string, 42> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -1790,7 +1790,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 40 nodename_list wckey
 
   // clang-format off
-  std::array<std::string, 41> fields{
+  std::array<std::string, 42> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
