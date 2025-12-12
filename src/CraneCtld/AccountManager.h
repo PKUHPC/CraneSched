@@ -57,16 +57,16 @@ class AccountManager {
 
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
-  CraneExpected<std::vector<User>> QueryAllUserInfo(uint32_t uid);
+  CraneExpected<std::set<User>> QueryAllUserInfo(uint32_t uid);
 
   CraneExpected<User> QueryUserInfo(uint32_t uid, const std::string& username);
 
-  CraneExpected<std::vector<Account>> QueryAllAccountInfo(uint32_t uid);
+  CraneExpected<std::set<Account>> QueryAllAccountInfo(uint32_t uid);
 
   CraneExpected<Account> QueryAccountInfo(uint32_t uid,
                                           const std::string& account);
 
-  CraneExpected<std::vector<Qos>> QueryAllQosInfo(uint32_t uid);
+  CraneExpected<std::set<Qos>> QueryAllQosInfo(uint32_t uid);
 
   CraneExpected<Qos> QueryQosInfo(uint32_t uid, const std::string& qos);
 

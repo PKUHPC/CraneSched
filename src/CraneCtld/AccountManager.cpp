@@ -312,9 +312,8 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   return QosMapMutexSharedPtr{&m_qos_map_, &m_rw_qos_mutex_};
 }
 
-CraneExpected<std::vector<User>> AccountManager::QueryAllUserInfo(
-    uint32_t uid) {
-  std::vector<User> res_user_list;
+CraneExpected<std::set<User>> AccountManager::QueryAllUserInfo(uint32_t uid) {
+  std::set<User> res_user_set{};
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -328,7 +327,7 @@ CraneExpected<std::vector<User>> AccountManager::QueryAllUserInfo(
     // querying accounts
     for (const auto& user : m_user_map_ | std::views::values) {
       if (user->deleted) continue;
-      res_user_list.emplace_back(*user);
+      res_user_set.emplace(*user);
     }
   } else {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -338,7 +337,7 @@ CraneExpected<std::vector<User>> AccountManager::QueryAllUserInfo(
       while (!queue.empty()) {
         std::string father = queue.front();
         for (const auto& user : m_account_map_.at(father)->users) {
-          res_user_list.emplace_back(*(m_user_map_.at(user)));
+          res_user_set.emplace(*(m_user_map_.at(user)));
         }
         queue.pop();
         for (const auto& child : m_account_map_.at(father)->child_accounts) {
@@ -348,7 +347,7 @@ CraneExpected<std::vector<User>> AccountManager::QueryAllUserInfo(
     }
   }
 
-  return res_user_list;
+  return res_user_set;
 }
 
 CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
@@ -371,10 +370,10 @@ CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
   return *user;
 }
 
-CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
+CraneExpected<std::set<Account>> AccountManager::QueryAllAccountInfo(
     uint32_t uid) {
   User res_user;
-  std::vector<Account> res_account_list;
+  std::set<Account> res_account_set;
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -391,7 +390,7 @@ CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
     // accounts are returned, variable user_account not used
     for (const auto& account : m_account_map_ | std::views::values) {
       if (account->deleted) continue;
-      res_account_list.emplace_back(*account);
+      res_account_set.emplace(*account);
     }
   } else {
     // Otherwise, only all sub-accounts under your own accounts will be
@@ -403,7 +402,7 @@ CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
       // If we query account C, [Z,A,B,C,E,F] is included.
       std::string p_name = m_account_map_.at(acct)->parent_account;
       while (!p_name.empty()) {
-        res_account_list.emplace_back(*(m_account_map_.at(p_name)));
+        res_account_set.emplace(*(m_account_map_.at(p_name)));
         p_name = m_account_map_.at(p_name)->parent_account;
       }
 
@@ -411,7 +410,7 @@ CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
       while (!queue.empty()) {
         std::string father = queue.front();
         const auto& account_content = m_account_map_.at(father);
-        res_account_list.emplace_back(*(account_content));
+        res_account_set.emplace(*(account_content));
         queue.pop();
         for (const auto& child : account_content->child_accounts) {
           queue.push(child);
@@ -420,7 +419,7 @@ CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
     }
   }
 
-  return res_account_list;
+  return res_account_set;
 }
 
 CraneExpected<Account> AccountManager::QueryAccountInfo(
@@ -445,10 +444,10 @@ CraneExpected<Account> AccountManager::QueryAccountInfo(
   return *account_ptr;
 }
 
-CraneExpected<std::vector<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
+CraneExpected<std::set<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   User res_user;
 
-  std::vector<Qos> res_qos_list;
+  std::set<Qos> res_qos_set;
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -463,7 +462,7 @@ CraneExpected<std::vector<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
   if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
     for (const auto& qos : m_qos_map_ | std::views::values) {
       if (qos->deleted) continue;
-      res_qos_list.emplace_back(*qos);
+      res_qos_set.emplace(*qos);
     }
   } else {
     for (const auto& item :
@@ -471,13 +470,13 @@ CraneExpected<std::vector<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
       for (const auto& part_qos_map :
            item.allowed_partition_qos_map | std::views::values) {
         for (const auto& qos : part_qos_map.second) {
-          res_qos_list.emplace_back(*(m_qos_map_.at(qos)));
+          res_qos_set.emplace(*(m_qos_map_.at(qos)));
         }
       }
     }
   }
 
-  return res_qos_list;
+  return res_qos_set;
 }
 
 CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,

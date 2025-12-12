@@ -809,7 +809,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  std::vector<Account> res_account_list;
+  std::set<Account> res_account_list;
   if (request->account_list().empty()) {
     auto res = g_account_manager->QueryAllAccountInfo(request->uid());
     if (!res) {
@@ -829,7 +829,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
         new_err_record->set_description(account);
         new_err_record->set_code(res.error());
       } else {
-        res_account_list.emplace_back(std::move(res.value()));
+        res_account_list.emplace(std::move(res.value()));
       }
     }
   }
@@ -889,7 +889,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
   std::unordered_set<std::string> user_list{request->user_list().begin(),
                                             request->user_list().end()};
 
-  std::vector<User> res_user_list;
+  std::set<User> res_user_list;
   if (user_list.empty()) {
     auto res = g_account_manager->QueryAllUserInfo(request->uid());
     if (!res) {
@@ -907,7 +907,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         new_err_record->set_description(username);
         new_err_record->set_code(res.error());
       } else {
-        res_user_list.emplace_back(std::move(res.value()));
+        res_user_list.emplace(std::move(res.value()));
       }
     }
   }
@@ -966,7 +966,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
-  std::vector<Qos> res_qos_list;
+  std::set<Qos> res_qos_list;
 
   if (request->qos_list().empty()) {
     auto res = g_account_manager->QueryAllQosInfo(request->uid());
@@ -987,7 +987,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
         new_err_record->set_description(qos);
         new_err_record->set_code(res.error());
       } else {
-        res_qos_list.emplace_back(std::move(res.value()));
+        res_qos_list.emplace(std::move(res.value()));
       }
     }
   }
