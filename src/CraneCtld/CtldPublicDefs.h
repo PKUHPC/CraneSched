@@ -795,6 +795,10 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
   }
+
+  bool operator<(Qos const& other) const {
+    return name < other.name;
+  }
 };
 
 struct Account {
@@ -809,6 +813,10 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
+
+  bool operator<(Account const& other) const {
+    return name < other.name;
+  }
 };
 
 struct User {
@@ -845,6 +853,10 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+
+  bool operator<(User const& other) const {
+    return uid < other.uid;
+  }
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
