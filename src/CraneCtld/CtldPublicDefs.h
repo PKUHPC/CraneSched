@@ -957,9 +957,7 @@ struct Qos {
         max_cpus_per_account);
   }
 
-  bool operator<(Qos const& other) const {
-    return name < other.name;
-  }
+  bool operator<(Qos const& other) const { return name < other.name; }
 };
 
 struct Account {
@@ -986,9 +984,7 @@ struct Account {
         fmt::join(coordinators, ", "));
   }
 
-  bool operator<(Account const& other) const {
-    return name < other.name;
-  }
+  bool operator<(Account const& other) const { return name < other.name; }
 };
 
 struct User {
@@ -1075,9 +1071,7 @@ struct User {
     }
   }
 
-  bool operator<(User const& other) const {
-    return uid < other.uid;
-  }
+  bool operator<(User const& other) const { return uid < other.uid; }
 };
 
 // TODO: not use free, only total and used
