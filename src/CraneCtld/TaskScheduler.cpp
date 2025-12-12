@@ -3748,24 +3748,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   // Calculate task memory value based on MEM_PER_CPU and user-set memory.
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
-
-  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
-  if (task_alloc_res.memory_bytes == 0) {
-    // If a task leaves its memory bytes to 0,
-    // use the partition's default value.
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
-  } else if (part_meta.max_mem_per_cpu != 0) {
-    // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
-    task_mem_per_cpu =
-        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
-  }
-  uint64_t mem_bytes = core_double * task_mem_per_cpu;
-
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
-  // Use mem_per_cpu if explicitly set in the task.
+  double core_double = static_cast<double>(task_alloc_res.cpu_count);
   double task_mem_per_cpu = 0.0;
   if (task->TaskToCtld().has_mem_per_cpu()) {
     task_mem_per_cpu = task->TaskToCtld().mem_per_cpu();
