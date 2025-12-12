@@ -93,7 +93,8 @@ class AccountManager {
 
   WckeyMutexSharedPtr GetExistedWckeyInfo(const std::string& name,
                                           const std::string& user_name);
-  CraneExpected<std::string> GetExistedDefaultWckeyName(const std::string& user_name);
+  CraneExpected<std::string> GetExistedDefaultWckeyName(
+      const std::string& user_name);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions

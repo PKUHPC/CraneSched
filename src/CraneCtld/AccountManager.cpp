@@ -389,10 +389,9 @@ CraneExpected<std::string> AccountManager::GetExistedDefaultWckeyName(
   util::read_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(user_name);
-  if (!user)
-    return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   if (user->default_wckey.empty())
-  return std::unexpected(CraneErrCode::ERR_NO_DEFAULT_WCKEY);
+    return std::unexpected(CraneErrCode::ERR_NO_DEFAULT_WCKEY);
 
   return user->default_wckey;
 }
