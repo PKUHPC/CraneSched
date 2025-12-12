@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Usage: $0 mode(1:acct_table | 2:qos_table | 3:task_table | 4:user_table | 5:all | 6:acct_table+qos_table+user_table)"
+echo "Usage: $0 mode(1:acct_table | 2:qos_table | 3:task_table | 4:user_table+wckey_table | 5:all | 6:acct_table+qos_table+user_table+wckey_table)"
 
 if [ "$#" -ne 1 ]; then
   echo "Parameter error: please input mode num!"
@@ -52,4 +52,5 @@ if [ "$mode" -eq 3 ] || [ "$mode" -eq 5 ]; then
 fi
 if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
+  wipe_collection wckey_table
 fi
