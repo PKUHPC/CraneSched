@@ -61,6 +61,8 @@ class StepInstance {
   bool x11_fwd{};
   bool pty{};
 
+  std::optional<std::filesystem::path> script_path;
+
   std::string cgroup_path;  // resolved cgroup path
   bool oom_baseline_inited{false};
   uint64_t baseline_oom_kill_count{0};  // v1 & v2
@@ -89,6 +91,8 @@ class StepInstance {
   StepInstance& operator=(StepInstance&&) = delete;
 
   ~StepInstance() = default;
+  CraneErrCode Prepare();
+  void CleanUp();
 
   [[nodiscard]] bool IsContainer() const noexcept;
   [[nodiscard]] bool IsBatch() const noexcept;
@@ -128,7 +132,10 @@ class StepInstance {
   void StopCriClient() { m_cri_client_.reset(); }
 
   // Just a convenient method for iteration on the map.
-  auto GetTaskIds() const { return m_task_map_ | std::views::keys; }
+  std::unordered_set<task_id_t> GetTaskIds() const {
+    return m_task_map_ | std::views::keys |
+           std::ranges::to<std::unordered_set>();
+  }
 
   ITaskInstance* GetTaskInstance(task_id_t task_id) {
     if (!m_task_map_.contains(task_id)) return nullptr;

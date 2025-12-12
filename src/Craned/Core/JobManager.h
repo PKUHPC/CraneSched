@@ -37,8 +37,7 @@ using StepToD = crane::grpc::StepToD;
 struct StepInstance {
   job_id_t job_id;
   step_id_t step_id;
-
-  pid_t supv_pid;
+  pid_t supv_pid{-1};
 
   crane::grpc::StepToD step_to_d;
   StepStatus status{StepStatus::Invalid};
@@ -84,7 +83,7 @@ struct JobInD {
   job_id_t job_id;
   crane::grpc::JobToD job_to_d;
 
-  std::unique_ptr<Common::CgroupInterface> cgroup{nullptr};
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
   CraneErrCode err_before_supervisor_ready{CraneErrCode::SUCCESS};
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
