@@ -48,7 +48,6 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
   CraneErrCode result = CraneErrCode::SUCCESS;
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
-  auto resource_str = util::ReadableResourceView(resource_view);
   user_meta_map_.try_emplace_l(
       task.Username(),
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
@@ -77,7 +76,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
           {task.qos, QosResource{.resource = std::move(resource_view),
                                  .jobs_per_user = 1}}});
 
-  CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}", resource_str,
+  CRANE_DEBUG("Malloc QOS resource {} for user {}. Ok: {}", util::ReadableResourceView(resource_view),
               task.Username(), result == CraneErrCode::SUCCESS);
 
   return result;

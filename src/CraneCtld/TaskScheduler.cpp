@@ -4105,9 +4105,6 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   // Calculate task memory value based on MEM_PER_CPU and user-set memory.
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
-  const auto core_double = task_alloc_res.CpuCount();
-  if (core_double == 0.0)
-    return std::unexpected{CraneErrCode::ERR_INVALID_PARAM};
 
   double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
   if (task_alloc_res.memory_bytes == 0) {
