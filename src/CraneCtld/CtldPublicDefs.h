@@ -196,7 +196,6 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
-  bool MustNeedWckey{false};
   bool WckeyValid{false};
 };
 

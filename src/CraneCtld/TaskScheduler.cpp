@@ -3802,7 +3802,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     }
   }
 
-  if (g_config.MustNeedWckey) {
+  if (g_config.WckeyValid) {
     if (task->MutableTaskToCtld()->has_wckey() &&
         !task->MutableTaskToCtld()->wckey().empty()) {
       task->wckey = task->MutableTaskToCtld()->wckey();

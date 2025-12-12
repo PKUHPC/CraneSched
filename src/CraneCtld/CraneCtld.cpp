@@ -643,15 +643,7 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
-      if (config["AccountingStorageEnforce"]) {
-        auto item_list = config["AccountingStorageEnforce"].as<std::string>();
-        std::unordered_set<std::string> items;
-        for (absl::string_view item : absl::StrSplit(item_list, ',')) {
-          item = absl::StripAsciiWhitespace(item);
-          if (!item.empty()) items.emplace(item);
-        }
-        g_config.MustNeedWckey = items.contains("wckeys");
-      }
+
       if (config["TrackWCKey"]) {
         auto val = config["TrackWCKey"].as<std::string>();
         val = absl::AsciiStrToLower(val);
