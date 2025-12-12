@@ -702,29 +702,23 @@ void ParseConfig(int argc, char** argv) {
 
         util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["Prolog"], ""), config_path,
-            &g_config.JobLifecycleHook.ProLogs);
-
+            &g_config.JobLifecycleHook.Prologs);
         util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["Epilog"], ""), config_path,
-            &g_config.JobLifecycleHook.EpiLogs);
-
+            &g_config.JobLifecycleHook.Epilogs);
         util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["TaskProlog"], ""), config_path,
             &g_config.JobLifecycleHook.TaskPrologs);
-
         util::ParsePrologEpilogHookPaths(
             YamlValueOr(job_log_hook_config["TaskEpilog"], ""), config_path,
             &g_config.JobLifecycleHook.TaskEpilogs);
 
         g_config.JobLifecycleHook.PrologTimeout =
             YamlValueOr<uint32_t>(job_log_hook_config["PrologTimeout"], 0);
-
         g_config.JobLifecycleHook.EpilogTimeout =
             YamlValueOr<uint32_t>(job_log_hook_config["EpilogTimeout"], 0);
-
         g_config.JobLifecycleHook.PrologEpilogTimeout = YamlValueOr<uint32_t>(
             job_log_hook_config["PrologEpilogTimeout"], 0);
-
         g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
             job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
 
@@ -771,7 +765,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
         }
-      }
+      } // end of JobLifecycleHook
 
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,

@@ -657,10 +657,10 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
       }
 
       if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
-        for (const auto& prolog : g_config.JobLifecycleHook.ProLogs) {
+        for (const auto& prolog : g_config.JobLifecycleHook.Prologs) {
           log_hook_conf->add_prologs(prolog);
         }
-        for (const auto& epilog : g_config.JobLifecycleHook.EpiLogs) {
+        for (const auto& epilog : g_config.JobLifecycleHook.Epilogs) {
           log_hook_conf->add_epilogs(epilog);
         }
       }
@@ -832,7 +832,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
     }
 
     // By default, Prolog is executed just before the job is launched.
-    if (!g_config.JobLifecycleHook.ProLogs.empty() &&
+    if (!g_config.JobLifecycleHook.Prologs.empty() &&
         (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) == 0) {
       if (!job->is_prolog_run && !step_it->second->IsCalloc()) {
         job->is_prolog_run = true;
@@ -845,7 +845,7 @@ void JobManager::EvCleanGrpcExecuteStepQueueCb_() {
         }
 
         RunPrologEpilogArgs run_prolog_args{
-            .scripts = g_config.JobLifecycleHook.ProLogs,
+            .scripts = g_config.JobLifecycleHook.Prologs,
             .envs = job->GetJobEnvMap(),
             .run_uid = 0,
             .run_gid = 0,
@@ -1037,13 +1037,13 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
   }
 
   // force the script to be executed at step allocation
-  if (!g_config.JobLifecycleHook.ProLogs.empty() &&
+  if (!g_config.JobLifecycleHook.Prologs.empty() &&
       ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Alloc) != 0) &&
       ((g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) ==
        0)) {
     if (!job->is_prolog_run) {
       job->is_prolog_run = true;
-      auto run_prolog = [this, job](EnvMap env_map) -> bool {
+      auto run_prolog = [this](RunPrologEpilogArgs args) -> bool {
         bool script_lock = false;
 
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
@@ -1051,25 +1051,10 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           script_lock = true;
         }
 
-        RunPrologEpilogArgs args{
-            .scripts = g_config.JobLifecycleHook.ProLogs,
-            .envs = env_map,
-            .run_uid = 0,
-            .run_gid = 0,
-            .is_prolog = true,
-            .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-
         if (g_config.JobLifecycleHook.PrologTimeout > 0)
           args.timeout_sec = g_config.JobLifecycleHook.PrologTimeout;
         else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
           args.timeout_sec = g_config.JobLifecycleHook.PrologEpilogTimeout;
-
-        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-          args.at_child_setup_cb = [job](pid_t pid) {
-            if (!job || !job->cgroup) return false;
-            return job->cgroup->MigrateProcIn(pid);
-          };
-        }
 
         auto ok = util::os::RunPrologOrEpiLog(args);
 
@@ -1078,12 +1063,23 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
         return ok ? true : false;
       };
 
-      CRANE_DEBUG("#{} Running Prolog In AllocSteps.", job_id);
+      CRANE_DEBUG("[Step #{}.{}] Running Prolog In AllocSteps.", job_id, step_id);
       if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::NoHold) {
-        EnvMap env_map = job->GetJobEnvMap();
+        // TODO: use MigrateProcToCgroupOfJob() ?
+
         g_thread_pool->detach_task([this, job_id, step_id, run_prolog,
-                                    env_map]() {
-          if (!run_prolog(env_map)) {
+                                    env_map = job->GetJobEnvMap()]() {
+          RunPrologEpilogArgs args{
+            .scripts = g_config.JobLifecycleHook.Prologs,
+            .envs = env_map,
+            .run_uid = 0,
+            .run_gid = 0,
+            .is_prolog = true,
+            .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+          // TODO: Contain
+
+          if (!run_prolog(args)) {
             g_ctld_client->UpdateNodeDrainState(true, "Prolog failed (NoHold)");
             ActivateTaskStatusChangeAsync_(
                 job_id, step_id, crane::grpc::TaskStatus::Failed,
@@ -1093,7 +1089,21 @@ void JobManager::LaunchStepMt_(std::unique_ptr<StepInstance> step) {
           }
         });
       } else {
-        if (!run_prolog(job->GetJobEnvMap())) {
+        RunPrologEpilogArgs args{
+          .scripts = g_config.JobLifecycleHook.Prologs,
+          .envs = job->GetJobEnvMap(),
+          .run_uid = 0,
+          .run_gid = 0,
+          .is_prolog = true,
+          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+          args.at_child_setup_cb = [job](pid_t pid) {
+            if (!job || !job->cgroup) return false;
+            return job->cgroup->MigrateProcIn(pid);
+          };
+        }
+        if (!run_prolog(args)) {
           g_ctld_client->UpdateNodeDrainState(true, "Prolog failed");
           ActivateTaskStatusChangeAsync_(
               job_id, step_id, crane::grpc::TaskStatus::Failed,
@@ -1441,10 +1451,10 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
       continue;
     }
 
-    if (!g_config.JobLifecycleHook.EpiLogs.empty()) {
+    if (!g_config.JobLifecycleHook.Epilogs.empty()) {
       CRANE_TRACE("#{}: Running epilogs...", job_id);
       RunPrologEpilogArgs run_epilog_args{
-          .scripts = g_config.JobLifecycleHook.EpiLogs,
+          .scripts = g_config.JobLifecycleHook.Epilogs,
           .envs = job.GetJobEnvMap(),
           .run_uid = 0,
           .run_gid = 0,

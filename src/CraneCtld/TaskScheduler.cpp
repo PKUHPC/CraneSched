@@ -1142,7 +1142,7 @@ void TaskScheduler::ScheduleThread_() {
       Mutex thread_pool_mtx;
       HashSet<task_id_t> failed_job_id_set;
 
-      if (!g_config.JobLifecycleHook.ProLogCtlds.empty()) {
+      if (!g_config.JobLifecycleHook.PrologCtlds.empty()) {
         // TODO: cbatch job must be requeue
         begin = std::chrono::steady_clock::now();
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
@@ -1151,7 +1151,7 @@ void TaskScheduler::ScheduleThread_() {
           g_thread_pool->detach_task([&, job_id, env = job->env]() {
             // run prolog ctld script
             RunPrologEpilogArgs run_prolog_args{
-                .scripts = g_config.JobLifecycleHook.ProLogCtlds,
+                .scripts = g_config.JobLifecycleHook.PrologCtlds,
                 .envs = env,
                 .run_uid = 0,
                 .run_gid = 0,
@@ -3389,10 +3389,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicense(task->licenses_count);
 
-      if (!g_config.JobLifecycleHook.EpiLogCtlds.empty()) {
+      if (!g_config.JobLifecycleHook.EpilogCtlds.empty()) {
         g_thread_pool->detach_task([env_copy = task->env]() {
           RunPrologEpilogArgs run_epilog_ctld_args{
-              .scripts = g_config.JobLifecycleHook.EpiLogCtlds,
+              .scripts = g_config.JobLifecycleHook.EpilogCtlds,
               .envs = env_copy,
               .run_uid = 0,
               .run_gid = 0,

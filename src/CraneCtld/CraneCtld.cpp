@@ -179,12 +179,10 @@ void ParseConfig(int argc, char** argv) {
 
         util::ParsePrologEpilogHookPaths(
             YamlValueOr(hook_config["PrologCranectld"], ""), config_path,
-            &g_config.JobLifecycleHook.ProLogCtlds);
-
-        if (hook_config["EpilogCranectld"])
-          util::ParsePrologEpilogHookPaths(
-              hook_config["EpilogCranectld"].as<std::string>(), config_path,
-              &g_config.JobLifecycleHook.EpiLogCtlds);
+            &g_config.JobLifecycleHook.PrologCtlds);
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(hook_config["EpilogCranectld"], ""), config_path,
+            &g_config.JobLifecycleHook.EpilogCtlds);
 
         g_config.JobLifecycleHook.PrologTimeout =
             YamlValueOr<uint32_t>(hook_config["PrologTimeout"], 0);

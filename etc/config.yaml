@@ -95,20 +95,18 @@ PriorityWeightQoS: 1000000
 #JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 JobLifecycleHook:
-  Prolog: prolog1.sh,prolog2.sh
+  Prolog: /path/to/prolog.sh
   PrologTimeout: 60
-  # TODO: ForceRequeueOnFail
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
-  Epilog: epilog1.sh,epilog2.sh
+  Epilog: /path/to/epilog.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
-  MaxOutputSize: 100000
-  PrologCranectld: prologctld.sh
-  EpilogCranectld: epilogctld.sh
-  CrunProlog: srun_prolog.sh
-  CrunEpilog: srun_epilog.sh
-  TaskProlog: task_prolog.sh
-  TaskEpilog: task_epilog.sh
+  PrologCranectld: /path/to/prologctld.sh
+  EpilogCranectld: /path/to/epilogctld.sh
+  CrunProlog: /path/to/srun_prolog.sh
+  CrunEpilog: /path/to/srun_epilog.sh
+  TaskProlog: /path/to/task_prolog.sh
+  TaskEpilog: /path/to/task_epilog.sh
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
