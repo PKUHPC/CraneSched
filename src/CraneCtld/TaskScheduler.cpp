@@ -973,6 +973,52 @@ void TaskScheduler::ScheduleThread_() {
       }
       m_task_indexes_mtx_.Unlock();
 
+      Mutex thread_pool_mtx;
+      HashSet<task_id_t> failed_job_id_set;
+
+      if (!g_config.JobLifecycleHook.ProLogCtlds.empty()) {
+        // TODO: cbatch job must be requeue
+        begin = std::chrono::steady_clock::now();
+        absl::BlockingCounter prolog_bl(jobs_to_run.size());
+        for (auto& job : jobs_to_run) {
+          const task_id_t job_id = job->TaskId();
+          g_thread_pool->detach_task([&, job_id, env = job->env]() {
+            // run prolog ctld script
+            RunPrologEpilogArgs run_prolog_args{
+                .scripts = g_config.JobLifecycleHook.ProLogCtlds,
+                .envs = env,
+                .run_uid = 0,
+                .run_gid = 0,
+                .is_prolog = true,
+                .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+            if (g_config.JobLifecycleHook.PrologTimeout) {
+              run_prolog_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologTimeout;
+            } else {
+              run_prolog_args.timeout_sec =
+                  g_config.JobLifecycleHook.PrologEpilogTimeout;
+            }
+            CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
+                        job_id, run_prolog_args.run_uid,
+                        run_prolog_args.timeout_sec);
+            auto run_prolog_result =
+                util::os::RunPrologOrEpiLog(run_prolog_args);
+            if (!run_prolog_result) {
+              thread_pool_mtx.Lock();
+              failed_job_id_set.emplace(job_id);
+              thread_pool_mtx.Unlock();
+            }
+            prolog_bl.DecrementCount();
+          });
+        }
+        prolog_bl.Wait();
+        end = std::chrono::steady_clock::now();
+        CRANE_TRACE(
+            "PrologCtld running costed {} ms",
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                .count());
+      }
+
       // RPC is time-consuming. Clustering rpc to one craned for performance.
       HashMap<CranedId, std::vector<crane::grpc::JobToD>> craned_alloc_job_map;
 
@@ -980,9 +1026,6 @@ void TaskScheduler::ScheduleThread_() {
       std::unordered_map<CranedId, std::vector<crane::grpc::StepToD>>
           craned_alloc_steps;
       std::vector<StepInCtld*> step_in_ctld_vec;
-
-      Mutex thread_pool_mtx;
-      HashSet<task_id_t> failed_job_id_set;
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_failed;
 
@@ -1062,7 +1105,6 @@ void TaskScheduler::ScheduleThread_() {
             alloc_job_latch.count_down();
             return;
           }
-
           auto err = stub->AllocJobs(jobs);
           if (err == CraneErrCode::SUCCESS) {
             alloc_job_latch.count_down();
@@ -2681,6 +2723,30 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicenseResource(task->licenses_count);
+
+      if (!g_config.JobLifecycleHook.EpiLogCtlds.empty()) {
+        g_thread_pool->detach_task([env_copy = task->env]() {
+          RunPrologEpilogArgs run_epilog_ctld_args{
+              .scripts = g_config.JobLifecycleHook.EpiLogCtlds,
+              .envs = env_copy,
+              .run_uid = 0,
+              .run_gid = 0,
+              .is_prolog = false,
+              .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+          if (g_config.JobLifecycleHook.EpilogTimeout) {
+            run_epilog_ctld_args.timeout_sec =
+                g_config.JobLifecycleHook.EpilogTimeout;
+          } else {
+            run_epilog_ctld_args.timeout_sec =
+                g_config.JobLifecycleHook.PrologEpilogTimeout;
+          }
+          CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
+                      run_epilog_ctld_args.run_uid,
+                      run_epilog_ctld_args.timeout_sec);
+          util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
+        });
+      }
+
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 

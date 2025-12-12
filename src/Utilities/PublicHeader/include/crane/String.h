@@ -20,6 +20,7 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
+#include <glob.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <re2/re2.h>
@@ -207,4 +208,8 @@ constexpr std::array<std::string_view, crane::grpc::TaskStatus_ARRAYSIZE>
 };  // namespace Internal
 
 std::string StepStatusToString(const crane::grpc::TaskStatus& status);
+void ParsePrologEpilogHookPaths(const std::string& log_hook_config,
+                                const std::string& config_file_path,
+                                std::vector<std::string>* result);
+
 }  // namespace util

@@ -181,6 +181,9 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+
+  string task_prolog = 42;
+  string task_epilog = 43;
 }
 
 message TaskInEmbeddedDb {
@@ -339,6 +342,9 @@ message StepToD {
 
   // Not used now.
   string extra_attr = 29;
+
+  string task_prolog = 30;
+  string task_epilog = 31;
 }
 
 message JobStepsToD {
@@ -689,6 +695,7 @@ enum ErrCode {
   ERR_NOT_FORCE = 76;
   ERR_INVALID_USERNAME = 77;
   ERR_LICENSE_LEGAL_FAILED = 78;
+  ERR_PROLOG = 79;
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.

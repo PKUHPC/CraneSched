@@ -57,6 +57,11 @@ struct StepInstance {
     return step_to_d.has_container_meta();
   }
 
+  [[nodiscard]] bool IsCalloc() const noexcept {
+    return step_to_d.interactive_meta().interactive_type() ==
+           crane::grpc::Calloc;
+  }
+
   [[nodiscard]] std::string StepIdString() const noexcept {
     return std::format("{}.{}", job_id, step_id);
   }
@@ -89,6 +94,8 @@ struct JobInD {
 
   std::unique_ptr<absl::Mutex> step_map_mtx;
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
+
+  bool is_prolog_run{false};
 
   EnvMap GetJobEnvMap();
 };
@@ -308,6 +315,8 @@ class JobManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
+
+  util::mutex m_prolog_serial_mutex_;  // when prolog flags set Serial
 
   std::thread m_uvw_thread_;
 };

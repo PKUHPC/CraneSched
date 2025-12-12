@@ -86,6 +86,22 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
 
+JobLifecycleHook:
+  Prolog: prolog1.sh,prolog2.sh
+  PrologTimeout: 60
+  # TODO: ForceRequeueOnFail
+  # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
+  Epilog: epilog1.sh,epilog2.sh
+  EpilogTimeout: 60
+  PrologEpilogTimeout: 120
+  MaxOutputSize: 100000
+  PrologCranectld: prologctld.sh
+  EpilogCranectld: epilogctld.sh
+  CrunProlog: srun_prolog.sh
+  CrunEpilog: srun_epilog.sh
+  TaskProlog: task_prolog.sh
+  TaskEpilog: task_epilog.sh
+
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:

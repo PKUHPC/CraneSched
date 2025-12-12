@@ -158,6 +158,17 @@ struct Config {
   };
   ContainerConfig Container;
 
+  struct JobLifecycleHookConfig {
+    std::vector<std::string> ProLogCtlds;  // ctld prologs
+    std::vector<std::string> EpiLogCtlds;  // ctld epilogs
+    uint32_t PrologTimeout{0};
+    uint32_t EpilogTimeout{0};
+    uint32_t PrologEpilogTimeout{0};
+    uint64_t MaxOutputSize;
+  };
+
+  JobLifecycleHookConfig JobLifecycleHook;
+
   bool CompressedRpc{};
 
   std::string CraneClusterName;
@@ -484,6 +495,9 @@ struct StepInCtld {
 
   // TODO: Find somewhere else to put this field?
   std::optional<ContainerMetaInTask> container_meta;
+
+  std::string task_prolog;
+  std::string task_epilog;
 
  protected:
   /* ------------- [2] -------------

@@ -655,6 +655,83 @@ void ParseConfig(int argc, char** argv) {
           }
         }
       }
+
+      if (config["JobLifecycleHook"]) {
+        const auto& job_log_hook_config = config["JobLifecycleHook"];
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["Prolog"], ""), config_path,
+            &g_config.JobLifecycleHook.ProLogs);
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["Epilog"], ""), config_path,
+            &g_config.JobLifecycleHook.EpiLogs);
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["TaskProlog"], ""), config_path,
+            &g_config.JobLifecycleHook.TaskPrologs);
+
+        util::ParsePrologEpilogHookPaths(
+            YamlValueOr(job_log_hook_config["TaskEpilog"], ""), config_path,
+            &g_config.JobLifecycleHook.TaskEpilogs);
+
+        g_config.JobLifecycleHook.PrologTimeout =
+            YamlValueOr<uint32_t>(job_log_hook_config["PrologTimeout"], 0);
+
+        g_config.JobLifecycleHook.EpilogTimeout =
+            YamlValueOr<uint32_t>(job_log_hook_config["EpilogTimeout"], 0);
+
+        g_config.JobLifecycleHook.PrologEpilogTimeout = YamlValueOr<uint32_t>(
+            job_log_hook_config["PrologEpilogTimeout"], 0);
+
+        g_config.JobLifecycleHook.MaxOutputSize = YamlValueOr<uint64_t>(
+            job_log_hook_config["MaxOutputSize"], kDefaultPrologOutputSize);
+
+        auto prolog_flags =
+            YamlValueOr<std::string>(job_log_hook_config["PrologFlags"], "");
+
+        for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
+          std::string trimmed(
+              absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
+          if (trimmed == "alloc")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
+          if (trimmed == "contain")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
+          if (trimmed == "nohold")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::NoHold;
+          if (trimmed == "forcerequeueonfail")
+            g_config.JobLifecycleHook.PrologFlags |= ForceRequeueOnFail;
+          if (trimmed == "runinjob")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::RunInJob;
+          if (trimmed == "serial")
+            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Serial;
+        }
+        // judge
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
+        }
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::NoHold) {
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
+          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
+            CRANE_ERROR("Cannot set NoHold, Contain flags at the same time.");
+            std::exit(1);
+          }
+        }
+        if (g_config.JobLifecycleHook.PrologFlags &
+            PrologFlagEnum::ForceRequeueOnFail) {
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
+        }
+        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
+          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
+          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
+            CRANE_ERROR(
+                "Cannot set RunInJob and Serial flags at the same time.");
+            std::exit(1);
+          }
+        }
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
