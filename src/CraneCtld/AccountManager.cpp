@@ -20,6 +20,7 @@
 
 #include "AccountMetaContainer.h"
 #include "Security/VaultClient.h"
+#include "TaskScheduler.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -195,6 +196,9 @@ CraneExpected<void> AccountManager::DeleteUser(uint32_t uid,
   // The provided account is invalid.
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+
+  if (g_account_meta_container->UserHasTask(user->name))
+    return std::unexpected(CraneErrCode::ERR_USER_HAS_TASK);
 
   return DeleteUser_(op_user->name, *user, account);
 }
@@ -993,26 +997,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-  std::string item = "";
-  switch (modify_field) {
-  case crane::grpc::ModifyField::Description:
-    item = "description";
-    break;
-  case crane::grpc::ModifyField::Priority:
-    item = "priority";
-    break;
-  case crane::grpc::ModifyField::MaxJobsPerUser:
-    item = "max_jobs_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxCpusPerUser:
-    item = "max_cpus_per_user";
-    break;
-  case crane::grpc::ModifyField::MaxTimeLimitPerTask:
-    item = "max_time_limit_per_task";
-    break;
-  default:
-    std::unreachable();
-  }
+  std::string item = std::string(CraneModifyFieldStr(modify_field));
 
   bool value_is_number{false};
   int64_t value_number;
@@ -1028,7 +1013,7 @@ CraneExpected<void> AccountManager::ModifyQos(
   }
 
   mongocxx::client_session::with_transaction_cb callback;
-  if (item == "description") {
+  if (item == Qos::FieldStringOfDescription()) {
     // Update to database
     callback = [&](mongocxx::client_session* session) {
       g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
@@ -1164,6 +1149,15 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
 CraneExpected<void> AccountManager::CheckQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  {
+    const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+    std::string account_name = task->account;
+    do {
+      task->account_chain.emplace_back(account_name);
+      account_name = account_map_ptr->at(account_name)->parent_account;
+    } while (!account_name.empty());
+  }
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
@@ -2101,7 +2095,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const std::string& actor_name,
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
+  g_account_meta_container->DeleteUserMeta(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
@@ -2141,6 +2135,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(
   for (const auto& qos : account.allowed_qos_list) {
     m_qos_map_[qos]->reference_count--;
   }
+
+  g_account_meta_container->DeleteAccountMeta(name);
 
   return {};
 }

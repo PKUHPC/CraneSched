@@ -254,12 +254,13 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Invalid username",
         "Reserved for future use",
         "Reserved for future use",
-  
+
         // 80 - 84
         "CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.",
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
         "Invalid memory format"
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
     };
 // clang-format on
 }  // namespace Internal

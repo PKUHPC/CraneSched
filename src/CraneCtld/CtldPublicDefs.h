@@ -707,6 +707,8 @@ struct TaskInCtld {
 
   std::unordered_map<std::string, uint32_t> licenses_count;
 
+  std::list<std::string> account_chain;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -918,10 +920,13 @@ struct Qos {
   uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
+  uint32_t max_jobs_per_account;
   uint32_t max_running_tasks_per_user;
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+  uint32_t max_submit_jobs_per_user;
+  uint32_t max_submit_jobs_per_account;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -935,6 +940,9 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxJobsPerUser() {
     return "max_jobs_per_user";
   }
+  static constexpr const char* FieldStringOfMaxJobsPerAccount() {
+    return "max_jobs_per_account";
+  }
   static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
     return "max_time_limit_per_task";
   }
@@ -943,6 +951,12 @@ struct Qos {
   }
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
+    return "max_submit_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
+    return "max_submit_jobs_per_account";
   }
 
   std::string QosToString() const {
@@ -1094,7 +1108,8 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
 
 struct QosResource {
   ResourceView resource;
-  uint32_t jobs_per_user;
+  uint32_t jobs_count;
+  uint32_t submit_jobs_count;
 };
 
 // Transaction
@@ -1105,6 +1120,29 @@ struct Txn {
   crane::grpc::TxnAction action;
   std::string info;
 };
+
+constexpr std::array<std::string_view, crane::grpc::ModifyField_ARRAYSIZE> CraneModifyFieldStrArr =  {
+  "partition",
+  "qos",
+  "default_qos",
+  "description", // account and qos
+  // user
+  "admin_level",
+  "default_account",
+  // qos
+  "priority",
+  "max_jobs_per_user",
+  "max_cpus_per_user",
+  "max_time_limit_per_task",
+  "max_jobs_per_account",
+  "max_submit_jobs_per_user",
+  "max_submit_jobs_per_account"
+};
+
+inline std::string_view CraneModifyFieldStr(
+    crane::grpc::ModifyField modify_field) {
+  return CraneModifyFieldStrArr[static_cast<uint16_t>(modify_field)];
+}
 
 }  // namespace Ctld
 
