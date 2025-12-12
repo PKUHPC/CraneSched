@@ -2418,7 +2418,8 @@ CraneExpected<void> AccountManager::DeleteWckey_(const std::string& name,
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_wckey_map_[{name, user_name}]->deleted = true;
+  if (m_wckey_map_[{name, user_name}])
+    m_wckey_map_[{name, user_name}]->deleted = true;
 
   return {};
 }
