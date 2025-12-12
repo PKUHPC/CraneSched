@@ -97,7 +97,7 @@ bool ConvertStringToInt64(const std::string& s, int64_t* val);
 std::string ReadableResourceView(const ResourceView& resource);
 std::string ReadableTypedDeviceMap(const DeviceMap& dedicated_resource);
 std::string ReadableDresInNode(const ResourceInNode& dedicated_resource);
-git std::string ReadableGrpcDresInNode(
+std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode& dres_in_node);
 
 std::string GenerateCommaSeparatedString(int val);
