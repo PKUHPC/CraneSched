@@ -190,8 +190,8 @@ CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
     if (!result) return result;
   }
 
-  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   // validate user existence under write lock
   user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
   if (user_exist == nullptr) {

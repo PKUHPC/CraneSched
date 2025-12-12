@@ -1313,11 +1313,6 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
-  if (g_config.WckeyValid || g_config.MustNeedWckey) {
-    task_info->set_wckey_valid(true);
-  } else {
-    task_info->set_wckey_valid(false);
-  }
 
   task_info->set_wckey(wckey);
 
