@@ -956,6 +956,8 @@ struct Qos {
         absl::FormatDuration(max_time_limit_per_task), max_cpus_per_user,
         max_cpus_per_account);
   }
+
+  bool operator<(Qos const& other) const { return name < other.name; }
 };
 
 struct Account {
@@ -981,6 +983,8 @@ struct Account {
         fmt::join(allowed_partition, ", "), fmt::join(allowed_qos_list, ", "),
         fmt::join(coordinators, ", "));
   }
+
+  bool operator<(Account const& other) const { return name < other.name; }
 };
 
 struct User {
@@ -1066,6 +1070,8 @@ struct User {
       return "Unknown";
     }
   }
+
+  bool operator<(User const& other) const { return uid < other.uid; }
 };
 
 // TODO: not use free, only total and used
