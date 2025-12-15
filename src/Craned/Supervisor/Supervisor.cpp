@@ -30,7 +30,7 @@
 
 using Craned::Supervisor::g_config;
 
-void InitFromStdin(int argc, char** argv) {
+int InitFromStdin(int argc, char** argv) {
   auto supervisor_start_time = std::chrono::system_clock::now();
   cxxopts::Options options("CSupervisor");
 
@@ -38,6 +38,10 @@ void InitFromStdin(int argc, char** argv) {
   options.add_options()
       ("v,version", "Display version information")
       ("h,help", "Display help for CSupervisor")
+      ("i,input-fd",
+        "Input file descriptor for supervisor(For internal use only)",cxxopts::value<int>())
+      ("o,output-fd",
+        "Output file descriptor for supervisor(For internal use only)",cxxopts::value<int>())
       ;
   // clang-format on
 
@@ -59,16 +63,34 @@ void InitFromStdin(int argc, char** argv) {
     std::exit(0);
   }
 
+  int grpc_input_fd = -1;
+  int grpc_output_fd = -1;
+  if (parsed_args.count("input-fd") > 0) {
+    grpc_input_fd = parsed_args["input-fd"].as<int>();
+  } else {
+    fmt::print(stderr, "Input fd is required.\n");
+    std::exit(1);
+  }
+  if (parsed_args.count("output-fd") > 0) {
+    grpc_output_fd = parsed_args["output-fd"].as<int>();
+  } else {
+    fmt::print(stderr, "Output fd is required.\n");
+    std::exit(1);
+  }
+
   using google::protobuf::io::FileInputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
 
-  auto istream = FileInputStream(STDIN_FILENO);
+  auto istream = FileInputStream(grpc_input_fd);
   crane::grpc::supervisor::InitSupervisorRequest msg;
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
   if (!ok) {
-    fmt::print(stderr, "[Supervisor] Failed to recv message from Craned.\n");
+    fmt::print(stderr,
+               "[Supervisor pid#{}] Failed to recv message from Craned.\n",
+               getpid());
     std::abort();
   }
+  close(grpc_input_fd);
   auto recv_init_msg_time = std::chrono::system_clock::now();
 
   g_config.JobId = msg.job_id();
@@ -129,15 +151,42 @@ void InitFromStdin(int argc, char** argv) {
                g_config.SupervisorMaxLogFileSize,
                g_config.SupervisorMaxLogFileNum);
   } else {
-    fmt::print(stderr, "[Supervisor] Invalid debug level: {}\n",
-               g_config.SupervisorDebugLevel);
+    fmt::print(stderr, "[Supervisor #{}.{}] Invalid debug level: {}\n",
+               g_config.SupervisorDebugLevel, g_config.JobId, g_config.StepId);
     ok = false;
+  }
+  if (ok) {
+    int null_fd = open("/dev/null", O_WRONLY);
+    if (null_fd != -1) {
+      if (dup2(null_fd, STDOUT_FILENO) == -1) {
+        fmt::print(
+            stderr,
+            "[Supervisor #{}.{}] Stdout failed to redirect to /dev/null: {}\n",
+            g_config.JobId, g_config.StepId, std::strerror(errno));
+        ok = false;
+      }
+      if (dup2(null_fd, STDERR_FILENO) == -1) {
+        fmt::print(
+            stderr,
+            "[Supervisor #{}.{}] Stderr failed to redirect to /dev/null: {}\n",
+            g_config.JobId, g_config.StepId, std::strerror(errno));
+        ok = false;
+      }
+      close(null_fd);
+    } else {
+      fmt::print(
+          stderr,
+          "[Supervisor #{}.{}] Failed to open /dev/null for stdout and stderr "
+          "writing: {}\n",
+          g_config.JobId, g_config.StepId, std::strerror(errno));
+      ok = false;
+    }
   }
 
   if (!ok) {
     using google::protobuf::io::FileOutputStream;
     using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-    auto ostream = FileOutputStream(STDOUT_FILENO);
+    auto ostream = FileOutputStream(grpc_output_fd);
     crane::grpc::supervisor::SupervisorReady msg;
     msg.set_ok(ok);
     SerializeDelimitedToZeroCopyStream(msg, &ostream);
@@ -148,6 +197,7 @@ void InitFromStdin(int argc, char** argv) {
              std::chrono::current_zone()->to_local(supervisor_start_time));
   CRANE_INFO("Supervisor recv init msg at: {}",
              std::chrono::current_zone()->to_local(recv_init_msg_time));
+  return grpc_output_fd;
 }
 
 bool CreateRequiredDirectories() {
@@ -164,11 +214,11 @@ bool CreateRequiredDirectories() {
   return ok;
 }
 
-void GlobalVariableInit() {
+void GlobalVariableInit(int grpc_output_fd) {
   bool ok = CreateRequiredDirectories();
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-  auto ostream = FileOutputStream(STDOUT_FILENO);
+  auto ostream = FileOutputStream(grpc_output_fd);
 
   // Ready for grpc call
   crane::grpc::supervisor::SupervisorReady msg;
@@ -235,16 +285,17 @@ void GlobalVariableInit() {
 
   ok &= ostream.Flush();
   if (!ok) std::abort();
+  close(grpc_output_fd);
 }
 
-void StartServer() {
+void StartServer(int grpc_output_fd) {
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
 
-  GlobalVariableInit();
+  GlobalVariableInit(grpc_output_fd);
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
@@ -284,7 +335,7 @@ void InstallStackTraceHooks() {
 }
 
 int main(int argc, char** argv) {
-  InitFromStdin(argc, argv);
+  auto grpc_output_fd = InitFromStdin(argc, argv);
   InstallStackTraceHooks();
-  StartServer();
+  StartServer(grpc_output_fd);
 }

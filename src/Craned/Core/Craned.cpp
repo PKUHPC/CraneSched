@@ -1071,8 +1071,6 @@ void StartServer() {
 
   GlobalVariableInit();
 
-  // Set FD_CLOEXEC on stdin, stdout, stderr
-  util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
   g_ctld_client->StartGrpcCtldConnection();

@@ -1446,7 +1446,6 @@ TaskManager::TaskManager()
   if (m_sigchld_handle_->start(SIGCHLD) != 0) {
     CRANE_ERROR("Failed to start the SIGCHLD handle");
   }
-
   m_sigchld_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
   m_sigchld_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
