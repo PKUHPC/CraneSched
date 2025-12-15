@@ -51,13 +51,13 @@ CforedClient::CforedClient() {
         CleanStopTaskIOQueueCb_();
       });
 
-
   m_reconnect_async_ = m_loop_->resource<uvw::async_handle>();
   m_reconnect_async_->on<uvw::async_event>([this](const uvw::async_event&, uvw::async_handle&) {
-      while (m_wait_reconn_ && !m_stopped_) {
-        InitChannelAndStub(m_cfored_name_);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      }
+    while (m_wait_reconn_ && !m_stopped_) {
+      InitChannelAndStub(m_cfored_name_);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  });
 
   std::shared_ptr<uvw::idle_handle> idle_handle =
       m_loop_->resource<uvw::idle_handle>();
