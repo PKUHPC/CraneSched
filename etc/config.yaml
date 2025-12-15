@@ -86,7 +86,7 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQoS: 1000000
 
-JobSubmitLuaScript: /path/to/your/job_submit.lua
+#JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
