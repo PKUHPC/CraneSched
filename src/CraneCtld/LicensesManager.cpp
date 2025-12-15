@@ -206,9 +206,9 @@ bool LicensesManager::MallocLicenseResource(
 
   if (g_config.Plugin.Enabled) {
     std::vector<crane::grpc::LicenseInfo> license_infos;
-    license_infos.reserve(licenses_map->size());
-    for (const auto& [lic_id, lic_ptr] : *licenses_map) {
-      auto lic = lic_ptr.GetExclusivePtr();
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
@@ -245,9 +245,9 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
 
   if (g_config.Plugin.Enabled) {
     std::vector<crane::grpc::LicenseInfo> license_infos;
-    license_infos.reserve(licenses_map->size());
-    for (const auto& [lic_id, lic_ptr] : *licenses_map) {
-      auto lic = lic_ptr.GetExclusivePtr();
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
@@ -282,9 +282,9 @@ void LicensesManager::FreeLicenseResource(
 
   if (g_config.Plugin.Enabled) {
     std::vector<crane::grpc::LicenseInfo> license_infos;
-    license_infos.reserve(licenses_map->size());
-    for (const auto& [lic_id, lic_ptr] : *licenses_map) {
-      auto lic = lic_ptr.GetExclusivePtr();
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
