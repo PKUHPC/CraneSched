@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2025 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -46,7 +46,7 @@ class LuaJobHandler {
 #ifdef HAVE_LUA
   static const luaL_Reg kGlobalFunctions[];
   static const luaL_Reg kCraneFunctions[];
-  static const char* kReqFxns[];
+  static const std::vector<std::string> kReqFxns;
 
   static int GetQosPriorityCb_(lua_State* lua_state);
 
@@ -55,12 +55,12 @@ class LuaJobHandler {
   static int SetJobEnvFieldCb_(lua_State* lua_state);
   static int SetJobReqFieldCb_(lua_State* lua_state);
   static int GetPartRecFieldNameCb_(lua_State* lua_state);
-  static int GetJobEnvField_(const TaskInCtld& job_desc, const char* name,
+  static int GetJobEnvField_(const TaskInCtld& job_desc, const std::string& name,
                              lua_State* lua_state);
-  static int GetJobReqField_(const TaskInCtld& job_desc, const char* name,
+  static int GetJobReqField_(const TaskInCtld& job_desc, const std::string& name,
                              lua_State* lua_state);
   static int GetPartRecField_(const crane::grpc::PartitionInfo& partition_meta,
-                              const char* name, lua_State* lua_state);
+                              const std::string& name, lua_State* lua_state);
 
   static void UpdateJobGloable_(
       const crane::LuaEnvironment& lua_env,
@@ -82,10 +82,10 @@ class LuaJobHandler {
   static int ResvFieldIndex_(lua_State* lua_state);
   static int LuaJobRecordField_(lua_State* lua_state,
                                 crane::grpc::TaskInfo* job_ptr,
-                                const char* name);
+                                const std::string& name);
   static int ResvField_(lua_State* lua_state,
                         crane::grpc::ReservationInfo* resv_ptr,
-                        const char* name);
+                        const std::string& name);
 
   static void PushResourceView_(lua_State* L, const ResourceView& res);
 #endif

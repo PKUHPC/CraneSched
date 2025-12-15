@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2025 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -43,7 +43,7 @@ class LuaEnvironment {
 
   void RegisterLuaCraneStructFunctions(const luaL_Reg* global_funcs);
 
-  bool LoadLuaScript(const char* req_funcs[]);
+  bool LoadLuaScript(std::vector<std::string> req_funcs);
 
   lua_State* GetLuaState() const { return m_lua_state_; }
   std::string GetUserMsg() const { return m_user_msg_; }
@@ -64,10 +64,11 @@ class LuaEnvironment {
 
   int LogLuaUserMsg_(lua_State* lua_state);
   static int LogLuaUserMsgStatic_(lua_State* lua_state);
-  static bool CheckLuaScriptFunction_(lua_State* lua_state, const char* name);
-  static bool CheckLuaScriptFunctions_(lua_State* lua_state,
-                                       const std::string& script_pash,
-                                       const char** req_fxns);
+  static bool CheckLuaScriptFunction_(lua_State* lua_state,
+                                      const std::string& name);
+  static bool CheckLuaScriptFunctions_(
+      lua_State* lua_state, const std::string& script_path,
+      const std::vector<std::string>& req_fxns);
 
   std::string m_lua_script_;
   lua_State* m_lua_state_{};
