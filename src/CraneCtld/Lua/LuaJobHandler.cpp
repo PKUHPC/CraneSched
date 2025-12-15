@@ -23,6 +23,25 @@
 
 namespace Ctld {
 
+#ifdef HAVE_LUA
+
+const luaL_Reg LuaJobHandler::kGlobalFunctions[] = {
+  {"_get_job_env_field_name", LuaJobHandler::GetJobEnvFieldNameCb_},
+  {"_get_job_req_field_name", LuaJobHandler::GetJobReqFieldNameCb_},
+  {"_set_job_env_field", LuaJobHandler::SetJobEnvFieldCb_},
+  {"_set_job_req_field", LuaJobHandler::SetJobReqFieldCb_},
+  {"_get_part_rec_field", LuaJobHandler::GetPartRecFieldNameCb_},
+  {nullptr, nullptr}};
+
+const luaL_Reg LuaJobHandler::kCraneFunctions[] = {
+  {"get_qos_priority", GetQosPriorityCb_}, {nullptr, nullptr}};
+
+const std::vector<std::string> LuaJobHandler::kReqFxns = {
+  "crane_job_submit",
+  "crane_job_modify"
+};
+#endif
+
 CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script, TaskInCtld* task) {
   CraneRichError result = FormatRichErr(CraneErrCode::SUCCESS, "");
 #ifdef HAVE_LUA
