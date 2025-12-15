@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+ * Copyright (c) 2025 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -55,7 +55,7 @@ void LuaEnvironment::RegisterLuaCraneStructFunctions(
   }
 }
 
-bool LuaEnvironment::LoadLuaScript(const char* req_funcs[]) {
+bool LuaEnvironment::LoadLuaScript(const std::vector<std::string> req_funcs) {
   if (m_lua_state_ == nullptr) {
     CRANE_DEBUG(
         "Lua state (m_lua_state_) is null when loading script '{}'. "
@@ -236,7 +236,7 @@ void LuaEnvironment::RegisterOutputErrTab_() {
   for (int i = 0; i < desc->value_count(); ++i) {
     const google::protobuf::EnumValueDescriptor* vdesc = desc->value(i);
     lua_pushnumber(m_lua_state_, vdesc->number());
-    lua_setfield(m_lua_state_, -2, vdesc->name().c_str());
+    lua_setfield(m_lua_state_, -2, vdesc->name().data());
   }
 }
 
@@ -259,22 +259,21 @@ int LuaEnvironment::LogLuaUserMsgStatic_(lua_State* lua_state) {
 }
 
 bool LuaEnvironment::CheckLuaScriptFunction_(lua_State* lua_state,
-                                             const char* name) {
+                                             const std::string& name) {
   bool result = true;
-  lua_getglobal(lua_state, name);
+  lua_getglobal(lua_state, name.data());
   if (!lua_isfunction(lua_state, -1)) result = false;
   lua_pop(lua_state, -1);
   return result;
 }
 
 bool LuaEnvironment::CheckLuaScriptFunctions_(lua_State* lua_state,
-                                              const std::string& script_pash,
-                                              const char** req_fxns) {
+                                              const std::string& script_path,
+                                              const std::vector<std::string>& req_fxns) {
   bool result = true;
-  const char** ptr = nullptr;
-  for (ptr = req_fxns; (ptr != nullptr) && *ptr; ptr++) {
-    if (!CheckLuaScriptFunction_(lua_state, *ptr)) {
-      CRANE_ERROR("{}: missing required function {}", script_pash, *ptr);
+  for (const auto& req_fxn : req_fxns) {
+    if (!CheckLuaScriptFunction_(lua_state, req_fxn)) {
+      CRANE_ERROR("{}: missing required function {}", script_path, req_fxn);
       result = false;
     }
   }
