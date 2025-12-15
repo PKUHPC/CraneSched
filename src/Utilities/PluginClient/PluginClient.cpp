@@ -340,14 +340,17 @@ void PluginClient::RegisterCranedHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::UpdateLicensesHookAsync(const std::vector<crane::grpc::LicenseInfo>& licenses) {
-  auto request = std::make_unique<crane::grpc::plugin::UpdateLicensesHookRequest>();
-  auto *mutable_lic =   request->mutable_license_info();
-  for (auto &lic : licenses) {
+void PluginClient::UpdateLicensesHookAsync(
+    const std::vector<crane::grpc::LicenseInfo>& licenses) {
+  auto request =
+      std::make_unique<crane::grpc::plugin::UpdateLicensesHookRequest>();
+  auto* mutable_lic = request->mutable_license_info();
+  for (auto& lic : licenses) {
     mutable_lic->Add()->CopyFrom(lic);
   }
 
-  HookEvent e{HookType::UPDATE_LICENSES, std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  HookEvent e{HookType::UPDATE_LICENSES,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }
 

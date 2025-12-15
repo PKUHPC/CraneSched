@@ -219,7 +219,7 @@ bool LicensesManager::MallocLicenseResource(
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
   }
 
-    return true;
+  return true;
 }
 
 void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
@@ -257,7 +257,6 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
   }
-
 }
 
 void LicensesManager::FreeLicenseResource(

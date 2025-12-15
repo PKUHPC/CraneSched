@@ -87,7 +87,8 @@ class PluginClient {
       const std::string& craned_id,
       const std::vector<crane::NetworkInterface>& interfaces);
 
-  void UpdateLicensesHookAsync(const std::vector<crane::grpc::LicenseInfo>& licenses);
+  void UpdateLicensesHookAsync(
+      const std::vector<crane::grpc::LicenseInfo>& licenses);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
@@ -131,7 +132,7 @@ class PluginClient {
            &PluginClient::SendDestroyCgroupHook_, &PluginClient::NodeEventHook_,
            &PluginClient::SendUpdatePowerStateHook_,
            &PluginClient::SendRegisterCranedHook_,
-          &PluginClient::SendUpdateLicensesHook_}};
+           &PluginClient::SendUpdateLicensesHook_}};
 };
 
 }  // namespace plugin
