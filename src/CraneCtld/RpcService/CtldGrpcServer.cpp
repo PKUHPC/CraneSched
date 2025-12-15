@@ -407,7 +407,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           std::string failure_reason;
           bool ok = true;
           crane::grpc::TaskToCtld task;
-          if (!g_task_scheduler->QueryTaskUseId(payload.task_id(), &task)) {
+          if (!g_task_scheduler->QueryTaskNodeRegex(payload.task_id(), &task)) {
             ok = false;
             failure_reason = "Task not found";
           } else {

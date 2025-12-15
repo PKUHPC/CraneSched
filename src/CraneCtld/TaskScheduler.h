@@ -804,7 +804,7 @@ class TaskScheduler {
       const crane::grpc::QueryTasksInfoRequest* request,
       std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map);
 
-  bool QueryTaskUseId(task_id_t task_id, crane::grpc::TaskToCtld* task);
+  bool QueryTaskNodeRegex(task_id_t task_id, crane::grpc::TaskToCtld* task);
 
   void QueryRnJobOnCtldForNodeConfig(const CranedId& craned_id,
                                      crane::grpc::ConfigureCranedRequest* req);
