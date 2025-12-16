@@ -105,21 +105,16 @@ class LuaPool {
     return fut;
   }
 
-  template <typename Callback, typename... Args>
-  std::future<CraneRichError> ExecuteLuaScript(Callback&& callback,
-                                               Args&&... args) {
+  template <typename Callback>
+  requires std::invocable<Callback> &&
+         std::same_as<std::invoke_result_t<Callback>, CraneRichError>
+  std::future<CraneRichError> ExecuteLuaScript(Callback callback) {
     auto promise = std::make_shared<std::promise<CraneRichError>>();
     std::future<CraneRichError> fut = promise->get_future();
-    auto packed_args = std::make_tuple(std::forward<Args>(args)...);
 
     m_thread_pool_->detach_task([callback = std::forward<Callback>(callback),
-                                 packed_args = std::move(packed_args),
                                  promise]() {
-      CraneRichError result;
-
-      result = std::apply(callback, packed_args);
-
-      promise->set_value(result);
+      promise->set_value(callback());
     });
 
     return fut;
