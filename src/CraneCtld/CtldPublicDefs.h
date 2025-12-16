@@ -929,13 +929,15 @@ struct TaskInCtld {
 
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  void SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
+  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
+    int popped_count = 0;
     auto now = absl::Now();
     while (!pending_step_ids_.empty()) {
       const step_id_t& step_id = pending_step_ids_.front();
       const auto& step = GetStep(step_id);
       if (step == nullptr) {
         // step has been removed
+        ++popped_count;
         pending_step_ids_.pop();
         continue;
       }
@@ -981,8 +983,10 @@ struct TaskInCtld {
               util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
+      ++popped_count;
       scheduled_steps->push_back(step);
     }
+    return popped_count;
   }
 
   void SetCachedPriority(const double val);

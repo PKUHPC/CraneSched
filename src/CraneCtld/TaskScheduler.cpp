@@ -1315,7 +1315,10 @@ void TaskScheduler::StepScheduleThread_() {
           auto rn_iter = m_running_task_map_.find(job_id);
           if (rn_iter != m_running_task_map_.end()) {
             auto& job = rn_iter->second;
-            job->SchedulePendingSteps(&scheduled_steps);
+            auto popped_cnt = job->SchedulePendingSteps(&scheduled_steps);
+            if ((m_job_pending_step_num_map_[job_id] -= popped_cnt) == 0) {
+              jobs_to_remove.push_back(job_id);
+            }
           } else {
             jobs_to_remove.push_back(job_id);
             CRANE_ERROR("Job #{} not in Rn queue for step scheduling", job_id);
@@ -1342,9 +1345,6 @@ void TaskScheduler::StepScheduleThread_() {
         absl::flat_hash_map<CranedId, std::vector<crane::grpc::StepToD>>
             craned_alloc_steps;
         for (auto* step : scheduled_steps) {
-          if (!--m_job_pending_step_num_map_[step->job_id]) {
-            m_job_pending_step_num_map_.erase(step->job_id);
-          }
           for (const auto& craned_id : step->CranedIds()) {
             craned_alloc_steps[craned_id].emplace_back(
                 step->GetStepToD(craned_id));
