@@ -64,7 +64,7 @@ class LuaJobHandler {
 
   static void UpdateJobGloable_(
       const crane::LuaEnvironment& lua_env,
-      crane::grpc::QueryTasksInfoReply* task_info_reply);
+      std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map);
   static void UpdateJobResvGloable_(
       const crane::LuaEnvironment& lua_env,
       crane::grpc::QueryReservationInfoReply* resv_info_reply);
