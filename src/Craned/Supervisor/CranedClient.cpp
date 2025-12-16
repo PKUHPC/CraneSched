@@ -18,15 +18,9 @@
 
 #include "CranedClient.h"
 
-#include "SupervisorServer.h"
-#include "TaskManager.h"
 #include "crane/GrpcHelper.h"
-#include "crane/String.h"
 
 namespace Craned::Supervisor {
-
-using grpc::ClientContext;
-using grpc::Status;
 
 CranedClient::~CranedClient() {
   if (m_async_send_thread_.joinable()) {

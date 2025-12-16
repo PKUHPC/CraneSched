@@ -82,6 +82,7 @@ struct Config {
   std::filesystem::path SupervisorUnixSockPath;
 
   job_id_t JobId;
+  std::string JobName;
   EnvMap JobEnv;
   step_id_t StepId;
   StepToSupv StepSpec;
@@ -98,6 +99,7 @@ struct RuntimeStatus {
   }
 };
 
+// Current supervisor status
 inline RuntimeStatus g_runtime_status;
 }  // namespace Craned::Supervisor
 

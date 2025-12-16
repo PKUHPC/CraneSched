@@ -19,6 +19,7 @@
 #include "CtldPublicDefs.h"
 
 #include "EmbeddedDbClient.h"
+#include "crane/Logger.h"
 
 namespace Ctld {
 
@@ -39,16 +40,66 @@ CranedRemoteMeta::CranedRemoteMeta(
   }
 }
 
+PodMetaInTask::PodMetaInTask(const crane::grpc::PodTaskAdditionalMeta& rhs)
+    : name(rhs.name()),
+      labels(rhs.labels().begin(), rhs.labels().end()),
+      annotations(rhs.annotations().begin(), rhs.annotations().end()),
+      userns(rhs.userns()),
+      run_as_user(rhs.run_as_user()),
+      run_as_group(rhs.run_as_group()) {
+  const auto& ns = rhs.namespace_();
+  namespace_option.network = ns.network();
+  namespace_option.pid = ns.pid();
+  namespace_option.ipc = ns.ipc();
+  namespace_option.target_id = ns.target_id();
+
+  for (const auto& port : rhs.ports()) {
+    port_mappings.emplace_back(
+        PortMapping{.protocol = port.protocol(),
+                    .container_port = port.container_port(),
+                    .host_port = port.host_port(),
+                    .host_ip = port.host_ip()});
+  }
+}
+
+PodMetaInTask::operator crane::grpc::PodTaskAdditionalMeta() const {
+  crane::grpc::PodTaskAdditionalMeta result;
+  result.set_name(this->name);
+  result.mutable_labels()->insert(this->labels.begin(), this->labels.end());
+  result.mutable_annotations()->insert(this->annotations.begin(),
+                                       this->annotations.end());
+
+  auto* ns = result.mutable_namespace_();
+  ns->set_network(this->namespace_option.network);
+  ns->set_pid(this->namespace_option.pid);
+  ns->set_ipc(this->namespace_option.ipc);
+  ns->set_target_id(this->namespace_option.target_id);
+
+  result.set_userns(this->userns);
+  result.set_run_as_user(this->run_as_user);
+  result.set_run_as_group(this->run_as_group);
+
+  for (const auto& pm : port_mappings) {
+    auto* ports = result.add_ports();
+    ports->set_protocol(pm.protocol);
+    ports->set_container_port(pm.container_port);
+    ports->set_host_port(pm.host_port);
+    ports->set_host_ip(pm.host_ip);
+  }
+
+  return result;
+}
+
 ContainerMetaInTask::ContainerMetaInTask(
     const crane::grpc::ContainerTaskAdditionalMeta& rhs)
-    : image_info{.image = rhs.image().image(),
+    : name(rhs.name()),
+      labels(rhs.labels().begin(), rhs.labels().end()),
+      annotations(rhs.annotations().begin(), rhs.annotations().end()),
+      image_info{.image = rhs.image().image(),
                  .username = rhs.image().username(),
                  .password = rhs.image().password(),
                  .server_address = rhs.image().server_address(),
                  .pull_policy = rhs.image().pull_policy()},
-      name(rhs.name()),
-      labels(rhs.labels().begin(), rhs.labels().end()),
-      annotations(rhs.annotations().begin(), rhs.annotations().end()),
       command(rhs.command()),
       args(rhs.args().begin(), rhs.args().end()),
       workdir(rhs.workdir()),
@@ -57,11 +108,7 @@ ContainerMetaInTask::ContainerMetaInTask(
       tty(rhs.tty()),
       stdin(rhs.stdin()),
       stdin_once(rhs.stdin_once()),
-      userns(rhs.userns()),
-      run_as_user(rhs.run_as_user()),
-      run_as_group(rhs.run_as_group()),
-      mounts(rhs.mounts().begin(), rhs.mounts().end()),
-      port_mappings(rhs.ports().begin(), rhs.ports().end()) {}
+      mounts(rhs.mounts().begin(), rhs.mounts().end()) {}
 
 ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
   crane::grpc::ContainerTaskAdditionalMeta result;
@@ -101,18 +148,9 @@ ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
   result.set_stdin(this->stdin);
   result.set_stdin_once(this->stdin_once);
 
-  result.set_userns(this->userns);
-  result.set_run_as_user(this->run_as_user);
-  result.set_run_as_group(this->run_as_group);
-
   auto* mounts_map = result.mutable_mounts();
   for (const auto& mount : this->mounts) {
     (*mounts_map)[mount.first] = mount.second;
-  }
-
-  auto* ports_map = result.mutable_ports();
-  for (const auto& port : this->port_mappings) {
-    (*ports_map)[port.first] = port.second;
   }
 
   return result;
@@ -234,21 +272,35 @@ void StepInCtld::RecoverFromDb(
     const TaskInCtld& job, crane::grpc::StepInEmbeddedDb const& step_in_db) {
   const auto& step_to_ctld = step_in_db.step_to_ctld();
   const auto& runtime_attr = step_in_db.runtime_attr();
-  type = step_to_ctld.type();
+
   this->job = const_cast<TaskInCtld*>(&job);
+
+  type = step_to_ctld.type();
   job_id = step_to_ctld.job_id();
   uid = step_to_ctld.uid();
   gids = {step_to_ctld.gid().begin(), step_to_ctld.gid().end()};
+
   name = step_to_ctld.name();
+  cwd = step_to_ctld.cwd();
+  extra_attr = step_to_ctld.extra_attr();
+
   ntasks_per_node = step_to_ctld.ntasks_per_node();
 
   requeue_if_failed = step_to_ctld.requeue_if_failed();
   get_user_env = step_to_ctld.get_user_env();
   env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
 
-  if (job.IsContainer() && step_to_ctld.has_container_meta())
-    container_meta =
-        static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
+  if (job.IsContainer()) {
+    if (runtime_attr.step_type() == crane::grpc::StepType::DAEMON) {
+      // For daemon step, only recover pod_meta.
+      pod_meta = job.pod_meta;
+    } else if (step_to_ctld.has_container_meta()) {
+      // For common step, recover both container_meta and pod_meta.
+      container_meta =
+          static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
+      pod_meta = job.pod_meta;
+    }
+  }
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
   requested_node_res_view =
@@ -291,9 +343,14 @@ void StepInCtld::SetFieldsOfStepInfo(
     crane::grpc::StepInfo* step_info) const noexcept {
   step_info->set_type(type);
   step_info->set_step_type(step_type);
+
   step_info->set_job_id(job_id);
   step_info->set_step_id(m_step_id_);
+
   step_info->set_name(name);
+  step_info->set_cwd(cwd);
+  step_info->set_extra_attr(extra_attr);
+
   step_info->set_uid(uid);
   step_info->mutable_gid()->Assign(gids.begin(), gids.end());
 
@@ -303,8 +360,6 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->mutable_end_time()->CopyFrom(m_runtime_attr_.end_time());
 
   step_info->set_node_num(node_num);
-  // string cmd_line = 13;
-  // string cwd = 14;
 
   *step_info->mutable_req_res_view() =
       static_cast<crane::grpc::ResourceView>(requested_node_res_view);
@@ -313,11 +368,9 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
                                              excluded_nodes.end());
 
-  // string extra_attr = 21;
   if (container_meta.has_value()) {
-    *step_info->mutable_container_meta() =
-        std::move(static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
-            container_meta.value()));
+    step_info->mutable_container_meta()->CopyFrom(
+        crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
   }
   step_info->set_held(m_held_);
   step_info->set_status(m_status_);
@@ -331,30 +384,33 @@ void StepInCtld::SetFieldsOfStepInfo(
 }
 
 void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
-  /*Fields in StepInCtld*/
+  /* Fields in StepInCtld */
   this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
+
   job_id = job.TaskId();
+  name = job.name;
+  cwd = job.cwd;
+
   uid = job.uid;
   gids = {job.gid};
-  name = job.name;
 
   ntasks_per_node = job.ntasks_per_node;
 
   requeue_if_failed = job.requeue_if_failed;
   get_user_env = job.get_user_env;
   env = job.env;
-  extra_attr = job.extra_attr;
 
   time_limit = job.time_limit;
+  extra_attr = job.extra_attr;
+
   requested_node_res_view = job.requested_node_res_view;
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
 
-  if (job.IsContainer()) {
-    container_meta = std::get<ContainerMetaInTask>(job.meta);
-  }
+  // If this is a container job, set pod_meta to launch pod in daemon step.
+  if (job.IsContainer()) pod_meta = job.pod_meta;
 
   SetStepType(crane::grpc::StepType::DAEMON);
 
@@ -371,7 +427,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetEndTime(job.EndTime());
 
   SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-  SetErrorExitCode(0u);
+  SetErrorExitCode(0U);
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
@@ -380,34 +436,34 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   account = job.account;
   qos = job.qos;
 
+  /* Field of StepToCtld proto */
   crane::grpc::StepToCtld step;
   step.mutable_time_limit()->CopyFrom(
       google::protobuf::util::TimeUtil::MillisecondsToDuration(
           ToInt64Milliseconds(time_limit)));
   step.set_job_id(job.TaskId());
-  *step.mutable_req_resources_per_task() =
-      static_cast<crane::grpc::ResourceView>(requested_node_res_view);
   step.set_type(job.type);
-  step.set_uid(uid);
   step.set_name(name);
-  step.set_node_num(node_num);
-  step.set_ntasks_per_node(ntasks_per_node);
+
+  step.set_cwd(cwd);
+  step.set_extra_attr(extra_attr);
 
   step.set_requeue_if_failed(requeue_if_failed);
-  step.set_get_user_env(get_user_env);
+
+  step.set_uid(uid);
   step.mutable_gid()->Assign(gids.begin(), gids.end());
+
   // No batch or ia meta need to set
-  step.set_extra_attr(job.extra_attr);
-  // step.set_cmd_line(job.cmd_line);
-  // step.set_cwd();
+
+  step.set_node_num(node_num);
+  step.set_ntasks_per_node(ntasks_per_node);
+  *step.mutable_req_resources_per_task() =
+      static_cast<crane::grpc::ResourceView>(requested_node_res_view);
+
+  step.set_get_user_env(get_user_env);
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-
-  if (job.IsContainer()) {
-    step.mutable_container_meta()->CopyFrom(
-        crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
-  }
 
   *MutableStepToCtld() = std::move(step);
 }
@@ -415,6 +471,7 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
 crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
     const CranedId& craned_id) const {
   crane::grpc::JobToD job_to_d;
+  job_to_d.set_name(job->name);
   job_to_d.set_job_id(job_id);
   job_to_d.set_uid(uid);
   job_to_d.set_account(job->account);
@@ -432,20 +489,22 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   *mutable_res_in_node =
       static_cast<crane::grpc::ResourceInNode>(m_allocated_res_.at(craned_id));
 
-  // Set type
   step_to_d.set_type(this->type);
   step_to_d.set_step_type(this->step_type);
 
   step_to_d.set_job_id(this->job_id);
   step_to_d.set_step_id(this->m_step_id_);
   step_to_d.set_name(this->name);
+  step_to_d.set_cwd(this->cwd);
 
   step_to_d.set_node_num(this->node_num);
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
-  step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
   step_to_d.set_get_user_env(this->get_user_env);
+  step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
   step_to_d.set_extra_attr(extra_attr);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -457,9 +516,9 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
 
-  if (this->container_meta.has_value())
-    step_to_d.mutable_container_meta()->CopyFrom(
-        crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
+  if (this->pod_meta.has_value())
+    step_to_d.mutable_pod_meta()->CopyFrom(
+        crane::grpc::PodTaskAdditionalMeta(pod_meta.value()));
 
   step_to_d.set_submit_hostname(job->TaskToCtld().submit_hostname());
   step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
@@ -476,7 +535,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                                    uint32_t exit_code,
                                    const std::string& reason,
                                    const CranedId& craned_id,
-                                   google::protobuf::Timestamp timestamp,
+                                   const google::protobuf::Timestamp& timestamp,
                                    StepStatusChangeContext* context) {
   bool job_finished{false};
 
@@ -491,19 +550,24 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
+
     if (this->AllNodesConfigured()) {
-      if (this->PrevErrorStatus())
+      if (this->PrevErrorStatus()) {
         job_finished = true;
-      else {
-        CRANE_TRACE("[Step #{}.{}] CONFIGURING->Running", job_id,
+      } else {
+        CRANE_TRACE("[Step #{}.{}] CONFIGURING->RUNNING", job_id,
                     this->StepId());
+
         this->SetStatus(crane::grpc::TaskStatus::Running);
         this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-        this->SetErrorExitCode(0u);
+        this->SetErrorExitCode(0U);
 
+        // After all daemon steps running, create the primary step from the
+        // submitted job.
         context->rn_step_raw_ptrs.insert(this);
         std::unique_ptr primary_step = std::make_unique<CommonStepInCtld>();
         primary_step->InitPrimaryStepFromJob(*job);
+
         // TODO: Aggregate this operation
         if (!g_embedded_db_client->AppendSteps({primary_step.get()})) {
           this->SetStatus(crane::grpc::TaskStatus::Failed);
@@ -513,6 +577,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           context->rn_step_raw_ptrs.erase(this);
           break;
         }
+
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
           meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
@@ -522,19 +587,20 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                   job->allocated_craneds_regex,
                   job->CranedIds() | std::ranges::to<std::unordered_set>())}});
         }
+
         job->SetPrimaryStep(std::move(primary_step));
-        for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
+        for (const auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
           context->craned_step_alloc_map[node_id].emplace_back(
               job->PrimaryStep()->GetStepToD(node_id));
         }
       }
     }
+
     break;
 
   case crane::grpc::TaskStatus::Running:
   case crane::grpc::TaskStatus::Completing:
     // Completing -> Completed / Failed
-
     this->StepOnNodeFinish(craned_id);
     if (new_status != crane::grpc::TaskStatus::Completed) {
       this->SetErrorStatus(new_status);
@@ -602,24 +668,22 @@ void DaemonStepInCtld::RecoverFromDb(
 void DaemonStepInCtld::SetFieldsOfStepInfo(
     crane::grpc::StepInfo* step_info) const noexcept {
   StepInCtld::SetFieldsOfStepInfo(step_info);
-  step_info->set_cwd("");
   step_info->set_cmd_line("");
-  step_info->set_extra_attr(extra_attr);
   step_info->set_craned_list(job->allocated_craneds_regex);
   *step_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(job->allocated_res_view);
 }
 
 void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
-  /*Fields in StepInCtld*/
-
+  /* Fields in StepInCtld */
   this->job = const_cast<TaskInCtld*>(&job);
   type = job.type;
-
   job_id = job.TaskId();
+  name = job.name;
+  cwd = job.cwd;
+
   uid = job.uid;
   gids = {job.gid};
-  name = job.name;
 
   ntasks_per_node = job.ntasks_per_node;
 
@@ -628,13 +692,20 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   env = job.env;
 
   time_limit = job.time_limit;
+  extra_attr = job.extra_attr;
+
   requested_node_res_view = job.requested_node_res_view;
   node_num = job.node_num;
   included_nodes = job.included_nodes;
   excluded_nodes = job.excluded_nodes;
 
-  if (job.IsContainer())
-    container_meta = std::get<ContainerMetaInTask>(job.meta);
+  if (job.IsContainer()) {
+    // NOTE: job is Container doesn't necessarily mean the step has
+    // container_meta as we can submit batch/crun steps inside a container job.
+    pod_meta = job.pod_meta;
+    if (std::holds_alternative<ContainerMetaInTask>(job.meta))
+      container_meta = std::get<ContainerMetaInTask>(job.meta);
+  }
 
   SetStepType(crane::grpc::StepType::PRIMARY);
 
@@ -652,20 +723,20 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   SetEndTime(job.EndTime());
 
   SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-  SetErrorExitCode(0u);
+  SetErrorExitCode(0U);
   SetStatus(crane::grpc::TaskStatus::Configuring);
   SetHeld(false);
 
   /*Fields in CommonStepInCtld*/
   cmd_line = job.cmd_line;
-  cwd = job.cwd;
-  extra_attr = job.extra_attr;
+
   if (job.IsInteractive()) {
-    ia_meta = std::get<InteractiveMeta>(std::move(job.meta));
+    ia_meta = std::get<InteractiveMeta>(job.meta);
   }
 
   allocated_craneds_regex = job.allocated_craneds_regex;
 
+  /* Field of StepToCtld proto */
   crane::grpc::StepToCtld step;
 
   step.mutable_time_limit()->CopyFrom(
@@ -690,7 +761,16 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
     step.mutable_interactive_meta()->CopyFrom(
         job.TaskToCtld().interactive_meta());
   } else if (job.IsContainer()) {
-    step.mutable_container_meta()->CopyFrom(job.TaskToCtld().container_meta());
+    // Primary step of a container job comes from ccon/cbatch.
+    if (job.TaskToCtld().has_batch_meta()) {
+      // cbatch has batch_meta.
+      step.mutable_batch_meta()->CopyFrom(job.TaskToCtld().batch_meta());
+    }
+    if (job.TaskToCtld().has_container_meta()) {
+      // ccon has container_meta.
+      step.mutable_container_meta()->CopyFrom(
+          job.TaskToCtld().container_meta());
+    }
   }
 
   step.set_extra_attr(job.extra_attr);
@@ -712,13 +792,19 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   /*Fields in StepInCtld*/
   type = step_to_ctld.type();
   job_id = step_to_ctld.job_id();
-  uid = step_to_ctld.uid();
-  gids = step_to_ctld.gid() | std::ranges::to<std::vector>();
   name = step_to_ctld.name();
 
+  cmd_line = step_to_ctld.cmd_line();
+  cwd = step_to_ctld.cwd();
+
+  uid = step_to_ctld.uid();
+  gids = step_to_ctld.gid() | std::ranges::to<std::vector>();
+
   requeue_if_failed = step_to_ctld.requeue_if_failed();
+
   get_user_env = step_to_ctld.get_user_env();
   env = step_to_ctld.env() | std::ranges::to<std::unordered_map>();
+
   extra_attr = step_to_ctld.extra_attr();
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
@@ -748,18 +834,16 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
     util::ParseHostList(step_to_ctld.excludes(), &excluded_list);
     excluded_nodes = excluded_list | std::ranges::to<std::unordered_set>();
   }
+
   if (step_to_ctld.type() == crane::grpc::TaskType::Container)
     container_meta =
         static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
-
-  cmd_line = step_to_ctld.cmd_line();
-  cwd = step_to_ctld.cwd();
 
   SetStepType(crane::grpc::StepType::COMMON);
 
   SetRequeueCount(0);
   SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-  SetErrorExitCode(0u);
+  SetErrorExitCode(0U);
   SetStatus(crane::grpc::TaskStatus::Pending);
   SetHeld(false);
   SetStartTime(absl::Now());
@@ -790,8 +874,9 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
-  step_to_d.set_get_user_env(this->get_user_env);
   step_to_d.set_extra_attr(extra_attr);
+
+  step_to_d.set_get_user_env(this->get_user_env);
 
   for (const auto& hostname : this->m_craned_ids_)
     step_to_d.mutable_nodelist()->Add()->assign(hostname);
@@ -809,19 +894,27 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     auto* mutable_meta = step_to_d.mutable_interactive_meta();
     mutable_meta->CopyFrom(StepToCtld().interactive_meta());
   } else if (this->type == crane::grpc::Container) {
-    auto* mutable_meta = step_to_d.mutable_container_meta();
-    mutable_meta->CopyFrom(StepToCtld().container_meta());
+    if (pod_meta.has_value()) {
+      step_to_d.mutable_pod_meta()->CopyFrom(
+          crane::grpc::PodTaskAdditionalMeta(pod_meta.value()));
+    }
+    if (container_meta.has_value()) {
+      step_to_d.mutable_container_meta()->CopyFrom(
+          StepToCtld().container_meta());
+    } else if (StepToCtld().has_batch_meta()) {
+      // cbatch --container primary step runs batch script under container job
+      step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
+    }
   }
 
   return step_to_d;
 }
 
-void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
-                                        uint32_t exit_code,
-                                        const std::string& reason,
-                                        const CranedId& craned_id,
-                                        google::protobuf::Timestamp timestamp,
-                                        StepStatusChangeContext* context) {
+void CommonStepInCtld::StepStatusChange(
+    crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    const std::string& reason, const CranedId& craned_id,
+    const google::protobuf::Timestamp& timestamp,
+    StepStatusChangeContext* context) {
   /**
    * Step final status
    * finished: step configured successfully, got all step execution status
@@ -958,17 +1051,23 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           if (comm_step->Status() == crane::grpc::TaskStatus::Pending) {
             comm_step->SetStatus(crane::grpc::Cancelled);
             comm_step->SetEndTime(absl::Now());
-            auto& meta = comm_step->ia_meta.value();
-            if (!meta.has_been_cancelled_on_front_end) {
-              meta.has_been_cancelled_on_front_end = true;
-              meta.cb_step_cancel({.job_id = comm_step->job_id,
-                                   .step_id = comm_step->StepId()});
+
+            // Crun needs this, ccon do not.
+            if (comm_step->ia_meta.has_value()) {
+              auto& meta = comm_step->ia_meta.value();
+              if (!meta.has_been_cancelled_on_front_end) {
+                meta.has_been_cancelled_on_front_end = true;
+                meta.cb_step_cancel({.job_id = comm_step->job_id,
+                                     .step_id = comm_step->StepId()});
+              }
+
+              // Send Completion Ack to frontend now.
+              meta.cb_step_completed({.job_id = comm_step->job_id,
+                                      .step_id = comm_step->StepId(),
+                                      .send_completion_ack = true,
+                                      .cfored_name = meta.cfored_name});
             }
-            // Send Completion Ack to frontend now.
-            meta.cb_step_completed({.job_id = comm_step->job_id,
-                                    .step_id = comm_step->StepId(),
-                                    .send_completion_ack = true,
-                                    .cfored_name = meta.cfored_name});
+
             pd_steps.insert(comm_step->StepId());
             continue;
           }
@@ -1015,9 +1114,8 @@ void CommonStepInCtld::RecoverFromDb(
     const TaskInCtld& job, const crane::grpc::StepInEmbeddedDb& step_in_db) {
   StepInCtld::RecoverFromDb(job, step_in_db);
 
+  /* Fields only in CommonStepInCtld */
   cmd_line = StepToCtld().cmd_line();
-  cwd = StepToCtld().cwd();
-  extra_attr = StepToCtld().extra_attr();
 
   allocated_craneds_regex =
       util::HostNameListToStr(step_in_db.runtime_attr().craned_ids());
@@ -1026,9 +1124,9 @@ void CommonStepInCtld::RecoverFromDb(
 void CommonStepInCtld::SetFieldsOfStepInfo(
     crane::grpc::StepInfo* step_info) const noexcept {
   StepInCtld::SetFieldsOfStepInfo(step_info);
-  step_info->set_cwd(cwd);
+
+  /* Fields only in CommonStepInCtld */
   step_info->set_cmd_line(cmd_line);
-  step_info->set_extra_attr(extra_attr);
   step_info->set_craned_list(allocated_craneds_regex);
   *step_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(m_allocated_res_.View());
@@ -1157,7 +1255,7 @@ void TaskInCtld::SetHeld(bool val) {
   runtime_attr.set_held(val);
 }
 
-void TaskInCtld::SetCachedPriority(const double val) {
+void TaskInCtld::SetCachedPriority(double val) {
   cached_priority = val;
   runtime_attr.set_cached_priority(val);
 }
@@ -1180,8 +1278,13 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   type = val.type();
 
   if (IsContainer()) {
-    meta.emplace<ContainerMetaInTask>(
-        static_cast<ContainerMetaInTask>(val.container_meta()));
+    if (val.has_pod_meta()) pod_meta = PodMetaInTask(val.pod_meta());
+    if (val.has_container_meta()) {
+      meta.emplace<ContainerMetaInTask>(
+          ContainerMetaInTask(val.container_meta()));
+    } else {
+      meta.emplace<std::monostate>();
+    }
   }
 
   node_num = val.node_num();
@@ -1298,15 +1401,15 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   task_info->set_extra_attr(extra_attr);
   task_info->set_reservation(reservation);
 
-  // Only pass container meta if it's a container task
+  // Only pass container meta if it's a container step
   // This is because ccon command requires more info than cqueue/cacct.
   if (IsContainer()) {
-    task_info->mutable_container_meta()->CopyFrom(
-        static_cast<crane::grpc::ContainerTaskAdditionalMeta>(
-            std::get<ContainerMetaInTask>(meta)));
-    // Remove sensitive info
-    task_info->mutable_container_meta()->mutable_image()->clear_username();
-    task_info->mutable_container_meta()->mutable_image()->clear_password();
+    if (pod_meta.has_value()) {
+      task_info->mutable_pod_meta()->CopyFrom(
+          static_cast<crane::grpc::PodTaskAdditionalMeta>(pod_meta.value()));
+    } else {
+      CRANE_ERROR("Container job #{} missing pod info!", task_info->task_id());
+    }
   }
 
   // Dynamic fields

@@ -290,8 +290,7 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
   return rich_err;
 }
 
-[[deprecated("Use Rich Error")]] inline std::string_view CraneErrStr(
-    CraneErrCode err) {
+inline std::string_view CraneErrStr(CraneErrCode err) {
   return Internal::kCraneErrStrArr[static_cast<uint16_t>(err)];
 }
 

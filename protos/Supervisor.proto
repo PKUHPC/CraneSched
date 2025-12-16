@@ -40,6 +40,7 @@ message InitSupervisorRequest {
   string craned_unix_socket_path = 5;
   string crane_base_dir = 6;
   string crane_script_dir = 7;
+  string job_name = 8;
 
   message ContainerConfig {
     string temp_dir = 1;

@@ -99,6 +99,19 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
+message SubmitContainerStepRequest {
+  StepToCtld step = 1;
+}
+
+message SubmitContainerStepReply {
+  bool ok = 1;
+  uint32 job_id = 2;
+  oneof payload {
+    uint32 step_id = 3;
+    ErrCode code = 4;
+  }
+}
+
 message AllocJobsRequest {
   repeated JobToD jobs = 1;
 }
@@ -1014,9 +1027,10 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
-message AttachInContainerTaskRequest {
+message AttachContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
 
   bool stdin = 6;
   bool tty = 7;
@@ -1024,17 +1038,18 @@ message AttachInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message AttachInContainerTaskReply {
+message AttachContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
 }
 
-message ExecInContainerTaskRequest {
+message ExecInContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
 
-  repeated string command = 3;
+  repeated string command = 5;
 
   bool stdin = 6;
   bool tty = 7;
@@ -1042,7 +1057,7 @@ message ExecInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message ExecInContainerTaskReply {
+message ExecInContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
@@ -1058,6 +1073,7 @@ service CraneCtld {
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
   rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+  rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1112,8 +1128,8 @@ service CraneCtld {
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
 service CeffQueryService {
@@ -1153,8 +1169,8 @@ service Craned {
   /*
   Craned will proxy the following container-related RPCs to CRI Service.
   */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);

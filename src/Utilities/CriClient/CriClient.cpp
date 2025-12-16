@@ -295,6 +295,140 @@ CraneExpectedRich<void> CriClient::RemovePodSandbox(
   return {};
 }
 
+CraneExpectedRich<api::PodSandboxStatus> CriClient::GetPodSandboxStatus(
+    const std::string& pod_sandbox_id, bool verbose) const {
+  using api::PodSandboxStatusRequest;
+  using api::PodSandboxStatusResponse;
+
+  PodSandboxStatusRequest request{};
+  PodSandboxStatusResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kCriDefaultReqTimeout);
+
+  request.set_pod_sandbox_id(pod_sandbox_id);
+  request.set_verbose(verbose);
+
+  auto status = m_rs_stub_->PodSandboxStatus(&context, request, &response);
+  if (!status.ok()) {
+    std::string error_msg = std::format(
+        "Failed to get pod sandbox status '{}': [gRPC:{}] {}", pod_sandbox_id,
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  if (!response.has_status()) {
+    std::string error_msg = std::format(
+        "Empty status returned for pod sandbox '{}'", pod_sandbox_id);
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  return response.status();
+}
+
+CraneExpectedRich<std::vector<api::PodSandbox>> CriClient::ListPodSandbox()
+    const {
+  using api::ListPodSandboxRequest;
+  using api::ListPodSandboxResponse;
+
+  ListPodSandboxRequest request{};
+  ListPodSandboxResponse response{};
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kCriDefaultReqTimeout);
+
+  auto status = m_rs_stub_->ListPodSandbox(&context, request, &response);
+  if (!status.ok()) {
+    std::string error_msg = std::format(
+        "Failed to list pod sandboxes: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  std::vector<api::PodSandbox> sandboxes;
+  sandboxes.reserve(response.items_size());
+  for (const auto& sandbox : response.items()) {
+    sandboxes.push_back(sandbox);
+  }
+
+  CRANE_TRACE("Listed {} pod sandboxes", sandboxes.size());
+  return sandboxes;
+}
+
+CraneExpectedRich<std::vector<api::PodSandbox>> CriClient::ListPodSandbox(
+    const std::unordered_map<std::string, std::string>& label_selector) const {
+  using api::ListPodSandboxRequest;
+  using api::ListPodSandboxResponse;
+
+  ListPodSandboxRequest request{};
+  ListPodSandboxResponse response{};
+
+  // Set up filter with label selector
+  auto* filter = request.mutable_filter();
+  auto* labels = filter->mutable_label_selector();
+  for (const auto& [key, value] : label_selector) {
+    (*labels)[key] = value;
+  }
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       kCriDefaultReqTimeout);
+
+  auto status = m_rs_stub_->ListPodSandbox(&context, request, &response);
+  if (!status.ok()) {
+    std::string error_msg = std::format(
+        "Failed to list pod sandboxes by labels: [gRPC:{}] {}",
+        static_cast<int>(status.error_code()), status.error_message());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  std::vector<api::PodSandbox> sandboxes;
+  sandboxes.reserve(response.items_size());
+  for (const auto& sandbox : response.items()) {
+    sandboxes.push_back(sandbox);
+  }
+
+  CRANE_TRACE("Listed {} pod sandboxes matching labels", sandboxes.size());
+  return sandboxes;
+}
+
+CraneExpectedRich<std::string> CriClient::GetPodSandboxId(
+    const std::unordered_map<std::string, std::string>& label_selector) const {
+  auto sandboxes_expt = ListPodSandbox(label_selector);
+  if (!sandboxes_expt) {
+    return std::unexpected(sandboxes_expt.error());
+  }
+
+  const auto& sandboxes = sandboxes_expt.value();
+  if (sandboxes.empty()) {
+    std::string error_msg = "No pod sandbox found matching labels";
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  if (sandboxes.size() > 1) {
+    std::string error_msg = std::format(
+        "Multiple pod sandboxes ({}) found matching labels",
+        sandboxes.size());
+    CRANE_ERROR("{}", error_msg);
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
+  }
+
+  return sandboxes.front().id();
+}
+
 CraneExpectedRich<std::string> CriClient::CreateContainer(
     const std::string& pod_id, const api::PodSandboxConfig& pod_config,
     api::ContainerConfig* config) const {
@@ -661,7 +795,7 @@ CraneExpectedRich<std::vector<api::Container>> CriClient::ListContainers(
   return containers;
 }
 
-CraneExpectedRich<std::string> CriClient::SelectContainerId(
+CraneExpectedRich<std::string> CriClient::GetContainerId(
     const std::unordered_map<std::string, std::string>& label_selector) const {
   auto containers_expt = ListContainers(label_selector);
   if (!containers_expt) {

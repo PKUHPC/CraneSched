@@ -219,6 +219,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::SubmitBatchTaskRequest *request,
       crane::grpc::SubmitBatchTaskReply *response) override;
 
+  grpc::Status SubmitContainerStep(
+      grpc::ServerContext *context,
+      const crane::grpc::SubmitContainerStepRequest *request,
+      crane::grpc::SubmitContainerStepReply *response) override;
+
   // This gRPC is for testing purposes only
   grpc::Status SubmitBatchTasks(
       grpc::ServerContext *context,
@@ -387,15 +392,15 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::SignUserCertificateRequest *request,
       crane::grpc::SignUserCertificateResponse *response) override;
 
-  grpc::Status AttachInContainerTask(
+  grpc::Status AttachContainerStep(
       grpc::ServerContext *context,
-      const crane::grpc::AttachInContainerTaskRequest *request,
-      crane::grpc::AttachInContainerTaskReply *response) override;
+      const crane::grpc::AttachContainerStepRequest *request,
+      crane::grpc::AttachContainerStepReply *response) override;
 
-  grpc::Status ExecInContainerTask(
+  grpc::Status ExecInContainerStep(
       grpc::ServerContext *context,
-      const crane::grpc::ExecInContainerTaskRequest *request,
-      crane::grpc::ExecInContainerTaskReply *response) override;
+      const crane::grpc::ExecInContainerStepRequest *request,
+      crane::grpc::ExecInContainerStepReply *response) override;
 
  private:
   static std::optional<std::string> CheckCertAndUIDAllowed_(
