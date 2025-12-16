@@ -11,10 +11,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_link_libraries(
     crane_tracer
     PUBLIC opentelemetry-cpp::trace
-           opentelemetry-cpp::otlp_grpc_exporter
+           opentelemetry-cpp::ostream_span_exporter
            opentelemetry-cpp::resources)
   
-  message(STATUS "OpenTelemetry tracing enabled (Debug build)")
+  message(STATUS "OpenTelemetry tracing enabled (Debug build) - output to file")
 else()
   message(STATUS "OpenTelemetry tracing disabled (Release build)")
 endif()
