@@ -73,12 +73,11 @@ void CranedClient::AsyncSendThread_() {
 
     {
       std::list<StepStatusChangeQueueElem> elems;
-      m_mutex_.Lock();
-      if (!m_task_status_change_queue_.empty()) {
-        elems.splice(elems.end(), std::move(m_task_status_change_queue_));
-        m_mutex_.Unlock();
-      } else {
-        m_mutex_.Unlock();
+      {
+        absl::MutexLock lock(&m_mutex_);
+        if (!m_task_status_change_queue_.empty()) {
+          elems.splice(elems.end(), std::move(m_task_status_change_queue_));
+        }
       }
 
       while (!elems.empty()) {
