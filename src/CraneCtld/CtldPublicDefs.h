@@ -929,13 +929,15 @@ struct TaskInCtld {
 
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  void SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
+  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
+    int popped_count = 0;
     auto now = absl::Now();
     while (!pending_step_ids_.empty()) {
       const step_id_t& step_id = pending_step_ids_.front();
       const auto& step = GetStep(step_id);
       if (step == nullptr) {
         // step has been removed
+        ++popped_count;
         pending_step_ids_.pop();
         continue;
       }
@@ -958,7 +960,7 @@ struct TaskInCtld {
         }
         step_alloc_res.AddResourceInNode(craned_id, feasible_res);
         step_craned_ids.insert(craned_id);
-        if (craned_ids.size() >= step->node_num) {
+        if (step_craned_ids.size() >= step->node_num) {
           break;
         }
       }
@@ -967,6 +969,8 @@ struct TaskInCtld {
       }
       step->SetAllocatedRes(step_alloc_res);
       step->SetCranedIds(step_craned_ids);
+      step->allocated_craneds_regex =
+          util::HostNameListToStr(step->CranedIds());
       step->SetConfiguringNodes(step_craned_ids);
       step->SetExecutionNodes(step_craned_ids);
       step->SetStartTime(now);
@@ -979,8 +983,10 @@ struct TaskInCtld {
               util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
+      ++popped_count;
       scheduled_steps->push_back(step);
     }
+    return popped_count;
   }
 
   void SetCachedPriority(const double val);
