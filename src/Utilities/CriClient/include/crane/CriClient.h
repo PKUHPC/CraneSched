@@ -36,6 +36,7 @@
 #include <system_error>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "crane/Lock.h"
 #include "crane/PublicHeader.h"
@@ -90,6 +91,17 @@ class CriClient {
   CraneExpectedRich<void> RemovePodSandbox(
       const std::string& pod_sandbox_id) const;
 
+  CraneExpectedRich<api::PodSandboxStatus> GetPodSandboxStatus(
+      const std::string& pod_sandbox_id, bool verbose = false) const;
+
+  CraneExpectedRich<std::vector<api::PodSandbox>> ListPodSandbox() const;
+
+  CraneExpectedRich<std::vector<api::PodSandbox>> ListPodSandbox(
+      const std::unordered_map<std::string, std::string>& label_selector) const;
+
+  CraneExpectedRich<std::string> GetPodSandboxId(
+      const std::unordered_map<std::string, std::string>& label_selector) const;
+
   // Containers
   CraneExpectedRich<std::string> CreateContainer(
       const std::string& pod_id, const api::PodSandboxConfig& pod_config,
@@ -127,8 +139,8 @@ class CriClient {
   CraneExpectedRich<std::vector<api::Container>> ListContainers(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
-  // Select exactly one container id by label selector
-  CraneExpectedRich<std::string> SelectContainerId(
+  // Get exactly one container id by label selector
+  CraneExpectedRich<std::string> GetContainerId(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
   // ==== Image Service ====
@@ -141,6 +153,18 @@ class CriClient {
                                        const std::string& pull_policy) const;
 
   // ==== Helpers ====
+
+  // Setup mapping for kid <-> uid. For kernel id and userspace id, See:
+  // https://www.kernel.org/doc/html/next/filesystems/idmappings.html
+  static cri::api::IDMapping MakeIdMapping(uid_t kernel_id, uid_t userspace_id,
+                                           size_t size) {
+    cri::api::IDMapping mapping{};
+    mapping.set_host_id(kernel_id);
+    mapping.set_container_id(userspace_id);
+    mapping.set_length(size);
+    return mapping;
+  }
+
   // Parse and compare numeric labels (using std::from_chars)
   template <typename T>
     requires requires(const char* first, const char* last, T& value) {
