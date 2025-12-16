@@ -46,6 +46,7 @@ CraneCtld:
 Keepalived:
   # the base directory of NFS storage
   CraneNFSBaseDir: /var/crane/
+  # file path of cranectld alive file (relative to CraneBaseDir)
   CraneCtldAliveFile: cranectld/cranectld.alive
 
 # Craned settings
