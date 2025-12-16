@@ -19,11 +19,14 @@
 #include "crane/TracerManager.h"
 
 #ifdef CRANE_ENABLE_TRACING
-#  include "opentelemetry/exporters/otlp/otlp_grpc_exporter_options.h"
+#  include <fstream>
+
+#  include "opentelemetry/exporters/ostream/span_exporter_factory.h"
 #  include "opentelemetry/sdk/resource/resource.h"
 #  include "opentelemetry/sdk/resource/semantic_conventions.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_options.h"
+#  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #endif
 
 namespace crane {
@@ -38,24 +41,27 @@ TracerManager& TracerManager::GetInstance() {
   return instance;
 }
 
-bool TracerManager::Initialize(const std::string& otlp_endpoint,
+bool TracerManager::Initialize(const std::string& output_file_path,
                                const std::string& service_name) {
 #ifdef CRANE_ENABLE_TRACING
   namespace trace_api = opentelemetry::trace;
   namespace trace_sdk = opentelemetry::sdk::trace;
-  namespace otlp = opentelemetry::exporter::otlp;
   namespace resource = opentelemetry::sdk::resource;
 
   service_name_ = service_name;
 
-  otlp::OtlpGrpcExporterOptions exporter_options;
-  exporter_options.endpoint = otlp_endpoint;
+  auto output_stream = std::make_shared<std::ofstream>(
+      output_file_path, std::ios::out | std::ios::app);
+  if (!output_stream->is_open()) {
+    return false;
+  }
 
-  auto exporter = otlp::OtlpGrpcExporterFactory::Create(exporter_options);
+  auto exporter =
+      opentelemetry::exporter::trace::OStreamSpanExporterFactory::Create(
+          *output_stream);
 
-  trace_sdk::BatchSpanProcessorOptions processor_options;
-  auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
-      std::move(exporter), processor_options);
+  auto processor =
+      trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));
 
   auto resource_attributes = resource::ResourceAttributes{
       {resource::SemanticConventions::kServiceName, service_name_}};
