@@ -329,7 +329,7 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
   }
 
   job_id_t job_id = request->task_id();
-  step_id_t step_id = kDaemonStepId;
+  step_id_t step_id = kPrimaryStepId;
   CRANE_INFO("[Step #{}.{}] Change step time limit to {} seconds.", job_id,
              step_id, request->time_limit_seconds());
   auto stub = g_supervisor_keeper->GetStub(job_id, step_id);
