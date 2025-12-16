@@ -67,11 +67,11 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script, TaskInCtl
     return FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
                          "lua environment is nil");
 
-  crane::grpc::QueryTasksInfoReply task_info_reply;
+  std::unordered_map<job_id_t, crane::grpc::TaskInfo> job_info_map;
   crane::grpc::QueryReservationInfoReply resv_info_reply;
   crane::grpc::QueryPartitionInfoReply partition_info_reply;
 
-  UpdateJobGloable_(*lua_env, &task_info_reply);
+  UpdateJobGloable_(*lua_env, &job_info_map);
   UpdateJobResvGloable_(*lua_env, &resv_info_reply);
   PushJobDesc_(task, *lua_env);
   PushPartitionList_(*lua_env, task->Username(), task->account,
@@ -168,22 +168,6 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script, TaskInCtl
   return result;
 }
 #ifdef HAVE_LUA
-
-const luaL_Reg LuaJobHandler::kGlobalFunctions[] = {
-    {"_get_job_env_field_name", LuaJobHandler::GetJobEnvFieldNameCb_},
-    {"_get_job_req_field_name", LuaJobHandler::GetJobReqFieldNameCb_},
-    {"_set_job_env_field", LuaJobHandler::SetJobEnvFieldCb_},
-    {"_set_job_req_field", LuaJobHandler::SetJobReqFieldCb_},
-    {"_get_part_rec_field", LuaJobHandler::GetPartRecFieldNameCb_},
-    {nullptr, nullptr}};
-
-const luaL_Reg LuaJobHandler::kCraneFunctions[] = {
-    {"get_qos_priority", GetQosPriorityCb_}, {nullptr, nullptr}};
-
-const std::vector<std::string> LuaJobHandler::kReqFxns = {
-  "crane_job_submit",
-  "crane_job_modify"
-};
 
 int LuaJobHandler::GetQosPriorityCb_(lua_State* lua_state) {
   std::string qos_name = lua_tostring(lua_state, -1);
@@ -433,38 +417,38 @@ int LuaJobHandler::GetJobReqField_(const TaskInCtld& job_desc, const std::string
       //  [](lua_State* L, const TaskInCtld& t) {
       //    lua_pushnumber(L, absl::ToDoubleSeconds(t.begin_time));
       //  }},
-      {"bash_meta",
-       [](lua_State* L, const TaskInCtld& t) {
-         if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
-           const auto& meta = ptr;
-           lua_newtable(L);
-
-           lua_pushstring(L, ptr->sh_script.c_str());
-           lua_setfield(L, -2, "sh_script");
-
-           lua_pushstring(L, ptr->output_file_pattern.c_str());
-           lua_setfield(L, -2, "output_file_pattern");
-
-           lua_pushstring(L, ptr->error_file_pattern.c_str());
-           lua_setfield(L, -2, "error_file_pattern");
-
-           lua_pushstring(L, ptr->interpreter.c_str());
-           lua_setfield(L, -2, "interpreter");
-         } else {
-           lua_pushnil(L);
-         }
-       }},
-      {"interactive_meta",
-       [](lua_State* L, const TaskInCtld& t) {
-         if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
-           lua_newtable(L);
-           lua_pushnumber(L, ptr->interactive_type);
-           lua_setfield(L, -2, "interactive_type");
-           // TODO: Add more fields.
-         } else {
-           lua_pushnil(L);
-         }
-       }},
+      // {"bash_meta",
+      //  [](lua_State* L, const TaskInCtld& t) {
+      //    if (auto* ptr = std::get_if<BatchMetaInTask>(&t.meta)) {
+      //      const auto& meta = ptr;
+      //      lua_newtable(L);
+      //
+      //      lua_pushstring(L, ptr->sh_script.c_str());
+      //      lua_setfield(L, -2, "sh_script");
+      //
+      //      lua_pushstring(L, ptr->output_file_pattern.c_str());
+      //      lua_setfield(L, -2, "output_file_pattern");
+      //
+      //      lua_pushstring(L, ptr->error_file_pattern.c_str());
+      //      lua_setfield(L, -2, "error_file_pattern");
+      //
+      //      lua_pushstring(L, ptr->interpreter.c_str());
+      //      lua_setfield(L, -2, "interpreter");
+      //    } else {
+      //      lua_pushnil(L);
+      //    }
+      //  }},
+      // {"interactive_meta",
+      //  [](lua_State* L, const TaskInCtld& t) {
+      //    if (auto* ptr = std::get_if<InteractiveMetaInTask>(&t.meta)) {
+      //      lua_newtable(L);
+      //      lua_pushnumber(L, ptr->interactive_type);
+      //      lua_setfield(L, -2, "interactive_type");
+      //      // TODO: Add more fields.
+      //    } else {
+      //      lua_pushnil(L);
+      //    }
+      //  }},
   };
 
   auto it = handlers.find(name);
@@ -551,15 +535,16 @@ int LuaJobHandler::GetPartRecField_(
   return 1;
 }
 
+// TODO: use iter, lazy update
 void LuaJobHandler::UpdateJobGloable_(
     const crane::LuaEnvironment& lua_env,
-    crane::grpc::QueryTasksInfoReply* task_info_reply) {
+    std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
   lua_getglobal(lua_env.GetLuaState(), "crane");
   lua_newtable(lua_env.GetLuaState());
 
   crane::grpc::QueryTasksInfoRequest request;
-  g_task_scheduler->QueryTasksInRam(&request, task_info_reply);
-  for (const auto& task : task_info_reply->task_info_list()) {
+  g_task_scheduler->QueryTasksInRam(&request, job_info_map);
+  for (const auto& [_, task] : *job_info_map) {
     /*
      * Create an empty table, with a metatable that looks up the
      * data for the individual job.
