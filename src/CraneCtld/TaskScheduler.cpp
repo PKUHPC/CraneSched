@@ -1682,7 +1682,9 @@ CraneErrCode TaskScheduler::ChangeTaskExtraAttrs(
 
 std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(TaskInCtld* task) {
   if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
-  return g_lua_pool->ExecuteLuaScript(LuaJobHandler::JobSubmit, g_config.JobSubmitLuaScript, task);
+  return g_lua_pool->ExecuteLuaScript([task]() {
+    return LuaJobHandler::JobSubmit(g_config.JobSubmitLuaScript, task);
+  });
 }
 
 std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(task_id_t task_id) {
@@ -1692,14 +1694,18 @@ std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(task
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     auto pd_iter = m_pending_task_map_.find(task_id);
     if (pd_iter != m_pending_task_map_.end())
-      return g_lua_pool->ExecuteLuaScript(LuaJobHandler::JobModify, g_config.JobSubmitLuaScript, pd_iter->second.get());
+      return g_lua_pool->ExecuteLuaScript([pd_iter]() {
+        return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript, pd_iter->second.get());
+      });
   }
 
   {
     LockGuard running_guard(&m_running_task_map_mtx_);
     auto rn_iter = m_running_task_map_.find(task_id);
     if (rn_iter != m_running_task_map_.end())
-      return g_lua_pool->ExecuteLuaScript(LuaJobHandler::JobModify, g_config.JobSubmitLuaScript, rn_iter->second.get());
+      return g_lua_pool->ExecuteLuaScript([rn_iter]() {
+       return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript, rn_iter->second.get());
+     });
   }
 
   return std::nullopt;
