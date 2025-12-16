@@ -181,7 +181,7 @@ void ParseConfig(int argc, char** argv) {
           exit(1);
         }
         g_keepalived_config.CraneCtldAliveFile =
-            g_keepalived_config.CraneNFSBaseDir /
+            g_config.CraneBaseDir /
             YamlValueOr(keepalived_config["CraneCtldAliveFile"],
                         kDefaultCraneCtldAlivePath);
         // When keepalived is set, the mutex file directory is located in
@@ -1012,15 +1012,10 @@ int StartServer() {
   InitializeCtldGlobalVariables();
 
   if (!g_config.KeepalivedConfig.CraneCtldAliveFile.empty()) {
-    int fd = open(g_config.KeepalivedConfig.CraneCtldAliveFile.c_str(),
-                  O_CREAT | O_WRONLY, 0666);
-    if (fd == -1) {
-      CRANE_ERROR("Failed to create alive file: {}", strerror(errno));
+    if (!util::os::CreateFile(g_config.KeepalivedConfig.CraneCtldAliveFile)) {
       DestroyCtldGlobalVariables();
       std::exit(1);
     }
-
-    close(fd);
   }
 
   g_ctld_server->Wait();
