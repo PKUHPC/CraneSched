@@ -3395,15 +3395,20 @@ void TaskScheduler::QueryTasksInRam(
     TaskInCtld& job = *job_ptr;
     crane::grpc::TaskInfo job_info;
     job.SetFieldsOfTaskInfo(&job_info);
+
+    job_info.set_status(job.Status());
+    job_info.mutable_elapsed_time()->set_seconds(
+        ToInt64Seconds(now - job.StartTime()));
     // Check if task has exceeded time limit
-    if ((job.Status() == crane::grpc::TaskStatus::Running ||
-         job.Status() == crane::grpc::TaskStatus::Configuring) &&
-        job.StartTime() + job.time_limit < now) {
-      job_info.set_status(crane::grpc::TaskStatus::Completing);
-      job_info.mutable_end_time()->set_seconds(
-          ToUnixSeconds(job.StartTime() + job.time_limit));
-      job_info.mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(job.time_limit));
+    if (job.Status() == crane::grpc::TaskStatus::Running ||
+        job.Status() == crane::grpc::TaskStatus::Configuring) {
+      if (job.StartTime() + job.time_limit < now) {
+        job_info.set_status(crane::grpc::TaskStatus::Completing);
+        job_info.mutable_end_time()->set_seconds(
+            ToUnixSeconds(job.StartTime() + job.time_limit));
+        job_info.mutable_elapsed_time()->set_seconds(
+            ToInt64Seconds(job.time_limit));
+      }
     }
 
     auto* proto_steps = job_info.mutable_step_info_list();
