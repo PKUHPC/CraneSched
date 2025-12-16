@@ -160,7 +160,7 @@ message TaskToCtld {
     ContainerTaskAdditionalMeta container_meta = 23;
   }
   TaskIoMeta io_meta = 24;
-  string sh_script = 25; // Crun and cbatch script content
+  string sh_script = 25;  // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -358,7 +358,7 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message TaskIoMeta{
+message TaskIoMeta {
   // Append mode for output and error files
   optional bool open_mode_append = 1;
   string input_file_pattern = 2;
