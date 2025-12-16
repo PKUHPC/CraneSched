@@ -40,7 +40,7 @@ class TracerManager {
  public:
   static TracerManager& GetInstance();
 
-  bool Initialize(const std::string& otlp_endpoint,
+  bool Initialize(const std::string& output_file_path,
                   const std::string& service_name);
 
   void Shutdown();
