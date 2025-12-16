@@ -113,7 +113,6 @@ CraneErrCode StepInstance::Prepare() {
 }
 
 void StepInstance::CleanUp() {
-
   if (script_path.has_value()) util::os::DeleteFile(script_path.value());
   if (x11_meta.has_value()) {
     auto x11_auth_path = x11_meta.value().x11_auth_path;
@@ -151,8 +150,7 @@ void StepInstance::CleanUp() {
   StopCforedClient();
   // Explicitly release CriClient
   StopCriClient();
-
-  }
+}
 
 bool StepInstance::IsContainer() const noexcept {
   return m_step_to_supv_.has_container_meta();
@@ -1331,7 +1329,6 @@ CraneErrCode ProcInstance::Prepare() {
   } else {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
-
 
   // If interpreter is not set, let system decide.
   m_executable_ = m_parent_step_inst_->script_path.value().string();
