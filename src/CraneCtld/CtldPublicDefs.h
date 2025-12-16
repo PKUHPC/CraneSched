@@ -958,7 +958,7 @@ struct TaskInCtld {
         }
         step_alloc_res.AddResourceInNode(craned_id, feasible_res);
         step_craned_ids.insert(craned_id);
-        if (craned_ids.size() >= step->node_num) {
+        if (step_craned_ids.size() >= step->node_num) {
           break;
         }
       }
@@ -967,6 +967,8 @@ struct TaskInCtld {
       }
       step->SetAllocatedRes(step_alloc_res);
       step->SetCranedIds(step_craned_ids);
+      step->allocated_craneds_regex =
+          util::HostNameListToStr(step->CranedIds());
       step->SetConfiguringNodes(step_craned_ids);
       step->SetExecutionNodes(step_craned_ids);
       step->SetStartTime(now);

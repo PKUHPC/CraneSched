@@ -324,7 +324,6 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->set_exit_code(m_exit_code_);
   // oneof pending_reason_or_craned_list {
   // string pending_reason = 35;
-  // string craned_list = 36;
 
   step_info->mutable_execution_node()->Assign(m_execute_nodes_.begin(),
                                               m_execute_nodes_.end());
@@ -1003,7 +1002,8 @@ void CommonStepInCtld::RecoverFromDb(
   cwd = StepToCtld().cwd();
   extra_attr = StepToCtld().extra_attr();
 
-  allocated_craneds_regex = job.allocated_craneds_regex;
+  allocated_craneds_regex =
+      util::HostNameListToStr(step_in_db.runtime_attr().craned_ids());
 }
 
 void CommonStepInCtld::SetFieldsOfStepInfo(
