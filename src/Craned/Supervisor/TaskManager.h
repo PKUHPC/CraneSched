@@ -232,7 +232,7 @@ class ITaskInstance {
   // Set environment variables for the task instance. Can be overridden.
   virtual void InitEnvMap();
 
-  task_id_t task_id{};
+  task_id_t task_id{0};
   CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
   TerminatedBy terminated_by{TerminatedBy::NONE};
 
