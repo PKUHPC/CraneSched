@@ -27,14 +27,17 @@
 #  include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
 #  include "opentelemetry/sdk/trace/batch_span_processor_options.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
+#  include "opentelemetry/sdk/trace/tracer_provider.h"
 #endif
 
 namespace crane {
 
+namespace _internal {
 #ifdef CRANE_ENABLE_TRACING
 thread_local opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
-    _internal::g_current_span = nullptr;
+    g_current_span;
 #endif
+}  // namespace _internal
 
 TracerManager& TracerManager::GetInstance() {
   static TracerManager instance;
@@ -50,15 +53,15 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 
   service_name_ = service_name;
 
-  auto output_stream = std::make_shared<std::ofstream>(
+  output_stream_ = std::make_shared<std::ofstream>(
       output_file_path, std::ios::out | std::ios::app);
-  if (!output_stream->is_open()) {
+  if (!static_cast<std::ofstream*>(output_stream_.get())->is_open()) {
     return false;
   }
 
   auto exporter =
       opentelemetry::exporter::trace::OStreamSpanExporterFactory::Create(
-          *output_stream);
+          *output_stream_);
 
   auto processor =
       trace_sdk::SimpleSpanProcessorFactory::Create(std::move(exporter));
@@ -67,8 +70,9 @@ bool TracerManager::Initialize(const std::string& output_file_path,
       {resource::SemanticConventions::kServiceName, service_name_}};
   auto resource_ptr = resource::Resource::Create(resource_attributes);
 
-  tracer_provider_ = trace_sdk::TracerProviderFactory::Create(
+  auto provider = std::make_shared<trace_sdk::TracerProvider>(
       std::move(processor), resource_ptr);
+  tracer_provider_ = provider;
 
   trace_api::Provider::SetTracerProvider(tracer_provider_);
 
@@ -84,7 +88,9 @@ bool TracerManager::Initialize(const std::string& output_file_path,
 void TracerManager::Shutdown() {
 #ifdef CRANE_ENABLE_TRACING
   if (tracer_provider_) {
-    tracer_provider_->Shutdown();
+    static_cast<opentelemetry::sdk::trace::TracerProvider*>(
+        tracer_provider_.get())
+        ->Shutdown();
   }
   initialized_ = false;
 #endif
@@ -94,7 +100,8 @@ void TracerManager::Shutdown() {
 opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
 TracerManager::CreateSpan(const std::string& span_name) {
   if (!tracer_) {
-    return nullptr;
+    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
+        nullptr);
   }
   return tracer_->StartSpan(span_name);
 }
@@ -104,7 +111,8 @@ TracerManager::CreateChildSpan(
     const std::string& span_name,
     const opentelemetry::trace::SpanContext& parent_context) {
   if (!tracer_) {
-    return nullptr;
+    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
+        nullptr);
   }
 
   opentelemetry::trace::StartSpanOptions options;
