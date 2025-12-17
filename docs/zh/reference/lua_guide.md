@@ -76,28 +76,40 @@ cranectld 当前保存的被修改作业的数据结构。
 
 #### job_desc
 
-| 属性名        | 类型      | 解释   |
-|------------|---------|------|
-| time_limit | number  | 时间限制 |
-| partition  | string  | 作业所属分区 |
-| type       | number  | 作业类型 |
-| uid        | number  | 作业所属uid |
-| account    | string  | 作业所属账户 |
-| name       | string  | 作业名  |
-| qos        | string  | 作业所属qos |
-| node_num   | number  | 节点数目 |
-| ntasks_per_node| number  | 每个节点的task数目 |
-|cpus_per_task | number  | 每个task的cpu数目 |
-|requeue_if_failed | boolean | 是否允许失败重试 |
-| get_user_env | boolean | 是否获取用户环境变量 |
-| gid          | number  | 作业所属gid |
-| extra_attr | string  | 额外的属性 |
-| cmd_line| string | 提交命令 |
-| cwd | string | 作业执行目录 |
-| env | table | 环境变量 |
-| reservation| string | 预约信息 |
+用户请求的作业参数。
 
-#### part
+| 属性名                     | 类型      | 解释           |
+|-------------------------|---------|--------------|
+| time_limit              | number  | 时间限制         |
+| partition               | string  | 作业所属分区       |
+| requested_node_res_view | table   | 需求资源信息       |
+| type                    | number  | 作业类型         |
+| uid                     | number  | 作业所属uid      |
+| account                 | string  | 作业所属账户       |
+| name                    | string  | 作业名          |
+| qos                     | string  | 作业所属qos      |
+| node_num                | number  | 节点数目         |
+| ntasks_per_node         | number  | 每个节点的task数目  |
+| cpus_per_task           | number  | 每个task的cpu数目 |
+| requeue_if_failed       | boolean | 是否允许失败重试     |
+| get_user_env            | boolean | 是否获取用户环境变量   |
+| gid                     | number  | 作业所属gid      |
+| batch_meta              | table   | 批量作业信息       |
+| interactive_meta        | table   | 交互式作业信息      |
+| extra_attr              | string  | 额外的属性        |
+| cmd_line                | string  | 提交命令         |
+| cwd                     | string  | 作业执行目录       |
+| env                     | table   | 环境变量         |
+| excludes                | string  | 排他节点         |
+| nodelist                | string  | 节点列表         |
+| reservation             | string  | 预约信息         |
+| begin_time              | number  | 作业开始时间       |
+| exclusive                | boolean | 是否独占节点       |
+| hold                    | boolean | 是否保持作业       |
+
+
+#### part_list
+该用户有权限使用的分区
 
 | 属性名                 | 类型                 | 解释 |
 |---------------------|--------------------|--|
@@ -257,7 +269,7 @@ function crane_job_submit(job_desc, part_list, uid)
 
     -- 全局 jobs
     if crane.jobs then
-        for job_id, job in pairs(crane.jobs) do
+        for job_id, job in crane.jobs:iter() do
             crane.log_debug("已存在作业: %s, 用户: %s, 状态: %s, 优先级: %s", job.job_name, job.username, tostring(job.status), tostring(job.priority))
             crane.log_debug("作业ID: %s, 分区: %s", tostring(job.job_id), job.partition)
             crane.log_debug("time_limit: %s, start_time: %s, end_time: %s, submit_time: %s", tostring(job.time_limit), tostring(job.start_time), tostring(job.end_time), tostring(job.submit_time))
@@ -270,7 +282,7 @@ function crane_job_submit(job_desc, part_list, uid)
 
     -- 全局 reservations
     if crane.reservations then
-        for resv_name, resv in pairs(crane.reservations) do
+        for resv_name, resv in crane.reservations:iter() do
             crane.log_debug("预约: %s, 分区: %s, 开始时间: %s, 时长: %s", resv.reservation_name, resv.partition, tostring(resv.start_time), tostring(resv.duration))
             if resv.allowed_accounts then
                 for i, acc in ipairs(resv.allowed_accounts) do
