@@ -19,12 +19,12 @@
 #pragma once
 
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <unordered_map>
 
 #ifdef CRANE_ENABLE_TRACING
-#  include "opentelemetry/exporters/otlp/otlp_grpc_exporter_factory.h"
 #  include "opentelemetry/sdk/trace/processor.h"
 #  include "opentelemetry/sdk/trace/simple_processor_factory.h"
 #  include "opentelemetry/sdk/trace/tracer_provider.h"
@@ -64,8 +64,10 @@ class TracerManager {
   ~TracerManager() = default;
 
 #ifdef CRANE_ENABLE_TRACING
-  std::shared_ptr<opentelemetry::sdk::trace::TracerProvider> tracer_provider_;
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
+      tracer_provider_;
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> tracer_;
+  std::shared_ptr<std::ostream> output_stream_;
 #endif
   std::string service_name_;
   bool initialized_ = false;

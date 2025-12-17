@@ -1124,7 +1124,8 @@ int main(int argc, char** argv) {
 
   // Test OpenTelemetry tracing
   auto& tracer = crane::TracerManager::GetInstance();
-  std::string trace_file = "output/cranectld_traces.json";
+  std::string trace_file =
+      "/nfs/home/interntwo/crane/CraneSched/output/cranectld_traces.json";
   if (tracer.Initialize(trace_file, "cranectld")) {
     CRANE_TRACE_BEGIN("cranectld.startup_test");
     CRANE_TRACE_SET_ATTRIBUTE("test.type", "initialization");
