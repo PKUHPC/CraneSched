@@ -149,7 +149,7 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
     if (lua_isnumber(lua_env->GetLuaState(), -1)) {
       rc = lua_tonumber(lua_env->GetLuaState(), -1);
     } else {
-      CRANE_INFO("{}/lua: non-numeric return code", __func__);
+      CRANE_ERROR("{}/lua: non-numeric return code", __func__);
     }
   }
   lua_pop(lua_env->GetLuaState(), 1);
@@ -241,64 +241,58 @@ int LuaJobHandler::SetJobReqFieldCb_(lua_State* lua_state) {
     return 0;
   }
 
-  if (name == "partition") {
+  if (name == "time_limit") {
+    uint64_t value = (uint64_t)luaL_checknumber(lua_state, 3);
+    job_desc->time_limit = absl::Seconds(value);
+  } else if (name == "partition") {
     const std::string& value_str = luaL_checkstring(lua_state, 3);
     job_desc->partition_id = value_str;
-  }
-  if (name == "name") {
-    const std::string& value_str = luaL_checkstring(lua_state, 3);
-    job_desc->name = value_str;
-  }
-  if (name == "account") {
+  } else if (name == "account") {
     const std::string& value_str = luaL_checkstring(lua_state, 3);
     job_desc->account = value_str;
-  }
-  if (name == "qos") {
+  } else if (name == "name") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    job_desc->name = value_str;
+  } else if (name == "qos") {
     const std::string& value_str = luaL_checkstring(lua_state, 3);
     job_desc->qos = value_str;
-  }
-  if (name == "cmd_line") {
-    const std::string& value_str = luaL_checkstring(lua_state, 3);
-    job_desc->cmd_line = value_str;
-  }
-  if (name == "cwd") {
-    const std::string& value_str = luaL_checkstring(lua_state, 3);
-    job_desc->cwd = value_str;
-  }
-  if (name == "reservation") {
-    const std::string& value_str = luaL_checkstring(lua_state, 3);
-    job_desc->reservation = value_str;
-  }
-  if (name == "extra_attr") {
-    const std::string& value_str = luaL_checkstring(lua_state, 3);
-    job_desc->extra_attr = value_str;
-  }
-  if (name == "type") {
-    job_desc->type =
-        static_cast<crane::grpc::TaskType>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "uid") {
-    job_desc->uid = static_cast<uid_t>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "gid") {
-    job_desc->gid = static_cast<gid_t>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "node_num") {
-    job_desc->node_num = static_cast<int>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "ntasks_per_node") {
+  } else if (name == "node_num") {
+    job_desc->node_num = static_cast<uint32_t>(luaL_checknumber(lua_state, 3));
+  } else if (name == "ntasks_per_node") {
     job_desc->ntasks_per_node =
         static_cast<int>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "cpus_per_task") {
+  } else if (name == "cpus_per_task") {
     job_desc->cpus_per_task =
         static_cast<cpu_t>(luaL_checknumber(lua_state, 3));
-  }
-  if (name == "requeue_if_failed") {
+  } else if (name == "requeue_if_failed") {
     job_desc->requeue_if_failed = lua_toboolean(lua_state, 3);
-  }
-  if (name == "get_user_env") {
-    job_desc->get_user_env = lua_toboolean(lua_state, 3);
+  } else if (name == "extra_attr") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    job_desc->extra_attr = value_str;
+  } else if (name == "cmd_line") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    job_desc->cmd_line = value_str;
+  } else if (name == "cwd") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    job_desc->cwd = value_str;
+  } else if (name == "excludes") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    for (const auto& node_name : absl::StrSplit(value_str, ',')) {
+      job_desc->excluded_nodes.emplace(node_name);
+    }
+  } else if (name == "nodelist") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    for (const auto& node_name : absl::StrSplit(value_str, ',')) {
+      job_desc->included_nodes.emplace(node_name);
+    }
+  } else if (name == "reservation") {
+    const std::string& value_str = luaL_checkstring(lua_state, 3);
+    job_desc->reservation = value_str;
+  } else if (name == "begin_time") {
+    uint64_t value = (uint64_t)luaL_checknumber(lua_state, 3);
+    job_desc->begin_time = absl::FromUnixSeconds(value);
+  } else if (name == "exclusive") {
+    job_desc->exclusive = lua_toboolean(lua_state, 3);
   }
 
   return 0;
