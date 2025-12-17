@@ -535,40 +535,102 @@ int LuaJobHandler::GetPartRecField_(
   return 1;
 }
 
-// TODO: use iter, lazy update
 void LuaJobHandler::UpdateJobGloable_(
     const crane::LuaEnvironment& lua_env,
     std::unordered_map<job_id_t, crane::grpc::TaskInfo>* job_info_map) {
-  lua_getglobal(lua_env.GetLuaState(), "crane");
-  lua_newtable(lua_env.GetLuaState());
 
-  crane::grpc::QueryTasksInfoRequest request;
-  g_task_scheduler->QueryTasksInRam(&request, job_info_map);
-  for (const auto& [_, task] : *job_info_map) {
-    /*
-     * Create an empty table, with a metatable that looks up the
-     * data for the individual job.
-     */
-    lua_newtable(lua_env.GetLuaState());
+  lua_State* lua_state = lua_env.GetLuaState();
 
-    lua_newtable(lua_env.GetLuaState());
-    lua_pushcfunction(lua_env.GetLuaState(), JobRecFieldIndex_);
-    lua_setfield(lua_env.GetLuaState(), -2, "__index");
-    /*
-     * Store the job_record in the metatable, so the index
-     * function knows which job it's getting data for.
-     */
-    lua_pushlightuserdata(lua_env.GetLuaState(), (void*)&task);
-    lua_setfield(lua_env.GetLuaState(), -2, "_job_rec_ptr");
-    lua_setmetatable(lua_env.GetLuaState(), -2);
+  lua_getglobal(lua_state, "crane");
+  lua_newtable(lua_state); // jobs
 
-    /* Lua copies passed strings, so we can reuse the buffer. */
-    lua_setfield(lua_env.GetLuaState(), -2,
-                 std::to_string(task.task_id()).data());
+  // jobs::iter()
+  lua_pushcfunction(lua_state, JobsIter_);
+  lua_setfield(lua_state, -2, "iter");
+
+  // jobs.get()
+  lua_pushcfunction(lua_state, JobsGet_);
+  lua_setfield(lua_state, -2, "get");
+
+  lua_setfield(lua_state, -2, "jobs");
+  lua_pop(lua_state, 1);
+}
+
+struct JobsIterState {
+  std::vector<crane::grpc::TaskInfo> tasks;
+  size_t index = 0;
+};
+
+int LuaJobHandler::JobsIter_(lua_State* lua_state) {
+  CRANE_TRACE("JobsIterCb called");
+
+  auto* state = static_cast<JobsIterState*>(
+    lua_newuserdata(lua_state, sizeof(JobsIterState)));
+  new (state) JobsIterState();
+
+  crane::grpc::QueryTasksInfoRequest req;
+  std::unordered_map<job_id_t, crane::grpc::TaskInfo> job_info_map;
+  g_task_scheduler->QueryTasksInRam(&req, &job_info_map);
+
+  for (auto& [_, task] : job_info_map) {
+    state->tasks.push_back(task);
   }
 
-  lua_setfield(lua_env.GetLuaState(), -2, "jobs");
-  lua_pop(lua_env.GetLuaState(), 1);
+  if (luaL_newmetatable(lua_state, "JobsIterState")) {
+    lua_pushcfunction(lua_state, JobsIterGC_);
+    lua_setfield(lua_state, -2, "__gc");
+  }
+  lua_setmetatable(lua_state, -2);
+
+  lua_pushvalue(lua_state, -1);
+  lua_pushcclosure(lua_state, JobsIterNext_, 1);
+
+  lua_insert(lua_state, -2);
+
+  lua_pushnil(lua_state);
+  return 3;
+}
+
+int LuaJobHandler::JobsIterNext_(lua_State* lua_state) {
+  CRANE_TRACE("JobsIterNextCb called");
+
+  auto* state = static_cast<JobsIterState*>(
+      lua_touserdata(lua_state, lua_upvalueindex(1)));
+
+  if (state->index >= state->tasks.size())
+    return 0;
+
+  const auto& task = state->tasks[state->index++];
+  std::string id = std::to_string(task.task_id());
+
+  lua_pushstring(lua_state, id.data());
+
+  lua_newtable(lua_state);
+
+  lua_newtable(lua_state);
+  lua_pushcfunction(lua_state, JobRecFieldIndex_);
+  lua_setfield(lua_state, -2, "__index");
+
+  lua_pushlightuserdata(lua_state, (void*)&task);
+  lua_setfield(lua_state, -2, "__job_rec_ptr");
+  lua_setmetatable(lua_state, -2);
+
+  return 2;
+}
+
+int LuaJobHandler::JobsIterGC_(lua_State* lua_state) {
+  CRANE_TRACE("JobsIterGC called");
+  auto* state = static_cast<JobsIterState*>(lua_touserdata(lua_state, 1));
+  state->~JobsIterState();
+  return 0;
+}
+
+int LuaJobHandler::JobsGet_(lua_State* lua_state) {
+  std::string id = luaL_checkstring(lua_state, 2);
+  job_id_t job_id = std::stoi(id);
+
+  lua_pushnil(lua_state);
+  return 0;
 }
 
 void LuaJobHandler::UpdateJobResvGloable_(
@@ -696,12 +758,16 @@ int LuaJobHandler::GetJobReqFieldIndex_(lua_State* lua_state) {
 }
 
 int LuaJobHandler::JobRecFieldIndex_(lua_State* lua_state) {
-  const std::string& name = luaL_checkstring(lua_state, 2);
-  crane::grpc::TaskInfo* job_ptr;
+  CRANE_TRACE("JobRecFieldIndex_ called");
 
-  lua_getmetatable(lua_state, -2);
-  lua_getfield(lua_state, -1, "_job_rec_ptr");
-  job_ptr = static_cast<crane::grpc::TaskInfo*>(lua_touserdata(lua_state, -1));
+  const std::string& name = luaL_checkstring(lua_state, 2);
+  crane::grpc::TaskInfo* job_ptr = nullptr;
+
+  if (lua_getmetatable(lua_state, 1)) {
+    lua_getfield(lua_state, -1, "__job_rec_ptr");
+    job_ptr = static_cast<crane::grpc::TaskInfo*>(lua_touserdata(lua_state, -1));
+    lua_pop(lua_state, 2); // metatable + job_ptr
+  }
 
   return LuaJobRecordField_(lua_state, job_ptr, name);
 }
