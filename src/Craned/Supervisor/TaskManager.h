@@ -47,6 +47,7 @@ class ITaskInstance;
 class StepInstance {
  public:
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> signal_timer{nullptr};
   PasswordEntry pwd;
 
   bool orphaned{false};
@@ -510,6 +511,29 @@ class TaskManager {
     if (m_step_.termination_timer) {
       m_step_.termination_timer->close();
       m_step_.termination_timer.reset();
+    }
+  }
+
+  void AddSignalTimer_(int64_t secs, int signal_number) {
+    auto signal_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    signal_handle->on<uvw::timer_event>(
+        [this, signal_number, TaskIds = m_step_.GetTaskIds()](
+            const uvw::timer_event&, uvw::timer_handle& h) {
+          for (task_id_t task_id : TaskIds) {
+            auto* task = m_step_.GetTaskInstance(task_id);
+            if (task->GetExecId().has_value()) {
+              task->Kill(signal_number);
+            }
+          }
+        });
+    signal_handle->start(std::chrono::seconds(secs), std::chrono::seconds(0));
+    m_step_.signal_timer = signal_handle;
+  }
+
+  void DelSignalTimer_() {
+    if (m_step_.signal_timer) {
+      m_step_.signal_timer->close();
+      m_step_.signal_timer.reset();
     }
   }
 
