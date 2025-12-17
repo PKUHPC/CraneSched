@@ -86,34 +86,35 @@ Same as the return values of `crane_job_submit`.
 
 #### job_desc
 
-| Property Name              | Type    | Description                      |
-|----------------------------|---------|----------------------------------|
-| time_limit                 | number  | Time limit                       |
-| partition                  | string  | Job partition                    |
-| requested_node_res_view    | table   | Requested resource information   |
-| type                       | number  | Job type                         |
-| uid                        | number  | Job owner UID                    |
-| account                    | string  | Job owner account                |
-| name                       | string  | Job name                         |
-| qos                        | string  | Job QOS                          |
-| node_num                   | number  | Number of nodes                  |
-| ntasks_per_node            | number  | Number of tasks per node         |
-| cpus_per_task              | number  | Number of CPUs per task          |
-| requeue_if_failed          | boolean | Allow requeue on failure         |
-| get_user_env               | boolean | Get user environment variables   |
-| gid                        | number  | Job owner GID                    |
-| batch_meta                 | table   | Batch job information            |
-| interactive_meta           | table   | Interactive job information      |
-| extra_attr                 | string  | Extra attributes                 |
-| cmd_line                   | string  | Submission command               |
-| cwd                        | string  | Working directory                |
-| env                        | table   | Environment variables            |
-| excludes                   | string  | Excluded nodes                   |
-| nodelist                   | string  | Node list                        |
-| reservation                | string  | Reservation information          |
-| begin_time                 | number  | Job start time                   |
-| exclusive                  | boolean | Exclusive node usage             |
-| hold                       | boolean | Hold job                         |
+| Property Name               | Type    | Description                      | Modifiable |
+|-----------------------------|---------|----------------------------------|------------|
+| time_limit                  | number  | Time limit                       | ✔️         |
+| partition                   | string  | Job partition                    | ✔️         |
+| requested_node_res_view     | table   | Requested resource information   | ❌         |
+| type                        | number  | Job type                         | ❌         |
+| uid                         | number  | Job owner UID                    | ❌         |
+| account                     | string  | Job owner account                | ✔️         |
+| name                        | string  | Job name                         | ✔️         |
+| qos                         | string  | Job QOS                          | ✔️         |
+| node_num                    | number  | Number of nodes                  | ✔️         |
+| ntasks_per_node             | number  | Tasks per node                   | ✔️         |
+| cpus_per_task               | number  | CPUs per task                    | ✔️         |
+| requeue_if_failed           | boolean | Allow requeue on failure         | ✔️         |
+| get_user_env                | boolean | Get user environment variables   | ❌         |
+| gid                         | number  | Job owner GID                    | ❌         |
+| batch_meta                  | table   | Batch job information            | ❌         |
+| interactive_meta            | table   | Interactive job information      | ❌         |
+| extra_attr                  | string  | Extra attributes                 | ✔️         |
+| cmd_line                    | string  | Submission command               | ✔️         |
+| cwd                         | string  | Working directory                | ✔️         |
+| env                         | table   | Environment variables            | ❌         |
+| excludes                    | string  | Excluded nodes                   | ✔️         |
+| nodelist                    | string  | Node list                        | ✔️         |
+| reservation                 | string  | Reservation information          | ✔️         |
+| begin_time                  | number  | Job start time                   | ✔️         |
+| exclusive                   | boolean | Exclusive node usage             | ✔️         |
+| hold                        | boolean | Hold job                         | ❌         |
+
 
 ---
 
