@@ -1577,7 +1577,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
-    CRANE_DEBUG("[Task #{}] Task not found.");
+    CRANE_DEBUG("[Task #{}] Task not found.", task_id);
     return;
   }
 
@@ -1780,8 +1780,8 @@ void TaskManager::EvTaskTimerCb_() {
   DelTerminationTimer_();
 
   if (m_step_.IsCalloc()) {
-    // For calloc job, we use job id, send TaskFinish_ directly.
-    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+    // Now calloc and cbatch steps only have one task with id 0.
+    TaskFinish_(0, crane::grpc::TaskStatus::ExceedTimeLimit,
                 ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   } else {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
