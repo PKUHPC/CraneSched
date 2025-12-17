@@ -40,6 +40,7 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
+        crane_tracer
         uvw
 
         cxxopts
