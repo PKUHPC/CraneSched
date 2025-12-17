@@ -458,6 +458,15 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
     step_to_d.mutable_container_meta()->CopyFrom(
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
 
+  if (this->job->TaskToCtld().has_signal_param()) {
+    step_to_d.mutable_signal_param()->CopyFrom(
+        this->job->TaskToCtld().signal_param());
+    auto signal_param = step_to_d.signal_param();
+    CRANE_INFO(" seconds_before_kill {} signal_num {}  ",
+               signal_param.seconds_before_kill(),
+               signal_param.signal_number());
+  }
+
   return step_to_d;
 }
 
@@ -796,6 +805,14 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   } else if (this->type == crane::grpc::Container) {
     auto* mutable_meta = step_to_d.mutable_container_meta();
     mutable_meta->CopyFrom(StepToCtld().container_meta());
+  }
+  if (this->job->TaskToCtld().has_signal_param()) {
+    step_to_d.mutable_signal_param()->CopyFrom(
+        this->job->TaskToCtld().signal_param());
+    auto signal_param = step_to_d.signal_param();
+    CRANE_INFO(" common seconds_before_kill {} signal_num {}  ",
+               signal_param.seconds_before_kill(),
+               signal_param.signal_number());
   }
 
   return step_to_d;

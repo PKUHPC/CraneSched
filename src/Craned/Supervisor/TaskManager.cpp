@@ -1593,6 +1593,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
   bool orphaned = m_step_.orphaned;
   if (m_step_.AllTaskFinished()) {
     DelTerminationTimer_();
+    DelSignalTimer_();
     m_step_.StopCforedClient();
     if (!orphaned) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
@@ -1952,6 +1953,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     }
     // Delete the old timer.
     DelTerminationTimer_();
+    DelSignalTimer_();
 
     absl::Time start_time =
         absl::FromUnixSeconds(m_step_.GetStep().start_time().seconds());
@@ -1965,8 +1967,21 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       m_terminate_task_async_handle_->send();
     } else {
       // If the task haven't timed out, set up a new timer.
-      AddTerminationTimer_(
-          ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
+      int64_t new_sec =
+          ToInt64Seconds(new_time_limit - (absl::Now() - start_time));
+      AddTerminationTimer_(new_sec);
+
+      if (m_step_.GetStep().has_signal_param()) {
+        auto signal_param = m_step_.GetStep().signal_param();
+        int64_t signal_sec = new_sec - signal_param.seconds_before_kill();
+        int signal_num = signal_param.signal_number();
+        AddSignalTimer_(signal_sec, signal_num);
+        CRANE_INFO(
+            "Add a new signal timer of seconds_before_kill {} signal_num "
+            "{} new seconds {}, timelimt {}",
+            signal_param.seconds_before_kill(), signal_param.signal_number(),
+            signal_sec, new_sec);
+      }
     }
 
     elem.ok_prom.set_value(CraneErrCode::SUCCESS);
@@ -2000,7 +2015,20 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     //       so we move it outside the multithreading part.
     int64_t sec = m_step_.GetStep().time_limit().seconds();
     AddTerminationTimer_(sec);
-    CRANE_INFO("Add a timer of {} seconds", sec);
+    CRANE_INFO("Add a timer of {} seconds {}", sec,
+               m_step_.GetStep().has_signal_param());
+    if (m_step_.GetStep().has_signal_param()) {
+      auto signal_param = m_step_.GetStep().signal_param();
+      int64_t signal_sec = sec - signal_param.seconds_before_kill();
+      int signal_num = m_step_.GetStep().signal_param().signal_number();
+      AddSignalTimer_(signal_sec, signal_num);
+      CRANE_INFO(
+          "Add a signal timer of seconds_before_kill {} signal_num {} for "
+          "job "
+          "#{}",
+          signal_param.seconds_before_kill(), signal_param.signal_number(),
+          m_step_.GetStep().job_id());
+    }
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
