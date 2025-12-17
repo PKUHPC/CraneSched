@@ -86,30 +86,38 @@ Same as the return values of `crane_job_submit`.
 
 #### job_desc
 
-| Attribute Name        | Type    | Description                     |
-|-----------------------|----------|---------------------------------|
-| time_limit            | number   | Time limit                      |
-| partition             | string   | Job partition                   |
-| type                  | number   | Job type                        |
-| uid                   | number   | User ID owning the job          |
-| account               | string   | Account                         |
-| name                  | string   | Job name                        |
-| qos                   | string   | Quality of Service              |
-| node_num              | number   | Number of nodes                 |
-| ntasks_per_node       | number   | Tasks per node                  |
-| cpus_per_task         | number   | CPUs per task                   |
-| requeue_if_failed     | boolean  | Allow automatic requeue         |
-| get_user_env          | boolean  | Whether to load user env vars   |
-| gid                   | number   | Group ID owning the job         |
-| extra_attr            | string   | Extra attributes                |
-| cmd_line              | string   | Submission command              |
-| cwd                   | string   | Working directory               |
-| env                   | table    | Environment variables           |
-| reservation           | string   | Reservation information         |
+| Property Name              | Type    | Description                      |
+|----------------------------|---------|----------------------------------|
+| time_limit                 | number  | Time limit                       |
+| partition                  | string  | Job partition                    |
+| requested_node_res_view    | table   | Requested resource information   |
+| type                       | number  | Job type                         |
+| uid                        | number  | Job owner UID                    |
+| account                    | string  | Job owner account                |
+| name                       | string  | Job name                         |
+| qos                        | string  | Job QOS                          |
+| node_num                   | number  | Number of nodes                  |
+| ntasks_per_node            | number  | Number of tasks per node         |
+| cpus_per_task              | number  | Number of CPUs per task          |
+| requeue_if_failed          | boolean | Allow requeue on failure         |
+| get_user_env               | boolean | Get user environment variables   |
+| gid                        | number  | Job owner GID                    |
+| batch_meta                 | table   | Batch job information            |
+| interactive_meta           | table   | Interactive job information      |
+| extra_attr                 | string  | Extra attributes                 |
+| cmd_line                   | string  | Submission command               |
+| cwd                        | string  | Working directory                |
+| env                        | table   | Environment variables            |
+| excludes                   | string  | Excluded nodes                   |
+| nodelist                   | string  | Node list                        |
+| reservation                | string  | Reservation information          |
+| begin_time                 | number  | Job start time                   |
+| exclusive                  | boolean | Exclusive node usage             |
+| hold                       | boolean | Hold job                         |
 
 ---
 
-#### part
+#### part_list
 
 | Attribute Name        | Type                 | Description                  |
 |-----------------------|----------------------|------------------------------|
@@ -204,13 +212,13 @@ JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 ```lua
 function crane_job_submit(job_desc, part_list, uid)
-    -- Log function examples
-    crane.log_info("Submit job: %s, uid: %d", job_desc.name, uid)
-    crane.log_debug("Job type: %d, Partition: %s", job_desc.type, job_desc.partition)
-    crane.log_error("This is an error log example")
-    crane.log_user("User message: Crane Lua test")
+    -- 日志函数演示
+    crane.log_info("提交作业: %s, uid: %d", job_desc.name, uid)
+    crane.log_debug("作业类型: %d, 分区: %s", job_desc.type, job_desc.partition)
+    crane.log_error("这是一个错误日志示例")
+    crane.log_user("用户消息: Crane Lua 测试")
 
-    -- Access all fields of job_desc (read-only)
+    -- 访问 job_desc 所有字段（只读）
     crane.log_info("time_limit: %s", tostring(job_desc.time_limit))
     crane.log_info("partition: %s", tostring(job_desc.partition))
     crane.log_info("requested_node_res_view: %s", tostring(job_desc.requested_node_res_view))
@@ -231,14 +239,14 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_info("container: %s", tostring(job_desc.container))
     crane.log_info("reservation: %s", tostring(job_desc.reservation))
 
-    -- env variables
+    -- env 环境变量
     if job_desc.env then
         for k, v in pairs(job_desc.env) do
-            crane.log_debug("Environment variable: %s=%s", k, v)
+            crane.log_debug("环境变量: %s=%s", k, v)
         end
     end
 
-    -- meta (batch_meta / interactive_meta)
+    -- meta（batch_meta / interactive_meta）
     if job_desc.bash_meta then
         crane.log_info("bash_meta.sh_script: %s", job_desc.bash_meta.sh_script or "")
         crane.log_info("bash_meta.output_file_pattern: %s", job_desc.bash_meta.output_file_pattern or "")
@@ -252,18 +260,18 @@ function crane_job_submit(job_desc, part_list, uid)
     -- requested_node_res_view
     crane.log_info("requested_node_res_view: %s", tostring(job_desc.requested_node_res_view))
 
-    -- Partition list part_list
+    -- 分区列表 part_list
     for pname, part in pairs(part_list) do
-        crane.log_info("Partition: %s, total nodes: %s, alive nodes: %s", part.name, tostring(part.total_nodes), tostring(part.alive_nodes))
-        crane.log_debug("Partition state: %s, default mem/cpu: %s, max mem/cpu: %s", tostring(part.state), tostring(part.default_mem_per_cpu), tostring(part.max_mem_per_cpu))
+        crane.log_info("分区: %s, 节点总数: %s, 存活节点: %s", part.name, tostring(part.total_nodes), tostring(part.alive_nodes))
+        crane.log_debug("分区状态: %s, 默认mem/cpu: %s, 最大mem/cpu: %s", tostring(part.state), tostring(part.default_mem_per_cpu), tostring(part.max_mem_per_cpu))
         if part.allowed_accounts then
             for i, acc in ipairs(part.allowed_accounts) do
-                crane.log_debug("Allowed account: %s", acc)
+                crane.log_debug("允许账号: %s", acc)
             end
         end
         if part.denied_accounts then
             for i, acc in ipairs(part.denied_accounts) do
-                crane.log_debug("Denied account: %s", acc)
+                crane.log_debug("禁止账号: %s", acc)
             end
         end
         crane.log_debug("nodelist: %s", tostring(part.nodelist))
@@ -272,11 +280,11 @@ function crane_job_submit(job_desc, part_list, uid)
         crane.log_debug("res_in_use: %s", tostring(part.res_in_use))
     end
 
-    -- Global jobs
+    -- 全局 jobs
     if crane.jobs then
-        for job_id, job in pairs(crane.jobs) do
-            crane.log_debug("Existing job: %s, User: %s, Status: %s, Priority: %s", job.job_name, job.username, tostring(job.status), tostring(job.priority))
-            crane.log_debug("Job ID: %s, Partition: %s", tostring(job.job_id), job.partition)
+        for job_id, job in crane.jobs:iter() do
+            crane.log_debug("已存在作业: %s, 用户: %s, 状态: %s, 优先级: %s", job.job_name, job.username, tostring(job.status), tostring(job.priority))
+            crane.log_debug("作业ID: %s, 分区: %s", tostring(job.job_id), job.partition)
             crane.log_debug("time_limit: %s, start_time: %s, end_time: %s, submit_time: %s", tostring(job.time_limit), tostring(job.start_time), tostring(job.end_time), tostring(job.submit_time))
             crane.log_debug("cmd_line: %s, cwd: %s, qos: %s, extra_attr: %s, reservation: %s, container: %s", job.cmd_line, job.cwd, job.qos, job.extra_attr, job.reservation, job.container)
             crane.log_debug("held: %s, exclusive: %s", tostring(job.held), tostring(job.exclusive))
@@ -285,28 +293,28 @@ function crane_job_submit(job_desc, part_list, uid)
         end
     end
 
-    -- Global reservations
+    -- 全局 reservations
     if crane.reservations then
-        for resv_name, resv in pairs(crane.reservations) do
-            crane.log_debug("Reservation: %s, Partition: %s, Start time: %s, Duration: %s", resv.reservation_name, resv.partition, tostring(resv.start_time), tostring(resv.duration))
+        for resv_name, resv in crane.reservations:iter() do
+            crane.log_debug("预约: %s, 分区: %s, 开始时间: %s, 时长: %s", resv.reservation_name, resv.partition, tostring(resv.start_time), tostring(resv.duration))
             if resv.allowed_accounts then
                 for i, acc in ipairs(resv.allowed_accounts) do
-                    crane.log_debug("Reservation allowed account: %s", acc)
+                    crane.log_debug("预约允许账号: %s", acc)
                 end
             end
             if resv.denied_accounts then
                 for i, acc in ipairs(resv.denied_accounts) do
-                    crane.log_debug("Reservation denied account: %s", acc)
+                    crane.log_debug("预约禁止账号: %s", acc)
                 end
             end
             if resv.allowed_users then
                 for i, user in ipairs(resv.allowed_users) do
-                    crane.log_debug("Reservation allowed user: %s", user)
+                    crane.log_debug("预约允许用户: %s", user)
                 end
             end
             if resv.denied_users then
                 for i, user in ipairs(resv.denied_users) do
-                    crane.log_debug("Reservation denied user: %s", user)
+                    crane.log_debug("预约禁止用户: %s", user)
                 end
             end
             crane.log_debug("craned_regex: %s", tostring(resv.craned_regex))
@@ -316,13 +324,13 @@ function crane_job_submit(job_desc, part_list, uid)
         end
     end
 
-    -- Using constants
+    -- 使用常量
     crane.log_debug("CraneErrCode.ERROR: %s", tostring(crane.ERROR))
     crane.log_debug("CraneErrCode.SUCCESS: %s", tostring(crane.SUCCESS))
     crane.log_debug("TaskStatus.Pending: %s, Running: %s, Completed: %s", tostring(crane.Pending), tostring(crane.Running), tostring(crane.Completed))
     crane.log_debug("TaskType.Batch: %s, Interactive: %s", tostring(crane.Batch), tostring(crane.Interactive))
 
-    -- Field helper functions (read-only demonstration, no modification)
+    -- 字段辅助函数（只读演示，不修改）
     local mt = getmetatable(job_desc)
     local env_val = _get_job_env_field_name(mt._job_desc, "PATH")
     crane.log_debug("_get_job_env_field_name PATH: %s", env_val or "NIL")
@@ -330,28 +338,28 @@ function crane_job_submit(job_desc, part_list, uid)
     crane.log_debug("_get_job_req_field_name name: %s", req_val or "NIL")
     _set_job_env_field(job_desc, "MYVAR", "hello_lua")
     local myvar_val = _get_job_env_field_name(mt._job_desc, "MYVAR")
-    crane.log_info("Verify MYVAR: %s", myvar_val or "NIL")
+    crane.log_info("验证 MYVAR: %s", myvar_val or "NIL")
     _set_job_req_field(job_desc, "name", "new_job_name")
     local name_val2 = _get_job_req_field_name(mt._job_desc, "name")
-    crane.log_info("Verify name: %s", name_val2 or "NIL")
+    crane.log_info("验证 name: %s", name_val2 or "NIL")
     
 
-    -- Return success
+    -- 返回成功
     return crane.SUCCESS
 end
 
 function crane_job_modify(job_desc, job_rec, part_list, uid)
-    crane.log_info("Modify job (read-only access): %s, Original partition: %s", job_desc.name, job_desc.partition)
-    -- Access job_rec fields (read-only)
+    crane.log_info("修改作业（只读访问）: %s, 原分区: %s", job_desc.name, job_desc.partition)
+    -- 访问 job_rec 字段（只读）
     if job_rec then
-        crane.log_info("Original job status: %s, Priority: %s, User: %s", tostring(job_rec.status), tostring(job_rec.priority), job_rec.username)
-        crane.log_info("Original job ID: %s, Partition: %s", tostring(job_rec.job_id), job_rec.partition)
+        crane.log_info("原作业状态: %s, 优先级: %s, 用户: %s", tostring(job_rec.status), tostring(job_rec.priority), job_rec.username)
+        crane.log_info("原作业ID: %s, 分区: %s", tostring(job_rec.job_id), job_rec.partition)
     end
 
-    -- CraneErrCode demonstration
-    crane.log_debug("Modify job, error code: %s", tostring(crane.ERROR))
+    -- CraneErrCode 演示
+    crane.log_debug("修改作业，错误码: %s", tostring(crane.ERROR))
 
-    -- Return success
+    -- 返回成功
     return crane.SUCCESS
 end
 ```
