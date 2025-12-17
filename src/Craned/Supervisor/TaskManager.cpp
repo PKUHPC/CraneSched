@@ -1577,7 +1577,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
-    CRANE_DEBUG("[Task #{}] Task not found.");
+    CRANE_DEBUG("[Task #{}] Task not found.", task_id);
     return;
   }
 
