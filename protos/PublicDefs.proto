@@ -161,6 +161,11 @@ message DependencyStatus {
   }
 }
 
+message SignalParam {
+  int32 signal_number = 1;
+  uint32 seconds_before_kill = 2;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -224,6 +229,7 @@ message TaskToCtld {
 
   string task_prolog = 46;
   string task_epilog = 47;
+  optional SignalParam signal_param = 48;
 }
 
 message TaskInEmbeddedDb {
@@ -394,6 +400,7 @@ message StepToD {
 
   string task_prolog = 30;
   string task_epilog = 31;
+  optional SignalParam signal_param = 32;
 }
 
 message JobStepsToD {
