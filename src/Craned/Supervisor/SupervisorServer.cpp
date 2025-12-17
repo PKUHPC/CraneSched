@@ -107,9 +107,9 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     // 1. Normal case: Pod remains running with no container (Running)
     // 2. Abnormal case: Pod exited prematurely (Completing)
 
-    // Here is the case #1. We silently terminate the empty pod by set
-    // orphaned=true. All status changes will be sent in ShutdownSupervisor().
-    g_task_mgr->TerminateTaskAsync(true, TerminatedBy::CANCELLED_BY_USER);
+    // Here is the case #1. Trigger task killing and wait for pod exit,
+    // where ShutdownSupervisor will be called.
+    g_task_mgr->TerminateTaskAsync(false, TerminatedBy::CANCELLED_BY_USER);
     return Status::OK;
   }
 

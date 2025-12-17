@@ -479,15 +479,15 @@ class TaskManager {
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
   void AddTerminationTimer_(Duration duration) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
+    auto termination_handle = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handle->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& /* h */) {
           EvTaskTimerCb_();
         });
-    termination_handel->start(
+    termination_handle->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
         std::chrono::seconds(0));
-    m_step_.termination_timer = termination_handel;
+    m_step_.termination_timer = termination_handle;
   }
 
   void AddTerminationTimer_(int64_t secs) {

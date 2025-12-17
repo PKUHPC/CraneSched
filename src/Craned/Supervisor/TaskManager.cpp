@@ -1900,10 +1900,10 @@ std::future<CraneErrCode> TaskManager::ChangeTaskTimeLimitAsync(
 
 void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
                                      TerminatedBy terminated_by) {
-  TaskTerminateQueueElem elem;
-  elem.mark_as_orphaned = mark_as_orphaned;
-  elem.termination_reason = terminated_by;
-  m_task_terminate_queue_.enqueue(elem);
+  m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
+      .termination_reason = terminated_by,
+      .mark_as_orphaned = mark_as_orphaned,
+  });
   m_terminate_task_async_handle_->send();
 }
 
@@ -2151,6 +2151,14 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     CRANE_TRACE("Receive TerminateRunningTask Request for {}.{}.",
                 g_config.JobId, g_config.StepId);
 
+    if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
+      CRANE_TRACE(
+          "TerminateRunningTask request ignored for daemon step unless active "
+          "shutdown is in progress.",
+          g_config.JobId, g_config.StepId);
+      continue;
+    }
+
     if (elem.mark_as_orphaned) m_step_.orphaned = true;
     if (!elem.mark_as_orphaned && !g_runtime_status.CanStepOperate()) {
       not_ready_elems.emplace_back(elem);
@@ -2159,16 +2167,14 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
 
     if (!elem.mark_as_orphaned && m_step_.AllTaskFinished()) {
-      CRANE_DEBUG("Terminating a completing task #{}, ignored.",
-                  g_config.JobId);
+      CRANE_DEBUG("Terminating a completing step #{}.{}, ignored.",
+                  g_config.JobId, g_config.StepId);
       continue;
     }
 
     int sig = m_step_.IsInteractive() ? SIGHUP : SIGTERM;
 
-    // If it's a daemon step, we wait for explicit shutdown.
-    if (!m_step_.IsDaemon() && m_exec_id_task_id_map_.empty() &&
-        elem.mark_as_orphaned) {
+    if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
       g_task_mgr->ShutdownSupervisorAsync();
       continue;
@@ -2204,6 +2210,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       }
     }
   }
+
   for (auto& not_ready_elem : not_ready_elems) {
     m_task_terminate_queue_.enqueue(not_ready_elem);
   }
@@ -2272,12 +2279,12 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       continue;
     }
 
-    // Add a timer to limit the execution time of a task.
-    // Note: event_new and event_add in this function is not thread safe,
-    //       so we move it outside the multithreading part.
-    int64_t sec = m_step_.GetStep().time_limit().seconds();
-    AddTerminationTimer_(sec);
-    CRANE_INFO("Add a timer of {} seconds", sec);
+    if (!m_step_.IsDaemon()) {
+      // Add a timer to limit the execution time of a task.
+      int64_t sec = m_step_.GetStep().time_limit().seconds();
+      AddTerminationTimer_(sec);
+      CRANE_INFO("Add a timer of {} seconds", sec);
+    }
 
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
