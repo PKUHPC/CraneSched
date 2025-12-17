@@ -78,34 +78,35 @@ cranectld 当前保存的被修改作业的数据结构。
 
 用户请求的作业参数。
 
-| 属性名                     | 类型      | 解释           |
-|-------------------------|---------|--------------|
-| time_limit              | number  | 时间限制         |
-| partition               | string  | 作业所属分区       |
-| requested_node_res_view | table   | 需求资源信息       |
-| type                    | number  | 作业类型         |
-| uid                     | number  | 作业所属uid      |
-| account                 | string  | 作业所属账户       |
-| name                    | string  | 作业名          |
-| qos                     | string  | 作业所属qos      |
-| node_num                | number  | 节点数目         |
-| ntasks_per_node         | number  | 每个节点的task数目  |
-| cpus_per_task           | number  | 每个task的cpu数目 |
-| requeue_if_failed       | boolean | 是否允许失败重试     |
-| get_user_env            | boolean | 是否获取用户环境变量   |
-| gid                     | number  | 作业所属gid      |
-| batch_meta              | table   | 批量作业信息       |
-| interactive_meta        | table   | 交互式作业信息      |
-| extra_attr              | string  | 额外的属性        |
-| cmd_line                | string  | 提交命令         |
-| cwd                     | string  | 作业执行目录       |
-| env                     | table   | 环境变量         |
-| excludes                | string  | 排他节点         |
-| nodelist                | string  | 节点列表         |
-| reservation             | string  | 预约信息         |
-| begin_time              | number  | 作业开始时间       |
-| exclusive                | boolean | 是否独占节点       |
-| hold                    | boolean | 是否保持作业       |
+| 属性名                     | 类型      | 解释                  | 是否可修改 |
+|---------------------------|-----------|-----------------------|------------|
+| time_limit                | number    | 时间限制              | ✔️         |
+| partition                 | string    | 作业所属分区          | ✔️         |
+| requested_node_res_view   | table     | 需求资源信息          | ❌         |
+| type                      | number    | 作业类型              | ❌         |
+| uid                       | number    | 作业所属uid           | ❌         |
+| account                   | string    | 作业所属账户          | ✔️         |
+| name                      | string    | 作业名                | ✔️         |
+| qos                       | string    | 作业所属qos           | ✔️         |
+| node_num                  | number    | 节点数目              | ✔️         |
+| ntasks_per_node           | number    | 每个节点的task数目    | ✔️         |
+| cpus_per_task             | number    | 每个task的cpu数目     | ✔️         |
+| requeue_if_failed         | boolean   | 是否允许失败重试      | ✔️         |
+| get_user_env              | boolean   | 是否获取用户环境变量  | ❌         |
+| gid                       | number    | 作业所属gid           | ❌         |
+| batch_meta                | table     | 批量作业信息          | ❌         |
+| interactive_meta          | table     | 交互式作业信息        | ❌         |
+| extra_attr                | string    | 额外的属性            | ✔️         |
+| cmd_line                  | string    | 提交命令              | ✔️         |
+| cwd                       | string    | 作业执行目录          | ✔️         |
+| env                       | table     | 环境变量              | ❌         |
+| excludes                  | string    | 排他节点              | ✔️         |
+| nodelist                  | string    | 节点列表              | ✔️         |
+| reservation               | string    | 预约信息              | ✔️         |
+| begin_time                | number    | 作业开始时间          | ✔️         |
+| exclusive                 | boolean   | 是否独占节点          | ✔️         |
+| hold                      | boolean   | 是否保持作业          | ❌         |
+
 
 
 #### part_list
