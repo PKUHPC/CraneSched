@@ -25,10 +25,10 @@ namespace crane {
 #ifdef HAVE_LUA
 
 const luaL_Reg LuaEnvironment::kCraneFunctions[] = {
-  {"log", LogLuaMsg_},
-  {"error", LogLuaError_},
-  {"time_str2mins", TimeStr2Mins_},
-  {nullptr, nullptr}};
+    {"log", LogLuaMsg_},
+    {"error", LogLuaError_},
+    {"time_str2mins", TimeStr2Mins_},
+    {nullptr, nullptr}};
 
 bool LuaEnvironment::Init(const std::string& script) {
   m_lua_script_ = script;
@@ -267,9 +267,9 @@ bool LuaEnvironment::CheckLuaScriptFunction_(lua_State* lua_state,
   return result;
 }
 
-bool LuaEnvironment::CheckLuaScriptFunctions_(lua_State* lua_state,
-                                              const std::string& script_path,
-                                              const std::vector<std::string>& req_fxns) {
+bool LuaEnvironment::CheckLuaScriptFunctions_(
+    lua_State* lua_state, const std::string& script_path,
+    const std::vector<std::string>& req_fxns) {
   bool result = true;
   for (const auto& req_fxn : req_fxns) {
     if (!CheckLuaScriptFunction_(lua_state, req_fxn)) {
