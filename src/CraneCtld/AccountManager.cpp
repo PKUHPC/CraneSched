@@ -178,25 +178,24 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
 
 CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
                                                  const Wckey& new_wckey) {
-  const User* user_exist = nullptr;
-
-  {
-    util::read_lock_guard user_guard(m_rw_user_mutex_);
-    auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-
-    auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return result;
-  }
-
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
-  // validate user existence under write lock
-  user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  const User* user_exist = GetExistedUserInfoNoLock_(new_wckey.user_name);
   if (user_exist == nullptr) {
     return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   }
+
+  if (op_user->uid != 0) {
+    auto result =
+        CheckIfUserHasHigherPrivThan_(*op_user, user_exist->admin_level);
+    if (!result) return result;
+  }
+
+  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
+  // validate user existence under write lock
   const Wckey* find_wckey =
       GetWckeyInfoNoLock_(new_wckey.name, new_wckey.user_name);
   // Avoid duplicate insertion
@@ -287,25 +286,23 @@ CraneExpected<void> AccountManager::DeleteQos(uint32_t uid,
 CraneExpected<void> AccountManager::DeleteWckey(uint32_t uid,
                                                 const std::string& name,
                                                 const std::string& user_name) {
-  {
-    util::read_lock_guard user_guard(m_rw_user_mutex_);
-    auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-
-    auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    if (!result) return result;
-  }
-
-  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
 
   const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
   if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (op_user->uid != 0) {
+    auto result =
+        CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
+    if (!result) return result;
+  }
   if (p_target_user->default_wckey == name) {
     return std::unexpected(CraneErrCode::ERR_DEL_DEFAULT_WCKEY);
   }
 
+  util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
   const Wckey* wckey = GetExistedWckeyInfoNoLock_(name, user_name);
   if (!wckey) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
 
@@ -1173,22 +1170,21 @@ CraneExpected<void> AccountManager::ModifyQos(
 
 CraneExpected<void> AccountManager::ModifyDefaultWckey(
     uint32_t uid, const std::string& name, const std::string& user_name) {
-  {
-    util::read_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-    auto user_result = GetUserInfoByUidNoLock_(uid);
-    if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
 
-    auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+  const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
+  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (op_user->uid != 0) {
+    auto result =
+        CheckIfUserHasHigherPrivThan_(*op_user, p_target_user->admin_level);
     if (!result) return result;
   }
 
   util::write_lock_guard wckey_guard(m_rw_wckey_mutex_);
-  util::write_lock_guard user_guard(m_rw_user_mutex_);
-
-  const User* p_target_user = GetExistedUserInfoNoLock_(user_name);
-  if (!p_target_user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   const Wckey* p = GetExistedWckeyInfoNoLock_(name, user_name);
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
