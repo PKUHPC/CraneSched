@@ -665,7 +665,7 @@ bool MongodbClient::FetchJobStepRecords(
                                   elem.get_int32().value);
       }
 
-      task->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
+      job_info_ptr->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());

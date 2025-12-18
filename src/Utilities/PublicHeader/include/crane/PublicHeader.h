@@ -260,9 +260,11 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "CRI support is disabled in the cluster.",
         "Task is pending or container is not ready.",
         "Invalid memory format",
-        "The specified wckey does not exist",
+        "Step resource request exceeds job resource",
+        
 
         // 85 - 89
+       "The specified wckey does not exist",
         "The wckey already exists in crane",
         "The entered cluster does not exist",
         "Cannot delete the default wckey. Please set a different default wckey first",
