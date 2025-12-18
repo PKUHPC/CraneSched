@@ -1974,13 +1974,18 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       if (m_step_.GetStep().has_signal_param()) {
         auto signal_param = m_step_.GetStep().signal_param();
         int64_t signal_sec = new_sec - signal_param.seconds_before_kill();
-        int signal_num = signal_param.signal_number();
-        AddSignalTimer_(signal_sec, signal_num);
-        CRANE_INFO(
-            "Add a new signal timer of seconds_before_kill {} signal_num "
-            "{} new seconds {}, timelimt {}",
-            signal_param.seconds_before_kill(), signal_param.signal_number(),
-            signal_sec, new_sec);
+        if (signal_sec > 0) {
+          int signal_num = signal_param.signal_number();
+          AddSignalTimer_(signal_sec, signal_num);
+          CRANE_INFO(
+              "Add a new signal timer of seconds_before_kill {} signal_num "
+              "{} new seconds {}, time_limit {}",
+              signal_param.seconds_before_kill(), signal_param.signal_number(),
+              signal_sec, new_sec);
+        } else {
+          CRANE_WARN("Signal offset {} >= time_limit {}, skipping signal timer",
+                     signal_param.seconds_before_kill(), new_sec);
+        }
       }
     }
 
@@ -2020,14 +2025,21 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (m_step_.GetStep().has_signal_param()) {
       auto signal_param = m_step_.GetStep().signal_param();
       int64_t signal_sec = sec - signal_param.seconds_before_kill();
-      int signal_num = m_step_.GetStep().signal_param().signal_number();
-      AddSignalTimer_(signal_sec, signal_num);
-      CRANE_INFO(
-          "Add a signal timer of seconds_before_kill {} signal_num {} for "
-          "job "
-          "#{}",
-          signal_param.seconds_before_kill(), signal_param.signal_number(),
-          m_step_.GetStep().job_id());
+      if (signal_sec > 0) {
+        int signal_num = signal_param.signal_number();
+        AddSignalTimer_(signal_sec, signal_num);
+        CRANE_INFO(
+            "Add a signal timer of seconds_before_kill {} signal_num {} for "
+            "job #{}",
+            signal_param.seconds_before_kill(), signal_param.signal_number(),
+            m_step_.GetStep().job_id());
+      } else {
+        CRANE_WARN(
+            "Signal offset {} >= time_limit {} for job #{}, skipping signal "
+            "timer",
+            signal_param.seconds_before_kill(), sec,
+            m_step_.GetStep().job_id());
+      }
     }
 
     m_step_.pwd.Init(m_step_.uid);
