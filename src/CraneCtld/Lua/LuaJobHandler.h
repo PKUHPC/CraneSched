@@ -69,13 +69,13 @@ class LuaJobHandler {
   static int GetPartRecFieldNameCb_(lua_State* lua_state);
 
   // crane.jobs table
-  static void UpdateJobGloable_(const crane::LuaEnvironment& lua_env);
+  static void UpdateJobGloabl_(const crane::LuaEnvironment& lua_env);
   static int JobsIterCb_(lua_State* lua_state);
   static int JobsIterNextCb_(lua_State* lua_state);
   static int JobsIterGcCb_(lua_State* lua_state);
 
   // crane.reservations table
-  static void UpdateResvGloable_(const crane::LuaEnvironment& lua_env);
+  static void UpdateResvGloabl_(const crane::LuaEnvironment& lua_env);
   static int ResvsIterCb_(lua_State* lua_state);
   static int ResvsIterNextCb_(lua_State* lua_state);
   static int ResvsIterGcCb_(lua_State* lua_state);
