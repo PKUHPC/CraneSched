@@ -950,7 +950,7 @@ void CommonStepInCtld::StepStatusChange(
         // cases by step status change
         this->SetStatus(crane::grpc::TaskStatus::Running);
         this->SetErrorStatus(crane::grpc::TaskStatus::Invalid);
-        this->SetErrorExitCode(0u);
+        this->SetErrorExitCode(0U);
         this->SetRunningNodes(this->ExecutionNodes());
 
         // Primary:Update job status when primary step is Running.
@@ -960,9 +960,9 @@ void CommonStepInCtld::StepStatusChange(
         }
 
         // Launch step execution
-        for (auto& node : this->ExecutionNodes()) {
+        for (const auto& node : this->ExecutionNodes())
           context->craned_step_exec_map[node][job_id].insert(step_id);
-        }
+
         context->rn_step_raw_ptrs.insert(this);
       }
     }
@@ -1145,20 +1145,32 @@ bool TaskInCtld::IsX11WithPty() const {
 }
 
 bool TaskInCtld::ShouldLaunchOnAllNodes() const {
-  // For cbatch tasks whose --node > 1,
-  // only execute the command at the first allocated node.
-  if (type != crane::grpc::Interactive) return false;
+  if (IsBatch()) {
+    // For cbatch jobs whose --node > 1,
+    // only execute the command at the first allocated node.
+    return false;
 
-  const auto& ia_meta = TaskToCtld().interactive_meta();
-  // For calloc tasks we still need to execute a dummy empty task to
-  // set up a timer.
-  if (ia_meta.interactive_type() == crane::grpc::Calloc) return false;
+  } else if (IsInteractive()) {
+    const auto& ia_meta = TaskToCtld().interactive_meta();
+    // For calloc jobs we still need to execute a dummy empty task to
+    // set up a timer.
+    if (ia_meta.interactive_type() == crane::grpc::Calloc) return false;
 
-  // Crun task with pty only launch on first node
-  if (ia_meta.pty()) return false;
+    // Crun job with pty only launch on first node
+    if (ia_meta.pty()) return false;
 
-  // For crun tasks with regular I/O, execute tasks on all allocated nodes.
-  return true;
+    // For crun jobs with regular I/O, execute jobs on all allocated nodes.
+    return true;
+
+  } else if (IsContainer()) {
+    // For container jobs, there is two cases:
+    // 1. ccon jobs: always launch on all nodes.
+    // 2. cbatch jobs with container support: only launch on the first node.
+    return TaskToCtld().has_container_meta();
+
+  } else {
+    std::unreachable();
+  }
 }
 
 void TaskInCtld::SetTaskId(task_id_t id) {
@@ -1344,20 +1356,11 @@ void TaskInCtld::SetFieldsByRuntimeAttr(
                       runtime_attr.craned_ids().end());
     allocated_craneds_regex = util::HostNameListToStr(craned_ids);
 
-    if (type == crane::grpc::Batch || type == crane::grpc::Container) {
-      executing_craned_ids.emplace_back(craned_ids.front());
-    } else if (type == crane::grpc::Interactive) {
-      if (task_to_ctld.interactive_meta().interactive_type() ==
-          crane::grpc::Calloc)
-        // For calloc tasks we still need to execute a dummy empty task to
-        // set up a timer.
-        executing_craned_ids.emplace_back(CranedIds().front());
-      else
-        // For crun tasks we need to execute tasks on all allocated nodes.
-        for (auto const& craned_id : craned_ids)
-          executing_craned_ids.emplace_back(craned_id);
+    if (ShouldLaunchOnAllNodes()) {
+      for (auto const& craned_id : craned_ids)
+        executing_craned_ids.emplace_back(craned_id);
     } else {
-      std::unreachable();
+      executing_craned_ids.emplace_back(craned_ids.front());
     }
 
     allocated_res = static_cast<ResourceV2>(runtime_attr.allocated_res());

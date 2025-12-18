@@ -2001,7 +2001,7 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
 
     auto exec_nodes = step->ExecutionNodes();
 
-    // TODO: Handle multiple nodes after ccon -N is implemented.
+    // TODO: Attach to multiple nodes?
     if (exec_nodes.size() != 1) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
@@ -2131,7 +2131,7 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
       return response;
     }
 
-    // TODO: Handle multiple nodes after ccon -N is implemented.
+    // TODO: Attach to multiple nodes?
     auto exec_nodes = step->ExecutionNodes();
     if (exec_nodes.size() != 1) {
       auto* err = response.mutable_status();

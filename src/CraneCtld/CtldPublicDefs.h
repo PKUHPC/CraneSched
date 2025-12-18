@@ -1057,6 +1057,7 @@ struct TaskInCtld {
 
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val);
 
+  // Must be called after SetFieldsByTaskToCtld!
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val);
 
   // Helper function to set the fields of TaskInfo using info in
