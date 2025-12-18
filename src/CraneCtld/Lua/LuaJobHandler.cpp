@@ -68,8 +68,8 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
 
   crane::grpc::QueryPartitionInfoReply partition_info_reply;
 
-  UpdateJobGloable_(*lua_env);
-  UpdateResvGloable_(*lua_env);
+  UpdateJobGloabl_(*lua_env);
+  UpdateResvGloabl_(*lua_env);
 
   PushJobDesc_(task, *lua_env);
   PushPartitionList_(*lua_env, task->Username(), task->account,
@@ -132,9 +132,7 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
 
   crane::grpc::QueryPartitionInfoReply partition_info_reply;
 
-  // dead lock
-  // UpdateJobGloable_();
-  UpdateResvGloable_(*lua_env);
+  UpdateResvGloabl_(*lua_env);
 
   PushJobDesc_(task_in_ctld, *lua_env);
   PushJobRec_(*lua_env, &task_info);
@@ -556,7 +554,7 @@ int LuaJobHandler::GetPartRecField_(
   return 1;
 }
 
-void LuaJobHandler::UpdateJobGloable_(const crane::LuaEnvironment& lua_env) {
+void LuaJobHandler::UpdateJobGloabl_(const crane::LuaEnvironment& lua_env) {
   lua_State* lua_state = lua_env.GetLuaState();
 
   lua_getglobal(lua_state, "crane");
@@ -633,7 +631,7 @@ int LuaJobHandler::JobsIterGcCb_(lua_State* lua_state) {
   return 0;
 }
 
-void LuaJobHandler::UpdateResvGloable_(const crane::LuaEnvironment& lua_env) {
+void LuaJobHandler::UpdateResvGloabl_(const crane::LuaEnvironment& lua_env) {
   lua_State* lua_state = lua_env.GetLuaState();
 
   lua_getglobal(lua_state, "crane");
@@ -952,7 +950,7 @@ int LuaJobHandler::LuaJobRecordField_(lua_State* lua_state,
                    [](lua_State* L, const crane::grpc::TaskInfo* j) {
          lua_pushstring(L, j->qos().data());
                    }},
-    {"req_res_view ", [](lua_State* L, const crane::grpc::TaskInfo* j) {
+    {"req_res_view", [](lua_State* L, const crane::grpc::TaskInfo* j) {
          PushResourceView_(L, static_cast<ResourceView>(j->req_res_view()));
           }},
                   {"req_nodes",
@@ -976,7 +974,9 @@ int LuaJobHandler::LuaJobRecordField_(lua_State* lua_state,
                                   j) {
          lua_pushboolean(L, j->held()); }},
                   {"status",
-                   [](lua_State* L, const crane::grpc::TaskInfo* j) {}},
+                   [](lua_State* L, const crane::grpc::TaskInfo* j) {
+                     lua_pushnumber(L, j->status());
+                   }},
                   {"exit_code",
                    [](lua_State* L, const crane::grpc::TaskInfo* j) {
          lua_pushnumber(L, j->exit_code());
