@@ -24,6 +24,12 @@ namespace crane {
 
 #ifdef HAVE_LUA
 
+const luaL_Reg LuaEnvironment::kCraneFunctions[] = {
+  {"log", LogLuaMsg_},
+  {"error", LogLuaError_},
+  {"time_str2mins", TimeStr2Mins_},
+  {nullptr, nullptr}};
+
 bool LuaEnvironment::Init(const std::string& script) {
   m_lua_script_ = script;
   if ((m_lua_state_ = luaL_newstate()) == nullptr) {
@@ -223,12 +229,6 @@ void LuaEnvironment::LuaTableRegister_(const luaL_Reg* l) {
   luaL_setfuncs(m_lua_state_, l, 0);
 #  endif
 }
-
-const luaL_Reg LuaEnvironment::kCraneFunctions[] = {
-    {"log", LogLuaMsg_},
-    {"error", LogLuaError_},
-    {"time_str2mins", TimeStr2Mins_},
-    {nullptr, nullptr}};
 
 void LuaEnvironment::RegisterOutputErrTab_() {
   const google::protobuf::EnumDescriptor* desc =
