@@ -409,6 +409,9 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
   }
 
+  step.set_task_prolog(job.TaskToCtld().task_prolog());
+  step.set_task_epilog(job.TaskToCtld().task_epilog());
+
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -755,6 +758,10 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
   SetStatus(crane::grpc::TaskStatus::Pending);
   SetHeld(false);
   SetStartTime(absl::Now());
+
+  task_prolog = step_to_ctld.task_prolog();
+  task_epilog = step_to_ctld.task_epilog();
+
   *MutableStepToCtld() = step_to_ctld;
 }
 
