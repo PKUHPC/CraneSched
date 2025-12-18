@@ -521,7 +521,7 @@ class TaskManager {
             const uvw::timer_event&, uvw::timer_handle& h) {
           for (task_id_t task_id : TaskIds) {
             auto* task = m_step_.GetTaskInstance(task_id);
-            if (task->GetExecId().has_value()) {
+            if (task != nullptr && task->GetExecId().has_value()) {
               task->Kill(signal_number);
             }
           }
