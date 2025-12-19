@@ -68,6 +68,7 @@ target_link_libraries(cranectld PRIVATE
 
         Backward::Interface
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
+        sol2
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)

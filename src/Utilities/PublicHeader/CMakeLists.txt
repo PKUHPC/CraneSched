@@ -22,6 +22,7 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         Subid::subid
         bs_thread_pool
         $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
+        sol2
 )
 
 if (${LUA_FOUND})

@@ -34,6 +34,7 @@ add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
 add_subdirectory(parallel-hashmap)
 add_subdirectory(libvault)
+add_subdirectory(lua_sol)
 
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)

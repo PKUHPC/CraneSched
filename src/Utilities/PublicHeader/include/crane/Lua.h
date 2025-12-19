@@ -19,7 +19,7 @@
 #pragma once
 
 #ifdef HAVE_LUA
-#  include <lua.hpp>
+#include <sol/sol.hpp>
 #endif
 
 #include <BS_thread_pool.hpp>
@@ -33,45 +33,30 @@ namespace crane {
 class LuaEnvironment {
  public:
   LuaEnvironment() = default;
-  ~LuaEnvironment() {
-    if (m_lua_state_ != nullptr) lua_close(m_lua_state_);
-  }
+  ~LuaEnvironment() = default;
 
   bool Init(const std::string& script);
 
-  void LuaTableRegister(const luaL_Reg* l);
-
   void RegisterLuaCraneStructFunctions(const luaL_Reg* global_funcs);
 
-  bool LoadLuaScript(std::vector<std::string> req_funcs);
+  bool LoadLuaScript(const std::vector<std::string>& req_funcs);
 
-  lua_State* GetLuaState() const { return m_lua_state_; }
+  sol::state& GetLuaState() const { return  *m_lua_state_ptr_; }
+  sol::table GetCraneTable() const { return m_crane_table_;}
   std::string GetUserMsg() const { return m_user_msg_; }
-  void ResetUserMsg() { m_user_msg_.clear(); }
 
  private:
-  static const luaL_Reg kCraneFunctions[];
-
-  static int LogLuaMsg_(lua_State* lua_state);
-  static int LogLuaError_(lua_State* lua_state);
-  static int TimeStr2Mins_(lua_State* lua_state);
 
   void RegisterFunctions_();
 
-  void LuaTableRegister_(const luaL_Reg* l);
-
   void RegisterOutputErrTab_();
 
-  int LogLuaUserMsg_(lua_State* lua_state);
-  static int LogLuaUserMsgStatic_(lua_State* lua_state);
-  static bool CheckLuaScriptFunction_(lua_State* lua_state,
-                                      const std::string& name);
-  static bool CheckLuaScriptFunctions_(
-      lua_State* lua_state, const std::string& script_path,
+  bool CheckLuaScriptFunctions_(
       const std::vector<std::string>& req_fxns);
 
   std::string m_lua_script_;
-  lua_State* m_lua_state_{};
+  std::unique_ptr<sol::state> m_lua_state_ptr_;
+  sol::table m_crane_table_;
   std::string m_user_msg_;
 };
 #endif
