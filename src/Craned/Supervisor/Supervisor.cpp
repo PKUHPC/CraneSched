@@ -241,6 +241,10 @@ void GlobalVariableInit() {
 }
 
 void StartServer() {
+  using crane::grpc::StepType;
+  using Craned::Supervisor::g_runtime_status;
+  using Craned::Supervisor::StepStatus;
+
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
@@ -255,37 +259,36 @@ void StartServer() {
   CRANE_INFO("Supervisor started for step type: {}.",
              static_cast<int>(g_config.StepSpec.step_type()));
 
-  if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON) {
-    ::Craned::Supervisor::g_runtime_status.Status =
-        Craned::Supervisor::StepStatus::Running;
-
+  if (g_config.StepSpec.step_type() == StepType::DAEMON) {
     // For container jobs, the daemon step need to setup a pod per node,
     // then the following common steps will launch containers inside the pod.
+    bool ready = true;
     if (g_config.StepSpec.has_pod_meta()) {
       if (!g_config.Container.Enabled) {
         CRANE_ERROR(
             "Container config is required for daemon step with pod spec.");
-        ::Craned::Supervisor::g_runtime_status.Status =
-            Craned::Supervisor::StepStatus::Failed;
+        ready = false;
       } else {
-        auto ok = g_task_mgr->ExecuteTaskAsync();
-        auto err = ok.get();
         // Just wait here for pod setup. if pod failed, daemon step failed.
-        if (err != CraneErrCode::SUCCESS) {
+        auto ok_prom = g_task_mgr->ExecuteTaskAsync();
+        if (auto err = ok_prom.get(); err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to start daemon step, code: {}",
                       static_cast<int>(err));
-          ::Craned::Supervisor::g_runtime_status.Status =
-              Craned::Supervisor::StepStatus::Failed;
+          ready = false;
         }
       }
     }
+
+    // Daemon step is RUNNING after supervisor and related resources are ready.
+    g_runtime_status.Status = ready ? StepStatus::Running : StepStatus::Failed;
+
   } else {
-    ::Craned::Supervisor::g_runtime_status.Status =
-        Craned::Supervisor::StepStatus::Configured;
+    // Common step is CONFIGURED after supervisor is ready.
+    g_runtime_status.Status = StepStatus::Configured;
   }
 
-  g_craned_client->StepStatusChangeAsync(
-      ::Craned::Supervisor::g_runtime_status.Status, 0, std::nullopt);
+  g_craned_client->StepStatusChangeAsync(g_runtime_status.Status, 0,
+                                         std::nullopt);
 
   g_server->Wait();
   g_server.reset();

@@ -546,9 +546,20 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   case crane::grpc::TaskStatus::Configuring:
     // Configuring -> Failed / Running
     this->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Running) {
+
+    switch (new_status) {
+    case crane::grpc::TaskStatus::Running:
+      break;
+
+    case crane::grpc::TaskStatus::Failed:
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
+      break;
+
+    [[unlikely]] default:
+      CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
+                  util::StepStatusToString(this->Status()),
+                  util::StepStatusToString(new_status));
     }
 
     if (this->AllNodesConfigured()) {
@@ -601,11 +612,22 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
   case crane::grpc::TaskStatus::Running:
   case crane::grpc::TaskStatus::Completing:
     // Completing -> Completed / Failed
-    this->StepOnNodeFinish(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Completed) {
+    switch (new_status) {
+    case crane::grpc::TaskStatus::Failed:
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
+      break;
+
+    case crane::grpc::TaskStatus::Completed:
+      break;
+
+    [[unlikely]] default:
+      CRANE_ERROR("Invalid daemon step status transition, current: {}, new: {}",
+                  util::StepStatusToString(this->Status()),
+                  util::StepStatusToString(new_status));
     }
+
+    this->StepOnNodeFinish(craned_id);
     job_finished = this->AllNodesFinished();
     if (!job_finished) {
       CRANE_DEBUG(
@@ -616,7 +638,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
 
   default: {
     CRANE_ASSERT_MSG(
-        false, fmt::format("Invalid step status, current: {}, new status: {}",
+        false, std::format("Invalid step status, current: {}, new status: {}",
                            StepStatusToString(this->Status()),
                            StepStatusToString(new_status)));
     std::unreachable();
@@ -628,19 +650,22 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
     context->step_ptrs.emplace(job->ReleaseDaemonStep());
     this->SetEndTime(absl::FromUnixSeconds(timestamp.seconds()) +
                      absl::Nanoseconds(timestamp.nanos()));
+
     if (this->Status() == crane::grpc::TaskStatus::Configuring) {
       this->SetStatus(this->PrevErrorStatus().value());
       this->SetExitCode(this->PrevErrorExitCode());
-      CRANE_INFO("[Step #{}.{}] ConfigureFailed with status {}.", job_id,
+      CRANE_INFO("[Step #{}.{}] Configuring failed with status {}.", job_id,
                  this->StepId(), this->Status());
-      // Daemon step failed to configure, terminate all daemon step,
-      for (const auto& node : this->CranedIds()) {
-        if (node == craned_id) continue;
-        context->craned_orphaned_steps[node][job_id].emplace(this->StepId());
-      }
 
+      // Do NOT send TerminateOrphanedStep for daemon steps. This could leads to
+      // race condition. For example,
+      // FreeJobs() and TerminateOrphanedStep() could be called concurrently for
+      // the same daemon step, both trying to free the supervisor, double-freed.
+
+      // FreeJobs() is enough to free the daemon step's supervisor.
       context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
       return std::pair{this->Status(), this->ExitCode()};
+
     } else {
       if (std::optional error_status = this->PrevErrorStatus(); error_status) {
         this->SetStatus(error_status.value());
@@ -649,11 +674,13 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         this->SetStatus(crane::grpc::TaskStatus::Completed);
         this->SetExitCode(0U);
       }
-      CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
+
+      CRANE_INFO("[Step #{}.{}] finished with status {}.", job_id,
                  this->StepId(), this->Status());
       return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
     }
   }
+
   return std::nullopt;
 }
 

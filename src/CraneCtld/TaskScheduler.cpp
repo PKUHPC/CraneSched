@@ -3005,8 +3005,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
-          "[Job #{}] Ignoring unknown job in CleanTaskStatusChangeQueueCb_.",
-          task_id);
+          "[Job #{}] Ignoring unknown job in CleanTaskStatusChangeQueueCb_ "
+          "(status: {}).",
+          task_id, util::StepStatusToString(new_status));
       continue;
     }
 
@@ -3046,7 +3047,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           absl::FromUnixSeconds(timestamp.seconds()) +
           absl::Nanoseconds(timestamp.nanos());
       absl::Time expected_end_time = task->StartTime() + task->time_limit;
-      constexpr int64_t kEndTimeToleranceSec = 5;
 
       if (reported_end_time >
           expected_end_time + absl::Seconds(kEndTimeToleranceSec)) {
@@ -3631,22 +3631,26 @@ void TaskScheduler::TerminateOrphanedSteps(
         CRANE_WARN("Job {} not found in running task map.", job_id);
         continue;
       }
+
       auto& job = job_it->second;
       for (const auto& step_id : step_ids) {
         StepInCtld* step{nullptr};
-        if (auto daemon_step = job->DaemonStep();
-            daemon_step && daemon_step->StepId() == step_id) {
+        if (auto* daemon_step = job->DaemonStep();
+            daemon_step != nullptr && daemon_step->StepId() == step_id) {
           step = daemon_step;
-        } else if (auto primary_step = job->PrimaryStep();
-                   primary_step && step_id == primary_step->StepId()) {
+        } else if (auto* primary_step = job->PrimaryStep();
+                   primary_step != nullptr &&
+                   step_id == primary_step->StepId()) {
           step = primary_step;
         } else {
           step = job->GetStep(step_id);
         }
-        if (!step) {
+
+        if (step == nullptr) {
           CRANE_WARN("[Step #{}.{}] Step not found in job.", step_id, job_id);
           continue;
         }
+
         for (const auto& craned_id : step->ExecutionNodes()) {
           craned_steps_map[craned_id][job_id].insert(step_id);
         }

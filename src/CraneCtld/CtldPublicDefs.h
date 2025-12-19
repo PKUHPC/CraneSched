@@ -58,6 +58,10 @@ constexpr uint32_t kSubmitTaskBatchNum = 1000;
 constexpr uint32_t kTaskStatusChangeTimeoutMS = 100;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
 
+// Validate and adjust end_time to prevent it from exceeding time_limit
+// by too much. Allow 5 seconds of floating tolerance.
+constexpr int64_t kEndTimeToleranceSec = 5;
+
 //*********************************************************
 
 // CranedKeeper Constants

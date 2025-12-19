@@ -1780,7 +1780,11 @@ void TaskManager::TaskFinish_(task_id_t task_id,
       "[Task #{}] Task status changed to {} (exit code: {}, reason: {}).",
       task_id, new_status, exit_code, reason.value_or(""));
 
-  if (g_runtime_status.Status.load() != StepStatus::Completing) {
+  // NOTE: Daemon step's supervisor only sent Running/Failed/Completed status
+  // when starting or actively shutting down the step.
+
+  if (!m_step_.IsDaemon() &&
+      g_runtime_status.Status.load() != StepStatus::Completing) {
     CRANE_INFO("Step completing now, prev status: {}.",
                g_runtime_status.Status.load());
     g_runtime_status.Status = StepStatus::Completing;
@@ -1807,8 +1811,6 @@ void TaskManager::TaskFinish_(task_id_t task_id,
     m_step_.StopCforedClient();
     m_step_.StopCriClient();
 
-    // NOTE: For Daemon steps, we do not send status change here.
-    // Instead, we send a Completed status in ShutdownSupervisor().
     if (!orphaned && !m_step_.IsDaemon()) {
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
@@ -2148,7 +2150,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   std::vector<TaskTerminateQueueElem> not_ready_elems;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
-    CRANE_TRACE("Receive TerminateRunningTask Request for {}.{}.",
+    CRANE_TRACE("Receive TerminateRunningTask Request for #{}.{}.",
                 g_config.JobId, g_config.StepId);
 
     if (m_step_.IsDaemon() && !m_active_shutdown_.load()) {
@@ -2294,7 +2296,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
       elem.ok_prom.set_value(CraneErrCode::ERR_SYSTEM_ERR);
-      return;
+      continue;
     }
 
     // Calloc tasks have no scripts to run. Just return.
@@ -2303,17 +2305,17 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
       m_exec_id_task_id_map_[0] = task_id;  // Placeholder
       m_step_.InitOomBaseline();
       elem.ok_prom.set_value(CraneErrCode::SUCCESS);
-      return;
+      continue;
     }
 
     // Single threaded here, it is always safe to ask TaskManager to
     // operate (Like terminate due to cfored conn err for crun task) any task.
     auto err = LaunchExecution_(task);
     if (err != CraneErrCode::SUCCESS) {
-      CRANE_WARN("[task #{}] Failed to launch process.", task_id);
+      CRANE_WARN("[Task #{}] Failed to launch process.", task_id);
     } else {
       auto exec_id = task->GetExecId().value();
-      CRANE_INFO("[task #{}] Launched exection, id: {}.", task_id,
+      CRANE_INFO("[Task #{}] Launched exection, id: {}.", task_id,
                  std::visit([](auto&& arg) { return std::format("{}", arg); },
                             exec_id));
       m_exec_id_task_id_map_[exec_id] = task_id;
