@@ -95,7 +95,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
-  CRANE_INFO("gRPC shutdown request received.");
+  CRANE_INFO("Daemon step is requested to shutdown.");
 
   // Set actively shutdown flag so that the daemon step can exit.
   g_task_mgr->SetActivelyShutdown();
@@ -105,7 +105,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
       g_runtime_status.Status == StepStatus::Running) {
     // For daemon step with pod, there is two cases:
     // 1. Normal case: Pod remains running with no container (Running)
-    // 2. Abnormal case: Pod exited prematurely (Completing)
+    // 2. Abnormal case: Pod failed to launch before (Failed)
 
     // Here is the case #1. Trigger task killing and wait for pod exit,
     // where ShutdownSupervisor will be called.

@@ -95,12 +95,12 @@ void CranedClient::AsyncSendThread_() {
         if (!status.ok()) {
           CRANE_ERROR(
               "Failed to send StepStatusChange: "
-              "NewStatus: {}, reason: {} | {}, code: {}",
+              "new_status: {}, reason: {} | {}, code: {}",
               elem.new_status, status.error_message(),
               context.debug_error_string(), int(status.error_code()));
           break;
         }
-        CRANE_TRACE("StepStatusChange sent, status {}. reply.ok={}",
+        CRANE_TRACE("StepStatusChange sent, status={}, reply.ok={}",
                     elem.new_status, reply.ok());
         elems.pop_front();
       }
