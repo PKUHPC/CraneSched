@@ -46,12 +46,11 @@ class LuaJobHandler {
 
  private:
 #ifdef HAVE_LUA
-  static void RegisterFunctions(const crane::LuaEnvironment& lua_env);
-  static void RegisterTypes(const crane::LuaEnvironment& lua_env);
-
-  static const luaL_Reg kGlobalFunctions[];
-  static const luaL_Reg kCraneFunctions[];
   static const std::vector<std::string> kReqFxns;
+
+  static void RegisterGlobalFunctions_(const crane::LuaEnvironment& lua_env);
+  static void RegisterTypes_(const crane::LuaEnvironment& lua_env);
+  static void RegisterGlobalVariables_(const crane::LuaEnvironment& lua_env);
 
   // struct JobsIterState {
   //   std::vector<crane::grpc::TaskInfo> tasks;
@@ -89,10 +88,9 @@ class LuaJobHandler {
   // static void PushJobDesc_(TaskInCtld* task,
   //                          const crane::LuaEnvironment& lua_env);
   // // part_list
-  // static void PushPartitionList_(
-  //     const crane::LuaEnvironment& lua_env, const std::string& user_name,
-  //     const std::string& account,
-  //     crane::grpc::QueryPartitionInfoReply* partition_info_reply);
+  static void PushPartitionList_(
+      const std::string& user_name, const std::string& account,
+      std::list<crane::grpc::PartitionInfo> part_list);
   // // job_rec
   // static void PushJobRec_(const crane::LuaEnvironment& lua_env,
   //                         crane::grpc::TaskInfo* task);
