@@ -1058,7 +1058,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
     const User* op_user, const User* user, const Account* account_ptr,
     const std::string& actual_account, const std::string& partition,
     const std::vector<crane::grpc::ModifyFieldOperation>& operations,
-    bool force) {
+    User& res_user, std::vector<std::string>& db_log, bool force) {
+  const std::string& account_name = account_ptr->name;
   std::vector<CraneExpectedRich<void>> rich_error_list;
   for (const auto& operation : operations) {
     if (operation.type() == crane::grpc::OperationType::Delete) {
@@ -1084,7 +1085,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
     } else {
       switch (operation.modify_field()) {
       case crane::grpc::ModifyField::AdminLevel: {
-        auto& value = operation.value_list()[0];
+        const auto& value = operation.value_list()[0];
         auto result =
             CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
         if (!result) {
@@ -1110,57 +1111,80 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
         break;
       }
       case crane::grpc::ModifyField::Partition: {
+        std::unordered_set<std::string> partition_list{
+            operation.value_list().begin(), operation.value_list().end()};
+
         if (operation.type() == crane::grpc::OperationType::Add) {
-          for (const auto& partition_name : operation.value_list()) {
-            auto result = CheckAddUserAllowedPartitionNoLock_(user, account_ptr,
-                                                              partition_name);
-            if (!result) {
-              auto rich_error = std::unexpected{
-                  FormatRichErr(result.error(), partition_name)};
-              rich_error_list.emplace_back(rich_error);
-            }
+          // has side effect
+          auto rich_result_list = CheckAddUserAllowedPartitionNoLock_(
+              user, account_ptr, partition_list, res_user);
+          if (!rich_result_list.empty()) {
+            rich_error_list.insert(rich_error_list.end(),
+                                   rich_result_list.begin(),
+                                   rich_result_list.end());
           }
+          db_log.emplace_back(fmt::format("Add: account: {}, partition: {}",
+                                          account_name,
+                                          fmt::join(partition_list, ",")));
         } else if (operation.type() == crane::grpc::OperationType::Overwrite) {
-          std::unordered_set<std::string> partition_list{
-              operation.value_list().begin(), operation.value_list().end()};
-          auto rich_result =
-              CheckSetUserAllowedPartitionNoLock_(account_ptr, partition_list);
+          // has side effect
+          auto rich_result = CheckSetUserAllowedPartitionNoLock_(
+              account_ptr, partition_list, res_user);
           if (!rich_result) {
             rich_error_list.emplace_back(rich_result);
           }
+          db_log.emplace_back(
+              fmt::format("Set: account: {}, partition_list:[{}]", account_name,
+                          fmt::join(partition_list, ",")));
         }
+
         break;
       }
       case crane::grpc::ModifyField::Qos: {
+        std::unordered_set<std::string> qos_list(operation.value_list().begin(),
+                                                 operation.value_list().end());
         if (operation.type() == crane::grpc::OperationType::Add) {
-          for (const auto& qos_name : operation.value_list()) {
-            auto result = CheckAddUserAllowedQosNoLock_(user, account_ptr,
-                                                        partition, qos_name);
-            if (!result) {
-              auto rich_error =
-                  std::unexpected{FormatRichErr(result.error(), qos_name)};
-              rich_error_list.emplace_back(rich_error);
-            }
+          // has side effect
+          auto rich_result_list = CheckAddUserAllowedQosNoLock_(
+              user, account_ptr, partition, qos_list, res_user);
+          if (!rich_result_list.empty()) {
+            rich_error_list.insert(rich_error_list.end(),
+                                   rich_result_list.begin(),
+                                   rich_result_list.end());
           }
+          db_log.emplace_back(
+              fmt::format("Add: account: {}, partition: {}, qos: {}",
+                          account_name, partition, fmt::join(qos_list, ",")));
         } else if (operation.type() == crane::grpc::OperationType::Overwrite) {
-          std::unordered_set<std::string> qos_list(
-              operation.value_list().begin(), operation.value_list().end());
+          std::string default_qos = "";
+          if (!operation.value_list().empty())
+            default_qos = operation.value_list()[0];
+          // has side effect
           auto rich_result = CheckSetUserAllowedQosNoLock_(
-              user, account_ptr, partition, qos_list, force);
+              user, account_ptr, partition, qos_list, default_qos, res_user,
+              force);
           if (!rich_result) {
             rich_error_list.emplace_back(rich_result);
           }
+          db_log.emplace_back(
+              fmt::format("Set: account: {}, partition: {}, qos_list: {}",
+                          account_name, partition, fmt::join(qos_list, ",")));
         }
         break;
       }
       case crane::grpc::ModifyField::DefaultQos: {
-        auto result = CheckSetUserDefaultQosNoLock_(
-            *user, actual_account, partition, operation.value_list()[0]);
+        // has side effect
+        auto result =
+            CheckSetUserDefaultQosNoLock_(*user, actual_account, partition,
+                                          operation.value_list()[0], res_user);
         if (!result) {
           auto rich_error = std::unexpected{
               FormatRichErr(result.error(), operation.value_list()[0])};
           rich_error_list.emplace_back(rich_error);
         }
+        db_log.emplace_back(
+            fmt::format("account: {}, partition: {}, default_qos: {}",
+                        actual_account, partition, operation.value_list()[0]));
         break;
       }
       case crane::grpc::ModifyField::DefaultAccount: {
@@ -1233,17 +1257,17 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     return rich_error_list;
   }
 
+  User res_user(user);
+  std::vector<std::string> db_log;
   // check user
-  auto check_result = CheckModifyUserOperations(
-      op_user, user, account_ptr, actual_account, partition, operations, force);
+  auto check_result =
+      CheckModifyUserOperations(op_user, user, account_ptr, actual_account,
+                                partition, operations, res_user, db_log, force);
   if (!check_result.empty()) {
     return check_result;
   }
 
   bool need_rollback = false;
-  User partition_user(user);
-  User qos_user(user);
-  User default_qos_user(user);
   g_db_client->StartTransaction();
   // do the modify operations in database
   for (const auto& operation : operations) {
@@ -1291,62 +1315,9 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
         }
         break;
       }
-      case crane::grpc::ModifyField::Partition: {
-        if (operation.type() == crane::grpc::OperationType::Add) {
-          std::unordered_set<std::string> partition_list{
-              operation.value_list().begin(), operation.value_list().end()};
-
-          for (const auto& partition_name : operation.value_list()) {
-            result =
-                AddUserAllowedPartition_(op_user->name, *user, *account_ptr,
-                                         partition_list, partition_user);
-            if (!result) {
-              need_rollback = true;
-            }
-          }
-        } else if (operation.type() == crane::grpc::OperationType::Overwrite) {
-          std::unordered_set<std::string> partition_list{
-              operation.value_list().begin(), operation.value_list().end()};
-          auto rich_res =
-              SetUserAllowedPartition_(op_user->name, *user, *account_ptr,
-                                       partition_list, partition_user);
-          if (!rich_res) {
-            need_rollback = true;
-          }
-        }
-        break;
-      }
-      case crane::grpc::ModifyField::Qos: {
-        if (operation.type() == crane::grpc::OperationType::Add) {
-          std::unordered_set<std::string> qos_list{
-              operation.value_list().begin(), operation.value_list().end()};
-          result = AddUserAllowedQos_(op_user->name, *user, *account_ptr,
-                                      partition, qos_list, qos_user);
-          if (!result) {
-            need_rollback = true;
-          }
-        } else if (operation.type() == crane::grpc::OperationType::Overwrite) {
-          std::unordered_set<std::string> qos_list{
-              operation.value_list().begin(), operation.value_list().end()};
-          std::string default_qos = "";
-          if (!operation.value_list().empty())
-            default_qos = operation.value_list()[0];
-          auto rich_res = SetUserAllowedQos_(
-              op_user->name, *user, *account_ptr, partition, default_qos,
-              std::move(qos_list), qos_user, force);
-          if (!rich_res) {
-            need_rollback = true;
-          }
-        }
-        break;
-      }
+      case crane::grpc::ModifyField::Partition:
+      case crane::grpc::ModifyField::Qos:
       case crane::grpc::ModifyField::DefaultQos: {
-        result =
-            SetUserDefaultQos_(actor_name, *user, actual_account, partition,
-                               operation.value_list()[0], default_qos_user);
-        if (!result) {
-          need_rollback = true;
-        }
         break;
       }
       case crane::grpc::ModifyField::DefaultAccount: {
@@ -1363,6 +1334,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     }
   }
 
+  need_rollback = need_rollback || !g_db_client->UpdateUser(res_user);
+
   if (need_rollback) {
     g_db_client->AbortTransaction();
     rich_error_list.emplace_back(
@@ -1370,6 +1343,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     return rich_error_list;
   } else {
     g_db_client->CommitTransactionWithoutCallback();
+  }
+
+  for (const auto& log : db_log) {
+    AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, log);
   }
 
   for (const auto& operation : operations) {
@@ -1387,7 +1364,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
         m_user_map_[user->name]
             ->account_to_attrs_map[account]
             .allowed_partition_qos_map =
-            qos_user.account_to_attrs_map[account].allowed_partition_qos_map;
+            res_user.account_to_attrs_map[account].allowed_partition_qos_map;
 
         break;
       }
@@ -1410,18 +1387,18 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
         break;
       }
       case crane::grpc::ModifyField::Partition: {
-        m_user_map_[user->name]
+        m_user_map_[name]
             ->account_to_attrs_map[account_ptr->name]
             .allowed_partition_qos_map =
-            partition_user.account_to_attrs_map[account_ptr->name]
+            res_user.account_to_attrs_map[account_ptr->name]
                 .allowed_partition_qos_map;
         break;
       }
       case crane::grpc::ModifyField::Qos: {
-        m_user_map_[user->name]
+        m_user_map_[name]
             ->account_to_attrs_map[account_ptr->name]
             .allowed_partition_qos_map =
-            qos_user.account_to_attrs_map[account_ptr->name]
+            res_user.account_to_attrs_map[account_ptr->name]
                 .allowed_partition_qos_map;
         break;
       }
@@ -1429,8 +1406,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
         m_user_map_[name]
             ->account_to_attrs_map[account]
             .allowed_partition_qos_map =
-            default_qos_user.account_to_attrs_map[account]
-                .allowed_partition_qos_map;
+            res_user.account_to_attrs_map[account].allowed_partition_qos_map;
         break;
       }
       case crane::grpc::ModifyField::DefaultAccount: {
@@ -1862,73 +1838,147 @@ CraneExpected<void> AccountManager::ResetUserCertificate(
  * NOLOCK
  ******************************************/
 
-CraneExpected<void> AccountManager::CheckAddUserAllowedPartitionNoLock_(
-    const User* user, const Account* account, const std::string& partition) {
-  auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
-  if (!result) return result;
-
+std::vector<CraneExpectedRich<void>>
+AccountManager::CheckAddUserAllowedPartitionNoLock_(
+    const User* user, const Account* account,
+    const std::unordered_set<std::string>& partition_list, User& res_user) {
+  std::vector<CraneExpectedRich<void>> rich_error_list;
   const std::string& account_name = account->name;
-  if (user->account_to_attrs_map.at(account_name)
-          .allowed_partition_qos_map.contains(partition)) {
-    return std::unexpected(CraneErrCode::ERR_PARTITION_ALREADY_EXISTS);
+  for (const auto& partition : partition_list) {
+    auto result =
+        CheckPartitionIsAllowedNoLock_(account, partition, false, true);
+    if (!result) {
+      rich_error_list.emplace_back(
+          std::unexpected(FormatRichErr(result.error(), partition)));
+      continue;
+    }
+
+    if (user->account_to_attrs_map.at(account_name)
+            .allowed_partition_qos_map.contains(partition)) {
+      rich_error_list.emplace_back(std::unexpected(FormatRichErr(
+          CraneErrCode::ERR_PARTITION_ALREADY_EXISTS, partition)));
+    }
+  }
+  if (!rich_error_list.empty()) {
+    return rich_error_list;
+  }
+  for (const auto& partition : partition_list) {
+    res_user.account_to_attrs_map[account_name]
+        .allowed_partition_qos_map[partition] =
+        std::pair<std::string, std::list<std::string>>{
+            account->default_qos,
+            std::list<std::string>{account->allowed_qos_list}};
   }
 
-  return {};
+  return rich_error_list;
 }
 
 CraneExpectedRich<void> AccountManager::CheckSetUserAllowedPartitionNoLock_(
     const Account* account,
-    const std::unordered_set<std::string>& partition_list) {
+    const std::unordered_set<std::string>& partition_list, User& res_user) {
+  res_user.account_to_attrs_map[account->name]
+      .allowed_partition_qos_map.clear();  // clear the partitions
   for (const auto& partition : partition_list) {
     auto result =
         CheckPartitionIsAllowedNoLock_(account, partition, false, true);
     if (!result)
       return std::unexpected(FormatRichErr(result.error(), partition));
-  }
 
+    res_user.account_to_attrs_map[account->name]
+        .allowed_partition_qos_map[partition] =
+        std::pair<std::string, std::list<std::string>>{
+            account->default_qos,
+            std::list<std::string>{account->allowed_qos_list}};
+  }
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckAddUserAllowedQosNoLock_(
+std::vector<CraneExpectedRich<void>>
+AccountManager::CheckAddUserAllowedQosNoLock_(
     const User* user, const Account* account, const std::string& partition,
-    const std::string& qos) {
-  auto result = CheckQosIsAllowedNoLock_(account, qos, false, true);
-  if (!result) return result;
+    const std::unordered_set<std::string>& qos_list, User& res_user) {
   const std::string& account_name = account->name;
+  const std::string& name = user->name;
   //  check if add item already the user's allowed qos
   const auto& attrs_in_account_map =
       user->account_to_attrs_map.at(account_name);
-  if (partition.empty()) {
-    // When the user has no partition, QoS cannot be added.
-    if (attrs_in_account_map.allowed_partition_qos_map.empty())
-      return std::unexpected(CraneErrCode::ERR_USER_EMPTY_PARTITION);
-
-    bool is_allowed = false;
-    for (const auto& [par, pair] :
-         attrs_in_account_map.allowed_partition_qos_map) {
-      const std::list<std::string>& list = pair.second;
-      if (!ranges::contains(list, qos)) {
-        is_allowed = true;
+  std::vector<CraneExpectedRich<void>> rich_error_list;
+  for (const auto& qos : qos_list) {
+    auto result = CheckQosIsAllowedNoLock_(account, qos, false, true);
+    if (!result) {
+      rich_error_list.emplace_back(
+          std::unexpected(FormatRichErr(result.error(), qos)));
+      continue;
+    }
+    if (partition.empty()) {
+      // When the user has no partition, QoS cannot be added.
+      if (attrs_in_account_map.allowed_partition_qos_map.empty()) {
+        rich_error_list.emplace_back(std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_USER_EMPTY_PARTITION, partition)));
         break;
       }
-    }
-    if (!is_allowed)
-      return std::unexpected(CraneErrCode::ERR_QOS_ALREADY_EXISTS);
-  } else {
-    auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
-    if (iter == attrs_in_account_map.allowed_partition_qos_map.end())
-      return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
-    const std::list<std::string>& list = iter->second.second;
-    if (ranges::contains(list, qos))
-      return std::unexpected(CraneErrCode::ERR_QOS_ALREADY_EXISTS);
-  }
 
-  return {};
+      bool is_allowed = false;
+      for (const auto& [par, pair] :
+           attrs_in_account_map.allowed_partition_qos_map) {
+        const std::list<std::string>& list = pair.second;
+        if (!ranges::contains(list, qos)) {
+          is_allowed = true;
+          break;
+        }
+      }
+      if (!is_allowed) {
+        rich_error_list.emplace_back(std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_QOS_ALREADY_EXISTS, qos)));
+      }
+    } else {
+      auto iter =
+          attrs_in_account_map.allowed_partition_qos_map.find(partition);
+      if (iter == attrs_in_account_map.allowed_partition_qos_map.end()) {
+        rich_error_list.emplace_back(std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)));
+      }
+      const std::list<std::string>& list = iter->second.second;
+      if (ranges::contains(list, qos)) {
+        rich_error_list.emplace_back(std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_QOS_ALREADY_EXISTS, qos)));
+      }
+    }
+  }
+  if (!rich_error_list.empty()) {
+    return rich_error_list;
+  }
+  for (const auto& qos : qos_list) {
+    if (partition.empty()) {
+      // add to all partition
+      for (auto& [par, pair] : res_user.account_to_attrs_map[account_name]
+                                   .allowed_partition_qos_map) {
+        std::list<std::string>& list = pair.second;
+        if (!ranges::contains(list, qos)) {
+          if (pair.first.empty()) {
+            pair.first = qos;
+          }
+          list.emplace_back(qos);
+        }
+      }
+    } else {
+      // add to exacted partition
+      auto iter = res_user.account_to_attrs_map[account_name]
+                      .allowed_partition_qos_map.find(partition);
+      std::list<std::string>& list = iter->second.second;
+      if (iter->second.first.empty()) {
+        iter->second.first = qos;
+      }
+      list.push_back(qos);
+    }
+  }
+  return rich_error_list;
 }
 
 CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     const User* user, const Account* account, const std::string& partition,
-    const std::unordered_set<std::string>& qos_list, bool force) {
+    const std::unordered_set<std::string>& qos_list, std::string& default_qos,
+    User& res_user, bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(account, qos, false, true);
     if (!result) return std::unexpected(FormatRichErr(result.error(), qos));
@@ -1960,12 +2010,33 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
             FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, ""));
     }
   }
+
+  if (partition.empty()) {
+    // Set the qos of all partition
+    for (auto& [par, pair] : res_user.account_to_attrs_map[account_name]
+                                 .allowed_partition_qos_map) {
+      if (!ranges::contains(qos_list, pair.first))
+        pair.first = qos_list.empty() ? "" : default_qos;
+      pair.second.assign(std::make_move_iterator(qos_list.begin()),
+                         std::make_move_iterator(qos_list.end()));
+    }
+  } else {
+    // Set the qos of a specified partition
+    auto iter = res_user.account_to_attrs_map[account_name]
+                    .allowed_partition_qos_map.find(partition);
+
+    if (!ranges::contains(qos_list, iter->second.first))
+      iter->second.first = qos_list.empty() ? "" : default_qos;
+
+    iter->second.second.assign(std::make_move_iterator(qos_list.begin()),
+                               std::make_move_iterator(qos_list.end()));
+  }
   return {};
 }
 
 CraneExpected<void> AccountManager::CheckSetUserDefaultQosNoLock_(
     const User& user, const std::string& account, const std::string& partition,
-    const std::string& qos) {
+    const std::string& qos, User& res_user) {
   const auto& attrs_in_account = user.account_to_attrs_map.at(account);
   if (partition.empty()) {
     bool is_allowed = false;
@@ -1990,6 +2061,19 @@ CraneExpected<void> AccountManager::CheckSetUserDefaultQosNoLock_(
       return std::unexpected(CraneErrCode::ERR_DUPLICATE_DEFAULT_QOS);
   }
 
+  if (partition.empty()) {
+    for (auto& [par, pair] :
+         res_user.account_to_attrs_map[account].allowed_partition_qos_map) {
+      if (ranges::contains(pair.second, qos) && qos != pair.first)
+        pair.first = qos;
+    }
+  } else {
+    auto iter =
+        res_user.account_to_attrs_map[account].allowed_partition_qos_map.find(
+            partition);
+
+    iter->second.first = qos;
+  }
   return {};
 }
 
