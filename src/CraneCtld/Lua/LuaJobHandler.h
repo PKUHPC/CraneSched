@@ -42,7 +42,7 @@ class LuaJobHandler {
   static CraneRichError JobSubmit(const std::string& lua_script,
                                   TaskInCtld* task);
   static CraneRichError JobModify(const std::string& lua_script,
-                                  TaskInCtld* task_in_ctld);
+                                  TaskInCtld* task);
 
  private:
 #ifdef HAVE_LUA
