@@ -132,6 +132,11 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+message SignalParam {
+  int32 signal_number = 1;
+  uint32 seconds_before_kill = 2;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -181,6 +186,7 @@ message TaskToCtld {
   }
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
+  optional SignalParam signal_param = 42;
 }
 
 message TaskInEmbeddedDb {
@@ -335,6 +341,7 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  optional SignalParam signal_param = 26;
 
   // Not used now.
   string extra_attr = 29;
