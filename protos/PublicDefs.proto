@@ -244,7 +244,7 @@ message StepToCtld {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
   }
-  
+
   // Step <-> Container
   optional ContainerTaskAdditionalMeta container_meta = 24;
 
@@ -399,8 +399,8 @@ message InteractiveTaskAdditionalMeta {
 }
 
 message PodTaskAdditionalMeta {
-  string name = 1; // Pod name, will use to generate hostname
-  
+  string name = 1;  // Pod name, will use to generate hostname
+
   map<string, string> labels = 2;
   map<string, string> annotations = 3;
 

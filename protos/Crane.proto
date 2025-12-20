@@ -606,8 +606,8 @@ message NodeEventInfo {
   string cluster_name = 1;
   string node_name = 2;
   uint64 uid = 3;
-  int64 start_time = 4;   // Unix timestamp in nanoseconds
-  int64 end_time = 5;     // Unix timestamp in nanoseconds
+  int64 start_time = 4;  // Unix timestamp in nanoseconds
+  int64 end_time = 5;    // Unix timestamp in nanoseconds
   string state = 6;
   string reason = 7;
 }
