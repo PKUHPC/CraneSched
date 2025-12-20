@@ -597,6 +597,27 @@ message QueryTaskEfficiencyReply {
   repeated TaskEfficiencyInfo efficiency_data = 3;
 }
 
+message QueryNodeEventsRequest {
+  repeated string node_names = 1;  // Node names to query, empty means all nodes
+  uint32 uid = 2;                  // User ID for authorization
+}
+
+message NodeEventInfo {
+  string cluster_name = 1;
+  string node_name = 2;
+  uint64 uid = 3;
+  int64 start_time = 4;   // Unix timestamp in nanoseconds
+  int64 end_time = 5;     // Unix timestamp in nanoseconds
+  string state = 6;
+  string reason = 7;
+}
+
+message QueryNodeEventsReply {
+  bool ok = 1;
+  string error_message = 2;
+  repeated NodeEventInfo event_info_list = 3;
+}
+
 message CreateReservationRequest {
   uint32 uid = 1;
   string reservation_name = 2;
@@ -1031,6 +1052,7 @@ message AttachContainerStepRequest {
   uint32 uid = 1;
   uint32 job_id = 2;
   uint32 step_id = 3;
+  string node_name = 4;
 
   bool stdin = 6;
   bool tty = 7;
@@ -1048,6 +1070,7 @@ message ExecInContainerStepRequest {
   uint32 uid = 1;
   uint32 job_id = 2;
   uint32 step_id = 3;
+  string node_name = 4;
 
   repeated string command = 5;
 
@@ -1132,8 +1155,9 @@ service CraneCtld {
   rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
-service CeffQueryService {
+service PluginQueryService {
   rpc QueryTaskEfficiency(QueryTaskEfficiencyRequest) returns (QueryTaskEfficiencyReply);
+  rpc QueryNodeEvents(QueryNodeEventsRequest) returns (QueryNodeEventsReply);
 }
 
 service CraneCtldForInternal {

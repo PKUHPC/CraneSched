@@ -2000,17 +2000,17 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     }
 
     auto exec_nodes = step->ExecutionNodes();
-
-    // TODO: Attach to multiple nodes?
-    if (exec_nodes.size() != 1) {
+    if (request.node_name().empty() && exec_nodes.size() == 1) {
+      target_craned_id = *exec_nodes.begin();
+    } else if (exec_nodes.contains(request.node_name())) {
+      target_craned_id = request.node_name();
+    } else {
       auto* err = response.mutable_status();
-      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
-      err->set_description("Multiple-node task not supported yet.");
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested node is not executing this step.");
       response.set_ok(false);
       return response;
     }
-
-    target_craned_id = *exec_nodes.begin();
   }
 
   auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
@@ -2131,17 +2131,18 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
       return response;
     }
 
-    // TODO: Attach to multiple nodes?
     auto exec_nodes = step->ExecutionNodes();
-    if (exec_nodes.size() != 1) {
+    if (request.node_name().empty() && exec_nodes.size() == 1) {
+      target_craned_id = *exec_nodes.begin();
+    } else if (exec_nodes.contains(request.node_name())) {
+      target_craned_id = request.node_name();
+    } else {
       auto* err = response.mutable_status();
-      err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
-      err->set_description("Multiple-node task not supported yet.");
+      err->set_code(CraneErrCode::ERR_INVALID_PARAM);
+      err->set_description("Requested node is not executing this step.");
       response.set_ok(false);
       return response;
     }
-
-    target_craned_id = *exec_nodes.begin();
   }
 
   auto stub = g_craned_keeper->GetCranedStub(target_craned_id);
