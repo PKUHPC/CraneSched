@@ -2097,6 +2097,21 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   allocated_res_view.SetToZero();
   allocated_res_view += resources;
 
+  double cpus_req = 0.0;
+  int64_t mem_req = 0;
+
+  if (task_to_ctld.has_cpus_per_task()) {
+    cpus_req = task_to_ctld.cpus_per_task() * task_to_ctld.ntasks();
+  }
+
+  if (task_to_ctld.has_mem_per_node()) {
+    mem_req += task_to_ctld.mem_per_node() * task_to_ctld.node_num();
+  }
+  if (task_to_ctld.has_cpus_per_task() && task_to_ctld.has_mem_per_cpu()) {
+    mem_req += static_cast<int64_t>(task_to_ctld.cpus_per_task()) *
+               task_to_ctld.mem_per_cpu() * task_to_ctld.ntasks();
+  }
+
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
     env_doc << entry.first << entry.second;
@@ -2153,47 +2168,46 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::optional<ContainerMetaInTask>, bool,             /*38-39*/
              std::unordered_map<std::string, uint32_t>,            /*40*/
              bsoncxx::array::value, std::string>                   /*41-42*/
-      values{                                                      // 0-4
-             static_cast<int32_t>(runtime_attr.task_id()),
-             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-             task_to_ctld.account(),
-             // 5-9
-             task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-             static_cast<int64_t>(task_to_ctld.req_resources()
-                                      .allocatable_res()
-                                      .memory_limit_bytes()),
-             task_to_ctld.name(), env_str,
-             static_cast<int32_t>(task_to_ctld.uid()),
-             // 10-14
-             static_cast<int32_t>(task_to_ctld.gid()),
-             util::HostNameListToStr(runtime_attr.craned_ids()),
-             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
-             // 15-19
-             runtime_attr.cached_priority(), 0,
-             runtime_attr.start_time().seconds(),
-             runtime_attr.end_time().seconds(), 0,
-             // 20-24
-             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-             task_to_ctld.time_limit().seconds(),
-             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
-             // 25-29
-             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
-             runtime_attr.username(), task_to_ctld.qos(),
-             task_to_ctld.get_user_env(),
-             // 30-34
-             task_to_ctld.type(), task_to_ctld.extra_attr(),
-             task_to_ctld.reservation(), task_to_ctld.exclusive(),
-             allocated_res_view.CpuCount(),
-             // 35-40
-             static_cast<int64_t>(allocated_res_view.MemoryBytes()),
-             allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
-             true /* Mark the document having complete job info */,
-             // 40-44
-             std::unordered_map<std::string, uint32_t>{
-                 runtime_attr.actual_licenses().begin(),
-                 runtime_attr.actual_licenses().end()},
-             bsoncxx::array::value{nodename_list_array.view()},
-             task_to_ctld.wckey()};
+      values{
+          // 0-4
+          static_cast<int32_t>(runtime_attr.task_id()),
+          runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
+          task_to_ctld.account(),
+          // 5-9
+          cpus_req,
+          mem_req,
+          task_to_ctld.name(), env_str,
+          static_cast<int32_t>(task_to_ctld.uid()),
+          // 10-14
+          static_cast<int32_t>(task_to_ctld.gid()),
+          util::HostNameListToStr(runtime_attr.craned_ids()),
+          runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
+          // 15-19
+          runtime_attr.cached_priority(), 0,
+          runtime_attr.start_time().seconds(),
+          runtime_attr.end_time().seconds(), 0,
+          // 20-24
+          task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+          task_to_ctld.time_limit().seconds(),
+          runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
+          // 25-29
+          task_to_ctld.cmd_line(), runtime_attr.exit_code(),
+          runtime_attr.username(), task_to_ctld.qos(),
+          task_to_ctld.get_user_env(),
+          // 30-34
+          task_to_ctld.type(), task_to_ctld.extra_attr(),
+          task_to_ctld.reservation(), task_to_ctld.exclusive(),
+          allocated_res_view.CpuCount(),
+          // 35-40
+          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
+          allocated_res_view.GetDeviceMap(), pod_meta, container_meta,
+          true /* Mark the document having complete job info */,
+          // 40-44
+          std::unordered_map<std::string, uint32_t>{
+              runtime_attr.actual_licenses().begin(),
+              runtime_attr.actual_licenses().end()},
+          bsoncxx::array::value{nodename_list_array.view()},
+          task_to_ctld.wckey()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -2280,8 +2294,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
-             task->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+             task->total_res_view.CpuCount(),
+             static_cast<int64_t>(task->total_res_view.MemoryBytes()),
              task->name, env_str, static_cast<int32_t>(task->uid),
              // 10-14
              static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
@@ -2367,8 +2381,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       values{                                                     // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             step->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(step->requested_node_res_view.MemoryBytes()),
+             step->total_res_view.CpuCount(),
+             static_cast<int64_t>(step->total_res_view.MemoryBytes()),
              // 5-9
              step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
              util::HostNameListToStr(step->CranedIds()),
@@ -2407,6 +2421,21 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
       container_meta =
           static_cast<ContainerMetaInTask>(step_to_ctld.container_meta());
     }
+  }
+
+  double cpus_req = 0.0;
+  int64_t mem_req = 0;
+
+  if (step_to_ctld.has_cpus_per_task()) {
+    cpus_req = step_to_ctld.cpus_per_task() * step_to_ctld.ntasks();
+  }
+
+  if (step_to_ctld.has_mem_per_node()) {
+    mem_req += step_to_ctld.mem_per_node() * step_to_ctld.node_num();
+  }
+  if (step_to_ctld.has_cpus_per_task() && step_to_ctld.has_mem_per_cpu()) {
+    mem_req += static_cast<int64_t>(step_to_ctld.cpus_per_task()) *
+               step_to_ctld.mem_per_cpu() * step_to_ctld.ntasks();
   }
 
   bsoncxx::builder::stream::document env_doc;
@@ -2454,13 +2483,8 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
           // 0-4
           static_cast<int32_t>(runtime_attr.step_id()),
           absl::ToUnixSeconds(absl::Now()), false,
-          step_to_ctld.req_resources_per_task()
-                  .allocatable_res()
-                  .cpu_core_limit() *
-              step_to_ctld.ntasks_per_node(),
-          static_cast<int64_t>(step_to_ctld.req_resources_per_task()
-                                   .allocatable_res()
-                                   .memory_limit_bytes()),
+          cpus_req,
+          mem_req,
           // 5-9
           step_to_ctld.name(), env_str, step_to_ctld.uid(),
           std::vector<gid_t>(step_to_ctld.gid().begin(),

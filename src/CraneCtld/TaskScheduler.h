@@ -87,10 +87,13 @@ struct PdJobInScheduler {
   PartitionId partition_id;
   std::string reservation;
 
-  ResourceView requested_node_res_view;
+  ResourceView node_res_view;
+  ResourceView task_res_view;
+  ResourceView total_res_view;
+
   uint32_t node_num;
   uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
+  uint32_t ntasks;
   bool exclusive;
 
   std::unordered_set<std::string> included_nodes;
@@ -102,6 +105,8 @@ struct PdJobInScheduler {
   std::string account;
 
   double priority;
+
+  std::unordered_map<CranedId, uint32_t> craned_id_to_task_num;
 
   absl::Time start_time;
   ResourceV2 allocated_res;
@@ -119,10 +124,12 @@ struct PdJobInScheduler {
         time_limit(job->time_limit),
         partition_id(job->partition_id),
         reservation(job->reservation),
-        requested_node_res_view(job->requested_node_res_view),
+        node_res_view(job->node_res_view),
+        task_res_view(job->task_res_view),
+        total_res_view(job->total_res_view),
         node_num(job->node_num),
         ntasks_per_node(job->ntasks_per_node),
-        cpus_per_task(job->cpus_per_task),
+        ntasks(job->ntasks),
         exclusive(job->exclusive),
         included_nodes(job->included_nodes),
         excluded_nodes(job->excluded_nodes),
