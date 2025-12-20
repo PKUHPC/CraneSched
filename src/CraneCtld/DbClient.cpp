@@ -2051,8 +2051,8 @@ MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
       values{                                                     // 0-4
              static_cast<int32_t>(step->StepId()),
              absl::ToUnixSeconds(absl::Now()), false,
-             step->requested_node_res_view.CpuCount(),
-             static_cast<int64_t>(step->requested_node_res_view.MemoryBytes()),
+             step->requested_task_res_view.CpuCount(),
+             static_cast<int64_t>(step->requested_task_res_view.MemoryBytes()),
              // 5-9
              step->name, env_str, static_cast<int32_t>(step->uid), step->gids,
              util::HostNameListToStr(step->CranedIds()),

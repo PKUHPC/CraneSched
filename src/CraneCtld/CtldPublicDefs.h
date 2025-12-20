@@ -485,6 +485,7 @@ struct StepInCtld {
   std::string name;
 
   uint32_t ntasks_per_node{0};
+  uint32_t ntasks{0};
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
@@ -493,9 +494,9 @@ struct StepInCtld {
 
   absl::Duration time_limit;
 
-  // For now, its cpu is ntasks_per_node * cpus_per_task in
-  // requested_task_res_view other parts are same as requested_task_res_view
-  ResourceView requested_node_res_view;
+  // // For now, its cpu is ntasks_per_node * cpus_per_task in
+  // // requested_task_res_view other parts are same as requested_task_res_view
+  // ResourceView requested_node_res_view;
   // Set by user request and should not be used now, without support for
   // task-based-resources-request.
   ResourceView requested_task_res_view;
@@ -933,66 +934,7 @@ struct TaskInCtld {
 
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
-    int popped_count = 0;
-    auto now = absl::Now();
-    while (!pending_step_ids_.empty()) {
-      const step_id_t& step_id = pending_step_ids_.front();
-      const auto& step = GetStep(step_id);
-      if (step == nullptr) {
-        // step has been removed
-        ++popped_count;
-        pending_step_ids_.pop();
-        continue;
-      }
-      ResourceV2 step_alloc_res;
-      std::unordered_set<CranedId> step_craned_ids;
-      for (auto const& craned_id :
-           step_res_avail_.EachNodeResMap() | std::views::keys) {
-        if (step->excluded_nodes.contains(craned_id)) {
-          continue;
-        }
-        if (!step->included_nodes.empty() &&
-            !step->included_nodes.contains(craned_id)) {
-          continue;
-        }
-        ResourceInNode feasible_res;
-        bool ok = step->requested_node_res_view.GetFeasibleResourceInNode(
-            step_res_avail_.at(craned_id), &feasible_res);
-        if (!ok) {
-          continue;
-        }
-        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-        step_craned_ids.insert(craned_id);
-        if (step_craned_ids.size() >= step->node_num) {
-          break;
-        }
-      }
-      if (step_craned_ids.size() < step->node_num) {
-        break;
-      }
-      step->SetAllocatedRes(step_alloc_res);
-      step->SetCranedIds(step_craned_ids);
-      step->allocated_craneds_regex =
-          util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(step_craned_ids);
-      step->SetExecutionNodes(step_craned_ids);
-      step->SetStartTime(now);
-      step->SetStatus(crane::grpc::TaskStatus::Configuring);
-      const auto& meta = step->ia_meta.value();
-      meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
-          .job_id = step->job_id,
-          .step_id = step->StepId(),
-          .allocated_nodes{std::make_pair(
-              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
-      step_res_avail_ -= step_alloc_res;
-      pending_step_ids_.pop();
-      ++popped_count;
-      scheduled_steps->push_back(step);
-    }
-    return popped_count;
-  }
-
+  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
   void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 

@@ -4336,15 +4336,6 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
       gres = step->job->requested_node_res_view.GetDeviceMap();
       *res_step_to_ctld->mutable_device_map() = ToGrpcDeviceMap(gres);
     }
-
-    if (step->node_num == 0) {
-      step->node_num = step->job->node_num;
-      step_to_ctld->set_node_num(step->node_num);
-    }
-    if (step->ntasks_per_node == 0) {
-      step->ntasks_per_node = step->job->ntasks_per_node;
-      step_to_ctld->set_ntasks_per_node(step->ntasks_per_node);
-    }
   }
 
   return {};
@@ -4383,10 +4374,8 @@ CraneExpected<void> TaskScheduler::CheckStepValidity(StepInCtld* step) {
   }
   // mem/gres for whole step,only CPU is allocated per task, currently multiply
   // cpu by ntasks_per_node
-  auto node_res_view = step->requested_task_res_view;
-  node_res_view.GetAllocatableRes().cpu_count *= step->ntasks_per_node;
-  step->requested_node_res_view = node_res_view;
-  if (!(step->requested_node_res_view <= job->requested_node_res_view))
+  auto requested_res_view = step->requested_task_res_view * step->ntasks;
+  if (!(requested_res_view <= job->requested_node_res_view * job->node_num))
     return std::unexpected{CraneErrCode::ERR_STEP_RES_BEYOND};
   return {};
 }

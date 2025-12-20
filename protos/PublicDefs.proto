@@ -223,13 +223,15 @@ message StepToCtld {
   uint32 uid = 6;  // Only for authorization
   string name = 7;
 
-  optional uint32 node_num = 8;
-  optional uint32 ntasks_per_node = 9;
+  uint32 node_num = 8;
+  uint32 ntasks_per_node = 9;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
   repeated uint32 gid = 14;
+
+  uint32 ntasks = 15;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
