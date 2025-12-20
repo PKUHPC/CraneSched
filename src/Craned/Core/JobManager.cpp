@@ -86,9 +86,7 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.ntasks_per_node()));
   env_map.emplace("CRANE_GPUS", std::to_string(daemon_step_to_d.total_gpus()));
   env_map.emplace("CRANE_MEM_PER_CPU", std::format("{:.2f}", mem_per_cpu));
-  env_map.emplace(
-      "CRANE_NTASKS",
-      std::to_string(alloc_node_num * daemon_step_to_d.ntasks_per_node()));
+  env_map.emplace("CRANE_NTASKS", std::to_string(daemon_step_to_d.ntasks()));
   env_map.emplace("CRANE_CLUSTER_NAME", g_config.CraneClusterName);
   env_map.emplace("CRANE_CPUS_ON_NODE", std::format("{:.2f}", cpus_on_node));
   env_map.emplace("CRANE_NODEID", node_id_to_str());

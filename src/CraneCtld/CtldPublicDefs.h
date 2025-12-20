@@ -561,6 +561,7 @@ struct StepInCtld {
   std::string cwd;
 
   uint32_t ntasks_per_node{0};
+  uint32_t ntasks{0};
 
   bool requeue_if_failed{false};
 
@@ -570,12 +571,10 @@ struct StepInCtld {
 
   absl::Duration time_limit;
 
-  // For now, its cpu is ntasks_per_node * cpus_per_task in
-  // requested_task_res_view other parts are same as requested_task_res_view
-  ResourceView requested_node_res_view;
-  // Set by user request and should not be used now, without support for
-  // task-based-resources-request.
-  ResourceView requested_task_res_view;
+  ResourceView node_res_view;
+  ResourceView task_res_view;
+  ResourceView total_res_view;
+
   uint32_t node_num{0};
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -784,8 +783,9 @@ struct TaskInCtld {
 
   PartitionId partition_id;
 
-  // Set by user request and probably include untyped devices.
-  ResourceView requested_node_res_view;
+  ResourceView node_res_view;
+  ResourceView task_res_view;
+  ResourceView total_res_view;
 
   crane::grpc::TaskType type;
 
@@ -796,8 +796,8 @@ struct TaskInCtld {
   std::string qos;
 
   uint32_t node_num{0};
+  uint32_t ntasks{0};
   uint32_t ntasks_per_node{0};
-  cpu_t cpus_per_task{0.0F};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -1031,84 +1031,8 @@ struct TaskInCtld {
 
   void SetStepResAvail(const ResourceV2& val) { step_res_avail_ = val; }
 
-  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps) {
-    int popped_count = 0;
-    auto now = absl::Now();
-    while (!pending_step_ids_.empty()) {
-      const step_id_t& step_id = pending_step_ids_.front();
-      const auto& step = GetStep(step_id);
-      if (step == nullptr) {
-        // step has been removed
-        ++popped_count;
-        pending_step_ids_.pop();
-        continue;
-      }
-
-      ResourceV2 step_alloc_res;
-      std::unordered_set<CranedId> step_craned_ids;
-      for (auto const& craned_id :
-           step_res_avail_.EachNodeResMap() | std::views::keys) {
-        if (step->excluded_nodes.contains(craned_id)) {
-          continue;
-        }
-        if (!step->included_nodes.empty() &&
-            !step->included_nodes.contains(craned_id)) {
-          continue;
-        }
-        ResourceInNode feasible_res;
-        bool ok = step->requested_node_res_view.GetFeasibleResourceInNode(
-            step_res_avail_.at(craned_id), &feasible_res);
-        if (!ok) {
-          continue;
-        }
-        step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-        step_craned_ids.insert(craned_id);
-        if (step_craned_ids.size() >= step->node_num) {
-          break;
-        }
-      }
-
-      if (step_craned_ids.size() < step->node_num) {
-        break;
-      }
-
-      step->SetAllocatedRes(step_alloc_res);
-      step->SetCranedIds(step_craned_ids);
-      step->allocated_craneds_regex =
-          util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(step_craned_ids);
-      step->SetExecutionNodes(step_craned_ids);
-      step->SetStartTime(now);
-      step->SetStatus(crane::grpc::TaskStatus::Configuring);
-      task_id_t cur_task_id = 0;
-      for (const auto& craned_id : step_craned_ids) {
-        for (int i = 0; i < step->ntasks_per_node; ++i) {
-          step->craned_task_map[craned_id].insert(cur_task_id);
-          auto res = step_alloc_res.at(craned_id);
-          // Mem is allocated at step level, set to 0 here to avoid mem limit.
-          res.allocatable_res.memory_bytes = 0;
-          res.allocatable_res.memory_sw_bytes = 0;
-          step->task_res_map[cur_task_id] = res;
-          ++cur_task_id;
-        }
-      }
-      if (step->ia_meta.has_value()) {
-        const auto& meta = step->ia_meta.value();
-        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
-            .job_id = step->job_id,
-            .step_id = step->StepId(),
-            .allocated_nodes{std::make_pair(
-                util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
-      }
-      step_res_avail_ -= step_alloc_res;
-      pending_step_ids_.pop();
-      ++popped_count;
-      scheduled_steps->push_back(step);
-    }
-    return popped_count;
-  }
-
-  void SetCachedPriority(double val);
+  int SchedulePendingSteps(std::vector<CommonStepInCtld*>* scheduled_steps);
+  void SetCachedPriority(const double val);
   double CachedPriority() const { return cached_priority; }
 
   void SetAllocatedRes(ResourceV2&& val);
@@ -1330,7 +1254,7 @@ struct LicenseResourceInDb {
   std::string name;
   std::string server;
   std::string server_type;
-  crane::grpc::LicenseResource_Type type;
+  crane::grpc::LicenseResource::Type type;
   uint32_t allocated{0};     /* count allocated to the cluster_resources */
   uint32_t last_consumed{0}; /* number from the server saying how many it
                               * currently has consumed */
@@ -1377,60 +1301,60 @@ struct Txn {
   std::string info;
 };
 
-struct PdJobInScheduler {
-  task_id_t job_id;
-  absl::Duration time_limit;
+// struct PdJobInScheduler {
+//   task_id_t job_id;
+//   absl::Duration time_limit;
 
-  PartitionId partition_id;
-  std::string reservation;
+//   PartitionId partition_id;
+//   std::string reservation;
 
-  ResourceView requested_node_res_view;
-  uint32_t node_num;
-  uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
-  bool exclusive;
+//   ResourceView requested_node_res_view;
+//   uint32_t node_num;
+//   uint32_t ntasks_per_node;
+//   cpu_t cpus_per_task;
+//   bool exclusive;
 
-  std::unordered_set<std::string> included_nodes;
-  std::unordered_set<std::string> excluded_nodes;
+//   std::unordered_set<std::string> included_nodes;
+//   std::unordered_set<std::string> excluded_nodes;
 
-  absl::Time submit_time;
-  uint32_t partition_priority;
-  uint32_t qos_priority;
-  std::string account;
+//   absl::Time submit_time;
+//   uint32_t partition_priority;
+//   uint32_t qos_priority;
+//   std::string account;
 
-  double priority;
+//   double priority;
 
-  absl::Time start_time;
-  ResourceV2 allocated_res;
-  std::vector<CranedId> craned_ids;
+//   absl::Time start_time;
+//   ResourceV2 allocated_res;
+//   std::vector<CranedId> craned_ids;
 
-  google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-      req_licenses;
-  bool is_license_or;
-  std::unordered_map<LicenseId, uint32_t> actual_licenses;
+//   google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld::License>
+//       req_licenses;
+//   bool is_license_or;
+//   std::unordered_map<LicenseId, uint32_t> actual_licenses;
 
-  std::string reason;
+//   std::string reason;
 
-  PdJobInScheduler(TaskInCtld* job)
-      : job_id(job->TaskId()),
-        time_limit(job->time_limit),
-        partition_id(job->partition_id),
-        reservation(job->reservation),
-        requested_node_res_view(job->requested_node_res_view),
-        node_num(job->node_num),
-        ntasks_per_node(job->ntasks_per_node),
-        cpus_per_task(job->cpus_per_task),
-        exclusive(job->exclusive),
-        included_nodes(job->included_nodes),
-        excluded_nodes(job->excluded_nodes),
-        submit_time(job->SubmitTime()),
-        partition_priority(job->partition_priority),
-        qos_priority(job->qos_priority),
-        account(job->account),
-        priority(job->mandated_priority),
-        req_licenses(job->TaskToCtld().licenses_count()),
-        is_license_or(job->TaskToCtld().is_licenses_or()) {}
-};
+//   PdJobInScheduler(TaskInCtld* job)
+//       : job_id(job->TaskId()),
+//         time_limit(job->time_limit),
+//         partition_id(job->partition_id),
+//         reservation(job->reservation),
+//         requested_node_res_view(job->requested_node_res_view),
+//         node_num(job->node_num),
+//         ntasks_per_node(job->ntasks_per_node),
+//         cpus_per_task(job->cpus_per_task),
+//         exclusive(job->exclusive),
+//         included_nodes(job->included_nodes),
+//         excluded_nodes(job->excluded_nodes),
+//         submit_time(job->SubmitTime()),
+//         partition_priority(job->partition_priority),
+//         qos_priority(job->qos_priority),
+//         account(job->account),
+//         priority(job->mandated_priority),
+//         req_licenses(job->TaskToCtld().licenses_count()),
+//         is_license_or(job->TaskToCtld().is_licenses_or()) {}
+// };
 
 }  // namespace Ctld
 

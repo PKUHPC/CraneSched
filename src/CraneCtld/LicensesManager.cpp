@@ -18,6 +18,8 @@
 
 #include "LicensesManager.h"
 
+#include "TaskScheduler.h"
+
 namespace Ctld {
 
 LicensesManager::LicensesManager() {}
@@ -31,7 +33,7 @@ int LicensesManager::Init(
 
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
   for (const auto& resource : resource_list) {
-    if (resource.type == crane::grpc::LicenseResource_Type_License) {
+    if (resource.type == crane::grpc::LicenseResource::License) {
       auto cluster_iter =
           resource.cluster_resources.find(g_config.CraneClusterName);
       if (cluster_iter != resource.cluster_resources.end()) {
@@ -130,7 +132,7 @@ void LicensesManager::GetLicensesInfo(
 }
 
 std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
-    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld::License>&
         lic_id_to_count,
     bool is_license_or) {
   auto licenses_map = m_licenses_map_.GetMapConstSharedPtr();
@@ -356,7 +358,7 @@ void LicensesManager::FreeLicense(
 CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
-    const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
+    const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
         operators) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
 
@@ -394,7 +396,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
   }
 
   if (g_config.AllLicenseResourcesAbsolute)
-    new_lic_resource.flags |= crane::grpc::LicenseResource_Flag_Absolute;
+    new_lic_resource.flags |= crane::grpc::LicenseResource::Absolute;
 
   auto result = CheckAndUpdateFields_(clusters, operators, &new_lic_resource);
   if (!result) return result;
@@ -411,7 +413,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
-  if (new_lic_resource.type == crane::grpc::LicenseResource_Type_License) {
+  if (new_lic_resource.type == crane::grpc::LicenseResource::License) {
     auto cluster_iter =
         new_lic_resource.cluster_resources.find(g_config.CraneClusterName);
     if (cluster_iter != new_lic_resource.cluster_resources.end()) {
@@ -438,7 +440,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
 CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
-    const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
+    const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
         operators) {
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
 
@@ -464,7 +466,7 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   // update license
-  if (res_lic_resource.type == crane::grpc::LicenseResource_Type_License) {
+  if (res_lic_resource.type == crane::grpc::LicenseResource::License) {
     auto cluster_iter =
         res_lic_resource.cluster_resources.find(g_config.CraneClusterName);
     if (cluster_iter != res_lic_resource.cluster_resources.end()) {
@@ -616,12 +618,12 @@ CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
 
 CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     const std::vector<std::string>& clusters,
-    const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
+    const std::unordered_map<crane::grpc::LicenseResource::Field, std::string>&
         operators,
     LicenseResourceInDb* res_resource) {
   for (const auto& [field, value] : operators) {
     switch (field) {
-    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
+    case crane::grpc::LicenseResource::Count:
       try {
         res_resource->total_resource_count = std::stoul(value);
       } catch (std::exception& e) {
@@ -631,7 +633,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
                                              "Invalid count parameter"));
       }
       break;
-    case crane::grpc::LicenseResource_Field::LicenseResource_Field_Allowed:
+    case crane::grpc::LicenseResource::Allowed:
       if (clusters.empty())
         return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                                              "No cluster specified"));
@@ -661,7 +663,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
         }
       }
       break;
-    case crane::grpc::LicenseResource_Field_LastConsumed:
+    case crane::grpc::LicenseResource::LastConsumed:
       try {
         res_resource->last_consumed = std::stoul(value);
       } catch (std::exception& e) {
@@ -672,17 +674,17 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
                           "Invalid last_consumed parameter"));
       }
       break;
-    case crane::grpc::LicenseResource_Field_Description:
+    case crane::grpc::LicenseResource::Description:
       res_resource->description = value;
       break;
-    case crane::grpc::LicenseResource_Field_Flags: {
+    case crane::grpc::LicenseResource::Flags: {
       for (const auto& flag : absl::StrSplit(value, ',')) {
         std::string lower_str =
             absl::AsciiStrToLower(absl::StripAsciiWhitespace(flag));
         if (lower_str == "absolute") {
-          res_resource->flags |= crane::grpc::LicenseResource_Flag_Absolute;
+          res_resource->flags |= crane::grpc::LicenseResource::Absolute;
         } else if (lower_str == "none") {
-          res_resource->flags = crane::grpc::LicenseResource_Flag_None;
+          res_resource->flags = crane::grpc::LicenseResource::None;
           break;
         } else {
           CRANE_DEBUG("Invalid flags parameter: {}", lower_str);
@@ -690,19 +692,19 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
       }
       break;
     }
-    case crane::grpc::LicenseResource_Field_ResourceType: {
+    case crane::grpc::LicenseResource::ResourceType: {
       std::string lower_str = absl::AsciiStrToLower(value);
       if (lower_str == "license") {
-        res_resource->type = crane::grpc::LicenseResource_Type_License;
+        res_resource->type = crane::grpc::LicenseResource::License;
       } else if (lower_str == "notset") {
-        res_resource->type = crane::grpc::LicenseResource_Type_NotSet;
+        res_resource->type = crane::grpc::LicenseResource::NotSet;
       } else {
         return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                                              "Invalid type parameter"));
       }
       break;
     }
-    case crane::grpc::LicenseResource_Field_ServerType:
+    case crane::grpc::LicenseResource::ServerType:
       res_resource->server_type = value;
       break;
     default:
@@ -714,7 +716,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   res_resource->last_update = absl::Now();
 
   uint32_t allocated = 0;
-  if (res_resource->flags & crane::grpc::LicenseResource_Flag_Absolute)
+  if (res_resource->flags & crane::grpc::LicenseResource::Absolute)
     allocated = res_resource->allocated;
   else {
     if (res_resource->allocated > 100)
@@ -744,7 +746,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
 void LicensesManager::UpdateLicense_(
     const LicenseResourceInDb& license_resource, uint32_t cluster_allowed,
     License* lic) {
-  if (license_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+  if (license_resource.flags & crane::grpc::LicenseResource::Absolute)
     lic->total = cluster_allowed;
   else  // when non-absolute, the cluster_allowed is the percentage of the
         // resource.count
