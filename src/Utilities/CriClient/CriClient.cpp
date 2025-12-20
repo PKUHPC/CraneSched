@@ -419,8 +419,7 @@ CraneExpectedRich<std::string> CriClient::GetPodSandboxId(
 
   if (sandboxes.size() > 1) {
     std::string error_msg = std::format(
-        "Multiple pod sandboxes ({}) found matching labels",
-        sandboxes.size());
+        "Multiple pod sandboxes ({}) found matching labels", sandboxes.size());
     CRANE_ERROR("{}", error_msg);
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_CRI_GENERIC, error_msg));
