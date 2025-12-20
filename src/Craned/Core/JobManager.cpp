@@ -21,6 +21,8 @@
 #include <pty.h>
 #include <sys/wait.h>
 
+#include <utility>
+
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "crane/PluginClient.h"
@@ -226,7 +228,18 @@ bool JobManager::FreeJobs(std::set<task_id_t>&& job_ids) {
   for (job_id_t job_id : job_ids) {
     auto job = FreeJobInfo_(job_id);
     if (!job.has_value()) {
-      CRANE_INFO("Try to free non-existent job #{}.", job_id);
+      CRANE_INFO(
+          "Try to free non-existent job #{}, sending a status change as "
+          "daemon step",
+          job_id);
+      // Free job implicitly free its daemon step and got a status change from
+      // daemon step, send a status change to ctld if not found.
+      g_ctld_client->StepStatusChangeAsync(StepStatusChangeQueueElem{
+          .job_id = job_id,
+          .step_id = kDaemonStepId,
+          .new_status = StepStatus::Cancelled,
+          .reason = "Job not found on craned during free request",
+          .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
       continue;
     }
 
@@ -748,7 +761,7 @@ void JobManager::ActivateTaskStatusChangeAsync_(
                                           .step_id = step_id,
                                           .new_status = new_status,
                                           .exit_code = exit_code,
-                                          .timestamp = timestamp};
+                                          .timestamp = std::move(timestamp)};
   if (reason.has_value()) status_change.reason = std::move(reason);
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
@@ -891,18 +904,35 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       bool terminate_job = elem.step_id == kDaemonStepId;
       auto map_ptr = m_job_map_.GetMapExclusivePtr();
       if (!map_ptr->contains(elem.job_id)) {
-        CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent job.",
-                    elem.job_id, elem.step_id);
-
+        CRANE_DEBUG(
+            "[Step #{}.{}] Terminating a non-existent job, sending a status "
+            "change",
+            elem.job_id, elem.step_id);
+        g_ctld_client->StepStatusChangeAsync(
+            {.job_id = elem.job_id,
+             .step_id = elem.step_id,
+             .new_status = crane::grpc::TaskStatus::Cancelled,
+             .exit_code = ExitCode::EC_TERMINATED,
+             .reason = "Terminated non-existent job.",
+             .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         continue;
       }
       auto job_instance = map_ptr->at(elem.job_id).RawPtr();
 
       absl::MutexLock lk(job_instance->step_map_mtx.get());
       if (!job_instance->step_map.contains(elem.step_id)) {
-        CRANE_DEBUG("[Step #{}.{}] Terminating a non-existent step.",
-                    elem.job_id, elem.step_id);
+        CRANE_DEBUG(
+            "[Step #{}.{}] Terminating a non-existent step, sending a status "
+            "change",
+            elem.job_id, elem.step_id);
 
+        g_ctld_client->StepStatusChangeAsync(
+            {.job_id = elem.job_id,
+             .step_id = elem.step_id,
+             .new_status = crane::grpc::TaskStatus::Cancelled,
+             .exit_code = ExitCode::EC_TERMINATED,
+             .reason = "Terminated non-existent step.",
+             .timestamp = google::protobuf::util::TimeUtil::GetCurrentTime()});
         continue;
       }
       auto& step = job_instance->step_map.at(elem.step_id);
@@ -1059,7 +1089,7 @@ void JobManager::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
   CRANE_INFO("[Step #{}.{}] is doing StepStatusChange, new status: {}", job_id,
              step_id, new_status);
   ActivateTaskStatusChangeAsync_(job_id, step_id, new_status, exit_code,
-                                 std::move(reason), timestamp);
+                                 std::move(reason), std::move(timestamp));
 }
 
 }  // namespace Craned

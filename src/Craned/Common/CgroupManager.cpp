@@ -1187,9 +1187,9 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
     // ban libbpf log
     libbpf_print_fn_t fn = libbpf_set_print(nullptr);
 
-    if (bpf_object__load(bpf_obj_) != 0) {
-      CRANE_ERROR("Failed to load BPF object {}",
-                  CgConstant::kBpfObjectFilePath);
+    if (auto err = bpf_object__load(bpf_obj_); err != 0) {
+      CRANE_ERROR("Failed to load BPF object {}: {} {}",
+                  CgConstant::kBpfObjectFilePath, err, std::strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }

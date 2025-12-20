@@ -685,10 +685,10 @@ struct CommonStepInCtld : StepInCtld {
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        const std::string& reason, const CranedId& craned_id,
-                        google::protobuf::Timestamp timestamp,
-                        StepStatusChangeContext* context);
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
+      crane::grpc::TaskStatus new_status, uint32_t exit_code,
+      const std::string& reason, const CranedId& craned_id,
+      google::protobuf::Timestamp timestamp, StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
@@ -896,6 +896,10 @@ struct TaskInCtld {
   }
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
+
+  bool AllExecutionStepsFinished() const {
+    return m_steps_.empty() && !m_primary_step_;
+  }
 
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
     // Common step can only be interactive step started by crun.

@@ -925,7 +925,7 @@ class TaskScheduler {
   static void PersistAndTransferTasksToMongodb_(
       std::unordered_set<TaskInCtld*> const& tasks);
 
-  CraneErrCode TerminateRunningStepNoLock_(StepInCtld* step);
+  CraneErrCode TerminateRunningStepNoLock_(CommonStepInCtld* step);
 
   CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 

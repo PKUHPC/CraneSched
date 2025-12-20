@@ -1665,18 +1665,8 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
-  if (step->StepType() == crane::grpc::StepType::DAEMON) {
-    for (CranedId const& craned_id : step->ExecutionNodes()) {
-      m_cancel_task_queue_.enqueue(
-          CancelRunningTaskQueueElem{.job_id = step->job_id,
-                                     .step_id = step->StepId(),
-                                     .craned_id = craned_id});
-      m_cancel_task_async_handle_->send();
-    }
-    return CraneErrCode::SUCCESS;
-  }
-
+CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -1868,14 +1858,14 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         }
       } else {
         // User cancel jobs with node/name... filter
-        auto daemon_step = task->DaemonStep();
-        if (!daemon_step) {
+        auto primary_step = task->PrimaryStep();
+        if (!primary_step) {
           CRANE_ERROR(
               "[Job #{}] Daemon step not found when cancelling running job",
               task_id);
           return;
         }
-        TerminateRunningStepNoLock_(daemon_step);
+        TerminateRunningStepNoLock_(primary_step);
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
         cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
       }
@@ -2955,11 +2945,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
       CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
                   task_id, step_id, new_status);
-      step->StepStatusChange(new_status, exit_code, reason, craned_index,
-                             timestamp, &context);
+      job_finished_status = step->StepStatusChange(
+          new_status, exit_code, reason, craned_index, timestamp, &context);
     }
 
     if (job_finished_status.has_value()) {
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  job_finished_status.value());
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
 
@@ -3012,9 +3004,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // Pending / Running -> Completed / Failed / Cancelled.
       // It means all task status changes will put the task into mongodb,
       // so we don't have any branch code here and just put it into mongodb.
-
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
       m_running_task_map_.erase(iter);
     }
   }
