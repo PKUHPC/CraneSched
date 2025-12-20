@@ -70,10 +70,10 @@ CraneErrCode StepInstance::Prepare() {
   // Init cfored
   if (IsCrun()) {
     InitCforedClient();
-    X11Meta x11_meta{};
 
     auto cfored_client = GetCforedClient();
     if (x11) {
+      X11Meta x11_meta{};
       if (x11_fwd)
         x11_meta.x11_port = cfored_client->InitUvX11FwdHandler();
       else
@@ -81,33 +81,33 @@ CraneErrCode StepInstance::Prepare() {
 
       CRANE_TRACE("Crun task x11 enabled. Forwarding: {}, X11 Port: {}",
                   x11_fwd, x11_meta.x11_port);
-    }
 
-    auto x11_auth_path =
-        fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd.HomeDir());
+      auto x11_auth_path =
+          fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd.HomeDir());
 
-    bool ok = util::os::CreateFoldersForFileEx(x11_auth_path, pwd.Uid(),
-                                               pwd.Gid(), 0700);
-    if (!ok) {
-      CRANE_ERROR("Failed to create xauth source file for");
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
+      bool ok = util::os::CreateFoldersForFileEx(x11_auth_path, pwd.Uid(),
+                                                 pwd.Gid(), 0700);
+      if (!ok) {
+        CRANE_ERROR("Failed to create xauth source file for");
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
 
-    // Default file permission is 0600.
-    int xauth_fd = mkstemp(x11_auth_path.data());
-    if (xauth_fd == -1) {
-      CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
-      return CraneErrCode::ERR_SYSTEM_ERR;
-    }
+      // Default file permission is 0600.
+      int xauth_fd = mkstemp(x11_auth_path.data());
+      if (xauth_fd == -1) {
+        CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
 
-    int ret = fchown(xauth_fd, pwd.Uid(), pwd.Gid());
-    if (ret == -1) {
-      CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
-      return CraneErrCode::ERR_SYSTEM_ERR;
+      int ret = fchown(xauth_fd, pwd.Uid(), pwd.Gid());
+      if (ret == -1) {
+        CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      x11_meta.x11_auth_path = x11_auth_path;
+      this->x11_meta = std::move(x11_meta);
+      close(xauth_fd);
     }
-    x11_meta.x11_auth_path = x11_auth_path;
-    this->x11_meta = std::move(x11_meta);
-    close(xauth_fd);
   }
   return CraneErrCode::SUCCESS;
 }

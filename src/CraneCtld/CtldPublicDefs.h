@@ -983,6 +983,18 @@ struct TaskInCtld {
       step->SetExecutionNodes(step_craned_ids);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
+      task_id_t cur_task_id = 0;
+      for (const auto& craned_id : step_craned_ids) {
+        for (int i = 0; i < step->ntasks_per_node; ++i) {
+          step->craned_task_map[craned_id].insert(cur_task_id);
+          auto res = step_alloc_res.at(craned_id);
+          // Mem is allocated at step level, set to 0 here to avoid mem limit.
+          res.allocatable_res.memory_bytes = 0;
+          res.allocatable_res.memory_sw_bytes = 0;
+          step->task_res_map[cur_task_id] = res;
+          ++cur_task_id;
+        }
+      }
       const auto& meta = step->ia_meta.value();
       meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
           .job_id = step->job_id,

@@ -278,8 +278,7 @@ void CforedClient::CleanStdoutFwdHandlerQueueCb_() {
 
       ph->on<uvw::error_event>([tid = meta.task_id, on_finish](
                                    uvw::error_event& e, uvw::pipe_handle& h) {
-        CRANE_WARN("[Task #{}]  output pipe error: {}. Closing.", tid,
-                   e.what());
+        CRANE_WARN("[Task #{}] output pipe error: {}. Closing.", tid, e.what());
         h.close();
         on_finish();
       });
