@@ -1943,7 +1943,7 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     if (step == nullptr) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested step does not exist.");
+      err->set_description("Requested step not running, already done?");
       response.set_ok(false);
       return response;
     }
@@ -2000,7 +2000,17 @@ crane::grpc::AttachContainerStepReply TaskScheduler::AttachContainerStep(
     }
 
     auto exec_nodes = step->ExecutionNodes();
-    if (request.node_name().empty() && exec_nodes.size() == 1) {
+    if (request.node_name().empty()) {
+      if (exec_nodes.size() > 1) {
+        auto* err = response.mutable_status();
+        err->set_code(CraneErrCode::ERR_CRI_MULTIPLE_NODES);
+        err->set_description(
+            "Cannot attach to container running on multiple nodes without "
+            "target node name.");
+        response.set_ok(false);
+        return response;
+      }
+      // Set default node name to the only running node
       target_craned_id = *exec_nodes.begin();
     } else if (exec_nodes.contains(request.node_name())) {
       target_craned_id = request.node_name();
@@ -2066,7 +2076,7 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
     if (step == nullptr) {
       auto* err = response.mutable_status();
       err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-      err->set_description("Requested step does not exist.");
+      err->set_description("Requested step not running, already done?");
       response.set_ok(false);
       return response;
     }
@@ -2132,7 +2142,17 @@ crane::grpc::ExecInContainerStepReply TaskScheduler::ExecInContainerStep(
     }
 
     auto exec_nodes = step->ExecutionNodes();
-    if (request.node_name().empty() && exec_nodes.size() == 1) {
+    if (request.node_name().empty()) {
+      if (exec_nodes.size() > 1) {
+        auto* err = response.mutable_status();
+        err->set_code(CraneErrCode::ERR_CRI_MULTIPLE_NODES);
+        err->set_description(
+            "Cannot attach to container running on multiple nodes without "
+            "target node name.");
+        response.set_ok(false);
+        return response;
+      }
+      // Set default node name to the only running node
       target_craned_id = *exec_nodes.begin();
     } else if (exec_nodes.contains(request.node_name())) {
       target_craned_id = request.node_name();
