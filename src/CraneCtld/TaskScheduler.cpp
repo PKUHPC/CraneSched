@@ -3668,7 +3668,7 @@ void TaskScheduler::TerminateOrphanedSteps(
         }
 
         if (step == nullptr) {
-          CRANE_WARN("[Step #{}.{}] Step not found in job.", step_id, job_id);
+          CRANE_WARN("[Step #{}.{}] Step not found in job.", job_id, step_id);
           continue;
         }
 
