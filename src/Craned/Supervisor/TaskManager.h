@@ -381,13 +381,13 @@ struct CrunInstanceMeta final : ProcInstanceMeta {
   CrunInstanceMeta& operator=(const CrunInstanceMeta&) = delete;
   CrunInstanceMeta& operator=(CrunInstanceMeta&&) = delete;
 
-  int stdin_write;
-  int stdout_write;
-  int stdin_read;
-  int stdout_read;
+  int stdin_write{};
+  int stdout_write{};
+  int stdin_read{};
+  int stdout_read{};
 
   std::string x11_target;
-  uint16_t x11_port;
+  uint16_t x11_port{};
   std::string x11_auth_path;
 };
 
