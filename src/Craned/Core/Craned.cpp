@@ -937,8 +937,9 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
   // It is always ok to create thread pool first.
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+  g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("BsThreadPool"); });
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 

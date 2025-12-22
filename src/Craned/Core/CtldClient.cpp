@@ -836,7 +836,8 @@ void CtldClient::AsyncSendThread_() {
       if (m_step_status_change_list_.empty()) break;
     }
 
-    grpc_state = m_ctld_channel_->GetState(true);
+    // Try to connect when not connected.
+    grpc_state = m_ctld_channel_->GetState(!prev_connected);
     connected = prev_grpc_state == GRPC_CHANNEL_READY;
 
     if (!connected) {
