@@ -262,8 +262,9 @@ void GlobalVariableInit(int grpc_output_fd) {
 
   Craned::Common::CgroupManager::Init(
       StrToLogLevel(g_config.SupervisorDebugLevel).value());
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+  g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("BsThreadPool"); });
   g_task_mgr = std::make_unique<Craned::Supervisor::TaskManager>();
 
   g_craned_client = std::make_unique<Craned::Supervisor::CranedClient>();
