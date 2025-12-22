@@ -217,7 +217,7 @@ class CtldClient {
   void AsyncSendThread_();
   bool Ping_();
 
-  void SendStatusChanges_();
+  bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
   absl::Mutex m_step_status_change_mtx_;
 

@@ -2899,8 +2899,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       args.begin(), approximate_size);
   if (actual_size == 0) return;
   args.resize(actual_size);
-
-  CRANE_TRACE("Cleaning {} TaskStatusChanges...", actual_size);
+  auto begin_time = std::chrono::steady_clock::now();
 
   StepStatusChangeContext context{};
   context.rn_step_raw_ptrs.reserve(actual_size);
@@ -3199,6 +3198,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
   txn_id_t txn_id;
 
+  auto now = std::chrono::steady_clock::now();
   // When store, write step info first, then job info.
   auto ok = g_embedded_db_client->BeginStepVarDbTransaction(&txn_id);
   if (!ok) {
@@ -3219,9 +3219,19 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         "TaskScheduler failed to commit step transaction when clean step "
         "status change.");
   }
+  auto duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "Persist step status changes to embedded db cost {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+  now = std::chrono::steady_clock::now();
 
   ProcessFinalSteps_(context.step_raw_ptrs);
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "ProcessFinalSteps_ took {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
 
+  now = std::chrono::steady_clock::now();
   ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
   if (!ok) {
     CRANE_ERROR(
@@ -3242,7 +3252,22 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         "TaskScheduler failed to commit job transaction when clean  step "
         "status change.");
   }
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "Persist job status changes to embedded db cost {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+  now = std::chrono::steady_clock::now();
   ProcessFinalTasks_(context.job_raw_ptrs);
+  duration = std::chrono::steady_clock::now() - now;
+  CRANE_TRACE(
+      "ProcessFinalTasks_ took {} ms",
+      std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+
+  auto end_time = std::chrono::steady_clock::now();
+  CRANE_TRACE("Cleaning {} StepStatusChanges cost {} ms.", actual_size,
+              std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                    begin_time)
+                  .count());
 }
 
 void TaskScheduler::QueryTasksInRam(

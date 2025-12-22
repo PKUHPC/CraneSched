@@ -231,7 +231,7 @@ class CranedKeeper {
   Mutex m_unavail_craned_set_mtx_;
   std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
       ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
-  std::unordered_set<CranedId> m_connecting_craned_set_
+  std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
       ABSL_GUARDED_BY(m_connect_craned_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;

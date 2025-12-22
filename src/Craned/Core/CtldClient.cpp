@@ -27,6 +27,8 @@
 namespace Craned {
 using namespace std::chrono_literals;
 
+using namespace std::chrono_literals;
+
 CtldClientStateMachine::CtldClientStateMachine() {
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
@@ -326,7 +328,11 @@ void CtldClient::Shutdown() {
   m_stopping_ = true;
   m_step_status_change_mtx_.Lock();
   CRANE_INFO("Cleaning up status changes in CtldClient");
-  SendStatusChanges_();
+
+  std::list<StepStatusChangeQueueElem> changes;
+  changes.splice(changes.begin(), std::move(m_step_status_change_list_));
+  m_step_status_change_mtx_.Unlock();
+  SendStatusChanges_(std::move(changes));
 }
 
 CtldClient::CtldClient() {
@@ -808,6 +814,7 @@ bool CtldClient::CranedRegister_(
 }
 
 void CtldClient::AsyncSendThread_() {
+  util::SetCurrentThreadName("SendCtldThr");
   // Wait Craned grpc server initialization.
   m_connection_start_notification_.WaitForNotification();
 
@@ -824,12 +831,13 @@ void CtldClient::AsyncSendThread_() {
       &m_step_status_change_list_);
 
   while (true) {
-    {
+    if (m_stopping_) {
       absl::MutexLock lock(&m_step_status_change_mtx_);
-      if (m_step_status_change_list_.empty() && m_stopping_) break;
+      if (m_step_status_change_list_.empty()) break;
     }
 
-    grpc_state = m_ctld_channel_->GetState(true);
+    // Try to connect when not connected.
+    grpc_state = m_ctld_channel_->GetState(!prev_connected);
     connected = prev_grpc_state == GRPC_CHANNEL_READY;
 
     if (!connected) {
@@ -875,17 +883,20 @@ void CtldClient::AsyncSendThread_() {
         cond, absl::Milliseconds(50));
     if (!has_msg) {
       m_step_status_change_mtx_.Unlock();
+      // No msg, sleep for a while to avoid busy loop.
+      std::this_thread::sleep_for(50ms);
     } else {
-      SendStatusChanges_();
+      std::list<StepStatusChangeQueueElem> changes;
+      changes.splice(changes.begin(), std::move(m_step_status_change_list_));
+      m_step_status_change_mtx_.Unlock();
+      bool err = SendStatusChanges_(std::move(changes));
+      if (err) std::this_thread::sleep_for(100ms);
     }
   }
 }
 
-void CtldClient::SendStatusChanges_() {
-  std::list<StepStatusChangeQueueElem> changes;
-  changes.splice(changes.begin(), std::move(m_step_status_change_list_));
-  m_step_status_change_mtx_.Unlock();
-
+bool CtldClient::SendStatusChanges_(
+    std::list<StepStatusChangeQueueElem>&& changes) {
   while (!changes.empty()) {
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
@@ -921,8 +932,8 @@ void CtldClient::SendStatusChanges_() {
       if (m_stopping_) {
         CRANE_INFO(
             "Failed to send StepStatusChange but stopping, drop all status "
-            "change.");
-        return;
+            "change to send.");
+        return false;
       }
       // If some messages are not sent due to channel failure,
       // put them back into m_task_status_change_list_
@@ -932,16 +943,14 @@ void CtldClient::SendStatusChanges_() {
                                           std::move(changes));
         m_step_status_change_mtx_.Unlock();
       }
-      // Sleep for a while to avoid too many retries.
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      break;
-
+      return false;
     } else {
       CRANE_TRACE("[Step #{}.{}] StepStatusChange sent. reply.ok={}",
                   status_change.job_id, status_change.step_id, reply.ok());
       changes.pop_front();
     }
   }
+  return true;
 }
 
 bool CtldClient::Ping_() {
