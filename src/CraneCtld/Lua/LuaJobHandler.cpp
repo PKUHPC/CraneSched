@@ -165,6 +165,17 @@ void LuaJobHandler::RegisterGlobalFunctions_(
       [](const std::string& name, const std::string& value, TaskInCtld* job) {
         job->env.emplace(name, value);
       });
+
+  lua_env.GetCraneTable().set_function(
+    "get_resv", [](const std::string& resv_name) -> std::optional<crane::grpc::ReservationInfo> {
+      auto reply = g_meta_container->QueryResvInfo(resv_name);
+      if (!reply.reservation_info_list().empty()) {
+        return reply.reservation_info_list()[0];
+      }
+
+      return std::nullopt;
+    }
+  );
 }
 
 void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
@@ -236,7 +247,6 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
             }
           }),
       "cwd", &TaskInCtld::cwd, "extra_attr", &TaskInCtld::extra_attr,
-      // "meta", &TaskInCtld::meta,
       "reservation", &TaskInCtld::reservation,
       "begin_time", &TaskInCtld::begin_time, "exclusive", &TaskInCtld::exclusive,
       "licenses_count", sol::property(
@@ -276,58 +286,181 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "time_limit", sol::property([](const TaskInfo& t) {
       return t.time_limit();
     }),
-    "end_time", &TaskInfo::end_time,
-    "submit_time", &TaskInfo::submit_time,
-    "account", &TaskInfo::account,
-    "node_num", &TaskInfo::node_num,
-    "cmd_line", &TaskInfo::cmd_line, "cwd", &TaskInfo::cwd,
+    "end_time", sol::property([](const TaskInfo& t) {
+      return t.end_time();
+    }),
+    "submit_time", sol::property([](const TaskInfo& t) {
+      return t.submit_time();
+    }),
+    "account", sol::property([](const TaskInfo& t) {
+      return t.account();
+    }),
+    "node_num", sol::property([](const TaskInfo& t) {
+      return t.node_num();
+    }),
+    "cmd_line", sol::property([](const TaskInfo& t) {
+      return t.cmd_line();
+    }),
+    "cwd", sol::property([](const TaskInfo& t) {
+      return t.cwd();
+    }),
     "username", sol::property([](const TaskInfo& t) {
       return t.username();
     }),
     "qos", sol::property([](const TaskInfo& t) {
       return t.qos();
     }),
-    // "req_res_view", &TaskInfo::req_res_view,
-    // "licenses_count", &TaskInfo::licenses_count,
-    // "req_nodes", &TaskInfo::req_nodes,
-    // "exclude_nodes", &TaskInfo::exclude_nodes,
-    "extra_attr", &TaskInfo::extra_attr,
-    "reservation", &TaskInfo::reservation,
-    // "container_meta", &TaskInfo::container_meta,
-    // "step_info_list", &TaskInfo::step_info_list,
-    "held", &TaskInfo::held, "status", &TaskInfo::status,
-    "exit_code", &TaskInfo::exit_code, "priority", &TaskInfo::priority,
-    "pending_reason", &TaskInfo::pending_reason,
-    "craned_list", &TaskInfo::craned_list,
-    "elapsed_time", &TaskInfo::elapsed_time,
-    // "execution_node", &TaskInfo::execution_node,
-    "exclusive", &TaskInfo::exclusive
-    // "allocated_res_view", &TaskInfo::allocated_res_view,
-    // "env", &TaskInfo::env
+    "req_res_view", sol::property([](const TaskInfo& t) {
+      return static_cast<ResourceView>(t.req_res_view());
+    }),
+    "licenses_count", sol::property([&](const TaskInfo& t) {
+      sol::table tbl = lua_env.GetLuaState().create_table();
+            for (const auto& [name, value] : t.licenses_count()) {
+              tbl[name] = value;
+            }
+            return tbl;
+    }),
+    "req_nodes", sol::property([](const TaskInfo& t) {
+      return std::vector<std::string>(t.req_nodes().begin(), t.req_nodes().end());
+    }),
+    "exclude_nodes", sol::property([](const TaskInfo& t) {
+      return std::vector<std::string>(t.exclude_nodes().begin(), t.exclude_nodes().end());
+    }),
+    "extra_attr", sol::property([](const TaskInfo& t) {
+      return t.extra_attr();
+    }),
+    "reservation", sol::property([](const TaskInfo& t) {
+      return t.reservation();
+    }),
+    "held", sol::property([](const TaskInfo& t) {
+      return t.held();
+    }),
+    "status", sol::property([](const TaskInfo& t) {
+      return t.status();
+    }),
+    "exit_code", sol::property([](const TaskInfo& t) {
+      return t.exit_code();
+    }),
+    "priority", sol::property([](const TaskInfo& t) {
+      return t.priority();
+    }),
+    "pending_reason", sol::property([](const TaskInfo& t) {
+      if (t.has_pending_reason())
+        return t.pending_reason();
+
+      return std::string{""};
+    }),
+    "craned_list", sol::property([](const TaskInfo& t) {
+      if (t.has_craned_list())
+        return t.craned_list();
+
+      return std::string{""};
+    }),
+    "elapsed_time", sol::property([](const TaskInfo& t) {
+      return t.elapsed_time();
+    }),
+    "execution_node", sol::property([](const TaskInfo& t) {
+      return std::vector<std::string>(t.execution_node().begin(), t.execution_node().end());
+    }),
+    "exclusive", sol::property([](const TaskInfo& t) {
+      return t.exclusive();
+    }),
+    "allocated_res_view", sol::property([](const TaskInfo& t) {
+      return static_cast<ResourceView>(t.allocated_res_view());
+    }),
+    "env", sol::property([&](const TaskInfo& t) {
+      sol::table tbl = lua_env.GetLuaState().create_table();
+      for (const auto& [name, value] : t.env()) tbl[name] = value;
+        return tbl;
+      })
   );
 
   using PartitionInfo = crane::grpc::PartitionInfo;
   lua_env.GetLuaState().new_usertype<PartitionInfo>("PartitionInfo",
-    "hostlist", &PartitionInfo::hostlist,
-    "state", &PartitionInfo::state,
-    "name", &PartitionInfo::name,
-    "total_nodes", &PartitionInfo::total_nodes,
-    "alive_nodes", &PartitionInfo::alive_nodes,
-    // "res_total", &PartitionInfo::res_total,
-    // "res_avail", &PartitionInfo::res_avail,
-    // "res_alloc", &PartitionInfo::res_alloc,
+    "hostlist", sol::property([](const PartitionInfo& p) {
+      return p.hostlist();
+    }),
+    "state", sol::property([](const PartitionInfo& p) {
+      return static_cast<uint32_t>(p.state());
+    }),
+    "name", sol::property([](const PartitionInfo& p) {
+      return p.name();
+    }),
+    "total_nodes", sol::property([](const PartitionInfo& p) {
+      return p.total_nodes();
+    }),
+    "alive_nodes", sol::property([](const PartitionInfo& p) {
+      return p.alive_nodes();
+    }),
+    "res_total", sol::property([](const PartitionInfo& p) {
+      return static_cast<ResourceView>(p.res_total());
+    }),
+    "res_avail", sol::property([](const PartitionInfo& p) {
+      return static_cast<ResourceView>(p.res_avail());
+    }),
+    "res_alloc", sol::property([](const PartitionInfo& p) {
+      return static_cast<ResourceView>(p.res_alloc());
+    }),
     "allowed_accounts", sol::property(
-      [](const PartitionInfo& partition_info) {
-        return std::vector<std::string>(partition_info.allowed_accounts().begin(),
-          partition_info.allowed_accounts().end());
+      [](const PartitionInfo& p) {
+        return std::vector<std::string>(p.allowed_accounts().begin(),
+          p.allowed_accounts().end());
       }),
     "denied_accounts", sol::property(
-      [](const PartitionInfo& partition_info) {
-        return std::vector<std::string>(partition_info.denied_accounts().begin(),
-          partition_info.denied_accounts().end());
+      [](const PartitionInfo& p) {
+        return std::vector<std::string>(p.denied_accounts().begin(),
+          p.denied_accounts().end());
       }),
-    "default_mem_per_cpu", &PartitionInfo::default_mem_per_cpu,
-    "max_mem_per_cpu", &PartitionInfo::max_mem_per_cpu
+    "default_mem_per_cpu", sol::property([](const PartitionInfo& p) {
+      return p.default_mem_per_cpu();
+    }),
+    "max_mem_per_cpu", sol::property([](const PartitionInfo& p) {
+      return p.max_mem_per_cpu();
+    })
+  );
+
+  using ReservationInfo = crane::grpc::ReservationInfo;
+  lua_env.GetLuaState().new_usertype<ReservationInfo>("ReservationInfo",
+    "reservation_name", sol::property([](const ReservationInfo& r) {
+      return r.reservation_name();
+    }),
+    "start_time", sol::property([](const ReservationInfo& r) {
+      return r.start_time();
+    }),
+    "duration", sol::property([](const ReservationInfo& r) {
+      return r.duration();
+    }),
+    "partition", sol::property([](const ReservationInfo& r) {
+      return r.partition();
+    }),
+    "craned_regex", sol::property([](const ReservationInfo& r) {
+      return r.craned_regex();
+    }),
+    "res_total", sol::property([](const ReservationInfo& r) {
+      return static_cast<ResourceView>(r.res_total());
+    }),
+    "res_avail", sol::property([](const ReservationInfo& r) {
+      return static_cast<ResourceView>(r.res_avail());
+    }),
+    "res_alloc", sol::property([](const ReservationInfo& r) {
+      return static_cast<ResourceView>(r.res_alloc());
+    }),
+    "allowed_accounts", sol::property(
+      [](const ReservationInfo& r) {
+        return std::vector<std::string>(r.allowed_accounts().begin(),
+          r.allowed_accounts().end());
+    }),
+    "denied_accounts", sol::property(
+      [](const ReservationInfo& r) {
+        return std::vector<std::string>(r.denied_accounts().begin(),
+          r.denied_accounts().end());
+      }),
+      "allowed_users", sol::property([](const ReservationInfo& r) {
+        return std::vector<std::string>(r.allowed_users().begin(), r.allowed_users().end());
+      }),
+      "denied_users", sol::property([](const ReservationInfo& r) {
+        return std::vector<std::string>(r.denied_users().begin(), r.denied_users().end());
+    })
   );
 
   // clang-format on
@@ -338,7 +471,8 @@ void LuaJobHandler::RegisterGlobalVariables_(
   // crane.reservations
   sol::table resv_table = lua_env.GetLuaState().create_table();
   resv_table[sol::metatable_key] = lua_env.GetLuaState().create_table_with(
-      "__pairs", [](sol::this_state ts, sol::table self) {
+      "__pairs",
+      [](sol::this_state ts, sol::table /*self*/) {
         sol::state_view lua(ts);
         sol::object next = lua["next"];
 
@@ -351,7 +485,6 @@ void LuaJobHandler::RegisterGlobalVariables_(
         return std::make_tuple(next, reservations_tbl, sol::nil);
       });
   lua_env.GetCraneTable()["reservations"] = resv_table;
-
 }
 
 void LuaJobHandler::PushPartitionList_(
