@@ -182,8 +182,12 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
   // clang-format off
 
   lua_env.GetLuaState().new_usertype<ResourceView>("ResourceView",
-    "cpu_count", &ResourceView::CpuCount,
-    "memory_bytes", &ResourceView::MemoryBytes,
+    "cpu_count", sol::property([](const ResourceView& rv) {
+      return rv.CpuCount();
+    }),
+    "memory_bytes", sol::property([](const ResourceView& rv) {
+      return rv.MemoryBytes();
+    }),
     "device_map", sol::property(
       [&](const ResourceView& rv) {
         sol::table tbl = lua_env.GetLuaState().create_table();
