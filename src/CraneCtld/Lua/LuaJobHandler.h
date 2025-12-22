@@ -52,73 +52,10 @@ class LuaJobHandler {
   static void RegisterTypes_(const crane::LuaEnvironment& lua_env);
   static void RegisterGlobalVariables_(const crane::LuaEnvironment& lua_env);
 
-  // struct JobsIterState {
-  //   std::vector<crane::grpc::TaskInfo> tasks;
-  //   size_t index = 0;
-  // };
-  //
-  // struct ResvsIterState {
-  //   crane::grpc::QueryReservationInfoReply reply;
-  //   size_t index = 0;
-  // };
-  //
-  // // global function cb
-  // static int GetQosPriorityCb_(const std::string& qos_name);
-  // static int GetJobEnvFieldNameCb_(lua_State* lua_state);
-  // static int GetJobReqFieldNameCb_(lua_State* lua_state);
-  // static int SetJobEnvFieldCb_(lua_State* lua_state);
-  // static int SetJobReqFieldCb_(lua_State* lua_state);
-  // static int GetPartRecFieldNameCb_(lua_State* lua_state);
-  //
-  // // crane.jobs table
-  // static void UpdateJobGloabl_(const crane::LuaEnvironment& lua_env);
-  // static int JobsIterCb_(lua_State* lua_state);
-  // static int JobsIterNextCb_(lua_State* lua_state);
-  // static int JobsIterGcCb_(lua_State* lua_state);
-  //
-  // // crane.reservations table
-  // static void UpdateResvGloabl_(const crane::LuaEnvironment& lua_env);
-  // static int ResvsIterCb_(lua_State* lua_state);
-  // static int ResvsIterNextCb_(lua_State* lua_state);
-  // static int ResvsIterGcCb_(lua_State* lua_state);
-  // static int ResvsGetCb_(lua_State* lua_state);
-  // static int ResvGcCb_(lua_State* lua_state);
-  //
-  // // job_desc
-  // static void PushJobDesc_(TaskInCtld* task,
-  //                          const crane::LuaEnvironment& lua_env);
-  // // part_list
+  // part_list
   static void PushPartitionList_(
       const std::string& user_name, const std::string& account,
       std::list<crane::grpc::PartitionInfo> part_list);
-  // // job_rec
-  // static void PushJobRec_(const crane::LuaEnvironment& lua_env,
-  //                         crane::grpc::TaskInfo* task);
-  // // resource_view
-  // static void PushResourceView_(lua_State* L, const ResourceView& res);
-  //
-  // static int GetJobReqFieldIndexCb_(lua_State* lua_state);
-  // static int JobRecFieldIndexCb_(lua_State* lua_state);
-  // static int PartitionRecFieldIndexCb_(lua_State* lua_state);
-  // static int ResvFieldIndexCb_(lua_State* lua_state);
-  //
-  // /* ---------------------------------------------------------------------------
-  //  * Field getter
-  //  * ---------------------------------------------------------------------------
-  //  */
-  // static int GetJobEnvField_(const TaskInCtld& job_desc,
-  //                            const std::string& name, lua_State* lua_state);
-  // static int GetJobReqField_(const TaskInCtld& job_desc,
-  //                            const std::string& name, lua_State* lua_state);
-  // static int GetPartRecField_(const crane::grpc::PartitionInfo& partition_meta,
-  //                             const std::string& name, lua_State* lua_state);
-  // static int LuaJobRecordField_(lua_State* lua_state,
-  //                               crane::grpc::TaskInfo* job_ptr,
-  //                               const std::string& name);
-  // static int ResvField_(lua_State* lua_state,
-  //                       crane::grpc::ReservationInfo* resv_ptr,
-  //                       const std::string& name);
-
 #endif
 };
 
