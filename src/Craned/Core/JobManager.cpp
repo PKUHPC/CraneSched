@@ -52,31 +52,16 @@ StepInstance::StepInstance(const crane::grpc::StepToD& step_to_d,
       status(status) {}
 
 EnvMap JobInD::GetJobEnvMap() {
-  CRANE_INFO("Init env data");
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(job_to_d.res());
 
   auto& daemon_step_to_d = step_map.at(kDaemonStepId)->step_to_d;
   auto nodelist = daemon_step_to_d.nodelist();
-  auto node_id_to_str = [nodelist, this]() -> std::string {
-    uint32_t node_idx = 0;
-
-    std::array<char, HOST_NAME_MAX + 1> host_name{};
-    if (gethostname(host_name.data(), host_name.size()) != 0) {
-      return std::to_string(-1);  // invalid
+  auto node_id_to_str = [nodelist]() -> std::string {
+    auto it = std::ranges::find(nodelist, g_config.Hostname);
+    if (it == nodelist.end()) {
+      return "-1";
     }
-    std::string_view host_name_view(host_name.data());
-    for (const auto& node_name : nodelist) {
-      if (node_name == host_name_view) {
-        break;
-      }
-      node_idx++;
-    }
-
-    if (node_idx >= nodelist.size()) {
-      return std::to_string(-1);  // invalid
-    }
-
-    return std::to_string(node_idx);
+    return std::to_string(static_cast<uint32_t>(it - nodelist.begin()));
   };
 
   auto alloc_node_num = daemon_step_to_d.nodelist().size();
@@ -108,7 +93,7 @@ EnvMap JobInD::GetJobEnvMap() {
                   std::to_string(daemon_step_to_d.node_num()));
   env_map.emplace("CRANE_JOB_PARTITION", job_to_d.partition());
   env_map.emplace("CRANE_JOB_QOS", job_to_d.qos());
-  env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.cwd());
+  env_map.emplace("CRANE_SUBMIT_DIR", daemon_step_to_d.submit_dir());
   env_map.emplace("CRANE_CPUS_PER_TASK",
                   std::format("{:.2f}", daemon_step_to_d.cpus_per_task()));
   env_map.insert_or_assign("CRANE_MEM_PER_NODE",
