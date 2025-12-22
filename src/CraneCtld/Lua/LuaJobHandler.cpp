@@ -71,8 +71,8 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
                          "Failed to load lua script");
 
   std::list<crane::grpc::PartitionInfo> part_list;
-  PushPartitionList_(task->name, task->account, part_list);
-
+  PushPartitionList_(task->Username(), task->account, &part_list);
+  CRANE_TRACE("{}", part_list.size());
   auto& lua_state = lua_env->GetLuaState();
   sol::function submit = lua_state["crane_job_submit"];
   sol::protected_function_result lua_result =
@@ -117,7 +117,7 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
   crane::grpc::TaskInfo task_info;
   task->SetFieldsOfTaskInfo(&task_info);
   std::list<crane::grpc::PartitionInfo> part_list;
-  PushPartitionList_(task->name, task->account, part_list);
+  PushPartitionList_(task->Username(), task->account, &part_list);
 
   auto& lua_state = lua_env->GetLuaState();
   sol::function modify = lua_state["crane_job_modify"];
@@ -208,7 +208,11 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
 
   // job_desc
   lua_env.GetLuaState().new_usertype<TaskInCtld>("TaskInCtld",
-    "time_limit", &TaskInCtld::time_limit,
+    "time_limit", sol::property([](const TaskInCtld& t) {
+      return  absl::ToInt64Seconds(t.time_limit);
+    }, [](TaskInCtld& t, int64_t time_limit) {
+      t.time_limit = absl::Seconds(time_limit);
+    }),
     "partition_id", &TaskInCtld::partition_id,
     "requested_node_res_view", &TaskInCtld::requested_node_res_view,
     "type", &TaskInCtld::type, "uid", &TaskInCtld::uid,
@@ -252,7 +256,18 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
           }),
       "cwd", &TaskInCtld::cwd, "extra_attr", &TaskInCtld::extra_attr,
       "reservation", &TaskInCtld::reservation,
-      "begin_time", &TaskInCtld::begin_time, "exclusive", &TaskInCtld::exclusive,
+      "begin_time", sol::property(
+        [](const TaskInCtld& t) -> int64_t {
+          if (t.begin_time == absl::InfinitePast()) return 0;
+          return absl::ToUnixSeconds(t.begin_time);
+        },
+      [](TaskInCtld& t, int64_t unix_seconds) {
+          if (unix_seconds == 0)
+            t.begin_time = absl::InfinitePast();
+          else
+            t.begin_time = absl::FromUnixSeconds(unix_seconds);
+        }),
+      "exclusive", &TaskInCtld::exclusive,
       "licenses_count", sol::property(
           [&](const TaskInCtld& t) {
             sol::table tbl = lua_env.GetLuaState().create_table();
@@ -288,13 +303,13 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
       return t.uid();
     }),
     "time_limit", sol::property([](const TaskInfo& t) {
-      return t.time_limit();
+      return google::protobuf::util::TimeUtil::DurationToSeconds(t.time_limit());
     }),
     "end_time", sol::property([](const TaskInfo& t) {
-      return t.end_time();
+      return t.end_time().seconds();
     }),
     "submit_time", sol::property([](const TaskInfo& t) {
-      return t.submit_time();
+      return t.submit_time().seconds();
     }),
     "account", sol::property([](const TaskInfo& t) {
       return t.account();
@@ -361,7 +376,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
       return std::string{""};
     }),
     "elapsed_time", sol::property([](const TaskInfo& t) {
-      return t.elapsed_time();
+      return google::protobuf::util::TimeUtil::DurationToSeconds(t.elapsed_time());
     }),
     "execution_node", sol::property([](const TaskInfo& t) {
       return std::vector<std::string>(t.execution_node().begin(), t.execution_node().end());
@@ -429,10 +444,10 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
       return r.reservation_name();
     }),
     "start_time", sol::property([](const ReservationInfo& r) {
-      return r.start_time();
+      return r.start_time().seconds();
     }),
     "duration", sol::property([](const ReservationInfo& r) {
-      return r.duration();
+      return google::protobuf::util::TimeUtil::DurationToSeconds(r.duration());
     }),
     "partition", sol::property([](const ReservationInfo& r) {
       return r.partition();
@@ -493,7 +508,7 @@ void LuaJobHandler::RegisterGlobalVariables_(
 
 void LuaJobHandler::PushPartitionList_(
     const std::string& user_name, const std::string& account,
-    std::list<crane::grpc::PartitionInfo> part_list) {
+    std::list<crane::grpc::PartitionInfo>* part_list) {
   auto user = g_account_manager->GetExistedUserInfo(user_name);
   if (!user) {
     CRANE_ERROR("username is null");
@@ -511,7 +526,7 @@ void LuaJobHandler::PushPartitionList_(
         !std::ranges::contains(partition.allowed_accounts(), actual_account))
       continue;
 
-    part_list.emplace_back(partition);
+    part_list->emplace_back(partition);
   }
 }
 #endif

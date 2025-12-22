@@ -213,39 +213,138 @@ JobSubmitLuaScript: /path/to/your/job_submit.lua
 
 ```lua
 function crane_job_submit(job_desc, part_list, uid)
-    -- 日志函数演示
-    crane.log_info("提交作业: %s, uid: %d", job_desc.name, uid)
-    crane.log_debug("作业类型: %d, 分区: %s", job_desc.type, job_desc.partition)
-    crane.log_error("这是一个错误日志示例")
-    crane.log_user("用户消息: Crane Lua 测试")
+    crane.log_info("==== crane_job_submit ====")
+    crane.log_info("job_desc.name: %s", job_desc.name)
+    crane.log_info("job_desc.uid: %d", job_desc.uid)
+    crane.log_info("job_desc.gid: %d", job_desc.gid)
+    crane.log_info("job_desc.account: %s", job_desc.account)
+    crane.log_info("job_desc.node_num: %d", job_desc.node_num)
+    crane.log_info("job_desc.qos: %s", job_desc.qos)
+    crane.log_info("job_desc.type: %d", job_desc.type)
+    crane.log_info("job_desc.time_limit: %d", job_desc.time_limit)
+    crane.log_info("job_desc.partition_id: %s", job_desc.partition_id)
+    crane.log_info("job_desc.cmd_line: %s", job_desc.cmd_line)
+    crane.log_info("job_desc.cwd: %s", job_desc.cwd)
+    crane.log_info("job_desc.extra_attr: %s", job_desc.extra_attr)
+    crane.log_info("job_desc.reservation: %s", job_desc.reservation)
+    crane.log_info("job_desc.begin_time: %d", job_desc.begin_time)
+    crane.log_info("job_desc.exclusive: %s", tostring(job_desc.exclusive))
+    crane.log_info("job_desc.requeue_if_failed: %s", tostring(job_desc.requeue_if_failed))
 
-    -- 访问 job_desc 所有字段（只读）
-    crane.log_info("time_limit: %s", tostring(job_desc.time_limit))
-    crane.log_info("partition: %s", tostring(job_desc.partition))
-    crane.log_info("requested_node_res_view: %s", tostring(job_desc.requested_node_res_view))
-    crane.log_info("type: %s", tostring(job_desc.type))
-    crane.log_info("uid: %s", tostring(job_desc.uid))
-    crane.log_info("account: %s", tostring(job_desc.account))
-    crane.log_info("name: %s", tostring(job_desc.name))
-    crane.log_info("qos: %s", tostring(job_desc.qos))
-    crane.log_info("node_num: %s", tostring(job_desc.node_num))
-    crane.log_info("ntasks_per_node: %s", tostring(job_desc.ntasks_per_node))
-    crane.log_info("cpus_per_task: %s", tostring(job_desc.cpus_per_task))
-    crane.log_info("requeue_if_failed: %s", tostring(job_desc.requeue_if_failed))
-    crane.log_info("get_user_env: %s", tostring(job_desc.get_user_env))
-    crane.log_info("gid: %s", tostring(job_desc.gid))
-    crane.log_info("extra_attr: %s", tostring(job_desc.extra_attr))
-    crane.log_info("cmd_line: %s", tostring(job_desc.cmd_line))
-    crane.log_info("cwd: %s", tostring(job_desc.cwd))
-    crane.log_info("container: %s", tostring(job_desc.container))
-    crane.log_info("reservation: %s", tostring(job_desc.reservation))
+    crane.log_info("job_desc.included_nodes: %s", table.concat(job_desc.included_nodes, ", "))
+    crane.log_info("job_desc.excluded_nodes: %s", table.concat(job_desc.excluded_nodes, ", "))
 
-    -- env 环境变量
-    if job_desc.env then
-        for k, v in pairs(job_desc.env) do
-            crane.log_debug("环境变量: %s=%s", k, v)
+    crane.log_info("job_desc.env:")
+    for k, v in pairs(job_desc.env) do
+        crane.log_info("  %s = %s", k, v)
+    end
+
+    crane.log_info("job_desc.licenses_count:")
+    for name, value in pairs(job_desc.licenses_count) do
+        crane.log_info("  %s %s", name, tostring(value))
+    end
+
+    crane.log_info("job_desc.requested_node_res_view:")
+    local rv = job_desc.requested_node_res_view
+    crane.log_info("  cpu_count: %d", rv.cpu_count)
+    crane.log_info("  memory_bytes: %d", rv.memory_bytes)
+    crane.log_info("  device_map:")
+    for dev, entry in pairs(rv.device_map) do
+        crane.log_info("    %s: untyped=%d", dev, entry.untyped_count)
+        crane.log_info("      typed:")
+        for tname, tcount in pairs(entry.typed) do
+            crane.log_info("        %s: %d", tname, tcount)
         end
     end
+
+    crane.log_info("part_list:")
+    for i, part in ipairs(part_list) do
+        crane.log_info("  [%d] %s", i, part.name)
+        crane.log_info("    hostlist: %s", part.hostlist)
+        crane.log_info("    state: %d", part.state)
+        crane.log_info("    total_nodes: %d", part.total_nodes)
+        crane.log_info("    alive_nodes: %d", part.alive_nodes)
+        crane.log_info("    allowed_accounts: %s", table.concat(part.allowed_accounts, ", "))
+        crane.log_info("    denied_accounts: %s", table.concat(part.denied_accounts, ", "))
+        crane.log_info("    default_mem_per_cpu: %d", part.default_mem_per_cpu)
+        crane.log_info("    max_mem_per_cpu: %d", part.max_mem_per_cpu)
+        crane.log_info("    res_total.cpu_count: %d", part.res_total.cpu_count)
+        crane.log_info("    res_total.memory_bytes: %d", part.res_total.memory_bytes)
+    end
+
+    crane.log_info("uid: %d", uid)
+
+    -- crane.get_qos_priority
+    local prio = crane.get_qos_priority(job_desc.qos)
+    crane.log_info("get_qos_priority(job_desc.qos): %s", tostring(prio))
+
+    -- crane.get_job_env_field
+    local env_test = crane.get_job_env_field(job_desc, "PATH")
+    crane.log_info("get_job_env_field(job_desc, 'PATH'): %s", tostring(env_test))
+
+    -- crane.set_job_env_field
+    crane.set_job_env_field("TEST_VAR", "test_value", job_desc)
+    crane.log_info("After set_job_env_field, job_desc.env.TEST_VAR: %s", tostring(job_desc.env.TEST_VAR))
+
+    -- crane.get_resv
+    local resv = crane.get_resv(job_desc.reservation)
+    if resv then
+        crane.log_info("get_resv(job_desc.reservation): %s", resv.reservation_name)
+        crane.log_info("  start_time: %d", resv.start_time)
+        crane.log_info("  duration: %d", resv.duration)
+        crane.log_info("  partition: %s", resv.partition)
+        crane.log_info("  craned_regex: %s", resv.craned_regex)
+        crane.log_info("  allowed_accounts: %s", table.concat(resv.allowed_accounts, ", "))
+        crane.log_info("  allowed_users: %s", table.concat(resv.allowed_users, ", "))
+        crane.log_info("  res_total.cpu_count: %d", resv.res_total.cpu_count)
+        crane.log_info("  res_total.memory_bytes: %d", resv.res_total.memory_bytes)
+    else
+        crane.log_info("get_resv(job_desc.reservation): nil")
+    end
+
+    -- crane.jobs
+    crane.log_info("crane.jobs:")
+    for id, job in pairs(crane.jobs) do
+        crane.log_info("  Job ID: %d", id)
+        crane.log_info("    name: %s", job.name)
+        crane.log_info("    username: %s", job.username)
+        crane.log_info("    account: %s", job.account)
+        crane.log_info("    partition: %s", job.partition)
+        crane.log_info("    status: %d", job.status)
+        crane.log_info("    node_num: %d", job.node_num)
+        crane.log_info("    time_limit: %d", job.time_limit)
+        crane.log_info("    submit_time: %d", job.submit_time)
+        crane.log_info("    cmd_line: %s", job.cmd_line)
+        crane.log_info("    env:")
+        for k, v in pairs(job.env) do
+            crane.log_info("      %s %s", k, v)
+        end
+        crane.log_info("    req_res_view.cpu_count: %d", job.req_res_view.cpu_count)
+        crane.log_info("    req_res_view.memory_bytes: %d", job.req_res_view.memory_bytes)
+    end
+
+    -- crane.reservations
+    crane.log_info("crane.reservations:")
+    for name, resv in pairs(crane.reservations) do
+        crane.log_info("  Reservation Name: %s", resv.reservation_name)
+        crane.log_info("    start_time: %d", resv.start_time)
+        crane.log_info("    duration: %d", resv.duration)
+        crane.log_info("    partition: %s", resv.partition)
+        crane.log_info("    craned_regex: %s", resv.craned_regex)
+        crane.log_info("    allowed_accounts: %s", table.concat(resv.allowed_accounts, ", "))
+        crane.log_info("    allowed_users: %s", table.concat(resv.allowed_users, ", "))
+        crane.log_info("    res_total.cpu_count: %d", resv.res_total.cpu_count)
+        crane.log_info("    res_total.memory_bytes: %d", resv.res_total.memory_bytes)
+    end
+
+    return crane.SUCCESS
+end
+
+function crane_job_modify(job_desc, job_rec, part_list, uid)
+    crane.log_info("==== crane_job_modify ====")
+
+    return crane.SUCCESS
+end
 
     -- meta（batch_meta / interactive_meta）
     if job_desc.bash_meta then
