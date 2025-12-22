@@ -178,6 +178,8 @@ CraneExpected<void> AccountManager::AddQos(uint32_t uid, const Qos& new_qos) {
 
 CraneExpected<void> AccountManager::AddUserWckey(uint32_t uid,
                                                  const Wckey& new_wckey) {
+  if (new_wckey.name.empty())
+    return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());

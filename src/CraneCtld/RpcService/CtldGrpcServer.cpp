@@ -1064,10 +1064,10 @@ grpc::Status CraneCtldServiceImpl::AddWckey(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   Wckey wckey;
-  const crane::grpc::WckeyInfo* wckey_info = &request->wckey();
+  const crane::grpc::WckeyInfo& wckey_info = request->wckey();
 
-  wckey.user_name = wckey_info->user_name();
-  wckey.name = wckey_info->name();
+  wckey.user_name = wckey_info.user_name();
+  wckey.name = wckey_info.name();
 
   CraneExpected<void> result =
       g_account_manager->AddUserWckey(request->uid(), wckey);
