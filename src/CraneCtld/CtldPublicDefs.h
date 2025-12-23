@@ -199,6 +199,12 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+
+  struct KeepalivedConfig {
+    std::filesystem::path CraneNFSBaseDir;
+    std::filesystem::path CraneCtldAliveFile;
+  };
+  KeepalivedConfig KeepalivedConfig;
 };
 
 struct RunTimeStatus {
