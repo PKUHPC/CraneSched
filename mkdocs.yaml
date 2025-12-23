@@ -83,6 +83,7 @@ nav:
     - Error Codes: reference/error_code.md
     - Job Environment Variables: reference/job_env_vars.md
     - License Usage Guide: reference/license_guide.md
+    - Keepalived Guide: reference/keepalived.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -120,6 +121,7 @@ plugins:
             Error Codes: 系统错误提示和解决方法
             Job Environment Variables: 作业环境变量
             License Usage Guide: 许可证使用指南
+            Keepalived Guide: Keepalived 使用指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
