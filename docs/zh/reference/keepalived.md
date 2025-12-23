@@ -153,7 +153,8 @@ systemctl stop cranectld>>/tmp/on_backup.log 2>&1
    systemctl start keepalived 
 ```
 
-注意事项
+**_注意事项_**
+
 1. `journalctl -u keepalived`未出现`Unsafe permission found for script 'xxx.sh' -disabling`，则权限设置正确
 2. 如果onMaster脚本与onBackUp脚本执行失败，可关闭 SELinux`sudo setenforce 0`
 3. 如需配置邮件通知，可在onmaster、onbackup和onfault脚本内设置。
