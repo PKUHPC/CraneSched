@@ -70,15 +70,12 @@ Same as the return values of `crane_job_submit`.
 
 ### Available Functions
 
-| Function Name                                                    | Description                          |
-|------------------------------------------------------------------|--------------------------------------|
-| crane._get_job_env_field_value(job_desc, "env_name")            | Get the value of a job's `env` field |
-| crane._get_job_req_field_name(job_desc, "name")                 | Get the value of a job's `req` field |
-| crane._set_job_env_field(job_desc, "env_name", "env_value")     | Set a job's `env` field              |
-| crane._set_job_req_field(job_desc, "name", "new_job_name")      | Set a job's `req` field              |
-| crane._get_part_rec_field(part, "field_name")                   | Get the `rec` field of a partition   |
-| crane.log_error("msg") / log_info("msg") / log_debug("msg")     | Logging functions                    |
-| crane.log_user("msg")                                           | Log message to user                  |
+| Function Name                                               | Description                                   |
+|------------------------------------------------------------|-----------------------------------------------|
+| crane.get_job_env_field(job_desc, "env_name")              | Query the value of a job's environment field  |
+| crane.set_job_env_field(job_desc, "env_name", "env_value") | Set the value of a job's environment field    |
+| crane.log_error("msg") / log_info("msg") / log_debug("msg")| Logging functions                             |
+| crane.log_user("msg")                                      | User-visible log message                     |
 
 ---
 
@@ -86,60 +83,52 @@ Same as the return values of `crane_job_submit`.
 
 #### job_desc
 
-| Property Name               | Type    | Description                      | Modifiable |
-|-----------------------------|---------|----------------------------------|------------|
-| time_limit                  | number  | Time limit                       | ✔️         |
-| partition                   | string  | Job partition                    | ✔️         |
-| requested_node_res_view     | table   | Requested resource information   | ❌         |
-| type                        | number  | Job type                         | ❌         |
-| uid                         | number  | Job owner UID                    | ❌         |
-| account                     | string  | Job owner account                | ✔️         |
-| name                        | string  | Job name                         | ✔️         |
-| qos                         | string  | Job QOS                          | ✔️         |
-| node_num                    | number  | Number of nodes                  | ✔️         |
-| ntasks_per_node             | number  | Tasks per node                   | ✔️         |
-| cpus_per_task               | number  | CPUs per task                    | ✔️         |
-| requeue_if_failed           | boolean | Allow requeue on failure         | ✔️         |
-| get_user_env                | boolean | Get user environment variables   | ❌         |
-| gid                         | number  | Job owner GID                    | ❌         |
-| batch_meta                  | table   | Batch job information            | ❌         |
-| interactive_meta            | table   | Interactive job information      | ❌         |
-| extra_attr                  | string  | Extra attributes                 | ✔️         |
-| cmd_line                    | string  | Submission command               | ✔️         |
-| cwd                         | string  | Working directory                | ✔️         |
-| env                         | table   | Environment variables            | ❌         |
-| excludes                    | string  | Excluded nodes                   | ✔️         |
-| nodelist                    | string  | Node list                        | ✔️         |
-| reservation                 | string  | Reservation information          | ✔️         |
-| begin_time                  | number  | Job start time                   | ✔️         |
-| exclusive                   | boolean | Exclusive node usage             | ✔️         |
-| hold                        | boolean | Hold job                         | ❌         |
+| Attribute Name             | Type    | Description                                   |
+|---------------------------|---------|-----------------------------------------------|
+| time_limit                | number  | Time limit                                    |
+| partition_id              | string  | Partition to which the job belongs            |
+| requested_node_res_view   | table   | Requested resource information                |
+| type                      | number  | Job type                                      |
+| uid                       | number  | UID of the job owner                          |
+| gid                       | number  | GID of the job owner                          |
+| account                   | string  | Account associated with the job               |
+| name                      | string  | Job name                                      |
+| qos                       | string  | QoS associated with the job                   |
+| node_num                  | number  | Number of nodes                               |
+| ntasks_per_node           | number  | Number of tasks per node                      |
+| cpus_per_task             | number  | Number of CPUs per task                       |
+| included_nodes            | string  | Nodes explicitly included                    |
+| excluded_nodes            | string  | Nodes explicitly excluded                    |
+| requeue_if_failed         | boolean | Whether the job can be requeued on failure    |
+| get_user_env              | boolean | Whether to load user environment variables    |
+| cmd_line                  | string  | Job command line                              |
+| env                       | table   | Environment variables                         |
+| cwd                       | string  | Working directory of the job                  |
+| extra_attr                | string  | Extra attributes                              |
+| reservation               | string  | Reservation information                      |
+| begin_time                | number  | Job start time                                |
+| exclusive                 | boolean | Whether to run in exclusive node mode         |
+| licenses_count            | table   | License information                           |
 
 
 ---
 
 #### part_list
 
-| Attribute Name        | Type                 | Description                  |
-|-----------------------|----------------------|------------------------------|
-| name                  | string               | Partition name               |
-| node_list             | string               | Node list                    |
-| total_nodes           | number               | Total number of nodes        |
-| alive_nodes           | number               | Number of alive nodes        |
-| state                 | number               | Partition state              |
-| default_mem_per_cpu   | number               | Default memory per CPU       |
-| max_mem_per_cpu       | number               | Max memory per CPU           |
-| allowed_accounts      | table(string list)   | Allowed accounts             |
-| denied_accounts       | table(string list)   | Denied accounts              |
-| res_total             | table                | Total resource information    |
-| res_avail             | table                | Available resource info       |
-| res_in_used           | table                | In-use resource info          |
-
-**Resource table fields:**
-
-- cpu_core_limit: CPU limit
-- memory_limit_bytes: Memory limit
-- memory_sw_limit_bytes: Swap limit
+| Attribute Name          | Type                 | Description                     |
+|-------------------------|----------------------|---------------------------------|
+| hostlist                | string               | List of node hostnames           |
+| state                   | number               | Partition state                  |
+| name                    | string               | Partition name                   |
+| total_nodes             | number               | Total number of nodes            |
+| alive_nodes             | number               | Number of alive nodes            |
+| res_total               | ResourceView         | Total resource information       |
+| res_avail               | ResourceView         | Available resource information  |
+| res_alloc               | ResourceView         | Allocated (in-use) resource info |
+| allowed_accounts        | table(string list)   | Allowed accounts                 |
+| denied_accounts         | table(string list)   | Denied accounts                  |
+| default_mem_per_cpu     | number               | Default memory per CPU           |
+| max_mem_per_cpu         | number               | Maximum memory per CPU           |
 
 ---
 
@@ -147,58 +136,58 @@ Same as the return values of `crane_job_submit`.
 
 #### crane.jobs or job_ptr
 
-| Attribute Name    | Type    | Description                 |
-|-------------------|---------|-----------------------------|
-| job_id            | number  | Job ID                      |
-| job_name          | string  | Job name                    |
-| type              | number  | Job type                    |
-| partition         | string  | Job partition               |
-| uid               | number  | User ID                     |
-| account           | string  | Account                     |
-| qos               | string  | QoS                         |
-| gid               | number  | Group ID                    |
-| time_limit        | number  | Time limit                  |
-| start_time        | number  | Job start time              |
-| end_time          | number  | Job end time                |
-| submit_time       | number  | Job submission time         |
-| node_num          | number  | Number of nodes             |
-| cmd_line          | string  | Command line                |
-| cwd               | string  | Working directory           |
-| username          | string  | User name                   |
-| req_res_view      | table   | Requested resource view     |
-| req_nodes         | string  | Requested nodes             |
-| exclude_nodes     | string  | Excluded nodes              |
-| extra_attr        | string  | Extra attributes            |
-| held              | boolean | Whether the job is held     |
-| status            | number  | Job status                  |
-| exit_code         | number  | Exit code                   |
-| execution_node    | string  | Execution node              |
-| exclusive         | boolean | Whether job is exclusive    |
+| Attribute Name      | Type           | Description                              |
+|---------------------|----------------|------------------------------------------|
+| type                | number         | Job type                                 |
+| task_id             | number         | Job ID                                   |
+| name                | string         | Job name                                 |
+| partition           | string         | Partition to which the job belongs       |
+| uid                 | number         | UID of the job owner                     |
+| time_limit          | number         | Time limit                               |
+| end_time            | number         | Job end time                             |
+| submit_time         | number         | Job submission time                     |
+| account             | string         | Account associated with the job          |
+| node_num            | number         | Number of nodes                          |
+| cmd_line            | string         | Submission command line                  |
+| cwd                 | string         | Job working directory                    |
+| username            | string         | Username who submitted the job           |
+| qos                 | string         | QoS associated with the job              |
+| req_res_view        | ResourceView   | Requested resource information           |
+| license_count       | table(map)     | License information                     |
+| req_nodes           | string         | Requested nodes                          |
+| exclude_nodes       | string         | Excluded nodes                           |
+| extra_attr          | string         | Extra attributes                         |
+| reservation         | string         | Reservation information                 |
+| held                | boolean        | Whether the job is held                  |
+| status              | number         | Job status                               |
+| exit_code           | number         | Job exit code                            |
+| priority            | number         | Job priority                             |
+| pending_reason      | string         | Reason for being pending                 |
+| craned_list         | string         | List of nodes allocated to the job       |
+| elapsed_time        | number         | Elapsed execution time                   |
+| execution_node      | string         | Job execution node                       |
+| exclusive           | boolean        | Whether the job runs in exclusive mode   |
+| alloc_res_view      | ResourceView   | Allocated (in-use) resource information |
+| env                 | table(map)     | Environment variables                   |
 
 ---
 
 #### crane.reservations
 
-| Attribute Name      | Type                | Description                 |
-|---------------------|---------------------|-----------------------------|
-| reservation_name    | string              | Reservation name            |
-| start_time          | number              | Start time                  |
-| duration            | number              | Duration                    |
-| partition           | string              | Partition                   |
-| craned_regex        | string              | Node regex                  |
-| res_total           | table               | Total resource info         |
-| res_avail           | table               | Available resource info     |
-| res_alloc           | table               | Allocated resource info     |
-| allowed_accounts    | table(string list)  | Allowed accounts            |
-| denied_accounts     | table(string list)  | Denied accounts             |
-| allowed_users       | table(string list)  | Allowed users               |
-| denied_users        | table(string list)  | Denied users                |
-
-**Resource table fields:**
-
-- cpu_core_limit: CPU limit
-- memory_limit_bytes: Memory limit
-- memory_sw_limit_bytes: Swap limit
+| Attribute Name        | Type                 | Description                               |
+|-----------------------|----------------------|-------------------------------------------|
+| reservation_name      | string               | Reservation name                          |
+| start_time            | number               | Reservation start time                   |
+| duration              | number               | Reservation duration                     |
+| partiton              | string               | Reservation partition                    |
+| craned_regex          | string               | Reserved nodes (regex)                   |
+| res_total             | ResourceView         | Total reserved resource information      |
+| res_avail             | ResourceView         | Available reserved resource information  |
+| res_alloc             | ResourceView         | Allocated reserved resource information  |
+| allowed_accounts      | table(string list)   | Accounts allowed for the reservation     |
+| denied_accounts       | table(string list)   | Accounts denied for the reservation      |
+| allowed_users         | table(string list)   | Users allowed for the reservation        |
+| denied_users          | table(string list)   | Users denied for the reservation         |
 
 
 ## Lua Script Configuration
