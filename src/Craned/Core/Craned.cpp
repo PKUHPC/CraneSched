@@ -728,12 +728,8 @@ void ParseConfig(int argc, char** argv) {
         for (const auto& item : absl::StrSplit(prolog_flags, ',')) {
           std::string trimmed(
               absl::AsciiStrToLower(absl::StripAsciiWhitespace(item)));
-          if (trimmed == "alloc")
-            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
           if (trimmed == "contain")
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
-          if (trimmed == "nohold")
-            g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::NoHold;
           if (trimmed == "forcerequeueonfail")
             g_config.JobLifecycleHook.PrologFlags |= ForceRequeueOnFail;
           if (trimmed == "runinjob")
@@ -742,22 +738,7 @@ void ParseConfig(int argc, char** argv) {
             g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Serial;
         }
         // judge
-        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
-        }
-        if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::NoHold) {
-          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
-          if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Contain) {
-            CRANE_ERROR("Cannot set NoHold, Contain flags at the same time.");
-            std::exit(1);
-          }
-        }
-        if (g_config.JobLifecycleHook.PrologFlags &
-            PrologFlagEnum::ForceRequeueOnFail) {
-          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
-        }
         if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
-          g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Alloc;
           g_config.JobLifecycleHook.PrologFlags |= PrologFlagEnum::Contain;
           if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::Serial) {
             CRANE_ERROR(
