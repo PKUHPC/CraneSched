@@ -746,7 +746,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
         }
-      } // end of JobLifecycleHook
+      }  // end of JobLifecycleHook
 
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
