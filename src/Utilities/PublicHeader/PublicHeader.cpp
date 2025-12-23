@@ -609,6 +609,14 @@ bool ResourceV2::IsZero() const { return each_node_res_map.empty(); }
 
 void ResourceV2::SetToZero() { each_node_res_map.clear(); }
 
+ResourceView ResourceV2::View() const noexcept {
+  return std::ranges::fold_left(
+      each_node_res_map, ResourceView{},
+      [](ResourceView acc, const auto& node_res_pair) {
+        return acc += node_res_pair.second;
+      });
+}
+
 bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
   for (const auto& [lhs_node_id, lhs_res_in_node] : lhs.each_node_res_map) {
     auto rhs_it = rhs.each_node_res_map.find(lhs_node_id);
@@ -627,6 +635,12 @@ bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
 ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
   allocatable_res = rhs.allocatable_res();
   device_map = FromGrpcDeviceMap(rhs.device_map());
+}
+
+ResourceView& ResourceView::operator=(const crane::grpc::ResourceView& rhs) {
+  allocatable_res = rhs.allocatable_res();
+  device_map = FromGrpcDeviceMap(rhs.device_map());
+  return *this;
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {

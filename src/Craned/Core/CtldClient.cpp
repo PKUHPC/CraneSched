@@ -25,6 +25,7 @@
 #include "crane/String.h"
 
 namespace Craned {
+using namespace std::chrono_literals;
 
 CtldClientStateMachine::CtldClientStateMachine() {
   m_logger_ = g_runtime_status.conn_logger;
@@ -840,10 +841,11 @@ void CtldClient::AsyncSendThread_() {
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
       }
 
-      std::chrono::time_point ddl =
-          std::chrono::system_clock::now() + std::chrono::seconds(3);
-      bool timeout = m_ctld_channel_->WaitForStateChange(prev_grpc_state, ddl);
-      if (!timeout) continue;  // No state change. No need to update prev state.
+      std::chrono::time_point ddl = std::chrono::system_clock::now() + 1s;
+      bool status_changed =
+          m_ctld_channel_->WaitForStateChange(prev_grpc_state, ddl);
+      if (!status_changed)
+        continue;  // No state change. No need to update prev state.
 
       prev_grpc_state = grpc_state;
       prev_connected = connected;

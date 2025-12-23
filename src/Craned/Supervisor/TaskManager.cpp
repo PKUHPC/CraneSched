@@ -40,6 +40,36 @@ namespace Craned::Supervisor {
 using Common::CgroupManager;
 using Common::kStepRequestCheckIntervalMs;
 
+CraneErrCode StepInstance::Prepare() {
+  auto sh_path = g_config.CraneScriptDir /
+                 fmt::format("Crane-{}.{}.sh", g_config.JobId, g_config.StepId);
+
+  FILE* fptr = fopen(sh_path.c_str(), "w");
+  if (fptr == nullptr) {
+    CRANE_ERROR("Failed write the script");
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  if (this->IsBatch())
+    fputs(m_step_to_supv_.batch_meta().sh_script().c_str(), fptr);
+  else  // Crun
+    fputs(m_step_to_supv_.interactive_meta().sh_script().c_str(), fptr);
+
+  fclose(fptr);
+
+  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+  if (chown(sh_path.c_str(), m_step_to_supv_.uid(), gids[0]) != 0) {
+    CRANE_ERROR("Failed to change ownership of script file:{}",
+                strerror(errno));
+  }
+  script_path = sh_path;
+  return CraneErrCode::SUCCESS;
+}
+
+void StepInstance::CleanUp() {
+  if (script_path.has_value()) util::os::DeleteFile(script_path.value());
+}
+
 bool StepInstance::IsContainer() const noexcept {
   return m_step_to_supv_.has_container_meta();
 }
@@ -1106,30 +1136,6 @@ CraneErrCode ContainerInstance::InjectFakeRootConfig_(
 }
 
 CraneErrCode ProcInstance::Prepare() {
-  // Write script content into file
-  auto sh_path =
-      g_config.CraneScriptDir / fmt::format("Crane-{}.sh", g_config.JobId);
-
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", task_id);
-    return CraneErrCode::ERR_SYSTEM_ERR;
-  }
-
-  if (m_parent_step_inst_->IsBatch())
-    fputs(GetParentStep().batch_meta().sh_script().c_str(), fptr);
-  else  // Crun
-    fputs(GetParentStep().interactive_meta().sh_script().c_str(), fptr);
-
-  fclose(fptr);
-
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-  if (chown(sh_path.c_str(), m_parent_step_inst_->GetStep().uid(),
-            m_parent_step_inst_->gids[0]) != 0) {
-    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}",
-                task_id, strerror(errno));
-  }
-
   // Write m_meta_
   if (m_parent_step_inst_->IsBatch()) {
     // Prepare file output name for batch tasks.
@@ -1155,7 +1161,7 @@ CraneErrCode ProcInstance::Prepare() {
   } else {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
-
+  std::filesystem::path sh_path = m_parent_step_inst_->script_path.value();
   m_meta_->parsed_sh_script_path = sh_path;
 
   // If interpreter is not set, let system decide.
@@ -1540,6 +1546,7 @@ void TaskManager::ShutdownSupervisor() {
                                            0, "");
     g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
   }
+  m_step_.CleanUp();
 
   // Explicitly release CriClient
   m_step_.StopCriClient();
@@ -1570,7 +1577,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
 
   auto task = m_step_.RemoveTaskInstance(task_id);
   if (task == nullptr) {
-    CRANE_DEBUG("[Task #{}] Task not found.");
+    CRANE_DEBUG("[Task #{}] Task not found.", task_id);
     return;
   }
 
@@ -1773,8 +1780,8 @@ void TaskManager::EvTaskTimerCb_() {
   DelTerminationTimer_();
 
   if (m_step_.IsCalloc()) {
-    // For calloc job, we use job id, send TaskFinish_ directly.
-    TaskFinish_(m_step_.job_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+    // Now calloc and cbatch steps only have one task with id 0.
+    TaskFinish_(0, crane::grpc::TaskStatus::ExceedTimeLimit,
                 ExitCode::EC_EXCEED_TIME_LIMIT, std::nullopt);
   } else {
     m_task_terminate_queue_.enqueue(TaskTerminateQueueElem{
@@ -1894,6 +1901,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       continue;
     }
 
+    CRANE_TRACE("Terminating all running tasks...");
     for (task_id_t task_id : m_step_.GetTaskIds()) {
       auto* task = m_step_.GetTaskInstance(task_id);
       if (elem.termination_reason == TerminatedBy::TERMINATION_BY_TIMEOUT) {
@@ -1980,6 +1988,13 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     task_id_t task_id = elem.instance->task_id;
     m_step_.AddTaskInstance(task_id, std::move(elem.instance));
     auto* task = m_step_.GetTaskInstance(task_id);
+    if (m_step_.Prepare() != CraneErrCode::SUCCESS) {
+      CRANE_ERROR("Failed to prepare step for task execution.");
+      elem.ok_prom.set_value(CraneErrCode::ERR_GENERIC_FAILURE);
+      TaskFinish_(elem.instance->task_id, crane::grpc::TaskStatus::Failed,
+                  ExitCode::EC_FILE_NOT_FOUND, "");
+      continue;
+    }
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.

@@ -36,6 +36,20 @@ int LicensesManager::Init(
 
   m_licenses_map_.InitFromMap(std::move(licenses_map));
 
+  if (g_config.Plugin.Enabled) {
+    std::vector<crane::grpc::LicenseInfo> license_infos;
+    license_infos.reserve(lic_id_to_count_map.size());
+    for (auto& [lic_id, count] : lic_id_to_count_map) {
+      crane::grpc::LicenseInfo license_info;
+      license_info.set_name(lic_id);
+      license_info.set_total(count);
+      license_info.set_free(count);
+      license_info.set_used(0);
+      license_infos.emplace_back(std::move(license_info));
+    }
+    g_plugin_client->UpdateLicensesHookAsync(license_infos);
+  }
+
   return 0;
 }
 
@@ -190,6 +204,21 @@ bool LicensesManager::MallocLicenseResource(
     }
   }
 
+  if (g_config.Plugin.Enabled) {
+    std::vector<crane::grpc::LicenseInfo> license_infos;
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
+      crane::grpc::LicenseInfo license_info;
+      license_info.set_name(lic->license_id);
+      license_info.set_total(lic->total);
+      license_info.set_free(lic->free);
+      license_info.set_used(lic->used);
+      license_infos.emplace_back(std::move(license_info));
+    }
+    g_plugin_client->UpdateLicensesHookAsync(license_infos);
+  }
+
   return true;
 }
 
@@ -213,6 +242,21 @@ void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
       lic->free -= count;
     }
   }
+
+  if (g_config.Plugin.Enabled) {
+    std::vector<crane::grpc::LicenseInfo> license_infos;
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
+      crane::grpc::LicenseInfo license_info;
+      license_info.set_name(lic->license_id);
+      license_info.set_total(lic->total);
+      license_info.set_free(lic->free);
+      license_info.set_used(lic->used);
+      license_infos.emplace_back(std::move(license_info));
+    }
+    g_plugin_client->UpdateLicensesHookAsync(license_infos);
+  }
 }
 
 void LicensesManager::FreeLicenseResource(
@@ -233,6 +277,21 @@ void LicensesManager::FreeLicenseResource(
       lic->used -= count;
     }
     lic->free += count;
+  }
+
+  if (g_config.Plugin.Enabled) {
+    std::vector<crane::grpc::LicenseInfo> license_infos;
+    license_infos.reserve(actual_license.size());
+    for (const auto& [lic_id, _] : actual_license) {
+      auto lic = licenses_map->find(lic_id)->second.GetExclusivePtr();
+      crane::grpc::LicenseInfo license_info;
+      license_info.set_name(lic->license_id);
+      license_info.set_total(lic->total);
+      license_info.set_free(lic->free);
+      license_info.set_used(lic->used);
+      license_infos.emplace_back(std::move(license_info));
+    }
+    g_plugin_client->UpdateLicensesHookAsync(license_infos);
   }
 }
 
