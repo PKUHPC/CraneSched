@@ -2,12 +2,12 @@
 
 Crane supports multiple `prolog` and `epilog` programs. Note that for security reasons, these programs do **not** have a search path set. You must either specify fully qualified paths in the programs or set the `PATH` environment variable. The table below explains the prolog and epilog programs available during job allocation, including when and where they run.
 
-| Parameter               | Location              | Invoked by | User                        | Execution Timing                                                                 |
-|-------------------------|-----------------------|------------|------------------------------|----------------------------------------------------------------------------------|
-| Prolog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | When a job or job step first starts on the node (default); `PrologFlags=Alloc` forces execution at allocation time |
-| PrologCtld (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job allocation                                                                 |
-| Epilog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | At job completion                                                                 |
-| EpilogCtld (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job completion                                                                 |
+| Parameter               | Location              | Invoked by | User                        | Execution Timing                                                              |
+|-------------------------|-----------------------|------------|------------------------------|-------------------------------------------------------------------------------|
+| Prolog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | When a job step first starts on the node (default); |
+| CranectldProlog (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job allocation                                                              |
+| Epilog (config.yaml)    | Compute node          | craned     | CranedUser (usually root)    | At job completion                                                              |
+| CranectldEpilog (config.yaml)| Controller node       | cranectld  | CranectldUser                | At job completion                                                              |
 
 The table below describes the prolog and epilog programs available during job step execution, including when and where they run.
 
@@ -46,8 +46,8 @@ echo "print This message has been printed with TaskProlog"
 
 - **If a Prolog fails (non-zero exit)** → the node is set to **DRAIN** and the job is **requeued**.
 - **If an Epilog fails** → the node is set to **DRAIN**.
-- **If PrologCtld fails** → the job is **requeued**. Interactive jobs (`calloc`, `crun`) are **canceled**.
-- **If EpilogCtld fails** → a **log is written**.
+- **If CranectldProlog fails** → the job is **requeued**. Interactive jobs (`calloc`, `crun`) are **canceled**.
+- **If CranectldEpilog fails** → a **log is written**.
 - **If task prolog fails** → the **task is canceled**.
 - **If crun prolog fails** → the **step is canceled**.
 - **If task epilog or crun epilog fails** → a **log is written**.
@@ -70,8 +70,8 @@ JobLifecycleHook:
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
-  PrologCranectld: /path/to/prologctld.sh
-  EpilogCranectld: /path/to/epilogctld.sh
+  CranectldProlog: /path/to/cranectld_prolog.sh
+  CranectldEpilog: /path/to/cranectld_epilog.sh
   CrunProlog: /path/to/srun_prolog.sh
   CrunEpilog: /path/to/srun_epilog.sh
   TaskProlog: /path/to/task_prolog.sh
@@ -82,26 +82,15 @@ JobLifecycleHook:
 
 # Prolog Flags
 
-### **Alloc**
-Runs Prolog at allocation time. Increases startup time.
-
 ### **Contain**
-Runs Prolog inside job cgroup at allocation time.  
-Implies **Alloc**.
-
-### **NoHold**
-Must be used with **Alloc**.  
-Allows `calloc` to proceed without waiting for all Prologs.  
-Faster with `crun`.  
-Incompatible with **Contain**.
+Runs Prolog inside job cgroup at allocation time.
 
 ### **ForceRequeueOnFail**
-Requeue batch jobs that fail due to Prolog errors, even if not requested.  
-Implies **Alloc**.
+Requeue batch jobs that fail due to Prolog errors, even if not requested.
 
 ### **RunInJob**
 Runs Prolog/Epilog inside extern cranestepd, included in job cgroup.  
-Implies **Contain** and **Alloc**.
+Implies **Contain**.
 
 ### **Serial**
 Runs Prolog/Epilog serially per node.  

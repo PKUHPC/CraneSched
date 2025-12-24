@@ -4,12 +4,12 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因
 这些程序没有设置搜索路径。你需要在程序中指定完整路径，或者设置 PATH 环境变量。
 下表说明了在作业分配时可用的 `prolog` 和 `epilog` 及其运行的时间和位置。
 
-| 参数     | 位置                | 调用者       | 用户                   | 执行时机                                                         |
-|--------|-------------------|-----------|----------------------|-------------------------------------------------------------------|
-| Prolog（config.yaml）| 计算节点              | craned    | CranedUser（通常为 root） | 该节点首次启动作业或作业步骤时（默认）；PrologFlags=Alloc 可强制在作业分配时执行脚本 |
-| PrologCtld（config.yaml）| 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业分配时                                                        |
-| Epilog（config.yaml） | 计算节点              | craned    | CranedUser（通常为 root） | 作业结束时                                                        |
-| EpilogCtld（config.yaml）| 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业结束时    |
+| 参数                           | 位置                | 调用者       | 用户                   | 执行时机    |
+|------------------------------|-------------------|-----------|----------------------|--------------|
+| Prolog（config.yaml）          | 计算节点              | craned    | CranedUser（通常为 root） | 该节点首次启动作业步骤时 |
+| CraneCtldProlog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业分配时   |
+| Epilog（config.yaml）          | 计算节点              | craned    | CranedUser（通常为 root） | 作业结束时   |
+| CraneCtldEpilog（config.yaml） | 主节点（CraneCtld 所在） | cranectld | CranectldUser        | 作业结束时   |
 
 下表说明了在作业步骤分配时可用的 `prolog` 和 `epilog` 及其运行的时间和位置。
 
@@ -63,10 +63,10 @@ echo "print This message has been printed with TaskProlog"
 
 - 如果 `Prolog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态且作业会被重新排队。
   如果 `Epilog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态。
-- 如果 `PrologCtld` 失败（返回非零退出码），
+- 如果 `CraneCtldProlog` 失败（返回非零退出码），
   作业会被重新排队。只有批处理作业能被重新排队。交互式作业（`calloc` 和 `crun`）
-  在 `PrologCtld` 失败时会被取消。
-  如果 `EpilogCtld` 失败（返回非零退出码），仅会记录日志。
+  在 `CraneCtldProlog` 失败时会被取消。
+  如果 `CraneCtldEpilog` 失败（返回非零退出码），仅会记录日志。
 - 如果 `task prolog` 失败（返回非零退出码），
   该任务会被取消。如果 `crun prolog` 失败（返回非零退出码），
   该步骤会被取消。如果 `task epilog` 或 `crun epilog` 失败（返回非零退出码），
@@ -87,9 +87,9 @@ JobLifecycleHook:
   # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60 
-  PrologEpilogTimeout: 120 
-  PrologCranectld: /path/to/prologctld.sh
-  EpilogCranectld: /path/to/epilogctld.sh
+  PrologEpilogTimeout: 120
+  CranectldProlog: /path/to/cranectld_prolog.sh
+  CranectldEpilog: /path/to/cranectld_epilog.sh
   CrunProlog: /path/to/srun_prolog.sh
   CrunEpilog: /path/to/srun_epilog.sh
   TaskProlog: /path/to/task_prolog.sh
@@ -99,30 +99,17 @@ JobLifecycleHook:
 ## Prolog 标志
 用于控制 Prolog 行为的标志。默认情况下没有设置任何标志。可以用逗号分隔的列表指定多个标志。目前支持的选项包括：
 
-- **Alloc**  
-  如果设置该标志，Prolog 脚本将在作业分配时执行。默认情况下，Prolog 只会在任务启动前执行。 
-  因此，当启动 calloc 时，不会执行 Prolog。Alloc 标志适用于在用户开始使用任何分配资源前进行准备。
-  **注意：** 使用 Alloc 标志会增加作业启动所需的时间。
-
 - **Contain**  
   在作业分配时，Prolog 脚本会在作业的cgroup下执行。
-  设置 Contain 会隐式地设置 Alloc 标志。
-
-- **NoHold**  
-  如果设置该标志，也应设置 Alloc 标志。这将允许 calloc 不会在每个节点上等待 prolog 完成后才继续。
-  阻塞会在步骤到达 Craned 并且在任何执行发生前进行。
-  这是一种更快的工作方式，如果你使用 crun 启动作业任务，建议使用此标志。
-  此标志不能与 Contain 标志同时使用。
 
 - **ForceRequeueOnFail**  
-  当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。  
-  **注意：** 设置此标志会隐式地设置 Alloc 标志。
+  当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。
 
 - **RunInJob**  
   使 Prolog/Epilog 在 extern cranestepd 进程中运行。
   这将把其包含为作业的进程之一。
   如果配置了 cgroup，则会被包含在 cgroup 中。
-  设置 RunInJob 标志会隐式地设置 Contain 和 Alloc 标志。
+  设置 RunInJob 标志会隐式地设置 Contain 标志。
 
 - **Serial**  
   默认情况下，Prolog 和 Epilog 脚本会在每个节点上并发运行。
