@@ -166,15 +166,16 @@ void LuaJobHandler::RegisterGlobalFunctions_(
       });
 
   lua_env.GetCraneTable().set_function(
-    "get_resv", [](const std::string& resv_name) -> std::optional<crane::grpc::ReservationInfo> {
-      auto reply = g_meta_container->QueryResvInfo(resv_name);
-      if (!reply.reservation_info_list().empty()) {
-        return reply.reservation_info_list()[0];
-      }
+      "get_resv",
+      [](const std::string& resv_name)
+          -> std::optional<crane::grpc::ReservationInfo> {
+        auto reply = g_meta_container->QueryResvInfo(resv_name);
+        if (!reply.reservation_info_list().empty()) {
+          return reply.reservation_info_list()[0];
+        }
 
-      return std::nullopt;
-    }
-  );
+        return std::nullopt;
+      });
 }
 
 void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
@@ -489,8 +490,7 @@ void LuaJobHandler::RegisterGlobalVariables_(
   // crane.reservations
   sol::table resv_table = lua_env.GetLuaState().create_table();
   resv_table[sol::metatable_key] = lua_env.GetLuaState().create_table_with(
-      "__pairs",
-      [](sol::this_state ts, sol::table /*self*/) {
+      "__pairs", [](sol::this_state ts, sol::table /*self*/) {
         sol::state_view lua(ts);
         sol::object next = lua["next"];
 

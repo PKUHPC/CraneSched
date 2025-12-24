@@ -19,7 +19,7 @@
 #pragma once
 
 #ifdef HAVE_LUA
-#include <sol/sol.hpp>
+#  include <sol/sol.hpp>
 #endif
 
 #include <BS_thread_pool.hpp>
@@ -37,18 +37,16 @@ class LuaEnvironment {
 
   bool LoadLuaScript(const std::vector<std::string>& req_funcs);
 #ifdef HAVE_LUA
-  sol::state& GetLuaState() const { return  *m_lua_state_ptr_; }
-  sol::table GetCraneTable() const { return m_crane_table_;}
+  sol::state& GetLuaState() const { return *m_lua_state_ptr_; }
+  sol::table GetCraneTable() const { return m_crane_table_; }
   std::string GetUserMsg() const { return m_user_msg_; }
 
  private:
-
   void RegisterFunctions_();
 
   void RegisterOutputErrTab_();
 
-  bool CheckLuaScriptFunctions_(
-      const std::vector<std::string>& req_fxns);
+  bool CheckLuaScriptFunctions_(const std::vector<std::string>& req_fxns);
 
   std::string m_lua_script_;
   std::unique_ptr<sol::state> m_lua_state_ptr_;
@@ -56,7 +54,6 @@ class LuaEnvironment {
   std::string m_user_msg_;
 #endif
 };
-
 
 class LuaPool {
  public:
@@ -93,16 +90,16 @@ class LuaPool {
   }
 
   template <typename Callback>
-  requires std::invocable<Callback> &&
-         std::same_as<std::invoke_result_t<Callback>, CraneRichError>
+    requires std::invocable<Callback> &&
+             std::same_as<std::invoke_result_t<Callback>, CraneRichError>
   std::future<CraneRichError> ExecuteLuaScript(Callback callback) {
     auto promise = std::make_shared<std::promise<CraneRichError>>();
     std::future<CraneRichError> fut = promise->get_future();
 
-    m_thread_pool_->detach_task([callback = std::forward<Callback>(callback),
-                                 promise]() {
-      promise->set_value(callback());
-    });
+    m_thread_pool_->detach_task(
+        [callback = std::forward<Callback>(callback), promise]() {
+          promise->set_value(callback());
+        });
 
     return fut;
   }

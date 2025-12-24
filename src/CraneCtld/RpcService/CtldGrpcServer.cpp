@@ -382,13 +382,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           step->ia_meta = std::move(meta);
 
           auto submit_result =
-            g_task_scheduler->SubmitStepAsync(std::move(step));
+              g_task_scheduler->SubmitStepAsync(std::move(step));
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
           auto submit_expt = submit_result.get();
           if (submit_expt.has_value()) {
             step_id_t step_id = submit_expt.value();
             result = std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-              std::pair(job_id, step_id)};
+                std::pair(job_id, step_id)};
           } else {
             result = std::unexpected(CraneErrStr(submit_expt.error()));
           }
@@ -728,8 +728,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   std::list<std::pair<task_id_t, std::future<CraneRichError>>> futures;
   for (const auto task_id : request->task_ids()) {
     auto fut = g_task_scheduler->JobModifyLuaCheck(task_id);
-    if (fut)
-      futures.emplace_back(task_id, std::move(fut.value()));
+    if (fut) futures.emplace_back(task_id, std::move(fut.value()));
   }
 
   for (auto& [task_id, fut] : futures) {
