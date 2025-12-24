@@ -456,17 +456,18 @@ void ProcInstance::InitEnvMap() {
 
 std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
                                                 const std::string& cwd,
-                                                bool is_stdout) const {
+                                                bool is_batch_stdout,
+                                                bool* is_local_file) const {
+  if (is_local_file != nullptr) *is_local_file = false;
   if (pattern.empty()) {
-    if (is_stdout) {
+    if (is_batch_stdout) {
       std::filesystem::path default_path = cwd;
 
       // Path ends with a directory, append default stdout/err file name
       // `Crane-<Job ID>.out` to the path.
       if (std::filesystem::is_directory(default_path))
         default_path =
-            default_path /
-            fmt::format("Crane-{}.{}.out", g_config.JobId, g_config.StepId);
+            default_path / fmt::format("Crane-{}.out", g_config.JobId);
       return default_path;
     } else
       return "";
@@ -492,6 +493,7 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
     return path_to_parse;
   }
   int node_index = std::distance(grpc_nodelist.begin(), node_it);
+  const std::unordered_set<char> local_file_replacement{'N', 'n', 't'};
   //clang-format off
   std::unordered_map<char, std::string> replacement_map{
       {'%', "%"},
@@ -549,6 +551,9 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
         result.append(full_match.data(), full_match.size());
       } else {
         const std::string& value = it->second;
+        if (local_file_replacement.contains(specifier)) {
+          if (is_local_file != nullptr) *is_local_file = true;
+        }
         int width = 0;
         bool is_numeric_field =
             !(specifier == 'N' || specifier == 'u' || specifier == 'x');
@@ -567,63 +572,176 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
   if (cursor < input.size()) {
     absl::StrAppend(&result, input.substr(cursor));
   }
-  return result;
+  std::filesystem::path path(result);
+  if (path.is_relative()) {
+    return (cwd / path).string();
+  } else {
+    return result;
+  }
 }
 
 CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
-  if (!m_parent_step_inst_->IsCrun()) return fork();
-
   auto* meta = GetCrunMeta_();
   CRANE_DEBUG("Launch crun task #{} pty: {}", task_id,
               m_parent_step_inst_->pty);
 
+  std::set<int> opened_fd{};
+  const auto open_dev_null = [this]() -> int {
+    int dev_null_fd = open("/dev/null", O_RDWR);
+    if (dev_null_fd == -1) {
+      CRANE_ERROR("[Task #{}] Failed to open /dev/null: {}", task_id,
+                  std::strerror(errno));
+      return -1;
+    }
+    return dev_null_fd;
+  };
+  int stdin_local_fd = -1;
+  int stdout_local_fd = -1;
+  int stderr_local_fd = -1;
+
   int to_crun_pipe[2];
-  int from_crun_pipe[2];
+  int from_crun_stdout_pipe[2];
+  int from_crun_stderr_pipe[2];
   int crun_pty_fd = -1;
 
+  int open_mode =
+      GetParentStep().io_meta().open_mode_append() ? O_APPEND : O_TRUNC;
   if (!m_parent_step_inst_->pty) {
-    if (pipe(to_crun_pipe) == -1) {
-      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
-                  task_id, strerror(errno));
-      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    if (meta->fwd_stdint) {
+      if (pipe(to_crun_pipe) == -1) {
+        CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                    task_id, std::strerror(errno));
+        return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+      }
+      opened_fd.insert(to_crun_pipe[0]);
+      opened_fd.insert(to_crun_pipe[1]);
+    } else {
+      if (meta->parsed_input_file_pattern.empty()) {
+        int null_fd = open_dev_null();
+        if (null_fd == -1) {
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stdin_local_fd = null_fd;
+      } else {
+        int fd = open(meta->parsed_input_file_pattern.c_str(), O_RDONLY);
+        if (fd == -1) {
+          CRANE_ERROR("[Task #{}] Failed to open input file {}: {}", task_id,
+                      meta->parsed_input_file_pattern, std::strerror(errno));
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stdin_local_fd = fd;
+      }
+      opened_fd.insert(stdin_local_fd);
     }
 
-    if (pipe(from_crun_pipe) == -1) {
-      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
-                  task_id, strerror(errno));
-      close(to_crun_pipe[0]);
-      close(to_crun_pipe[1]);
-      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    if (meta->fwd_stdout) {
+      if (pipe(from_crun_stdout_pipe) == -1) {
+        CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                    task_id, strerror(errno));
+        for (int fd : opened_fd) {
+          close(fd);
+        }
+        return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+      }
+      opened_fd.insert(from_crun_stdout_pipe[0]);
+      opened_fd.insert(from_crun_stdout_pipe[1]);
+    } else {
+      if (meta->parsed_output_file_pattern.empty()) {
+        int null_fd = open_dev_null();
+        if (null_fd == -1) {
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stdout_local_fd = null_fd;
+      } else {
+        int fd = open(meta->parsed_output_file_pattern.c_str(),
+                      O_RDWR | O_CREAT | open_mode, 0644);
+        if (fd == -1) {
+          CRANE_ERROR("[Task #{}] Failed to open output file {}: {}", task_id,
+                      meta->parsed_output_file_pattern, std::strerror(errno));
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stdout_local_fd = fd;
+      }
+      opened_fd.insert(stdout_local_fd);
+    }
+
+    if (meta->fwd_stderr) {
+      if (pipe(from_crun_stderr_pipe) == -1) {
+        CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                    task_id, strerror(errno));
+        for (int fd : opened_fd) {
+          close(fd);
+        }
+        return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+      }
+      opened_fd.insert(from_crun_stderr_pipe[0]);
+      opened_fd.insert(from_crun_stderr_pipe[1]);
+    } else {
+      if (meta->parsed_error_file_pattern.empty() &&
+          meta->parsed_output_file_pattern.empty()) {
+        int null_fd = open_dev_null();
+        if (null_fd == -1) {
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stderr_local_fd = null_fd;
+      } else {
+        auto* err_path = meta->parsed_error_file_pattern.empty()
+                             ? &meta->parsed_output_file_pattern
+                             : &meta->parsed_error_file_pattern;
+        int fd = open(err_path->c_str(), O_RDWR | O_CREAT | open_mode, 0644);
+        if (fd == -1) {
+          CRANE_ERROR("[Task #{}] Failed to open err file {}: {}", task_id,
+                      *err_path, std::strerror(errno));
+          return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+        }
+        stderr_local_fd = fd;
+      }
+      opened_fd.insert(stderr_local_fd);
     }
   }
 
   pid_t pid = -1;
-  if (m_parent_step_inst_->pty && m_parent_step_inst_->task_ids.size() > 1) {
-    CRANE_ERROR("Crun pty task with task-per-node >1 not supported.");
-    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-  }
   if (m_parent_step_inst_->pty) {
     pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
 
     if (pid > 0) {
       meta->stdin_read = -1;
       meta->stdout_read = crun_pty_fd;
+      meta->stderr_read = -1;
       meta->stdin_write = crun_pty_fd;
       meta->stdout_write = -1;
+      meta->stderr_write = -1;
     }
   } else {
     pid = fork();
 
-    meta->stdin_write = to_crun_pipe[1];
-    meta->stdin_read = to_crun_pipe[0];
-    meta->stdout_write = from_crun_pipe[1];
-    meta->stdout_read = from_crun_pipe[0];
+    if (meta->fwd_stdint) {
+      meta->stdin_write = to_crun_pipe[1];
+      meta->stdin_read = to_crun_pipe[0];
+    } else {
+      meta->stdin_write = -1;
+      meta->stdin_read = stdin_local_fd;
+    }
+    if (meta->fwd_stdout) {
+      meta->stdout_write = from_crun_stdout_pipe[1];
+      meta->stdout_read = from_crun_stdout_pipe[0];
+    } else {
+      meta->stdout_write = -1;
+      meta->stdout_read = stdout_local_fd;
+    }
+
+    if (meta->fwd_stderr) {
+      meta->stderr_write = from_crun_stderr_pipe[1];
+      meta->stderr_read = from_crun_stderr_pipe[0];
+    } else {
+      meta->stderr_write = -1;
+      meta->stderr_read = stderr_local_fd;
+    }
 
     if (pid == -1) {
-      close(to_crun_pipe[0]);
-      close(to_crun_pipe[1]);
-      close(from_crun_pipe[0]);
-      close(from_crun_pipe[1]);
+      for (int fd : opened_fd) {
+        close(fd);
+      }
     }
   }
 
@@ -636,8 +754,9 @@ bool ProcInstance::SetupCrunFwdAtParent_() {
   if (!m_parent_step_inst_->pty) {
     // For non-pty tasks, pipe is used for stdin/stdout and one end should be
     // closed.
-    close(meta->stdin_read);
-    close(meta->stdout_write);
+    if (meta->fwd_stdint) close(meta->stdin_read);
+    if (meta->fwd_stdout) close(meta->stdout_write);
+    if (meta->fwd_stderr) close(meta->stderr_write);
   }
   // For pty tasks, stdin_read and stdout_write are the same fd and should not
   // be closed.
@@ -645,7 +764,8 @@ bool ProcInstance::SetupCrunFwdAtParent_() {
   auto* parent_cfored_client = m_parent_step_inst_->GetCforedClient();
 
   auto ok = parent_cfored_client->InitFwdMetaAndUvStdoutFwdHandler(
-      task_id, meta->stdin_write, meta->stdout_read, m_parent_step_inst_->pty);
+      task_id, meta->stdin_write, meta->stdout_read, meta->stderr_read,
+      m_parent_step_inst_->pty);
   if (!ok) return false;
   CRANE_INFO("Task #{} fwd ready.", task_id);
   return true;
@@ -723,7 +843,7 @@ CraneErrCode ProcInstance::SetChildProcProperty_() {
 }
 
 CraneErrCode ProcInstance::SetChildProcBatchFd_() {
-  int stdout_fd, stderr_fd;
+  int stdout_fd{-1}, stderr_fd{-1};
 
   auto* meta = dynamic_cast<BatchInstanceMeta*>(m_meta_.get());
   const std::string& stdin_file_path = meta->parsed_input_file_pattern;
@@ -734,9 +854,26 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
       GetParentStep().io_meta().open_mode_append() ? O_APPEND : O_TRUNC;
   if (stdin_file_path.empty()) {
     // Close stdin for batch tasks.
+
     // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    if (m_parent_step_inst_->IsBatch()) close(STDIN_FILENO);
+    // keep waiting for the input from stdin or other fds and will never
+    // end.
+    if (m_parent_step_inst_->IsBatch()) {
+      int dev_null_fd = open("/dev/null", O_RDWR);
+      if (dev_null_fd == -1) {
+        fmt::println(stderr, "[Task #{}] Subprocess error: open /dev/null. {}",
+                     task_id, std::strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      if (dup2(dev_null_fd, STDIN_FILENO) == -1) {
+        fmt::println(stderr,
+                     "[Task #{}] Subprocess error: dup2 /dev/null to stdin. {}",
+                     task_id, std::strerror(errno));
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+      fmt::println(stderr, "[Task #{}] Subprocess stdin: dup2 /dev/null",
+                   task_id);
+    }
     fmt::println(stderr, "[Task #{}] Subprocess stdin: closed", task_id);
   } else {
     int stdin_fd = open(stdin_file_path.c_str(), O_RDONLY);
@@ -748,7 +885,12 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
     fmt::println(stderr, "[Task #{}] Subprocess stdin: {}", task_id,
                  stdin_file_path);
     // STDIN -> input file
-    if (dup2(stdin_fd, STDIN_FILENO) == -1) std::exit(1);
+    if (dup2(stdin_fd, STDIN_FILENO) == -1) {
+      fmt::println(stderr,
+                   "[Task #{}] Subprocess error: dup2 stdin file to stdin. {}",
+                   task_id, strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   }
 
   stdout_fd =
@@ -758,8 +900,12 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
                  stdout_file_path, strerror(errno));
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
-  if (dup2(stdout_fd, STDOUT_FILENO) == -1)
-    std::exit(1);  // stdout -> output file
+  if (dup2(stdout_fd, STDOUT_FILENO) == -1) {
+    fmt::println(stderr,
+                 "[Task #{}] Subprocess error: dup2 stdout file to stdout. {}",
+                 task_id, strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
   fmt::println(stderr, "[Task #{}] Subprocess stdout: {}", task_id,
                stdout_file_path);
 
@@ -767,7 +913,12 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
     fmt::println(stderr, "[Task #{}] Subprocess stderr: {}", task_id,
                  stdout_file_path);
     // if stderr file is not set, redirect stderr to stdout
-    if (dup2(stdout_fd, STDERR_FILENO) == -1) std::exit(1);
+    if (dup2(stdout_fd, STDERR_FILENO) == -1) {
+      fmt::println(stderr,
+                   "[Task #{}] Subprocess error: dup2 stderr using stdout. {}",
+                   task_id, strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
   } else {
     stderr_fd =
         open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
@@ -778,8 +929,12 @@ CraneErrCode ProcInstance::SetChildProcBatchFd_() {
     }
     fmt::println(stderr, "[Task #{}] Subprocess stderr: {}", task_id,
                  stderr_file_path);
-    if (dup2(stderr_fd, STDERR_FILENO) == -1)
-      std::exit(1);  // stderr -> error file
+    if (dup2(stderr_fd, STDERR_FILENO) == -1) {
+      fmt::println(
+          stderr, "[Task #{}] Subprocess error: dup2 stderr file to stderr. {}",
+          task_id, strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
     close(stderr_fd);
   }
   close(stdout_fd);
@@ -793,9 +948,10 @@ void ProcInstance::SetupCrunFwdAtChild_() {
   if (!m_parent_step_inst_->pty) {
     if (dup2(meta->stdin_read, STDIN_FILENO) == -1) std::exit(1);
     if (dup2(meta->stdout_write, STDOUT_FILENO) == -1) std::exit(1);
-    if (dup2(meta->stdout_write, STDERR_FILENO) == -1) std::exit(1);
+    if (dup2(meta->stderr_write, STDERR_FILENO) == -1) std::exit(1);
     close(meta->stdin_read);
     close(meta->stdout_write);
+    close(meta->stderr_write);
   }
 }
 
@@ -1429,21 +1585,107 @@ CraneErrCode ProcInstance::Prepare() {
   } else {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
   }
-  m_meta_->parsed_output_file_pattern =
-      ParseFilePathPattern_(GetParentStep().io_meta().output_file_pattern(),
-                            GetParentStep().cwd(), true);
+  if (IsCrun()) {
+    auto* meta = GetCrunMeta_();
+    // Determine fwd or file for stdout, stdin, stderr,
+    // If both fwd and file are not requested, redirect to /dev/null
+    auto determine_fwd_or_file = [this](const std::string& pattern)
+        -> std::pair<bool /*fwd*/, bool /*file*/> {
+      if (pattern == "all") return {true, false};
+      if (pattern == "none") return {false, false};
+      task_id_t req_task_id{0};
+      bool is_file_path{false};
+      if (absl::SimpleAtoi(pattern, &req_task_id)) {
+        if (req_task_id < GetParentStep().ntasks_total()) {
+          if (req_task_id == task_id) {
+            // This task is requested
+            return {true, false};
+          } else {
+            // This task is not requested
+            return {false, false};
+          }
+        } else {
+          // Pattern is a file
+          return {false, true};
+        }
+      }
+      // Pattern is a file
+      return {false, true};
+    };
 
-  // If -e / --error is not defined, leave
-  // parsed_error_file_pattern empty;
-  if (!GetParentStep().io_meta().error_file_pattern().empty()) {
+    {
+      bool local_file{false};
+      const auto& output_pattern =
+          GetParentStep().io_meta().output_file_pattern();
+      auto [fwd, is_file] = determine_fwd_or_file(output_pattern);
+      meta->fwd_stdout = fwd;
+      if (is_file) {
+        auto path = ParseFilePathPattern_(output_pattern, GetParentStep().cwd(),
+                                          false, &local_file);
+        if (local_file) {
+          // The file is redirected to local file, contains may node
+          // name/taskid/nodex idx
+          meta->parsed_output_file_pattern = path;
+        } else {
+          // If not redirect to local file, stdout is forwarded to file wrote by
+          // crun
+          meta->fwd_stdout = true;
+        }
+      }
+    }
+    {
+      bool local_file{false};
+      const auto& input_pattern =
+          GetParentStep().io_meta().input_file_pattern();
+      auto [fwd, is_file] = determine_fwd_or_file(input_pattern);
+      meta->fwd_stdint = fwd;
+      if (is_file) {
+        // The file is redirected to local file, contains may node
+        // name/taskid/nodex idx
+        auto path = ParseFilePathPattern_(input_pattern, GetParentStep().cwd(),
+                                          false, &local_file);
+        if (local_file) {
+          meta->parsed_input_file_pattern = path;
+        } else {
+          // If not redirect to local file, stdin comes from file read by crun
+          meta->fwd_stdint = true;
+        }
+      }
+    }
+    {
+      bool local_file{false};
+      const auto& err_pattern = GetParentStep().io_meta().error_file_pattern();
+      auto [fwd, is_file] = determine_fwd_or_file(err_pattern);
+      meta->fwd_stderr = fwd;
+      if (is_file) {
+        meta->parsed_error_file_pattern = ParseFilePathPattern_(
+            err_pattern, GetParentStep().cwd(), false, &local_file);
+        if (local_file) {
+          // The file is redirected to local file, contains may node
+          // name/taskid/nodex idx
+          meta->parsed_error_file_pattern = meta->parsed_error_file_pattern;
+        } else {
+          // If not redirect to local file, stderr is forwarded to file wrote by
+          // crun
+          meta->fwd_stderr = true;
+        }
+      }
+    }
+
+  } else {
+    m_meta_->parsed_output_file_pattern =
+        ParseFilePathPattern_(GetParentStep().io_meta().output_file_pattern(),
+                              GetParentStep().cwd(), true, nullptr);
+
+    // If -e / --error is not defined, leave
+    // parsed_error_file_pattern empty;
     m_meta_->parsed_error_file_pattern =
         ParseFilePathPattern_(GetParentStep().io_meta().error_file_pattern(),
-                              GetParentStep().cwd(), false);
-  }
-  if (!GetParentStep().io_meta().input_file_pattern().empty()) {
+                              GetParentStep().cwd(), false, nullptr);
+
     m_meta_->parsed_input_file_pattern =
         ParseFilePathPattern_(GetParentStep().io_meta().input_file_pattern(),
-                              GetParentStep().cwd(), false);
+                              GetParentStep().cwd(), false, nullptr);
   }
 
   // If interpreter is not set, let system decide.

@@ -341,8 +341,13 @@ struct InteractiveMeta {
   struct StepResAllocArgs {
     job_id_t job_id;
     step_id_t step_id;
-    std::expected<std::pair<std::string, std::vector<CranedId>>, std::string>
-        allocated_nodes;
+    struct ResAllocInfo {
+      std::string allocated_craned_regex;
+      std::vector<CranedId> allocated_craned_ids;
+      std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
+      uint32_t ntasks_total;
+    };
+    std::expected<ResAllocInfo, std::string> res_allocate_expt;
   };
   std::function<void(StepResAllocArgs const&)> cb_step_res_allocated;
 
@@ -683,7 +688,7 @@ struct CommonStepInCtld : StepInCtld {
   std::string allocated_craneds_regex;
   // TODO: Schedule thread should fill in following task map
   std::unordered_map<task_id_t, ResourceInNode> task_res_map;
-  std::unordered_map<CranedId, std::unordered_set<task_id_t>> craned_task_map;
+  std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
@@ -1011,11 +1016,18 @@ struct TaskInCtld {
         }
       }
       const auto& meta = step->ia_meta.value();
-      meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+      auto arg = StepInteractiveMeta::StepResAllocArgs{
           .job_id = step->job_id,
           .step_id = step->StepId(),
-          .allocated_nodes{std::make_pair(
-              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+          .res_allocate_expt{
+              StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                  .allocated_craned_regex = step->allocated_craneds_regex,
+                  .allocated_craned_ids = step_craned_ids,
+                  .craned_task_map = step->craned_task_map,
+                  .ntasks_total =
+                      static_cast<uint32_t>(step->task_res_map.size())}}};
+
+      meta.cb_step_res_allocated(arg);
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       ++popped_count;

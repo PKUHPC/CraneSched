@@ -1905,7 +1905,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
-  std::string script = script = task->TaskToCtld().sh_script();
+  std::string script = task->TaskToCtld().sh_script();
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
 
   if (task->type == crane::grpc::Container)

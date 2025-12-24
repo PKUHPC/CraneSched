@@ -446,6 +446,8 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   // No need to set batch/ia/io meta and script
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
   step_to_d.set_get_user_env(this->get_user_env);
+  // FIXME: ntasks_total should be set according to a ntasks filed in job
+  step_to_d.set_ntasks_total(this->job->ntasks_per_node * this->job->node_num);
   step_to_d.set_extra_attr(extra_attr);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -508,11 +510,17 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         }
         if (primary_step->type == crane::grpc::Interactive) {
           const auto& meta = primary_step->ia_meta.value();
-          meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+          auto arg = StepInteractiveMeta::StepResAllocArgs{
               .job_id = primary_step->job_id,
               .step_id = primary_step->StepId(),
-              .allocated_nodes{std::make_pair(job->allocated_craneds_regex,
-                                              job->CranedIds())}});
+              .res_allocate_expt{
+                  StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                      .allocated_craned_regex = job->allocated_craneds_regex,
+                      .allocated_craned_ids = job->CranedIds(),
+                      .craned_task_map = primary_step->craned_task_map,
+                      .ntasks_total = static_cast<uint32_t>(
+                          primary_step->task_res_map.size())}}};
+          meta.cb_step_res_allocated(arg);
         }
         job->SetPrimaryStep(std::move(primary_step));
         for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
@@ -827,6 +835,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_cwd(this->cwd);
   step_to_d.set_get_user_env(this->get_user_env);
+  step_to_d.set_ntasks_total(this->task_res_map.size());
   step_to_d.set_extra_attr(extra_attr);
 
   for (const auto& hostname : this->m_craned_ids_)
@@ -856,6 +865,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
     mutable_meta->CopyFrom(StepToCtld().io_meta());
   }
   step_to_d.set_sh_script(StepToCtld().sh_script());
+  step_to_d.mutable_io_meta()->CopyFrom(StepToCtld().io_meta());
 
   return step_to_d;
 }

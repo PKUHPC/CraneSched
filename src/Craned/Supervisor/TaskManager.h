@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "Supervisor.grpc.pb.h"
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -198,10 +199,10 @@ class StepInstance {
 struct TaskInstanceMeta {
   virtual ~TaskInstanceMeta() = default;
 
-  std::string parsed_sh_script_path;
-  std::string parsed_input_file_pattern;
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
+  std::string parsed_sh_script_path{};
+  std::string parsed_input_file_pattern{};
+  std::string parsed_output_file_pattern{};
+  std::string parsed_error_file_pattern{};
 };
 
 struct BatchInstanceMeta : TaskInstanceMeta {
@@ -213,8 +214,14 @@ struct CrunInstanceMeta : TaskInstanceMeta {
 
   int stdin_write;
   int stdout_write;
+  int stderr_write;
   int stdin_read;
   int stdout_read;
+  int stderr_read;
+
+  bool fwd_stdint;
+  bool fwd_stdout;
+  bool fwd_stderr;
 };
 
 struct TaskExitInfo {
@@ -238,6 +245,8 @@ class ITaskInstance {
   ITaskInstance& operator=(ITaskInstance&&) = delete;
   ITaskInstance& operator=(const ITaskInstance&) = delete;
 
+  [[nodiscard]] bool IsBatch() const { return m_parent_step_inst_->IsBatch(); }
+  [[nodiscard]] bool IsCrun() const { return m_parent_step_inst_->IsCrun(); }
   // Helper methods shared by all task instances
   StepInstance* GetParentStepInstance() const { return m_parent_step_inst_; }
   const StepToSupv& GetParentStep() const {
@@ -396,13 +405,12 @@ class ProcInstance : public ITaskInstance {
   std::vector<std::string> GetChildProcExecArgv_() const;
 
   /* Perform file name substitutions
-   * %j - Job ID
-   * %u - Username
-   * %x - Job name
+   * @return: pair of (parsed file path, true if file on local machine)
    */
   std::string ParseFilePathPattern_(const std::string& pattern,
                                     const std::string& cwd,
-                                    bool is_stdout) const;
+                                    bool is_batch_stdout,
+                                    bool* is_local_file) const;
 
   std::unique_ptr<TaskInstanceMeta> m_meta_;
   pid_t m_pid_{0};  // forked pid

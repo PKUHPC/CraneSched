@@ -541,6 +541,27 @@ message QueryTaskEfficiencyReply {
   repeated TaskEfficiencyInfo efficiency_data = 3;
 }
 
+message QueryNodeEventsRequest {
+  repeated string node_names = 1;  // Node names to query, empty means all nodes
+  uint32 uid = 2;                  // User ID for authorization
+}
+
+message NodeEventInfo {
+  string cluster_name = 1;
+  string node_name = 2;
+  uint64 uid = 3;
+  int64 start_time = 4;  // Unix timestamp in nanoseconds
+  int64 end_time = 5;    // Unix timestamp in nanoseconds
+  string state = 6;
+  string reason = 7;
+}
+
+message QueryNodeEventsReply {
+  bool ok = 1;
+  string error_message = 2;
+  repeated NodeEventInfo event_info_list = 3;
+}
+
 message CreateReservationRequest {
   uint32 uid = 1;
   string reservation_name = 2;
@@ -705,6 +726,11 @@ message StreamCtldReply {
     string allocated_craned_regex = 4;
     string failure_reason = 5;
     repeated string craned_ids = 6;
+    message Tasks {
+      repeated uint32 task_ids = 1;
+    }
+    map<string, Tasks> craned_task_map = 7;
+    uint32 ntasks_total = 8;
   }
 
   message TaskCancelRequest {
@@ -764,6 +790,7 @@ message StreamCrunRequest {
   message TaskIOForwardReq {
     bytes msg = 1;
     bool eof = 2;
+    optional uint32 task_id = 3;
   }
 
   message TaskX11ForwardReq {
@@ -796,6 +823,7 @@ message StreamCrunReply {
     TASK_EXIT_STATUS = 7;
     TASK_X11_CONN = 8;
     TASK_X11_EOF = 9;
+    TASK_ERR_OUTPUT_FORWARD = 10;
   }
 
   message TaskIdReply {
@@ -809,6 +837,11 @@ message StreamCrunReply {
     bool ok = 1;
     string allocated_craned_regex = 2;
     repeated string craned_ids = 3;
+    message Tasks {
+      repeated uint32 task_ids = 1;
+    }
+    map<string, Tasks> craned_task_map = 4;
+    uint32 ntasks_total = 5;
   }
 
   message TaskCancelRequest {}
@@ -822,6 +855,10 @@ message StreamCrunReply {
   }
 
   message TaskIOForwardReply {
+    bytes msg = 1;
+  }
+
+  message TaskIOErrOutputForwardReply {
     bytes msg = 1;
   }
 
@@ -860,6 +897,7 @@ message StreamCrunReply {
     TaskExitStatusReply payload_task_exit_status_reply = 9;
     TaskX11ConnReply payload_task_x11_conn_reply = 10;
     TaskX11EofReply payload_task_x11_eof_reply = 11;
+    TaskIOErrOutputForwardReply payload_task_io_err_output_forward_reply = 12;
   }
 }
 
@@ -885,6 +923,10 @@ message StreamTaskIORequest {
     bytes msg = 1;
   }
 
+  message TaskErrOutputReq {
+    bytes msg = 1;
+  }
+
   message SupervisorUnRegisterReq {}
 
   message TaskX11FwdConnReq {
@@ -907,10 +949,6 @@ message StreamTaskIORequest {
     uint32 task_id = 1;
     uint32 exit_code = 2;
     bool signaled = 3;
-  }
-
-  message TaskErrOutputReq {
-    bytes msg = 1;
   }
 
   SupervisorRequestType type = 1;
@@ -942,6 +980,7 @@ message StreamTaskIOReply {
   message TaskInputReq {
     bytes msg = 1;
     bool eof = 2;
+    optional uint32 task_id = 3;
   }
 
   message SupervisorUnregisterReply {
@@ -1128,8 +1167,9 @@ service CraneCtld {
   rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
 }
 
-service CeffQueryService {
+service PluginQueryService {
   rpc QueryTaskEfficiency(QueryTaskEfficiencyRequest) returns (QueryTaskEfficiencyReply);
+  rpc QueryNodeEvents(QueryNodeEventsRequest) returns (QueryNodeEventsReply);
 }
 
 service CraneCtldForInternal {

@@ -345,6 +345,8 @@ message StepToD {
 
   bool get_user_env = 25;
 
+  uint32 ntasks_total = 26;
+
   // Not used now.
   string extra_attr = 29;
 }
@@ -365,6 +367,10 @@ message IoMeta {
   string input_file_pattern = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
+
+  // For crun only
+  optional uint32 input_task_id = 5;
+  optional uint32 output_task_id = 6;
 }
 
 message BatchTaskAdditionalMeta {
