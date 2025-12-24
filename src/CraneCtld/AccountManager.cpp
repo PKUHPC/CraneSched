@@ -1251,6 +1251,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, log);
       };
 
   // Update to database
@@ -1260,7 +1261,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     return rich_error_list;
   }
 
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyUser, log);
   // Update the memory
   m_user_map_[name] = std::make_unique<Ctld::User>(std::move(res_user));
   return rich_error_list;
@@ -1270,6 +1270,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     uint32_t uid, const std::string& name,
     const std::vector<crane::grpc::ModifyFieldOperation>& operations) {
   std::vector<CraneExpectedRich<void>> rich_error_list;
+  std::string actor_name = "";
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -1279,6 +1280,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
       return rich_error_list;
     }
     const User* op_user = user_result.value();
+    actor_name = op_user->name;
 
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) {
@@ -1319,49 +1321,65 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     return rich_error_list;
   }
 
-  std::vector<Qos> qos_list;
-  bool need_rollback = false;
+  Qos res_qos(*m_qos_map_[name]);
+  std::string log = "";
 
-  // do the modify operations in database
-
-  g_db_client->StartTransaction();
   for (const auto& operation : operations) {
     auto value = operation.value_list()[0];
-    auto item = Qos::GetModifyFieldStr(operation.modify_field());
-    bool result = true;
-    if (item == "description") {
-      // Update to database
-      result =
-          result && g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS,
-                                                 "$set", name, item, value);
-    } else {
-      /* uint32 Type Stores data based on long(int64_t) */
-      int64_t value_number;
-      util::ConvertStringToInt64(value, &value_number);
-      result = result &&
-               g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS,
-                                            "$set", name, item, value_number);
-    }
-    Qos qos;
-    result = result && g_db_client->SelectQos("name", name, &qos);
-    if (!result) {
-      need_rollback = true;
+    switch (operation.modify_field()) {
+    case crane::grpc::ModifyField::Description: {
+      res_qos.description = value;
+      log += fmt::format("Set: qos: {}, description: {}\n", name, value);
       break;
     }
-    qos_list.emplace_back(qos);
+    case crane::grpc::ModifyField::Priority: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.priority = value_number;
+      log += fmt::format("Set: qos: {}, priority: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxJobsPerUser: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_jobs_per_user = value_number;
+      log += fmt::format("Set: qos: {}, max_jobs_per_user: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxCpusPerUser: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_cpus_per_user = value_number;
+      log += fmt::format("Set: qos: {}, max_cpus_per_user: {}\n", name, value);
+      break;
+    }
+    case crane::grpc::ModifyField::MaxTimeLimitPerTask: {
+      int64_t value_number;
+      util::ConvertStringToInt64(value, &value_number);
+      res_qos.max_time_limit_per_task = absl::Seconds(value_number);
+      log += fmt::format("Set: qos: {}, max_time_limit_per_task: {}\n", name,
+                         value);
+      break;
+    }
+    default:
+      std::unreachable();
+    }
   }
-  if (need_rollback) {
-    g_db_client->AbortTransaction();
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateQos(res_qos);
+        AddTxnLogToDB_(actor_name, name, TxnAction::ModifyQos, log);
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
     rich_error_list.emplace_back(
         std::unexpected{FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")});
     return rich_error_list;
-  } else {
-    g_db_client->CommitTransactionWithoutCallback();
   }
-  // do the modify operations in memory
-  for (auto qos : qos_list) {
-    *m_qos_map_[name] = std::move(qos);
-  }
+
+  m_qos_map_[name] = std::make_unique<Ctld::Qos>(std::move(res_qos));
+
   return rich_error_list;
 }
 
