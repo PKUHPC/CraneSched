@@ -56,12 +56,6 @@ struct StepInstance {
     return step_to_d.type() == crane::grpc::TaskType::Container;
   }
 
-  [[nodiscard]] bool IsCalloc() const noexcept {
-    return step_to_d.has_interactive_meta() &&
-           step_to_d.interactive_meta().interactive_type() ==
-               crane::grpc::Calloc;
-  }
-
   [[nodiscard]] std::string StepIdString() const noexcept {
     return std::format("{}.{}", job_id, step_id);
   }

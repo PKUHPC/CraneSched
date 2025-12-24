@@ -647,31 +647,31 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob ||
         !g_config.JobLifecycleHook.TaskPrologs.empty() ||
         !g_config.JobLifecycleHook.TaskEpilogs.empty()) {
-      auto* log_hook_conf = init_req.mutable_job_lifecycle_hook_config();
+      auto* job_lifecycle_hook_conf = init_req.mutable_job_lifecycle_hook_config();
 
       for (const auto& prolog : g_config.JobLifecycleHook.TaskPrologs) {
-        log_hook_conf->add_task_prologs(prolog);
+        job_lifecycle_hook_conf->add_task_prologs(prolog);
       }
       for (const auto& epilog : g_config.JobLifecycleHook.TaskEpilogs) {
-        log_hook_conf->add_task_epilogs(epilog);
+        job_lifecycle_hook_conf->add_task_epilogs(epilog);
       }
 
-      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob) {
+      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob && step->IsDaemonStep()) {
         for (const auto& prolog : g_config.JobLifecycleHook.Prologs) {
-          log_hook_conf->add_prologs(prolog);
+          job_lifecycle_hook_conf->add_prologs(prolog);
         }
         for (const auto& epilog : g_config.JobLifecycleHook.Epilogs) {
-          log_hook_conf->add_epilogs(epilog);
+          job_lifecycle_hook_conf->add_epilogs(epilog);
         }
       }
 
-      log_hook_conf->set_prolog_timeout(
+      job_lifecycle_hook_conf->set_prolog_timeout(
           g_config.JobLifecycleHook.PrologTimeout);
-      log_hook_conf->set_epilog_timeout(
+      job_lifecycle_hook_conf->set_epilog_timeout(
           g_config.JobLifecycleHook.EpilogTimeout);
-      log_hook_conf->set_prolog_epilog_timeout(
+      job_lifecycle_hook_conf->set_prolog_epilog_timeout(
           g_config.JobLifecycleHook.PrologEpilogTimeout);
-      log_hook_conf->set_max_output_size(
+      job_lifecycle_hook_conf->set_max_output_size(
           g_config.JobLifecycleHook.MaxOutputSize);
     }
 

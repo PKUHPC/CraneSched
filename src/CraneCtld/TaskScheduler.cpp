@@ -1142,7 +1142,7 @@ void TaskScheduler::ScheduleThread_() {
       Mutex thread_pool_mtx;
       HashSet<task_id_t> failed_job_id_set;
 
-      if (!g_config.JobLifecycleHook.PrologCtlds.empty()) {
+      if (!g_config.JobLifecycleHook.CranectldPrologs.empty()) {
         // TODO: cbatch job must be requeue
         begin = std::chrono::steady_clock::now();
         absl::BlockingCounter prolog_bl(jobs_to_run.size());
@@ -1151,7 +1151,7 @@ void TaskScheduler::ScheduleThread_() {
           g_thread_pool->detach_task([&, job_id, env = job->env]() {
             // run prolog ctld script
             RunPrologEpilogArgs run_prolog_args{
-                .scripts = g_config.JobLifecycleHook.PrologCtlds,
+                .scripts = g_config.JobLifecycleHook.CranectldPrologs,
                 .envs = env,
                 .run_uid = 0,
                 .run_gid = 0,
@@ -1164,7 +1164,7 @@ void TaskScheduler::ScheduleThread_() {
               run_prolog_args.timeout_sec =
                   g_config.JobLifecycleHook.PrologEpilogTimeout;
             }
-            CRANE_TRACE("#{}: Running PrologCtld as UID {} with timeout {}s",
+            CRANE_TRACE("#{}: Running CraneCtldProlog as UID {} with timeout {}s",
                         job_id, run_prolog_args.run_uid,
                         run_prolog_args.timeout_sec);
             auto run_prolog_result =
@@ -1180,7 +1180,7 @@ void TaskScheduler::ScheduleThread_() {
         prolog_bl.Wait();
         end = std::chrono::steady_clock::now();
         CRANE_TRACE(
-            "PrologCtld running costed {} ms",
+            "CraneCtldProlog running costed {} ms",
             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                 .count());
       }
@@ -3389,10 +3389,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (!task->licenses_count.empty())
         g_licenses_manager->FreeLicense(task->licenses_count);
 
-      if (!g_config.JobLifecycleHook.EpilogCtlds.empty()) {
+      if (!g_config.JobLifecycleHook.CranectldEpilogs.empty()) {
         g_thread_pool->detach_task([env_copy = task->env]() {
           RunPrologEpilogArgs run_epilog_ctld_args{
-              .scripts = g_config.JobLifecycleHook.EpilogCtlds,
+              .scripts = g_config.JobLifecycleHook.CranectldEpilogs,
               .envs = env_copy,
               .run_uid = 0,
               .run_gid = 0,
@@ -3405,7 +3405,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             run_epilog_ctld_args.timeout_sec =
                 g_config.JobLifecycleHook.PrologEpilogTimeout;
           }
-          CRANE_TRACE("Running EpilogCtld as UID {} with timeout {}s",
+          CRANE_TRACE("Running CraneCtldEpilog as UID {} with timeout {}s",
                       run_epilog_ctld_args.run_uid,
                       run_epilog_ctld_args.timeout_sec);
           util::os::RunPrologOrEpiLog(run_epilog_ctld_args);
