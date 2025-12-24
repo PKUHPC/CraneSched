@@ -22,9 +22,10 @@
 
 namespace crane {
 
-#ifdef HAVE_LUA
+
 
 bool LuaEnvironment::Init(const std::string& script) {
+#ifdef HAVE_LUA
   m_lua_script_ = script;
   m_lua_state_ptr_ = std::make_unique<sol::state>(sol::state());
   m_lua_state_ptr_->open_libraries(sol::lib::base, sol::lib::package,
@@ -33,17 +34,12 @@ bool LuaEnvironment::Init(const std::string& script) {
                        ? (*m_lua_state_ptr_)["crane"]
                        : (*m_lua_state_ptr_).create_named_table("crane");
   RegisterFunctions_();
+#endif
   return true;
 }
 
-void LuaEnvironment::RegisterLuaCraneStructFunctions(
-    const luaL_Reg* global_funcs) {
-  for (const luaL_Reg* reg = global_funcs; reg->name != nullptr; ++reg) {
-    m_crane_table_.set_function(reg->name, reg->func);
-  }
-}
-
 bool LuaEnvironment::LoadLuaScript(const std::vector<std::string>& req_funcs) {
+#ifdef HAVE_LUA
   if (m_lua_state_ptr_ == nullptr) {
     CRANE_DEBUG(
         "Lua state (m_lua_state_) is null when loading script '{}'. "
@@ -93,10 +89,11 @@ bool LuaEnvironment::LoadLuaScript(const std::vector<std::string>& req_funcs) {
     CRANE_ERROR("{}: required function(s) not present", m_lua_script_);
     return false;
   }
-
+#endif
   return true;
 }
 
+#ifdef HAVE_LUA
 void LuaEnvironment::RegisterFunctions_() {
   // crane.log_info()
   m_crane_table_.set_function("log_info", [](const sol::variadic_args& va) {

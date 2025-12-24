@@ -933,6 +933,11 @@ void InitializeCtldGlobalVariables() {
 
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
 
+  if (!g_config.JobSubmitLuaScript.empty()) {
+    g_lua_pool = std::make_unique<crane::LuaPool>();
+    if (!g_lua_pool->Init()) std::exit(1);
+  }
+
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
@@ -972,9 +977,6 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
-
-  if (!g_config.JobSubmitLuaScript.empty())
-    g_lua_pool = std::make_unique<crane::LuaPool>();
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 

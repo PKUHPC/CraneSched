@@ -28,8 +28,6 @@
 #include "crane/Logger.h"
 
 namespace crane {
-#ifdef HAVE_LUA
-
 class LuaEnvironment {
  public:
   LuaEnvironment() = default;
@@ -37,10 +35,8 @@ class LuaEnvironment {
 
   bool Init(const std::string& script);
 
-  void RegisterLuaCraneStructFunctions(const luaL_Reg* global_funcs);
-
   bool LoadLuaScript(const std::vector<std::string>& req_funcs);
-
+#ifdef HAVE_LUA
   sol::state& GetLuaState() const { return  *m_lua_state_ptr_; }
   sol::table GetCraneTable() const { return m_crane_table_;}
   std::string GetUserMsg() const { return m_user_msg_; }
@@ -58,21 +54,28 @@ class LuaEnvironment {
   std::unique_ptr<sol::state> m_lua_state_ptr_;
   sol::table m_crane_table_;
   std::string m_user_msg_;
-};
 #endif
+};
+
 
 class LuaPool {
  public:
-  LuaPool() {
+  LuaPool() = default;
+
+  bool Init() {
+#ifndef HAVE_LUA
+    CRANE_ERROR("Lua is not enable");
+    return false;
+#endif
     m_thread_pool_ = std::make_unique<BS::thread_pool>(
         std::thread::hardware_concurrency(),
         [] { util::SetCurrentThreadName("LuaThreadPool"); });
+    return true;
   }
 
   std::future<CraneRichError> ExecuteLuaScript(const std::string& lua_script) {
     auto promise = std::make_shared<std::promise<CraneRichError>>();
     std::future<CraneRichError> fut = promise->get_future();
-
     m_thread_pool_->detach_task([lua_script, promise]() {
       CraneRichError result;
       auto lua_env = std::make_unique<crane::LuaEnvironment>();
@@ -86,7 +89,6 @@ class LuaPool {
 
       promise->set_value(result);
     });
-
     return fut;
   }
 
