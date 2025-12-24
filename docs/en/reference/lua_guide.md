@@ -192,6 +192,8 @@ Same as the return values of `crane_job_submit`.
 
 ## Lua Script Configuration
 
+The system needs to have Lua version 5.x installed.
+
 ### /etc/crane/config.yaml
 
 ```yaml

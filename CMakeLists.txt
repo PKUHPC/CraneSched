@@ -85,6 +85,9 @@ option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" OFF)
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
+
+option(CRANE_WITH_LUA "Enable lua" ON)
+
 # Options end here -------------------------------------------------------------------------------
 
 if (CRANE_ENABLE_BPF AND NOT CRANE_ENABLE_CGROUP_V2)
@@ -273,14 +276,16 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
-find_package(Lua QUIET)
-if(LUA_FOUND)
-    add_definitions(-DHAVE_LUA)
-    set(LUA_INCLUDE_DIR ${LUA_INCLUDE_DIR} CACHE PATH "Lua include dir")
-    set(LUA_LIBRARIES ${LUA_LIBRARIES} CACHE STRING "Lua libraries")
-    message(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
-    message(STATUS "LUA_LIBRARIES = ${LUA_LIBRARIES}")
-endif()
+if (CRANE_WITH_LUA)
+    find_package(Lua QUIET)
+    if(LUA_FOUND)
+        add_definitions(-DHAVE_LUA)
+        set(LUA_INCLUDE_DIR ${LUA_INCLUDE_DIR} CACHE PATH "Lua include dir")
+        set(LUA_LIBRARIES ${LUA_LIBRARIES} CACHE STRING "Lua libraries")
+        message(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
+        message(STATUS "LUA_LIBRARIES = ${LUA_LIBRARIES}")
+    endif()
+endif ()
 
 if (${CRANE_FULL_DYNAMIC})
     set(CMAKE_SKIP_BUILD_RPATH FALSE)

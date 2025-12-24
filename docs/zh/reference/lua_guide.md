@@ -175,6 +175,7 @@ cranectld 当前保存的被修改作业的数据结构。
 | denied_users     | table(string list) | 预约拒绝的用户 |
 
 ## Lua 脚本配置
+系统需安装Lua5.x版本
 
 ### /etc/crane/config.yaml
 
