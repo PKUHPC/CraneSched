@@ -51,8 +51,8 @@ dependency 功能在以下命令中可用：
   - `d`, `day`, `days` - 天
   - `w`, `week`, `weeks` - 周
 
-- **D-HH:MM:SS 格式**
-  - 示例：`1-01:30:00` = 1天1小时30分钟
+!!! warning "不支持的格式"
+    **不要使用** `HH:MM:SS` 或 `D-HH:MM:SS` 格式（如 `01:30:00` 或 `1-01:30:00`）。冒号 `:` 字符被保留用作作业 ID 分隔符，因此这类格式会被误解析为多个作业 ID，而不是延迟时间。这可能导致"重复作业"错误，或者静默成功但产生完全错误的依赖行为。请始终使用带单位的时间格式（如 `90m` 或 `1h30m`）。
 
 ### 多依赖组合
 
@@ -106,8 +106,8 @@ cbatch --dependency afterok:100+30 my_script.sh
 # 等待作业 100 成功完成后，延迟 10 秒钟再运行
 cbatch --dependency afterok:100+10s my_script.sh
 
-# 使用 HH:MM:SS 格式指定延迟
-cbatch --dependency afterok:100+01:30:00 my_script.sh
+# 延迟 1 小时 30 分钟（使用带单位的格式）
+cbatch --dependency afterok:100+90m my_script.sh
 ```
 
 ### 3. 多依赖
@@ -195,6 +195,7 @@ Dependency=PendingDependencies=afterok:100+01:00:00 Status=WaitForAll
 | 延迟格式无效 | 延迟时间格式不正确 | `afterok:100+invalid` |
 | 重复依赖 | 同一作业 ID 出现多次 | `afterok:100:100` |
 | 作业 ID 不存在或已结束 | 依赖的作业不存在（运行时检查）| `afterok:99999` |
+| 不支持的时间格式 | 在延迟中使用 `:` （被误解析为作业 ID） | `after:1+00:00:01` 或 `after:1+00:00:02` （解析为多个作业 ID，可能报错也可能不报错） |
 
 ### 错误示例
 
@@ -207,6 +208,19 @@ $ cbatch --dependency afterok:100+invalid job.sh
 
 # 错误：重复的作业 ID
 $ cbatch --dependency afterok:100,afternotok:100 job.sh
+
+# 错误：在延迟时间中使用冒号（会被误解析为作业 ID 分隔符）
+$ cbatch --dependency after:1+00:00:01 job.sh
+# 会被解析为：等待作业 1, 00, 00, 01
+# 错误信息："duplicate task 1 in dependencies"（作业 1 出现两次）
+
+$ cbatch --dependency after:1+00:00:02 job.sh
+# 会被解析为：等待作业 1, 00, 00, 02
+# 可能提交成功但行为错误（等待作业 00 和 02，忽略了 1 秒延迟）
+
+# 正确：始终使用带单位的时间格式
+$ cbatch --dependency after:1+1s job.sh
+$ cbatch --dependency after:1+2s job.sh
 ```
 
 ## 相关命令
