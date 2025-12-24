@@ -341,8 +341,7 @@ struct InteractiveMeta {
   struct StepResAllocArgs {
     job_id_t job_id;
     step_id_t step_id;
-    std::expected<std::pair<std::string, std::unordered_set<CranedId>>,
-                  std::string>
+    std::expected<std::pair<std::string, std::vector<CranedId>>, std::string>
         allocated_nodes;
   };
   std::function<void(StepResAllocArgs const&)> cb_step_res_allocated;
@@ -519,7 +518,7 @@ struct StepInCtld {
   std::int32_t m_requeue_count_{0};
   ResourceV2 m_allocated_res_;
 
-  std::unordered_set<CranedId> m_craned_ids_;
+  std::vector<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
 
   std::unordered_set<CranedId> m_configuring_nodes_;
@@ -581,10 +580,8 @@ struct StepInCtld {
   void SetAllocatedRes(const ResourceV2& res);
   ResourceV2 AllocatedRes() const { return m_allocated_res_; }
 
-  void SetCranedIds(const std::unordered_set<CranedId>& craned_list);
-  const std::unordered_set<CranedId>& CranedIds() const {
-    return m_craned_ids_;
-  }
+  void SetCranedIds(const std::vector<CranedId>& craned_list);
+  const std::vector<CranedId>& CranedIds() const { return m_craned_ids_; }
 
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
@@ -966,7 +963,7 @@ struct TaskInCtld {
         continue;
       }
       ResourceV2 step_alloc_res;
-      std::unordered_set<CranedId> step_craned_ids;
+      std::vector<CranedId> step_craned_ids;
       for (auto const& craned_id :
            step_res_avail_.EachNodeResMap() | std::views::keys) {
         if (step->excluded_nodes.contains(craned_id)) {
@@ -983,7 +980,7 @@ struct TaskInCtld {
           continue;
         }
         step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-        step_craned_ids.insert(craned_id);
+        step_craned_ids.emplace_back(craned_id);
         if (step_craned_ids.size() >= step->node_num) {
           break;
         }
@@ -995,8 +992,10 @@ struct TaskInCtld {
       step->SetCranedIds(step_craned_ids);
       step->allocated_craneds_regex =
           util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(step_craned_ids);
-      step->SetExecutionNodes(step_craned_ids);
+      auto node_set =
+          std::unordered_set(step_craned_ids.begin(), step_craned_ids.end());
+      step->SetConfiguringNodes(node_set);
+      step->SetExecutionNodes(node_set);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
       task_id_t cur_task_id = 0;

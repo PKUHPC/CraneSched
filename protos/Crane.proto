@@ -872,6 +872,7 @@ message StreamTaskIORequest {
     TASK_EXIT_STATUS = 4;
     TASK_X11_CONN = 5;
     TASK_X11_EOF = 6;
+    TASK_ERR_OUTPUT = 7;
   }
 
   message SupervisorRegisterReq {
@@ -908,6 +909,10 @@ message StreamTaskIORequest {
     bool signaled = 3;
   }
 
+  message TaskErrOutputReq {
+    bytes msg = 1;
+  }
+
   SupervisorRequestType type = 1;
 
   oneof payload {
@@ -918,6 +923,7 @@ message StreamTaskIORequest {
     TaskExitStatus payload_task_exit_status_req = 6;
     TaskX11FwdConnReq payload_task_x11_fwd_conn_req = 7;
     TaskX11OutputEofReq payload_task_x11_eof_req = 8;
+    TaskErrOutputReq payload_task_err_output_req = 9;
   }
 }
 

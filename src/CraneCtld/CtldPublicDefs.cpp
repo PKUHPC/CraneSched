@@ -152,7 +152,7 @@ void StepInCtld::SetAllocatedRes(const ResourceV2& res) {
       static_cast<crane::grpc::ResourceV2>(res);
 }
 
-void StepInCtld::SetCranedIds(const std::unordered_set<CranedId>& craned_list) {
+void StepInCtld::SetCranedIds(const std::vector<CranedId>& craned_list) {
   this->m_craned_ids_ = craned_list;
   this->m_runtime_attr_.mutable_craned_ids()->Assign(craned_list.begin(),
                                                      craned_list.end());
@@ -362,9 +362,10 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
   SetAllocatedRes(job.AllocatedRes());
 
   SetCranedIds({job.CranedIds().begin(), job.CranedIds().end()});
-  SetExecutionNodes(CranedIds());
-  SetConfiguringNodes(CranedIds());
-  SetRunningNodes(CranedIds());
+  auto node_set = job.CranedIds() | std::ranges::to<std::unordered_set>();
+  SetExecutionNodes(node_set);
+  SetConfiguringNodes(node_set);
+  SetRunningNodes(node_set);
 
   SetSubmitTime(job.SubmitTime());
   SetStartTime(job.StartTime());
@@ -510,9 +511,8 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
           meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
               .job_id = primary_step->job_id,
               .step_id = primary_step->StepId(),
-              .allocated_nodes{std::make_pair(
-                  job->allocated_craneds_regex,
-                  job->CranedIds() | std::ranges::to<std::unordered_set>())}});
+              .allocated_nodes{std::make_pair(job->allocated_craneds_regex,
+                                              job->CranedIds())}});
         }
         job->SetPrimaryStep(std::move(primary_step));
         for (auto& node_id : job->PrimaryStep()->ExecutionNodes()) {
@@ -758,19 +758,9 @@ void CommonStepInCtld::SetFieldsByStepToCtld(
 
   time_limit = absl::Seconds(step_to_ctld.time_limit().seconds());
   // Following fields will zero value will inherit from job
-  if (step_to_ctld.has_req_resources_per_task()) {
-    requested_task_res_view = step_to_ctld.req_resources_per_task();
-  } else {
-    requested_task_res_view.SetToZero();
-  }
-  if (step_to_ctld.has_node_num())
-    node_num = step_to_ctld.node_num();
-  else
-    node_num = 0;
-  if (step_to_ctld.has_ntasks_per_node())
-    ntasks_per_node = step_to_ctld.ntasks_per_node();
-  else
-    ntasks_per_node = 0;
+  requested_task_res_view = step_to_ctld.req_resources_per_task();
+  node_num = step_to_ctld.node_num();
+  ntasks_per_node = step_to_ctld.ntasks_per_node();
 
   {
     std::list<std::string> included_list{};
