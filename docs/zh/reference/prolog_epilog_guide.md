@@ -16,10 +16,10 @@ Crane 支持多种 `prolog` 和 `epilog` 程序。请注意，出于安全原因
 | 参数                                      | 位置        | 调用者        | 用户            | 执行时机                    |
 |-----------------------------------------|-----------|------------|---------------|-----------------------------|
 | CrunProlog（config.yaml 或 crun --prolog） | crun 调用节点 | crun 命令    | 执行 crun 命令的用户 | 作业步骤启动前              |
-| TaskProlog（config.yaml）                 | 计算节点      | cranestepd | 执行 crun 命令的用户 | 作业步骤启动前              |
-| crun --task-prolog                      | 计算节点      | cranestepd | 执行 crun 命令的用户 | 作业步骤启动前              |
-| TaskEpilog（config.yaml）                 | 计算节点      | cranestepd | 执行 crun 命令的用户 | 作业步骤完成时              |
-| crun --task-epilog                      | 计算节点      | cranestepd | 执行 crun 命令的用户 | 作业步骤完成时              |
+| TaskProlog（config.yaml）                 | 计算节点      | cranestepd->csupervisor | 执行 crun 命令的用户 | 作业步骤启动前              |
+| crun --task-prolog                      | 计算节点      | cranestepd->csupervisor | 执行 crun 命令的用户 | 作业步骤启动前              |
+| TaskEpilog（config.yaml）                 | 计算节点      | cranestepd->csupervisor | 执行 crun 命令的用户 | 作业步骤完成时              |
+| crun --task-epilog                      | 计算节点      | cranestepd->csupervisor | 执行 crun 命令的用户 | 作业步骤完成时              |
 | CrunEpilog（config.yaml 或 crun --epilog） | crun 调用节点 | crun 命令    | 执行 crun 命令的用户 | 作业步骤完成时              |
 
 默认情况下，`Prolog` 脚本只会在某个节点首次收到来自新分配的作业步骤时运行；
