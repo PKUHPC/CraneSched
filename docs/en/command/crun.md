@@ -12,7 +12,7 @@ crun only supports request parameters via command line. Supported command-line o
 - **-C/--config string**: Path to configuration file (default: "/etc/crane/config.yaml")
 - **-c/--cpus-per-task float**: Number of CPUs required per task (default: 1)
 - **--comment string**: Comment for the job
-- **-d/--dependency string**: Job dependency. Format: `<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` or `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`. Supported types: `after`, `afterok`, `afternotok`, `afterany`
+- **-d/--dependency string**: Job dependency. Format: `<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` or `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`. Supported types: `after`, `afterok`, `afternotok`, `afterany`. **Note**: For `<delay>`, use time with units (e.g., `10s`, `5m`, `2h`) - do NOT use `HH:MM:SS` format as `:` is the job ID separator. See [Job Dependency](../reference/job_dependency.md) for details
 - **--debug-level string**: Available debug levels: trace, debug, info (default: "info")
 - **-x/--exclude string**: Exclude specific nodes from allocation (comma-separated list)
 - **--exclusive**: Exclusive node resources

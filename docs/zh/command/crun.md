@@ -12,7 +12,7 @@ crun只支持通过命令行指定请求参数，支持的命令行选项：
 - **-C/--config string**: 配置文件路径（默认"/etc/crane/config.yaml"）
 - **-c/--cpus-per-task float**: 每个任务所需的CPU数量（默认值为1）
 - **--comment string**: 作业的备注
-- **-d/--dependency string**: 作业依赖关系。格式：`<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` 或 `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`。支持的类型：`after`、`afterok`、`afternotok`、`afterany`
+- **-d/--dependency string**: 作业依赖关系。格式：`<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` 或 `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`。支持的类型：`after`、`afterok`、`afternotok`、`afterany`。**注意**：`<delay>` 必须使用带单位的时间格式（如 `10s`、`5m`、`2h`），不要使用 `HH:MM:SS` 格式，因为 `:` 是作业 ID 分隔符。详见 [作业依赖](../reference/job_dependency.md)
 - **--debug-level string**: 可用的调试级别：trace、debug、info（默认值为"info"）
 - **-x/--exclude string**: 从分配中排除特定节点（以逗号分隔的列表）
 - **--exclusive**: 独占节点资源

@@ -51,8 +51,8 @@ Optional delay parameter, supporting the following formats:
   - `d`, `day`, `days` - days
   - `w`, `week`, `weeks` - weeks
 
-- **D-HH:MM:SS format**
-  - Example: `1-01:30:00` = 1 day 1 hour 30 minutes
+!!! warning "Unsupported Format"
+    **Do NOT use** `HH:MM:SS` or `D-HH:MM:SS` format (e.g., `01:30:00` or `1-01:30:00`). The colon `:` character is reserved as the job ID separator, so such formats will be misinterpreted as multiple job IDs instead of delay time. This may either cause "duplicate task" errors or silently succeed with completely wrong dependency behavior. Always use time units instead (e.g., `90m` or `1h30m`).
 
 ### Multiple Dependency Combinations
 
@@ -106,8 +106,8 @@ cbatch --dependency afterok:100+30 my_script.sh
 # Wait for job 100 to complete successfully, then delay 10 seconds before running
 cbatch --dependency afterok:100+10s my_script.sh
 
-# Use HH:MM:SS format to specify delay
-cbatch --dependency afterok:100+01:30:00 my_script.sh
+# Delay for 1 hour 30 minutes (use unit-based format)
+cbatch --dependency afterok:100+90m my_script.sh
 ```
 
 ### 3. Multiple Dependencies
@@ -195,6 +195,7 @@ The system will return errors in the following situations:
 | Invalid delay format | Delay time format is incorrect | `afterok:100+invalid` |
 | Duplicate dependency | Same job ID appears multiple times | `afterok:100:100` |
 | Job ID doesn't exist or ended | Dependent job doesn't exist (runtime check) | `afterok:99999` |
+| Unsupported time format | Using `:` in delay (misinterpreted as job IDs) | `after:1+00:00:01` or `after:1+00:00:02` (parsed as multiple job IDs, may or may not error) |
 
 ### Error Examples
 
@@ -207,6 +208,19 @@ $ cbatch --dependency afterok:100+invalid job.sh
 
 # Error: Duplicate job ID
 $ cbatch --dependency afterok:100,afternotok:100 job.sh
+
+# Error: Using colon in delay time (misinterpreted as job ID separator)
+$ cbatch --dependency after:1+00:00:01 job.sh
+# This will be parsed as: after jobs 1, 00, 00, 01
+# Error message: "duplicate task 1 in dependencies" (job 1 appears twice)
+
+$ cbatch --dependency after:1+00:00:02 job.sh
+# This will be parsed as: after jobs 1, 00, 00, 02
+# May succeed but with wrong behavior (waits for jobs 00 and 02, ignores the 1-second delay)
+
+# Correct: Always use time units
+$ cbatch --dependency after:1+1s job.sh
+$ cbatch --dependency after:1+2s job.sh
 ```
 
 ## Related Commands
