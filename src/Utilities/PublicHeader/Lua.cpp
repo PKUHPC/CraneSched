@@ -22,8 +22,6 @@
 
 namespace crane {
 
-
-
 bool LuaEnvironment::Init(const std::string& script) {
 #ifdef HAVE_LUA
   m_lua_script_ = script;
@@ -100,7 +98,8 @@ void LuaEnvironment::RegisterFunctions_() {
     sol::state_view lua(va.lua_state());
     sol::function string_format = lua["string"]["format"];
     sol::object result = string_format.call(
-        va[0], sol::as_args(std::vector<sol::object>{va.begin()+1, va.end()}));
+        va[0],
+        sol::as_args(std::vector<sol::object>{va.begin() + 1, va.end()}));
     CRANE_INFO("[lua]: {}", result.as<std::string>());
   });
 
@@ -109,7 +108,8 @@ void LuaEnvironment::RegisterFunctions_() {
     sol::state_view lua(va.lua_state());
     sol::function string_format = lua["string"]["format"];
     sol::object result = string_format.call(
-        va[0], sol::as_args(std::vector<sol::object>{va.begin()+1, va.end()}));
+        va[0],
+        sol::as_args(std::vector<sol::object>{va.begin() + 1, va.end()}));
     CRANE_DEBUG("[lua]: {}", result.as<std::string>());
   });
 
@@ -118,7 +118,8 @@ void LuaEnvironment::RegisterFunctions_() {
     sol::state_view lua(va.lua_state());
     sol::function string_format = lua["string"]["format"];
     sol::object result = string_format.call(
-        va[0], sol::as_args(std::vector<sol::object>{va.begin()+1, va.end()}));
+        va[0],
+        sol::as_args(std::vector<sol::object>{va.begin() + 1, va.end()}));
     CRANE_TRACE("[lua]: {}", result.as<std::string>());
   });
 
@@ -127,7 +128,8 @@ void LuaEnvironment::RegisterFunctions_() {
     sol::state_view lua(va.lua_state());
     sol::function string_format = lua["string"]["format"];
     sol::object result = string_format.call(
-        va[0], sol::as_args(std::vector<sol::object>{va.begin()+1, va.end()}));
+        va[0],
+        sol::as_args(std::vector<sol::object>{va.begin() + 1, va.end()}));
     CRANE_ERROR("[lua]: {}", result.as<std::string>());
   });
 
@@ -136,7 +138,8 @@ void LuaEnvironment::RegisterFunctions_() {
     sol::state_view lua(va.lua_state());
     sol::function string_format = lua["string"]["format"];
     sol::object result = string_format.call(
-        va[0], sol::as_args(std::vector<sol::object>{va.begin()+1, va.end()}));
+        va[0],
+        sol::as_args(std::vector<sol::object>{va.begin() + 1, va.end()}));
     m_user_msg_ = result.as<std::string>();
   });
 
@@ -144,7 +147,6 @@ void LuaEnvironment::RegisterFunctions_() {
   m_crane_table_.set_function("time_str2mins", [](const std::string& time) {
     return util::TimeStr2Mins(time);
   });
-
 
   RegisterOutputErrTab_();
   m_crane_table_["ERROR"] = static_cast<int>(CraneErrCode::ERR_LUA_FAILED);

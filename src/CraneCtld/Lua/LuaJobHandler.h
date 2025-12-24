@@ -21,7 +21,7 @@
 // Precompiled header comes first!
 
 #ifdef HAVE_LUA
-#include <sol/sol.hpp>
+#  include <sol/sol.hpp>
 #endif
 
 #include "AccountManager.h"
