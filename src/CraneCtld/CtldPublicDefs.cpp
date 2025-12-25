@@ -559,6 +559,25 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       }
 
       context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
+      if (job->IsInteractive()) {
+        auto meta = std::get<InteractiveMeta>(job->meta);
+        if (!meta.has_been_cancelled_on_front_end) {
+          meta.has_been_cancelled_on_front_end = true;
+          meta.cb_step_cancel({.job_id = job_id, .step_id = kPrimaryStepId});
+          // Completion ack will send in grpc server triggered by task complete
+          // req
+          meta.cb_step_completed({.job_id = job_id,
+                                  .step_id = kPrimaryStepId,
+                                  .send_completion_ack = false,
+                                  .cfored_name = meta.cfored_name});
+        } else {
+          // Send Completion Ack to frontend now.
+          meta.cb_step_completed({.job_id = job_id,
+                                  .step_id = kPrimaryStepId,
+                                  .send_completion_ack = true,
+                                  .cfored_name = meta.cfored_name});
+        }
+      }
       return std::pair{this->Status(), this->ExitCode()};
     } else {
       if (std::optional error_status = this->PrevErrorStatus(); error_status) {
@@ -570,7 +589,17 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       }
       CRANE_INFO("[Step #{}.{}] FINISHED with status {}.", job_id,
                  this->StepId(), this->Status());
-      return std::pair{job->PrimaryStepStatus(), job->PrimaryStepExitCode()};
+      // Daemon step terminated by user before primary step created
+      if (job->PrimaryStepStatus() == crane::grpc::TaskStatus::Invalid) {
+        return std::pair{this->Status(), this->ExitCode()};
+      } else {
+        if (job->AllStepsFinished()) {
+          return std::make_pair(job->PrimaryStepStatus(),
+                                job->PrimaryStepExitCode());
+        } else {
+          return std::nullopt;
+        }
+      }
     }
   }
   return std::nullopt;
@@ -650,6 +679,26 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   }
 
   allocated_craneds_regex = job.allocated_craneds_regex;
+  // FIXME: Following task fields should set by scheduler
+  task_id_t cur_task_id = 0;
+  if (job.IsBatch() || job.IsCalloc()) {
+    // Batch/Calloc: will launch one task on one node only
+    craned_task_map[job.executing_craned_ids.front()].insert(cur_task_id);
+    task_res_map[cur_task_id] =
+        job.AllocatedRes().at(job.executing_craned_ids.front());
+  } else {
+    for (const auto& craned_id : job.CranedIds()) {
+      for (int i = 0; i < job.ntasks_per_node; ++i) {
+        craned_task_map[craned_id].insert(cur_task_id);
+        auto res = job.AllocatedRes().at(craned_id);
+        // Mem is allocated at step level, set to 0 here to avoid mem limit.
+        res.allocatable_res.memory_bytes = 0;
+        res.allocatable_res.memory_sw_bytes = 0;
+        task_res_map[cur_task_id] = res;
+        ++cur_task_id;
+      }
+    }
+  }
 
   crane::grpc::StepToCtld step;
 
@@ -772,6 +821,17 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
 
   step_to_d.set_uid(uid);
   step_to_d.mutable_gid()->Assign(this->gids.begin(), this->gids.end());
+
+  auto* task_res_map = step_to_d.mutable_task_res_map();
+  auto task_it = this->craned_task_map.find(craned_id);
+  if (task_it != this->craned_task_map.end()) {
+    for (auto task_id : task_it->second) {
+      auto& res = this->task_res_map.at(task_id);
+      task_res_map->emplace(task_id,
+                            static_cast<crane::grpc::ResourceInNode>(res));
+    }
+  }
+
   step_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
   step_to_d.set_cwd(this->cwd);
@@ -786,27 +846,31 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
   step_to_d.mutable_submit_time()->set_seconds(
       ToUnixSeconds(this->m_submit_time_));
   step_to_d.mutable_time_limit()->set_seconds(ToInt64Seconds(this->time_limit));
-
-  if (this->type == crane::grpc::Batch) {
-    auto* mutable_meta = step_to_d.mutable_batch_meta();
-    mutable_meta->CopyFrom(StepToCtld().batch_meta());
-  } else if (this->type == crane::grpc::Interactive) {
-    auto* mutable_meta = step_to_d.mutable_interactive_meta();
-    mutable_meta->CopyFrom(StepToCtld().interactive_meta());
-  } else if (this->type == crane::grpc::Container) {
-    auto* mutable_meta = step_to_d.mutable_container_meta();
-    mutable_meta->CopyFrom(StepToCtld().container_meta());
+  switch (this->type) {
+  case crane::grpc::Batch:
+    step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
+    break;
+  case crane::grpc::Interactive:
+    step_to_d.mutable_interactive_meta()->CopyFrom(
+        StepToCtld().interactive_meta());
+    break;
+  case crane::grpc::Container:
+    step_to_d.mutable_container_meta()->CopyFrom(StepToCtld().container_meta());
+    break;
+  default:
+    std::unreachable();
   }
 
   return step_to_d;
 }
 
-void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
-                                        uint32_t exit_code,
-                                        const std::string& reason,
-                                        const CranedId& craned_id,
-                                        google::protobuf::Timestamp timestamp,
-                                        StepStatusChangeContext* context) {
+std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>>
+CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
+                                   uint32_t exit_code,
+                                   const std::string& reason,
+                                   const CranedId& craned_id,
+                                   google::protobuf::Timestamp timestamp,
+                                   StepStatusChangeContext* context) {
   /**
    * Step final status
    * finished: step configured successfully, got all step execution status
@@ -824,9 +888,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
               job_id, step_id, this->Status(), new_status, craned_id);
 
   if (this->Status() == crane::grpc::TaskStatus::Configuring) {
-    // Configuring -> Configured / Failed / Cancelled,
+    // Configuring -> Starting / Failed / Cancelled,
     this->NodeConfigured(craned_id);
-    if (new_status != crane::grpc::TaskStatus::Configured) {
+    if (new_status != crane::grpc::TaskStatus::Starting) {
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
@@ -935,6 +999,9 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         }
 
         std::unordered_set<step_id_t> pd_steps;
+        CRANE_DEBUG("[Job #{}] primary step exited, terminating other steps.",
+                    job_id);
+
         // Cancel all other step with CANCELED status
         for (const auto& comm_step : job->Steps() | std::views::values) {
           // All pending steps are crun steps, just set status to cancelled
@@ -953,11 +1020,18 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                                     .send_completion_ack = true,
                                     .cfored_name = meta.cfored_name});
             pd_steps.insert(comm_step->StepId());
-            continue;
-          }
-          for (const auto& node : comm_step->ExecutionNodes()) {
-            context->craned_cancel_steps[node][comm_step->job_id].emplace(
-                comm_step->StepId());
+            CRANE_TRACE(
+                "[Step #{}.{}] Cancelled pending step due to primary step "
+                "exit.",
+                comm_step->job_id, comm_step->StepId());
+          } else {
+            CRANE_TRACE(
+                "[Step #{}.{}] Sending cancel due to primary step exit.",
+                comm_step->job_id, comm_step->StepId());
+            for (const auto& node : comm_step->ExecutionNodes()) {
+              context->craned_cancel_steps[node][comm_step->job_id].emplace(
+                  comm_step->StepId());
+            }
           }
         }
         for (const auto& pd_step_id : pd_steps) {
@@ -992,6 +1066,10 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
+  if (job->AllStepsFinished())
+    return std::make_pair(job->PrimaryStepStatus(), job->PrimaryStepExitCode());
+  else
+    return std::nullopt;
 }
 
 void CommonStepInCtld::RecoverFromDb(

@@ -526,6 +526,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext* context, const crane::grpc::CancelTaskRequest* request,
     crane::grpc::CancelTaskReply* response) {
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->operator_uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
