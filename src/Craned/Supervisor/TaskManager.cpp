@@ -953,10 +953,12 @@ CraneErrCode ContainerInstance::Prepare() {
   }
 
   // Generate log pathes
+  // NOTE：These should be consistent with ccon CLI.
   m_log_dir_ = std::filesystem::path(step_to_supv.cwd()) /
-               std::format(kContainerLogDirPattern, g_config.JobId);
-  m_log_file_ = m_log_dir_ / std::format(kContainerLogFilePattern,
-                                         g_config.JobId, g_config.StepId);
+               std::format(PodInstance::kPodLogDirPattern, g_config.JobId);
+  m_log_file_ =
+      m_log_dir_ / std::format(kContainerLogFilePattern, g_config.StepId,
+                               g_config.CranedIdOfThisNode);
 
   // Create private directory for container job
   if (!util::os::CreateFoldersForFileEx(m_log_file_,
