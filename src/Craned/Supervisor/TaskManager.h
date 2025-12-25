@@ -315,7 +315,6 @@ class ContainerInstance : public ITaskInstance {
 
  private:
   // Container related constants
-  static constexpr std::string_view kContainerLogDirPattern = "{}.out";
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
 
   // Setup id-mapped mounts in rootless containers.
