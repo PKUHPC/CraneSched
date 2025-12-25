@@ -1342,7 +1342,7 @@ void TaskInCtld::UpdateDependency(task_id_t dep_job_id, absl::Time event_time) {
 void TaskInCtld::AddDependent(crane::grpc::DependencyType dep_type,
                               task_id_t dep_job_id) {
   if (dep_type == crane::grpc::DependencyType::AFTER &&
-      status == crane::grpc::TaskStatus::Running) {
+      status != crane::grpc::TaskStatus::Pending) {
     // already satisfied
     g_task_scheduler->AddDependencyEvent(dep_job_id, task_id, start_time);
   } else {
