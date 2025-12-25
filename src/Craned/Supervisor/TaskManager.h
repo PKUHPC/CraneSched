@@ -24,6 +24,7 @@
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "Supervisor.grpc.pb.h"
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
