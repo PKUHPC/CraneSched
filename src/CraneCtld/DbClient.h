@@ -244,11 +244,6 @@ class MongodbClient {
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
-  bool StartTransaction();
-
-  bool CommitTransactionWithoutCallback();
-
-  bool AbortTransaction();
 
  private:
   bool CheckDefaultRootAccountUserAndInit_();
