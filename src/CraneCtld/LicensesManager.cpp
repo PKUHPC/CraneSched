@@ -71,7 +71,8 @@ int LicensesManager::Init(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic_id);
       license_info.set_total(lic.total);
-      license_info.set_free(lic.total - lic.used - lic.reserved - lic.last_deficit);
+      license_info.set_free(lic.total - lic.used - lic.reserved -
+                            lic.last_deficit);
       license_info.set_used(lic.used);
       license_info.set_reserved(lic.reserved);
       license_info.set_lastdeficit(lic.last_deficit);
@@ -181,7 +182,7 @@ void LicensesManager::CheckLicenseCountSufficient(
             lic.total) {
           actual_licenses->emplace(license.key(), license.count());
           break;
-            }
+        }
       }
     }
   } else {
@@ -196,7 +197,7 @@ void LicensesManager::CheckLicenseCountSufficient(
           lic.total) {
         actual_licenses->clear();
         break;
-          }
+      }
       actual_licenses->emplace(license.key(), license.count());
     }
   }
@@ -247,7 +248,8 @@ bool LicensesManager::MallocLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
+      license_info.set_free(lic->total - lic->used - lic->reserved -
+                            lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
       license_info.set_lastdeficit(lic->last_deficit);
@@ -279,7 +281,8 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
+      license_info.set_free(lic->total - lic->used - lic->reserved -
+                            lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
       license_info.set_lastdeficit(lic->last_deficit);
@@ -317,7 +320,8 @@ void LicensesManager::FreeLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
+      license_info.set_free(lic->total - lic->used - lic->reserved -
+                            lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
       license_info.set_lastdeficit(lic->last_deficit);
