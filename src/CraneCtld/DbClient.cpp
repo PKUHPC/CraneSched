@@ -1100,6 +1100,7 @@ bool MongodbClient::UpdateResource(const LicenseResource& resource) {
     }
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
+    return false;
   }
 
   return true;
@@ -1114,7 +1115,7 @@ bool MongodbClient::DeleteResource(const std::string& resource_name,
   try {
     bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
         (*GetClient_())[m_db_name_][m_resource_collection_name_].delete_one(
-            filter.view());
+          *GetSession_(), filter.view());
 
     if (result && result.value().deleted_count() == 1) return true;
   } catch (const std::exception& e) {
