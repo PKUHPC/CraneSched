@@ -4363,7 +4363,6 @@ void SchedulerAlgo::NodeSelect(
 void SchedulerAlgo::CheckClusterResource_(
     std::vector<PdJobInScheduler*>* job_ptr_vec) {
   std::unordered_map<LicenseId, License> back_map;
-
   {
     auto licenses_map = g_licenses_manager->GetLicensesMapExclusivePtr();
     for (const auto& [license_id, license] : *licenses_map) {
@@ -4375,34 +4374,10 @@ void SchedulerAlgo::CheckClusterResource_(
     if (job_ptr->req_licenses.empty()) continue;
 
     job_ptr->actual_licenses.clear();
-    if (job_ptr->is_license_or) {
-      for (const auto& license : job_ptr->req_licenses) {
-        auto iter = back_map.find(license.key());
-        if (iter != back_map.end()) {
-          auto lic = iter->second;
-          if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
-              lic.total) {
-            job_ptr->actual_licenses.emplace(license.key(), license.count());
-            break;
-          }
-        }
-      }
-    } else {
-      for (const auto& license : job_ptr->req_licenses) {
-        auto iter = back_map.find(license.key());
-        if (iter == back_map.end()) {
-          job_ptr->actual_licenses.clear();
-          break;
-        }
-        auto lic = iter->second;
-        if (license.count() + lic.reserved + lic.used + lic.last_deficit >
-            lic.total) {
-          job_ptr->actual_licenses.clear();
-          break;
-        }
-        job_ptr->actual_licenses.emplace(license.key(), license.count());
-      }
-    }
+
+    g_licenses_manager->CheckLicenseCountSufficient(
+        back_map, job_ptr->req_licenses, job_ptr->is_license_or,
+        &job_ptr->actual_licenses);
 
     if (job_ptr->actual_licenses.empty()) {
       job_ptr->reason = "License";
