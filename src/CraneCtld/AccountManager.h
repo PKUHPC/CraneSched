@@ -40,6 +40,7 @@ class AccountManager {
   using QosMutexSharedPtr = util::ScopeConstSharedPtr<Qos, util::rw_mutex>;
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
+  using WckeyMutexSharedPtr = util::ScopeConstSharedPtr<Wckey, util::rw_mutex>;
 
   using TxnAction = crane::grpc::TxnAction;
 
@@ -53,6 +54,8 @@ class AccountManager {
 
   CraneExpected<void> AddQos(uint32_t uid, const Qos& new_qos);
 
+  CraneExpected<void> AddUserWckey(uint32_t uid, const Wckey& wckey);
+
   CraneExpected<void> DeleteUser(uint32_t uid, const std::string& name,
                                  const std::string& account);
 
@@ -60,7 +63,13 @@ class AccountManager {
 
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
+  CraneExpected<void> DeleteWckey(uint32_t uid, const std::string& name,
+                                  const std::string& user_name);
+
   CraneExpected<std::set<User>> QueryAllUserInfo(uint32_t uid);
+
+  CraneExpected<std::vector<Wckey>> QueryAllWckeyInfo(
+      uint32_t uid, std::unordered_set<std::string> wckey_list);
 
   CraneExpected<User> QueryUserInfo(uint32_t uid, const std::string& username);
 
@@ -81,6 +90,11 @@ class AccountManager {
 
   QosMutexSharedPtr GetExistedQosInfo(const std::string& name);
   QosMapMutexSharedPtr GetAllQosInfo();
+
+  WckeyMutexSharedPtr GetExistedWckeyInfo(const std::string& name,
+                                          const std::string& user_name);
+  CraneExpected<std::string> GetExistedDefaultWckeyName(
+      const std::string& user_name);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions
@@ -142,6 +156,8 @@ class AccountManager {
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
+  CraneExpected<void> ModifyDefaultWckey(uint32_t uid, const std::string& name,
+                                         const std::string& user_name);
 
   CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
                                    bool block);
@@ -189,6 +205,11 @@ class AccountManager {
 
   const User* GetUserInfoNoLock_(const std::string& name);
   const User* GetExistedUserInfoNoLock_(const std::string& name);
+
+  const Wckey* GetExistedWckeyInfoNoLock_(const std::string& name,
+                                          const std::string& user_name);
+  const Wckey* GetWckeyInfoNoLock_(const std::string& name,
+                                   const std::string& user_name);
 
   const Account* GetAccountInfoNoLock_(const std::string& name);
   const Account* GetExistedAccountInfoNoLock_(const std::string& name);
@@ -293,6 +314,9 @@ class AccountManager {
   CraneExpected<void> AddQos_(const std::string& actor_name, const Qos& qos,
                               const Qos* stale_qos);
 
+  CraneExpected<void> AddWckey_(const Wckey& wckey, const Wckey* stale_wckey,
+                                const User* user);
+
   CraneExpected<void> DeleteUser_(const std::string& actor_name,
                                   const User& user, const std::string& account);
 
@@ -306,6 +330,8 @@ class AccountManager {
                                                const User& user,
                                                const Account& account,
                                                const std::string& partition);
+  CraneExpected<void> DeleteWckey_(const std::string& name,
+                                   const std::string& user_name);
   CraneExpected<void> AddUserAllowedQos_(const std::string& actor_name,
                                          const User& user,
                                          const Account& account,
@@ -325,6 +351,8 @@ class AccountManager {
                                          const std::string& account,
                                          const std::string& partition,
                                          const std::string& qos);
+  CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
+                                           const std::string& user);
   CraneExpectedRich<void> SetUserAllowedPartition_(
       const std::string& actor_name, const User& user, const Account& account,
       const std::unordered_set<std::string>& partition_list);
@@ -408,6 +436,24 @@ class AccountManager {
                             const std::string& child);
   bool PaternityTestNoLockDFS_(const std::string& parent,
                                const std::string& child);
+  struct WckeyKey {
+    std::string name;
+    std::string user_name;
+
+    template <typename H>
+    friend H AbslHashValue(H h, const WckeyKey& key) {
+      return H::combine(std::move(h), key.name, key.user_name);
+    }
+    bool operator==(const WckeyKey& other) const {
+      return name == other.name && user_name == other.user_name;
+    }
+  };
+
+  struct WcKeyHash {
+    std::size_t operator()(const WckeyKey& key) const {
+      return absl::Hash<WckeyKey>{}(key);
+    }
+  };
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;
@@ -417,6 +463,8 @@ class AccountManager {
   util::rw_mutex m_rw_user_mutex_;
   std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Qos>> m_qos_map_;
   util::rw_mutex m_rw_qos_mutex_;
+  std::unordered_map<WckeyKey, std::unique_ptr<Wckey>, WcKeyHash> m_wckey_map_;
+  util::rw_mutex m_rw_wckey_mutex_;
 };
 
 }  // namespace Ctld

@@ -1314,6 +1314,8 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   *task_info->mutable_allocated_res_view() =
       static_cast<crane::grpc::ResourceView>(allocated_res_view);
 
+  task_info->set_wckey(wckey);
+
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());
 }

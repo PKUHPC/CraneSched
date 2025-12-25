@@ -199,6 +199,7 @@ struct Config {
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
+  bool WckeyValid{false};
 };
 
 struct RunTimeStatus {
@@ -732,6 +733,7 @@ struct TaskInCtld {
   bool exclusive{false};
 
   std::unordered_map<std::string, uint32_t> licenses_count;
+  std::string wckey;
 
  private:
   /* ------------- [2] -------------
@@ -1112,6 +1114,7 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
+  std::string default_wckey;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
@@ -1166,6 +1169,18 @@ struct User {
   }
 
   bool operator<(User const& other) const { return uid < other.uid; }
+};
+
+struct Wckey {
+  bool deleted = false;
+  std::string name;
+  std::string user_name; /* user name */
+  bool is_default = false;
+
+  bool operator==(const Wckey& other) const noexcept {
+    return name == other.name && user_name == other.user_name &&
+           is_default == other.is_default && deleted == other.deleted;
+  }
 };
 
 // TODO: not use free, only total and used

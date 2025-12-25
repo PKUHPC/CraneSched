@@ -148,6 +148,9 @@ Licenses:
 # Default value is false.
 RejectJobsBeyondCapacity: false
 
+# Set the wckey
+#TrackWCKey: Yes
+
 # Set the mode for opening output and error files
 # Default value is false.
 JobFileAppend: false
