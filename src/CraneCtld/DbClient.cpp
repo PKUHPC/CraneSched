@@ -1833,7 +1833,7 @@ void MongodbClient::ViewToResource_(
     resource->count = ViewValueOr_(resource_view["count"], 0);
     resource->flags = ViewValueOr_(resource_view["flags"], 0);
     resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], 0);
-    resource->last_update = ViewValueOr_(resource_view["last_update"], 0);
+    resource->last_update = ViewValueOr_(resource_view["last_update"], int64_t(0));
     resource->description =
         ViewValueOr_(resource_view["description"], std::string{});
 

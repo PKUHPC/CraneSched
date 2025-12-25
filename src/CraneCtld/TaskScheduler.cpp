@@ -1011,9 +1011,6 @@ void TaskScheduler::ScheduleThread_() {
       LockGuard running_guard(&m_running_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
-        if (!job_in_scheduler->actual_licenses.empty())
-          g_licenses_manager->FreeReserved(job_in_scheduler->actual_licenses);
-
         auto it = m_pending_task_map_.find(job_in_scheduler->job_id);
         if (it != m_pending_task_map_.end()) {
           auto& job = it->second;
@@ -4284,17 +4281,13 @@ void SchedulerAlgo::NodeSelect(
                                           g_config.ScheduledBatchSize,
                                           job_ptr_vec);
 
+  CheckClusterResource_(&job_ptr_vec);
+
   // Schedule pending tasks
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
-    // ctld only virtual resource;
-    if (!job->req_licenses.empty()) {
-      if (!g_licenses_manager->CheckLicenseCountSufficient(
-              job->req_licenses, job->is_license_or, &job->actual_licenses)) {
-        job->reason = "License";
-        continue;
-      }
-    }
+    if (!job->reason.empty()) continue;
+
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
       auto it = part_scheduler_map.find(job->partition_id);
@@ -4363,6 +4356,61 @@ void SchedulerAlgo::NodeSelect(
           job->reason = "Priority";
         }
       }
+    }
+  }
+}
+
+void SchedulerAlgo::CheckClusterResource_(
+    std::vector<PdJobInScheduler*>* job_ptr_vec) {
+  std::unordered_map<LicenseId, License> back_map;
+
+  {
+    auto licenses_map = g_licenses_manager->GetLicensesMapExclusivePtr();
+    for (const auto& [license_id, license] : *licenses_map) {
+      back_map.emplace(license_id, *license.GetExclusivePtr());
+    }
+  }
+
+  for (const auto& job_ptr : *job_ptr_vec) {
+    if (job_ptr->req_licenses.empty()) continue;
+
+    job_ptr->actual_licenses.clear();
+    if (job_ptr->is_license_or) {
+      for (const auto& license : job_ptr->req_licenses) {
+        auto iter = back_map.find(license.key());
+        if (iter != back_map.end()) {
+          auto lic = iter->second;
+          if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
+              lic.total) {
+            job_ptr->actual_licenses.emplace(license.key(), license.count());
+            break;
+          }
+        }
+      }
+    } else {
+      for (const auto& license : job_ptr->req_licenses) {
+        auto iter = back_map.find(license.key());
+        if (iter == back_map.end()) {
+          job_ptr->actual_licenses.clear();
+          break;
+        }
+        auto lic = iter->second;
+        if (license.count() + lic.reserved + lic.used + lic.last_deficit >
+            lic.total) {
+          job_ptr->actual_licenses.clear();
+          break;
+        }
+        job_ptr->actual_licenses.emplace(license.key(), license.count());
+      }
+    }
+
+    if (job_ptr->actual_licenses.empty()) {
+      job_ptr->reason = "License";
+      continue;
+    }
+
+    for (const auto& [lic_id, count] : job_ptr->actual_licenses) {
+      back_map[lic_id].used += count;
     }
   }
 }

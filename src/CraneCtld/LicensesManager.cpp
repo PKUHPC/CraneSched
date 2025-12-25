@@ -57,7 +57,7 @@ int LicensesManager::Init(
         key, std::make_unique<LicenseResource>(std::move(resource)));
   }
 
-  for (auto& [lic_id, count] : lic_id_to_count_map) {
+  for (const auto& [lic_id, count] : lic_id_to_count_map) {
     licenses_map.insert({lic_id, License{.license_id = lic_id,
                                          .total = count,
                                          .used = 0,
@@ -81,6 +81,10 @@ int LicensesManager::Init(
   }
 
   return 0;
+}
+
+LicensesMapExclusivePtr LicensesManager::GetLicensesMapExclusivePtr() {
+  return m_licenses_map_.GetMapExclusivePtr();
 }
 
 void LicensesManager::GetLicensesInfo(
@@ -159,50 +163,6 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   return {};
 }
 
-bool LicensesManager::CheckLicenseCountSufficient(
-    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
-        lic_id_to_count,
-    bool is_license_or,
-    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
-  auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
-  actual_licenses->clear();
-  if (is_license_or) {
-    for (const auto& license : lic_id_to_count) {
-      auto iter = licenses_map->find(license.key());
-      if (iter != licenses_map->end()) {
-        auto lic = iter->second.GetExclusivePtr();
-        if (license.count() + lic->reserved + lic->used + lic->last_deficit <=
-            lic->total) {
-          actual_licenses->emplace(license.key(), license.count());
-          break;
-        }
-      }
-    }
-  } else {
-    for (const auto& license : lic_id_to_count) {
-      auto iter = licenses_map->find(license.key());
-      if (iter == licenses_map->end()) {
-        actual_licenses->clear();
-        return false;
-      }
-      auto lic = iter->second.GetExclusivePtr();
-      if (license.count() + lic->reserved + lic->used + lic->last_deficit >
-          lic->total) {
-        actual_licenses->clear();
-        return false;
-      }
-      actual_licenses->emplace(license.key(), license.count());
-    }
-  }
-
-  for (auto [lic_id, count] : *actual_licenses) {
-    auto lic = licenses_map->at(lic_id).GetExclusivePtr();
-    lic->reserved += count;
-  }
-
-  return !actual_licenses->empty();
-}
-
 void LicensesManager::FreeReserved(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
@@ -248,7 +208,7 @@ bool LicensesManager::MallocLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->free);
+      license_info.set_free(lic->total-lic->used);
       license_info.set_used(lic->used);
       license_infos.emplace_back(std::move(license_info));
     }
@@ -277,7 +237,7 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->free);
+      license_info.set_free(lic->total-lic->used);
       license_info.set_used(lic->used);
       license_infos.emplace_back(std::move(license_info));
     }
@@ -312,7 +272,7 @@ void LicensesManager::FreeLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->free);
+      license_info.set_free(lic->total-lic->used);
       license_info.set_used(lic->used);
       license_infos.emplace_back(std::move(license_info));
     }

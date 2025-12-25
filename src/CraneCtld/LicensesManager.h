@@ -21,10 +21,10 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "DbClient.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/PluginClient.h"
-#include "DbClient.h"
 
 namespace Ctld {
 
@@ -35,6 +35,9 @@ using HashMap = absl::flat_hash_map<K, V, Hash>;
 using LicensesAtomicMap = util::AtomicHashMap<HashMap, LicenseId, License>;
 using LicensesMetaRawMap = LicensesAtomicMap::RawMap;
 
+using LicensesMapExclusivePtr =
+      util::ScopeExclusivePtr<LicensesMetaRawMap, util::rw_mutex>;
+
 class LicensesManager {
  public:
   LicensesManager();
@@ -43,6 +46,8 @@ class LicensesManager {
 
   int Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
+  LicensesMapExclusivePtr GetLicensesMapExclusivePtr();
+
   void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest *request,
                        crane::grpc::QueryLicensesInfoReply *response);
 
@@ -50,12 +55,6 @@ class LicensesManager {
       const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
           &lic_id_to_count,
       bool is_license_or);
-
-  bool CheckLicenseCountSufficient(
-      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-          &lic_id_to_count,
-      bool is_license_or,
-      std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
