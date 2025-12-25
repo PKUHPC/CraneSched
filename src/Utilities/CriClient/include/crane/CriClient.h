@@ -99,6 +99,7 @@ class CriClient {
   CraneExpectedRich<std::vector<api::PodSandbox>> ListPodSandbox(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
+  // Get exactly one pod id by label selector
   CraneExpectedRich<std::string> GetPodSandboxId(
       const std::unordered_map<std::string, std::string>& label_selector) const;
 
