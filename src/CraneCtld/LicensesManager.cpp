@@ -64,21 +64,24 @@ int LicensesManager::Init(
                                          .reserved = 0}});
   }
 
-  m_licenses_map_.InitFromMap(std::move(licenses_map));
-
   if (g_config.Plugin.Enabled) {
     std::vector<crane::grpc::LicenseInfo> license_infos;
-    license_infos.reserve(lic_id_to_count_map.size());
-    for (auto& [lic_id, count] : lic_id_to_count_map) {
+    license_infos.reserve(licenses_map.size());
+    for (const auto& [lic_id, lic] : licenses_map) {
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic_id);
-      license_info.set_total(count);
-      license_info.set_free(count);
-      license_info.set_used(0);
+      license_info.set_total(lic.total);
+      license_info.set_free(lic.total - lic.used - lic.reserved - lic.last_deficit);
+      license_info.set_used(lic.used);
+      license_info.set_reserved(lic.reserved);
+      license_info.set_lastdeficit(lic.last_deficit);
+      license_info.set_lastconsumed(lic.last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
   }
+
+  m_licenses_map_.InitFromMap(std::move(licenses_map));
 
   return 0;
 }
@@ -244,8 +247,11 @@ bool LicensesManager::MallocLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total-lic->used);
+      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
       license_info.set_used(lic->used);
+      license_info.set_reserved(lic->reserved);
+      license_info.set_lastdeficit(lic->last_deficit);
+      license_info.set_lastconsumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -273,8 +279,11 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total-lic->used);
+      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
       license_info.set_used(lic->used);
+      license_info.set_reserved(lic->reserved);
+      license_info.set_lastdeficit(lic->last_deficit);
+      license_info.set_lastconsumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -308,8 +317,11 @@ void LicensesManager::FreeLicense(
       crane::grpc::LicenseInfo license_info;
       license_info.set_name(lic->license_id);
       license_info.set_total(lic->total);
-      license_info.set_free(lic->total-lic->used);
+      license_info.set_free(lic->total - lic->used - lic->reserved - lic->last_deficit);
       license_info.set_used(lic->used);
+      license_info.set_reserved(lic->reserved);
+      license_info.set_lastdeficit(lic->last_deficit);
+      license_info.set_lastconsumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
