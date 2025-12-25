@@ -1840,9 +1840,9 @@ grpc::Status CraneCtldServiceImpl::QueryTxnLog(
 }
 
 grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
-    grpc::ServerContext *context,
-    const crane::grpc::AddOrModifyLicenseResourceRequest *request,
-    crane::grpc::AddOrModifyLicenseResourceReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::AddOrModifyLicenseResourceRequest* request,
+    crane::grpc::AddOrModifyLicenseResourceReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1860,7 +1860,7 @@ grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
                                     request->clusters().end()};
 
   std::unordered_map<crane::grpc::LicenseResource_Field, std::string> operators;
-  for (const auto &operator_ : request->operators()) {
+  for (const auto& operator_ : request->operators()) {
     operators.emplace(operator_.operator_field(), operator_.value());
   }
 
@@ -1884,9 +1884,9 @@ grpc::Status CraneCtldServiceImpl::AddOrModifyLicenseResource(
 }
 
 grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
-    grpc::ServerContext *context,
-    const crane::grpc::DeleteLicenseResourceRequest *request,
-    crane::grpc::DeleteLicenseResourceReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::DeleteLicenseResourceRequest* request,
+    crane::grpc::DeleteLicenseResourceReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1915,9 +1915,9 @@ grpc::Status CraneCtldServiceImpl::DeleteLicenseResource(
 }
 
 grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryLicenseResourceRequest *request,
-    crane::grpc::QueryLicenseResourceReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QueryLicenseResourceRequest* request,
+    crane::grpc::QueryLicenseResourceReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
@@ -1938,9 +1938,9 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
     response->set_ok(true);
   }
 
-  auto *mutable_license_resources = response->mutable_license_resource_list();
-  for (const auto &license_resource : res_resources) {
-    auto *mutable_license_resource = mutable_license_resources->Add();
+  auto* mutable_license_resources = response->mutable_license_resource_list();
+  for (const auto& license_resource : res_resources) {
+    auto* mutable_license_resource = mutable_license_resources->Add();
     mutable_license_resource->set_resource_name(license_resource.name);
     mutable_license_resource->set_server(license_resource.server);
     mutable_license_resource->set_server_type(license_resource.server_type);
@@ -1951,9 +1951,9 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
     mutable_license_resource->set_allocated(license_resource.allocated);
     mutable_license_resource->set_flags(license_resource.flags);
 
-    auto *mutable_cluster_resources =
+    auto* mutable_cluster_resources =
         mutable_license_resource->mutable_cluster_resource_info();
-    for (const auto &[cluster_name, allowed] :
+    for (const auto& [cluster_name, allowed] :
          license_resource.cluster_resources) {
       mutable_cluster_resources->emplace(cluster_name, allowed);
     }
