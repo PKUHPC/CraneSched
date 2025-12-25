@@ -693,10 +693,9 @@ enum ErrCode {
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
 
-  ERR_LICENSE_NOT_FOUND = 85;
+  ERR_RESOURCE_NOT_FOUND = 85;
   ERR_INVALID_ARGUMENT = 86;
-  ERR_CLUSTER_LICENSE_NOT_FOUND = 87;
-  ERR_RESOURCE_ALREADY_EXIST = 88;
+  ERR_RESOURCE_ALREADY_EXIST = 87;
 }
 
 enum EntityType {
