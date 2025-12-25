@@ -720,6 +720,19 @@ double ResourceView::CpuCount() const {
   return static_cast<double>(allocatable_res.cpu_count);
 }
 
+uint64_t ResourceView::GpuCount() const {
+  auto it = device_map.find(kResourceTypeGpu);
+  if (it == device_map.end()) return 0;
+
+  const auto& [untyped_count, type_map] = it->second;
+
+  uint64_t type_sum = std::accumulate(std::views::values(type_map).begin(),
+                                      std::views::values(type_map).end(),
+                                      static_cast<uint64_t>(0));
+
+  return untyped_count + type_sum;
+}
+
 uint64_t ResourceView::MemoryBytes() const {
   return allocatable_res.memory_bytes;
 }

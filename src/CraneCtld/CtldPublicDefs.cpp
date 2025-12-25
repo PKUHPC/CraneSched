@@ -417,6 +417,9 @@ crane::grpc::JobToD DaemonStepInCtld::GetJobToD(
   crane::grpc::JobToD job_to_d;
   job_to_d.set_job_id(job_id);
   job_to_d.set_uid(uid);
+  job_to_d.set_account(job->account);
+  job_to_d.set_qos(job->qos);
+  job_to_d.set_partition(job->partition_id);
   *job_to_d.mutable_res() =
       crane::grpc::ResourceInNode(m_allocated_res_.at(craned_id));
   return job_to_d;
@@ -457,6 +460,13 @@ crane::grpc::StepToD DaemonStepInCtld::GetStepToD(
   if (this->container_meta.has_value())
     step_to_d.mutable_container_meta()->CopyFrom(
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
+
+  step_to_d.set_submit_hostname(job->TaskToCtld().submit_hostname());
+  step_to_d.set_total_gpus(this->requested_node_res_view.GpuCount());
+  step_to_d.set_cwd(this->job->cwd);
+  step_to_d.set_ntasks_per_node(this->job->ntasks_per_node);
+  step_to_d.set_cpus_per_task(this->job->TaskToCtld().cpus_per_task());
+  step_to_d.set_submit_dir(this->job->TaskToCtld().submit_dir());
 
   return step_to_d;
 }
