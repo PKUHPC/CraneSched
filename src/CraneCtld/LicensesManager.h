@@ -36,7 +36,7 @@ using LicensesAtomicMap = util::AtomicHashMap<HashMap, LicenseId, License>;
 using LicensesMetaRawMap = LicensesAtomicMap::RawMap;
 
 using LicensesMapExclusivePtr =
-      util::ScopeExclusivePtr<LicensesMetaRawMap, util::rw_mutex>;
+    util::ScopeExclusivePtr<LicensesMetaRawMap, util::rw_mutex>;
 
 class LicensesManager {
  public:
@@ -55,6 +55,13 @@ class LicensesManager {
       const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
           &lic_id_to_count,
       bool is_license_or);
+
+  void CheckLicenseCountSufficient(
+      const std::unordered_map<LicenseId, License> &back_map,
+      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
+          &req_licenses,
+      bool is_license_or,
+      std::unordered_map<LicenseId, uint32_t> *actual_licenses);
 
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
