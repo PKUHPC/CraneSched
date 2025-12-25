@@ -641,8 +641,11 @@ CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
 
 std::vector<CraneExpectedRich<void>>
 AccountManager::CheckModifyAccountOperations(
-    const Account* account,
+    Account* account,
     const std::vector<crane::grpc::ModifyFieldOperation>& operations,
+    std::unordered_map<std::string, Account>& account_map,
+    std::unordered_map<std::string, User>& user_map,
+    std::unordered_map<std::string, Qos>& qos_map, std::string* log,
     bool force) {
   std::vector<CraneExpectedRich<void>> rich_error_list;
   for (const auto& operation : operations) {
@@ -650,26 +653,41 @@ AccountManager::CheckModifyAccountOperations(
         operation.modify_field() == crane::grpc::ModifyField::Partition) {
       std::unordered_set<std::string> partition_list(
           operation.value_list().begin(), operation.value_list().end());
-      auto rich_result = CheckSetAccountAllowedPartitionNoLock_(
+      CraneExpectedRich<void> rich_result;
+
+      rich_result = CheckSetAccountAllowedPartitionNoLock_(
           account, partition_list, force);
       if (!rich_result) {
         if (rich_result.error().description().empty())
           rich_result.error().set_description(
               absl::StrJoin(operation.value_list(), ","));
         rich_error_list.emplace_back(rich_result);
+        continue;
       }
+      SetAccountAllowedPartition_(account, partition_list, account_map,
+                                  user_map);
+      *log += fmt::format("Set: partition_list: {}\n",
+                          fmt::join(partition_list, ","));
     } else if (operation.type() == crane::grpc::OperationType::Overwrite &&
                operation.modify_field() == crane::grpc::ModifyField::Qos) {
       std::unordered_set<std::string> qos_list(operation.value_list().begin(),
                                                operation.value_list().end());
-      auto rich_result =
-          CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
+      CraneExpectedRich<void> rich_result;
+      rich_result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
       if (!rich_result) {
         if (rich_result.error().description().empty())
           rich_result.error().set_description(
               absl::StrJoin(operation.value_list(), ","));
         rich_error_list.emplace_back(rich_result);
+        continue;
       }
+      rich_result = SetAccountAllowedQos_(account, qos_list, account_map,
+                                          user_map, qos_map);
+      if (!rich_result) {
+        rich_error_list.emplace_back(rich_result);
+        continue;
+      }
+      *log += fmt::format("Set: qos_list: {}\n", fmt::join(qos_list, ","));
     } else {
       for (const auto& value : operation.value_list()) {
         switch (operation.type()) {
@@ -682,7 +700,10 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            account->allowed_partition.emplace_back(value);
+            *log += fmt::format("Add: partition: {}\n", value);
             break;
           }
           case crane::grpc::ModifyField::Qos: {
@@ -691,7 +712,17 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            if (account->default_qos.empty()) {
+              account->default_qos = value;
+            }
+            account->allowed_qos_list.emplace_back(value);
+            if (qos_map.find(value) == qos_map.end()) {
+              qos_map.emplace(value, Qos(*m_qos_map_[value]));
+            }
+            qos_map[value].reference_count += 1;
+            *log += fmt::format("Add: qos: {}\n", value);
             break;
           }
           default:
@@ -708,7 +739,10 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            account->description = value;
+            *log += fmt::format("description: {}\n", value);
             break;
           }
           case crane::grpc::ModifyField::DefaultQos: {
@@ -717,7 +751,10 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            account->default_qos = value;
+            *log += fmt::format("default_qos: {}\n", value);
             break;
           }
 
@@ -736,7 +773,15 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            auto rich_result = DeleteAccountAllowedPartitionNoLock_(
+                account, value, account_map, user_map);
+            if (!rich_result) {
+              rich_error_list.emplace_back(rich_result);
+              continue;
+            }
+            *log += fmt::format("Del: partition: {}\n", value);
             break;
           }
 
@@ -747,7 +792,21 @@ AccountManager::CheckModifyAccountOperations(
               auto rich_error =
                   std::unexpected{FormatRichErr(result.error(), value)};
               rich_error_list.emplace_back(rich_error);
+              continue;
             }
+            auto rich_result = DeleteAccountAllowedQosNoLock_(
+                account, value, account_map, user_map);
+            if (!rich_result) {
+              rich_error_list.emplace_back(
+                  std::unexpected{rich_result.error()});
+              continue;
+            }
+            if (qos_map.find(value) == qos_map.end()) {
+              qos_map.emplace(value, Qos(*m_qos_map_[value]));
+            }
+            int change_num = rich_result.value();
+            qos_map[value].reference_count -= change_num;
+            *log += fmt::format("Del: qos: {}\n", value);
             break;
           }
 
@@ -770,7 +829,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
     uint32_t uid, const std::string& account_name,
     const std::vector<crane::grpc::ModifyFieldOperation>& operations,
     bool force) {
-  std::string actor_name;
+  std::string actor_name = "";
   std::vector<CraneExpectedRich<void>> rich_error_list;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -806,251 +865,56 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
     return rich_error_list;
   }
 
-  // helper stl
-  std::unordered_set<std::string> partition_list;
-  std::unordered_set<std::string> qos_list;
-  std::list<int> change_num;
-  int delete_qos_change_num;
-  std::string default_qos = "";
+  Account res_account(*account);
+  std::string log = "";
+  std::unordered_map<std::string, Account> account_map;
+  std::unordered_map<std::string, User> user_map;
+  std::unordered_map<std::string, Qos> qos_map;
+
+  for (const auto& user : account->users) {
+    user_map.emplace(user, User(*m_user_map_[user]));
+  }
+  for (const auto& child_account : account->child_accounts) {
+    account_map.emplace(child_account, Account(*m_account_map_[child_account]));
+  }
+  account_map.emplace(res_account.name, res_account);
+
   // check operations validity
-  auto check_result = CheckModifyAccountOperations(account, operations, force);
+  auto check_result = CheckModifyAccountOperations(
+      &res_account, operations, account_map, user_map, qos_map, &log, force);
   if (!check_result.empty()) {
     return check_result;
   }
-
-  bool need_rollback = false;
-  // do the modify operations in database
-  g_db_client->StartTransaction();
-  for (const auto& operation : operations) {
-    if (operation.type() == crane::grpc::OperationType::Overwrite &&
-        operation.modify_field() == crane::grpc::ModifyField::Partition) {
-      partition_list.insert(operation.value_list().begin(),
-                            operation.value_list().end());
-      auto rich_result =
-          SetAccountAllowedPartition_(actor_name, *account, partition_list);
-      if (!rich_result) {
-        need_rollback = true;
-        break;
-      }
-    } else if (operation.type() == crane::grpc::OperationType::Overwrite &&
-               operation.modify_field() == crane::grpc::ModifyField::Qos) {
-      qos_list.insert(operation.value_list().begin(),
-                      operation.value_list().end());
-      if (!operation.value_list().empty())
-        default_qos = operation.value_list()[0];
-      auto rich_result = SetAccountAllowedQos_(actor_name, *account, qos_list,
-                                               change_num, default_qos);
-      if (!rich_result) {
-        need_rollback = true;
-        break;
-      }
-    } else {
-      for (const auto& value : operation.value_list()) {
-        if (need_rollback) break;
-        switch (operation.type()) {
-        case crane::grpc::OperationType::Add: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Partition: {
-            auto result =
-                AddAccountAllowedPartition_(actor_name, account_name, value);
-            if (!result) {
-              need_rollback = true;
-            }
-            break;
-          }
-
-          case crane::grpc::ModifyField::Qos: {
-            auto result = AddAccountAllowedQos_(actor_name, *account, value);
-            if (!result) {
-              need_rollback = true;
-              break;
-            }
-            break;
-          }
-
-          default:
-            std::unreachable();
-          }
-          break;
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        for (auto& [name, element] : account_map) {
+          g_db_client->UpdateAccount(element);
         }
-
-        case crane::grpc::OperationType::Overwrite: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Description: {
-            auto result =
-                SetAccountDescription_(actor_name, account_name, value);
-            if (!result) {
-              need_rollback = true;
-            }
-            break;
-          }
-          case crane::grpc::ModifyField::DefaultQos: {
-            auto result = SetAccountDefaultQos_(actor_name, *account, value);
-            if (!result) {
-              need_rollback = true;
-            }
-            break;
-          }
-
-          default:
-            std::unreachable();
-          }
-          break;
+        for (auto& [name, element] : user_map) {
+          g_db_client->UpdateUser(element);
         }
-
-        case crane::grpc::OperationType::Delete: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Partition: {
-            auto result =
-                DeleteAccountAllowedPartition_(actor_name, *account, value);
-            if (!result) {
-              need_rollback = true;
-            }
-            break;
-          }
-          case crane::grpc::ModifyField::Qos: {
-            auto result = DeleteAccountAllowedQos_(actor_name, *account, value);
-            if (!result) {
-              need_rollback = true;
-            } else {
-              delete_qos_change_num = result.value();
-            }
-            break;
-          }
-          default:
-            std::unreachable();
-          }
-          break;
+        for (auto& [name, element] : qos_map) {
+          g_db_client->UpdateQos(element);
         }
-        default:
-          std::unreachable();
-        }
-      }
-    }
-  }
+        AddTxnLogToDB_(actor_name, account_name, TxnAction::ModifyAccount, log);
+      };
 
-  if (need_rollback) {
-    g_db_client->AbortTransaction();
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
     rich_error_list.emplace_back(
         std::unexpected{FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "")});
     return rich_error_list;
-  } else {
-    g_db_client->CommitTransactionWithoutCallback();
   }
 
-  // do the modify operations in memory
-  for (const auto& operation : operations) {
-    if (operation.type() == crane::grpc::OperationType::Overwrite &&
-        operation.modify_field() == crane::grpc::ModifyField::Partition) {
-      std::list<std::string> deleted_partition;
-      for (const auto& par : account->allowed_partition) {
-        if (!ranges::contains(partition_list, par))
-          deleted_partition.emplace_back(par);
-      }
-      for (const auto& par : deleted_partition) {
-        DeleteAccountAllowedPartitionFromMapNoLock_(account->name, par);
-      }
-      m_account_map_[account_name]->allowed_partition.assign(
-          std::make_move_iterator(partition_list.begin()),
-          std::make_move_iterator(partition_list.end()));
-    } else if (operation.type() == crane::grpc::OperationType::Overwrite &&
-               operation.modify_field() == crane::grpc::ModifyField::Qos) {
-      ;
-
-      std::list<std::string> deleted_qos;
-      for (const auto& qos : account->allowed_qos_list) {
-        if (!ranges::contains(qos_list, qos)) deleted_qos.emplace_back(qos);
-      }
-
-      std::list<std::string> add_qos;
-      for (const auto& qos : qos_list) {
-        if (!ranges::contains(account->allowed_qos_list, qos))
-          add_qos.emplace_back(qos);
-      }
-
-      for (const auto& qos : deleted_qos) {
-        DeleteAccountAllowedQosFromMapNoLock_(account->name, qos);
-        m_qos_map_[qos]->reference_count -= change_num.front();
-        change_num.pop_front();
-      }
-
-      if (!add_qos.empty()) {
-        if (account->default_qos.empty()) {
-          m_account_map_[account_name]->default_qos = default_qos;
-        }
-        m_account_map_[account_name]->allowed_qos_list.assign(
-            std::make_move_iterator(qos_list.begin()),
-            std::make_move_iterator(qos_list.end()));
-        for (const auto& qos : add_qos) {
-          m_qos_map_[qos]->reference_count++;
-        }
-      }
-
-    } else {
-      for (const auto& value : operation.value_list()) {
-        switch (operation.type()) {
-        case crane::grpc::OperationType::Add: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Partition: {
-            m_account_map_[account_name]->allowed_partition.emplace_back(value);
-            break;
-          }
-
-          case crane::grpc::ModifyField::Qos: {
-            if (account->default_qos.empty()) {
-              m_account_map_[account_name]->default_qos = value;
-            }
-            m_account_map_[account_name]->allowed_qos_list.emplace_back(value);
-            m_qos_map_[value]->reference_count++;
-            break;
-          }
-
-          default:
-            std::unreachable();
-          }
-          break;
-        }
-
-        case crane::grpc::OperationType::Overwrite: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Description: {
-            m_account_map_[account_name]->description = value;
-            break;
-          }
-          case crane::grpc::ModifyField::DefaultQos: {
-            m_account_map_[account_name]->default_qos = value;
-            break;
-          }
-
-          default:
-            std::unreachable();
-          }
-          break;
-        }
-
-        case crane::grpc::OperationType::Delete: {
-          switch (operation.modify_field()) {
-          case crane::grpc::ModifyField::Partition: {
-            DeleteAccountAllowedPartitionFromMapNoLock_(account->name, value);
-            break;
-          }
-          case crane::grpc::ModifyField::Qos: {
-            DeleteAccountAllowedQosFromMapNoLock_(account->name, value);
-            m_qos_map_[value]->reference_count -= delete_qos_change_num;
-            break;
-          }
-          default:
-            std::unreachable();
-          }
-          break;
-        }
-        default:
-          std::unreachable();
-        }
-      }
-    }
+  for (auto& [name, element] : account_map) {
+    m_account_map_[name] = std::make_unique<Account>(std::move(element));
   }
-
+  for (auto& [name, element] : user_map) {
+    m_user_map_[name] = std::make_unique<User>(std::move(element));
+  }
+  for (auto& [name, element] : qos_map) {
+    m_qos_map_[name] = std::make_unique<Qos>(std::move(element));
+  }
   return rich_error_list;
 }
 
@@ -3096,182 +2960,76 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
   return {};
 }
 
-CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
-    const std::string& actor_name, const std::string& name,
-    const std::string& partition) {
-  // Update to database
-  bool result = g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                             "$addToSet", name,
-                                             "allowed_partition", partition);
-
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
-                 fmt::format("Add: partition: {}", partition));
-
-  return result ? CraneExpected<void>()
-                : std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-}
-
-CraneExpected<void> AccountManager::AddAccountAllowedQos_(
-    const std::string& actor_name, const Account& account,
-    const std::string& qos) {
-  const std::string& name = account.name;
-
-  bool result = true;
-  if (account.default_qos.empty()) {
-    result = result &&
-             g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                          "$set", name, "default_qos", qos);
-  }
-  result = result && g_db_client->UpdateEntityOne(
-                         MongodbClient::EntityType::ACCOUNT, "$addToSet", name,
-                         "allowed_qos_list", qos);
-  result = result && IncQosReferenceCountInDb_(qos, 1);
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
-                 fmt::format("Add: qos: {}", qos));
-
-  return result ? CraneExpected<void>()
-                : std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-}
-
-CraneExpected<void> AccountManager::SetAccountDescription_(
-    const std::string& actor_name, const std::string& name,
-    const std::string& description) {
-  bool result =
-      g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                   name, "description", description);
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
-                 fmt::format("description: {}", description));
-
-  return result ? CraneExpected<void>()
-                : std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-}
-
-CraneExpected<void> AccountManager::SetAccountDefaultQos_(
-    const std::string& actor_name, const Account& account,
-    const std::string& qos) {
-  const std::string& name = account.name;
-
-  bool result = g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                             "$set", name, "default_qos", qos);
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
-                 fmt::format("default_qos: {}", qos));
-
-  return result ? CraneExpected<void>()
-                : std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-}
-
 CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
-    const std::string& actor_name, const Account& account,
-    std::unordered_set<std::string>& partition_list) {
-  const std::string& name = account.name;
-
+    Account* account, std::unordered_set<std::string>& partition_list,
+    std::unordered_map<std::string, Account>& account_map,
+    std::unordered_map<std::string, User>& user_map) {
   std::list<std::string> deleted_partition;
-  for (const auto& par : account.allowed_partition) {
+  for (const auto& par : account->allowed_partition) {
     if (!ranges::contains(partition_list, par))
       deleted_partition.emplace_back(par);
   }
 
   int add_num = 0;
   for (const auto& par : partition_list) {
-    if (!ranges::contains(account.allowed_partition, par)) add_num++;
+    if (!ranges::contains(account->allowed_partition, par)) add_num++;
   }
-  bool result = true;
-  // DB operation
+
   for (const auto& par : deleted_partition) {
-    result =
-        result && DeleteAccountAllowedPartitionFromDBNoLock_(account.name, par);
+    auto rich_result = DeleteAccountAllowedPartitionNoLock_(
+        account, par, account_map, user_map);
+    if (!rich_result) {
+      return rich_result;
+    }
   }
 
   if (add_num > 0) {
-    result = result && g_db_client->UpdateEntityOne(
-                           MongodbClient::EntityType::ACCOUNT, "$set", name,
-                           "allowed_partition", partition_list);
+    account->allowed_partition =
+        std::list<std::string>(partition_list.begin(), partition_list.end());
   }
-  if (!result)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
-
-  AddTxnLogToDB_(
-      actor_name, name, TxnAction::ModifyAccount,
-      fmt::format("Set: partition_list: {}", fmt::join(partition_list, ",")));
 
   return {};
 }
-
 CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
-    const std::string& actor_name, const Account& account,
-    std::unordered_set<std::string>& qos_list, std::list<int>& change_num,
-    const std::string& default_qos) {
-  const std::string& name = account.name;
-
+    Account* account, std::unordered_set<std::string>& qos_list,
+    std::unordered_map<std::string, Account>& account_map,
+    std::unordered_map<std::string, User>& user_map,
+    std::unordered_map<std::string, Qos>& qos_map) {
   std::list<std::string> deleted_qos;
-  for (const auto& qos : account.allowed_qos_list) {
+  for (const auto& qos : account->allowed_qos_list) {
     if (!ranges::contains(qos_list, qos)) deleted_qos.emplace_back(qos);
   }
 
   std::list<std::string> add_qos;
   for (const auto& qos : qos_list) {
-    if (!ranges::contains(account.allowed_qos_list, qos))
+    if (!ranges::contains(account->allowed_qos_list, qos))
       add_qos.emplace_back(qos);
   }
 
   for (const auto& qos : deleted_qos) {
-    int num = DeleteAccountAllowedQosFromDBNoLock_(account.name, qos);
-    IncQosReferenceCountInDb_(qos, -num);
-    change_num.emplace_back(num);
+    auto rich_result =
+        DeleteAccountAllowedQosNoLock_(account, qos, account_map, user_map);
+    if (!rich_result) {
+      return std::unexpected{rich_result.error()};
+    }
+    if (qos_map.find(qos) == qos_map.end()) {
+      qos_map.emplace(qos, Qos(*m_qos_map_[qos]));
+    }
+    int num = rich_result.value();
+    qos_map[qos].reference_count -= num;
   }
-
-  bool result = true;
-
   if (!add_qos.empty()) {
-    Account temp;
-    result = result && g_db_client->SelectAccount("name", name, &temp);
-    if (temp.default_qos.empty()) {
-      result = result && g_db_client->UpdateEntityOne(
-                             MongodbClient::EntityType::ACCOUNT, "$set", name,
-                             "default_qos", default_qos);
-    }
-
-    result = result && g_db_client->UpdateEntityOne(
-                           MongodbClient::EntityType::ACCOUNT, "$set", name,
-                           "allowed_qos_list", qos_list);
+    account->allowed_qos_list =
+        std::list<std::string>(qos_list.begin(), qos_list.end());
     for (const auto& qos : add_qos) {
-      result = result && IncQosReferenceCountInDb_(qos, 1);
+      if (qos_map.find(qos) == qos_map.end()) {
+        qos_map.emplace(qos, Qos(*m_qos_map_[qos]));
+      }
+      qos_map[qos].reference_count += 1;
     }
   }
-  if (!result)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
-
-  AddTxnLogToDB_(actor_name, name, TxnAction::ModifyAccount,
-                 fmt::format("Set: qos_list: {}", fmt::join(qos_list, ",")));
 
   return {};
-}
-
-CraneExpected<void> AccountManager::DeleteAccountAllowedPartition_(
-    const std::string& actor_name, const Account& account,
-    const std::string& partition) {
-  bool result =
-      DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
-  AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
-                 fmt::format("Del: partition: {}", partition));
-
-  return result ? CraneExpected<void>()
-                : std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-}
-
-CraneExpected<int> AccountManager::DeleteAccountAllowedQos_(
-    const std::string& actor_name, const Account& account,
-    const std::string& qos) {
-  int change_num;
-  change_num = DeleteAccountAllowedQosFromDBNoLock_(account.name, qos);
-  bool result = IncQosReferenceCountInDb_(qos, -change_num);
-  if (!result) return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-  AddTxnLogToDB_(actor_name, account.name, TxnAction::ModifyAccount,
-                 fmt::format("Del: qos: {}", qos));
-
-  return change_num;
 }
 
 CraneExpected<void> AccountManager::BlockUserNoLock_(
@@ -3415,6 +3173,68 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
   }
   return change_num;
 }
+// modify the backup
+CraneExpectedRich<int> AccountManager::DeleteAccountAllowedQosNoLock_(
+    Account* account, const std::string& qos,
+    std::unordered_map<std::string, Account>& account_map,
+    std::unordered_map<std::string, User>& user_map) {
+  if (!ranges::contains(account->allowed_qos_list, qos))
+    return std::unexpected{FormatRichErr(CraneErrCode::ERR_QOS_MISSING, qos)};
+
+  int change_num = 1;
+  for (const auto& account_name : account->child_accounts) {
+    if (account_map.find(account_name) == account_map.end()) {
+      const Account* child_account = GetExistedAccountInfoNoLock_(account_name);
+      if (!child_account) {
+        CRANE_ERROR(
+            "Operating on a non-existent account '{}', please check this item "
+            "in database and restart cranectld",
+            account_name);
+        return std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account_name)};
+      }
+      account_map.emplace(account_name, Account(*child_account));
+    }
+    auto rich_result = DeleteAccountAllowedQosNoLock_(
+        &account_map[account_name], qos, account_map, user_map);
+    if (!rich_result) {
+      return rich_result;
+    } else {
+      change_num += rich_result.value();
+    }
+  }
+
+  for (const auto& user_name : account->users) {
+    if (user_map.find(user_name) == user_map.end()) {
+      user_map.emplace(user_name, User(*m_user_map_[user_name]));
+    }
+    auto user = user_map[user_name];
+    if (!user.account_to_attrs_map.contains(account->name)) {
+      CRANE_ERROR("User '{}' doesn't belong to account '{}'", user_name,
+                  account->name);
+      return std::unexpected{FormatRichErr(
+          CraneErrCode::ERR_USER_ACCOUNT_MISMATCH,
+          fmt::format("User: {}, Account: {}", user_name, account->name))};
+    }
+    for (auto& [par, pair] :
+         user.account_to_attrs_map[account->name].allowed_partition_qos_map) {
+      if (ranges::contains(pair.second, qos)) pair.second.remove(qos);
+
+      if (pair.first == qos) {
+        pair.first = pair.second.empty() ? "" : pair.second.front();
+      }
+    }
+  }
+
+  account->allowed_qos_list.remove(qos);
+  if (account->default_qos == qos) {
+    std::list<std::string> temp{account->allowed_qos_list};
+    temp.remove(qos);
+    account->default_qos = temp.empty() ? "" : temp.front();
+  }
+
+  return change_num;
+}
 
 /**
  * @note need write lock(m_rw_account_mutex_) and write *
@@ -3553,6 +3373,44 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
                                account->name, "allowed_partition", partition);
   return true;
+}
+
+CraneExpectedRich<void> AccountManager::DeleteAccountAllowedPartitionNoLock_(
+    Account* account, const std::string& partition,
+    std::unordered_map<std::string, Account>& account_map,
+    std::unordered_map<std::string, User>& user_map) {
+  if (!ranges::contains(account->allowed_partition, partition))
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+
+  for (const auto& account_name : account->child_accounts) {
+    if (account_map.find(account_name) == account_map.end()) {
+      const Account* child_account = GetExistedAccountInfoNoLock_(account_name);
+      if (!child_account) {
+        CRANE_ERROR(
+            "Operating on a non-existent account '{}', please check this item "
+            "in database and restart cranectld",
+            account_name);
+        return std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account_name)};
+      }
+      account_map.emplace(account_name, Account(*child_account));
+    }
+    DeleteAccountAllowedPartitionNoLock_(&account_map[account_name], partition,
+                                         account_map, user_map);
+  }
+
+  for (const auto& user_name : account->users) {
+    if (user_map.find(user_name) == user_map.end()) {
+      user_map.emplace(user_name, User(*m_user_map_[user_name]));
+    }
+    user_map[user_name]
+        .account_to_attrs_map[account->name]
+        .allowed_partition_qos_map.erase(partition);
+  }
+  account->allowed_partition.remove(partition);
+
+  return {};
 }
 
 /**

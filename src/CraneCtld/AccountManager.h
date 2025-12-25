@@ -184,8 +184,11 @@ class AccountManager {
    * ---------------------------------------------------------------------------
    */
   std::vector<CraneExpectedRich<void>> CheckModifyAccountOperations(
-      const Account* account,
+      Account* account,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
+      std::unordered_map<std::string, Account>& account_map,
+      std::unordered_map<std::string, User>& users,
+      std::unordered_map<std::string, Qos>& qos_map, std::string* log,
       bool force);
   std::vector<CraneExpectedRich<void>> CheckModifyUserOperations(
       const User* op_user, const Account* account_ptr,
@@ -355,26 +358,15 @@ class AccountManager {
                                             const std::string& account,
                                             const std::string& partition);
 
-  CraneExpected<void> AddAccountAllowedPartition_(const std::string& actor_name,
-                                                  const std::string& name,
-                                                  const std::string& partition);
-  CraneExpected<void> AddAccountAllowedQos_(const std::string& actor_name,
-                                            const Account& account,
-                                            const std::string& qos);
-
-  CraneExpected<void> SetAccountDescription_(const std::string& actor_name,
-                                             const std::string& name,
-                                             const std::string& description);
-  CraneExpected<void> SetAccountDefaultQos_(const std::string& actor_name,
-                                            const Account& account,
-                                            const std::string& qos);
   CraneExpectedRich<void> SetAccountAllowedPartition_(
-      const std::string& actor_name, const Account& account,
-      std::unordered_set<std::string>& partition_list);
+      Account* account, std::unordered_set<std::string>& partition_list,
+      std::unordered_map<std::string, Account>& account_map,
+      std::unordered_map<std::string, User>& user_map);
   CraneExpectedRich<void> SetAccountAllowedQos_(
-      const std::string& actor_name, const Account& account,
-      std::unordered_set<std::string>& qos_list, std::list<int>& change_num,
-      const std::string& default_qos);
+      Account* account, std::unordered_set<std::string>& qos_list,
+      std::unordered_map<std::string, Account>& account_map,
+      std::unordered_map<std::string, User>& user_map,
+      std::unordered_map<std::string, Qos>& qos_map);
 
   CraneExpected<void> DeleteAccountAllowedPartition_(
       const std::string& actor_name, const Account& account,
@@ -403,6 +395,12 @@ class AccountManager {
                                            const std::string& qos);
   bool DeleteAccountAllowedQosFromMapNoLock_(const std::string& name,
                                              const std::string& qos);
+
+  CraneExpectedRich<int> DeleteAccountAllowedQosNoLock_(
+      Account* account, const std::string& qos,
+      std::unordered_map<std::string, Account>& account_map,
+      std::unordered_map<std::string, User>& user_map);
+
   bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
       const std::string& name, const std::string& account,
       const std::string& qos);
@@ -414,6 +412,11 @@ class AccountManager {
                                                   const std::string& partition);
   bool DeleteAccountAllowedPartitionFromMapNoLock_(
       const std::string& name, const std::string& partition);
+
+  CraneExpectedRich<void> DeleteAccountAllowedPartitionNoLock_(
+      Account* account, const std::string& partition,
+      std::unordered_map<std::string, Account>& account_map,
+      std::unordered_map<std::string, User>& user_map);
 
   void AddTxnLogToDB_(const std::string& actor_name, const std::string& target,
                       TxnAction action, const std::string& info);
