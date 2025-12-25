@@ -163,6 +163,42 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
   return {};
 }
 
+void LicensesManager::CheckLicenseCountSufficient(
+    const std::unordered_map<LicenseId, License>& back_map,
+    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
+        req_licenses,
+    bool is_license_or,
+    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
+  if (is_license_or) {
+    for (const auto& license : req_licenses) {
+      auto iter = back_map.find(license.key());
+      if (iter != back_map.end()) {
+        auto lic = iter->second;
+        if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
+            lic.total) {
+          actual_licenses->emplace(license.key(), license.count());
+          break;
+            }
+      }
+    }
+  } else {
+    for (const auto& license : req_licenses) {
+      auto iter = back_map.find(license.key());
+      if (iter == back_map.end()) {
+        actual_licenses->clear();
+        break;
+      }
+      auto lic = iter->second;
+      if (license.count() + lic.reserved + lic.used + lic.last_deficit >
+          lic.total) {
+        actual_licenses->clear();
+        break;
+          }
+      actual_licenses->emplace(license.key(), license.count());
+    }
+  }
+}
+
 void LicensesManager::FreeReserved(
     const std::unordered_map<LicenseId, uint32_t>& actual_license) {
   auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
