@@ -1006,8 +1006,6 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      begin = std::chrono::steady_clock::now();
-
       // Now we have the ownerships of to-run jobs in jobs_to_run. Add task
       // ids to node maps immediately before CreateCgroupForTasks to ensure
       // that if a CraneD crash, the callback of CranedKeeper can call
@@ -1069,6 +1067,7 @@ void TaskScheduler::ScheduleThread_() {
         job->SetDaemonStep(std::move(daemon_step));
       }
 
+      begin = std::chrono::steady_clock::now();
       if (!g_embedded_db_client->AppendSteps(step_in_ctld_vec)) {
         jobs_failed.insert(jobs_failed.end(),
                            std::make_move_iterator(jobs_to_run.begin()),
@@ -1086,7 +1085,13 @@ void TaskScheduler::ScheduleThread_() {
                 daemon_step->GetStepToD(craned_id));
         }
       }
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Append steps to embedded DB costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       // FIXME: Put jobs to running map before sending RPC to craned, or
       // StatusChange will unable to lookup the jobs.
       std::latch alloc_job_latch(craned_alloc_job_map.size());
@@ -1094,7 +1099,7 @@ void TaskScheduler::ScheduleThread_() {
         CranedId const& craned_id = iter.first;
         std::vector<crane::grpc::JobToD>& jobs = iter.second;
 
-        m_rpc_worker_pool_->detach_task([&]() {
+        m_rpc_worker_pool_->detach_task([&] {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send AllocJobs for {} tasks to {}", jobs.size(),
                       craned_id);
@@ -1145,7 +1150,13 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_job_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc job costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
+      begin = std::chrono::steady_clock::now();
       std::latch alloc_step_latch(craned_alloc_steps.size());
       for (const auto& craned_id : craned_alloc_steps | std::views::keys) {
         m_rpc_worker_pool_->detach_task([&, craned_id] {
@@ -1192,6 +1203,11 @@ void TaskScheduler::ScheduleThread_() {
         });
       }
       alloc_step_latch.wait();
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Alloc daemon steps costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       std::vector<std::unique_ptr<TaskInCtld>> jobs_created;
       for (auto& job : jobs_to_run) {
@@ -1201,12 +1217,6 @@ void TaskScheduler::ScheduleThread_() {
           jobs_created.emplace_back(std::move(job));
         }
       }
-
-      end = std::chrono::steady_clock::now();
-      CRANE_TRACE(
-          "CreateCgroupForJobs costed {} ms",
-          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-              .count());
 
       begin = std::chrono::steady_clock::now();
 
@@ -1655,18 +1665,8 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(StepInCtld* step) {
-  if (step->StepType() == crane::grpc::StepType::DAEMON) {
-    for (CranedId const& craned_id : step->ExecutionNodes()) {
-      m_cancel_task_queue_.enqueue(
-          CancelRunningTaskQueueElem{.job_id = step->job_id,
-                                     .step_id = step->StepId(),
-                                     .craned_id = craned_id});
-      m_cancel_task_async_handle_->send();
-    }
-    return CraneErrCode::SUCCESS;
-  }
-
+CraneErrCode TaskScheduler::TerminateRunningStepNoLock_(
+    CommonStepInCtld* step) {
   auto* common_step = static_cast<CommonStepInCtld*>(step);
   bool need_to_be_terminated = false;
   if (step->type == crane::grpc::Interactive) {
@@ -1858,14 +1858,14 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         }
       } else {
         // User cancel jobs with node/name... filter
-        auto daemon_step = task->DaemonStep();
-        if (!daemon_step) {
+        auto primary_step = task->PrimaryStep();
+        if (!primary_step) {
           CRANE_ERROR(
               "[Job #{}] Daemon step not found when cancelling running job",
               task_id);
           return;
         }
-        TerminateRunningStepNoLock_(daemon_step);
+        TerminateRunningStepNoLock_(primary_step);
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
         cancelled_job_steps[task_id] = crane::grpc::JobStepIds{};
       }
@@ -2825,19 +2825,15 @@ void TaskScheduler::CleanStepSubmitQueueCb_() {
     if (it != m_running_task_map_.end()) {
       step->job = it->second.get();
       step->SetSubmitTime(now);
-      auto err = AcquireStepAttributes(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
+      auto ok = HandleUnsetOptionalInStepToCtld(step.get());
+      if (ok) ok = AcquireStepAttributes(step.get());
+      if (ok) ok = CheckStepValidity(step.get());
+      if (ok) {
+        valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
+      } else {
+        elems[pos].second.set_value(std::unexpected{ok.error()});
         step.reset();
-        continue;
       }
-      err = CheckStepValidity(step.get());
-      if (!err.has_value()) {
-        elems[pos].second.set_value(std::unexpected{err.error()});
-        step.reset();
-        continue;
-      }
-      valid_steps.emplace_back(step.release(), std::move(elems[pos].second));
     } else {
       elems[pos].second.set_value(
           std::unexpected(CraneErrCode::ERR_INVALID_JOB_ID));
@@ -2945,11 +2941,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
       CRANE_TRACE("[Step #{}.{}] Step status change received, status: {}.",
                   task_id, step_id, new_status);
-      step->StepStatusChange(new_status, exit_code, reason, craned_index,
-                             timestamp, &context);
+      job_finished_status = step->StepStatusChange(
+          new_status, exit_code, reason, craned_index, timestamp, &context);
     }
 
     if (job_finished_status.has_value()) {
+      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
+                  job_finished_status.value());
       task->SetStatus(job_finished_status.value().first);
       task->SetExitCode(job_finished_status.value().second);
 
@@ -3002,9 +3000,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       // Pending / Running -> Completed / Failed / Cancelled.
       // It means all task status changes will put the task into mongodb,
       // so we don't have any branch code here and just put it into mongodb.
-
-      CRANE_TRACE("[Job #{}] Completed with status {}.", task_id,
-                  job_finished_status.value());
       m_running_task_map_.erase(iter);
     }
   }
@@ -4082,9 +4077,9 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
     TaskInCtld* task) {
   if (task->IsBatch()) {
-    auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
-    if (!batch_meta->has_open_mode_append())
-      batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+    auto* io_meta = task->MutableTaskToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
   }
 
   return {};
@@ -4274,6 +4269,16 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
+  return {};
+}
+
+CraneExpected<void> TaskScheduler::HandleUnsetOptionalInStepToCtld(
+    StepInCtld* step) {
+  if (step->StepToCtld().has_io_meta()) {
+    auto* io_meta = step->MutableStepToCtld()->mutable_io_meta();
+    if (!io_meta->has_open_mode_append())
+      io_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  }
   return {};
 }
 

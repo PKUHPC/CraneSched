@@ -115,7 +115,7 @@ enum TaskStatus {
   Cancelled = 5;
   OutOfMemory = 6;
   Configuring = 7;
-  Configured = 8;
+  Starting = 8;
   Completing = 9;
 
   Invalid = 15;
@@ -159,6 +159,8 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
     ContainerTaskAdditionalMeta container_meta = 23;
   }
+  IoMeta io_meta = 24;
+  string sh_script = 25;  // Crun and cbatch script content
 
   string extra_attr = 30;
 
@@ -218,13 +220,14 @@ message StepToCtld {
   google.protobuf.Duration time_limit = 1;
   // account, qos from job
   uint32 job_id = 2;
+  // FIXME: Only cpu is per task, memory and gres is total for the step now.
   ResourceView req_resources_per_task = 3;
   TaskType type = 5;
   uint32 uid = 6;  // Only for authorization
   string name = 7;
 
-  optional uint32 node_num = 8;
-  optional uint32 ntasks_per_node = 9;
+  uint32 node_num = 8;
+  uint32 ntasks_per_node = 9;
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
@@ -236,6 +239,9 @@ message StepToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
     ContainerTaskAdditionalMeta container_meta = 23;
   }
+
+  IoMeta io_meta = 24;
+  string sh_script = 25;
 
   string extra_attr = 30;
 
@@ -311,11 +317,14 @@ message StepToD {
 
   uint32 uid = 6;
   repeated uint32 gid = 7;
+  map<uint32 /*task id*/, ResourceInNode> task_res_map = 8;
 
   // For execution step
   optional BatchTaskAdditionalMeta batch_meta = 9;
   optional InteractiveTaskAdditionalMeta interactive_meta = 10;
   optional ContainerTaskAdditionalMeta container_meta = 11;
+  IoMeta io_meta = 12;
+  string sh_script = 13;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -336,6 +345,8 @@ message StepToD {
 
   bool get_user_env = 25;
 
+  uint32 ntasks_total = 26;
+
   // Not used now.
   string extra_attr = 29;
 }
@@ -350,12 +361,20 @@ message JobStepIds {
   repeated uint32 steps = 1;
 }
 
-message BatchTaskAdditionalMeta {
-  string sh_script = 1;
-  optional bool open_mode_append = 2;
+message IoMeta {
+  // Append mode for output and error files
+  optional bool open_mode_append = 1;
+  string input_file_pattern = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
-  string interpreter = 5;
+
+  // For crun only
+  optional uint32 input_task_id = 5;
+  optional uint32 output_task_id = 6;
+}
+
+message BatchTaskAdditionalMeta {
+  string interpreter = 1;
 }
 
 message X11Meta {
@@ -368,7 +387,6 @@ message X11Meta {
 
 message InteractiveTaskAdditionalMeta {
   string cfored_name = 1;
-  string sh_script = 2;
   string term_env = 3;
   InteractiveTaskType interactive_type = 4;
 
@@ -689,7 +707,7 @@ enum ErrCode {
 
   ERR_CRI_GENERIC = 80;              // CRI runtime returns error. For other errors in Crane, use ERR_GENERIC_FAILURE.
   ERR_CRI_DISABLED = 81;             // CRI support is disabled in the cluster.
-  ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
+  ERR_CRI_CONTAINER_NOT_READY = 82;  // Job is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
 }
@@ -808,6 +826,13 @@ message CranedRemoteMeta {
   uint32 config_crc = 9;
 }
 
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 free = 4;
+}
+
 enum TxnAction {
   AddAccount = 0;
   ModifyAccount = 1;
@@ -818,10 +843,4 @@ enum TxnAction {
   AddQos = 6;
   ModifyQos = 7;
   DeleteQos = 8;
-}
-message LicenseInfo {
-  string name = 1;
-  uint32 total = 2;
-  uint32 used = 3;
-  uint32 free = 4;
 }

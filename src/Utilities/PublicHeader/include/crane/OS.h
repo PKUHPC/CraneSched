@@ -81,6 +81,8 @@ bool CheckProxyEnvironmentVariable();
 
 absl::Time GetSystemBootTime();
 
+CraneExpected<std::string> GetHostname();
+
 }  // namespace os
 
 }  // namespace util

@@ -341,9 +341,13 @@ struct InteractiveMeta {
   struct StepResAllocArgs {
     job_id_t job_id;
     step_id_t step_id;
-    std::expected<std::pair<std::string, std::unordered_set<CranedId>>,
-                  std::string>
-        allocated_nodes;
+    struct ResAllocInfo {
+      std::string allocated_craned_regex;
+      std::vector<CranedId> allocated_craned_ids;
+      std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
+      uint32_t ntasks_total;
+    };
+    std::expected<ResAllocInfo, std::string> res_allocate_expt;
   };
   std::function<void(StepResAllocArgs const&)> cb_step_res_allocated;
 
@@ -519,8 +523,9 @@ struct StepInCtld {
   std::int32_t m_requeue_count_{0};
   ResourceV2 m_allocated_res_;
 
-  std::unordered_set<CranedId> m_craned_ids_;
+  std::vector<CranedId> m_craned_ids_;
   std::unordered_set<CranedId> m_execute_nodes_;
+
   std::unordered_set<CranedId> m_configuring_nodes_;
   std::unordered_set<CranedId> m_running_nodes_;
 
@@ -547,6 +552,17 @@ struct StepInCtld {
 
  public:
   virtual ~StepInCtld() = default;
+  bool IsBatch() const { return type == crane::grpc::Batch; }
+  bool IsCalloc() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Calloc;
+  }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           m_step_to_ctld_.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
+  }
 
   void SetStepType(crane::grpc::StepType type);
   crane::grpc::StepType StepType() const;
@@ -569,10 +585,8 @@ struct StepInCtld {
   void SetAllocatedRes(const ResourceV2& res);
   ResourceV2 AllocatedRes() const { return m_allocated_res_; }
 
-  void SetCranedIds(const std::unordered_set<CranedId>& craned_list);
-  const std::unordered_set<CranedId>& CranedIds() const {
-    return m_craned_ids_;
-  }
+  void SetCranedIds(const std::vector<CranedId>& craned_list);
+  const std::vector<CranedId>& CranedIds() const { return m_craned_ids_; }
 
   void SetExecutionNodes(const std::unordered_set<CranedId>& nodes);
   std::unordered_set<CranedId> ExecutionNodes() const {
@@ -672,6 +686,9 @@ struct CommonStepInCtld : StepInCtld {
    * ----------- */
 
   std::string allocated_craneds_regex;
+  // TODO: Schedule thread should fill in following task map
+  std::unordered_map<task_id_t, ResourceInNode> task_res_map;
+  std::unordered_map<CranedId, std::set<task_id_t>> craned_task_map;
 
   ~CommonStepInCtld() override = default;
 
@@ -681,10 +698,10 @@ struct CommonStepInCtld : StepInCtld {
   [[nodiscard]] crane::grpc::StepToD GetStepToD(
       const CranedId& craned_id) const override;
 
-  void StepStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        const std::string& reason, const CranedId& craned_id,
-                        google::protobuf::Timestamp timestamp,
-                        StepStatusChangeContext* context);
+  std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
+      crane::grpc::TaskStatus new_status, uint32_t exit_code,
+      const std::string& reason, const CranedId& craned_id,
+      google::protobuf::Timestamp timestamp, StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
@@ -821,6 +838,11 @@ struct TaskInCtld {
            task_to_ctld.interactive_meta().interactive_type() ==
                crane::grpc::InteractiveTaskType::Calloc;
   }
+  bool IsCrun() const {
+    return type == crane::grpc::TaskType::Interactive &&
+           task_to_ctld.interactive_meta().interactive_type() ==
+               crane::grpc::InteractiveTaskType::Crun;
+  }
   bool IsContainer() const { return type == crane::grpc::Container; }
   bool IsX11() const;
   bool IsX11WithPty() const;
@@ -893,6 +915,10 @@ struct TaskInCtld {
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
+  bool AllStepsFinished() const {
+    return m_steps_.empty() && !m_primary_step_ && !m_daemon_step_;
+  }
+
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {
     // Common step can only be interactive step started by crun.
     CRANE_ASSERT(step->type == crane::grpc::TaskType::Interactive);
@@ -942,7 +968,7 @@ struct TaskInCtld {
         continue;
       }
       ResourceV2 step_alloc_res;
-      std::unordered_set<CranedId> step_craned_ids;
+      std::vector<CranedId> step_craned_ids;
       for (auto const& craned_id :
            step_res_avail_.EachNodeResMap() | std::views::keys) {
         if (step->excluded_nodes.contains(craned_id)) {
@@ -959,7 +985,7 @@ struct TaskInCtld {
           continue;
         }
         step_alloc_res.AddResourceInNode(craned_id, feasible_res);
-        step_craned_ids.insert(craned_id);
+        step_craned_ids.emplace_back(craned_id);
         if (step_craned_ids.size() >= step->node_num) {
           break;
         }
@@ -971,16 +997,37 @@ struct TaskInCtld {
       step->SetCranedIds(step_craned_ids);
       step->allocated_craneds_regex =
           util::HostNameListToStr(step->CranedIds());
-      step->SetConfiguringNodes(step_craned_ids);
-      step->SetExecutionNodes(step_craned_ids);
+      auto node_set =
+          std::unordered_set(step_craned_ids.begin(), step_craned_ids.end());
+      step->SetConfiguringNodes(node_set);
+      step->SetExecutionNodes(node_set);
       step->SetStartTime(now);
       step->SetStatus(crane::grpc::TaskStatus::Configuring);
+      task_id_t cur_task_id = 0;
+      for (const auto& craned_id : step_craned_ids) {
+        for (int i = 0; i < step->ntasks_per_node; ++i) {
+          step->craned_task_map[craned_id].insert(cur_task_id);
+          auto res = step_alloc_res.at(craned_id);
+          // Mem is allocated at step level, set to 0 here to avoid mem limit.
+          res.allocatable_res.memory_bytes = 0;
+          res.allocatable_res.memory_sw_bytes = 0;
+          step->task_res_map[cur_task_id] = res;
+          ++cur_task_id;
+        }
+      }
       const auto& meta = step->ia_meta.value();
-      meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+      auto arg = StepInteractiveMeta::StepResAllocArgs{
           .job_id = step->job_id,
           .step_id = step->StepId(),
-          .allocated_nodes{std::make_pair(
-              util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+          .res_allocate_expt{
+              StepInteractiveMeta::StepResAllocArgs::ResAllocInfo{
+                  .allocated_craned_regex = step->allocated_craneds_regex,
+                  .allocated_craned_ids = step_craned_ids,
+                  .craned_task_map = step->craned_task_map,
+                  .ntasks_total =
+                      static_cast<uint32_t>(step->task_res_map.size())}}};
+
+      meta.cb_step_res_allocated(arg);
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       ++popped_count;

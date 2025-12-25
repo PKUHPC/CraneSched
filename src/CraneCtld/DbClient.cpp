@@ -1880,7 +1880,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              runtime_attr.start_time().seconds(),
              runtime_attr.end_time().seconds(), 0,
              // 20-24
-             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+             task_to_ctld.sh_script(), runtime_attr.status(),
              task_to_ctld.time_limit().seconds(),
              runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
              // 25-29
@@ -1905,12 +1905,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
-  std::string script;
+  std::string script = task->TaskToCtld().sh_script();
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
 
-  if (task->type == crane::grpc::Batch)
-    script = task->TaskToCtld().batch_meta().sh_script();
-  else if (task->type == crane::grpc::Container)
+  if (task->type == crane::grpc::Container)
     container_meta = std::get<ContainerMetaInTask>(task->meta);
 
   // TODO: Interactive meta?
@@ -2005,9 +2003,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 }
 
 MongodbClient::document MongodbClient::StepInCtldToDocument_(StepInCtld* step) {
-  std::string script;
-  if (step->type == crane::grpc::Batch)
-    script = step->StepToCtld().batch_meta().sh_script();
+  std::string script = step->StepToCtld().sh_script();
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : step->env) {
@@ -2077,9 +2073,7 @@ MongodbClient::document MongodbClient::StepInEmbeddedDbToDocument_(
   const auto& step_to_ctld = step.step_to_ctld();
   const auto& runtime_attr = step.runtime_attr();
 
-  std::string script;
-  if (step_to_ctld.type() == crane::grpc::Batch)
-    script = step_to_ctld.batch_meta().sh_script();
+  std::string script = step_to_ctld.sh_script();
 
   std::optional<ContainerMetaInTask> container_meta{std::nullopt};
   if (step_to_ctld.type() == crane::grpc::Container) {
