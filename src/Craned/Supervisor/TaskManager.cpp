@@ -1123,8 +1123,9 @@ CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
   using cri::kCriLabelUidKey;
 
   auto* cri_client = m_parent_step_inst_->GetCriClient();
-  auto pod_config_file = m_log_dir_ / std::format(kPodConfigFilePattern,
-                                                  g_config.CranedIdOfThisNode);
+  auto pod_config_file =
+      m_log_dir_ / std::format(PodInstance::kPodConfigFilePattern,
+                               g_config.CranedIdOfThisNode);
   if (!std::filesystem::exists(pod_config_file)) {
     CRANE_ERROR("Pod config file {} does not exist for container #{}.{}",
                 pod_config_file, g_config.JobId, g_config.StepId);
@@ -1142,7 +1143,7 @@ CraneErrCode ContainerInstance::LoadPodSandboxInfo_(
     return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
-  auto lock_file = m_log_dir_ / std::format(kPodIdLockFilePattern,
+  auto lock_file = m_log_dir_ / std::format(PodInstance::kPodIdLockFilePattern,
                                             g_config.CranedIdOfThisNode);
 
   std::string pod_id;

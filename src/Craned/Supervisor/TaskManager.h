@@ -258,14 +258,15 @@ class PodInstance : public ITaskInstance {
 
   const TaskExitInfo& HandlePodExited();
 
- private:
-  // NOTE: Should be consistent with ContainerInstance.
+  // NOTE: These are public constants and will be used ContainerInstance.
   // We use this to get a consistent data dir for pod/containers.
   static constexpr std::string_view kPodLogDirPattern = "{}.out";
   // NOTE: Should be consistent with ContainerInstance.
   // We get PodSandboxConfig from this file in another common steps.
   static constexpr std::string_view kPodConfigFilePattern = ".{}.bin";
   static constexpr std::string_view kPodIdLockFilePattern = ".{}.lock";
+
+ private:
   static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
 
   static std::string MakeHashId_(job_id_t job_id, const std::string& job_name,
@@ -313,20 +314,9 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
-  // Should be consistent with PodInstance.
-  static constexpr std::string_view kPodConfigFilePattern = ".{}.bin";
-  static constexpr std::string_view kPodIdLockFilePattern = ".{}.lock";
-
   // Container related constants
   static constexpr std::string_view kContainerLogDirPattern = "{}.out";
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
-  static constexpr size_t kCriPodPrefixLen = sizeof("job-") - 1;
-  static constexpr size_t kCriPodSuffixLen = 8;     // Hash suffix
-  static constexpr size_t kCriDnsMaxLabelLen = 63;  // DNS-1123 len limit
-
-  inline static std::string MakeHashId_(job_id_t job_id,
-                                        const std::string& job_name,
-                                        const std::string& node_name);
 
   // Setup id-mapped mounts in rootless containers.
   // NOTE: Called only after userns, run_as_* fields are set in config.
