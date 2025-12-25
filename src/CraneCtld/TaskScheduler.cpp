@@ -627,8 +627,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
   if (!task->licenses_count.empty())
-    g_licenses_manager->MallocLicenseResourceWhenRecoverRunning(
-        task->licenses_count);
+    g_licenses_manager->MallocLicenseWhenRecoverRunning(task->licenses_count);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -896,9 +895,6 @@ void TaskScheduler::ScheduleThread_() {
       LockGuard running_guard(&m_running_task_map_mtx_);
 
       for (auto& job_in_scheduler : pending_jobs) {
-        if (!job_in_scheduler->actual_licenses.empty())
-          g_licenses_manager->FreeReserved(job_in_scheduler->actual_licenses);
-
         auto it = m_pending_task_map_.find(job_in_scheduler->job_id);
         if (it != m_pending_task_map_.end()) {
           auto& job = it->second;
@@ -946,7 +942,7 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           if (!job_in_scheduler->actual_licenses.empty()) {
-            if (!g_licenses_manager->MallocLicenseResource(
+            if (!g_licenses_manager->MallocLicense(
                     job_in_scheduler->actual_licenses)) {
               job->pending_reason = "Licenses";
               continue;
@@ -1260,7 +1256,7 @@ void TaskScheduler::ScheduleThread_() {
                                                    job->TaskId());
           g_account_meta_container->FreeQosResource(*job);
           if (!job->licenses_count.empty())
-            g_licenses_manager->FreeLicenseResource(job->licenses_count);
+            g_licenses_manager->FreeLicense(job->licenses_count);
           LockGuard indexes_guard(&m_task_indexes_mtx_);
           for (const CranedId& craned_id : job->CranedIds()) {
             m_node_to_tasks_map_[craned_id].erase(job->TaskId());
@@ -2994,7 +2990,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                                                task->TaskId());
       g_account_meta_container->FreeQosResource(*task);
       if (!task->licenses_count.empty())
-        g_licenses_manager->FreeLicenseResource(task->licenses_count);
+        g_licenses_manager->FreeLicense(task->licenses_count);
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 
@@ -3907,17 +3903,13 @@ void SchedulerAlgo::NodeSelect(
                                           g_config.ScheduledBatchSize,
                                           job_ptr_vec);
 
+  CheckClusterResource_(&job_ptr_vec);
+
   // Schedule pending tasks
   // TODO: do it in parallel
   for (const auto& job : job_ptr_vec) {
-    // ctld only virtual resource;
-    if (!job->req_licenses.empty()) {
-      if (!g_licenses_manager->CheckLicenseCountSufficient(
-              job->req_licenses, job->is_license_or, &job->actual_licenses)) {
-        job->reason = "License";
-        continue;
-      }
-    }
+    if (!job->reason.empty()) continue;
+
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
       auto it = part_scheduler_map.find(job->partition_id);
@@ -3986,6 +3978,36 @@ void SchedulerAlgo::NodeSelect(
           job->reason = "Priority";
         }
       }
+    }
+  }
+}
+
+void SchedulerAlgo::CheckClusterResource_(
+    std::vector<PdJobInScheduler*>* job_ptr_vec) {
+  std::unordered_map<LicenseId, License> back_map;
+  {
+    auto licenses_map = g_licenses_manager->GetLicensesMapExclusivePtr();
+    for (const auto& [license_id, license] : *licenses_map) {
+      back_map.emplace(license_id, *license.GetExclusivePtr());
+    }
+  }
+
+  for (const auto& job_ptr : *job_ptr_vec) {
+    if (job_ptr->req_licenses.empty()) continue;
+
+    job_ptr->actual_licenses.clear();
+
+    g_licenses_manager->CheckLicenseCountSufficient(
+        back_map, job_ptr->req_licenses, job_ptr->is_license_or,
+        &job_ptr->actual_licenses);
+
+    if (job_ptr->actual_licenses.empty()) {
+      job_ptr->reason = "License";
+      continue;
+    }
+
+    for (const auto& [lic_id, count] : job_ptr->actual_licenses) {
+      back_map[lic_id].used += count;
     }
   }
 }

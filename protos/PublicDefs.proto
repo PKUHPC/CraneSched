@@ -692,6 +692,10 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+
+  ERR_RESOURCE_NOT_FOUND = 85;
+  ERR_INVALID_ARGUMENT = 86;
+  ERR_RESOURCE_ALREADY_EXIST = 87;
 }
 
 enum EntityType {
@@ -819,9 +823,50 @@ enum TxnAction {
   ModifyQos = 7;
   DeleteQos = 8;
 }
+
 message LicenseInfo {
   string name = 1;
   uint32 total = 2;
   uint32 used = 3;
   uint32 free = 4;
+  uint32 reserved = 5;
+  bool remote = 6;
+  uint32 LastConsumed = 7;
+  uint32 LastDeficit = 8;
+  int64 LastUpdate = 9;
+}
+
+message LicenseResourceInfo {
+  string resource_name = 1;
+  map<string, uint32> cluster_resource_info = 2;
+  uint32 count = 3;
+  string server = 4;
+  string server_type = 5;
+  LicenseResource.Type type = 6;
+  string description = 7;
+  uint32 last_consumed = 8;
+  uint32 allocated = 9;
+  uint32 flags = 10;
+}
+
+message LicenseResource {
+  enum Type {
+    NotSet = 0;
+    License = 1;
+  }
+
+  enum Field {
+    Count = 0;
+    Allowed = 1;
+    LastConsumed = 2;
+    Description = 3;
+    Flags = 4;
+    ServerType = 5;
+    ResourceType = 6;
+  }
+
+  enum Flag {
+    None = 0;
+    Absolute = 1;
+  }
 }

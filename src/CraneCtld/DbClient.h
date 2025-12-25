@@ -247,6 +247,12 @@ class MongodbClient {
       const std::unordered_map<std::string, std::string>& conditions,
       int64_t start_time, int64_t end_time, std::list<Txn>* res_txn);
 
+  bool InsertResource(const LicenseResource& resource);
+  bool UpdateResource(const LicenseResource& resource);
+  bool DeleteResource(const std::string& resource_name,
+                      const std::string& server);
+  void SelectAllResource(std::list<LicenseResource>* resource_list);
+
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
   void CreateCollectionIndex(mongocxx::collection& coll,
@@ -291,6 +297,10 @@ class MongodbClient {
   void ViewToTxn_(const bsoncxx::document::view& txn_view, Txn* txn);
   document TxnToDocument_(const Txn& txn);
 
+  void ViewToResource_(const bsoncxx::document::view& resource_view,
+                       LicenseResource* resource);
+  document ResourceToDocument_(const LicenseResource& resource);
+
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
@@ -314,6 +324,7 @@ class MongodbClient {
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
+  const std::string m_resource_collection_name_{"resource_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
