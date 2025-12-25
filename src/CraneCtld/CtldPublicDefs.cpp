@@ -999,6 +999,9 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
         }
 
         std::unordered_set<step_id_t> pd_steps;
+        CRANE_DEBUG("[Job #{}] primary step exited, terminating other steps.",
+                    job_id);
+
         // Cancel all other step with CANCELED status
         for (const auto& comm_step : job->Steps() | std::views::values) {
           // All pending steps are crun steps, just set status to cancelled
@@ -1017,11 +1020,18 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
                                     .send_completion_ack = true,
                                     .cfored_name = meta.cfored_name});
             pd_steps.insert(comm_step->StepId());
-            continue;
-          }
-          for (const auto& node : comm_step->ExecutionNodes()) {
-            context->craned_cancel_steps[node][comm_step->job_id].emplace(
-                comm_step->StepId());
+            CRANE_TRACE(
+                "[Step #{}.{}] Cancelled pending step due to primary step "
+                "exit.",
+                comm_step->job_id, comm_step->StepId());
+          } else {
+            CRANE_TRACE(
+                "[Step #{}.{}] Sending cancel due to primary step exit.",
+                comm_step->job_id, comm_step->StepId());
+            for (const auto& node : comm_step->ExecutionNodes()) {
+              context->craned_cancel_steps[node][comm_step->job_id].emplace(
+                  comm_step->StepId());
+            }
           }
         }
         for (const auto& pd_step_id : pd_steps) {

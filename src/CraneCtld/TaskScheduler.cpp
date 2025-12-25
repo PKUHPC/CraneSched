@@ -1857,13 +1857,17 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           job_steps.add_steps(step->StepId());
         }
       } else {
-        // User cancel jobs with node/name... filter
+        if (task->Status() == crane::grpc::TaskStatus::Configuring) {
+          (*reply.mutable_not_cancelled_job_steps())[task->TaskId()].set_reason(
+              "Cannot cancel configuring job");
+          return;
+        }
+        // User cancel jobs with node/name... filter or cancel a job.
         auto primary_step = task->PrimaryStep();
         if (!primary_step) {
-          CRANE_ERROR(
-              "[Job #{}] Daemon step not found when cancelling running job",
+          CRANE_DEBUG(
+              "[Job #{}] Primary step not found when cancelling running job",
               task_id);
-          return;
         }
         TerminateRunningStepNoLock_(primary_step);
         auto& cancelled_job_steps = *reply.mutable_cancelled_steps();
