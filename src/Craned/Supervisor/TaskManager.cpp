@@ -493,6 +493,9 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
     return path_to_parse;
   }
   int node_index = std::distance(grpc_nodelist.begin(), node_it);
+  // Pattern with following format specifiers will be created on compute node.
+  // For crun, will redirect io to local file instead of forwarding from/to
+  // cfored and crun , otherwise will be forwarded from/to cfored and crun.
   const std::unordered_set<char> local_file_replacement{'N', 'n', 't'};
   //clang-format off
   std::unordered_map<char, std::string> replacement_map{
@@ -580,7 +583,33 @@ std::string ProcInstance::ParseFilePathPattern_(const std::string& pattern,
   }
 }
 
-CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
+std::pair<std::string, bool> ProcInstance::CrunParseFilePattern_(
+    const std::string& pattern) const {
+  if (pattern == kCrunFwdALL) {
+    return {"", true};
+  } else if (pattern == kCrunFwdNONE) {
+    return {"", false};
+  } else {
+    task_id_t req_task_id;
+    if (absl::SimpleAtoi(pattern, &req_task_id)) {
+      if (req_task_id == task_id) {
+        return {"", true};
+      } else {
+        return {"", false};
+      }
+    }
+    bool local_file{false};
+    auto path = ParseFilePathPattern_(pattern, GetParentStep().cwd(), false,
+                                      &local_file);
+    if (!local_file) {
+      return {"", true};
+    } else {
+      return {path, false};
+    }
+  }
+}
+
+CraneExpected<pid_t> ProcInstance::ForkCrunAndInitIOfd_() {
   auto* meta = GetCrunMeta_();
   CRANE_DEBUG("Launch crun task #{} pty: {}", task_id,
               m_parent_step_inst_->pty);
@@ -607,7 +636,7 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   int open_mode =
       GetParentStep().io_meta().open_mode_append() ? O_APPEND : O_TRUNC;
   if (!m_parent_step_inst_->pty) {
-    if (meta->fwd_stdint) {
+    if (meta->fwd_stdin) {
       if (pipe(to_crun_pipe) == -1) {
         CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                     task_id, std::strerror(errno));
@@ -715,7 +744,7 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
   } else {
     pid = fork();
 
-    if (meta->fwd_stdint) {
+    if (meta->fwd_stdin) {
       meta->stdin_write = to_crun_pipe[1];
       meta->stdin_read = to_crun_pipe[0];
     } else {
@@ -726,16 +755,16 @@ CraneExpected<pid_t> ProcInstance::ForkCrunAndInitMeta_() {
       meta->stdout_write = from_crun_stdout_pipe[1];
       meta->stdout_read = from_crun_stdout_pipe[0];
     } else {
-      meta->stdout_write = -1;
-      meta->stdout_read = stdout_local_fd;
+      meta->stdout_write = stdout_local_fd;
+      meta->stdout_read = -1;
     }
 
     if (meta->fwd_stderr) {
       meta->stderr_write = from_crun_stderr_pipe[1];
       meta->stderr_read = from_crun_stderr_pipe[0];
     } else {
-      meta->stderr_write = -1;
-      meta->stderr_read = stderr_local_fd;
+      meta->stderr_write = stderr_local_fd;
+      meta->stderr_read = -1;
     }
 
     if (pid == -1) {
@@ -754,7 +783,7 @@ bool ProcInstance::SetupCrunFwdAtParent_() {
   if (!m_parent_step_inst_->pty) {
     // For non-pty tasks, pipe is used for stdin/stdout and one end should be
     // closed.
-    if (meta->fwd_stdint) close(meta->stdin_read);
+    if (meta->fwd_stdin) close(meta->stdin_read);
     if (meta->fwd_stdout) close(meta->stdout_write);
     if (meta->fwd_stderr) close(meta->stderr_write);
   }
@@ -1587,89 +1616,23 @@ CraneErrCode ProcInstance::Prepare() {
   }
   if (IsCrun()) {
     auto* meta = GetCrunMeta_();
-    // Determine fwd or file for stdout, stdin, stderr,
-    // If both fwd and file are not requested, redirect to /dev/null
-    auto determine_fwd_or_file = [this](const std::string& pattern)
-        -> std::pair<bool /*fwd*/, bool /*file*/> {
-      if (pattern == "all") return {true, false};
-      if (pattern == "none") return {false, false};
-      task_id_t req_task_id{0};
-      bool is_file_path{false};
-      if (absl::SimpleAtoi(pattern, &req_task_id)) {
-        if (req_task_id < GetParentStep().ntasks_total()) {
-          if (req_task_id == task_id) {
-            // This task is requested
-            return {true, false};
-          } else {
-            // This task is not requested
-            return {false, false};
-          }
-        } else {
-          // Pattern is a file
-          return {false, true};
-        }
-      }
-      // Pattern is a file
-      return {false, true};
-    };
-
     {
-      bool local_file{false};
-      const auto& output_pattern =
-          GetParentStep().io_meta().output_file_pattern();
-      auto [fwd, is_file] = determine_fwd_or_file(output_pattern);
+      auto [path, fwd] = CrunParseFilePattern_(
+          GetParentStep().io_meta().output_file_pattern());
       meta->fwd_stdout = fwd;
-      if (is_file) {
-        auto path = ParseFilePathPattern_(output_pattern, GetParentStep().cwd(),
-                                          false, &local_file);
-        if (local_file) {
-          // The file is redirected to local file, contains may node
-          // name/taskid/nodex idx
-          meta->parsed_output_file_pattern = path;
-        } else {
-          // If not redirect to local file, stdout is forwarded to file wrote by
-          // crun
-          meta->fwd_stdout = true;
-        }
-      }
+      meta->parsed_output_file_pattern = path;
     }
     {
-      bool local_file{false};
-      const auto& input_pattern =
-          GetParentStep().io_meta().input_file_pattern();
-      auto [fwd, is_file] = determine_fwd_or_file(input_pattern);
-      meta->fwd_stdint = fwd;
-      if (is_file) {
-        // The file is redirected to local file, contains may node
-        // name/taskid/nodex idx
-        auto path = ParseFilePathPattern_(input_pattern, GetParentStep().cwd(),
-                                          false, &local_file);
-        if (local_file) {
-          meta->parsed_input_file_pattern = path;
-        } else {
-          // If not redirect to local file, stdin comes from file read by crun
-          meta->fwd_stdint = true;
-        }
-      }
+      auto [path, fwd] =
+          CrunParseFilePattern_(GetParentStep().io_meta().input_file_pattern());
+      meta->fwd_stdin = fwd;
+      meta->parsed_output_file_pattern = path;
     }
     {
-      bool local_file{false};
-      const auto& err_pattern = GetParentStep().io_meta().error_file_pattern();
-      auto [fwd, is_file] = determine_fwd_or_file(err_pattern);
+      auto [path, fwd] =
+          CrunParseFilePattern_(GetParentStep().io_meta().error_file_pattern());
       meta->fwd_stderr = fwd;
-      if (is_file) {
-        meta->parsed_error_file_pattern = ParseFilePathPattern_(
-            err_pattern, GetParentStep().cwd(), false, &local_file);
-        if (local_file) {
-          // The file is redirected to local file, contains may node
-          // name/taskid/nodex idx
-          meta->parsed_error_file_pattern = meta->parsed_error_file_pattern;
-        } else {
-          // If not redirect to local file, stderr is forwarded to file wrote by
-          // crun
-          meta->fwd_stderr = true;
-        }
-      }
+      meta->parsed_error_file_pattern = path;
     }
 
   } else {
@@ -1725,7 +1688,7 @@ CraneErrCode ProcInstance::Spawn() {
   if (m_parent_step_inst_->IsBatch())
     child_pid = fork();
   else {
-    auto pid_expt = ForkCrunAndInitMeta_();
+    auto pid_expt = ForkCrunAndInitIOfd_();
     if (!pid_expt) return pid_expt.error();
 
     child_pid = pid_expt.value();

@@ -200,6 +200,7 @@ struct TaskInstanceMeta {
   virtual ~TaskInstanceMeta() = default;
 
   std::string parsed_sh_script_path{};
+  // Empty parsed pattern will redirect to /dev/null
   std::string parsed_input_file_pattern{};
   std::string parsed_output_file_pattern{};
   std::string parsed_error_file_pattern{};
@@ -219,7 +220,7 @@ struct CrunInstanceMeta : TaskInstanceMeta {
   int stdout_read;
   int stderr_read;
 
-  bool fwd_stdint;
+  bool fwd_stdin;
   bool fwd_stdout;
   bool fwd_stderr;
 };
@@ -384,8 +385,11 @@ class ProcInstance : public ITaskInstance {
   CrunInstanceMeta* GetCrunMeta_() const {
     return dynamic_cast<CrunInstanceMeta*>(this->m_meta_.get());
   };
+  // returns: pair of (parsed file path, true need forward to cfored)
+  std::pair<std::string, bool> CrunParseFilePattern_(
+      const std::string& pattern) const;
 
-  CraneExpected<pid_t> ForkCrunAndInitMeta_();
+  CraneExpected<pid_t> ForkCrunAndInitIOfd_();
 
   bool SetupCrunFwdAtParent_();
   void SetupCrunFwdAtChild_();

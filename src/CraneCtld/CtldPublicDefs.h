@@ -915,8 +915,8 @@ struct TaskInCtld {
   CommonStepInCtld* PrimaryStep() const { return m_primary_step_.get(); }
   CommonStepInCtld* ReleasePrimaryStep() { return m_primary_step_.release(); }
 
-  bool AllExecutionStepsFinished() const {
-    return m_steps_.empty() && !m_primary_step_;
+  bool AllStepsFinished() const {
+    return m_steps_.empty() && !m_primary_step_ && !m_daemon_step_;
   }
 
   void AddStep(std::unique_ptr<CommonStepInCtld>&& step) {

@@ -1062,7 +1062,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
-  if (job->AllExecutionStepsFinished())
+  if (job->AllStepsFinished())
     return std::make_pair(job->PrimaryStepStatus(), job->PrimaryStepExitCode());
   else
     return std::nullopt;
