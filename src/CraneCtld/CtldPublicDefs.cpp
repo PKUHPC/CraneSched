@@ -592,9 +592,14 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       // Daemon step terminated by user before primary step created
       if (job->PrimaryStepStatus() == crane::grpc::TaskStatus::Invalid) {
         return std::pair{this->Status(), this->ExitCode()};
+      } else {
+        if (job->AllStepsFinished()) {
+          return std::make_pair(job->PrimaryStepStatus(),
+                                job->PrimaryStepExitCode());
+        } else {
+          return std::nullopt;
+        }
       }
-      return std::make_pair(job->PrimaryStepStatus(),
-                            job->PrimaryStepExitCode());
     }
   }
   return std::nullopt;
@@ -1051,7 +1056,7 @@ CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       context->step_ptrs.insert(job->EraseStep(step_id));
     }
   }
-  if (job->AllExecutionStepsFinished())
+  if (job->AllStepsFinished())
     return std::make_pair(job->PrimaryStepStatus(), job->PrimaryStepExitCode());
   else
     return std::nullopt;
