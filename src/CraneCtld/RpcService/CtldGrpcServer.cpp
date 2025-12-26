@@ -725,7 +725,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   }
 
   std::list<task_id_t> task_ids;
-  std::list<std::pair<task_id_t, std::future<CraneRichError>>> futures;
+  std::vector<std::pair<task_id_t, std::future<CraneRichError>>> futures;
+  futures.reserve(request->task_ids().size());
   for (const auto task_id : request->task_ids()) {
     auto fut = g_task_scheduler->JobModifyLuaCheck(task_id);
     if (fut) futures.emplace_back(task_id, std::move(fut.value()));
