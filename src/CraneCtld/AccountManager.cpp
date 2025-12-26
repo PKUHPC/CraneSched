@@ -1185,7 +1185,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     return rich_error_list;
   }
 
-  Qos res_qos(*m_qos_map_[name]);
+  Qos res_qos(*p);
   std::string log = "";
 
   for (const auto& operation : operations) {
