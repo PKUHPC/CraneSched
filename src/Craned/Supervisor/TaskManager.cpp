@@ -1698,6 +1698,9 @@ void TaskManager::EvShutdownSupervisorCb_() {
 
     m_step_.CleanUp();
 
+    // Explicitly release CriClient
+    m_step_.StopCriClient();
+
     g_craned_client->Shutdown();
     g_server->Shutdown();
 
