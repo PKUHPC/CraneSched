@@ -15,16 +15,27 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
         get_filename_component(ABS_FIL ${FIL} ABSOLUTE)
         get_filename_component(FIL_WE ${FIL} NAME_WE)
 
+        # Check if the proto file contains service definitions
+        file(READ "${ABS_FIL}" PROTO_FILE_CONTENT)
+        string(REGEX MATCH "service[ \t]+[A-Za-z0-9_]+" HAS_GRPC_SERVICE "${PROTO_FILE_CONTENT}")
+
         list(APPEND ${SRCS}
-                "${OUTDIR}/${FIL_WE}.pb.cc"
-                "${OUTDIR}/${FIL_WE}.grpc.pb.cc")
+                "${OUTDIR}/${FIL_WE}.pb.cc")
         list(APPEND ${HDRS}
-                "${OUTDIR}/${FIL_WE}.pb.h"
-                "${OUTDIR}/${FIL_WE}.grpc.pb.h")
+                "${OUTDIR}/${FIL_WE}.pb.h")
+
+        # Always generate .pb.{cc,h} files with --cpp_out
+        set(PROTO_OUTPUTS "${OUTDIR}/${FIL_WE}.pb.cc" "${OUTDIR}/${FIL_WE}.pb.h")
+
+        # Only add .grpc.pb.{cc,h} if the proto file has service definitions
+        if (HAS_GRPC_SERVICE)
+            list(APPEND ${SRCS} "${OUTDIR}/${FIL_WE}.grpc.pb.cc")
+            list(APPEND ${HDRS} "${OUTDIR}/${FIL_WE}.grpc.pb.h")
+            list(APPEND PROTO_OUTPUTS "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h")
+        endif ()
 
         add_custom_command(
-                OUTPUT "${OUTDIR}/${FIL_WE}.pb.cc" "${OUTDIR}/${FIL_WE}.pb.h"
-                       "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h"
+                OUTPUT ${PROTO_OUTPUTS}
                 COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_PROTOBUF_LIBS_PATH}:$LD_LIBRARY_PATH"  ${_PROTOBUF_PROTOC}
                 ARGS --grpc_out "${OUTDIR}" --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR}
                 -I ${SYSTEM_PROTO_DIR}
