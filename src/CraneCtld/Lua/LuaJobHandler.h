@@ -55,7 +55,7 @@ class LuaJobHandler {
   // part_list
   static void PushPartitionList_(
       const std::string& user_name, const std::string& account,
-      std::list<crane::grpc::PartitionInfo>* part_list);
+      std::vector<crane::grpc::PartitionInfo>* part_list);
 #endif
 };
 

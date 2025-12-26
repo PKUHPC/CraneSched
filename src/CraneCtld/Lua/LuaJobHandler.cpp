@@ -70,7 +70,7 @@ CraneRichError LuaJobHandler::JobSubmit(const std::string& lua_script,
     return FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
                          "Failed to load lua script");
 
-  std::list<crane::grpc::PartitionInfo> part_list;
+  std::vector<crane::grpc::PartitionInfo> part_list;
   PushPartitionList_(task->Username(), task->account, &part_list);
   auto& lua_state = lua_env->GetLuaState();
   sol::function submit = lua_state["crane_job_submit"];
@@ -115,7 +115,7 @@ CraneRichError LuaJobHandler::JobModify(const std::string& lua_script,
 
   crane::grpc::TaskInfo task_info;
   task->SetFieldsOfTaskInfo(&task_info);
-  std::list<crane::grpc::PartitionInfo> part_list;
+  std::vector<crane::grpc::PartitionInfo> part_list;
   PushPartitionList_(task->Username(), task->account, &part_list);
 
   auto& lua_state = lua_env->GetLuaState();
@@ -507,7 +507,7 @@ void LuaJobHandler::RegisterGlobalVariables_(
 
 void LuaJobHandler::PushPartitionList_(
     const std::string& user_name, const std::string& account,
-    std::list<crane::grpc::PartitionInfo>* part_list) {
+    std::vector<crane::grpc::PartitionInfo>* part_list) {
   auto user = g_account_manager->GetExistedUserInfo(user_name);
   if (!user) {
     CRANE_ERROR("username is null");
@@ -517,6 +517,7 @@ void LuaJobHandler::PushPartitionList_(
   if (actual_account.empty()) actual_account = user->default_account;
 
   auto partition_info_reply = g_meta_container->QueryAllPartitionInfo();
+  part_list->reserve(partition_info_reply.partition_info_list_size());
   for (const auto& partition : partition_info_reply.partition_info_list()) {
     if (!user->account_to_attrs_map.at(actual_account)
              .allowed_partition_qos_map.contains(partition.name()))
