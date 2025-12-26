@@ -16,17 +16,12 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
         get_filename_component(FIL_WE ${FIL} NAME_WE)
 
         # Check if the proto file contains service definitions
-        # Use execute_process with grep for efficiency and to handle comments properly
-        execute_process(
-                COMMAND grep -E "^[[:space:]]*service[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\{" "${ABS_FIL}"
-                RESULT_VARIABLE GREP_RESULT
-                OUTPUT_QUIET
-                ERROR_QUIET
-        )
-        # grep returns 0 if pattern found, non-zero otherwise
-        set(HAS_GRPC_SERVICE FALSE)
-        if (GREP_RESULT EQUAL 0)
+        # Use CMake's file(STRINGS) for cross-platform compatibility
+        file(STRINGS "${ABS_FIL}" PROTO_SERVICE_LINES REGEX "^[[:space:]]*service[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\{")
+        if (PROTO_SERVICE_LINES)
             set(HAS_GRPC_SERVICE TRUE)
+        else ()
+            set(HAS_GRPC_SERVICE FALSE)
         endif ()
 
         list(APPEND ${SRCS}
@@ -37,20 +32,21 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
         # Always generate .pb.{cc,h} files with --cpp_out
         set(PROTO_OUTPUTS "${OUTDIR}/${FIL_WE}.pb.cc" "${OUTDIR}/${FIL_WE}.pb.h")
 
+        # Build protoc command arguments based on whether the proto has services
+        set(PROTOC_ARGS --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR} -I ${SYSTEM_PROTO_DIR})
+
         # Only add .grpc.pb.{cc,h} if the proto file has service definitions
         if (HAS_GRPC_SERVICE)
             list(APPEND ${SRCS} "${OUTDIR}/${FIL_WE}.grpc.pb.cc")
             list(APPEND ${HDRS} "${OUTDIR}/${FIL_WE}.grpc.pb.h")
             list(APPEND PROTO_OUTPUTS "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h")
+            list(APPEND PROTOC_ARGS --grpc_out "${OUTDIR}" --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}")
         endif ()
 
         add_custom_command(
                 OUTPUT ${PROTO_OUTPUTS}
                 COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_PROTOBUF_LIBS_PATH}:$LD_LIBRARY_PATH"  ${_PROTOBUF_PROTOC}
-                ARGS --grpc_out "${OUTDIR}" --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR}
-                -I ${SYSTEM_PROTO_DIR}
-                --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
-                ${ABS_FIL}
+                ARGS ${PROTOC_ARGS} ${ABS_FIL}
                 DEPENDS ${ABS_FIL}
                 COMMENT "Running gRPC C++ protocol buffer compiler on ${FIL}"
         )
