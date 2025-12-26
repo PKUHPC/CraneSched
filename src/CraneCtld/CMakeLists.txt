@@ -19,6 +19,9 @@ add_executable(cranectld
         Security/VaultClient.cpp
         Security/VaultClient.h
 
+        Lua/LuaJobHandler.cpp
+        Lua/LuaJobHandler.h
+
         RpcService/CranedKeeper.h
         RpcService/CranedKeeper.cpp
         RpcService/CtldGrpcServer.h
@@ -64,6 +67,8 @@ target_link_libraries(cranectld PRIVATE
         range-v3::range-v3
 
         Backward::Interface
+        $<$<BOOL:${LUA_FOUND}>:${LUA_LIBRARIES}>
+        sol2
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
@@ -84,4 +89,8 @@ endif ()
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_link_libraries(cranectld PRIVATE stdc++fs)
+endif ()
+
+if (${LUA_FOUND})
+    target_include_directories(cranectld PRIVATE ${LUA_INCLUDE_DIR})
 endif ()
