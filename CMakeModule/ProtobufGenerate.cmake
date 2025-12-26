@@ -17,7 +17,9 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
 
         # Check if the proto file contains service definitions
         # Use CMake's file(STRINGS) for cross-platform compatibility
-        file(STRINGS "${ABS_FIL}" PROTO_SERVICE_LINES REGEX "^[[:space:]]*service[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\{")
+        # Pattern matches: optional whitespace, 'service', required whitespace, service name, optional whitespace, opening brace
+        set(SERVICE_REGEX "^[[:space:]]*service[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\{")
+        file(STRINGS "${ABS_FIL}" PROTO_SERVICE_LINES REGEX "${SERVICE_REGEX}")
         if (PROTO_SERVICE_LINES)
             set(HAS_GRPC_SERVICE TRUE)
         else ()
@@ -41,6 +43,9 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
             list(APPEND ${HDRS} "${OUTDIR}/${FIL_WE}.grpc.pb.h")
             list(APPEND PROTO_OUTPUTS "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h")
             list(APPEND PROTOC_ARGS --grpc_out "${OUTDIR}" --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}")
+            set(COMMENT_TEXT "Running gRPC C++ protocol buffer compiler on ${FIL}")
+        else ()
+            set(COMMENT_TEXT "Running C++ protocol buffer compiler on ${FIL}")
         endif ()
 
         add_custom_command(
@@ -48,7 +53,7 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
                 COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_PROTOBUF_LIBS_PATH}:$LD_LIBRARY_PATH"  ${_PROTOBUF_PROTOC}
                 ARGS ${PROTOC_ARGS} ${ABS_FIL}
                 DEPENDS ${ABS_FIL}
-                COMMENT "Running gRPC C++ protocol buffer compiler on ${FIL}"
+                COMMENT "${COMMENT_TEXT}"
         )
     endforeach ()
 
