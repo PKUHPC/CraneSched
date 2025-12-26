@@ -16,8 +16,18 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
         get_filename_component(FIL_WE ${FIL} NAME_WE)
 
         # Check if the proto file contains service definitions
-        file(READ "${ABS_FIL}" PROTO_FILE_CONTENT)
-        string(REGEX MATCH "service[ \t]+[A-Za-z0-9_]+" HAS_GRPC_SERVICE "${PROTO_FILE_CONTENT}")
+        # Use execute_process with grep for efficiency and to handle comments properly
+        execute_process(
+                COMMAND grep -E "^[[:space:]]*service[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\\{" "${ABS_FIL}"
+                RESULT_VARIABLE GREP_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+        )
+        # grep returns 0 if pattern found, non-zero otherwise
+        set(HAS_GRPC_SERVICE FALSE)
+        if (GREP_RESULT EQUAL 0)
+            set(HAS_GRPC_SERVICE TRUE)
+        endif ()
 
         list(APPEND ${SRCS}
                 "${OUTDIR}/${FIL_WE}.pb.cc")
