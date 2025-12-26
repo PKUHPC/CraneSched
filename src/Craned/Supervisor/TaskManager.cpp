@@ -1432,6 +1432,12 @@ TaskManager::TaskManager()
     : m_supervisor_exit_(false), m_step_(g_config.StepSpec) {
   m_uvw_loop_ = uvw::loop::create();
 
+  m_shutdown_supervisor_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_shutdown_supervisor_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvShutdownSupervisorCb_();
+      });
+
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) {
@@ -1532,29 +1538,20 @@ TaskManager::TaskManager()
 
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  CRANE_TRACE("TaskManager destroyed.");
 }
 
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::ShutdownSupervisor() {
+void TaskManager::ShutdownSupervisorAsync(crane::grpc::TaskStatus new_status,
+                                          uint32_t exit_code,
+                                          std::string reason) {
   CRANE_INFO("All tasks finished, exiting...");
-  if (m_step_.IsDaemonStep()) {
-    CRANE_DEBUG("Sending a completed status as daemon step.");
-    g_craned_client->StepStatusChangeAsync(crane::grpc::TaskStatus::Completed,
-                                           0, "");
-    g_runtime_status.Status = crane::grpc::TaskStatus::Completed;
-  }
-  m_step_.CleanUp();
-
-  // Explicitly release CriClient
-  m_step_.StopCriClient();
-
-  g_craned_client->Shutdown();
-  g_server->Shutdown();
-
-  this->Shutdown();
+  m_shutdown_status_queue_.enqueue(
+      std::make_tuple(new_status, exit_code, std::move(reason)));
+  m_shutdown_supervisor_handle_->send();
 }
 
 void TaskManager::TaskStopAndDoStatusChange(task_id_t task_id) {
@@ -1598,7 +1595,7 @@ void TaskManager::TaskFinish_(task_id_t task_id,
       g_craned_client->StepStatusChangeAsync(new_status, exit_code,
                                              std::move(reason));
     }
-    ShutdownSupervisor();
+    ShutdownSupervisorAsync();
   }
 }
 
@@ -1683,6 +1680,29 @@ void TaskManager::TerminateTaskAsync(bool mark_as_orphaned,
   elem.termination_reason = terminated_by;
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
+}
+
+void TaskManager::EvShutdownSupervisorCb_() {
+  std::tuple<crane::grpc::TaskStatus, uint32_t, std::string> final_status;
+  bool got_final_status = false;
+  do {
+    got_final_status = m_shutdown_status_queue_.try_dequeue(final_status);
+    if (!got_final_status) continue;
+    auto& [status, exit_code, reason] = final_status;
+    if (m_step_.IsDaemonStep()) {
+      CRANE_DEBUG("Sending a {} status as daemon step.", status);
+      g_runtime_status.Status = status;
+      if (!m_step_.orphaned)
+        g_craned_client->StepStatusChangeAsync(status, exit_code, reason);
+    }
+
+    m_step_.CleanUp();
+
+    g_craned_client->Shutdown();
+    g_server->Shutdown();
+
+    this->Shutdown();
+  } while (!got_final_status);
 }
 
 void TaskManager::EvSigchldCb_() {
@@ -1897,7 +1917,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     if (m_exec_id_task_id_map_.empty() && elem.mark_as_orphaned) {
       CRANE_DEBUG("No task is running, shutting down...");
-      g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
+      g_task_mgr->ShutdownSupervisorAsync();
       continue;
     }
 

@@ -396,7 +396,9 @@ class TaskManager {
   TaskManager& operator=(TaskManager&&) = delete;
 
   void Wait();
-  void ShutdownSupervisor();
+  void ShutdownSupervisorAsync(
+      crane::grpc::TaskStatus new_status = StepStatus::Completed,
+      uint32_t exit_code = 0, std::string reason = "");
 
   // NOLINTBEGIN(readability-identifier-naming)
   template <typename Duration>
@@ -475,6 +477,8 @@ class TaskManager {
     std::promise<CraneErrCode> ok_prom;
   };
 
+  void EvShutdownSupervisorCb_();
+
   // Process exited
   void EvSigchldCb_();
   void EvSigchldTimerCb_();
@@ -495,6 +499,9 @@ class TaskManager {
   void EvGrpcQueryStepEnvCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
+  ConcurrentQueue<std::tuple<crane::grpc::TaskStatus, uint32_t, std::string>>
+      m_shutdown_status_queue_;
+  std::shared_ptr<uvw::async_handle> m_shutdown_supervisor_handle_;
 
   // Handle SIGCHLD for ProcInstance
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
