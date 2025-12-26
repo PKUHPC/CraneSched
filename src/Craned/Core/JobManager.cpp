@@ -647,7 +647,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob ||
         !g_config.JobLifecycleHook.TaskPrologs.empty() ||
         !g_config.JobLifecycleHook.TaskEpilogs.empty()) {
-      auto* job_lifecycle_hook_conf = init_req.mutable_job_lifecycle_hook_config();
+      auto* job_lifecycle_hook_conf =
+          init_req.mutable_job_lifecycle_hook_config();
 
       for (const auto& prolog : g_config.JobLifecycleHook.TaskPrologs) {
         job_lifecycle_hook_conf->add_task_prologs(prolog);
@@ -656,7 +657,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
         job_lifecycle_hook_conf->add_task_epilogs(epilog);
       }
 
-      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob && step->IsDaemonStep()) {
+      if (g_config.JobLifecycleHook.PrologFlags & PrologFlagEnum::RunInJob &&
+          step->IsDaemonStep()) {
         for (const auto& prolog : g_config.JobLifecycleHook.Prologs) {
           job_lifecycle_hook_conf->add_prologs(prolog);
         }

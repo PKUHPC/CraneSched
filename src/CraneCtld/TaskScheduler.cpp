@@ -1164,9 +1164,9 @@ void TaskScheduler::ScheduleThread_() {
               run_prolog_args.timeout_sec =
                   g_config.JobLifecycleHook.PrologEpilogTimeout;
             }
-            CRANE_TRACE("#{}: Running CraneCtldProlog as UID {} with timeout {}s",
-                        job_id, run_prolog_args.run_uid,
-                        run_prolog_args.timeout_sec);
+            CRANE_TRACE(
+                "#{}: Running CraneCtldProlog as UID {} with timeout {}s",
+                job_id, run_prolog_args.run_uid, run_prolog_args.timeout_sec);
             auto run_prolog_result =
                 util::os::RunPrologOrEpiLog(run_prolog_args);
             if (!run_prolog_result) {

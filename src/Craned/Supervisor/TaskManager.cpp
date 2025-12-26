@@ -1763,7 +1763,8 @@ CraneErrCode ProcInstance::Spawn() {
                    "[Subprocess] Error: Failed to run step task prolog\n");
         std::abort();
       }
-      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_, STDOUT_FILENO);
+      util::os::ApplyPrologOutputToEnvAndStdout(result.value(), &m_env_,
+                                                STDOUT_FILENO);
     }
 
     err = SetChildProcEnv_();
