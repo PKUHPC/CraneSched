@@ -41,7 +41,7 @@ e.g., 2-4). If only one number is specified, this is used as both the minimum an
 
 **-c, --cpus-per-task=\<ncpus\>**
 
-:   **Applies to:** `job`, `step`
+:  **Applies to:** `job`, `step`
 Number of CPUs required per task. This may be useful if the task is multithreaded and requires more than one CPU per
 task for optimal performance. Default: 1.
 
