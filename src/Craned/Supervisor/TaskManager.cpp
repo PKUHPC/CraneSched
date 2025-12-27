@@ -1341,8 +1341,8 @@ CraneErrCode ContainerInstance::ResolveMountIdMapping_(
 
   // modify mounts, see comments regarding *mapping members
   for (auto& mount : *config->mutable_mounts()) {
-    mount.mutable_uidmappings()->Add(std::move(mount_uid_mapping));
-    mount.mutable_gidmappings()->Add(std::move(mount_gid_mapping));
+    mount.mutable_uidmappings()->Add()->CopyFrom(mount_uid_mapping);
+    mount.mutable_gidmappings()->Add()->CopyFrom(mount_gid_mapping);
   }
 
   return CraneErrCode::SUCCESS;
@@ -1350,7 +1350,6 @@ CraneErrCode ContainerInstance::ResolveMountIdMapping_(
 
 CraneErrCode ProcInstance::Prepare() {
   // Write m_meta_
-
   if (m_parent_step_inst_->IsCrun()) {
     m_meta_ = std::make_unique<CrunInstanceMeta>();
   } else {
