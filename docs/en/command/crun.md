@@ -232,54 +232,81 @@ Options marked as "Applies to: `job`" cannot be overridden in step mode and will
 Request 2 nodes, 1 CPU core, 200M memory in CPU partition, and run bash:
 
 ```bash
-crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
+$ crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
+pwd
+/work
+hostname
+crane01
+crane02
+exit
 ```
-
-![crun](../../images/crun/crun_c.png)
 
 **Exclude specific nodes:**
 
 Request 1 node, exclude crane01 and crane02, set job name to testjob, time limit 0:25:25, and run bash:
 
 ```bash
-crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
+$ crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
+pwd
+/work
+hostname
+crane03
+exit
 ```
-
-![crun](../../images/crun/crun_N1.png)
 
 **Specify node list:**
 
 Request 1 node and 200M memory in GPU partition, nodes must be chosen from crane02 or crane03, and run bash:
 
 ```bash
-crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
+$ crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
+pwd 
+/work
+hostname
+crane02
+exit
 ```
-
-![crun](../../images/crun/crun_N2.png)
 
 **With account, QoS, and environment settings:**
 
 ```bash
-crun -A ROOT -J test_crun -x cranetest03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
+$ crun -A ROOT -J test_crun -x crane03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
+Task id allocated: 188, waiting resources.
+Allocated craned nodes: crane02
+Task io forward ready, waiting input.
+pwd
+/work
+hostname
+crane02
 ```
-
-![crun](../../images/crun/crun_A.png)
 
 **With working directory and debug level:**
 
 ```bash
-crun -D /path --debug-level trace --export ALL /usr/bin/bash
+$ crun -D /path --debug-level trace --export ALL /usr/bin/bash
+Oct 12 16:08:28.856 [TRAC] Sending Task Req to Cfored
+Oct 12 16:08:28.858 [TRAC] Waiting TaskId
+Task id allocated: 1, waiting resources.
+Oct 12 16:08:29.172 [TRAC] Waiting Res Alloc
+Allocated craned nodes: crane02
+Task io forward ready, waiting input.
+pwd
+/path
+hostname
+crane02
+exit
 ```
-
-![crun](../../images/crun/crun_D.png)
 
 **Run on specific node:**
 
 ```bash
-crun -w cranetest04 /usr/bin/bash
+$ crun -w crane04 /usr/bin/bash
+Task id allocated: 1, waiting resources.
+Allocated craned nodes: crane04
+Task io forward ready, waiting input.
+hostname
+crane04
 ```
-
-![crun](../../images/crun/crun_w.png)
 
 **X11 forwarding:**
 
@@ -287,8 +314,6 @@ crun -w cranetest04 /usr/bin/bash
 # Run X11 applications
 crun --x11 xclock
 ```
-
-![crun](../../images/crun/crun_clock.png)
 
 **Exclusive mode:**
 
@@ -338,7 +363,20 @@ crun --comment "Testing new algorithm" -c 8 /usr/bin/python script.py
 crun can be started nested within a calloc task and will automatically inherit all resources from the calloc task. No
 need to specify partition, account, or QoS:
 
-![crun](../../images/crun/crun_N3.png)
+```bash
+$ calloc -N=2 -c=1 --mem 500M --ntasks-per-node 1
+Task id allocated: 1
+Allocated craned nodes: crane[02-03].
+$ crun echo $CRANE_PARTITION
+CPU
+CPU
+$ crun echo $CRANE_MEM_PER_NODE
+500
+500
+$ crun hostname
+crane03
+crane02
+```
 
 **Basic step execution:**
 

@@ -218,70 +218,96 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 在CPU分区，申请两个节点，一个CPU核心，200M内存，并运行bash程序：
 
 ```bash
-crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
+$ crun -c 1 --mem 200M -p CPU -N 2 /usr/bin/bash
+pwd
+/work
+hostname
+crane01
+crane02
+exit
 ```
-
-![crun](../../images/crun/crun_c.png)
 
 **排除特定节点：**
 
 申请一个节点，且节点不能是crane01、crane02，任务名称为testjob，运行时间限制为0:25:25，并运行bash程序：
 
 ```bash
-crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
+$ crun -N 1 -x crane01,crane02 -J testjob -t 0:25:25 /usr/bin/bash
+pwd
+/work
+hostname
+crane03
+exit
 ```
-
-![crun](../../images/crun/crun_N1.png)
 
 **指定节点列表：**
 
 在GPU分区申请一个节点和200M运行内存，节点只能在crane02、crane03中选择，并运行bash程序：
 
 ```bash
-crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
-```
+$ crun -p GPU --mem 200M -w crane02,crane03 /usr/bin/bash
+pwd 
+/work
+hostname
+crane02
+exit
 
-![crun](../../images/crun/crun_N2.png)
+```
 
 **带账户、QoS和环境设置：**
 
 ```bash
-crun -A ROOT -J test_crun -x cranetest03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
+$ crun -A ROOT -J test_crun -x crane03 --get-user-env --ntasks-per-node 2 -q test_qos -t 00:20:00 /usr/bin/bash
+Task id allocated: 188, waiting resources.
+Allocated craned nodes: crane02
+Task io forward ready, waiting input.
+pwd
+/work
+hostname
+crane02
 ```
-
-![crun](../../images/crun/crun_A.png)
 
 **带工作目录和调试级别：**
 
 ```bash
-crun -D /path --debug-level trace --export ALL /usr/bin/bash
+$ crun -D /path --debug-level trace --export ALL /usr/bin/bash
+Oct 12 16:08:28.856 [TRAC] Sending Task Req to Cfored
+Oct 12 16:08:28.858 [TRAC] Waiting TaskId
+Task id allocated: 1, waiting resources.
+Oct 12 16:08:29.172 [TRAC] Waiting Res Alloc
+Allocated craned nodes: crane02
+Task io forward ready, waiting input.
+pwd
+/path
+hostname
+crane02
+exit
 ```
-
-![crun](../../images/crun/crun_D.png)
 
 **在特定节点上运行：**
 
 ```bash
-crun -w cranetest04 /usr/bin/bash
+$ crun -w crane04 /usr/bin/bash
+Task id allocated: 1, waiting resources.
+Allocated craned nodes: crane04
+Task io forward ready, waiting input.
+hostname
+crane04
 ```
-
-![crun](../../images/crun/crun_w.png)
 
 **X11转发：**
 
 ```bash
 # 运行X11应用程序
-crun --x11 xclock
+$ crun --x11 xclock
 ```
-
-![crun](../../images/crun/crun_clock.png)
 
 **独占模式：**
 
 请求对分配节点的独占访问，防止其他作业共享：
 
 ```bash
-crun --exclusive -N 2 /usr/bin/bash
+$ crun --exclusive -N 2 /usr/bin/bash
 ```
 
 **暂挂模式：**
@@ -289,7 +315,7 @@ crun --exclusive -N 2 /usr/bin/bash
 以暂挂状态提交作业，防止其在手动释放前启动：
 
 ```bash
-crun --hold -c 4 /usr/bin/bash
+$ crun --hold -c 4 /usr/bin/bash
 # 稍后使用以下命令释放: ccontrol release <job_id>
 ```
 
@@ -298,7 +324,7 @@ crun --hold -c 4 /usr/bin/bash
 使用预留资源运行作业：
 
 ```bash
-crun -r my_reservation /usr/bin/bash
+$ crun -r my_reservation /usr/bin/bash
 ```
 
 **邮件通知：**
@@ -306,7 +332,7 @@ crun -r my_reservation /usr/bin/bash
 接收作业事件的邮件通知：
 
 ```bash
-crun --mail-type=END --mail-user=user@example.com -c 4 /usr/bin/bash
+$ crun --mail-type=END --mail-user=user@example.com -c 4 /usr/bin/bash
 ```
 
 **作业备注：**
@@ -314,7 +340,7 @@ crun --mail-type=END --mail-user=user@example.com -c 4 /usr/bin/bash
 为作业添加描述性备注：
 
 ```bash
-crun --comment "测试新算法" -c 8 /usr/bin/python script.py
+$ crun --comment "测试新算法" -c 8 /usr/bin/python script.py
 ```
 
 ### 作业步模式示例
@@ -323,7 +349,20 @@ crun --comment "测试新算法" -c 8 /usr/bin/python script.py
 
 crun可以在calloc任务内嵌套启动，将自动继承calloc任务的所有资源。不需要指定分区、账户或QoS：
 
-![crun](../../images/crun/crun_N3.png)
+```bash
+$ calloc -N=2 -c=1 --mem 500M --ntasks-per-node 1
+Task id allocated: 1
+Allocated craned nodes: crane[02-03].
+$ crun echo $CRANE_PARTITION
+CPU
+CPU
+$ crun echo $CRANE_MEM_PER_NODE
+500
+500
+$ crun hostname
+crane03
+crane02
+```
 
 **基本作业步执行：**
 
