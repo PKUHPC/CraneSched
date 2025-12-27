@@ -134,6 +134,7 @@ class PasswordEntry {
   gid_t Gid() const { return m_pw_gid_; }
   uid_t Uid() const { return m_pw_uid_; }
 
+  // Get SubUID ranges for this user
   SubIdRanges SubUidRanges() const {
     if (!m_valid_) return {nullptr, 0};
     struct subid_range* ranges = nullptr;
@@ -141,6 +142,7 @@ class PasswordEntry {
     return {ranges, count > 0 ? count : 0};
   }
 
+  // Get SubGID ranges for this user
   SubIdRanges SubGidRanges() const {
     if (!m_valid_) return {nullptr, 0};
     struct subid_range* ranges = nullptr;
