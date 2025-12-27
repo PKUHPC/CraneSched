@@ -14,179 +14,176 @@ The system automatically detects the mode by checking for the `CRANE_JOB_ID` env
 ## Options
 
 **-h, --help**
-
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display help information for crun command.
 
 **-v, --version**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display crun version information.
 
-**-C, --config=\<path\>**
+**-C, --config=&lt;path&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
-**--debug-level=\<level\>**
+**--debug-level=&lt;level&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Set debug output level. Available levels: trace, debug, info. Default: "info".
 
-**-N, --nodes=\<minnodes[-maxnodes]\>**
+**-N, --nodes=&lt;num&gt;**
 
-:   **Applies to:** `job`, `step`
-Number of nodes on which to run. The specification can include a minimum and maximum node count separated by a dash (
-e.g., 2-4). If only one number is specified, this is used as both the minimum and maximum node count. Default: 1.
+:   **Applies to:** `job`, `step`  
+Number of nodes on which to run. Default: 1.
 
-**-c, --cpus-per-task=\<ncpus\>**
+**-c, --cpus-per-task=&lt;ncpus&gt;**
 
-:  **Applies to:** `job`, `step`
+:  **Applies to:** `job`, `step`  
 Number of CPUs required per task. This may be useful if the task is multithreaded and requires more than one CPU per
 task for optimal performance. Default: 1.
 
-**--ntasks-per-node=\<ntasks\>**
+**--ntasks-per-node=&lt;ntasks&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Request that ntasks be invoked on each node. If used with the --nodes option, the --ntasks option will be treated as the
 maximum count of tasks for the job. This means there will be at least ntasks-per-node * nodes tasks invoked, or ntasks
 tasks invoked, whichever is smaller. Default: 1.
 
-**--mem=\<size\>**
+**--mem=&lt;size&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Maximum amount of real memory required per node. Supports different units: GB(G, g), MB(M, m), KB(K, k), and Bytes(B).
 Default unit is MB.
 
-**-t, --time=\<time\>**
+**-t, --time=&lt;time&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Set a limit on the total run time of the job allocation. Time format is "[day-]hours:minutes:seconds". For example, "
 5-0:0:1" for 5 days and 1 second, or "10:1:2" for 10 hours, 1 minute, and 2 seconds.
 
-**--gres=\<list\>**
+**--gres=&lt;list&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify generic resources required per task. Format: "gpu:type:number" (e.g., "gpu:a100:1") or "gpu:number" (e.g., "gpu:
 1").
 
-**-w, --nodelist=\<host1,host2,...\>**
+**-w, --nodelist=&lt;host1,host2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Request a specific list of nodes. The list may be specified as a comma-separated list of node names.
 
-**-x, --exclude=\<host1,host2,...\>**
+**-x, --exclude=&lt;host1,host2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Explicitly exclude certain nodes from the resources granted to the job. The list may be specified as a comma-separated
 list of node names.
 
-**-p, --partition=\<partition_name\>**
+**-p, --partition=&lt;partition_name&gt;**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Request a specific partition for the resource allocation. If not specified, the default partition will be used.
 
-**-A, --account=\<account\>**
+**-A, --account=&lt;account&gt;**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Charge resources used by this job to specified account. The account is an arbitrary string.
 
-**-q, --qos=\<qos\>**
+**-q, --qos=&lt;qos&gt;**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Request a specific quality of service for the job. QoS values are defined by the system administrator.
 
 **--exclusive**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 The job allocation cannot share nodes with other running jobs.
 
 **-H, --hold**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Submit the job in a held state. A held job will not be scheduled for execution until it is explicitly released by the
 user or administrator using the ccontrol release command.
 
-**-r, --reservation=\<reservation_name\>**
+**-r, --reservation=&lt;reservation_name&gt;**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Allocate resources for the job from the named reservation.
 
-**-J, --job-name=\<jobname\>**
+**-J, --job-name=&lt;jobname&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify a name for the job allocation. The specified name will appear along with the job id in the output of cqueue.
 
-**-L, --licenses=\<license\>**
+**-L, --licenses=&lt;license&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specification of licenses required for the job. Format: "license1:count1,license2:count2" or "license1:count1|license2:
 count2". For example: "matlab:2,ansys:1".
 
-**--wckey=\<wckey\>**
+**--wckey=&lt;wckey&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify a workload characterization key for the job. This is an arbitrary string that can be used for tracking groups of
 jobs.
 
-**--comment=\<string\>**
+**--comment=&lt;string&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 An arbitrary comment string for the job.
 
-**-D, --chdir=\<directory\>**
+**-D, --chdir=&lt;directory&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Set the working directory of the task to directory before execution begins. The path can be absolute or relative.
 
-**--export=\<environment\>**
+**--export=&lt;environment&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify environment variables to be exported to the task environment. Options include "ALL" (export all environment
 variables), "NONE" (export no environment variables), or a comma-separated list of variable names.
 
 **--get-user-env**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Load the user's login environment variables into the task environment.
 
-**--extra-attr=\<json\>**
+**--extra-attr=&lt;json&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify extra attributes for the job in JSON format.
 
-**-i, --input=\<mode\>**
+**-i, --input=&lt;mode&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify how standard input is to be redirected. Options are "all" (redirect stdin to all tasks) or "none" (do not
 redirect stdin). Default: "all".
 
 **--pty**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Execute task in pseudo terminal mode. This allows for proper handling of interactive programs.
 
 **--x11**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Enable X11 support for the job. If not used with --x11-forwarding, direct X11 forwarding is used (insecure). Default is
 false.
 
 **--x11-forwarding**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Enable secure X11 forwarding through CraneSched. Default is false.
 
-**--mail-type=\<type\>**
+**--mail-type=&lt;type&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Notify user by email when certain event types occur. Valid type values are NONE, BEGIN, END, FAIL, TIMELIMIT, and ALL (
 equivalent to BEGIN, END, FAIL, and TIMELIMIT). Multiple type values may be specified in a comma-separated list.
 Default: NONE.
 
-**--mail-user=\<email\>**
-
-:   **Applies to:** `job`, `step`
+**--mail-user=&lt;email&gt;**
+:   **Applies to:** `job`, `step`    
 Email address to receive job status notifications if --mail-type is specified.
 
 ## Job Mode vs Step Mode

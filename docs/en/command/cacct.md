@@ -13,112 +13,112 @@ cacct
 
 **-h, --help**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display help information for cacct command.
 
 **-v, --version**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display cacct version information.
 
-**-C, --config=\<path\>**
+**-C, --config=&lt;path&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
-**-j, --job=\<jobid1,jobid2,...\>**
+**-j, --job=&lt;jobid1,jobid2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When querying jobs, this filters by job ID.
 The output will include matching jobs and their associated steps. Supports step ID format `jobid.stepid` to query
 specific steps.
 
-**-n, --name=\<name1,name2,...\>**
+**-n, --name=&lt;name1,name2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify job names to query (comma-separated list for multiple names).
 
-**-u, --user=\<username1,username2,...\>**
+**-u, --user=&lt;username1,username2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify users whose jobs to query (comma-separated list for multiple users). Filters jobs and steps by the specified
 usernames.
 
-**-A, --account=\<account1,account2,...\>**
+**-A, --account=&lt;account1,account2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify accounts to query (comma-separated list for multiple accounts). Filters jobs and steps by the specified
 accounts.
 
-**-p, --partition=\<partition1,partition2,...\>**
+**-p, --partition=&lt;partition1,partition2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify partitions to view (comma-separated list for multiple partitions). Default: all partitions.
 
-**-q, --qos=\<qos1,qos2,...\>**
+**-q, --qos=&lt;qos1,qos2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify QoS to view (comma-separated list for multiple QoS). Default: all QoS levels.
 
-**-t, --state=\<state\>**
+**-t, --state=&lt;state&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify job states to view. Supported states: 'pending' or 'p', 'running' or 'r', 'completed' or 'c', 'failed' or 'f', '
 cancelled' or 'x', 'time-limit-exceeded' or 't', and 'all'. Default: 'all'. Multiple states can be specified as a
 comma-separated list.
 
-**-s, --submit-time=\<time_range\>**
+**-s, --submit-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Filter jobs by submission time range. Supports closed intervals (format: `2024-01-02T15:04:05~2024-01-11T11:12:41`) or
 half-open intervals (format: `2024-01-02T15:04:05~` for after a specific time, or `~2024-01-11T11:12:41` for before a
 specific time).
 
-**-S, --start-time=\<time_range\>**
+**-S, --start-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Filter jobs by start time range. Same format as submit-time.
 
-**-E, --end-time=\<time_range\>**
+**-E, --end-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Filter jobs by end time range. Same format as submit-time. For example, `~2023-03-14T10:00:00` filters jobs that ended
 before the specified time.
 
-**-w, --nodelist=\<node1,node2,...\>**
+**-w, --nodelist=&lt;node1,node2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify node names to view (comma-separated list or patterns like node[1-10]). Default: all nodes.
 
-**--type=\<type1,type2,...\>**
+**--type=&lt;type1,type2,...&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify task types to view (comma-separated list). Valid values: 'Interactive', 'Batch', 'Container'. Default: all
 types.
 
 **-F, --full**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display full information without field truncation. By default, only 30 characters per cell are displayed.
 
 **-N, --noheader**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Hide table header in output.
 
-**-m, --max-lines=\<number\>**
+**-m, --max-lines=&lt;number&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify maximum number of output lines. For example, `-m=500` limits output to 500 lines. Default: 100 entries.
 
 **--json**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Output command execution results in JSON format instead of table format.
 
-**-o, --format=\<format_string\>**
+**-o, --format=&lt;format_string&gt;**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Customize output format using format specifiers. Fields are identified by a percent sign (%) followed by a character or
 string. Format specification syntax: `%[.]<size><type>`. Without size: field uses natural width. With size only (`%5j`):
 minimum width, left-aligned. With dot and size (`%.5j`): minimum width, right-aligned. See Format Specifiers section

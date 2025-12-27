@@ -18,99 +18,99 @@ Display help information for cqueue command.
 
 **-v, --version**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display cqueue version information.
 
 **-C, --config=\<path\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Path to configuration file. Default: "/etc/crane/config.yaml".
 
 **-F, --full**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Display full content without truncation. By default, only 30 characters per cell are displayed.
 
 **-N, --noheader**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Hide table headers in output.
 
 **-m, --max-lines=\<number\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify maximum number of output lines. For example, `-m=500` limits output to 500 lines. By default, displays 100
 entries.
 
 **-i, --iterate=\<seconds\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Refresh query results at specified intervals (in seconds). For example, `-i=3` outputs results every 3 seconds.
 
 **--json**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Output command execution results in JSON format instead of table format.
 
 **-s, --step[=\<stepid1,stepid2,...\>]**
 
-:   **Applies to:** `step`
+:   **Applies to:** `step`  
 Query step information instead of job information. Accepts optional comma-separated list of step IDs in format
 `jobid.stepid` (e.g., `123.1,123.2,456.3`). If no argument is provided, shows all steps. This option switches the query
 mode from jobs to steps.
 
 **-j, --job=\<jobid1,jobid2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When used with `--step`, filters steps
 belonging to the specified jobs.
 
 **-n, --name=\<name1,name2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify job names to query (comma-separated list for multiple names).
 
 **-t, --state=\<state\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify states to query. Valid values are 'pending(p)', 'running(r)' and 'all'. Default is 'all' (both pending and
 running). For steps, valid states include 'running' and other step-specific states.
 
 **-S, --start**
 
-:   **Applies to:** `job`
+:   **Applies to:** `job`  
 Display start time. For pending jobs, shows expected start time. For running jobs, shows actual start time.
 
 **-u, --user=\<username1,username2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify users to query (comma-separated list for multiple users). Filters jobs or steps by the specified usernames.
 
 **-A, --account=\<account1,account2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify accounts to query (comma-separated list for multiple accounts). Filters jobs or steps by the specified accounts.
 
 **-p, --partition=\<partition1,partition2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify partitions to query (comma-separated list for multiple partitions). Filters jobs or steps by the specified
 partitions.
 
 **-q, --qos=\<qos1,qos2,...\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Specify QoS to query (comma-separated list for multiple QoS). Filters jobs or steps by the specified Quality of Service
 levels.
 
 **--self**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 View jobs or steps submitted by current user only.
 
 **-o, --format=\<format_string\>**
 
-:   **Applies to:** `job`, `step`
+:   **Applies to:** `job`, `step`  
 Customize output format using format specifiers. Fields are identified by a percent sign (%) followed by a character.
 Format specification syntax: `%[.]<size><type>`. Without size: field uses natural width. With size only (`%5j`): minimum
 width, left-aligned. With dot and size (`%.5j`): minimum width, right-aligned. The available format specifiers differ
