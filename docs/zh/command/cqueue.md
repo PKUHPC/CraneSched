@@ -40,6 +40,7 @@ cqueue
 - **-p/--partition string**：指定查询作业所在分区，指定多个分区时用逗号隔开
 - **-q/--qos string**：指定查询作业的QoS，指定多个QoS时用逗号隔开
 - **--self**：查看当前用户提交的作业
+- **-s/--step [stepid,...]**：查询作业步信息而非作业信息。接受可选的逗号分隔的作业步ID列表，格式为`jobid.stepid`（如`123.1,123.2,456.3`）。如果不提供参数，则显示所有作业步
 - **-S/--start**：显示作业的开始时间（pending作业显示预期开始时间）
 - **-t/--state string**：指定查询作业状态。有效值为 'pending(p)'、'running(r)' 和 'all'。默认为 'all'（显示所有pending和running作业）
 - **-u/--user string**：指定查询作业所属用户，指定多个用户时用逗号隔开
@@ -105,6 +106,48 @@ cqueue --format "ID:%8j | Name:%.15n | State:%t"
 ```
 
 **注意：** 如果格式无效或无法识别，程序将报错并终止。
+
+### 作业步格式说明符
+
+使用`--step`标志时，可以使用作业步特定的格式标识符来自定义输出。
+
+**作业步特定格式标识符**（不区分大小写）：
+
+| 标识符 | 完整名称 | 描述 |
+|--------|----------|------|
+| %i | StepId | 作业步ID，格式为jobid.stepid |
+| %j | JobId | 父作业ID |
+| %n | Name | 作业步名称 |
+| %P | Partition | 分区（从父作业继承） |
+| %u | User | 用户名（从父作业继承） |
+| %U | Uid | 用户ID |
+| %e | ElapsedTime | 作业步启动以来的已用时间 |
+| %L | NodeList | 作业步正在运行的节点列表 |
+| %t | State | 作业步的当前状态 |
+| %l | TimeLimit | 作业步的时间限制 |
+| %N | NodeNum | 分配给作业步的节点数量 |
+| %a | Account | 账户（从父作业继承） |
+| %q | QoS | 服务质量（从父作业继承） |
+| %o | Command | 作业步的命令行 |
+
+**作业步格式示例：**
+
+```bash
+# 使用默认格式查看所有作业步
+cqueue --step
+
+# 查看特定作业步
+cqueue --step 123.1,123.2
+
+# 自定义作业步格式
+cqueue --step --format "%i %n %t %e %L"
+
+# 查看特定作业的作业步
+cqueue --step -j 123
+
+# 右对齐格式
+cqueue --step --format "%.10i %.20n %.10t"
+```
 
 ## 使用示例
 
@@ -201,6 +244,31 @@ cqueue --self
 **JSON输出：**
 ```bash
 cqueue --json
+```
+
+**查询所有作业步：**
+```bash
+cqueue --step
+```
+
+**查询特定作业步：**
+```bash
+cqueue --step 100.1,100.2,200.3
+```
+
+**查询特定作业的作业步：**
+```bash
+cqueue --step -j 123
+```
+
+**使用自定义格式查询作业步：**
+```bash
+cqueue --step --format "%i %n %t %e %L"
+```
+
+**查询特定用户的作业步：**
+```bash
+cqueue --step -u username
 ```
 
 ## 相关命令

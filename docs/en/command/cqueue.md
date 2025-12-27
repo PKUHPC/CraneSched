@@ -40,6 +40,7 @@ cqueue
 - **-p/--partition string**: Specify partitions to query (comma-separated list for multiple partitions)
 - **-q/--qos string**: Specify QoS to query (comma-separated list for multiple QoS)
 - **--self**: View jobs submitted by current user
+- **-s/--step [stepid,...]**: Query step information instead of jobs. Accepts optional comma-separated list of step IDs in format `jobid.stepid` (e.g., `123.1,123.2,456.3`). If no argument provided, shows all steps
 - **-S/--start**: Display job start time (for pending jobs, shows expected start time)
 - **-t/--state string**: Specify job states to query. Valid values are 'pending(p)', 'running(r)' and 'all'. Default is 'all' (both pending and running jobs)
 - **-u/--user string**: Specify users to query (comma-separated list for multiple users)
@@ -105,6 +106,48 @@ cqueue --format "ID:%8j | Name:%.15n | State:%t"
 ```
 
 **Note:** If the format is invalid or unrecognized, the program will terminate with an error message.
+
+### Step Format Specifiers
+
+When using the `--step` flag, you can use step-specific format identifiers to customize the output.
+
+**Step-Specific Format Identifiers** (case-insensitive):
+
+| Identifier | Full Name | Description |
+|------------|-----------|-------------|
+| %i | StepId | Step ID in format jobid.stepid |
+| %j | JobId | Parent job ID |
+| %n | Name | Step name |
+| %P | Partition | Partition (inherited from parent job) |
+| %u | User | Username (inherited from parent job) |
+| %U | Uid | User ID |
+| %e | ElapsedTime | Elapsed time since step started |
+| %L | NodeList | List of nodes the step is running on |
+| %t | State | Current state of the step |
+| %l | TimeLimit | Time limit for the step |
+| %N | NodeNum | Number of nodes allocated to the step |
+| %a | Account | Account (inherited from parent job) |
+| %q | QoS | Quality of Service (inherited from parent job) |
+| %o | Command | Command line of the step |
+
+**Step Format Examples:**
+
+```bash
+# View all steps with default format
+cqueue --step
+
+# View specific steps
+cqueue --step 123.1,123.2
+
+# Custom format for steps
+cqueue --step --format "%i %n %t %e %L"
+
+# Steps for a specific job
+cqueue --step -j 123
+
+# Right-aligned format
+cqueue --step --format "%.10i %.20n %.10t"
+```
 
 ## Usage Examples
 
@@ -201,6 +244,31 @@ cqueue --self
 **JSON output:**
 ```bash
 cqueue --json
+```
+
+**Query all steps:**
+```bash
+cqueue --step
+```
+
+**Query specific steps:**
+```bash
+cqueue --step 100.1,100.2,200.3
+```
+
+**Query steps for a specific job:**
+```bash
+cqueue --step -j 123
+```
+
+**Query steps with custom format:**
+```bash
+cqueue --step --format "%i %n %t %e %L"
+```
+
+**Query steps for specific user:**
+```bash
+cqueue --step -u username
 ```
 
 ## Related Commands

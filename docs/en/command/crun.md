@@ -32,7 +32,7 @@ crun only supports request parameters via command line. Supported command-line o
 - **--pty**: Run with a pseudo-terminal
 - **-q/--qos string**: QoS used for the job
 - **-r/--reservation string**: Use reserved resources
-- **-t/--time string**: Time limit, format: "day-hours:minutes:seconds" (e.g., 5-0:0:1 for 5 days, 1 second) or "hours:minutes:seconds" (e.g., 10:1:2 for 10 hours, 1 minute, 2 seconds)
+- **-t/--time string**: Time limit, format: "[day-]hours:minutes:seconds" (e.g., 5-0:0:1 for 5 days and 1 second, or 10:1:2 for 10 hours, 1 minute, 2 seconds)
 - **-v/--version**: crun version
 - **--x11**: Enable X11 support, default is false. If not used with --x11-forwarding, direct X11 is used (insecure)
 - **--x11-forwarding**: Enable X11 forwarding by CraneSched (secure), default is false
@@ -172,6 +172,74 @@ crun -i all /usr/bin/bash
 
 # No stdin redirection
 crun -i none /usr/bin/bash
+```
+
+## Running as Job Steps
+
+When `crun` is executed within an existing job allocation (such as within a `calloc` session), it automatically runs as a **step** rather than creating a new job. The system detects this by checking for the `CRANE_JOB_ID` environment variable.
+
+### Step Mode Behavior
+
+**Automatic Detection:**
+- If `CRANE_JOB_ID` is set → runs as a step within that job
+- If `CRANE_JOB_ID` is not set → runs as a new standalone job
+
+**Resource Allocation:**
+- Steps use resources from the parent job's allocation
+- Can specify subset of nodes, different CPU counts, etc.
+- Resources must be available within the parent job's allocation
+
+**Inherited Properties:**
+
+Steps automatically inherit from parent job:
+- Partition
+- Account
+- QoS
+- User/Group
+
+**Options Not Supported in Step Mode:**
+
+The following options are ignored when running as a step (they are inherited from the parent job):
+- `-p/--partition`
+- `-A/--account`
+- `-q/--qos`
+- `--exclusive`
+- `-H/--hold`
+- `-r/--reservation`
+
+### Step Usage Examples
+
+**Basic step execution:**
+```bash
+# First allocate resources
+calloc -N 2 -c 8 -p CPU -A myaccount
+
+# Within the allocation, run steps (no need to specify partition/account)
+crun -N 1 -c 4 ./task1
+crun -N 1 -c 4 ./task2
+crun -N 2 -c 2 ./task3
+```
+
+**Multiple concurrent steps:**
+```bash
+# In calloc allocation
+crun -N 1 ./long_running_task &
+crun -N 1 ./another_task &
+wait
+```
+
+**Step with specific resources:**
+```bash
+# Within calloc allocation with 4 nodes
+crun -N 2 -c 8 --mem 4G ./memory_intensive_task
+crun -w crane01,crane02 ./specific_node_task
+```
+
+**Monitoring steps:**
+```bash
+# In another terminal
+cqueue --step -j $CRANE_JOB_ID
+ccontrol show step $CRANE_JOB_ID.2
 ```
 
 ## Related Commands

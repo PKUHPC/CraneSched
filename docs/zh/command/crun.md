@@ -32,7 +32,7 @@ crun只支持通过命令行指定请求参数，支持的命令行选项：
 - **--pty**: 使用伪终端运行
 - **-q/--qos string**: 作业使用的服务质量（QoS）
 - **-r/--reservation string**: 使用预留资源
-- **-t/--time string**: 时间限制，格式："day-hours:minutes:seconds"（如 5-0:0:1 表示5天1秒）或 "hours:minutes:seconds"（如 10:1:2 表示10小时1分钟2秒）
+- **-t/--time string**: 时间限制，格式："[day-]hours:minutes:seconds"（如 5-0:0:1 表示5天1秒，或 10:1:2 表示10小时1分钟2秒）
 - **-v/--version**: crun的版本
 - **--x11**: 启用X11支持，默认值为false。如果未配合 --x11-forwarding 使用，则直接使用X11（不安全）
 - **--x11-forwarding**: 由鹤思启用X11转发（安全），默认值为false
@@ -171,6 +171,74 @@ crun -i all /usr/bin/bash
 
 # 不进行标准输入重定向
 crun -i none /usr/bin/bash
+```
+
+## 作为作业步骤运行
+
+当`crun`在现有作业分配内执行时（例如在`calloc`会话中），它会自动作为**步骤**运行，而不是创建新作业。系统通过检查`CRANE_JOB_ID`环境变量来检测这一点。
+
+### 步骤模式行为
+
+**自动检测：**
+- 如果设置了`CRANE_JOB_ID` → 作为该作业内的步骤运行
+- 如果未设置`CRANE_JOB_ID` → 作为新的独立作业运行
+
+**资源分配：**
+- 步骤使用父作业分配的资源
+- 可以指定节点子集、不同的CPU数量等
+- 资源必须在父作业的分配范围内可用
+
+**继承的属性：**
+
+步骤自动从父作业继承：
+- 分区
+- 账户
+- QoS
+- 用户/组
+
+**步骤模式下不支持的选项：**
+
+以下选项在作为步骤运行时将被忽略（它们从父作业继承）：
+- `-p/--partition`
+- `-A/--account`
+- `-q/--qos`
+- `--exclusive`
+- `-H/--hold`
+- `-r/--reservation`
+
+### 步骤使用示例
+
+**基本步骤执行：**
+```bash
+# 首先分配资源
+calloc -N 2 -c 8 -p CPU -A myaccount
+
+# 在分配内运行步骤（无需指定分区/账户）
+crun -N 1 -c 4 ./task1
+crun -N 1 -c 4 ./task2
+crun -N 2 -c 2 ./task3
+```
+
+**多个并发步骤：**
+```bash
+# 在calloc分配中
+crun -N 1 ./long_running_task &
+crun -N 1 ./another_task &
+wait
+```
+
+**具有特定资源的步骤：**
+```bash
+# 在具有4个节点的calloc分配内
+crun -N 2 -c 8 --mem 4G ./memory_intensive_task
+crun -w crane01,crane02 ./specific_node_task
+```
+
+**监控步骤：**
+```bash
+# 在另一个终端中
+cqueue --step -j $CRANE_JOB_ID
+ccontrol show step $CRANE_JOB_ID.2
 ```
 
 ## 相关命令
