@@ -452,7 +452,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->task().uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  // Check task type
+  // Check job type
   if (request->task().type() == crane::grpc::TaskType::Container &&
       !g_config.Container.Enabled) {
     response->set_ok(false);
@@ -476,6 +476,56 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   } else {
     response->set_ok(false);
     response->set_code(result.error());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::SubmitContainerStep(
+    grpc::ServerContext* context,
+    const crane::grpc::SubmitContainerStepRequest* request,
+    crane::grpc::SubmitContainerStepReply* response) {
+  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
+    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready"};
+  if (auto msg = CheckCertAndUIDAllowed_(context, request->step().uid()); msg)
+    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
+
+  // For convenience of the CLI.
+  response->set_job_id(request->step().job_id());
+
+  // Only container steps are accepted here.
+  if (request->step().type() != crane::grpc::TaskType::Container) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  if (!request->step().has_container_meta()) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_INVALID_PARAM);
+    return grpc::Status::OK;
+  }
+
+  // Check container feature flag.
+  if (!g_config.Container.Enabled) {
+    response->set_ok(false);
+    response->set_code(CraneErrCode::ERR_CRI_DISABLED);
+    return grpc::Status::OK;
+  }
+
+  auto step = std::make_unique<CommonStepInCtld>();
+  step->SetFieldsByStepToCtld(request->step());
+
+  auto submit_future = g_task_scheduler->SubmitStepAsync(std::move(step));
+  auto submit_result = submit_future.get();
+
+  if (submit_result.has_value()) {
+    response->set_ok(true);
+    response->set_step_id(submit_result.value());
+  } else {
+    response->set_ok(false);
+    response->set_code(submit_result.error());
   }
 
   return grpc::Status::OK;
@@ -2114,19 +2164,19 @@ grpc::Status CraneCtldServiceImpl::SignUserCertificate(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
+grpc::Status CraneCtldServiceImpl::AttachContainerStep(
     grpc::ServerContext* context,
-    const crane::grpc::AttachInContainerTaskRequest* request,
-    crane::grpc::AttachInContainerTaskReply* response) {
+    const crane::grpc::AttachContainerStepRequest* request,
+    crane::grpc::AttachContainerStepReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
   // Validate request
-  if (request->task_id() <= 0) {
+  if (request->job_id() == 0 || request->step_id() == 0) {
     auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-    err->set_description("Invalid task ID");
+    err->set_description("Invalid job id or step id");
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -2151,24 +2201,24 @@ grpc::Status CraneCtldServiceImpl::AttachInContainerTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->AttachInContainerTask(*request);
+  *response = g_task_scheduler->AttachContainerStep(*request);
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
+grpc::Status CraneCtldServiceImpl::ExecInContainerStep(
     grpc::ServerContext* context,
-    const crane::grpc::ExecInContainerTaskRequest* request,
-    crane::grpc::ExecInContainerTaskReply* response) {
+    const crane::grpc::ExecInContainerStepRequest* request,
+    crane::grpc::ExecInContainerStepReply* response) {
   if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
   // Validate request
-  if (request->task_id() <= 0) {
+  if (request->job_id() == 0 || request->step_id() == 0) {
     auto* err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
-    err->set_description("Invalid task ID");
+    err->set_description("Invalid job id or step id");
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -2201,7 +2251,7 @@ grpc::Status CraneCtldServiceImpl::ExecInContainerTask(
   if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
     return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
 
-  *response = g_task_scheduler->ExecInContainerTask(*request);
+  *response = g_task_scheduler->ExecInContainerStep(*request);
 
   return grpc::Status::OK;
 }

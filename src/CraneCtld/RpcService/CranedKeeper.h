@@ -91,11 +91,11 @@ class CranedStub {
 
   CraneErrCode ChangeJobTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  crane::grpc::AttachInContainerTaskReply AttachInContainerTask(
-      const crane::grpc::AttachInContainerTaskRequest &request);
+  crane::grpc::AttachContainerStepReply AttachContainerStep(
+      const crane::grpc::AttachContainerStepRequest &request);
 
-  crane::grpc::ExecInContainerTaskReply ExecInContainerTask(
-      const crane::grpc::ExecInContainerTaskRequest &request);
+  crane::grpc::ExecInContainerStepReply ExecInContainerStep(
+      const crane::grpc::ExecInContainerStepRequest &request);
 
   bool Connected() const {
     return !m_disconnected_.load(std::memory_order_acquire);
