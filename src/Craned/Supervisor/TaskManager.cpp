@@ -1258,6 +1258,11 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
     // If relative path is given, handle it with cwd.
     std::filesystem::path host_path(mount.first);
     if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
+    if (!std::filesystem::exists(host_path)) {
+      CRANE_ERROR("Mount host path {} does not exist for #{}.{}", host_path,
+                  job_id, step_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
 
     m->set_host_path(std::move(host_path));
     m->set_container_path(mount.second);
