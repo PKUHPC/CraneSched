@@ -752,21 +752,6 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   }
 
   // Setup userns
-  // Setup run_as_user / run_as_group
-  if (uid == 0 || pod_meta.userns() ||
-      (pod_meta.run_as_user() == uid && pod_meta.run_as_group() == gid)) {
-    // If user is root or using userns, run_as_* is always allowed.
-    // Non-root user w/o userns cannot use run_as_* other than its own.
-    sec_ctx->mutable_run_as_user()->set_value(pod_meta.run_as_user());
-    sec_ctx->mutable_run_as_group()->set_value(pod_meta.run_as_group());
-  } else {
-    CRANE_ERROR(
-        "Pod #{} is not allowed to use other identities when not "
-        "using userns",
-        job_id);
-    return CraneErrCode::ERR_INVALID_PARAM;
-  }
-
   if (pod_meta.userns()) {
     if (ResolveUserNsMapping_(m_parent_step_inst_->pwd, sec_ctx) !=
         CraneErrCode::SUCCESS) {
@@ -2283,7 +2268,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     if (auto err = m_step_.Prepare(); err != CraneErrCode::SUCCESS) {
       CRANE_ERROR("Failed to prepare step for task execution.");
       elem.ok_prom.set_value(err);
-      TaskFinish_(elem.instance->task_id, crane::grpc::TaskStatus::Failed,
+      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
                   ExitCode::EC_FILE_NOT_FOUND, "");
       continue;
     }
@@ -2298,7 +2283,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     m_step_.pwd.Init(m_step_.uid);
     if (!m_step_.pwd.Valid()) {
       CRANE_ERROR("Failed to look up password entry for uid {}", m_step_.uid);
-      TaskFinish_(task->task_id, crane::grpc::TaskStatus::Failed,
+      TaskFinish_(task_id, crane::grpc::TaskStatus::Failed,
                   ExitCode::EC_PERMISSION_DENIED,
                   fmt::format("Failed to look up password entry for uid {}",
                               m_step_.uid));
