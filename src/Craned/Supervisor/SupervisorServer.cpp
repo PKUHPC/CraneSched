@@ -96,7 +96,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
     const crane::grpc::supervisor::ShutdownSupervisorRequest* request,
     crane::grpc::supervisor::ShutdownSupervisorReply* response) {
   CRANE_INFO("Grpc shutdown request received.");
-  g_thread_pool->detach_task([] { g_task_mgr->ShutdownSupervisor(); });
+  g_task_mgr->ShutdownSupervisorAsync();
   return Status::OK;
 }
 

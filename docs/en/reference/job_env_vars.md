@@ -33,6 +33,19 @@ CraneSched automatically sets a series of environment variables when executing j
 
 ---
 
+## Step Environment Variables
+
+When executing within a job step, CraneSched sets additional step-specific environment variables. These variables help scripts and programs distinguish between running as a standalone job versus running as a step within a job.
+
+### CRANE_STEP_ID
+- **Description**: Step ID within the parent job (numeric part only, without the job ID)
+- **Type**: Integer
+- **Example**: `1` (for step 123.1, this value would be `1`)
+- **Available**: Only set in step execution context
+- **Note**: If this variable is not set, the process is running as a standalone job, not as a step
+
+---
+
 ## Node and Resource Environment Variables
 
 ### CRANE_JOB_NODELIST

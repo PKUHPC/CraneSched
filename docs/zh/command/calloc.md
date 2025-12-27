@@ -22,7 +22,7 @@ calloc 必须在运行 `cfored` 的节点上启动。当任务启动时，会进
 - **-A, --account string**: 提交作业的账户
 - **-p, --partition string**: 请求的分区
 - **-q, --qos string**: 作业使用的服务质量（QoS）
-- **-t, --time string**: 时间限制，格式：`day-hours:minutes:seconds`（如 `5-0:0:1` 表示 5 天 1 秒）或 `hours:minutes:seconds`（如 `10:1:2` 表示 10 小时 1 分钟 2 秒）
+- **-t, --time string**: 时间限制，格式：`[day-]hours:minutes:seconds`（如 `5-0:0:1` 表示 5 天 1 秒，或 `10:1:2` 表示 10 小时 1 分钟 2 秒）
 - **--comment string**: 作业注释
 
 ### 节点选择
