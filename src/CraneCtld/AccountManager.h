@@ -43,6 +43,9 @@ class AccountManager {
   using WckeyMutexSharedPtr = util::ScopeConstSharedPtr<Wckey, util::rw_mutex>;
 
   using TxnAction = crane::grpc::TxnAction;
+  // name, value, modify_field, txn_action
+  using ModifyRecord =
+      std::tuple<std::string, std::string, crane::grpc::ModifyField, TxnAction>;
 
   AccountManager();
 
@@ -183,13 +186,11 @@ class AccountManager {
    * ModifyUser-related functions(no lock)
    * ---------------------------------------------------------------------------
    */
+
   std::vector<CraneExpectedRich<void>> CheckModifyAccountOperations(
       Account* account,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
-      std::unordered_map<std::string, Account>& account_map,
-      std::unordered_map<std::string, User>& users,
-      std::unordered_map<std::string, Qos>& qos_map, std::string* log,
-      bool force);
+      std::string* log, std::vector<ModifyRecord>& modify_record, bool force);
   std::vector<CraneExpectedRich<void>> CheckModifyUserOperations(
       const User* op_user, const Account* account_ptr,
       const std::string& actual_account, const std::string& partition,
@@ -360,13 +361,10 @@ class AccountManager {
 
   CraneExpectedRich<void> SetAccountAllowedPartition_(
       Account* account, std::unordered_set<std::string>& partition_list,
-      std::unordered_map<std::string, Account>& account_map,
-      std::unordered_map<std::string, User>& user_map);
+      std::vector<ModifyRecord>& modify_record);
   CraneExpectedRich<void> SetAccountAllowedQos_(
       Account* account, std::unordered_set<std::string>& qos_list,
-      std::unordered_map<std::string, Account>& account_map,
-      std::unordered_map<std::string, User>& user_map,
-      std::unordered_map<std::string, Qos>& qos_map);
+      std::vector<ModifyRecord>& modify_record);
 
   CraneExpected<void> DeleteAccountAllowedPartition_(
       const std::string& actor_name, const Account& account,
@@ -396,10 +394,8 @@ class AccountManager {
   bool DeleteAccountAllowedQosFromMapNoLock_(const std::string& name,
                                              const std::string& qos);
 
-  CraneExpectedRich<int> DeleteAccountAllowedQosNoLock_(
-      Account* account, const std::string& qos,
-      std::unordered_map<std::string, Account>& account_map,
-      std::unordered_map<std::string, User>& user_map);
+  CraneExpectedRich<int> DeleteAccountAllowedQosNoLock_(const Account* account,
+                                                        const std::string& qos);
 
   bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
       const std::string& name, const std::string& account,
@@ -412,11 +408,6 @@ class AccountManager {
                                                   const std::string& partition);
   bool DeleteAccountAllowedPartitionFromMapNoLock_(
       const std::string& name, const std::string& partition);
-
-  CraneExpectedRich<void> DeleteAccountAllowedPartitionNoLock_(
-      Account* account, const std::string& partition,
-      std::unordered_map<std::string, Account>& account_map,
-      std::unordered_map<std::string, User>& user_map);
 
   void AddTxnLogToDB_(const std::string& actor_name, const std::string& target,
                       TxnAction action, const std::string& info);
