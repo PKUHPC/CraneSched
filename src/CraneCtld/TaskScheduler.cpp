@@ -1090,7 +1090,12 @@ void TaskScheduler::ScheduleThread_() {
             }
           }
 
-          // TODO: check and malloc qos resource - allocated_res
+          if (auto result = g_account_meta_container->MallocQosResource(
+                  *job_in_scheduler);
+              !result) {
+            job->pending_reason = result.error();
+            continue;
+          }
 
           PartitionId const& partition_id = job->partition_id;
 
@@ -4328,7 +4333,10 @@ void SchedulerAlgo::NodeSelect(
         continue;
       }
     }
-    // TODO: check qos resource req_resource
+    // TODO: Check multiple jobs together?
+    if (!g_account_meta_container->CheckQosResourceSufficient(job)) {
+      continue;
+    }
 
     LocalScheduler* scheduler;
     if (job->reservation.empty()) {
