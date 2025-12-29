@@ -409,9 +409,6 @@ void DaemonStepInCtld::InitFromJob(const TaskInCtld& job) {
         crane::grpc::ContainerTaskAdditionalMeta(container_meta.value()));
   }
 
-  step.set_task_prolog(job.TaskToCtld().task_prolog());
-  step.set_task_epilog(job.TaskToCtld().task_epilog());
-
   *MutableStepToCtld() = std::move(step);
 }
 
@@ -658,6 +655,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   }
 
   allocated_craneds_regex = job.allocated_craneds_regex;
+  task_prolog = job.TaskToCtld().task_prolog();
+  task_epilog = job.TaskToCtld().task_epilog();
 
   crane::grpc::StepToCtld step;
 
@@ -692,8 +691,8 @@ void CommonStepInCtld::InitPrimaryStepFromJob(const TaskInCtld& job) {
   step.mutable_env()->insert(env.begin(), env.end());
   step.set_excludes(job.TaskToCtld().excludes());
   step.set_nodelist(job.TaskToCtld().nodelist());
-  task_prolog = job.TaskToCtld().task_prolog();
-  task_epilog = job.TaskToCtld().task_epilog();
+  step.set_task_prolog(job.TaskToCtld().task_prolog());
+  step.set_task_epilog(job.TaskToCtld().task_epilog());
 
   *MutableStepToCtld() = std::move(step);
 }
