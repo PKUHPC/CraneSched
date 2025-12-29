@@ -366,10 +366,9 @@ std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
       auto now = std::chrono::steady_clock::now();
       auto elapsed_now =
           std::chrono::duration_cast<std::chrono::seconds>(now - start_time);
-      uint32_t remaining_time =
-          (args.timeout_sec > elapsed_now.count())
-              ? args.timeout_sec - elapsed_now.count()
-              : 0;
+      uint32_t remaining_time = (args.timeout_sec > elapsed_now.count())
+                                    ? args.timeout_sec - elapsed_now.count()
+                                    : 0;
       bool child_exited = false;
 
       if (args.timeout_sec == 0) {
