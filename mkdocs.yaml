@@ -84,6 +84,7 @@ nav:
     - Job Environment Variables: reference/job_env_vars.md
     - Job Steps: reference/job_steps.md
     - License Usage Guide: reference/license_guide.md
+    - Prolog Epilog Guide: reference/prolog_epilog_guide.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
@@ -122,6 +123,7 @@ plugins:
             Job Environment Variables: 作业环境变量
             Job Steps: 作业步
             License Usage Guide: 许可证使用指南
+            Prolog Epilog Guide: Prolog/Epilog 配置指南
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
