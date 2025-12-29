@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <regex>
+#include <glob.h>
 
 #include "crane/Logger.h"
 namespace util {

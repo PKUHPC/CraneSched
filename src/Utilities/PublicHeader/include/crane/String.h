@@ -20,7 +20,6 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
-#include <glob.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <re2/re2.h>

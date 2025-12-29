@@ -122,7 +122,7 @@ enum PrologFlagEnum : std::uint8_t {
   Contain = 1 << 0,             // 0000 0001 = 1
   ForceRequeueOnFail = 1 << 1,  // 0000 0010 = 2
   RunInJob = 1 << 2,            // 0000 0100 = 4
-  Serial = 1 << 3,              // 000 1000 = 8
+  Serial = 1 << 3,              // 0000 1000 = 8
 };
 
 constexpr uint64_t kDefaultPrologOutputSize = 1024 * 1024;
