@@ -3,7 +3,7 @@
 **cacctmgr 使用 SQL 风格的命令管理鹤思系统中的账户、用户和服务质量（QoS）设置。**
 
 !!! note
-    此命令使用 SQL 风格的语法来管理集群资源。语法为：`cacctmgr <操作> <实体> [选项]`
+此命令使用 SQL 风格的语法来管理集群资源。语法为：`cacctmgr <操作> <实体> [选项]`
 
 ## 用户角色
 
@@ -52,32 +52,36 @@ cacctmgr <操作> <实体> [ID] [选项]
 ### 1.1 添加账户
 
 **语法：**
+
 ```bash
 cacctmgr add account <名称> [选项]
 ```
 
 **选项：**
 
-- **Description=<描述>**: 账户描述
-- **Parent=<父账户>**: 父账户名称
-- **DefaultQos=<qos>**: 账户的默认 QoS
-- **Partition=<分区1,分区2,...>**: 允许的分区（逗号分隔）
-- **QosList=<qos1,qos2,...>**: 允许的 QoS 列表（逗号分隔）
-- **Name=<名称1,名称2,...>**: 批量创建多个账户（逗号分隔）
+- **Description=&lt;描述&gt;**: 账户描述
+- **Parent=&lt;父账户&gt;**: 父账户名称
+- **DefaultQos=&lt;qos&gt;**: 账户的默认 QoS
+- **Partition=&lt;分区1,分区2,...&gt;**: 允许的分区（逗号分隔）
+- **QosList=&lt;qos1,qos2,...&gt;**: 允许的 QoS 列表（逗号分隔）
+- **Name=&lt;名称1,名称2,...&gt;**: 批量创建多个账户（逗号分隔）
 
 **示例：**
 
 创建简单账户：
+
 ```bash
 cacctmgr add account PKU Description="北京大学" Partition=CPU,GPU QosList=normal,high
 ```
 
 创建子账户：
+
 ```bash
 cacctmgr add account ComputingCentre Description="计算中心" Parent=PKU
 ```
 
 批量创建账户：
+
 ```bash
 cacctmgr add account dept Name=CS,Math,Physics Parent=PKU
 ```
@@ -85,6 +89,7 @@ cacctmgr add account dept Name=CS,Math,Physics Parent=PKU
 ### 1.2 删除账户
 
 **语法：**
+
 ```bash
 cacctmgr delete account <名称>
 ```
@@ -92,6 +97,7 @@ cacctmgr delete account <名称>
 **注意：** 不能删除还有子账户或用户的账户。需要先删除它们。
 
 **示例：**
+
 ```bash
 cacctmgr delete account ComputingCentre
 ```
@@ -99,39 +105,44 @@ cacctmgr delete account ComputingCentre
 ### 1.3 修改账户
 
 **语法：**
+
 ```bash
 cacctmgr modify account where Name=<账户> set <属性>=<值>
 ```
 
 **属性：**
 
-- **Description=<描述>**: 设置描述
-- **DefaultQos=<qos>**: 设置默认 QoS
-- **AllowedPartition=<分区>**: 设置允许的分区（覆盖）
-- **AllowedPartition+=<分区>**: 向允许列表添加分区
-- **AllowedPartition-=<分区>**: 从允许列表移除分区
-- **AllowedQos=<qos列表>**: 设置允许的 QoS 列表（覆盖）
-- **AllowedQos+=<qos列表>**: 向允许列表添加 QoS
-- **AllowedQos-=<qos列表>**: 从允许列表移除 QoS
+- **Description=&lt;描述&gt;**: 设置描述
+- **DefaultQos=&lt;qos&gt;**: 设置默认 QoS
+- **AllowedPartition=&lt;分区&gt;**: 设置允许的分区（覆盖）
+- **AllowedPartition+=&lt;分区&gt;**: 向允许列表添加分区
+- **AllowedPartition-=&lt;分区&gt;**: 从允许列表移除分区
+- **AllowedQos=&lt;qos列表&gt;**: 设置允许的 QoS 列表（覆盖）
+- **AllowedQos+=&lt;qos列表&gt;**: 向允许列表添加 QoS
+- **AllowedQos-=&lt;qos列表&gt;**: 从允许列表移除 QoS
 
 **示例：**
 
 修改账户描述：
+
 ```bash
 cacctmgr modify account where Name=ComputingCentre set Description="HPC计算中心"
 ```
 
 向允许列表添加分区：
+
 ```bash
 cacctmgr modify account where Name=PKU set AllowedPartition+=GPU2,GPU3
 ```
 
 从允许列表移除分区：
+
 ```bash
 cacctmgr modify account where Name=PKU set AllowedPartition-=GPU
 ```
 
 设置允许的分区（替换现有）：
+
 ```bash
 cacctmgr modify account where Name=PKU set AllowedPartition=CPU,GPU
 ```
@@ -139,27 +150,31 @@ cacctmgr modify account where Name=PKU set AllowedPartition=CPU,GPU
 ### 1.4 显示账户
 
 **语法：**
+
 ```bash
 cacctmgr show account [名称] [选项]
 ```
 
 **选项：**
 
-- **Name=<名称1,名称2,...>**: 仅显示特定账户
+- **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定账户
 
 **示例：**
 
 显示所有账户：
+
 ```bash
 cacctmgr show account
 ```
 
 显示特定账户：
+
 ```bash
 cacctmgr show account PKU
 ```
 
 显示多个账户：
+
 ```bash
 cacctmgr show account Name=PKU,ComputingCentre
 ```
@@ -167,6 +182,7 @@ cacctmgr show account Name=PKU,ComputingCentre
 ### 1.5 阻止/解除阻止账户
 
 **语法：**
+
 ```bash
 cacctmgr block account <名称>
 cacctmgr unblock account <名称>
@@ -175,11 +191,13 @@ cacctmgr unblock account <名称>
 **示例：**
 
 阻止账户：
+
 ```bash
 cacctmgr block account ComputingCentre
 ```
 
 解除阻止账户：
+
 ```bash
 cacctmgr unblock account ComputingCentre
 ```
@@ -191,44 +209,49 @@ cacctmgr unblock account ComputingCentre
 ### 2.1 添加用户
 
 **语法：**
+
 ```bash
 cacctmgr add user <名称> Account=<账户> [选项]
 ```
 
 **必需：**
 
-- **Account=<账户>**: 用户所属的账户（必需）
+- **Account=&lt;账户&gt;**: 用户所属的账户（必需）
 
 **选项：**
 
 - **Coordinator=true|false**: 将用户设置为账户调度员
-- **Level=<级别>**: 用户管理级别（none/operator/admin，默认：none）
-- **Partition=<分区1,分区2,...>**: 允许的分区（逗号分隔）
-- **Name=<名称1,名称2,...>**: 批量创建多个用户（逗号分隔）
+- **Level=&lt;级别&gt;**: 用户管理级别（none/operator/admin，默认：none）
+- **Partition=&lt;分区1,分区2,...&gt;**: 允许的分区（逗号分隔）
+- **Name=&lt;名称1,名称2,...&gt;**: 批量创建多个用户（逗号分隔）
 
 **注意：** 用户必须作为 Linux 系统用户存在（先使用 `useradd` 创建）。
 
 **示例：**
 
 创建简单用户：
+
 ```bash
 useradd alice
 cacctmgr add user alice Account=PKU
 ```
 
 创建具有特定权限的用户：
+
 ```bash
 useradd bob
 cacctmgr add user bob Account=PKU Level=operator Partition=CPU,GPU
 ```
 
 创建调度员用户：
+
 ```bash
 useradd charlie
 cacctmgr add user charlie Account=PKU Coordinator=true
 ```
 
 批量创建用户：
+
 ```bash
 useradd user1 && useradd user2 && useradd user3
 cacctmgr add user batch Account=PKU Name=user1,user2,user3
@@ -237,31 +260,36 @@ cacctmgr add user batch Account=PKU Name=user1,user2,user3
 ### 2.2 删除用户
 
 **语法：**
+
 ```bash
 cacctmgr delete user <名称> [Account=<账户>]
 ```
 
 **选项：**
 
-- **Account=<账户>**: 指定账户上下文（可选）
-- **Name=<名称1,名称2,...>**: 删除多个用户（逗号分隔）
+- **Account=&lt;账户&gt;**: 指定账户上下文（可选）
+- **Name=&lt;名称1,名称2,...&gt;**: 删除多个用户（逗号分隔）
 
 **特殊情况：**
+
 - 如果名称是 `ALL` 且设置了 `--force`，将删除指定账户的所有用户
 
 **示例：**
 
 删除用户：
+
 ```bash
 cacctmgr delete user alice
 ```
 
 从特定账户删除用户：
+
 ```bash
 cacctmgr delete user bob Account=PKU
 ```
 
 删除账户的所有用户（需要强制）：
+
 ```bash
 cacctmgr delete user ALL Account=PKU --force
 ```
@@ -269,41 +297,45 @@ cacctmgr delete user ALL Account=PKU --force
 ### 2.3 修改用户
 
 **语法：**
+
 ```bash
 cacctmgr modify user where Name=<用户> [Account=<账户>] [Partition=<分区>] set <属性>=<值>
 ```
 
 **Where 子句：**
 
-- **Name=<用户>**: 要修改的用户（必需）
-- **Account=<账户>**: 账户上下文（可选）
-- **Partition=<分区>**: 分区上下文（可选）
+- **Name=&lt;用户&gt;**: 要修改的用户（必需）
+- **Account=&lt;账户&gt;**: 账户上下文（可选）
+- **Partition=&lt;分区&gt;**: 分区上下文（可选）
 
 **属性：**
 
-- **AdminLevel=<级别>**: 设置管理级别（none/operator/admin）
-- **DefaultAccount=<账户>**: 设置默认账户
-- **DefaultQos=<qos>**: 设置默认 QoS
-- **AllowedPartition=<分区>**: 设置允许的分区（覆盖）
-- **AllowedPartition+=<分区>**: 添加分区
-- **AllowedPartition-=<分区>**: 移除分区
-- **AllowedQos=<qos列表>**: 设置允许的 QoS（覆盖）
-- **AllowedQos+=<qos列表>**: 添加 QoS
-- **AllowedQos-=<qos列表>**: 移除 QoS
+- **AdminLevel=&lt;级别&gt;**: 设置管理级别（none/operator/admin）
+- **DefaultAccount=&lt;账户&gt;**: 设置默认账户
+- **DefaultQos=&lt;qos&gt;**: 设置默认 QoS
+- **AllowedPartition=&lt;分区&gt;**: 设置允许的分区（覆盖）
+- **AllowedPartition+=&lt;分区&gt;**: 添加分区
+- **AllowedPartition-=&lt;分区&gt;**: 移除分区
+- **AllowedQos=&lt;qos列表&gt;**: 设置允许的 QoS（覆盖）
+- **AllowedQos+=&lt;qos列表&gt;**: 添加 QoS
+- **AllowedQos-=&lt;qos列表&gt;**: 移除 QoS
 
 **示例：**
 
 修改用户管理级别：
+
 ```bash
 cacctmgr modify user where Name=alice Account=PKU set AdminLevel=operator
 ```
 
 从用户移除分区：
+
 ```bash
 cacctmgr modify user where Name=bob set AllowedPartition-=GPU
 ```
 
 向用户添加 QoS：
+
 ```bash
 cacctmgr modify user where Name=charlie set AllowedQos+=high
 ```
@@ -311,28 +343,32 @@ cacctmgr modify user where Name=charlie set AllowedQos+=high
 ### 2.4 显示用户
 
 **语法：**
+
 ```bash
 cacctmgr show user [名称] [选项]
 ```
 
 **选项：**
 
-- **Accounts=<账户>**: 仅显示特定账户的用户
-- **Name=<名称1,名称2,...>**: 仅显示特定用户
+- **Accounts=&lt;账户&gt;**: 仅显示特定账户的用户
+- **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定用户
 
 **示例：**
 
 显示所有用户：
+
 ```bash
 cacctmgr show user
 ```
 
 显示特定用户：
+
 ```bash
 cacctmgr show user alice
 ```
 
 显示账户中的用户：
+
 ```bash
 cacctmgr show user Accounts=PKU
 ```
@@ -340,6 +376,7 @@ cacctmgr show user Accounts=PKU
 ### 2.5 阻止/解除阻止用户
 
 **语法：**
+
 ```bash
 cacctmgr block user <名称> Account=<账户>
 cacctmgr unblock user <名称> Account=<账户>
@@ -347,16 +384,18 @@ cacctmgr unblock user <名称> Account=<账户>
 
 **必需：**
 
-- **Account=<账户>**: 用户阻止/解除阻止需要账户上下文
+- **Account=&lt;账户&gt;**: 用户阻止/解除阻止需要账户上下文
 
 **示例：**
 
 阻止用户：
+
 ```bash
 cacctmgr block user alice Account=PKU
 ```
 
 解除阻止用户：
+
 ```bash
 cacctmgr unblock user alice Account=PKU
 ```
@@ -364,21 +403,25 @@ cacctmgr unblock user alice Account=PKU
 ### 2.6 重置用户证书
 
 **语法：**
+
 ```bash
 cacctmgr reset <名称>
 ```
 
 **特殊情况：**
+
 - 如果名称是 `all`，将重置所有用户的证书
 
 **示例：**
 
 重置单个用户证书：
+
 ```bash
 cacctmgr reset alice
 ```
 
 重置所有用户证书：
+
 ```bash
 cacctmgr reset all
 ```
@@ -390,32 +433,36 @@ cacctmgr reset all
 ### 3.1 添加 QoS
 
 **语法：**
+
 ```bash
 cacctmgr add qos <名称> [选项]
 ```
 
 **选项：**
 
-- **Description=<描述>**: QoS 描述
-- **Priority=<优先级>**: 优先级值（值越高，优先级越高）
-- **MaxJobsPerUser=<数量>**: 每个用户的最大并发作业数
-- **MaxCpusPerUser=<数量>**: 每个用户的最大 CPU 数
-- **MaxTimeLimitPerTask=<秒数>**: 每个任务的最大运行时间（秒）
-- **Name=<名称1,名称2,...>**: 批量创建多个 QoS（逗号分隔）
+- **Description=&lt;描述&gt;**: QoS 描述
+- **Priority=&lt;优先级&gt;**: 优先级值（值越高，优先级越高）
+- **MaxJobsPerUser=&lt;数量&gt;**: 每个用户的最大并发作业数
+- **MaxCpusPerUser=&lt;数量&gt;**: 每个用户的最大 CPU 数
+- **MaxTimeLimitPerTask=&lt;秒数&gt;**: 每个任务的最大运行时间（秒）
+- **Name=&lt;名称1,名称2,...&gt;**: 批量创建多个 QoS（逗号分隔）
 
 **示例：**
 
 创建 QoS：
+
 ```bash
 cacctmgr add qos normal Description="普通QoS" Priority=1000 MaxJobsPerUser=10 MaxCpusPerUser=100
 ```
 
 创建高优先级 QoS：
+
 ```bash
 cacctmgr add qos high Description="高优先级" Priority=5000 MaxJobsPerUser=20 MaxCpusPerUser=200 MaxTimeLimitPerTask=86400
 ```
 
 批量创建 QoS：
+
 ```bash
 cacctmgr add qos batch Name=low,medium,high Priority=500
 ```
@@ -423,15 +470,17 @@ cacctmgr add qos batch Name=low,medium,high Priority=500
 ### 3.2 删除 QoS
 
 **语法：**
+
 ```bash
 cacctmgr delete qos <名称>
 ```
 
 **选项：**
 
-- **Name=<名称1,名称2,...>**: 删除多个 QoS（逗号分隔）
+- **Name=&lt;名称1,名称2,...&gt;**: 删除多个 QoS（逗号分隔）
 
 **示例：**
+
 ```bash
 cacctmgr delete qos low
 ```
@@ -439,26 +488,29 @@ cacctmgr delete qos low
 ### 3.3 修改 QoS
 
 **语法：**
+
 ```bash
 cacctmgr modify qos where Name=<qos> set <属性>=<值>
 ```
 
 **属性：**
 
-- **Description=<描述>**: 设置描述
-- **MaxCpusPerUser=<数量>**: 设置每个用户的最大 CPU 数
-- **MaxJobsPerUser=<数量>**: 设置每个用户的最大作业数
-- **MaxTimeLimitPerTask=<秒数>**: 设置每个任务的最大时间（秒）
-- **Priority=<优先级>**: 设置优先级
+- **Description=&lt;描述&gt;**: 设置描述
+- **MaxCpusPerUser=&lt;数量&gt;**: 设置每个用户的最大 CPU 数
+- **MaxJobsPerUser=&lt;数量&gt;**: 设置每个用户的最大作业数
+- **MaxTimeLimitPerTask=&lt;秒数&gt;**: 设置每个任务的最大时间（秒）
+- **Priority=&lt;优先级&gt;**: 设置优先级
 
 **示例：**
 
 修改 QoS 优先级：
+
 ```bash
 cacctmgr modify qos where Name=normal set Priority=2000
 ```
 
 更新资源限制：
+
 ```bash
 cacctmgr modify qos where Name=high set MaxJobsPerUser=50 MaxCpusPerUser=500
 ```
@@ -466,22 +518,25 @@ cacctmgr modify qos where Name=high set MaxJobsPerUser=50 MaxCpusPerUser=500
 ### 3.4 显示 QoS
 
 **语法：**
+
 ```bash
 cacctmgr show qos [名称] [选项]
 ```
 
 **选项：**
 
-- **Name=<名称1,名称2,...>**: 仅显示特定 QoS
+- **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定 QoS
 
 **示例：**
 
 显示所有 QoS：
+
 ```bash
 cacctmgr show qos
 ```
 
 显示特定 QoS：
+
 ```bash
 cacctmgr show qos normal
 ```
@@ -493,31 +548,35 @@ cacctmgr show qos normal
 ### 4.1 显示事务日志
 
 **语法：**
+
 ```bash
 cacctmgr show transaction where [选项]
 ```
 
 **Where 选项：**
 
-- **Actor=<用户名>**: 按执行操作的用户过滤
-- **Target=<目标>**: 按目标实体过滤
-- **Action=<操作>**: 按操作类型过滤
-- **Info=<信息>**: 按附加信息过滤
-- **StartTime=<时间戳>**: 按开始时间过滤
+- **Actor=&lt;用户名&gt;**: 按执行操作的用户过滤
+- **Target=&lt;目标&gt;**: 按目标实体过滤
+- **Action=&lt;操作&gt;**: 按操作类型过滤
+- **Info=&lt;信息&gt;**: 按附加信息过滤
+- **StartTime=&lt;时间戳&gt;**: 按开始时间过滤
 
 **示例：**
 
 显示所有事务：
+
 ```bash
 cacctmgr show transaction
 ```
 
 显示特定用户的事务：
+
 ```bash
 cacctmgr show transaction where Actor=admin
 ```
 
 显示特定账户的事务：
+
 ```bash
 cacctmgr show transaction where Target=PKU
 ```
@@ -529,32 +588,37 @@ cacctmgr show transaction where Target=PKU
 ### 5.1 添加 Wckey
 
 **语法：**
+
 ```bash
 cacctmgr add wckey <名称> [选项]
 ```
 
 **选项：**
 
-- **User=<用户名>**: 用户名 （必需）
+- **User=&lt;用户名&gt;**: 用户名 （必需）
 
 **示例：**
 
 添加 Wckey
+
 ```bash
 cacctmgr add wckey hpcgroup User=zhangsan
 ```
+
 ### 5.2 删除 Wckey
 
 **语法：**
+
 ```bash
 cacctmgr delete wckey <名称> [选项]
 ```
 
 **选项：**
 
-- **User=<用户名>**: 用户名 （必需）
+- **User=&lt;用户名&gt;**: 用户名 （必需）
 
 **示例：**
+
 ```bash
 cacctmgr delete wckey hpcgroup User=zhangsan
 ```
@@ -562,18 +626,20 @@ cacctmgr delete wckey hpcgroup User=zhangsan
 ### 5.3 修改默认Wckey
 
 **语法：**
+
 ```bash
 cacctmgr modify wckey where User=<name> set DefaultWckey=<wckey>
 ```
 
 **属性：**
 
-- **User=<用户名>**: 用户名 （必需）
-- **DefaultWckey=<Wckey名>**: 存在的wckey名 （必需）
+- **User=&lt;用户名&gt;**: 用户名 （必需）
+- **DefaultWckey=&lt;Wckey名&gt;**: 存在的wckey名 （必需）
 
 **示例：**
 
 修改默认Wckey
+
 ```bash
 cacctmgr modify wckey where User=zhangsan set DefaultWckey=hpcgroup
 ```
@@ -581,17 +647,19 @@ cacctmgr modify wckey where User=zhangsan set DefaultWckey=hpcgroup
 ### 5.4 显示 Wckey
 
 **语法：**
+
 ```bash
 cacctmgr show wckey [名称]
 ```
 
 **选项：**
 
-- **Name=<名称1,名称2,...>**: 仅显示特定Wckey（逗号分隔）
+- **Name=&lt;名称1,名称2,...&gt;**: 仅显示特定Wckey（逗号分隔）
 
 **示例：**
 
 显示所有 Wckey
+
 ```bash
 cacctmgr show wckey
 ```
@@ -639,6 +707,7 @@ cacctmgr show transaction where Actor=professor
 ### JSON 输出示例
 
 以 JSON 格式获取结果用于脚本：
+
 ```bash
 cacctmgr show account --json
 cacctmgr show user Accounts=PKU --json
@@ -649,19 +718,19 @@ cacctmgr show qos --json
 
 ## 权限矩阵
 
-| 操作 | Admin | Operator | Coordinator | User |
-|------|-------|----------|-------------|------|
-| 添加账户 | ✓ | ✓ | ✗ | ✗ |
-| 删除账户 | ✓ | ✓ | ✗ | ✗ |
-| 修改账户 | ✓ | ✓ | 自己的账户 | ✗ |
-| 添加用户 | ✓ | ✓ | 同账户 | ✗ |
-| 删除用户 | ✓ | ✓ | 同账户 | ✗ |
-| 修改用户 | ✓ | ✓ | 同账户 | ✗ |
-| 添加 QoS | ✓ | ✓ | ✗ | ✗ |
-| 删除 QoS | ✓ | ✓ | ✗ | ✗ |
-| 修改 QoS | ✓ | ✓ | ✗ | ✗ |
-| 显示（查询） | ✓ | ✓ | ✓ | ✓（自己的账户） |
-| 阻止/解除阻止 | ✓ | ✓ | 同账户 | ✗ |
+| 操作      | Admin | Operator | Coordinator | User     |
+|---------|-------|----------|-------------|----------|
+| 添加账户    | ✓     | ✓        | ✗           | ✗        |
+| 删除账户    | ✓     | ✓        | ✗           | ✗        |
+| 修改账户    | ✓     | ✓        | 自己的账户       | ✗        |
+| 添加用户    | ✓     | ✓        | 同账户         | ✗        |
+| 删除用户    | ✓     | ✓        | 同账户         | ✗        |
+| 修改用户    | ✓     | ✓        | 同账户         | ✗        |
+| 添加 QoS  | ✓     | ✓        | ✗           | ✗        |
+| 删除 QoS  | ✓     | ✓        | ✗           | ✗        |
+| 修改 QoS  | ✓     | ✓        | ✗           | ✗        |
+| 显示（查询）  | ✓     | ✓        | ✓           | ✓（自己的账户） |
+| 阻止/解除阻止 | ✓     | ✓        | 同账户         | ✗        |
 
 ---
 

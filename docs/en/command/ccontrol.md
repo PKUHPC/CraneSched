@@ -24,6 +24,7 @@ ccontrol <ACTION> <ENTITY> [OPTIONS]
 - **node** - Compute nodes
 - **partition** - Node partitions
 - **job** - Jobs/tasks
+- **step** - Job steps (sub-execution units within jobs)
 - **reservation** - Resource reservations
 - **lic** - License
 
@@ -97,6 +98,63 @@ ccontrol show job 12345
 ```
 
 ![ccontrol](../../images/ccontrol/ccontrol_showjob2.png)
+
+#### Show Steps
+
+Display detailed information about job steps.
+
+```bash
+# Show specific step
+ccontrol show step <job_id>.<step_id>
+
+# Show all steps (requires --all flag)
+ccontrol show step --all
+```
+
+**Syntax:**
+- Step ID format: `jobid.stepid` (e.g., `123.1`, `456.2`)
+
+**Output Fields:**
+- **StepId**: Step identifier in format `jobid.stepid`
+- **Name**: Step name
+- **Partition**: Partition name (inherited from parent job)
+- **User**: Username
+- **Account**: Account name (inherited from parent job)
+- **QoS**: Quality of Service (inherited from parent job)
+- **State**: Current step state (PENDING, RUNNING, COMPLETED, FAILED, CANCELLED)
+- **TimeLimit**: Time limit for the step
+- **ElapsedTime**: Time elapsed since step started
+- **NodeList**: Nodes allocated to the step
+- **CPUs**: Number of CPUs allocated to the step
+- **Memory**: Memory allocated to the step
+- **GRES**: Generic resources (GPU, etc.) allocated to the step
+- **StartTime**: Time when the step started
+
+**Examples:**
+
+```bash
+# Show details of step 1 from job 123
+ccontrol show step 123.1
+
+# Show details of step 2 from job 456
+ccontrol show step 456.2
+```
+
+**Example Output:**
+```
+StepId=123.1 StepName=task1
+Partition=compute Account=research_group QoS=normal
+State=RUNNING TimeLimit=01:00:00 ElapsedTime=00:15:30
+NodeList=node[01-02] CPUs=8 Memory=4096MB
+GRES=gpu:2
+StartTime=2025-01-15T10:30:00
+```
+
+**Usage Notes:**
+- Steps inherit partition, account, and QoS from their parent job
+- Use `cqueue --step` for a list view of all steps
+- Use `ccontrol show step` for detailed information about a specific step
+- Step states include: PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
 
 #### Show Reservations
 

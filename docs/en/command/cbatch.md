@@ -51,7 +51,7 @@ cbatch cbatch_test.sh
 - **-A, --account string**: Account for job submission
 - **-p, --partition string**: Requested partition
 - **-q, --qos string**: Quality of Service (QoS) used for the job
-- **-t, --time string**: Time limit, format: `day-hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days, 1 second) or `hours:minutes:seconds` (e.g., `10:1:2` for 10 hours, 1 minute, 2 seconds)
+- **-t, --time string**: Time limit, format: `[day-]hours:minutes:seconds` (e.g., `5-0:0:1` for 5 days and 1 second, or `10:1:2` for 10 hours, 1 minute, 2 seconds)
 - **--comment string**: Comment for the job
 
 ### Node Selection

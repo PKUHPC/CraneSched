@@ -531,6 +531,11 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       this->SetErrorExitCode(exit_code);
     }
     job_finished = this->AllNodesFinished();
+    if (!job_finished) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] got a finish status, waiting for {} status change.",
+          job_id, this->StepId(), this->RunningNodes().size());
+    }
     break;
 
   default: {
@@ -868,10 +873,12 @@ void CommonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       this->SetErrorStatus(new_status);
       this->SetErrorExitCode(exit_code);
     }
-    CRANE_DEBUG(
-        "[Step #{}.{}] got a finish status, waiting for {} status change.",
-        job_id, step_id, this->RunningNodes().size());
     step_finished = this->AllNodesFinished();
+    if (!step_finished) {
+      CRANE_DEBUG(
+          "[Step #{}.{}] got a finish status, waiting for {} status change.",
+          job_id, step_id, this->RunningNodes().size());
+    }
 
   } else {
     CRANE_ASSERT_MSG(
