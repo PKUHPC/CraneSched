@@ -20,6 +20,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <optional>
+
 #include "DbClient.h"
 #include "Security/VaultClient.h"
 #include "crane/Lock.h"
@@ -43,9 +45,10 @@ class AccountManager {
   using WckeyMutexSharedPtr = util::ScopeConstSharedPtr<Wckey, util::rw_mutex>;
 
   using TxnAction = crane::grpc::TxnAction;
-  // name, value, modify_field, txn_action
+  using ModifyField = crane::grpc::ModifyField;
+  // value, modify_field, reference_count(if modify_field == Qos else nullopt)
   using ModifyRecord =
-      std::tuple<std::string, std::string, crane::grpc::ModifyField, TxnAction>;
+      std::tuple<std::string, crane::grpc::ModifyField, std::optional<int>>;
 
   AccountManager();
 
@@ -190,7 +193,7 @@ class AccountManager {
   std::vector<CraneExpectedRich<void>> CheckModifyAccountOperations(
       Account* account,
       const std::vector<crane::grpc::ModifyFieldOperation>& operations,
-      std::string* log, std::vector<ModifyRecord>& modify_record, bool force);
+      std::string* log, std::vector<ModifyRecord>* modify_record, bool force);
   std::vector<CraneExpectedRich<void>> CheckModifyUserOperations(
       const User* op_user, const Account* account_ptr,
       const std::string& actual_account, const std::string& partition,
@@ -227,10 +230,11 @@ class AccountManager {
       const User* op_user, User* user, const std::string& value);
   CraneExpectedRich<void> CheckAndModifyUserAdminLevelNoLock_(
       const User* op_user, User* user, const std::string& value);
-  CraneExpected<void> CheckAddAccountAllowedPartitionNoLock_(
-      const Account* account, const std::string& partition);
-  CraneExpected<void> CheckAddAccountAllowedQosNoLock_(const Account* account,
-                                                       const std::string& qos);
+  std::vector<CraneExpectedRich<void>> CheckAddAccountAllowedPartitionNoLock_(
+      const Account* account,
+      const std::unordered_set<std::string>& partition_list);
+  std::vector<CraneExpectedRich<void>> CheckAddAccountAllowedQosNoLock_(
+      const Account* account, const std::unordered_set<std::string>& qos_list);
   CraneExpected<void> CheckSetAccountDescriptionNoLock_(const Account* account);
   CraneExpectedRich<void> CheckSetAccountAllowedPartitionNoLock_(
       const Account* account,
@@ -361,10 +365,10 @@ class AccountManager {
 
   CraneExpectedRich<void> SetAccountAllowedPartition_(
       Account* account, std::unordered_set<std::string>& partition_list,
-      std::vector<ModifyRecord>& modify_record);
+      std::vector<ModifyRecord>* modify_record);
   CraneExpectedRich<void> SetAccountAllowedQos_(
       Account* account, std::unordered_set<std::string>& qos_list,
-      std::vector<ModifyRecord>& modify_record);
+      std::vector<ModifyRecord>* modify_record);
 
   CraneExpected<void> DeleteAccountAllowedPartition_(
       const std::string& actor_name, const Account& account,
@@ -393,9 +397,6 @@ class AccountManager {
                                            const std::string& qos);
   bool DeleteAccountAllowedQosFromMapNoLock_(const std::string& name,
                                              const std::string& qos);
-
-  CraneExpectedRich<int> DeleteAccountAllowedQosNoLock_(const Account* account,
-                                                        const std::string& qos);
 
   bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
       const std::string& name, const std::string& account,
