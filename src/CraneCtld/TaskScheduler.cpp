@@ -4281,7 +4281,7 @@ void SchedulerAlgo::NodeSelect(
                                           g_config.ScheduledBatchSize,
                                           job_ptr_vec);
 
-  CheckClusterResource_(&job_ptr_vec);
+  g_licenses_manager->CheckLicenseCountSufficient(&job_ptr_vec);
 
   // Schedule pending tasks
   // TODO: do it in parallel
@@ -4356,36 +4356,6 @@ void SchedulerAlgo::NodeSelect(
           job->reason = "Priority";
         }
       }
-    }
-  }
-}
-
-void SchedulerAlgo::CheckClusterResource_(
-    std::vector<PdJobInScheduler*>* job_ptr_vec) {
-  std::unordered_map<LicenseId, License> back_map;
-  {
-    auto licenses_map = g_licenses_manager->GetLicensesMapExclusivePtr();
-    for (const auto& [license_id, license] : *licenses_map) {
-      back_map.emplace(license_id, *license.GetExclusivePtr());
-    }
-  }
-
-  for (const auto& job_ptr : *job_ptr_vec) {
-    if (job_ptr->req_licenses.empty()) continue;
-
-    job_ptr->actual_licenses.clear();
-
-    g_licenses_manager->CheckLicenseCountSufficient(
-        back_map, job_ptr->req_licenses, job_ptr->is_license_or,
-        &job_ptr->actual_licenses);
-
-    if (job_ptr->actual_licenses.empty()) {
-      job_ptr->reason = "License";
-      continue;
-    }
-
-    for (const auto& [lic_id, count] : job_ptr->actual_licenses) {
-      back_map[lic_id].used += count;
     }
   }
 }

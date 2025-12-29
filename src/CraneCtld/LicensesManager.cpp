@@ -168,37 +168,57 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
 }
 
 void LicensesManager::CheckLicenseCountSufficient(
-    const std::unordered_map<LicenseId, License>& back_map,
-    const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>&
-        req_licenses,
-    bool is_license_or,
-    std::unordered_map<LicenseId, uint32_t>* actual_licenses) {
-  if (is_license_or) {
-    for (const auto& license : req_licenses) {
-      auto iter = back_map.find(license.key());
-      if (iter != back_map.end()) {
-        auto lic = iter->second;
-        if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
-            lic.total) {
-          actual_licenses->emplace(license.key(), license.count());
-          break;
+    std::vector<PdJobInScheduler*>* job_ptr_vec) {
+  std::unordered_map<LicenseId, License> back_map;
+
+  {
+    auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
+    for (const auto& [license_id, license] : *licenses_map) {
+      back_map.emplace(license_id, *license.GetExclusivePtr());
+    }
+  }
+
+  for (const auto& job_ptr : *job_ptr_vec) {
+    if (job_ptr->req_licenses.empty()) continue;
+
+    job_ptr->actual_licenses.clear();
+
+    if (job_ptr->is_license_or) {
+      for (const auto& license : job_ptr->req_licenses) {
+        auto iter = back_map.find(license.key());
+        if (iter != back_map.end()) {
+          auto lic = iter->second;
+          if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
+              lic.total) {
+            job_ptr->actual_licenses.emplace(license.key(), license.count());
+            break;
+          }
         }
       }
+    } else {
+      for (const auto& license : job_ptr->req_licenses) {
+        auto iter = back_map.find(license.key());
+        if (iter == back_map.end()) {
+          job_ptr->actual_licenses.clear();
+          break;
+        }
+        auto lic = iter->second;
+        if (license.count() + lic.reserved + lic.used + lic.last_deficit >
+            lic.total) {
+          job_ptr->actual_licenses.clear();
+          break;
+        }
+        job_ptr->actual_licenses.emplace(license.key(), license.count());
+      }
     }
-  } else {
-    for (const auto& license : req_licenses) {
-      auto iter = back_map.find(license.key());
-      if (iter == back_map.end()) {
-        actual_licenses->clear();
-        break;
-      }
-      auto lic = iter->second;
-      if (license.count() + lic.reserved + lic.used + lic.last_deficit >
-          lic.total) {
-        actual_licenses->clear();
-        break;
-      }
-      actual_licenses->emplace(license.key(), license.count());
+
+    if (job_ptr->actual_licenses.empty()) {
+      job_ptr->reason = "License";
+      continue;
+    }
+
+    for (const auto& [lic_id, count] : job_ptr->actual_licenses) {
+      back_map[lic_id].used += count;
     }
   }
 }

@@ -56,12 +56,7 @@ class LicensesManager {
           &lic_id_to_count,
       bool is_license_or);
 
-  void CheckLicenseCountSufficient(
-      const std::unordered_map<LicenseId, License> &back_map,
-      const google::protobuf::RepeatedPtrField<crane::grpc::TaskToCtld_License>
-          &req_licenses,
-      bool is_license_or,
-      std::unordered_map<LicenseId, uint32_t> *actual_licenses);
+  void CheckLicenseCountSufficient(std::vector<PdJobInScheduler*>* job_ptr_vec);
 
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
