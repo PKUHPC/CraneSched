@@ -487,6 +487,10 @@ std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
     if (pid == -1) {
       CRANE_ERROR("{} subprocess creation failed: {}.", script,
                   strerror(errno));
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
       return std::nullopt;
     }
 
