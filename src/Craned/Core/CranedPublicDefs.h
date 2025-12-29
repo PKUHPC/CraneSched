@@ -103,6 +103,12 @@ struct Config {
     std::filesystem::path TempDir;
     std::filesystem::path RuntimeEndpoint;
     std::filesystem::path ImageEndpoint;
+    struct BindFsConfig {
+      bool Enabled{false};
+      std::filesystem::path BindfsBinary{"bindfs"};
+      std::filesystem::path FusermountBinary{"fusermount"};
+    };
+    BindFsConfig BindFs;
   };
   ContainerConfig Container;
 

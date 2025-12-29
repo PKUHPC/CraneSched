@@ -183,3 +183,7 @@ Container:
   # In most cases, ImageEndpoint is the same as RuntimeEndpoint
   RuntimeEndpoint: /run/containerd/containerd.sock
   ImageEndpoint: /run/containerd/containerd.sock
+  BindFs:
+    Enabled: false
+    BindfsBinary: bindfs
+    FusermountBinary: fusermount

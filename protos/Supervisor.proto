@@ -46,6 +46,12 @@ message InitSupervisorRequest {
     string temp_dir = 1;
     string runtime_endpoint = 2;
     string image_endpoint = 3;
+
+    message BindFsConfig {
+      string bindfs_binary = 1;
+      string fusermount_binary = 2;
+    }
+    BindFsConfig bindfs = 4;
   }
   ContainerConfig container_config = 15;
 

@@ -110,6 +110,13 @@ void InitFromStdin(int argc, char** argv) {
     g_config.Container.RuntimeEndpoint =
         msg.container_config().runtime_endpoint();
     g_config.Container.ImageEndpoint = msg.container_config().image_endpoint();
+    g_config.Container.BindFs.Enabled = msg.container_config().has_bindfs();
+    if (g_config.Container.BindFs.Enabled) {
+      const auto& bindfs_conf = msg.container_config().bindfs();
+      g_config.Container.BindFs.BindfsBinary = bindfs_conf.bindfs_binary();
+      g_config.Container.BindFs.FusermountBinary =
+          bindfs_conf.fusermount_binary();
+    }
   }
 
   // Plugin config

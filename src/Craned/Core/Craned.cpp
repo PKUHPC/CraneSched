@@ -639,6 +639,14 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled =
               YamlValueOr<bool>(container_config["Enabled"], false);
 
+          const auto& bindfs_config = container_config["BindFs"];
+          g_config.Container.BindFs.Enabled =
+              YamlValueOr<bool>(bindfs_config["Enabled"], false);
+          g_config.Container.BindFs.BindfsBinary =
+              YamlValueOr(bindfs_config["BindfsBinary"], "bindfs");
+          g_config.Container.BindFs.FusermountBinary =
+              YamlValueOr(bindfs_config["FusermountBinary"], "fusermount");
+
           if (g_config.Container.Enabled) {
             g_config.Container.TempDir =
                 g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
