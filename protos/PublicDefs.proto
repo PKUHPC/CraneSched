@@ -470,6 +470,7 @@ message TaskInfo {
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
   string wckey = 41;
+  map<string, string> env = 42;
 }
 
 message StepInfo {
@@ -694,11 +695,14 @@ enum ErrCode {
   ERR_CRI_CONTAINER_NOT_READY = 82;  // Task is pending or container is not ready.
   ERR_INVALID_MEM_FORMAT = 83;       // Invalid mem format when parsing mem
   ERR_STEP_RES_BEYOND = 84;          // Step resource request exceeds job resource.
+
   ERR_INVALID_WCKEY = 85;
   ERR_WCKEY_ALREADY_EXISTS = 86;
   ERR_INVALID_CLUSTER = 87;
   ERR_DEL_DEFAULT_WCKEY = 88;
   ERR_NO_DEFAULT_WCKEY = 89;
+
+  ERR_LUA_FAILED = 90;
 }
 
 enum EntityType {
