@@ -55,9 +55,10 @@ class AccountMetaContainer final {
 
   void MallocQosResourceToRecoveredRunningTask(TaskInCtld& task);
 
-  std::expected<void, std::string> CheckQosResource(const TaskInCtld& task);
+  bool CheckQosResourceSufficient(PdJobInScheduler* job);
 
-  std::expected<void, std::string> MallocQosResource(const TaskInCtld& task);
+  std::expected<void, std::string> MallocQosResource(
+      const PdJobInScheduler& job);
 
   void FreeQosSubmitResource(const TaskInCtld& task);
 
@@ -85,8 +86,8 @@ class AccountMetaContainer final {
   CraneErrCode CheckQosSubmitResourceForAccount_(const TaskInCtld& task,
                                                  const Qos& qos);
 
-  bool CheckQosResource_(const Qos& qos, const TaskInCtld& task);
-
+  bool CheckQosResource_(const Qos& qos, const PdJobInScheduler& job,
+                         const ResourceView& resource_view);
 
   template<typename T>
   static void CheckAndSubResource_(T& current, T need, const std::string& resource_name,
