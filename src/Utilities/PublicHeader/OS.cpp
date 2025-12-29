@@ -84,17 +84,14 @@ bool DeleteFolders(std::string const& p) {
 bool CreateFile(std::string const& p) {
   if (std::filesystem::exists(p)) return true;
 
-  try {
-    std::ofstream ofs(p, std::ios::out);
-    if (!ofs) {
-      CRANE_ERROR("Failed to create file {}: {}", p, std::strerror(errno));
-      return false;
-    }
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Exception when creating file {}: {}", p, e.what());
+  int fd = open(p.c_str(),
+                  O_WRONLY | O_CREAT | O_TRUNC,
+                  0644);
+  if (fd == -1) {
+    CRANE_ERROR("Create file {} failed: {}", p, std::strerror(errno));
     return false;
   }
-
+  close(fd);
   return true;
 }
 
