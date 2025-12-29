@@ -586,7 +586,7 @@ std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
 
       std::vector<const char*> argv = {script.c_str(), nullptr};
       execvp(argv[0], const_cast<char* const*>(argv.data()));
-      fmt::print(stderr, "[Subprocess] execvp() failed: %s\n", strerror(errno));
+      fmt::print(stderr, "[Subprocess] execvp() failed: {}\n", strerror(errno));
       exit(EXIT_FAILURE);
     }
   }
