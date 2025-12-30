@@ -3587,7 +3587,7 @@ bool TaskScheduler::QueryTaskNodeRegex(task_id_t task_id, crane::grpc::TaskToCtl
   if (iter == m_running_task_map_.end()) return false;
 
   *task = iter->second->TaskToCtld();
-  task->set_nodelist(iter->second->GetAllocatedCranedsRegex());
+  task->set_nodelist(iter->second->allocated_craneds_regex);
   return true;
 }
 

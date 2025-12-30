@@ -555,26 +555,24 @@ void CforedClient::AsyncSendRecvThread_() {
     // But, for Prepare tag which indicates the stream is ready,
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
-      CRANE_ERROR("Cfored connection failed.");
-      /*
-      * if (m_wait_reconn_) break;
+      CRANE_DEBUG("Cfored connection lost. Attempting to reconnect...");
+      if (m_wait_reconn_) break;
       m_wait_reconn_ = true;
       if (output_clean_thread.joinable()) output_clean_thread.join();
-      m_reconnect_async_->send();
+      // m_reconnect_async_->send();
       break;
-       */
-      absl::MutexLock lock(&m_mtx_);
-      for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
-        CRANE_ERROR(
-            "[Task #{}] Markd task io stopped due to cfored conn failure.",
-            task_id);
-        m_stop_task_io_queue_.enqueue(task_id);
-        m_clean_stop_task_io_queue_async_handle_->send();
-      }
-      CRANE_ERROR("Terminating all task due to cfored connection failure.");
-      g_task_mgr->TerminateTaskAsync(
-          false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
-      state = State::End;
+      // absl::MutexLock lock(&m_mtx_);
+      // for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+      //   CRANE_ERROR(
+      //       "[Task #{}] Markd task io stopped due to cfored conn failure.",
+      //       task_id);
+      //   m_stop_task_io_queue_.enqueue(task_id);
+      //   m_clean_stop_task_io_queue_async_handle_->send();
+      // }
+      // CRANE_ERROR("Terminating all task due to cfored connection failure.");
+      // g_task_mgr->TerminateTaskAsync(
+      //     false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
+      // state = State::End;
     }
 
     switch (state) {
@@ -716,6 +714,12 @@ void CforedClient::AsyncSendRecvThread_() {
     if (state == State::Forwarding) continue;
     CRANE_TRACE("Next state: {}", int(state));
     if (state == State::End) break;
+  }
+
+  if (!m_stopped_ && m_wait_reconn_) {
+    m_wait_reconn_ = false;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    InitChannelAndStub(m_cfored_name_);
   }
 }
 

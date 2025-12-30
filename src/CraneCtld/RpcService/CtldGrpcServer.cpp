@@ -206,28 +206,36 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
   auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
   std::string cfored_name;
   std::weak_ptr<StreamWriterProxy> proxy_weak_ptr;
+
   auto cb_step_res_allocated =
-      [writer_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteTaskResAllocReply(arg);
+      [proxy_weak_ptr](const StepInteractiveMeta::StepResAllocArgs& arg) {
+        if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+          proxy->WithWriter([&](CforedStreamWriter& writer) {
+            writer.WriteTaskResAllocReply(arg);
+          });
+        }
       };
   auto cb_step_cancel =
-      [writer_weak_ptr](StepInteractiveMeta::StepCancelArgs const& args) {
+      [proxy_weak_ptr](StepInteractiveMeta::StepCancelArgs const& args) {
         auto& [job_id, step_id] = args;
         CRANE_TRACE("[Step #{}.{}] Sending TaskCancelRequest in task_cancel",
                     job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer)
-          writer->WriteTaskCancelRequest(job_id, step_id);
+        if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+          proxy->WithWriter([&](CforedStreamWriter& writer) {
+            writer.WriteTaskCancelRequest(job_id, step_id);
+          });
+        }
       };
   auto cb_step_completed =
-      [this,
-       writer_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
+      [this, proxy_weak_ptr](StepInteractiveMeta::StepCompeteArgs const& args) {
         auto& [job_id, step_id, send_completion_ack, cfored_name] = args;
         CRANE_TRACE("[Step #{}.{}] The completion callback of has been called.",
                     job_id, step_id);
-        if (auto writer = writer_weak_ptr.lock(); writer) {
-          if (send_completion_ack)
-            writer->WriteTaskCompletionAckReply(job_id, step_id);
+        if (auto proxy = proxy_weak_ptr.lock(); proxy) {
+          proxy->WithWriter([&](CforedStreamWriter& writer) {
+            if (send_completion_ack)
+              writer.WriteTaskCompletionAckReply(job_id, step_id);
+          });
         } else {
           CRANE_ERROR(
               "[Step #{}.{}] Stream writer of has been destroyed. "
@@ -347,7 +355,7 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
                 "Failed to send msg to cfored {}. Connection is broken. "
                 "Exiting...",
                 cfored_name);
-            state = StreamState::kCleanData;
+            state = StreamState::kWaitReConnect;
           } else {
             if (result.has_value()) {
               auto [job_id, step_id] = result.value();
