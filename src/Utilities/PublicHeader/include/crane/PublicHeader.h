@@ -120,6 +120,9 @@ constexpr uint64_t kCranedTimeoutSec = 30;
 
 constexpr uint64_t kEraseResvIntervalSec = 5;
 
+constexpr uint32_t kMaxReconnectAttempts = 1000;
+constexpr uint32_t kMaxReconnectIntervalSec = 60;
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;

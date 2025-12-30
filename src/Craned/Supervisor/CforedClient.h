@@ -128,6 +128,7 @@ class CforedClient {
   std::shared_ptr<uvw::loop> m_loop_;
   std::thread m_ev_thread_;
 
+  std::atomic<uint32_t> m_reconnect_attempts_;
   std::shared_ptr<uvw::async_handle> m_reconnect_async_;
 
   std::string m_cfored_name_;

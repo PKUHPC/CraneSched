@@ -53,9 +53,10 @@ CforedClient::CforedClient() {
 
   m_reconnect_async_ = m_loop_->resource<uvw::async_handle>();
   m_reconnect_async_->on<uvw::async_event>([this](const uvw::async_event&, uvw::async_handle&) {
-    while (m_wait_reconn_ && !m_stopped_) {
+    if (m_wait_reconn_ && !m_stopped_) {
+      CRANE_INFO("Attempting to reconnect cfored {} for the {} time...", m_cfored_name_, m_reconnect_attempts_.load());
+      m_wait_reconn_ = false;
       InitChannelAndStub(m_cfored_name_);
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   });
 
@@ -555,24 +556,30 @@ void CforedClient::AsyncSendRecvThread_() {
     // But, for Prepare tag which indicates the stream is ready,
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
-      CRANE_DEBUG("Cfored connection lost. Attempting to reconnect...");
-      if (m_wait_reconn_) break;
-      m_wait_reconn_ = true;
-      if (output_clean_thread.joinable()) output_clean_thread.join();
-      // m_reconnect_async_->send();
-      break;
-      // absl::MutexLock lock(&m_mtx_);
-      // for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
-      //   CRANE_ERROR(
-      //       "[Task #{}] Markd task io stopped due to cfored conn failure.",
-      //       task_id);
-      //   m_stop_task_io_queue_.enqueue(task_id);
-      //   m_clean_stop_task_io_queue_async_handle_->send();
-      // }
-      // CRANE_ERROR("Terminating all task due to cfored connection failure.");
-      // g_task_mgr->TerminateTaskAsync(
-      //     false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
-      // state = State::End;
+      if (m_reconnect_attempts_.load() > kMaxReconnectAttempts) {
+        CRANE_DEBUG("Cfored connection failed.");
+        absl::MutexLock lock(&m_mtx_);
+        for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
+          CRANE_ERROR(
+              "[Task #{}] Markd task io stopped due to cfored conn failure.",
+              task_id);
+          m_stop_task_io_queue_.enqueue(task_id);
+          m_clean_stop_task_io_queue_async_handle_->send();
+        }
+        CRANE_ERROR("Terminating all task due to cfored connection failure.");
+        g_task_mgr->TerminateTaskAsync(
+            false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
+        state = State::End;
+      } else {
+        if (m_wait_reconn_) break;
+        m_wait_reconn_ = true;
+        if (output_clean_thread.joinable()) output_clean_thread.join();
+        m_reconnect_attempts_++;
+        int interval = std::min(m_reconnect_attempts_.load(), kMaxReconnectIntervalSec);
+        std::this_thread::sleep_for(std::chrono::seconds(interval));
+        m_reconnect_async_->send();
+        break;
+      }
     }
 
     switch (state) {
@@ -597,6 +604,8 @@ void CforedClient::AsyncSendRecvThread_() {
     case State::WaitRegisterAck: {
       CRANE_TRACE("WaitRegisterAck");
 
+      m_reconnect_attempts_ = 0;
+
       if (tag == Tag::Write) {
         write_pending.store(false, std::memory_order::release);
         CRANE_TRACE("Cfored Registration was sent. Reading Ack...");
@@ -610,7 +619,6 @@ void CforedClient::AsyncSendRecvThread_() {
         // Issue initial read request
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
-        m_wait_reconn_ = false;
         // Start output forwarding thread
         output_clean_thread =
             std::thread(&CforedClient::CleanOutputQueueAndWriteToStreamThread_,
@@ -714,12 +722,6 @@ void CforedClient::AsyncSendRecvThread_() {
     if (state == State::Forwarding) continue;
     CRANE_TRACE("Next state: {}", int(state));
     if (state == State::End) break;
-  }
-
-  if (!m_stopped_ && m_wait_reconn_) {
-    m_wait_reconn_ = false;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    InitChannelAndStub(m_cfored_name_);
   }
 }
 

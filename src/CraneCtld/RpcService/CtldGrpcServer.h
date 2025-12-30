@@ -81,6 +81,7 @@ class CforedStreamWriter {
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
     task_res_alloc_reply->set_job_id(job_id);
     task_res_alloc_reply->set_step_id(step_id);
+    CRANE_TRACE("[Step #{}.{}] WriteTaskResAllocReply called", job_id, step_id);
 
     if (allocated_craned_expt.has_value()) {
       task_res_alloc_reply->set_ok(true);
