@@ -645,7 +645,7 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.BindFs.BindfsBinary =
               YamlValueOr(bindfs_config["BindfsBinary"], "bindfs");
           g_config.Container.BindFs.FusermountBinary =
-              YamlValueOr(bindfs_config["FusermountBinary"], "fusermount");
+              YamlValueOr(bindfs_config["FusermountBinary"], "fusermount3");
 
           if (g_config.Container.Enabled) {
             g_config.Container.TempDir =

@@ -106,7 +106,7 @@ struct Config {
     struct BindFsConfig {
       bool Enabled{false};
       std::filesystem::path BindfsBinary{"bindfs"};
-      std::filesystem::path FusermountBinary{"fusermount"};
+      std::filesystem::path FusermountBinary{"fusermount3"};
     };
     BindFsConfig BindFs;
   };

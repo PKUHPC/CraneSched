@@ -19,11 +19,14 @@
 #pragma once
 #include <sched.h>
 
+#include <expected>
+
 #include "PublicDefs.pb.h"
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
 #include "CforedClient.h"
+#include "crane/BindFs.h"
 #include "crane/CriClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -314,13 +317,24 @@ class ContainerInstance : public ITaskInstance {
       const cri::api::ContainerStatus& status);
 
  private:
-  // Container related constants
+  // Container related constants (step_id.node_id.log)
   static constexpr std::string_view kContainerLogFilePattern = "{}.{}.log";
+
+  // This is wrapper for SetupIdMappedMounts_ and SetupIdMappedBindFs_.
+  // NOTE: Must be called only after userns, run_as_* fields are set in config.
+  CraneErrCode ApplyIdMappedMounts_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config,
+                                    bool use_bindfs);
 
   // Setup id-mapped mounts in rootless containers.
   // NOTE: Called only after userns, run_as_* fields are set in config.
-  static CraneErrCode ResolveMountIdMapping_(const PasswordEntry& pwd,
-                                             cri::api::ContainerConfig* config);
+  CraneErrCode SetupIdMappedMounts_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config);
+
+  // Setup id-mapped bindfs for a mount (workaround for no idmap fs).
+  // NOTE: Called only after userns, run_as_* fields are set in config.
+  CraneErrCode SetupIdMappedBindFs_(const PasswordEntry& pwd,
+                                    cri::api::ContainerConfig* config);
 
   CraneErrCode LoadPodSandboxInfo_(
       const crane::grpc::PodTaskAdditionalMeta* pod_meta);
@@ -337,6 +351,7 @@ class ContainerInstance : public ITaskInstance {
 
   std::filesystem::path m_log_dir_;
   std::filesystem::path m_log_file_;
+  std::vector<std::unique_ptr<bindfs::IdMappedBindFs>> m_bindfs_mounts_;
 };
 
 struct ProcInstanceMeta {

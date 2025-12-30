@@ -997,8 +997,10 @@ CraneErrCode ContainerInstance::Prepare() {
     const auto& rich_err = container_id_expt.error();
     CRANE_ERROR("Failed to create container for #{}.{}: {}", g_config.JobId,
                 g_config.StepId, rich_err.description());
+    m_bindfs_mounts_.clear();
     return rich_err.code();
   }
+
   m_container_id_ = std::move(container_id_expt.value());
   CRANE_DEBUG("Container {} created for #{}.{}", m_container_id_,
               g_config.JobId, g_config.StepId);
@@ -1090,6 +1092,7 @@ CraneErrCode ContainerInstance::Cleanup() {
   // For container jobs, Kill() is idempotent.
   // It's ok to call it (at most) twice to remove container.
   CraneErrCode err = Kill(0);
+  m_bindfs_mounts_.clear();
   return err;
 }
 
@@ -1236,24 +1239,6 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   m_container_config_.set_stdin_once(ca_meta.stdin_once());
   m_container_config_.set_tty(ca_meta.tty());
 
-  // mount the generated script with uid/gid mapping.
-  for (const auto& mount : ca_meta.mounts()) {
-    auto* m = m_container_config_.add_mounts();
-
-    // If relative path is given, handle it with cwd.
-    std::filesystem::path host_path(mount.first);
-    if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
-    if (!std::filesystem::exists(host_path)) {
-      CRANE_ERROR("Mount host path {} does not exist for #{}.{}", host_path,
-                  job_id, step_id);
-      return CraneErrCode::ERR_INVALID_PARAM;
-    }
-
-    m->set_host_path(std::move(host_path));
-    m->set_container_path(mount.second);
-    m->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
-  }
-
   // security context
   auto* sec_ctx =
       m_container_config_.mutable_linux()->mutable_security_context();
@@ -1279,14 +1264,44 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
     return CraneErrCode::ERR_INVALID_PARAM;
   }
 
-  // Setup idmapped mounts if using userns.
-  if (pod_meta->userns()) {
-    if (ResolveMountIdMapping_(m_parent_step_inst_->pwd,
-                               &m_container_config_) != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to inject fake root config for #{}.{}", job_id,
-                  step_id);
-      return CraneErrCode::ERR_SYSTEM_ERR;
+  bool use_bindfs = pod_meta->userns() && g_config.Container.BindFs.Enabled &&
+                    !ca_meta.mounts().empty();
+  if (use_bindfs)
+    CRANE_TRACE("Using bindfs for container mounts of #{}.{}", job_id, step_id);
+
+  // mounts
+  for (const auto& mount : ca_meta.mounts()) {
+    auto* m = m_container_config_.add_mounts();
+
+    // If relative path is given, handle it with cwd.
+    std::filesystem::path host_path(mount.first);
+    if (host_path.is_relative()) host_path = GetParentStep().cwd() / host_path;
+    if (!std::filesystem::exists(host_path)) {
+      CRANE_ERROR("Mount host path {} does not exist for #{}.{}", host_path,
+                  job_id, step_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
     }
+
+    // Pre check for bindfs
+    if (use_bindfs && !std::filesystem::is_directory(host_path)) {
+      CRANE_ERROR(
+          "Bindfs only supports directory mounts. Host path {} is invalid "
+          "for #{}.{}",
+          host_path, job_id, step_id);
+      return CraneErrCode::ERR_INVALID_PARAM;
+    }
+
+    m->set_host_path(std::move(host_path));
+    m->set_container_path(mount.second);
+    m->set_propagation(cri::api::MountPropagation::PROPAGATION_PRIVATE);
+  }
+
+  // Setup idmapped mounts if using userns.
+  if (pod_meta->userns() &&
+      ApplyIdMappedMounts_(m_parent_step_inst_->pwd, &m_container_config_,
+                           use_bindfs) != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to apply idmapped mounts for #{}.{}", job_id, step_id);
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // workdir
@@ -1308,7 +1323,67 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode ContainerInstance::ResolveMountIdMapping_(
+CraneErrCode ContainerInstance::ApplyIdMappedMounts_(
+    const PasswordEntry& pwd, cri::api::ContainerConfig* config,
+    bool use_bindfs) {
+  // NOTE: These methods are assuming pwd.Gid() is the same as egid.
+  // which could be problematic. But for most HPC scenarios this should be fine.
+  if (use_bindfs) {
+    // If idmapped mounts not supported by FS/kernel,
+    // use bindfs as a workaround.
+    return SetupIdMappedBindFs_(pwd, config);
+  }
+  // Use standard linux idmapped mounts
+  return SetupIdMappedMounts_(pwd, config);
+}
+
+CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
+    const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
+  const auto& sec_ctx = config->mutable_linux()->mutable_security_context();
+  uid_t run_as_user = sec_ctx->run_as_user().value();
+  gid_t run_as_group = sec_ctx->run_as_group().value();
+
+  const auto& uid_mapping =
+      sec_ctx->mutable_namespace_options()->mutable_userns_options()->uids(0);
+  const auto& gid_mapping =
+      sec_ctx->mutable_namespace_options()->mutable_userns_options()->gids(0);
+
+  // For example, leo is 1000 on host, with a subid range
+  // 101000-102000.
+  // When leo want a userns container and run as 10 inside the container,
+  // then:
+  //   uid_offset = 101000 - 1000 + 10 = 100010
+  // The bindfs will utilize these to create a FUSE mount point.
+  // When using the mount point inside the container:
+  //   uid 10 in container -> uid 101010 in kernel
+  //   101010(kuid) - 100010(offset) = 1000(leo) on host
+  uid_t uid_offset = uid_mapping.host_id() - pwd.Uid() + run_as_user;
+  gid_t gid_offset = gid_mapping.host_id() - pwd.Gid() + run_as_group;
+
+  std::vector<std::unique_ptr<bindfs::IdMappedBindFs>> bindfs_mounts;
+  bindfs_mounts.reserve(config->mounts().size());
+  m_bindfs_mounts_.clear();
+
+  try {
+    for (auto& m : *config->mutable_mounts()) {
+      auto mount = std::make_unique<bindfs::IdMappedBindFs>(
+          m.host_path(), m_parent_step_inst_->pwd, pwd.Uid(), pwd.Gid(),
+          uid_offset, gid_offset, g_config.Container.BindFs.BindfsBinary,
+          g_config.Container.BindFs.FusermountBinary);
+
+      m.set_host_path(mount->GetMountedPath());
+      bindfs_mounts.emplace_back(std::move(mount));
+    }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to setup bindfs: {}", e.what());
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  m_bindfs_mounts_ = std::move(bindfs_mounts);
+  return CraneErrCode::SUCCESS;
+}
+
+CraneErrCode ContainerInstance::SetupIdMappedMounts_(
     const PasswordEntry& pwd, cri::api::ContainerConfig* config) {
   using cri::CriClient;
 

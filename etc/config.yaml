@@ -185,5 +185,5 @@ Container:
   ImageEndpoint: /run/containerd/containerd.sock
   BindFs:
     Enabled: false
-    BindfsBinary: bindfs
-    FusermountBinary: fusermount
+    BindfsBinary: /usr/bin/bindfs
+    FusermountBinary: /usr/bin/fusermount3

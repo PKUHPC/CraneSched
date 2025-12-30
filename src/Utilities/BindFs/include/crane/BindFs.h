@@ -25,6 +25,8 @@
 
 #include "crane/PasswordEntry.h"
 
+namespace bindfs {
+
 struct BindFsMetadata {
   std::filesystem::path source;
   uint32_t uid_offset{0};
@@ -41,9 +43,9 @@ struct BindFsMetadata {
 class IdMappedBindFs {
  public:
   IdMappedBindFs(std::filesystem::path source, const PasswordEntry& pwd,
-                 uid_t uid, gid_t gid,
+                 uid_t kuid, gid_t kgid, uid_t uid_offset, gid_t gid_offset,
                  std::filesystem::path bindfs_bin = "bindfs",
-                 std::filesystem::path fusermount_bin = "fusermount");
+                 std::filesystem::path fusermount_bin = "fusermount3");
 
   IdMappedBindFs(const IdMappedBindFs&) = delete;
   IdMappedBindFs& operator=(const IdMappedBindFs&) = delete;
@@ -59,20 +61,20 @@ class IdMappedBindFs {
   constexpr static std::string_view kMountPrefix = "/mnt/crane";
   static bool CheckMountValid_(const std::filesystem::path& mount_path);
 
-  int Mount_() noexcept;
-  int Unmount_() noexcept;
+  std::expected<int, std::string> Mount_() noexcept;
+  std::expected<int, std::string> Unmount_() noexcept;
 
   [[nodiscard]] std::string GetHashedMountPoint_() noexcept;
   [[nodiscard]] std::expected<void, std::string> CreateMountPoint_() noexcept;
   [[nodiscard]] std::expected<void, std::string> ReleaseMountPoint_() noexcept;
 
-  uid_t m_uid_;
-  gid_t m_gid_;
+  uid_t m_kuid_;
+  gid_t m_kgid_;
+  uid_t m_uid_offset_;
+  gid_t m_gid_offset_;
+
   std::string m_user_;
   std::string m_group_;
-
-  SubIdRanges m_subuids_;
-  SubIdRanges m_subgids_;
 
   std::filesystem::path m_bindfs_bin_;
   std::filesystem::path m_fusermount_bin_;
@@ -81,3 +83,5 @@ class IdMappedBindFs {
   std::filesystem::path m_target_;
   std::filesystem::path m_target_lock_;
 };
+
+}  // namespace bindfs

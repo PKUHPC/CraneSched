@@ -20,6 +20,8 @@
 #include "crane/String.h"
 #include "linux/magic.h"
 
+namespace bindfs {
+
 // Serialization for BindFsMetadata
 std::string BindFsMetadata::Marshal() const {
   nlohmann::json json;
@@ -79,12 +81,8 @@ bool IdMappedBindFs::CheckMountValid_(const std::filesystem::path& mount_path) {
 }
 
 std::string IdMappedBindFs::GetHashedMountPoint_() noexcept {
-  const auto& subuid_range = m_subuids_.At(0);
-  const auto& subgid_range = m_subgids_.At(0);
-
-  std::string p = std::format("u{}-{}\x1fg{}-{}\x1fs{}", subuid_range.start,
-                              subuid_range.count, subgid_range.start,
-                              subgid_range.count, m_source_.string());
+  std::string p = std::format("u{}-{}\x1fg{}-{}\x1fs{}", m_user_, m_uid_offset_,
+                              m_group_, m_gid_offset_, m_source_.string());
 
   uint32_t a = util::Adler32Of(p);
   uint32_t c = util::Crc32Of(p);
@@ -93,7 +91,7 @@ std::string IdMappedBindFs::GetHashedMountPoint_() noexcept {
   return std::format("{:016x}", h);  // 16 hex chars, lowercase
 }
 
-int IdMappedBindFs::Mount_() noexcept {
+std::expected<int, std::string> IdMappedBindFs::Mount_() noexcept {
   /*
  bindfs \
    --uid-offset=523288 \
@@ -103,16 +101,14 @@ int IdMappedBindFs::Mount_() noexcept {
    -o allow_other \
    /home/leo/test /mnt/test
  */
-  std::string uid_offset =
-      std::format("--uid-offset={}", m_subuids_.At(0).start);
-  std::string gid_offset =
-      std::format("--gid-offset={}", m_subgids_.At(0).start);
+  std::string uid_offset = std::format("--uid-offset={}", m_uid_offset_);
+  std::string gid_offset = std::format("--gid-offset={}", m_gid_offset_);
   std::string user_opt =
       std::format("--create-for-user={}",
-                  m_user_.empty() ? std::to_string(m_uid_) : m_user_);
+                  m_user_.empty() ? std::to_string(m_kuid_) : m_user_);
   std::string group_opt =
       std::format("--create-for-group={}",
-                  m_group_.empty() ? std::to_string(m_gid_) : m_group_);
+                  m_group_.empty() ? std::to_string(m_kgid_) : m_group_);
 
   // clang-format off
   std::vector<const char*> args{
@@ -129,21 +125,43 @@ int IdMappedBindFs::Mount_() noexcept {
 
   subprocess_s subprocess{};
   int result = subprocess_create(args.data(), 0, &subprocess);
-  if (0 != result) return result;
+  if (0 != result) {
+    return std::unexpected(std::format("spawn failed: {}", strerror(errno)));
+  }
 
-  subprocess_join(&subprocess, &result);
+  if (subprocess_join(&subprocess, &result) != 0) {
+    subprocess_destroy(&subprocess);
+    return std::unexpected("join failed");
+  }
+  subprocess_destroy(&subprocess);
+
+  if (result != 0) {
+    return std::unexpected(std::format("rc: {}", result));
+  }
+
   return result;
 }
 
-int IdMappedBindFs::Unmount_() noexcept {
+std::expected<int, std::string> IdMappedBindFs::Unmount_() noexcept {
   std::vector<const char*> args{m_fusermount_bin_.c_str(), "-u",
                                 m_target_.c_str(), nullptr};
 
   subprocess_s subprocess{};
   int result = subprocess_create(args.data(), 0, &subprocess);
-  if (result != 0) return result;
+  if (result != 0) {
+    return std::unexpected(std::format("spawn failed: {}", strerror(errno)));
+  }
 
-  subprocess_join(&subprocess, &result);
+  if (subprocess_join(&subprocess, &result) != 0) {
+    subprocess_destroy(&subprocess);
+    return std::unexpected("join failed");
+  }
+  subprocess_destroy(&subprocess);
+
+  if (result != 0) {
+    return std::unexpected(std::format("rc: {}", result));
+  }
+
   return result;
 }
 
@@ -178,7 +196,7 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
                                          parent_path.string(), ec.message()));
     }
 
-    if (chown(parent_path.c_str(), m_uid_, m_gid_) != 0) {
+    if (chown(parent_path.c_str(), m_kuid_, m_kgid_) != 0) {
       return std::unexpected(std::format("Failed to chown directory {}: {}",
                                          parent_path.string(),
                                          strerror(errno)));
@@ -213,8 +231,8 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
 
   if (lk_meta_expt->empty()) {
     metadata.source = m_source_;
-    metadata.uid_offset = m_subuids_.At(0).start;
-    metadata.gid_offset = m_subgids_.At(0).start;
+    metadata.uid_offset = m_uid_offset_;
+    metadata.gid_offset = m_gid_offset_;
     metadata.user = m_user_;
     metadata.group = m_group_;
   } else {
@@ -234,19 +252,16 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
     // Already mounted, just increment counter
     metadata.counter += 1;
     auto write_result = lk->WriteMetadata(metadata.Marshal());
-    if (!write_result) {
-      return std::unexpected(write_result.error());
-    }
+    if (!write_result) return std::unexpected(write_result.error());
+
     return {};
   }
 
   // If the counter is 0 but mount is valid (due to unmount failure),
   // treat it as valid to avoid remounting over existing mount
   if (!valid) {
-    if (int rc = Mount_(); rc) {
-      return std::unexpected(std::format("Failed to mount bindfs {} (rc: {})",
-                                         m_target_.string(), rc));
-    }
+    auto mount_expt = Mount_();
+    if (!mount_expt) return std::unexpected(mount_expt.error());
   }
 
   // Update the mount counter
@@ -255,9 +270,12 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
   // Write back the updated metadata
   auto write_result = lk->WriteMetadata(metadata.Marshal());
   if (!write_result) {
-    Unmount_();  // Try best to unmount when lock failed
-    return std::unexpected(std::format("Failed to update bindfs metadata: {}",
-                                       write_result.error()));
+    // Try best to unmount when lock failed
+    auto unmount_expt = Unmount_();
+    if (!unmount_expt)
+      CRANE_ERROR("Failed to unmount bindfs after writing error: {}",
+                  unmount_expt.error());
+    return std::unexpected(write_result.error());
   }
 
   return {};
@@ -301,8 +319,7 @@ std::expected<void, std::string> IdMappedBindFs::ReleaseMountPoint_() noexcept {
     // Write back the updated metadata (counter > 0, keep lock file)
     auto write_result = lk->WriteMetadata(metadata.Marshal());
     if (!write_result) {
-      return std::unexpected(
-          std::format("Failed to write metadata: {}", write_result.error()));
+      return std::unexpected(write_result.error());
     }
 
     return {};
@@ -310,14 +327,13 @@ std::expected<void, std::string> IdMappedBindFs::ReleaseMountPoint_() noexcept {
 
   // Last reference, unmount the bindfs
   CRANE_TRACE("Unmounting bindfs {} (counter reached 0)", m_target_.string());
-  int rc = Unmount_();
-  if (rc != 0) {
-    CRANE_ERROR("Failed to unmount bindfs {} (rc: {})", m_target_.string(), rc);
-    // Continue cleanup even if unmount failed
+  auto unmount_expt = Unmount_();
+  if (!unmount_expt) {
+    CRANE_ERROR("Unmount bindfs failed: {}", unmount_expt.error());
   }
 
   // Remove the mount directory if empty (only if unmount succeeded)
-  if (rc == 0) {
+  if (unmount_expt) {
     std::error_code ec;
     bool exists = fs::exists(m_target_, ec);
     if (ec) {
@@ -342,8 +358,7 @@ std::expected<void, std::string> IdMappedBindFs::ReleaseMountPoint_() noexcept {
   // Do this even if unmount failed, because counter reflects process count
   auto write_result = lk->WriteMetadata(metadata.Marshal());
   if (!write_result) {
-    return std::unexpected(
-        std::format("Failed to write metadata: {}", write_result.error()));
+    return std::unexpected(write_result.error());
   }
 
   // Explicitly release the lock before removing the lock file
@@ -358,22 +373,24 @@ std::expected<void, std::string> IdMappedBindFs::ReleaseMountPoint_() noexcept {
   }
 
   // Return error if unmount failed (after cleanup)
-  if (rc != 0) {
-    return std::unexpected("Failed to unmount. Mount point may still open.");
+  if (!unmount_expt) {
+    return std::unexpected(unmount_expt.error());
   }
 
   return {};
 }
 
+// NOTE: kuid/kgid are the kernel (real, init userns) uid/gid of the user.
 IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
-                               const PasswordEntry& pwd, uid_t uid, gid_t gid,
+                               const PasswordEntry& pwd, uid_t kuid, gid_t kgid,
+                               uid_t uid_offset, gid_t gid_offset,
                                std::filesystem::path bindfs_bin,
                                std::filesystem::path fusermount_bin)
-    : m_uid_(uid),
-      m_gid_(gid),
+    : m_kuid_(kuid),
+      m_kgid_(kgid),
+      m_uid_offset_(uid_offset),
+      m_gid_offset_(gid_offset),
       m_user_(pwd.Username()),
-      m_subuids_(pwd.SubUidRanges()),
-      m_subgids_(pwd.SubGidRanges()),
       m_bindfs_bin_(std::move(bindfs_bin)),
       m_fusermount_bin_(std::move(fusermount_bin)),
       m_source_(std::move(source)) {
@@ -389,25 +406,16 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
     throw std::runtime_error("Invalid PasswordEntry");
   }
 
-  if (!m_subuids_.Valid() || !m_subgids_.Valid()) {
-    throw std::runtime_error("Invalid subuid/subgid ranges");
-  }
-
-  if (m_subuids_.Count() != 1 || m_subgids_.Count() != 1) {
-    throw std::runtime_error(
-        "Currently only support one continuous subuid/subgid range");
-  }
-
-  struct group* grp = getgrgid(gid);
+  struct group* grp = getgrgid(kgid);
   if (grp != nullptr) {
     m_group_ = std::string(grp->gr_name);
   } else {
     throw std::runtime_error(
-        std::format("Failed to get group name for gid: {}", gid));
+        std::format("Failed to get group name for gid: {}", kgid));
   }
 
   // e.g., /mnt/crane/1000/9f8b7c6d5e4f3a2b
-  m_target_ = std::filesystem::path(kMountPrefix) / std::to_string(m_uid_) /
+  m_target_ = std::filesystem::path(kMountPrefix) / std::to_string(m_kuid_) /
               GetHashedMountPoint_();
   m_target_lock_ = std::filesystem::path(m_target_.string() + ".lock");
 
@@ -429,3 +437,5 @@ IdMappedBindFs::~IdMappedBindFs() {
     CRANE_INFO("Bindfs {} released", m_target_);
   }
 }
+
+}  // namespace bindfs
