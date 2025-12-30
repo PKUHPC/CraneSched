@@ -234,7 +234,7 @@ crun -N 1 ./collect_results.sh
 
 - **Resource Constraints**: Steps cannot request more resources than available in the parent job
 - **Job Dependency**: Steps cannot outlive the parent job
-- **No Property Override**: Steps cannot change partition, account, or QoS from parent job
+- **No Property Override** :Steps cannot change partition, account, or QoS from parent job
 - **Scheduler Overhead**: Very large numbers of short-lived steps may create scheduling overhead
 - **Time Limits**: Steps must complete within the parent job's time limit
 

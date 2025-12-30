@@ -4093,8 +4093,8 @@ CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
-    CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
-                CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
+    CRANE_ERROR("Failed to call AcquireTaskAttributes: no such partition {}",
+                task->partition_id);
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }
 
@@ -4106,23 +4106,36 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(task_alloc_res.cpu_count);
-
-  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
-  if (task_alloc_res.memory_bytes == 0) {
-    // If a task leaves its memory bytes to 0,
-    // use the partition's default value.
-    task_mem_per_cpu = part_meta.default_mem_per_cpu;
-  } else if (part_meta.max_mem_per_cpu != 0) {
-    // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
-    task_mem_per_cpu =
-        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
+  if (task_alloc_res.CpuCount() == 0) {
+    CRANE_DEBUG("Job has zero cpu request, rejected.");
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
   }
+  double task_mem_per_cpu = 0.0;
+  if (task->TaskToCtld().has_mem_per_cpu()) {
+    task_mem_per_cpu = task->TaskToCtld().mem_per_cpu();
+  } else if (task_alloc_res.memory_bytes > 0) {
+    // Otherwise, calculate from memory_bytes and number of cores.
+    task_mem_per_cpu =
+        static_cast<double>(task_alloc_res.memory_bytes) / core_double;
+  } else {
+    // User specified memory bytes is zero, will use the partition's default
+  }
+
+  // If still zero, use the partition's default value.
+  if (task_mem_per_cpu == 0.0) {
+    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+  }
+
+  // Enforce the partition's maximum if set.
+  if (part_meta.max_mem_per_cpu > 0) {
+    task_mem_per_cpu = std::min(task_mem_per_cpu,
+                                static_cast<double>(part_meta.max_mem_per_cpu));
+  }
+
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+  task_alloc_res.memory_bytes = mem_bytes;
+  task_alloc_res.memory_sw_bytes = mem_bytes;
 
   auto check_qos_result = g_account_manager->CheckQosLimitOnTask(
       task->Username(), task->account, task);
@@ -4162,19 +4175,22 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (g_config.WckeyValid) {
     if (task->MutableTaskToCtld()->has_wckey() &&
         !task->MutableTaskToCtld()->wckey().empty()) {
-      task->wckey = task->MutableTaskToCtld()->wckey();
+      std::string wckey = task->MutableTaskToCtld()->wckey();
       auto wckey_scoped_ptr =
-          g_account_manager->GetExistedWckeyInfo(task->wckey, task->Username());
+          g_account_manager->GetExistedWckeyInfo(wckey, task->Username());
       if (!wckey_scoped_ptr) {
-        CRANE_DEBUG("Wckey '{}' not found in the wckey database", task->wckey);
+        CRANE_DEBUG("Job wckey '{}' not found in the wckey database, rejected.",
+                    wckey);
         return std::unexpected(CraneErrCode::ERR_INVALID_WCKEY);
       }
+
+      task->wckey = wckey;
       // Only fetch default if needed for marking purposes
       // Prefix with "*" to indicate default wckey is in use
       if (auto result =
               g_account_manager->GetExistedDefaultWckeyName(task->Username());
-          result && task->wckey == result.value()) {
-        task->wckey = "*" + task->wckey;
+          result && wckey == result.value()) {
+        task->using_default_wckey = true;
       }
       // Note: Ignore error from GetExistedDefaultWckeyName since the user's
       // wckey was already validated; the default check is only for marking
@@ -4183,10 +4199,11 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
       auto result =
           g_account_manager->GetExistedDefaultWckeyName(task->Username());
       if (!result) return std::unexpected(result.error());
-      task->wckey = "*" + result.value();
+      task->wckey = result.value();
+      task->using_default_wckey = true;
     }
   } else {
-    task->wckey = "";
+    task->wckey.clear();
   }
 
   return {};
@@ -4195,6 +4212,16 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+
+  // Check res req valid
+  {
+    const auto& res = task->requested_node_res_view;
+
+    if (res.MemoryBytes() == 0) {
+      CRANE_DEBUG("Job #{} has zero memory request.", task->TaskId());
+      return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
+    }
+  }
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -4336,6 +4363,17 @@ CraneExpected<void> TaskScheduler::AcquireStepAttributes(StepInCtld* step) {
           step->job->requested_node_res_view.GetAllocatableRes().cpu_count;
       res_step_to_ctld->mutable_allocatable_res()->set_cpu_core_limit(
           allocatable_resource.CpuCount());
+    }
+    if (step_to_ctld->has_mem_per_cpu()) {
+      uint64_t mem_per_cpu = step_to_ctld->mem_per_cpu();  // in bytes
+      uint64_t mem_bytes =
+          static_cast<uint64_t>(mem_per_cpu * allocatable_resource.cpu_count);
+      allocatable_resource.memory_bytes = mem_bytes;
+      allocatable_resource.memory_sw_bytes = mem_bytes;
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_limit_bytes(
+          allocatable_resource.memory_bytes);
+      res_step_to_ctld->mutable_allocatable_res()->set_memory_sw_limit_bytes(
+          allocatable_resource.memory_sw_bytes);
     }
     if (allocatable_resource.memory_bytes == 0ull) {
       allocatable_resource.memory_bytes =
