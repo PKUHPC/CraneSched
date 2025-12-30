@@ -144,6 +144,9 @@ constexpr uint64_t kEraseResvIntervalSec = 5;
 constexpr const char* const kCrunFwdALL = "all";
 constexpr const char* const kCrunFwdNONE = "none";
 
+constexpr uint32_t kMaxReconnectAttempts = 1000;
+constexpr uint32_t kMaxReconnectIntervalSec = 60;
+
 enum PrologFlagEnum : std::uint8_t {
   Contain = 1 << 0,             // 0000 0001 = 1
   ForceRequeueOnFail = 1 << 1,  // 0000 0010 = 2
