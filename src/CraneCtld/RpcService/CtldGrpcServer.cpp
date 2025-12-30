@@ -1160,7 +1160,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
       request->uid(), request->name(), operations, request->force());
 
   if (!rich_error_list.empty()) {
-    for (const auto &rich_error : rich_error_list) {
+    for (const auto& rich_error : rich_error_list) {
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
     }
   }
@@ -1192,7 +1192,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
       operations, request->force());
 
   if (!rich_error_list.empty()) {
-    for (const auto &rich_error : rich_error_list) {
+    for (const auto& rich_error : rich_error_list) {
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
     }
   }
@@ -1222,7 +1222,7 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
       g_account_manager->ModifyQos(request->uid(), request->name(), operations);
 
   if (!rich_error_list.empty()) {
-    for (const auto &rich_error : rich_error_list) {
+    for (const auto& rich_error : rich_error_list) {
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_error.error());
     }
   }
