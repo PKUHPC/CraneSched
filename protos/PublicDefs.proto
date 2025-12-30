@@ -182,6 +182,8 @@ message TaskToCtld {
   repeated License licenses_count = 40;
   bool is_licenses_or = 41;
   optional string wckey = 42;
+  string submit_hostname = 43;
+  string submit_dir = 44;
 }
 
 message TaskInEmbeddedDb {
@@ -246,7 +248,7 @@ message StepToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-  string container = 26;
+  string container = 36;
 }
 
 message RuntimeAttrOfStep {
@@ -336,6 +338,9 @@ message StepToD {
   double cpus_per_task = 24;
 
   bool get_user_env = 25;
+  string submit_hostname = 26;
+  uint32 total_gpus = 27;
+  string submit_dir = 28;
 
   // Not used now.
   string extra_attr = 29;
