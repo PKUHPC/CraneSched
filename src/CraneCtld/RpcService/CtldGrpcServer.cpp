@@ -1258,27 +1258,6 @@ grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyDefaultWckey(
-    grpc::ServerContext* context,
-    const crane::grpc::ModifyDefaultWckeyRequest* request,
-    crane::grpc::ModifyDefaultWckeyReply* response) {
-  if (!g_runtime_status.srv_ready.load(std::memory_order_acquire))
-    return grpc::Status{grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready"};
-  if (auto msg = CheckCertAndUIDAllowed_(context, request->uid()); msg)
-    return {grpc::StatusCode::UNAUTHENTICATED, msg.value()};
-  auto modify_res = g_account_manager->ModifyDefaultWckey(
-      request->uid(), request->name(), request->user_name());
-  if (modify_res) {
-    response->set_ok(true);
-  } else {
-    response->set_ok(false);
-    response->set_code(modify_res.error());
-  }
-
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext* context,
     const crane::grpc::QueryAccountInfoRequest* request,
