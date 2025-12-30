@@ -309,49 +309,11 @@ class AccountManager {
   CraneExpected<void> DeleteQos_(const std::string& actor_name,
                                  const std::string& name);
 
-  CraneExpected<void> AddUserAllowedPartition_(
-      const std::string& actor_name, const User& user, const Account& account,
-      const std::unordered_set<std::string>& partition_list, User& res_user);
-  CraneExpected<void> AddUserAllowedQos_(
-      const std::string& actor_name, const User& user, const Account& account,
-      const std::string& partition,
-      const std::unordered_set<std::string>& qos_list, User& res_user);
-  CraneExpected<void> AddUserAllowedPartition_(const std::string& actor_name,
-                                               const User& user,
-                                               const Account& account,
-                                               const std::string& partition);
   CraneExpected<void> DeleteWckey_(const std::string& name,
                                    const std::string& user_name);
-  CraneExpected<void> AddUserAllowedQos_(const std::string& actor_name,
-                                         const User& user,
-                                         const Account& account,
-                                         const std::string& partition,
-                                         const std::string& qos);
 
-  CraneExpected<void> SetUserAdminLevel_(const std::string& actor_name,
-                                         const std::string& name,
-                                         User::AdminLevel new_level);
-
-  CraneExpected<void> SetUserDefaultAccount_(const std::string& actor_name,
-                                             const std::string& user,
-                                             const std::string& def_account);
-
-  CraneExpected<void> SetUserDefaultQos_(const std::string& actor_name,
-                                         const User& user,
-                                         const std::string& account,
-                                         const std::string& partition,
-                                         const std::string& qos,
-                                         User& res_user);
-                                         const std::string& qos);
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
                                            const std::string& user);
-  CraneExpectedRich<void> SetUserAllowedPartition_(
-      const std::string& actor_name, const User& user, const Account& account,
-      const std::unordered_set<std::string>& partition_list, User& res_user);
-  CraneExpectedRich<void> SetUserAllowedQos_(
-      const std::string& actor_name, const User& user, const Account& account,
-      const std::string& partition, const std::string& default_qos,
-      std::unordered_set<std::string>&& qos_list, User& res_user, bool force);
 
   CraneExpected<void> DeleteUserAllowedPartition_(const std::string& actor_name,
                                                   const User& user,
@@ -367,13 +329,6 @@ class AccountManager {
   void SetAccountAllowedQos_(Account* account,
                              std::unordered_set<std::string>& qos_list,
                              std::vector<ModifyRecord>* modify_record);
-
-  CraneExpected<void> DeleteAccountAllowedPartition_(
-      const std::string& actor_name, const Account& account,
-      const std::string& partition);
-  CraneExpected<int> DeleteAccountAllowedQos_(const std::string& actor_name,
-                                              const Account& account,
-                                              const std::string& qos);
 
   CraneExpected<void> BlockUserNoLock_(const std::string& actor_name,
                                        const std::string& name,
