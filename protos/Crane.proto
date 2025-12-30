@@ -787,7 +787,7 @@ message StreamCforedRequest {
     STEP_REQUEST = 4;
     JOB_COMPLETION_REQUEST = 2;
     CFORED_GRACEFUL_EXIT = 3;
-    TASK_META_REQUEST = 4;
+    TASK_META_REQUEST = 5;
   }
   CforedRequestType type = 1;
 
@@ -831,7 +831,7 @@ message StreamCforedRequest {
     StepReq payload_step_req = 6;
     JobCompleteReq payload_job_complete_req = 4;
     GracefulExitReq payload_graceful_exit_req = 5;
-    TaskMetaReq payload_task_meta_req = 6;
+    TaskMetaReq payload_task_meta_req = 7;
   }
 }
 

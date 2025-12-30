@@ -664,12 +664,11 @@ void CforedClient::AsyncSendRecvThread_() {
     // But, for Prepare tag which indicates the stream is ready,
     // ok is false, since there's no message to read.
     if (!ok && tag != Tag::Prepare) {
-      CRANE_ERROR("Cfored connection failed.");
-      /*
-      * if (m_wait_reconn_) break;
+      CRANE_DEBUG("Cfored connection lost. Attempting to reconnect...");
+      if (m_wait_reconn_) break;
       m_wait_reconn_ = true;
       if (output_clean_thread.joinable()) output_clean_thread.join();
-      m_reconnect_async_->send();
+      // m_reconnect_async_->send();
       break;
        */
       absl::MutexLock lock(&m_mtx_);
@@ -854,7 +853,7 @@ void CforedClient::AsyncSendRecvThread_() {
     CRANE_TRACE("Next state: {}", int(state));
     if (state == State::End) break;
   }
-}
+} 
 
 bool CforedClient::TaskProcessStop(task_id_t task_id, uint32_t exit_code,
                                    bool signaled) {
