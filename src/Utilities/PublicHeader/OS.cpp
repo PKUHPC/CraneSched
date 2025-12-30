@@ -81,6 +81,18 @@ bool DeleteFolders(std::string const& p) {
   return true;
 }
 
+bool CreateFile(std::string const& p) {
+  if (std::filesystem::exists(p)) return true;
+
+  int fd = open(p.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd == -1) {
+    CRANE_ERROR("Create file {} failed: {}", p, std::strerror(errno));
+    return false;
+  }
+  close(fd);
+  return true;
+}
+
 bool CreateFolders(std::string const& p) {
   if (std::filesystem::exists(p)) return true;
 

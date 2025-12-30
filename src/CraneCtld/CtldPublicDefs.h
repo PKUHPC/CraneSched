@@ -200,6 +200,12 @@ struct Config {
   bool JobFileOpenModeAppend{false};
   bool IgnoreConfigInconsistency{false};
   bool WckeyValid{false};
+
+  struct KeepalivedConfig {
+    std::filesystem::path CraneNFSBaseDir;
+    std::filesystem::path CraneCtldAliveFile;
+  };
+  KeepalivedConfig KeepalivedConfig;
 };
 
 struct RunTimeStatus {
