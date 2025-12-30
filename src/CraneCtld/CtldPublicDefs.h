@@ -735,6 +735,8 @@ struct TaskInCtld {
   bool exclusive{false};
 
   std::unordered_map<std::string, uint32_t> licenses_count;
+
+  bool using_default_wckey{false};
   std::string wckey;
 
  private:
