@@ -842,6 +842,8 @@ void CtldClient::AsyncSendThread_() {
       if (prev_connected) {  // Edge triggered: grpc connected -> disconnected.
         CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
                           "Channel to CraneCtlD is disconnected.");
+        prev_grpc_state = grpc_state;
+        prev_connected = connected;
         g_ctld_client->StopPingCtld();
         g_ctld_client_sm->EvGrpcConnectionFailed();
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
