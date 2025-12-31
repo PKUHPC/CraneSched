@@ -27,8 +27,6 @@
 namespace Craned {
 using namespace std::chrono_literals;
 
-using namespace std::chrono_literals;
-
 CtldClientStateMachine::CtldClientStateMachine() {
   m_logger_ = g_runtime_status.conn_logger;
   m_uvw_loop_ = uvw::loop::create();
