@@ -27,25 +27,18 @@
 
 namespace bindfs {
 
-struct BindFsMetadata {
-  std::filesystem::path source;
-  uint32_t uid_offset{0};
-  uint32_t gid_offset{0};
-  std::string user;
-  std::string group;
-  uint32_t counter{0};
+constexpr static std::string_view kBindFsBin = "/usr/bin/bindfs";
+constexpr static std::string_view kFusermountBin = "/usr/bin/fusermount3";
+constexpr static std::string_view kBindFsMountBaseDir = "/mnt/crane";
 
-  [[nodiscard]] static std::expected<BindFsMetadata, std::string> Unmarshal(
-      const std::string& data) noexcept;
-  std::string Marshal() const;
-};
+struct BindFsMetadata;
 
 class IdMappedBindFs {
  public:
   IdMappedBindFs(std::filesystem::path source, const PasswordEntry& pwd,
                  uid_t kuid, gid_t kgid, uid_t uid_offset, gid_t gid_offset,
-                 std::filesystem::path bindfs_bin = "bindfs",
-                 std::filesystem::path fusermount_bin = "fusermount3");
+                 std::filesystem::path bindfs_bin = kBindFsBin,
+                 std::filesystem::path fusermount_bin = kFusermountBin);
 
   IdMappedBindFs(const IdMappedBindFs&) = delete;
   IdMappedBindFs& operator=(const IdMappedBindFs&) = delete;
@@ -56,9 +49,9 @@ class IdMappedBindFs {
   ~IdMappedBindFs();
 
   std::filesystem::path GetMountedPath() { return m_target_; }
+  bool ValidateMetadata(const BindFsMetadata& metadata) const;
 
  private:
-  constexpr static std::string_view kMountPrefix = "/mnt/crane";
   static bool CheckMountValid_(const std::filesystem::path& mount_path);
 
   std::expected<int, std::string> Mount_() noexcept;
@@ -82,6 +75,21 @@ class IdMappedBindFs {
   std::filesystem::path m_source_;
   std::filesystem::path m_target_;
   std::filesystem::path m_target_lock_;
+};
+
+// Metadata stored in lock file
+struct BindFsMetadata {
+  std::filesystem::path source;
+  uint32_t uid_offset{0};
+  uint32_t gid_offset{0};
+  std::string user;
+  std::string group;
+  uint32_t counter{0};
+
+  [[nodiscard]] static std::expected<BindFsMetadata, std::string> Unmarshal(
+      const std::string& data) noexcept;
+
+  std::string Marshal() const;
 };
 
 }  // namespace bindfs

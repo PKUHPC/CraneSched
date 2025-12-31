@@ -59,6 +59,13 @@ std::expected<BindFsMetadata, std::string> BindFsMetadata::Unmarshal(
   }
 }
 
+bool IdMappedBindFs::ValidateMetadata(const BindFsMetadata& metadata) const {
+  return (metadata.counter >= 0 && metadata.source == m_source_ &&
+          metadata.uid_offset == m_uid_offset_ &&
+          metadata.gid_offset == m_gid_offset_ && metadata.user == m_user_ &&
+          metadata.group == m_group_);
+}
+
 bool IdMappedBindFs::CheckMountValid_(const std::filesystem::path& mount_path) {
   namespace fs = std::filesystem;
   std::error_code ec;
@@ -177,8 +184,8 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
 
   if (!lock_exists) {
     // Create parent directories if not exist
-    // e.g., /mnt/crane (root, 711)
-    //           - <uid> (user, 711)
+    // e.g., /mnt/crane (root, 700)
+    //           - <uid> (user, 700)
     //             - <hash> (mount point)
     fs::create_directories(m_target_, ec);
     if (ec) {
@@ -187,15 +194,11 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
     }
 
     fs::path parent_path = m_target_.parent_path();  // <uid>
-    fs::permissions(
-        parent_path,
-        fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec,
-        ec);
+    fs::permissions(parent_path, fs::perms::owner_all, ec);
     if (ec) {
       return std::unexpected(std::format("Failed to chmod directory {}: {}",
                                          parent_path.string(), ec.message()));
     }
-
     if (chown(parent_path.c_str(), m_kuid_, m_kgid_) != 0) {
       return std::unexpected(std::format("Failed to chown directory {}: {}",
                                          parent_path.string(),
@@ -203,10 +206,7 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
     }
 
     parent_path = parent_path.parent_path();  // /mnt/crane
-    fs::permissions(
-        parent_path,
-        fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec,
-        ec);
+    fs::permissions(parent_path, fs::perms::owner_all, ec);
     if (ec) {
       return std::unexpected(std::format("Failed to chmod directory {}: {}",
                                          parent_path.string(), ec.message()));
@@ -239,6 +239,10 @@ std::expected<void, std::string> IdMappedBindFs::CreateMountPoint_() noexcept {
     auto meta_expt = BindFsMetadata::Unmarshal(lk_meta_expt.value());
     if (!meta_expt) return std::unexpected(meta_expt.error());
     metadata = std::move(meta_expt.value());
+  }
+
+  if (!ValidateMetadata(metadata)) {
+    return std::unexpected("Bindfs metadata validation failed");
   }
 
   bool valid = CheckMountValid_(m_target_);
@@ -306,6 +310,9 @@ std::expected<void, std::string> IdMappedBindFs::ReleaseMountPoint_() noexcept {
   }
 
   BindFsMetadata metadata = std::move(meta_expt.value());
+  if (!ValidateMetadata(metadata)) {
+    return std::unexpected("Bindfs metadata validation failed");
+  }
 
   if (metadata.counter == 0) {
     CRANE_WARN("Counter already 0 for {}", m_target_lock_.string());
@@ -415,8 +422,8 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
   }
 
   // e.g., /mnt/crane/1000/9f8b7c6d5e4f3a2b
-  m_target_ = std::filesystem::path(kMountPrefix) / std::to_string(m_kuid_) /
-              GetHashedMountPoint_();
+  m_target_ = std::filesystem::path(kBindFsMountBaseDir) /
+              std::to_string(m_kuid_) / GetHashedMountPoint_();
   m_target_lock_ = std::filesystem::path(m_target_.string() + ".lock");
 
   auto result = CreateMountPoint_();
