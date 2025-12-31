@@ -755,8 +755,7 @@ CraneErrCode PodInstance::SetPodSandboxConfig_(
   if (pod_meta.userns()) {
     if (ResolveUserNsMapping_(m_parent_step_inst_->pwd, sec_ctx) !=
         CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to inject fake root config for pod of job #{}",
-                  job_id);
+      CRANE_ERROR("Failed to setup userns config for pod of job #{}", job_id);
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
   }

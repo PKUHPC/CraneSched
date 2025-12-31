@@ -84,11 +84,12 @@ class FileLockRegistry {
       const std::filesystem::path& path, FileLockType lock_type,
       bool blocking) {
     std::error_code ec;
-    auto normalized_path = std::filesystem::absolute(path, ec).lexically_normal();
+    auto normalized_path =
+        std::filesystem::absolute(path, ec).lexically_normal();
     if (ec) {
-      return std::unexpected(std::format(
-          "Failed to resolve absolute path for '{}': {}", path.string(),
-          ec.message()));
+      return std::unexpected(
+          std::format("Failed to resolve absolute path for '{}': {}",
+                      path.string(), ec.message()));
     }
     std::string path_str = normalized_path.string();
 
@@ -118,9 +119,8 @@ class FileLockRegistry {
               return std::unexpected(lock_info->init_error);
             }
             lock_info->ref_count++;
-            SPDLOG_TRACE(
-                "Incremented lock reference count for '{}' to {}", path_str,
-                lock_info->ref_count);
+            SPDLOG_TRACE("Incremented lock reference count for '{}' to {}",
+                         path_str, lock_info->ref_count);
             return lock_info;
           }
 
@@ -146,9 +146,8 @@ class FileLockRegistry {
         m_locks_[path_str] = lock_info;
       }
 
-      auto init_failed =
-          [&](const std::string& message)
-              -> std::expected<std::shared_ptr<FileLockInfo>, std::string> {
+      auto init_failed = [&](const std::string& message)
+          -> std::expected<std::shared_ptr<FileLockInfo>, std::string> {
         {
           std::lock_guard<std::mutex> lock_guard(lock_info->mtx);
           lock_info->init_error = message;
@@ -167,8 +166,7 @@ class FileLockRegistry {
       // Create new lock with security flags
       // O_NOFOLLOW: Don't follow symbolic links (prevents TOCTOU attacks)
       // O_CLOEXEC: Close on exec (prevents fd leaks to child processes)
-      int open_flags =
-          (lock_type == FileLockType::READ) ? O_RDONLY : O_RDWR;
+      int open_flags = (lock_type == FileLockType::READ) ? O_RDONLY : O_RDWR;
       open_flags |= O_CREAT | O_NOFOLLOW | O_CLOEXEC;
       int fd = open(normalized_path.c_str(), open_flags, 0666);
       if (fd < 0) {

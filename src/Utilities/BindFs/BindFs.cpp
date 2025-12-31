@@ -20,6 +20,11 @@
 #include "crane/String.h"
 #include "linux/magic.h"
 
+// Workaround if no magic.h available
+#ifndef FUSE_SUPER_MAGIC
+#  define FUSE_SUPER_MAGIC 0x65735546
+#endif
+
 namespace bindfs {
 
 // Serialization for BindFsMetadata

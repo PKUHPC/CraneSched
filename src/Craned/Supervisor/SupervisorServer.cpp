@@ -103,7 +103,7 @@ grpc::Status SupervisorServiceImpl::ShutdownSupervisor(
   if (g_config.StepSpec.step_type() == crane::grpc::StepType::DAEMON &&
       g_config.StepSpec.has_pod_meta() &&
       g_runtime_status.Status == StepStatus::Running) {
-    // For daemon step with pod, there is two cases:
+    // For daemon step with pod, there are two cases:
     // 1. Normal case: Pod remains running with no container (Running)
     // 2. Abnormal case: Pod failed to launch before (Failed)
 
