@@ -844,7 +844,7 @@ void CtldClient::AsyncSendThread_() {
                           "Channel to CraneCtlD is disconnected.");
         // Update prev disconnected grpc state
         prev_grpc_state = grpc_state;
-        prev_connected = connected;
+        prev_connected = false;
         g_ctld_client->StopPingCtld();
         g_ctld_client_sm->EvGrpcConnectionFailed();
         for (const auto& cb : m_on_ctld_disconnected_cb_chain_) cb();
@@ -857,7 +857,6 @@ void CtldClient::AsyncSendThread_() {
           continue;  // No state change. No need to update prev state.
 
         prev_grpc_state = grpc_state;
-        prev_connected = connected;
         continue;
       }
     }
@@ -866,11 +865,11 @@ void CtldClient::AsyncSendThread_() {
     if (!prev_connected) {  // Edge triggered: grpc disconnected -> connected.
       CRANE_LOGGER_INFO(g_runtime_status.conn_logger,
                         "Channel to CraneCtlD is connected.");
+      prev_connected = true;
       g_ctld_client_sm->EvGrpcConnected();
       for (const auto& cb : m_on_ctld_connected_cb_chain_) cb();
     }
 
-    prev_connected = connected;
     prev_grpc_state = grpc_state;
 
     if (g_ctld_client_sm->IsReadyNow() == false) continue;
