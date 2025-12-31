@@ -129,7 +129,6 @@ class CforedClient {
   std::thread m_ev_thread_;
 
   std::atomic<uint32_t> m_reconnect_attempts_;
-  std::shared_ptr<uvw::async_handle> m_reconnect_async_;
 
   std::string m_cfored_name_;
   std::unordered_map<task_id_t, TaskFwdMeta> m_fwd_meta_map
