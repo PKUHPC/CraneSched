@@ -392,6 +392,7 @@ class MongodbClient {
       const bsoncxx::document::view& doc);
   ResourceInNode BsonToResourceInNode(const bsoncxx::document::view& doc);
   ResourceV2 BsonToResourceV2(const bsoncxx::document::view& doc);
+  PodMetaInTask BsonToPodMeta(const bsoncxx::document::view& doc);
   ContainerMetaInTask BsonToContainerMeta(const bsoncxx::document::view& doc);
 
   std::string m_db_name_, m_connect_uri_;
@@ -440,6 +441,11 @@ template <>
 void MongodbClient::DocumentAppendItem_<std::optional<ContainerMetaInTask>>(
     document& doc, const std::string& key,
     const std::optional<ContainerMetaInTask>& value);
+
+template <>
+void MongodbClient::DocumentAppendItem_<std::optional<PodMetaInTask>>(
+    document& doc, const std::string& key,
+    const std::optional<PodMetaInTask>& value);
 
 }  // namespace Ctld
 

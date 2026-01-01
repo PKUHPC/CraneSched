@@ -789,7 +789,7 @@ class TaskScheduler {
                                        google::protobuf::Timestamp timestamp) {
     // TODO: Add reason implementation here!
     StepStatusChangeAsync(task_id, step_id, craned_index, new_status, exit_code,
-                          reason.value_or(""), timestamp);
+                          reason.value_or(""), std::move(timestamp));
   }
 
   void StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
@@ -814,11 +814,11 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  crane::grpc::AttachInContainerTaskReply AttachInContainerTask(
-      const crane::grpc::AttachInContainerTaskRequest& request);
+  crane::grpc::AttachContainerStepReply AttachContainerStep(
+      const crane::grpc::AttachContainerStepRequest& request);
 
-  crane::grpc::ExecInContainerTaskReply ExecInContainerTask(
-      const crane::grpc::ExecInContainerTaskRequest& request);
+  crane::grpc::ExecInContainerStepReply ExecInContainerStep(
+      const crane::grpc::ExecInContainerStepRequest& request);
 
   CraneErrCode TerminatePendingOrRunningIaStep(job_id_t job_id,
                                                step_id_t step_id) {

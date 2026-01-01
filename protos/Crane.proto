@@ -99,6 +99,19 @@ message SubmitBatchTasksReply {
   repeated ErrCode code_list = 2;
 }
 
+message SubmitContainerStepRequest {
+  StepToCtld step = 1;
+}
+
+message SubmitContainerStepReply {
+  bool ok = 1;
+  uint32 job_id = 2;
+  oneof payload {
+    uint32 step_id = 3;
+    ErrCode code = 4;
+  }
+}
+
 message AllocJobsRequest {
   repeated JobToD jobs = 1;
 }
@@ -584,6 +597,27 @@ message QueryTaskEfficiencyReply {
   repeated TaskEfficiencyInfo efficiency_data = 3;
 }
 
+message QueryNodeEventsRequest {
+  repeated string node_names = 1;  // Node names to query, empty means all nodes
+  uint32 uid = 2;                  // User ID for authorization
+}
+
+message NodeEventInfo {
+  string cluster_name = 1;
+  string node_name = 2;
+  uint64 uid = 3;
+  int64 start_time = 4;  // Unix timestamp in nanoseconds
+  int64 end_time = 5;    // Unix timestamp in nanoseconds
+  string state = 6;
+  string reason = 7;
+}
+
+message QueryNodeEventsReply {
+  bool ok = 1;
+  string error_message = 2;
+  repeated NodeEventInfo event_info_list = 3;
+}
+
 message CreateReservationRequest {
   uint32 uid = 1;
   string reservation_name = 2;
@@ -1014,9 +1048,11 @@ message QueryTxnLogReply {
   repeated Txn txn_log_list = 3;
 }
 
-message AttachInContainerTaskRequest {
+message AttachContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string node_name = 4;
 
   bool stdin = 6;
   bool tty = 7;
@@ -1024,17 +1060,19 @@ message AttachInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message AttachInContainerTaskReply {
+message AttachContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
 }
 
-message ExecInContainerTaskRequest {
+message ExecInContainerStepRequest {
   uint32 uid = 1;
-  uint32 task_id = 2;
+  uint32 job_id = 2;
+  uint32 step_id = 3;
+  string node_name = 4;
 
-  repeated string command = 3;
+  repeated string command = 5;
 
   bool stdin = 6;
   bool tty = 7;
@@ -1042,7 +1080,7 @@ message ExecInContainerTaskRequest {
   bool stderr = 9;
 }
 
-message ExecInContainerTaskReply {
+message ExecInContainerStepReply {
   bool ok = 1;
   RichError status = 2;
   string url = 3;
@@ -1058,6 +1096,7 @@ service CraneCtld {
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
   rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+  rpc SubmitContainerStep(SubmitContainerStepRequest) returns (SubmitContainerStepReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
@@ -1112,12 +1151,13 @@ service CraneCtld {
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 
   /* RPCS called from ccon */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 }
 
-service CeffQueryService {
+service PluginQueryService {
   rpc QueryTaskEfficiency(QueryTaskEfficiencyRequest) returns (QueryTaskEfficiencyReply);
+  rpc QueryNodeEvents(QueryNodeEventsRequest) returns (QueryNodeEventsReply);
 }
 
 service CraneCtldForInternal {
@@ -1153,8 +1193,8 @@ service Craned {
   /*
   Craned will proxy the following container-related RPCs to CRI Service.
   */
-  rpc AttachInContainerTask(AttachInContainerTaskRequest) returns (AttachInContainerTaskReply);
-  rpc ExecInContainerTask(ExecInContainerTaskRequest) returns (ExecInContainerTaskReply);
+  rpc AttachContainerStep(AttachContainerStepRequest) returns (AttachContainerStepReply);
+  rpc ExecInContainerStep(ExecInContainerStepRequest) returns (ExecInContainerStepReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryStepFromPort(QueryStepFromPortRequest) returns (QueryStepFromPortReply);
