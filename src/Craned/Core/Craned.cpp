@@ -639,14 +639,6 @@ void ParseConfig(int argc, char** argv) {
           g_config.Container.Enabled =
               YamlValueOr<bool>(container_config["Enabled"], false);
 
-          const auto& bindfs_config = container_config["BindFs"];
-          g_config.Container.BindFs.Enabled =
-              YamlValueOr<bool>(bindfs_config["Enabled"], false);
-          g_config.Container.BindFs.BindfsBinary =
-              YamlValueOr(bindfs_config["BindfsBinary"], "bindfs");
-          g_config.Container.BindFs.FusermountBinary =
-              YamlValueOr(bindfs_config["FusermountBinary"], "fusermount3");
-
           if (g_config.Container.Enabled) {
             g_config.Container.TempDir =
                 g_config.CraneBaseDir / YamlValueOr(container_config["TempDir"],
@@ -670,6 +662,16 @@ void ParseConfig(int argc, char** argv) {
                 fmt::format("unix://{}", g_config.Container.RuntimeEndpoint);
             g_config.Container.ImageEndpoint =
                 fmt::format("unix://{}", g_config.Container.ImageEndpoint);
+
+            if (container_config["BindFs"]) {
+              const auto& bindfs_config = container_config["BindFs"];
+              g_config.Container.BindFs.Enabled =
+                  YamlValueOr<bool>(bindfs_config["Enabled"], false);
+              g_config.Container.BindFs.BindfsBinary =
+                  bindfs_config["BindfsBinary"].as<std::string>();
+              g_config.Container.BindFs.FusermountBinary =
+                  bindfs_config["FusermountBinary"].as<std::string>();
+            }
           }
         }
       }
