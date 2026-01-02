@@ -6,6 +6,7 @@
 #include <sys/statfs.h>
 #include <unistd.h>
 
+#include <array>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -418,13 +419,15 @@ IdMappedBindFs::IdMappedBindFs(std::filesystem::path source,
     throw std::runtime_error("Invalid PasswordEntry");
   }
 
-  struct group* grp = getgrgid(kgid);
-  if (grp != nullptr) {
-    m_group_ = std::string(grp->gr_name);
-  } else {
+  struct group grp{};
+  std::array<char, 4096> buf{};
+  struct group* grpp = nullptr;
+  if (getgrgid_r(kgid, &grp, buf.data(), buf.size(), &grpp) != 0 ||
+      grpp == nullptr) {
     throw std::runtime_error(
         std::format("Failed to get group name for gid: {}", kgid));
   }
+  m_group_ = std::string(grp.gr_name);
 
   // e.g., /mnt/crane/1000/9f8b7c6d5e4f3a2b
   m_target_ = std::filesystem::path(kBindFsMountBaseDir) /
