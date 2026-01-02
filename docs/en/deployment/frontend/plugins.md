@@ -59,7 +59,7 @@ sudo apt install ./cranesched-plugin_*.deb
 This installs:
 - `cplugind` daemon to `/usr/bin/`
 - Plugin shared objects to `/usr/lib/crane/plugin/`:
-  - `dummy.so`, `energy.so`, `event.so`, `mail.so`, `monitor.so`, `powerControl.so`
+  - `dummy.so`, `mail.so`, `monitor.so`, `powerControl.so`
 - `cplugind.service` systemd unit
 
 Enable and start the service:
