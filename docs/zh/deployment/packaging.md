@@ -248,8 +248,6 @@ sudo apt install ./cranesched-plugin_*.deb
 - `/usr/lib/crane/plugin/` 中的插件共享对象：
 
     - `dummy.so` - 测试插件
-    - `energy.so` - 功耗监控
-    - `event.so` - 节点状态事件记录
     - `mail.so` - 作业电子邮件通知
     - `monitor.so` - 资源使用指标收集
     - `powerControl.so` - 电源管理
