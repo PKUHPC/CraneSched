@@ -18,6 +18,12 @@
 
 #include "crane/OS.h"
 
+#include <sys/types.h>
+
+#include <array>
+
+#include "crane/Logger.h"
+
 #if defined(__linux__) || defined(__unix__)
 #  include <sys/stat.h>
 #  include <sys/sysinfo.h>
@@ -31,10 +37,10 @@
 namespace util::os {
 
 bool GetNodeInfo(NodeSpecInfo* info) {
-  if (!info) return false;
+  if (info == nullptr) return false;
 
-  char hostname[HOST_NAME_MAX + 1];
-  if (gethostname(hostname, sizeof(hostname)) != 0) {
+  std::array<char, HOST_NAME_MAX + 1> hostname{};
+  if (gethostname(hostname.data(), hostname.size()) != 0) {
     int err = errno;
     fmt::print(stderr, "gethostname failed: errno={} ({})\n", err,
                strerror(err));
@@ -54,7 +60,7 @@ bool GetNodeInfo(NodeSpecInfo* info) {
   uint64_t mem_bytes = sys_info.totalram * sys_info.mem_unit;
   double mem_gb = static_cast<double>(mem_bytes) / (1024 * 1024 * 1024);
 
-  info->name = hostname;
+  info->name = std::string(hostname.data());
   info->cpu = cpu_count;
   info->memory_gb = mem_gb;
 
@@ -253,6 +259,76 @@ bool CheckProxyEnvironmentVariable() {
   // NOLINTEND
 
   return has_proxy;
+}
+
+bool CheckUserHasPermission(uid_t uid, gid_t gid,
+                            std::filesystem::path const& p) {
+  // Get path permissions and owner
+  std::error_code ec;
+  std::filesystem::file_status status = std::filesystem::status(p, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to get status of {}: {}", p.c_str(), ec.message());
+    return false;
+  }
+
+  if (!std::filesystem::exists(status)) {
+    CRANE_ERROR("Path {} does not exist.", p.c_str());
+    return false;
+  }
+
+  const auto perms = status.permissions();
+  const bool is_dir = std::filesystem::is_directory(status);
+
+  // 2. Get path owner uid/gid (not available from std::filesystem)
+  struct stat st{};
+  if (::stat(p.c_str(), &st) != 0) {
+    int e = errno;
+    CRANE_ERROR("stat({}) failed: {} ({})", p.c_str(), std::strerror(e), e);
+    return false;
+  }
+
+  const uid_t owner_uid = st.st_uid;
+  const gid_t owner_gid = st.st_gid;
+
+  if (uid == 0) {
+    return true;
+  }
+
+  auto has_perm_for_class = [is_dir, perms](
+                                std::filesystem::perms read_bit,
+                                std::filesystem::perms exec_bit) -> bool {
+    if (is_dir) {
+      // For directory, require both read and exec bits
+      return ((perms & read_bit) != std::filesystem::perms::none) &&
+             ((perms & exec_bit) != std::filesystem::perms::none);
+    } else {  // NOLINT(readability-else-after-return)
+      // For file, only require read bit
+      return (perms & read_bit) != std::filesystem::perms::none;
+    }
+  };
+
+  // 5. Check permissions based on POSIX rules:
+  //   - If uid matches owner uid, check owner permissions
+  //   - Else if gid matches owner gid, check group permissions
+  //   - Else check others permissions
+  if (uid == owner_uid) {
+    if (has_perm_for_class(std::filesystem::perms::owner_read,
+                           std::filesystem::perms::owner_exec)) {
+      return true;
+    }
+  } else if (gid == owner_gid) {
+    if (has_perm_for_class(std::filesystem::perms::group_read,
+                           std::filesystem::perms::group_exec)) {
+      return true;
+    }
+  } else {
+    if (has_perm_for_class(std::filesystem::perms::others_read,
+                           std::filesystem::perms::others_exec)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool GetSystemReleaseInfo(SystemRelInfo* info) {

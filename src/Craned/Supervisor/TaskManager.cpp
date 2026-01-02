@@ -1281,13 +1281,22 @@ CraneErrCode ContainerInstance::SetContainerConfig_(
       return CraneErrCode::ERR_INVALID_PARAM;
     }
 
-    // Pre check for bindfs
-    if (use_bindfs && !std::filesystem::is_directory(host_path)) {
-      CRANE_ERROR(
-          "Bindfs only supports directory mounts. Host path {} is invalid "
-          "for #{}.{}",
-          host_path, job_id, step_id);
+    // Check file permissions
+    if (!util::os::CheckUserHasPermission(uid, gid, host_path)) {
+      CRANE_ERROR("User {} does not have permission to access mount path {}",
+                  uid, host_path);
       return CraneErrCode::ERR_INVALID_PARAM;
+    }
+
+    // Pre check for bindfs
+    if (use_bindfs) {
+      if (!std::filesystem::is_directory(host_path)) {
+        CRANE_ERROR(
+            "Bindfs only supports directory mounts. Host path {} is invalid "
+            "for #{}.{}",
+            host_path, job_id, step_id);
+        return CraneErrCode::ERR_INVALID_PARAM;
+      }
     }
 
     m->set_host_path(std::move(host_path));

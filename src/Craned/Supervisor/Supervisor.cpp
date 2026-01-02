@@ -18,7 +18,6 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include <fcntl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 
 #include <cxxopts.hpp>
