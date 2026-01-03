@@ -1,5 +1,7 @@
 add_subdirectory(AnonymousPipe)
+add_subdirectory(BindFs)
 add_subdirectory(CriClient)
 add_subdirectory(FileLogger)
+add_subdirectory(FileLock)
 add_subdirectory(PluginClient)
 add_subdirectory(PublicHeader)

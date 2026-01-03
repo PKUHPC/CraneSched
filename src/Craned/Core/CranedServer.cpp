@@ -349,10 +349,10 @@ grpc::Status CranedServiceImpl::ChangeJobTimeLimit(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::AttachInContainerTask(
+grpc::Status CranedServiceImpl::AttachContainerStep(
     grpc::ServerContext *context,
-    const crane::grpc::AttachInContainerTaskRequest *request,
-    crane::grpc::AttachInContainerTaskReply *response) {
+    const crane::grpc::AttachContainerStepRequest *request,
+    crane::grpc::AttachContainerStepReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto *err = response->mutable_status();
@@ -365,7 +365,7 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
   if (!g_config.Container.Enabled || g_cri_client == nullptr) {
     // Should never happen.
     CRANE_ERROR(
-        "AttachInContainerTask request received but Container is not enabled.");
+        "AttachContainerStep request received but Container is not enabled.");
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
@@ -375,18 +375,18 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
 
   // TODO: After we move CriEventStreaming to Craned, we can get container_id
   // directly.
-  // TODO: Only support single step in job now. Need to support multi-step
-  // later.
   std::unordered_map<std::string, std::string> label_selector{
       {std::string(cri::kCriDefaultLabel), "true"},
-      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->job_id())},
+      {std::string(cri::kCriLabelStepIdKey),
+       std::to_string(request->step_id())},
       {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
   };
-  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
     const auto &rich_err = container_expt.error();
-    CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
-                rich_err.description());
+    CRANE_ERROR("Failed to find container for step #{} in job #{}: {}",
+                request->step_id(), request->job_id(), rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
@@ -406,8 +406,8 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
 
   if (!url_expt) {
     const auto &rich_err = url_expt.error();
-    CRANE_ERROR("Failed to attach to container for #{}: {}", request->task_id(),
-                rich_err.description());
+    CRANE_ERROR("Failed to attach to container for step #{} in job #{}: {}",
+                request->step_id(), request->job_id(), rich_err.description());
     auto *err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
@@ -420,10 +420,10 @@ grpc::Status CranedServiceImpl::AttachInContainerTask(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ExecInContainerTask(
+grpc::Status CranedServiceImpl::ExecInContainerStep(
     grpc::ServerContext *context,
-    const crane::grpc::ExecInContainerTaskRequest *request,
-    crane::grpc::ExecInContainerTaskReply *response) {
+    const crane::grpc::ExecInContainerStepRequest *request,
+    crane::grpc::ExecInContainerStepReply *response) {
   if (!g_server->ReadyFor(RequestSource::CTLD)) {
     CRANE_DEBUG("CranedServer is not ready.");
     auto *err = response->mutable_status();
@@ -436,7 +436,7 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
   if (!g_config.Container.Enabled || g_cri_client == nullptr) {
     // Should never happen.
     CRANE_ERROR(
-        "ExecInContainerTask request received but Container is not enabled.");
+        "ExecInContainerStep request received but Container is not enabled.");
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_GENERIC_FAILURE);
     err->set_description("Container feature is not enabled.");
@@ -446,7 +446,7 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
 
   // Validate command
   if (request->command_size() == 0) {
-    CRANE_ERROR("ExecInContainerTask request has empty command.");
+    CRANE_ERROR("ExecInContainerStep request has empty command.");
     auto *err = response->mutable_status();
     err->set_code(CraneErrCode::ERR_INVALID_PARAM);
     err->set_description("Command cannot be empty.");
@@ -458,14 +458,16 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
   // directly.
   std::unordered_map<std::string, std::string> label_selector{
       {std::string(cri::kCriDefaultLabel), "true"},
-      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->task_id())},
+      {std::string(cri::kCriLabelJobIdKey), std::to_string(request->job_id())},
+      {std::string(cri::kCriLabelStepIdKey),
+       std::to_string(request->step_id())},
       {std::string(cri::kCriLabelUidKey), std::to_string(request->uid())},
   };
-  auto container_expt = g_cri_client->SelectContainerId(label_selector);
+  auto container_expt = g_cri_client->GetContainerId(label_selector);
   if (!container_expt) {
     const auto &rich_err = container_expt.error();
-    CRANE_ERROR("Failed to find container for task #{}: {}", request->task_id(),
-                rich_err.description());
+    CRANE_ERROR("Failed to find container for step #{} in job #{}: {}",
+                request->step_id(), request->job_id(), rich_err.description());
 
     // NOTE: This could because the container is creating/starting.
     // The caller should retry later. Fix this after we add CONFIGURING state.
@@ -493,8 +495,8 @@ grpc::Status CranedServiceImpl::ExecInContainerTask(
 
   if (!url_expt) {
     const auto &rich_err = url_expt.error();
-    CRANE_ERROR("Failed to exec in container for #{}: {}", request->task_id(),
-                rich_err.description());
+    CRANE_ERROR("Failed to exec in container for step #{} in job #{}: {}",
+                request->step_id(), request->job_id(), rich_err.description());
     auto *err = response->mutable_status();
     err->CopyFrom(rich_err);  // Directly copy RichError with detailed info
     response->set_ok(false);
