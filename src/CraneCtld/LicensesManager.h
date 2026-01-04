@@ -25,6 +25,7 @@
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/PluginClient.h"
+#include "absl/container/flat_hash_map.h"
 
 namespace Ctld {
 
@@ -102,16 +103,8 @@ class LicensesManager {
 
   void UpdateLicense_(const LicenseResourceInDb& license_resource, uint32_t cluster_allowed, License *license);
 
-  struct LicenseIdServerPairHash {
-    std::size_t operator()(const std::pair<LicenseId, std::string> &p) const {
-      std::size_t h1 = std::hash<LicenseId>{}(p.first);
-      std::size_t h2 = std::hash<std::string>{}(p.second);
-      return h1 ^ (h2 << 1);
-    }
-  };
-  std::unordered_map<std::pair<LicenseId, std::string>,
-                     std::unique_ptr<LicenseResourceInDb>, LicenseIdServerPairHash>
-      m_license_resource_map_;
+  absl::flat_hash_map< std::pair<LicenseId, std::string>,
+      std::unique_ptr<LicenseResourceInDb> > m_license_resource_map_;
 
   util::rw_mutex m_rw_resource_mutex_;
 
