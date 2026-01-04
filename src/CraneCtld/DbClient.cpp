@@ -1185,8 +1185,8 @@ bool MongodbClient::InsertLicenseResource(const LicenseResourceInDb& resource) {
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].insert_one(
-            *GetSession_(), doc.view());
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .insert_one(*GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
   } catch (const std::exception& e) {
@@ -1207,8 +1207,8 @@ bool MongodbClient::UpdateLicenseResource(const LicenseResourceInDb& resource) {
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].update_one(
-            *GetSession_(), filter.view(), set_document.view());
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .update_one(*GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
       return false;
@@ -1222,15 +1222,15 @@ bool MongodbClient::UpdateLicenseResource(const LicenseResourceInDb& resource) {
 }
 
 bool MongodbClient::DeleteLicenseResource(const std::string& resource_name,
-                                   const std::string& server) {
+                                          const std::string& server) {
   document filter;
   filter.append(kvp("name", resource_name));
   filter.append(kvp("server", server));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
-        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].delete_one(
-            *GetSession_(), filter.view());
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_]
+            .delete_one(*GetSession_(), filter.view());
 
     if (result && result.value().deleted_count() == 1) return true;
   } catch (const std::exception& e) {
@@ -1244,7 +1244,8 @@ void MongodbClient::SelectAllLicenseResource(
     std::list<LicenseResourceInDb>* resource_list) {
   try {
     mongocxx::cursor cursor =
-        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].find({});
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].find(
+            {});
     for (auto view : cursor) {
       LicenseResourceInDb resource;
       ViewToLicenseResource_(view, &resource);
@@ -1822,7 +1823,8 @@ MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
 }
 
 void MongodbClient::ViewToLicenseResource_(
-    const bsoncxx::document::view& resource_view, LicenseResourceInDb* resource) {
+    const bsoncxx::document::view& resource_view,
+    LicenseResourceInDb* resource) {
   try {
     resource->name = ViewValueOr_(resource_view["name"], std::string{});
     resource->server = ViewValueOr_(resource_view["server"], std::string{});
