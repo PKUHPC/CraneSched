@@ -664,7 +664,7 @@ DaemonStepInCtld::StepStatusChange(crane::grpc::TaskStatus new_status,
       // FreeJobs() is enough to free the daemon step's supervisor.
       context->craned_jobs_to_free[craned_id].emplace_back(job->TaskId());
       if (job->IsInteractive()) {
-        auto meta = std::get<InteractiveMeta>(job->meta);
+        auto& meta = std::get<InteractiveMeta>(job->meta);
         if (!meta.has_been_cancelled_on_front_end) {
           meta.has_been_cancelled_on_front_end = true;
           meta.cb_step_cancel({.job_id = job_id, .step_id = kPrimaryStepId});
