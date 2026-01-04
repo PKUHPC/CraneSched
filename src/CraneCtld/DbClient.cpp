@@ -461,8 +461,8 @@ bool MongodbClient::FetchJobRecords(
         }
         job_info.set_exclusive(view["exclusive"].get_bool().value);
 
-        if (view["req_node"])
-          for (auto& craned_id : view["req_node"].get_array().value) {
+        if (view["req_nodes"])
+          for (auto& craned_id : view["req_nodes"].get_array().value) {
             job_info.add_req_nodes(craned_id.get_string().value.data());
           }
         if (view["exclude_nodes"])
