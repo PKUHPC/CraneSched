@@ -492,6 +492,20 @@ EmbeddedDbClient::~EmbeddedDbClient() {
       CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
   }
 
+  if (m_step_var_db_) {
+    auto result = m_step_var_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of step variable data!");
+  }
+
+  if (m_step_fixed_db_) {
+    auto result = m_step_fixed_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of step fixed data!");
+  }
+
   if (m_resv_db_) {
     auto result = m_resv_db_->Close();
     if (!result)

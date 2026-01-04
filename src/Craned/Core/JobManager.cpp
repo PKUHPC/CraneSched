@@ -699,60 +699,28 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
 
-    // Message will send to stdin of Supervisor for its init.
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(craned_supervisor_fd, STDIN_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdin: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdin: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-
-    for (int retry_count{0}; retry_count < 5; ++retry_count) {
-      if (-1 == dup2(supervisor_craned_fd, STDOUT_FILENO)) {
-        if (errno == EINTR) {
-          fmt::print(
-              stderr,
-              "[Step #{}.{}] Retrying dup2 stdout: interrupted system call, "
-              "retry count: {}",
-              job_id, step_id, retry_count);
-          continue;
-        }
-        std::error_code ec(errno, std::generic_category());
-        fmt::print("[Step #{}.{}] Failed to dup2 stdout: {}.", job_id, step_id,
-                   ec.message());
-        std::abort();
-      }
-
-      break;
-    }
-    close(craned_supervisor_fd);
-    close(supervisor_craned_fd);
-
-    util::os::CloseFdFrom(3);
+    util::os::CloseFdFromExcept(3,
+                                {craned_supervisor_fd, supervisor_craned_fd});
 
     // Prepare the command line arguments.
+    std::vector<std::string> string_argv;
     std::vector<const char*> argv;
 
     // Argv[0] is the program name which can be anything.
     auto supv_name = fmt::format("csupervisor: [{}.{}]", job_id, step_id);
-    argv.emplace_back(supv_name.c_str());
-    argv.push_back(nullptr);
-    fmt::print(
-        stderr, "[{}] [Step #{}.{}]: Executing supervisor\n",
-        std::chrono::current_zone()->to_local(std::chrono::system_clock::now()),
-        job_id, step_id);
+    string_argv.emplace_back(supv_name.c_str());
+    string_argv.push_back("--input-fd");
+    string_argv.push_back(std::to_string(craned_supervisor_fd));
+    string_argv.push_back("--output-fd");
+    string_argv.push_back(std::to_string(supervisor_craned_fd));
+    argv.reserve(string_argv.size());
+    for (auto& arg : string_argv) {
+      argv.push_back(arg.c_str());
+    }
+    argv.push_back(nullptr);  // argv must be null-terminated.
+    fmt::print(stderr,
+               "[{:%Y-%m-%d %H:%M:%S}] [Step #{}.{}]: Executing supervisor\n",
+               std::chrono::system_clock::now(), job_id, step_id);
 
     // Use execvp to search the kSupervisorPath in the PATH.
     execvp(g_config.Supervisor.Path.c_str(),

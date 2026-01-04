@@ -355,9 +355,10 @@ crane::grpc::ExecInContainerStepReply CranedStub::ExecInContainerStep(
 
 void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
   if (code == grpc::UNAVAILABLE) {
-    CRANE_INFO("Craned {} reports service unavailable. Considering it down.",
-               m_craned_id_);
-    g_meta_container->CranedDown(m_craned_id_);
+    CRANE_INFO(
+        "Craned {} reports service unavailable. Maybe it is connecting to "
+        "CTLD.",
+        m_craned_id_);
   }
 }
 
@@ -538,15 +539,13 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
                          ProtoTimestampToString(craned->m_token_.value()));
 
       WriterLock lock(&m_connect_craned_mtx_);
-      util::lock_guard guard(m_unavail_craned_set_mtx_);
       CRANE_ASSERT(
           !m_connected_craned_id_stub_map_.contains(craned->m_craned_id_));
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_disconnected_ = false;
-      CRANE_ASSERT(m_unavail_craned_set_.contains(craned->m_craned_id_));
-      CRANE_ASSERT(m_connecting_craned_set_.contains(craned->m_craned_id_));
-      token = m_unavail_craned_set_.at(craned->m_craned_id_);
-      m_unavail_craned_set_.erase(craned->m_craned_id_);
+      auto it = m_connecting_craned_set_.find(craned->m_craned_id_);
+      CRANE_ASSERT(it != m_connecting_craned_set_.end());
+      token = it->second;
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
@@ -872,7 +871,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
         if (!m_connecting_craned_set_.contains(it->first) &&
             !m_connected_craned_id_stub_map_.contains(it->first)) {
-          m_connecting_craned_set_.emplace(it->first);
+          m_connecting_craned_set_.emplace(*it);
           g_thread_pool->detach_task(
               [this, craned_id = it->first, token = it->second] {
                 ConnectCranedNode_(craned_id, token);
@@ -881,10 +880,10 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
         } else {
           CRANE_LOGGER_TRACE(g_runtime_status.conn_logger,
                              "Craned {} is already connecting or connected, "
-                             "ignore new connection request. Token {}.",
+                             "drop new connection request. Token {}.",
                              it->first, ProtoTimestampToString(it->second));
         }
-        ++it;
+        it = m_unavail_craned_set_.erase(it);
       }
     }
 

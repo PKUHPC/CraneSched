@@ -68,7 +68,7 @@ Craned:
   # ping interval in seconds
   PingInterval: 15
   # register operation timeout in seconds
-  CraneCtldTimeout: 5
+  CraneCtldTimeout: 30
   # max size of craned log file
   MaxLogFileSize: 50M
   # max files of craned log file
