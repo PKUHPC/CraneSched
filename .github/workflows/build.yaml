@@ -261,7 +261,10 @@ jobs:
               -v ./output:/Workspace/output \
               -v ./script:/Workspace/script \
               -v ./cache/ccache:/root/.ccache \
-              "${CI_IMAGE_TAG}" /bin/bash --login script/build.sh
+              -e CMAKE_CXX_FLAGS="-march=x86-64-v3" \
+              -e CMAKE_C_FLAGS="-march=x86-64-v3" \
+              -e CRANE_NATIVE_ARCH_OPT="OFF" \
+              "${CI_IMAGE_TAG}" /bin/bash --login -c 'export ADDITIONAL_CMAKE_ARGS="-DCRANE_NATIVE_ARCH_OPT=OFF -DCMAKE_CXX_FLAGS=\"-march=x86-64-v3\" -DCMAKE_C_FLAGS=\"-march=x86-64-v3\"" && script/build.sh'
 
       # Validate non-empty output
       - name: Validate non-empty output
