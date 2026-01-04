@@ -434,8 +434,11 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       auto* payload = request.mutable_payload_task_output_req();
       payload->set_msg(output);
 
-      while (write_pending->load(std::memory_order::acquire))
+      while (write_pending->load(std::memory_order::acquire)) {
+        if (m_wait_reconn_.load(std::memory_order::acquire))
+          goto exited;
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
 
       CRANE_TRACE("Writing output...");
       write_pending->store(true, std::memory_order::release);
@@ -453,8 +456,11 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       auto& [p, len] = x11_output;
       payload->set_msg(p.get(), len);
 
-      while (write_pending->load(std::memory_order::acquire))
+      while (write_pending->load(std::memory_order::acquire)) {
+        if (m_wait_reconn_.load(std::memory_order::acquire))
+          goto exited;
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
 
       CRANE_TRACE("Forwarding x11 output from task to cfored {}",
                   this->m_cfored_name_);
@@ -465,6 +471,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     }
   }
 
+exited:
   m_output_drained_.store(true, std::memory_order::release);
   CRANE_TRACE("CleanOutputQueueThread exited.");
 }
@@ -483,7 +490,7 @@ void CforedClient::AsyncSendRecvThread_() {
     // channel reconnect
     if (m_wait_reconn_ && m_cfored_channel_->GetState(true) != GRPC_CHANNEL_READY) {
       if (m_reconnect_attempts_.load() > kMaxReconnectAttempts) {
-        CRANE_DEBUG("Cfored connection failed.");
+        CRANE_TRACE("Cfored reconnect failed.");
         absl::MutexLock lock(&m_mtx_);
         for (auto& task_id : m_fwd_meta_map | std::ranges::views::keys) {
           CRANE_ERROR(
@@ -507,9 +514,6 @@ void CforedClient::AsyncSendRecvThread_() {
       std::this_thread::sleep_for(std::chrono::seconds(interval));
       continue;
     }
-
-    m_wait_reconn_ = false;
-    m_reconnect_attempts_ = 0;
 
     std::atomic<bool> write_pending;
     std::thread output_clean_thread;
@@ -580,10 +584,18 @@ void CforedClient::AsyncSendRecvThread_() {
       // But, for Prepare tag which indicates the stream is ready,
       // ok is false, since there's no message to read.
       if (!ok && tag != Tag::Prepare) {
+        if (m_wait_reconn_) {
+          CRANE_TRACE("Discarding event: tag={}, ok={}. Already waiting reconnect.", int(tag), ok);
+          continue;
+        }
+        CRANE_DEBUG("Cfored connection failed, wait reconnect...");
         m_wait_reconn_ = true;
         if (output_clean_thread.joinable()) output_clean_thread.join();
         break;
       }
+
+      m_wait_reconn_ = false;
+      m_reconnect_attempts_ = 0;
 
       switch (state) {
       case State::Registering:
@@ -771,6 +783,7 @@ void CforedClient::TaskOutPutForward(const std::string& msg) {
           "msg!");
       return;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
   }
 
   m_output_queue_.enqueue(msg);
