@@ -1248,7 +1248,7 @@ struct Wckey {
   }
 };
 
-struct LicenseResource {
+struct LicenseResourceInDb {
   std::string name;
   std::string server;
   std::string server_type;
