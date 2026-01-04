@@ -889,8 +889,8 @@ void CtldClient::AsyncSendThread_() {
       std::list<StepStatusChangeQueueElem> changes;
       changes.splice(changes.begin(), std::move(m_step_status_change_list_));
       m_step_status_change_mtx_.Unlock();
-      bool err = SendStatusChanges_(std::move(changes));
-      if (err) std::this_thread::sleep_for(100ms);
+      bool success = SendStatusChanges_(std::move(changes));
+      if (!success) std::this_thread::sleep_for(100ms);
     }
   }
 }
