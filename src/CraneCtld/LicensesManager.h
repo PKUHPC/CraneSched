@@ -22,10 +22,10 @@
 // Precompiled header comes first!
 
 #include "DbClient.h"
+#include "absl/container/flat_hash_map.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/PluginClient.h"
-#include "absl/container/flat_hash_map.h"
 
 namespace Ctld {
 
@@ -57,7 +57,8 @@ class LicensesManager {
           &lic_id_to_count,
       bool is_license_or);
 
-  void CheckLicenseCountSufficient(std::vector<PdJobInScheduler*>* job_ptr_vec);
+  void CheckLicenseCountSufficient(
+      std::vector<PdJobInScheduler *> *job_ptr_vec);
 
   void FreeReserved(
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
@@ -101,10 +102,12 @@ class LicensesManager {
           &operators,
       LicenseResourceInDb *res_resource);
 
-  void UpdateLicense_(const LicenseResourceInDb& license_resource, uint32_t cluster_allowed, License *license);
+  void UpdateLicense_(const LicenseResourceInDb &license_resource,
+                      uint32_t cluster_allowed, License *license);
 
-  absl::flat_hash_map< std::pair<LicenseId, std::string>,
-      std::unique_ptr<LicenseResourceInDb> > m_license_resource_map_;
+  absl::flat_hash_map<std::pair<LicenseId, std::string>,
+                      std::unique_ptr<LicenseResourceInDb>>
+      m_license_resource_map_;
 
   util::rw_mutex m_rw_resource_mutex_;
 
