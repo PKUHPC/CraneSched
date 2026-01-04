@@ -293,19 +293,41 @@ std::string CgroupManager::CgroupStrByTaskId(job_id_t job_id, step_id_t step_id,
                      CgConstant::kTaskCgNamePrefix, task_id);
 }
 
+std::string CgroupManager::CgroupStrByParsedIds(const CgroupStrParsedIds &ids) {
+  auto [job_id_opt, step_id_opt, system_flag, task_id_opt] = ids;
+  CRANE_ASSERT(job_id_opt.has_value());
+  if (!step_id_opt.has_value()) {
+    return CgroupStrByJobId(job_id_opt.value());
+  } else if (task_id_opt.has_value()) {
+    return CgroupStrByTaskId(job_id_opt.value(), step_id_opt.value(),
+                             task_id_opt.value());
+  } else {
+    return CgroupStrByStepId(job_id_opt.value(), step_id_opt.value(),
+                             system_flag);
+  }
+}
+
 CgroupStrParsedIds CgroupManager::ParseIdsFromCgroupStr_(
     const std::string &cgroup_str) {
   // Pattern now includes optional system/user suffix for step:
   // job_{job_id}[/step_{step_id}[/system|user[/task_{task_id}]]]
   static const auto cg_pattern_str = std::format(
-      R"(.*{}(\d+)(?:\/{}(\d+)(?:\/(?:system|user)(?:\/{}(\d+))?)?)?)",
+      R"(.*{}(\d+)(?:\/{}(\d+)(?:\/(system|user)(?:\/{}(\d+))?)?)?)",
       CgConstant::kJobCgNamePrefix, CgConstant::kStepCgNamePrefix,
       CgConstant::kTaskCgNamePrefix);
   static const LazyRE2 cg_pattern(cg_pattern_str.c_str());
-
+  std::optional<job_id_t> job_id;
+  std::optional<step_id_t> step_id;
+  std::optional<task_id_t> task_id;
+  std::optional<std::string> system_or_user;
   CgroupStrParsedIds parsed_ids{};
-  if (RE2::FullMatch(cgroup_str, *cg_pattern, &std::get<0>(parsed_ids),
-                     &std::get<1>(parsed_ids), &std::get<2>(parsed_ids))) {
+  if (RE2::FullMatch(cgroup_str, *cg_pattern, &job_id, &step_id,
+                     &system_or_user, &task_id)) {
+    std::get<CgConstant::KParsedJobIdIdx>(parsed_ids) = job_id;
+    std::get<CgConstant::KParsedStepIdIdx>(parsed_ids) = step_id;
+    std::get<CgConstant::KParsedSystemFlagIdx>(parsed_ids) =
+        system_or_user.has_value() && system_or_user.value() == "system";
+    std::get<CgConstant::KParsedTaskIdIdx>(parsed_ids) = task_id;
     return parsed_ids;
   }
 
@@ -497,19 +519,12 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
       return cg_unique_ptr;
     }
     auto *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
-    cg_v2_ptr->RecoverFromCgSpec(resource);
+    cg_v2_ptr->RecoverFromResInNode(resource);
 #endif
 
     return cg_unique_ptr;
   }
 
-  // To avoid access g_config.
-  if (g_plugin_client) {
-    // FIXME: Refactor related plugin interface and replace here.
-    auto ids = ParseIdsFromCgroupStr_(cgroup_str);
-    g_plugin_client->CreateCgroupHookAsync(
-        std::get<0>(ids).value_or(0), cg_unique_ptr->CgroupName(), resource);
-  }
   ResourceInNode resource_in_node(resource);
   if (min_mem != 0) {
     if (resource_in_node.allocatable_res.memory_bytes < min_mem) {
@@ -521,7 +536,7 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
     }
   }
 
-  CRANE_TRACE("Setting cgroup {}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
+  CRANE_TRACE("Setting cgroup {}. Res: CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
               cgroup_str, resource_in_node.allocatable_res.CpuCount(),
               resource_in_node.allocatable_res.memory_bytes / (1024.0 * 1024.0),
               util::ReadableDresInNode(resource_in_node));
@@ -536,68 +551,68 @@ CgroupManager::AllocateAndGetCgroup(const std::string &cgroup_str,
   return std::unexpected(CraneErrCode::ERR_CGROUP);
 }
 
-std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV1_(
+std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV1_(
     CgConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
-  std::set<job_id_t> job_ids;
+  std::set<CgroupStrParsedIds> ids;
 
   const char *controller_str =
       CgConstant::GetControllerStringView(controller).data();
 
   int base_level;
-  int depth = 1;
   int ret = cgroup_walk_tree_begin(controller_str,
-                                   CgConstant::kRootCgNamePrefix.c_str(), depth,
+                                   CgConstant::kRootCgNamePrefix.c_str(), 0,
                                    &handle, &info, &base_level);
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
       auto parsed_ids = ParseIdsFromCgroupStr_(info.path);
-      auto job_id_opt = std::get<0>(parsed_ids);
-      if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
+      auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
+      if (job_id_opt.has_value()) ids.emplace(parsed_ids);
     }
-    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+    ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
   }
 
   if (handle != nullptr) cgroup_walk_tree_end(&handle);
-  return job_ids;
+  return ids;
 }
 
-std::set<job_id_t> CgroupManager::GetJobIdsFromCgroupV2_(
+std::set<CgroupStrParsedIds> CgroupManager::GetIdsFromCgroupV2_(
     const std::filesystem::path &root_cgroup_path) {
-  std::set<job_id_t> job_ids;
+  std::set<CgroupStrParsedIds> ids;
 
   // If the directory not existed, return an empty set.
-  if (!std::filesystem::exists(root_cgroup_path)) return job_ids;
+  if (!std::filesystem::exists(root_cgroup_path)) return ids;
 
   try {
     for (const auto &it :
-         std::filesystem::directory_iterator(root_cgroup_path)) {
+         std::filesystem::recursive_directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id_opt = std::get<0>(parsed_ids);
-        if (job_id_opt.has_value()) job_ids.emplace(job_id_opt.value());
+        auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
+        if (job_id_opt.has_value()) ids.emplace(parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
-  return job_ids;
+  return ids;
 }
 
-std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
+std::unordered_map<ino_t, CgroupStrParsedIds>
+CgroupManager::GetCgInoJobIdMapCgroupV2_(
     const std::filesystem::path &root_cgroup_path) {
-  std::unordered_map<ino_t, job_id_t> cg_job_id_map;
+  std::unordered_map<ino_t, CgroupStrParsedIds> cg_id_map;
 
   // If the directory not existed, return an empty map.
-  if (!std::filesystem::exists(root_cgroup_path)) return cg_job_id_map;
+  if (!std::filesystem::exists(root_cgroup_path)) return cg_id_map;
 
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       if (it.is_directory()) {
         auto parsed_ids = ParseIdsFromCgroupStr_(it.path().filename());
-        auto job_id_opt = std::get<0>(parsed_ids);
+        auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
         if (!job_id_opt.has_value()) continue;
 
         struct stat cg_stat{};
@@ -607,29 +622,29 @@ std::unordered_map<ino_t, job_id_t> CgroupManager::GetCgJobIdMapCgroupV2_(
           continue;
         }
 
-        cg_job_id_map.emplace(cg_stat.st_ino, job_id_opt.value());
+        cg_id_map.emplace(cg_stat.st_ino, parsed_ids);
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
-  return cg_job_id_map;
+  return cg_id_map;
 }
 
 #ifdef CRANE_ENABLE_BPF
 
-CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
+CraneExpected<absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>>>
 CgroupManager::GetJobBpfMapCgroupsV2_(
     const std::filesystem::path &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
-      GetCgJobIdMapCgroupV2_(root_cgroup_path);
+      GetCgInoJobIdMapCgroupV2_(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
       return std::unexpected(CraneErrCode::ERR_EBPF);
   }
 
-  std::unordered_map<task_id_t, std::vector<BpfKey>> results;
+  absl::flat_hash_map<CgroupStrParsedIds, std::vector<BpfKey>> results;
 
   auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
     // Skip log level record.
@@ -689,7 +704,7 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
     std::string line;
     while (std::getline(infile, line)) {
       auto parsed_ids = ParseIdsFromCgroupStr_(line);
-      auto job_id_opt = std::get<0>(parsed_ids);
+      auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
 
       // if job_id found, entry is valid.
       if (job_id_opt.has_value()) return parsed_ids;
@@ -703,7 +718,7 @@ CraneExpected<CgroupStrParsedIds> CgroupManager::GetIdsByPid(pid_t pid) {
     }
 
     auto parsed_ids = ParseIdsFromCgroupStr_(line);
-    auto job_id_opt = std::get<0>(parsed_ids);
+    auto job_id_opt = std::get<CgConstant::KParsedJobIdIdx>(parsed_ids);
 
     // If job_id found, entry is valid.
     if (job_id_opt.has_value()) return parsed_ids;
@@ -934,10 +949,9 @@ bool Cgroup::SetControllerStrs(CgConstant::Controller controller,
 void Cgroup::Destroy() {
   if (m_cgroup_ != nullptr) {
     CRANE_DEBUG("Destroying cgroup {}.", m_cgroup_name_);
-    int err;
-    if ((err = cgroup_delete_cgroup_ext(
-             m_cgroup_,
-             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+    int err = cgroup_delete_cgroup_ext(
+        m_cgroup_, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION);
+    if (err != 0) {
       CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_name_.c_str(), err, cgroup_strerror(err));
     }
@@ -995,6 +1009,27 @@ bool CgroupV1::SetCpuShares(uint64_t share) {
       CgConstant::ControllerFile::CPU_SHARES, share);
 }
 
+bool CgroupV1::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v1, cpuset controller is separate
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER)) {
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v1");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  // Convert cpu_set to comma-separated string (e.g., "0,1,2,5")
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER,
+      CgConstant::ControllerFile::CPUSET_CPUS, cpu_list);
+}
+
 /*
  * CPU_CFS_PERIOD_US is the period of time in microseconds for how long a
  * cgroup's access to CPU resources is measured.
@@ -1049,7 +1084,11 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   return ok;
 }
 
-bool CgroupV1::KillAllProcesses() {
+// FIXME: Potential risk
+// We need to freeze the cgroup before killing processes to avoid new processes
+// being created during the kill operation or some processes dead before we kill
+// them.
+bool CgroupV1::KillAllProcesses(int signum) {
   using namespace CgConstant::Internal;
 
   const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
@@ -1078,7 +1117,7 @@ bool CgroupV1::KillAllProcesses() {
 
     if (rc == 0) {
       for (int j = 0; j < size; ++j) {
-        kill(pids[j], SIGKILL);
+        kill(-pids[j], signum);
       }
       free(pids);
     } else {
@@ -1148,9 +1187,9 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
     // ban libbpf log
     libbpf_print_fn_t fn = libbpf_set_print(nullptr);
 
-    if (bpf_object__load(bpf_obj_) != 0) {
-      CRANE_ERROR("Failed to load BPF object {}",
-                  CgConstant::kBpfObjectFilePath);
+    if (auto err = bpf_object__load(bpf_obj_); err != 0) {
+      CRANE_ERROR("Failed to load BPF object {}: {} {}",
+                  CgConstant::kBpfObjectFilePath, err, std::strerror(errno));
       bpf_object__close(bpf_obj_);
       return false;
     }
@@ -1290,6 +1329,26 @@ bool CgroupV2::SetCpuShares(uint64_t share) {
       CgConstant::ControllerFile::CPU_WEIGHT_V2, share);
 }
 
+bool CgroupV2::SetCpuBind(const std::unordered_set<uint32_t> &cpu_set) {
+  // For cgroup v2, cpuset.cpus is under the cpuset controller
+  if (!CgroupManager::IsMounted(CgConstant::Controller::CPUSET_CONTROLLER_V2)) {
+    CRANE_WARN(
+        "CPUSET controller is not mounted, cannot set CPU binding for v2");
+    return false;
+  }
+
+  if (cpu_set.empty()) {
+    CRANE_WARN("Empty CPU set provided for CPU binding");
+    return false;
+  }
+
+  std::string cpu_list = absl::StrJoin(cpu_set, ",");
+
+  return m_cgroup_info_.SetControllerStr(
+      CgConstant::Controller::CPUSET_CONTROLLER_V2,
+      CgConstant::ControllerFile::CPUSET_CPUS_V2, cpu_list);
+}
+
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
   return m_cgroup_info_.SetControllerValue(
       CgConstant::Controller::MEMORY_CONTROLLER_V2,
@@ -1373,8 +1432,9 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     // No need to attach ebpf prog twice.
     if (!m_bpf_attached_) {
       if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
-                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
-        CRANE_ERROR("Failed to attach BPF program");
+                          cgroup_fd, BPF_CGROUP_DEVICE,
+                          BPF_F_ALLOW_MULTI) < 0) {
+        CRANE_ERROR("Failed to attach BPF program: {}", strerror(errno));
         close(cgroup_fd);
         return false;
       }
@@ -1394,7 +1454,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
-bool CgroupV2::RecoverFromCgSpec(const crane::grpc::ResourceInNode &resource) {
+bool CgroupV2::RecoverFromResInNode(
+    const crane::grpc::ResourceInNode &resource) {
   if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
@@ -1467,7 +1528,7 @@ bool CgroupV2::EraseBpfDeviceMap() {
 }
 #endif
 
-bool CgroupV2::KillAllProcesses() {
+bool CgroupV2::KillAllProcesses(int signum) {
   using namespace CgConstant::Internal;
 
   const char *controller = CgConstant::GetControllerStringView(
@@ -1476,6 +1537,7 @@ bool CgroupV2::KillAllProcesses() {
 
   const char *cg_name = m_cgroup_info_.GetCgroupName().c_str();
 
+  CRANE_TRACE("Killing process with signal {} in cgroup: {}", signum, cg_name);
   int size, rc;
   pid_t *pids;
 
@@ -1484,7 +1546,8 @@ bool CgroupV2::KillAllProcesses() {
 
   if (rc == 0) {
     for (int i = 0; i < size; ++i) {
-      kill(pids[i], SIGKILL);
+      // Kill the process group
+      kill(-pids[i], signum);
     }
     free(pids);
     return true;
@@ -1534,12 +1597,16 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
                                             CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
-  ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
+  if (resource.memory_bytes != 0) {
+    ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
+  }
 
-  // Depending on the system configuration, the following two options may
-  // not be enabled, so we ignore the result of them.
-  cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
-  cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
+  if (resource.memory_sw_bytes != 0) {
+    // Depending on the system configuration, the following two options may
+    // not be enabled, so we ignore the result of them.
+    cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
+    cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
+  }
   return ok;
 }
 
@@ -1547,12 +1614,16 @@ bool AllocatableResourceAllocator::Allocate(
     const crane::grpc::AllocatableResource &resource, CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
-  ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
+  if (resource.memory_limit_bytes() != 0) {
+    ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
+  }
 
-  // Depending on the system configuration, the following two options may
-  // not be enabled, so we ignore the result of them.
-  cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
-  cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
+  if (resource.memory_sw_limit_bytes() != 0) {
+    // Depending on the system configuration, the following two options may
+    // not be enabled, so we ignore the result of them.
+    cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
+    cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
+  }
   return ok;
 }
 
