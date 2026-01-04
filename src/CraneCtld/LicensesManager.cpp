@@ -32,17 +32,18 @@ int LicensesManager::Init(
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
   for (const auto& resource : resource_list) {
     if (resource.type == crane::grpc::LicenseResource_Type_License) {
-      auto cluster_iter = resource.cluster_resources.find(g_config.CraneClusterName);
+      auto cluster_iter =
+          resource.cluster_resources.find(g_config.CraneClusterName);
       if (cluster_iter != resource.cluster_resources.end()) {
         auto license_id = std::format("{}@{}", resource.name, resource.server);
         License lic{.license_id = license_id,
-                                .used = 0,
-                                .reserved = 0,
-                                .remote = true,
-                                .server = resource.server,
-                                .last_consumed = resource.last_consumed,
-                                .last_deficit = 0,
-                                .last_update = resource.last_update};
+                    .used = 0,
+                    .reserved = 0,
+                    .remote = true,
+                    .server = resource.server,
+                    .last_consumed = resource.last_consumed,
+                    .last_deficit = 0,
+                    .last_update = resource.last_update};
         UpdateLicense_(resource, cluster_iter->second, &lic);
         licenses_map.emplace(license_id, std::move(lic));
       }
@@ -398,21 +399,21 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   if (new_lic_resource.type == crane::grpc::LicenseResource_Type_License) {
-    auto cluster_iter = new_lic_resource.cluster_resources.find(g_config.CraneClusterName);
+    auto cluster_iter =
+        new_lic_resource.cluster_resources.find(g_config.CraneClusterName);
     if (cluster_iter != new_lic_resource.cluster_resources.end()) {
       auto license_id =
           std::format("{}@{}", new_lic_resource.name, new_lic_resource.server);
       License lic{.license_id = license_id,
-                                .used = 0,
-                                .reserved = 0,
-                                .remote = true,
-                                .server = new_lic_resource.server,
-                                .last_consumed = new_lic_resource.last_consumed,
-                                .last_deficit = 0,
-                                .last_update = new_lic_resource.last_update};
+                  .used = 0,
+                  .reserved = 0,
+                  .remote = true,
+                  .server = new_lic_resource.server,
+                  .last_consumed = new_lic_resource.last_consumed,
+                  .last_deficit = 0,
+                  .last_update = new_lic_resource.last_update};
       UpdateLicense_(new_lic_resource, cluster_iter->second, &lic);
-      m_licenses_map_.Emplace(
-          license_id, std::move(lic));
+      m_licenses_map_.Emplace(license_id, std::move(lic));
     }
   }
 
@@ -464,13 +465,13 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
             "License resource {} not found in license map. now adding...",
             license_id);
         License lic{.license_id = license_id,
-                                .used = 0,
-                                .reserved = 0,
-                                .remote = true,
-                                .server = res_lic_resource.server,
-                                .last_consumed = res_lic_resource.last_consumed,
-                                .last_deficit = 0,
-                                .last_update = res_lic_resource.last_update};
+                    .used = 0,
+                    .reserved = 0,
+                    .remote = true,
+                    .server = res_lic_resource.server,
+                    .last_consumed = res_lic_resource.last_consumed,
+                    .last_deficit = 0,
+                    .last_update = res_lic_resource.last_update};
         UpdateLicense_(res_lic_resource, cluster_iter->second, &lic);
         m_licenses_map_.Emplace(license_id, std::move(lic));
       } else {
@@ -518,7 +519,17 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
           FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND,
                         "Resources {}@{} not found in cluster {}",
                         res_resource.name, res_resource.server, cluster));
-    res_resource.allocated -= cluster_iter->second;
+    if (res_resource.allocated < cluster_iter->second) {
+      CRANE_ERROR(
+          "Allocated license count underflow when removing allocation: "
+          "resource {}@{}, cluster '{}', allocated={}, to_remove={}. "
+          "This should not happen and may indicate inconsistent resource "
+          "state.",
+          res_resource.name, res_resource.server, cluster,
+          res_resource.allocated, cluster_iter->second);
+    } else {
+      res_resource.allocated -= cluster_iter->second;
+    }
     res_resource.cluster_resources.erase(cluster_iter);
   }
 
@@ -712,10 +723,13 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   return {};
 }
 
-void LicensesManager::UpdateLicense_(const LicenseResourceInDb& license_resource, uint32_t cluster_allowed, License *lic) {
+void LicensesManager::UpdateLicense_(
+    const LicenseResourceInDb& license_resource, uint32_t cluster_allowed,
+    License* lic) {
   if (license_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
     lic->total = cluster_allowed;
-  else // when non-absolute, the iter->second is the percentage of the resource.count
+  else  // when non-absolute, the iter->second is the percentage of the
+        // resource.count
     lic->total = (license_resource.count * cluster_allowed) / 100;
   uint32_t external = 0;
   if (license_resource.count < lic->total)
