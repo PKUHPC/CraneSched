@@ -68,7 +68,7 @@ void CloseFdRange(int fd_begin, int fd_end);
 // This may be slow if fd_max is too large.
 void CloseFdFrom(int fd_begin);
 
-// Close file descriptors from fd_begin to the max fd except for `_fds`.skip
+// Close file descriptors from fd_begin to the max fd except for `skip_fds`.
 // This may be slow if fd_max is too large.
 void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds);
 
