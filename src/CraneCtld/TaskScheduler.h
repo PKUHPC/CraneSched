@@ -174,8 +174,6 @@ class SchedulerAlgo {
       const std::vector<std::unique_ptr<PdJobInScheduler>>& pending_jobs);
 
  private:
-  void CheckClusterResource_(std::vector<PdJobInScheduler*>* job_ptr_vec);
-
   static constexpr bool kAlgoTraceOutput = false;
   // TODO: move to config
   static constexpr bool kAlgoRedundantNode = false;
