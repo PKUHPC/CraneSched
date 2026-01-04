@@ -1070,8 +1070,8 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
 
     g_thread_pool->detach_task([&shutdown_step_latch, step] {
       auto stub = step->supervisor_stub;
-      CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.", step->job_id,
-                  step->step_id);
+      CRANE_TRACE("[Step #{}.{}] Shutting down daemon supervisor.",
+                  step->job_id, step->step_id);
       auto err = stub->ShutdownSupervisor();
       if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR(

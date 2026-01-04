@@ -733,7 +733,8 @@ struct CommonStepInCtld : StepInCtld {
   std::optional<std::pair<crane::grpc::TaskStatus, uint32_t>> StepStatusChange(
       crane::grpc::TaskStatus new_status, uint32_t exit_code,
       const std::string& reason, const CranedId& craned_id,
-      const google::protobuf::Timestamp& timestamp, StepStatusChangeContext* context);
+      const google::protobuf::Timestamp& timestamp,
+      StepStatusChangeContext* context);
   void RecoverFromDb(const TaskInCtld& job,
                      const crane::grpc::StepInEmbeddedDb& step_in_db) override;
   void SetFieldsOfStepInfo(
@@ -1052,14 +1053,14 @@ struct TaskInCtld {
           ++cur_task_id;
         }
       }
-            if (step->ia_meta.has_value()) {
-              const auto& meta = step->ia_meta.value();
-              meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
-                  .job_id = step->job_id,
-                  .step_id = step->StepId(),
-                  .allocated_nodes{std::make_pair(
-                      util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
-            }
+      if (step->ia_meta.has_value()) {
+        const auto& meta = step->ia_meta.value();
+        meta.cb_step_res_allocated(StepInteractiveMeta::StepResAllocArgs{
+            .job_id = step->job_id,
+            .step_id = step->StepId(),
+            .allocated_nodes{std::make_pair(
+                util::HostNameListToStr(step_craned_ids), step_craned_ids)}});
+      }
       step_res_avail_ -= step_alloc_res;
       pending_step_ids_.pop();
       ++popped_count;
