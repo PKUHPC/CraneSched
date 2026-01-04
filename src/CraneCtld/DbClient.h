@@ -337,7 +337,7 @@ class MongodbClient {
   bool InsertLicenseResource(const LicenseResourceInDb& resource);
   bool UpdateLicenseResource(const LicenseResourceInDb& resource);
   bool DeleteLicenseResource(const std::string& resource_name,
-                      const std::string& server);
+                             const std::string& server);
   void SelectAllLicenseResource(std::list<LicenseResourceInDb>* resource_list);
 
   bool CommitTransaction(
@@ -390,7 +390,7 @@ class MongodbClient {
   document TxnToDocument_(const Txn& txn);
 
   void ViewToLicenseResource_(const bsoncxx::document::view& resource_view,
-                       LicenseResourceInDb* resource);
+                              LicenseResourceInDb* resource);
   document LicenseResourceToDocument_(const LicenseResourceInDb& resource);
 
   document TaskInCtldToDocument_(TaskInCtld* task);
@@ -418,7 +418,8 @@ class MongodbClient {
   const std::string m_qos_collection_name_{"qos_table"};
   const std::string m_txn_collection_name_{"txn_table"};
   const std::string m_wckey_collection_name_{"wckey_table"};
-  const std::string m_license_resource_collection_name_{"license_resource_table"};
+  const std::string m_license_resource_collection_name_{
+      "license_resource_table"};
   std::shared_ptr<spdlog::logger> m_logger_;
 
   std::unique_ptr<mongocxx::instance> m_instance_;
