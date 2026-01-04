@@ -1926,7 +1926,7 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
 
   std::vector<std::string> clusters{request->clusters().begin(),
                                     request->clusters().end()};
-  std::list<LicenseResource> res_resources;
+  std::list<LicenseResourceInDb> res_resources;
   auto result = g_licenses_manager->QueryLicenseResource(
       request->resource_name(), request->server(), clusters, &res_resources);
 

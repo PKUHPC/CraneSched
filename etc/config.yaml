@@ -151,7 +151,7 @@ Licenses:
   - name: ansys
     quantity: 100
 
-AllLicenseResourcesAbsolute: yes
+AllLicenseResourcesAbsolute: false
 
 # Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
 # if this option is set to true.

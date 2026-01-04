@@ -22,7 +22,7 @@ class Collection(Enum):
     TASK = "task_table"
     USER = "user_table"
     WCKEY = "wckey_table"
-    RESOURCE = "resource_table"
+    RESOURCE = "license_resource_table"
 
 
 def load_config(crane_path: str, db_path: str = None):

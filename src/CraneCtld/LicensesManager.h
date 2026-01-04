@@ -71,6 +71,7 @@ class LicensesManager {
       const std::unordered_map<LicenseId, uint32_t> &actual_license);
 
   /* TODO：multi-cluster synchronization */
+
   CraneExpectedRich<void> AddLicenseResource(
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters,
@@ -90,14 +91,16 @@ class LicensesManager {
   CraneExpectedRich<void> QueryLicenseResource(
       const std::string &name, const std::string &server,
       const std::vector<std::string> &clusters,
-      std::list<LicenseResource> *res_licenses);
+      std::list<LicenseResourceInDb> *res_licenses);
 
  private:
   CraneExpectedRich<void> CheckAndUpdateFields_(
       const std::vector<std::string> &clusters,
       const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>
           &operators,
-      LicenseResource *res_resource);
+      LicenseResourceInDb *res_resource);
+
+  void UpdateLicense_(const LicenseResourceInDb& license_resource, uint32_t cluster_allowed, License *license);
 
   struct LicenseIdServerPairHash {
     std::size_t operator()(const std::pair<LicenseId, std::string> &p) const {
@@ -107,7 +110,7 @@ class LicensesManager {
     }
   };
   std::unordered_map<std::pair<LicenseId, std::string>,
-                     std::unique_ptr<LicenseResource>, LicenseIdServerPairHash>
+                     std::unique_ptr<LicenseResourceInDb>, LicenseIdServerPairHash>
       m_license_resource_map_;
 
   util::rw_mutex m_rw_resource_mutex_;

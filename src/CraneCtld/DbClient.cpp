@@ -1179,13 +1179,13 @@ void MongodbClient::SelectTxns(
   }
 }
 
-bool MongodbClient::InsertResource(const LicenseResource& resource) {
-  document doc = ResourceToDocument_(resource);
+bool MongodbClient::InsertLicenseResource(const LicenseResourceInDb& resource) {
+  document doc = LicenseResourceToDocument_(resource);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-        (*GetClient_())[m_db_name_][m_resource_collection_name_].insert_one(
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].insert_one(
             *GetSession_(), doc.view());
 
     if (ret != bsoncxx::stdx::nullopt) return true;
@@ -1196,8 +1196,8 @@ bool MongodbClient::InsertResource(const LicenseResource& resource) {
   return false;
 }
 
-bool MongodbClient::UpdateResource(const LicenseResource& resource) {
-  document doc = ResourceToDocument_(resource), set_document, filter;
+bool MongodbClient::UpdateLicenseResource(const LicenseResourceInDb& resource) {
+  document doc = LicenseResourceToDocument_(resource), set_document, filter;
 
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
   set_document.append(kvp("$set", doc));
@@ -1207,7 +1207,7 @@ bool MongodbClient::UpdateResource(const LicenseResource& resource) {
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-        (*GetClient_())[m_db_name_][m_resource_collection_name_].update_one(
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].update_one(
             *GetSession_(), filter.view(), set_document.view());
 
     if (!update_result || update_result->modified_count() == 0) {
@@ -1221,7 +1221,7 @@ bool MongodbClient::UpdateResource(const LicenseResource& resource) {
   return true;
 }
 
-bool MongodbClient::DeleteResource(const std::string& resource_name,
+bool MongodbClient::DeleteLicenseResource(const std::string& resource_name,
                                    const std::string& server) {
   document filter;
   filter.append(kvp("name", resource_name));
@@ -1229,7 +1229,7 @@ bool MongodbClient::DeleteResource(const std::string& resource_name,
 
   try {
     bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
-        (*GetClient_())[m_db_name_][m_resource_collection_name_].delete_one(
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].delete_one(
             *GetSession_(), filter.view());
 
     if (result && result.value().deleted_count() == 1) return true;
@@ -1240,14 +1240,14 @@ bool MongodbClient::DeleteResource(const std::string& resource_name,
   return false;
 }
 
-void MongodbClient::SelectAllResource(
-    std::list<LicenseResource>* resource_list) {
+void MongodbClient::SelectAllLicenseResource(
+    std::list<LicenseResourceInDb>* resource_list) {
   try {
     mongocxx::cursor cursor =
-        (*GetClient_())[m_db_name_][m_resource_collection_name_].find({});
+        (*GetClient_())[m_db_name_][m_license_resource_collection_name_].find({});
     for (auto view : cursor) {
-      LicenseResource resource;
-      ViewToResource_(view, &resource);
+      LicenseResourceInDb resource;
+      ViewToLicenseResource_(view, &resource);
       resource_list->emplace_back(resource);
     }
   } catch (const std::exception& e) {
@@ -1821,8 +1821,8 @@ MongodbClient::document MongodbClient::TxnToDocument_(const Txn& txn) {
   return DocumentConstructor_(fields, values);
 }
 
-void MongodbClient::ViewToResource_(
-    const bsoncxx::document::view& resource_view, LicenseResource* resource) {
+void MongodbClient::ViewToLicenseResource_(
+    const bsoncxx::document::view& resource_view, LicenseResourceInDb* resource) {
   try {
     resource->name = ViewValueOr_(resource_view["name"], std::string{});
     resource->server = ViewValueOr_(resource_view["server"], std::string{});
@@ -1851,8 +1851,8 @@ void MongodbClient::ViewToResource_(
   }
 }
 
-MongodbClient::document MongodbClient::ResourceToDocument_(
-    const LicenseResource& resource) {
+MongodbClient::document MongodbClient::LicenseResourceToDocument_(
+    const LicenseResourceInDb& resource) {
   std::array<std::string, 11> fields{
       "name",      "server",        "server_type",       "type",
       "allocated", "last_consumed", "cluster_resources", "count",

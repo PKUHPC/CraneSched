@@ -25,36 +25,31 @@ LicensesManager::LicensesManager() {}
 int LicensesManager::Init(
     const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
   HashMap<LicenseId, License> licenses_map;
-  std::list<LicenseResource> resource_list;
+  std::list<LicenseResourceInDb> resource_list;
 
-  g_db_client->SelectAllResource(&resource_list);
+  g_db_client->SelectAllLicenseResource(&resource_list);
 
   util::write_lock_guard resource_guard(m_rw_resource_mutex_);
   for (const auto& resource : resource_list) {
     if (resource.type == crane::grpc::LicenseResource_Type_License) {
-      auto iter = resource.cluster_resources.find(g_config.CraneClusterName);
-      if (iter != resource.cluster_resources.end()) {
+      auto cluster_iter = resource.cluster_resources.find(g_config.CraneClusterName);
+      if (cluster_iter != resource.cluster_resources.end()) {
         auto license_id = std::format("{}@{}", resource.name, resource.server);
-        uint32_t total = 0;
-        if (resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-          total = iter->second;
-        else
-          total = (resource.count * iter->second) / 100;
-        licenses_map.emplace(license_id,
-                             License{.license_id = license_id,
-                                     .total = total,
-                                     .used = 0,
-                                     .reserved = 0,
-                                     .remote = true,
-                                     .server = resource.server,
-                                     .last_consumed = resource.last_consumed,
-                                     .last_deficit = 0,
-                                     .last_update = resource.last_update});
+        License lic{.license_id = license_id,
+                                .used = 0,
+                                .reserved = 0,
+                                .remote = true,
+                                .server = resource.server,
+                                .last_consumed = resource.last_consumed,
+                                .last_deficit = 0,
+                                .last_update = resource.last_update};
+        UpdateLicense_(resource, cluster_iter->second, &lic);
+        licenses_map.emplace(license_id, std::move(lic));
       }
     }
     auto key = std::make_pair(resource.name, resource.server);
     m_license_resource_map_.emplace(
-        key, std::make_unique<LicenseResource>(std::move(resource)));
+        key, std::make_unique<LicenseResourceInDb>(resource));
   }
 
   for (const auto& [lic_id, count] : lic_id_to_count_map) {
@@ -169,12 +164,12 @@ std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
 
 void LicensesManager::CheckLicenseCountSufficient(
     std::vector<PdJobInScheduler*>* job_ptr_vec) {
-  std::unordered_map<LicenseId, License> back_map;
+  std::unordered_map<LicenseId, License> avail_license_map;
 
   {
     auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
     for (const auto& [license_id, license] : *licenses_map) {
-      back_map.emplace(license_id, *license.GetExclusivePtr());
+      avail_license_map.emplace(license_id, *license.GetExclusivePtr());
     }
   }
 
@@ -185,8 +180,8 @@ void LicensesManager::CheckLicenseCountSufficient(
 
     if (job_ptr->is_license_or) {
       for (const auto& license : job_ptr->req_licenses) {
-        auto iter = back_map.find(license.key());
-        if (iter != back_map.end()) {
+        auto iter = avail_license_map.find(license.key());
+        if (iter != avail_license_map.end()) {
           auto lic = iter->second;
           if (license.count() + lic.reserved + lic.used + lic.last_deficit <=
               lic.total) {
@@ -197,8 +192,8 @@ void LicensesManager::CheckLicenseCountSufficient(
       }
     } else {
       for (const auto& license : job_ptr->req_licenses) {
-        auto iter = back_map.find(license.key());
-        if (iter == back_map.end()) {
+        auto iter = avail_license_map.find(license.key());
+        if (iter == avail_license_map.end()) {
           job_ptr->actual_licenses.clear();
           break;
         }
@@ -218,7 +213,7 @@ void LicensesManager::CheckLicenseCountSufficient(
     }
 
     for (const auto& [lic_id, count] : job_ptr->actual_licenses) {
-      back_map[lic_id].used += count;
+      avail_license_map[lic_id].used += count;
     }
   }
 }
@@ -365,7 +360,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                                          "Name or server is empty"));
 
-  LicenseResource res_resource{.name = name, .server = server};
+  LicenseResourceInDb new_lic_resource{.name = name, .server = server};
   bool is_exist = false;
   auto key = std::make_pair(name, server);
   auto iter = m_license_resource_map_.find(key);
@@ -376,57 +371,53 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
             FormatRichErr(CraneErrCode::ERR_RESOURCE_ALREADY_EXIST, ""));
       }
     }
-    res_resource = *iter->second;
+    new_lic_resource = *iter->second;
     is_exist = true;
   }
 
   for (const auto& cluster : clusters) {
-    res_resource.cluster_resources.emplace(cluster, 0);
+    new_lic_resource.cluster_resources.emplace(cluster, 0);
   }
 
   if (g_config.AllLicenseResourceAbsolute)
-    res_resource.flags |= crane::grpc::LicenseResource_Flag_Absolute;
+    new_lic_resource.flags |= crane::grpc::LicenseResource_Flag_Absolute;
 
-  auto result = CheckAndUpdateFields_(clusters, operators, &res_resource);
+  auto result = CheckAndUpdateFields_(clusters, operators, &new_lic_resource);
   if (!result) return result;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         if (is_exist)
-          g_db_client->UpdateResource(res_resource);
+          g_db_client->UpdateLicenseResource(new_lic_resource);
         else
-          g_db_client->InsertResource(res_resource);
+          g_db_client->InsertLicenseResource(new_lic_resource);
       };
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
-  if (res_resource.type == crane::grpc::LicenseResource_Type_License) {
-    auto iter = res_resource.cluster_resources.find(g_config.CraneClusterName);
-    if (iter != res_resource.cluster_resources.end()) {
+  if (new_lic_resource.type == crane::grpc::LicenseResource_Type_License) {
+    auto cluster_iter = new_lic_resource.cluster_resources.find(g_config.CraneClusterName);
+    if (cluster_iter != new_lic_resource.cluster_resources.end()) {
       auto license_id =
-          std::format("{}@{}", res_resource.name, res_resource.server);
-      uint32_t total = 0;
-      if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-        total = iter->second;
-      else
-        total = (res_resource.count * iter->second) / 100;
+          std::format("{}@{}", new_lic_resource.name, new_lic_resource.server);
+      License lic{.license_id = license_id,
+                                .used = 0,
+                                .reserved = 0,
+                                .remote = true,
+                                .server = new_lic_resource.server,
+                                .last_consumed = new_lic_resource.last_consumed,
+                                .last_deficit = 0,
+                                .last_update = new_lic_resource.last_update};
+      UpdateLicense_(new_lic_resource, cluster_iter->second, &lic);
       m_licenses_map_.Emplace(
-          license_id, License{.license_id = license_id,
-                              .total = total,
-                              .used = 0,
-                              .reserved = 0,
-                              .remote = true,
-                              .server = res_resource.server,
-                              .last_consumed = res_resource.last_consumed,
-                              .last_deficit = 0,
-                              .last_update = res_resource.last_update});
+          license_id, std::move(lic));
     }
   }
 
   m_license_resource_map_[key] =
-      std::make_unique<LicenseResource>(std::move(res_resource));
+      std::make_unique<LicenseResourceInDb>(std::move(new_lic_resource));
 
   return {};
 }
@@ -446,13 +437,13 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND, ""));
 
-  LicenseResource res_resource(*(iter->second));
-  auto result = CheckAndUpdateFields_(clusters, operators, &res_resource);
+  LicenseResourceInDb res_lic_resource(*(iter->second));
+  auto result = CheckAndUpdateFields_(clusters, operators, &res_lic_resource);
   if (!result) return result;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateResource(res_resource);
+        g_db_client->UpdateLicenseResource(res_lic_resource);
       };
 
   if (!g_db_client->CommitTransaction(callback))
@@ -460,76 +451,40 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
         FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   // update license
-  if (res_resource.type == crane::grpc::LicenseResource_Type_License) {
+  if (res_lic_resource.type == crane::grpc::LicenseResource_Type_License) {
     auto cluster_iter =
-        res_resource.cluster_resources.find(g_config.CraneClusterName);
-    if (cluster_iter != res_resource.cluster_resources.end()) {
+        res_lic_resource.cluster_resources.find(g_config.CraneClusterName);
+    if (cluster_iter != res_lic_resource.cluster_resources.end()) {
       auto licenses_map = m_licenses_map_.GetMapExclusivePtr();
       auto license_id =
-          std::format("{}@{}", res_resource.name, res_resource.server);
+          std::format("{}@{}", res_lic_resource.name, res_lic_resource.server);
       auto lic_iter = licenses_map->find(license_id);
       if (lic_iter == licenses_map->end()) {
         CRANE_ERROR(
             "License resource {} not found in license map. now adding...",
             license_id);
-
-        uint32_t total = 0;
-        if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-          total = cluster_iter->second;
-        else
-          total = (res_resource.count * cluster_iter->second) / 100;
-
-        m_licenses_map_.Emplace(
-            license_id, License{.license_id = license_id,
-                                .total = total,
+        License lic{.license_id = license_id,
                                 .used = 0,
                                 .reserved = 0,
                                 .remote = true,
-                                .server = res_resource.server,
-                                .last_consumed = res_resource.last_consumed,
+                                .server = res_lic_resource.server,
+                                .last_consumed = res_lic_resource.last_consumed,
                                 .last_deficit = 0,
-                                .last_update = res_resource.last_update});
+                                .last_update = res_lic_resource.last_update};
+        UpdateLicense_(res_lic_resource, cluster_iter->second, &lic);
+        m_licenses_map_.Emplace(license_id, std::move(lic));
       } else {
         auto lic = lic_iter->second.GetExclusivePtr();
-        if (res_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
-          lic->total = cluster_iter->second;
-        else
-          lic->total = (res_resource.count * cluster_iter->second) / 100;
-        uint32_t external = 0;
-        if (res_resource.count < lic->total)
-          CRANE_ERROR(
-              "allocated more licenses than exist total ({} > {}). this should "
-              "not happen.",
-              lic->total, res_resource.count);
-        else
-          external = res_resource.count - lic->total;
-        lic->last_consumed = res_resource.last_consumed;
-        if (lic->last_consumed <= (external + lic->used)) {
-          /*
-           * "Normal" operation - license consumption is below what the
-           * local cluster, plus possible use from other clusters,
-           * have assigned out. No deficit in this case.
-           */
-          lic->last_deficit = 0;
-        } else {
-          /*
-           * "Deficit" operation. Someone is using licenses that aren't
-           * included in our local tracking, and exceed that available
-           * to other clusters. So... we need to adjust our scheduling
-           * behavior here to avoid over-allocating licenses.
-           */
-          lic->last_deficit = lic->last_consumed - external - lic->used;
-        }
-        lic->last_update = res_resource.last_update;
+        UpdateLicense_(res_lic_resource, cluster_iter->second, lic.get());
         if (lic->used > lic->total) {
-          CRANE_DEBUG("license {} total decreased", lic->license_id);
+          CRANE_WARN("license {} total decreased", lic->license_id);
         }
       }
     }
   }
 
   m_license_resource_map_[key] =
-      std::make_unique<LicenseResource>(std::move(res_resource));
+      std::make_unique<LicenseResourceInDb>(std::move(res_lic_resource));
 
   return {};
 }
@@ -547,7 +502,7 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_RESOURCE_NOT_FOUND, ""));
 
-  LicenseResource res_resource(*iter->second);
+  LicenseResourceInDb res_resource(*iter->second);
   bool is_local = false;
   for (const auto& cluster : clusters) {
     std::unordered_map<std::string, uint32_t>::iterator cluster_iter;
@@ -570,9 +525,9 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         if (clusters.empty()) {
-          g_db_client->DeleteResource(name, server);
+          g_db_client->DeleteLicenseResource(name, server);
         } else {
-          g_db_client->UpdateResource(res_resource);
+          g_db_client->UpdateLicenseResource(res_resource);
         }
       };
 
@@ -590,7 +545,7 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
     m_license_resource_map_.erase(key);
   } else {
     m_license_resource_map_[key] =
-        std::make_unique<LicenseResource>(std::move(res_resource));
+        std::make_unique<LicenseResourceInDb>(std::move(res_resource));
   }
 
   return {};
@@ -599,7 +554,7 @@ CraneExpectedRich<void> LicensesManager::RemoveLicenseResource(
 CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
     const std::string& name, const std::string& server,
     const std::vector<std::string>& clusters,
-    std::list<LicenseResource>* res_licenses) {
+    std::list<LicenseResourceInDb>* res_licenses) {
   util::read_lock_guard resource_guard(m_rw_resource_mutex_);
 
   if (name.empty() || server.empty()) {
@@ -641,7 +596,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
         operators,
-    LicenseResource* res_resource) {
+    LicenseResourceInDb* res_resource) {
   for (const auto& [field, value] : operators) {
     switch (field) {
     case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
@@ -755,6 +710,39 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   }
 
   return {};
+}
+
+void LicensesManager::UpdateLicense_(const LicenseResourceInDb& license_resource, uint32_t cluster_allowed, License *lic) {
+  if (license_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
+    lic->total = cluster_allowed;
+  else // when non-absolute, the iter->second is the percentage of the resource.count
+    lic->total = (license_resource.count * cluster_allowed) / 100;
+  uint32_t external = 0;
+  if (license_resource.count < lic->total)
+    CRANE_ERROR(
+        "allocated more licenses than exist total ({} > {}). this should "
+        "not happen.",
+        lic->total, license_resource.count);
+  else
+    external = license_resource.count - lic->total;
+  lic->last_consumed = license_resource.last_consumed;
+  if (lic->last_consumed <= (external + lic->used)) {
+    /*
+     * "Normal" operation - license consumption is below what the
+     * local cluster, plus possible use from other clusters,
+     * have assigned out. No deficit in this case.
+     */
+    lic->last_deficit = 0;
+  } else {
+    /*
+     * "Deficit" operation. Someone is using licenses that aren't
+     * included in our local tracking, and exceed that available
+     * to other clusters. So... we need to adjust our scheduling
+     * behavior here to avoid over-allocating licenses.
+     */
+    lic->last_deficit = lic->last_consumed - external - lic->used;
+  }
+  lic->last_update = license_resource.last_update;
 }
 
 }  // namespace Ctld
