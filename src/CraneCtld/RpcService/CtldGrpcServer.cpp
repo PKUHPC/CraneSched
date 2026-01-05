@@ -424,12 +424,13 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
         case StreamCforedRequest::STEP_META_REQUEST: {
           auto const& payload = cfored_request.payload_step_meta_req();
-          CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(), payload.step_id());
+          CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(),
+                      payload.step_id());
           std::string failure_reason;
           bool ok = true;
           crane::grpc::StepToCtld step;
-          if (!g_task_scheduler->QueryStepAndNodeRegex(payload.job_id(), payload.step_id(),
-                                                        &step)) {
+          if (!g_task_scheduler->QueryStepAndNodeRegex(
+                  payload.job_id(), payload.step_id(), &step)) {
             ok = false;
             failure_reason = "Step not found";
           } else {

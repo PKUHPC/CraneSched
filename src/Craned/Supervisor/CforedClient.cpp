@@ -435,8 +435,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       payload->set_msg(output);
 
       while (write_pending->load(std::memory_order::acquire)) {
-        if (m_wait_reconn_.load(std::memory_order::acquire))
-          goto exited;
+        if (m_wait_reconn_.load(std::memory_order::acquire)) goto exited;
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
       }
 
@@ -457,8 +456,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       payload->set_msg(p.get(), len);
 
       while (write_pending->load(std::memory_order::acquire)) {
-        if (m_wait_reconn_.load(std::memory_order::acquire))
-          goto exited;
+        if (m_wait_reconn_.load(std::memory_order::acquire)) goto exited;
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
       }
 
@@ -488,7 +486,8 @@ void CforedClient::AsyncSendRecvThread_() {
 
   while (!m_stopped_) {
     // channel reconnect
-    if (m_wait_reconn_ && m_cfored_channel_->GetState(true) != GRPC_CHANNEL_READY) {
+    if (m_wait_reconn_ &&
+        m_cfored_channel_->GetState(true) != GRPC_CHANNEL_READY) {
       if (m_reconnect_attempts_.load() > kMaxReconnectAttempts) {
         CRANE_TRACE("Cfored reconnect failed.");
         absl::MutexLock lock(&m_mtx_);
@@ -504,11 +503,11 @@ void CforedClient::AsyncSendRecvThread_() {
             false, TerminatedBy::TERMINATION_BY_CFORED_CONN_FAILURE);
         m_stopped_ = true;
         m_wait_reconn_ = false;
-        return ;
+        return;
       }
       m_reconnect_attempts_++;
       CRANE_INFO("Attempting to reconnect cfored {} for the {} time...",
-                  m_cfored_name_, m_reconnect_attempts_.load());
+                 m_cfored_name_, m_reconnect_attempts_.load());
       int interval =
           std::min(m_reconnect_attempts_.load(), kMaxReconnectIntervalSec);
       std::this_thread::sleep_for(std::chrono::seconds(interval));
@@ -585,7 +584,9 @@ void CforedClient::AsyncSendRecvThread_() {
       // ok is false, since there's no message to read.
       if (!ok && tag != Tag::Prepare) {
         if (m_wait_reconn_ && tag != Tag::Prepare) {
-          CRANE_TRACE("Discarding event: tag={}, ok={}. Already waiting reconnect.", int(tag), ok);
+          CRANE_TRACE(
+              "Discarding event: tag={}, ok={}. Already waiting reconnect.",
+              int(tag), ok);
           continue;
         }
         CRANE_DEBUG("Cfored connection failed, wait reconnect...");

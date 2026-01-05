@@ -159,13 +159,14 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskMetaReply(bool ok, const std::string& failure_reason, const crane::grpc::StepToCtld& step, int32_t pid) {
+  bool WriteTaskMetaReply(bool ok, const std::string &failure_reason,
+                          const crane::grpc::StepToCtld &step, int32_t pid) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::STEP_META_REPLY);
-    auto* task_meta_reply = reply.mutable_payload_step_meta_reply();
+    auto *task_meta_reply = reply.mutable_payload_step_meta_reply();
     task_meta_reply->set_ok(ok);
     task_meta_reply->set_failure_reason(failure_reason);
     task_meta_reply->set_cattach_pid(pid);
@@ -190,7 +191,7 @@ class CforedStreamWriter {
 };
 
 class StreamWriterProxy {
-public:
+ public:
   void SetWriter(std::shared_ptr<CforedStreamWriter> writer) {
     std::lock_guard<std::mutex> lock(mtx_);
     writer_ = std::move(writer);
@@ -201,13 +202,13 @@ public:
     return writer_;
   }
 
-  template<typename Func>
-  void WithWriter(Func&& func) {
+  template <typename Func>
+  void WithWriter(Func &&func) {
     std::shared_ptr<CforedStreamWriter> writer = GetWriter();
     if (writer) func(*writer);
   }
 
-private:
+ private:
   std::mutex mtx_;
   std::shared_ptr<CforedStreamWriter> writer_;
 };
@@ -479,7 +480,7 @@ class CtldServer {
 
   Mutex m_stream_proxy_mtx_;
   HashMap<std::string /* cfored_name */, std::shared_ptr<StreamWriterProxy>>
-    m_cfored_stream_proxy_map_ ABSL_GUARDED_BY(m_stream_proxy_mtx_);
+      m_cfored_stream_proxy_map_ ABSL_GUARDED_BY(m_stream_proxy_mtx_);
 
   std::unique_ptr<CtldForInternalServiceImpl> m_internal_service_impl_;
   std::unique_ptr<Server> m_internal_server_;
