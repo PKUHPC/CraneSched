@@ -317,7 +317,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           meta.cb_step_completed = cb_step_completed;
           task->meta = std::move(meta);
 
-
           std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
           auto lua_result = g_task_scheduler->JobSubmitLuaCheck(task.get());
           if (lua_result) {
@@ -333,14 +332,14 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
 
           if (result) {
             auto submit_result =
-              g_task_scheduler->SubmitTaskToScheduler(std::move(task));
+                g_task_scheduler->SubmitTaskToScheduler(std::move(task));
             std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
             if (submit_result.has_value()) {
               CraneExpected<task_id_t> job_result = submit_result.value().get();
               if (job_result.has_value()) {
                 result =
                     std::expected<std::pair<job_id_t, step_id_t>, std::string>{
-                      std::pair(job_result.value(), kPrimaryStepId)};
+                        std::pair(job_result.value(), kPrimaryStepId)};
               } else {
                 result = std::unexpected(CraneErrStr(job_result.error()));
               }
@@ -348,7 +347,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
               result = std::unexpected(CraneErrStr(submit_result.error()));
             }
           }
-
 
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
