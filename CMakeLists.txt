@@ -86,7 +86,7 @@ option(CRANE_CPACK_DEBUGINFO_PACKAGE "Enable generation of debug info package" O
 
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 
-option(CRANE_WITH_LUA "Enable lua" ON)
+option(CRANE_WITH_LUA "Enable lua" OFF)
 
 # Options end here -------------------------------------------------------------------------------
 
@@ -284,6 +284,8 @@ if (CRANE_WITH_LUA)
         set(LUA_LIBRARIES ${LUA_LIBRARIES} CACHE STRING "Lua libraries")
         message(STATUS "LUA_INCLUDE_DIR = ${LUA_INCLUDE_DIR}")
         message(STATUS "LUA_LIBRARIES = ${LUA_LIBRARIES}")
+    else()
+        message(FATAL_ERROR "Lua not found")
     endif()
 endif ()
 

@@ -1690,7 +1690,6 @@ std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(
 
 std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(
     task_id_t task_id) {
-  if (g_config.JobSubmitLuaScript.empty()) return std::nullopt;
 
   {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
