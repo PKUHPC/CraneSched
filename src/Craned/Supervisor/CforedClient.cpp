@@ -584,7 +584,7 @@ void CforedClient::AsyncSendRecvThread_() {
       // But, for Prepare tag which indicates the stream is ready,
       // ok is false, since there's no message to read.
       if (!ok && tag != Tag::Prepare) {
-        if (m_wait_reconn_) {
+        if (m_wait_reconn_ && tag != Tag::Prepare) {
           CRANE_TRACE("Discarding event: tag={}, ok={}. Already waiting reconnect.", int(tag), ok);
           continue;
         }

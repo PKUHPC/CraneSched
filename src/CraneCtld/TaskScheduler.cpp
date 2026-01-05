@@ -3581,13 +3581,25 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(id_filtered_job_rng, append_fn);
 }
 
-bool TaskScheduler::QueryTaskNodeRegex(task_id_t task_id, crane::grpc::TaskToCtld* task) {
+bool TaskScheduler::QueryStepAndNodeRegex(job_id_t job_id, step_id_t step_id, crane::grpc::StepToCtld* step) {
   LockGuard running_guard(&m_running_task_map_mtx_);
-  auto iter = m_running_task_map_.find(task_id);
+  auto iter = m_running_task_map_.find(job_id);
   if (iter == m_running_task_map_.end()) return false;
 
-  *task = iter->second->TaskToCtld();
-  task->set_nodelist(iter->second->allocated_craneds_regex);
+  if (step_id == 0) return false;
+
+  auto *job = iter->second.get();
+
+  if (step_id == 1) {
+    *step = job->PrimaryStep()->StepToCtld();
+    step->set_nodelist(iter->second->allocated_craneds_regex);
+    return true;
+  }
+
+  auto step_iter = job->Steps().find(step_id);
+  if (step_iter == job->Steps().end()) return false;
+  *step = step_iter->second->StepToCtld();
+  step->set_nodelist(iter->second->allocated_craneds_regex);
   return true;
 }
 

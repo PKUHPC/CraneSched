@@ -159,17 +159,17 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskMetaReply(bool ok, const std::string& failure_reason, const crane::grpc::TaskToCtld& task, int32_t pid) {
+  bool WriteTaskMetaReply(bool ok, const std::string& failure_reason, const crane::grpc::StepToCtld& step, int32_t pid) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
-    reply.set_type(StreamCtldReply::TASK_META_REPLY);
-    auto* task_meta_reply = reply.mutable_payload_task_meta_reply();
+    reply.set_type(StreamCtldReply::STEP_META_REPLY);
+    auto* task_meta_reply = reply.mutable_payload_step_meta_reply();
     task_meta_reply->set_ok(ok);
     task_meta_reply->set_failure_reason(failure_reason);
     task_meta_reply->set_cattach_pid(pid);
-    task_meta_reply->mutable_task()->CopyFrom(task);
+    task_meta_reply->mutable_step()->CopyFrom(step);
 
     return m_stream_->Write(reply);
   }

@@ -422,23 +422,24 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           }
         } break;
 
-        case StreamCforedRequest::TASK_META_REQUEST: {
-          auto const& payload = cfored_request.payload_task_meta_req();
-          CRANE_TRACE("Recv TaskMetaReq of Task #{}", payload.task_id());
+        case StreamCforedRequest::STEP_META_REQUEST: {
+          auto const& payload = cfored_request.payload_step_meta_req();
+          CRANE_TRACE("[Step #{}.{}] Recv STEP_META_REQUEST", payload.job_id(), payload.step_id());
           std::string failure_reason;
           bool ok = true;
-          crane::grpc::TaskToCtld task;
-          if (!g_task_scheduler->QueryTaskNodeRegex(payload.task_id(), &task)) {
+          crane::grpc::StepToCtld step;
+          if (!g_task_scheduler->QueryStepAndNodeRegex(payload.job_id(), payload.step_id(),
+                                                        &step)) {
             ok = false;
-            failure_reason = "Task not found";
+            failure_reason = "Step not found";
           } else {
-            if (payload.uid() != task.uid() &&
+            if (payload.uid() != step.uid() &&
                 !g_account_manager->CheckUidIsAdmin(payload.uid())) {
               ok = false;
               failure_reason = "permission denied";
             }
           }
-          stream_writer->WriteTaskMetaReply(ok, failure_reason, task,
+          stream_writer->WriteTaskMetaReply(ok, failure_reason, step,
                                             payload.cattach_pid());
         } break;
 
