@@ -160,6 +160,11 @@ CranedMetaContainer::ResvMetaMapPtr CranedMetaContainer::GetResvMetaMapPtr() {
   return resv_meta_map_.GetMapSharedPtr();
 }
 
+CranedMetaContainer::ResvMetaMapExclusivePtr
+CranedMetaContainer::GetResvMetaMapExclusivePtr() {
+  return resv_meta_map_.GetMapExclusivePtr();
+}
+
 void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
                                                  task_id_t task_id,
                                                  const ResourceV2& resources) {
