@@ -192,7 +192,13 @@ Same as the return values of `crane_job_submit`.
 
 ## Lua Script Configuration
 
-The system needs to have Lua version 5.x installed.
+The system needs to have Lua version 5.x and lua-devel installed.
+
+### Crane compilation
+```shell
+# Check the packaging guide for details
+cmake -G Ninja .. -DCRANE_WITH_LUA=true
+```
 
 ### /etc/crane/config.yaml
 

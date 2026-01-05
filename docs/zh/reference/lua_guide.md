@@ -175,7 +175,13 @@ cranectld 当前保存的被修改作业的数据结构。
 | denied_users     | table(string list) | 预约拒绝的用户 |
 
 ## Lua 脚本配置
-系统需安装Lua5.x版本
+系统需安装Lua5.x版本及lua-devel。
+
+### Crane 编译
+```shell
+# 详细查看打包指南
+cmake -G Ninja .. -DCRANE_WITH_LUA=true
+```
 
 ### /etc/crane/config.yaml
 
