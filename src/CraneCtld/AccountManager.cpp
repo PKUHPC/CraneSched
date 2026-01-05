@@ -2713,25 +2713,6 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
-    const std::string& actor_name, const User& user, const std::string& account,
-    const std::string& partition) {
-  const std::string& name = user.name;
-  bool result = g_db_client->UpdateEntityOne(
-      Ctld::MongodbClient::EntityType::USER, "$unset", name,
-      "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
-          partition,
-      std::string(""));
-
-  if (!result) {
-    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
-  }
-  AddTxnLogToDB_(
-      actor_name, name, TxnAction::ModifyUser,
-      fmt::format("Del: account: {}, partition: {}", account, partition));
-  return {};
-}
-
 CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
     User* user, const std::string& qos, const std::string& account,
     const std::string& partition) {

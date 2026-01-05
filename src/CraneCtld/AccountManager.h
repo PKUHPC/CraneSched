@@ -315,10 +315,6 @@ class AccountManager {
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
                                            const std::string& user);
 
-  CraneExpected<void> DeleteUserAllowedPartition_(const std::string& actor_name,
-                                                  const User& user,
-                                                  const std::string& account,
-                                                  const std::string& partition);
   CraneExpected<void> DeleteUserAllowedQos_(User* user, const std::string& qos,
                                             const std::string& account,
                                             const std::string& partition);
