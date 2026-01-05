@@ -2369,55 +2369,57 @@ std::expected<void, std::string> TaskScheduler::CreateResv_(
   }
 
   const ResvId& resv_name = request.reservation_name();
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  if (resv_meta_map->contains(resv_name)) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected("Reservation name already exists");
-  }
-
-  std::vector<CranedId> affected_nodes_vec;
-  for (auto& craned_meta : craned_meta_vec) {
-    const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
-        resv_name, std::make_pair(start_time, end_time));
-    if (!ok) {
-      CRANE_ERROR("Failed to insert reservation resource to {}",
-                  craned_meta->static_meta.hostname);
-    } else {
-      affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
+    if (resv_meta_map->contains(resv_name)) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected("Reservation name already exists");
     }
-  }
-  craned_meta_vec.clear();
 
-  g_meta_container->AddResReduceEventsAndUnlock(
-      {std::make_pair(start_time, std::move(affected_nodes_vec))});
+    std::vector<CranedId> affected_nodes_vec;
+    for (auto& craned_meta : craned_meta_vec) {
+      const auto& [it, ok] = craned_meta->resv_in_node_map.emplace(
+          resv_name, std::make_pair(start_time, end_time));
+      if (!ok) {
+        CRANE_ERROR("Failed to insert reservation resource to {}",
+                    craned_meta->static_meta.hostname);
+      } else {
+        affected_nodes_vec.emplace_back(craned_meta->static_meta.hostname);
+      }
+    }
+    craned_meta_vec.clear();
 
-  ResvMeta resv{.name = resv_name,
-                .part_id = partition,
-                .start_time = start_time,
-                .end_time = end_time,
-                .accounts_black_list = allowed_accounts.empty(),
-                .users_black_list = allowed_users.empty(),
-                .accounts = allowed_accounts.empty()
-                                ? std::move(denied_accounts)
-                                : std::move(allowed_accounts),
-                .users = allowed_users.empty() ? std::move(denied_users)
-                                               : std::move(allowed_users),
-                .craned_ids = {craned_ids.begin(), craned_ids.end()},
-                .res_total = allocated_res,
-                .res_avail = allocated_res,
-                .rn_job_res_map = {}};
+    g_meta_container->AddResReduceEventsAndUnlock(
+        {std::make_pair(start_time, std::move(affected_nodes_vec))});
 
-  const auto& [it, ok] = resv_meta_map->emplace(resv_name, std::move(resv));
-  if (!ok) {
-    // unreachable
-    CRANE_ERROR(
-        "Failed to insert reservation meta : Reservation name {} "
-        "already exists",
-        resv_name);
-    return std::unexpected(
-        fmt::format("Failed to insert reservation meta : Reservation name {} "
-                    "already exists",
-                    resv_name));
+    ResvMeta resv{.name = resv_name,
+                  .part_id = partition,
+                  .start_time = start_time,
+                  .end_time = end_time,
+                  .accounts_black_list = allowed_accounts.empty(),
+                  .users_black_list = allowed_users.empty(),
+                  .accounts = allowed_accounts.empty()
+                                  ? std::move(denied_accounts)
+                                  : std::move(allowed_accounts),
+                  .users = allowed_users.empty() ? std::move(denied_users)
+                                                 : std::move(allowed_users),
+                  .craned_ids = {craned_ids.begin(), craned_ids.end()},
+                  .res_total = allocated_res,
+                  .res_avail = allocated_res,
+                  .rn_job_res_map = {}};
+
+    const auto& [it, ok] = resv_meta_map->emplace(resv_name, std::move(resv));
+    if (!ok) {
+      // unreachable
+      CRANE_ERROR(
+          "Failed to insert reservation meta : Reservation name {} "
+          "already exists",
+          resv_name);
+      return std::unexpected(
+          fmt::format("Failed to insert reservation meta : Reservation name {} "
+                      "already exists",
+                      resv_name));
+    }
   }
 
   {
@@ -2461,23 +2463,26 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
 std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
     const ResvId& resv_id) {
   g_meta_container->LockResReduceEvents();
-  auto resv_meta_map = g_meta_container->GetResvMetaMapPtr();
-  CRANE_TRACE("Deleting reservation {}", resv_id);
-  if (!resv_meta_map->contains(resv_id)) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected(fmt::format("Reservation {} not found", resv_id));
+  absl::flat_hash_set<CranedId> craned_ids;
+  {
+    auto resv_meta_map = g_meta_container->GetResvMetaMapExclusivePtr();
+    CRANE_TRACE("Deleting reservation {}", resv_id);
+    if (!resv_meta_map->contains(resv_id)) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected(fmt::format("Reservation {} not found", resv_id));
+    }
+
+    const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
+
+    if (!resv_meta->rn_job_res_map.empty()) {
+      g_meta_container->UnlockResReduceEvents();
+      return std::unexpected(fmt::format(
+          "Not allowed to delete reservation {} with running tasks", resv_id));
+    }
+
+    craned_ids = std::move(resv_meta->craned_ids);
+    resv_meta_map->erase(resv_id);
   }
-
-  const auto& resv_meta = resv_meta_map->at(resv_id).GetExclusivePtr();
-
-  if (!resv_meta->rn_job_res_map.empty()) {
-    g_meta_container->UnlockResReduceEvents();
-    return std::unexpected(fmt::format(
-        "Not allowed to delete reservation {} with running tasks", resv_id));
-  }
-
-  const auto craned_ids = std::move(resv_meta->craned_ids);
-  resv_meta_map->erase(resv_id);
   g_meta_container->AddResReduceEventsAndUnlock({resv_id});
 
   for (const auto& craned_id : craned_ids) {
