@@ -19,7 +19,7 @@
 #include "CtldPublicDefs.h"
 
 #include "EmbeddedDbClient.h"
-#include "crane/Logger.h"
+#include "TaskScheduler.h"
 
 namespace Ctld {
 
@@ -154,6 +154,23 @@ ContainerMetaInTask::operator crane::grpc::ContainerTaskAdditionalMeta() const {
   }
 
   return result;
+}
+
+void DependenciesInJob::update(task_id_t job_id, absl::Time event_time) {
+  auto it = deps.find(job_id);
+  if (it == deps.end()) {
+    CRANE_ERROR("Dependency for job {} not found", job_id);
+    return;
+  }
+  const auto& [dep_type, delay_seconds] = it->second;
+
+  absl::Time dep_ready_time = event_time + absl::Seconds(delay_seconds);
+  if (is_or) {
+    ready_time = std::min(ready_time, dep_ready_time);
+  } else {
+    ready_time = std::max(ready_time, dep_ready_time);
+  }
+  deps.erase(it);
 }
 
 void StepInCtld::SetStepType(crane::grpc::StepType type) {
@@ -1305,6 +1322,41 @@ void TaskInCtld::SetAllocatedRes(ResourceV2&& val) {
   allocated_res = std::move(val);
 }
 
+void TaskInCtld::SetDependency(const crane::grpc::Dependencies& grpc_deps) {
+  if (grpc_deps.is_or()) {
+    dependencies.is_or = true;
+    dependencies.ready_time = absl::InfiniteFuture();
+  } else {
+    dependencies.is_or = false;
+    dependencies.ready_time = absl::InfinitePast();
+  }
+  for (const auto& dep : grpc_deps.deps()) {
+    dependencies.deps[dep.job_id()] = {dep.type(), dep.delay_seconds()};
+  }
+}
+
+void TaskInCtld::UpdateDependency(task_id_t dep_job_id, absl::Time event_time) {
+  dependencies.update(dep_job_id, event_time);
+}
+
+void TaskInCtld::AddDependent(crane::grpc::DependencyType dep_type,
+                              task_id_t dep_job_id) {
+  if (dep_type == crane::grpc::DependencyType::AFTER &&
+      status != crane::grpc::TaskStatus::Pending) {
+    // already satisfied
+    g_task_scheduler->AddDependencyEvent(dep_job_id, task_id, start_time);
+  } else {
+    dependents[dep_type].push_back(dep_job_id);
+  }
+}
+
+void TaskInCtld::TriggerDependencyEvents(
+    const crane::grpc::DependencyType& dep_type, absl::Time event_time) {
+  for (task_id_t dependent_id : dependents[dep_type]) {
+    g_task_scheduler->AddDependencyEvent(dependent_id, task_id, event_time);
+  }
+}
+
 void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   task_to_ctld = val;
 
@@ -1358,6 +1410,8 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
   exclusive = val.exclusive();
 
   SetHeld(val.hold());
+
+  SetDependency(val.dependencies());
 }
 
 void TaskInCtld::SetFieldsByRuntimeAttr(
@@ -1443,6 +1497,29 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
   }
 
   // Dynamic fields
+  if (!dependencies.deps.empty() ||
+      dependencies.ready_time != absl::InfinitePast()) {
+    auto* dep_status = task_info->mutable_dependency_status();
+    dep_status->set_is_or(dependencies.is_or);
+
+    for (const auto& [dep_job_id, dep_info] : dependencies.deps) {
+      const auto& [dep_type, delay_seconds] = dep_info;
+      auto* dep_cond = dep_status->add_pending();
+      dep_cond->set_job_id(dep_job_id);
+      dep_cond->set_type(dep_type);
+      dep_cond->set_delay_seconds(delay_seconds);
+    }
+
+    if (dependencies.ready_time == absl::InfiniteFuture()) {
+      dep_status->set_infinite_future(true);
+    } else if (dependencies.ready_time == absl::InfinitePast()) {
+      dep_status->set_infinite_past(true);
+    } else {
+      dep_status->mutable_ready_time()->set_seconds(
+          absl::ToUnixSeconds(dependencies.ready_time));
+    }
+  }
+
   task_info->set_held(held);
   task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                               executing_craned_ids.end());

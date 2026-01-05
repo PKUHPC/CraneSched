@@ -127,6 +127,11 @@ nodes个任务，或ntasks个任务，以较小者为准。默认值：1。
 :   **适用于：** `作业`, `作业步`  
 在执行开始之前将任务的工作目录设置为directory。路径可以是绝对路径或相对路径。
 
+**-d, --dependency=&lt;string&gt;**
+
+:   **适用于：** `作业`  
+作业依赖关系。格式：`<type>:<job_id>[+<delay>][:<job_id>][,<type>:<job_id>[:<job_id>]]` 或 `<type>:<job_id>[:<job_id>][?<type>:<job_id>[:<job_id>]]`。支持的类型：`after`、`afterok`、`afternotok`、`afterany`。**注意**：`<delay>` 必须使用带单位的时间格式（如 `10s`、`5m`、`2h`），不要使用 `HH:MM:SS` 格式，因为 `:` 是作业 ID 分隔符。详见 [作业依赖](../reference/job_dependency.md)。
+
 **--export=&lt;environment&gt;**
 
 :   **适用于：** `作业`, `作业步`  

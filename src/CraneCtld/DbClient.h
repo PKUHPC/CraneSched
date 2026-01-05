@@ -125,6 +125,11 @@ class MongodbClient {
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
+  // Fetch job status (state, exit_code, time_end, time_start)
+  std::unordered_map<task_id_t, std::tuple<crane::grpc::TaskStatus, uint32_t,
+                                           int64_t, int64_t>>
+  FetchJobStatus(const std::unordered_set<task_id_t>& job_ids);
+
   /* ----- Method of operating the step table ----------- */
   bool InsertRecoveredStep(
       crane::grpc::StepInEmbeddedDb const& step_in_embedded_db);
