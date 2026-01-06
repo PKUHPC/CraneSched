@@ -293,6 +293,11 @@ class MongodbClient {
     case EntityType::WCKEY:
       coll_name = m_wckey_collection_name_;
       break;
+    default:
+        CRANE_ERROR(
+            "UpdateEntityOneByFields does not support RESOURCE. Use UpdateEntityOne "
+            "instead.");
+        return false;
     }
 
     auto count =
