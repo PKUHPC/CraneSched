@@ -943,6 +943,9 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   case EntityType::WCKEY:
     coll = m_wckey_collection_name_;
     break;
+  default:
+    CRANE_ERROR("Invalid entity type {}.", static_cast<int>(type));
+    return false;
   }
   document filter;
   filter.append(kvp("name", name));
