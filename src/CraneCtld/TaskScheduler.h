@@ -783,7 +783,8 @@ class TaskScheduler {
       TaskInCtld* task);
 
   void JobModifyLuaCheck(const crane::grpc::ModifyTaskRequest& request,
-      crane::grpc::ModifyTaskReply* response, std::list<task_id_t>* task_ids);
+                         crane::grpc::ModifyTaskReply* response,
+                         std::list<task_id_t>* task_ids);
 
   CraneExpected<std::future<CraneExpected<task_id_t>>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);

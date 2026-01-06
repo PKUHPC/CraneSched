@@ -517,7 +517,8 @@ void LuaJobHandler::PushPartitionList_(
   for (const auto& partition : partition_info_reply.partition_info_list()) {
     auto iter = user->account_to_attrs_map.find(actual_account);
     if (iter == user->account_to_attrs_map.end()) continue;
-    if (!iter->second.allowed_partition_qos_map.contains(partition.name())) continue;
+    if (!iter->second.allowed_partition_qos_map.contains(partition.name()))
+      continue;
     if (!partition.allowed_accounts().empty() &&
         !std::ranges::contains(partition.allowed_accounts(), actual_account))
       continue;
