@@ -726,26 +726,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   if (g_config.JobSubmitLuaScript.empty()) {
     task_ids.assign(request->task_ids().begin(), request->task_ids().end());
   } else {
-    std::vector<std::pair<task_id_t, std::future<CraneRichError>>> futures;
-    futures.reserve(request->task_ids().size());
-
-    for (const auto task_id : request->task_ids()) {
-      auto fut = g_task_scheduler->JobModifyLuaCheck(task_id);
-      if (fut) futures.emplace_back(task_id, std::move(fut.value()));
-    }
-
-    for (auto& [task_id, fut] : futures) {
-      auto rich_err = fut.get();
-      if (rich_err.code() != CraneErrCode::SUCCESS) {
-        response->add_not_modified_tasks(task_id);
-        if (rich_err.description().empty())
-          response->add_not_modified_reasons(CraneErrStr(rich_err.code()));
-        else
-          response->add_not_modified_reasons(rich_err.description());
-      } else {
-        task_ids.emplace_back(task_id);
-      }
-    }
+    g_task_scheduler->JobModifyLuaCheck(*request, response, &task_ids);
   }
 
   CraneErrCode err;

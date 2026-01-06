@@ -1688,29 +1688,47 @@ std::optional<std::future<CraneRichError>> TaskScheduler::JobSubmitLuaCheck(
   });
 }
 
-std::optional<std::future<CraneRichError>> TaskScheduler::JobModifyLuaCheck(
-    task_id_t task_id) {
-  {
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
+void TaskScheduler::JobModifyLuaCheck(
+    const crane::grpc::ModifyTaskRequest& request,
+    crane::grpc::ModifyTaskReply* response, std::list<task_id_t>* task_ids) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  std::vector<std::pair<task_id_t, std::future<CraneRichError>>> futures;
+  futures.reserve(request.task_ids().size());
+  for (const auto task_id : request.task_ids()) {
     auto pd_iter = m_pending_task_map_.find(task_id);
-    if (pd_iter != m_pending_task_map_.end())
-      return g_lua_pool->ExecuteLuaScript([pd_iter]() {
+    if (pd_iter != m_pending_task_map_.end()) {
+      auto fut = g_lua_pool->ExecuteLuaScript([pd_iter]() {
         return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript,
                                         pd_iter->second.get());
       });
-  }
+      futures.emplace_back(task_id, std::move(fut));
+      continue;
+    }
 
-  {
-    LockGuard running_guard(&m_running_task_map_mtx_);
     auto rn_iter = m_running_task_map_.find(task_id);
-    if (rn_iter != m_running_task_map_.end())
-      return g_lua_pool->ExecuteLuaScript([rn_iter]() {
+    if (rn_iter != m_running_task_map_.end()) {
+      auto fut = g_lua_pool->ExecuteLuaScript([rn_iter]() {
         return LuaJobHandler::JobModify(g_config.JobSubmitLuaScript,
                                         rn_iter->second.get());
       });
+      futures.emplace_back(task_id, std::move(fut));
+    }
   }
 
-  return std::nullopt;
+  for (auto& [task_id, fut] : futures) {
+    auto rich_err = fut.get();
+    if (rich_err.code() != CraneErrCode::SUCCESS) {
+      response->add_not_modified_tasks(task_id);
+      if (rich_err.description().empty())
+        response->add_not_modified_reasons(CraneErrStr(rich_err.code()));
+      else
+        response->add_not_modified_reasons(rich_err.description());
+    } else {
+      task_ids->emplace_back(task_id);
+    }
+  }
 }
 
 CraneExpected<std::future<CraneExpected<task_id_t>>>

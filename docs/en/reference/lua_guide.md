@@ -136,58 +136,58 @@ Same as the return values of `crane_job_submit`.
 
 #### crane.jobs or job_ptr
 
-| Attribute Name      | Type           | Description                              |
-|---------------------|----------------|------------------------------------------|
-| type                | number         | Job type                                 |
-| task_id             | number         | Job ID                                   |
-| name                | string         | Job name                                 |
-| partition           | string         | Partition to which the job belongs       |
-| uid                 | number         | UID of the job owner                     |
-| time_limit          | number         | Time limit                               |
-| end_time            | number         | Job end time                             |
-| submit_time         | number         | Job submission time                     |
-| account             | string         | Account associated with the job          |
-| node_num            | number         | Number of nodes                          |
-| cmd_line            | string         | Submission command line                  |
-| cwd                 | string         | Job working directory                    |
-| username            | string         | Username who submitted the job           |
-| qos                 | string         | QoS associated with the job              |
-| req_res_view        | ResourceView   | Requested resource information           |
-| license_count       | table(map)     | License information                     |
-| req_nodes           | string         | Requested nodes                          |
-| exclude_nodes       | string         | Excluded nodes                           |
-| extra_attr          | string         | Extra attributes                         |
-| reservation         | string         | Reservation information                 |
-| held                | boolean        | Whether the job is held                  |
-| status              | number         | Job status                               |
-| exit_code           | number         | Job exit code                            |
-| priority            | number         | Job priority                             |
-| pending_reason      | string         | Reason for being pending                 |
-| craned_list         | string         | List of nodes allocated to the job       |
-| elapsed_time        | number         | Elapsed execution time                   |
-| execution_node      | string         | Job execution node                       |
-| exclusive           | boolean        | Whether the job runs in exclusive mode   |
-| alloc_res_view      | ResourceView   | Allocated (in-use) resource information |
-| env                 | table(map)     | Environment variables                   |
+| Attribute Name | Type           | Description                              |
+|----------------|----------------|------------------------------------------|
+| type           | number         | Job type                                 |
+| task_id        | number         | Job ID                                   |
+| name           | string         | Job name                                 |
+| partition      | string         | Partition to which the job belongs       |
+| uid            | number         | UID of the job owner                     |
+| time_limit     | number         | Time limit                               |
+| end_time       | number         | Job end time                             |
+| submit_time    | number         | Job submission time                     |
+| account        | string         | Account associated with the job          |
+| node_num       | number         | Number of nodes                          |
+| cmd_line       | string         | Submission command line                  |
+| cwd            | string         | Job working directory                    |
+| username       | string         | Username who submitted the job           |
+| qos            | string         | QoS associated with the job              |
+| req_res_view   | ResourceView   | Requested resource information           |
+| licenses_count | table(map)     | License information                     |
+| req_nodes      | string         | Requested nodes                          |
+| exclude_nodes  | string         | Excluded nodes                           |
+| extra_attr     | string         | Extra attributes                         |
+| reservation    | string         | Reservation information                 |
+| held           | boolean        | Whether the job is held                  |
+| status         | number         | Job status                               |
+| exit_code      | number         | Job exit code                            |
+| priority       | number         | Job priority                             |
+| pending_reason | string         | Reason for being pending                 |
+| craned_list    | string         | List of nodes allocated to the job       |
+| elapsed_time   | number         | Elapsed execution time                   |
+| execution_node | string         | Job execution node                       |
+| exclusive      | boolean        | Whether the job runs in exclusive mode   |
+| alloc_res_view | ResourceView   | Allocated (in-use) resource information |
+| env            | table(map)     | Environment variables                   |
 
 ---
 
 #### crane.reservations
 
-| Attribute Name        | Type                 | Description                               |
-|-----------------------|----------------------|-------------------------------------------|
-| reservation_name      | string               | Reservation name                          |
-| start_time            | number               | Reservation start time                   |
-| duration              | number               | Reservation duration                     |
-| partiton              | string               | Reservation partition                    |
-| craned_regex          | string               | Reserved nodes (regex)                   |
-| res_total             | ResourceView         | Total reserved resource information      |
-| res_avail             | ResourceView         | Available reserved resource information  |
-| res_alloc             | ResourceView         | Allocated reserved resource information  |
-| allowed_accounts      | table(string list)   | Accounts allowed for the reservation     |
-| denied_accounts       | table(string list)   | Accounts denied for the reservation      |
-| allowed_users         | table(string list)   | Users allowed for the reservation        |
-| denied_users          | table(string list)   | Users denied for the reservation         |
+| Attribute Name   | Type                 | Description                               |
+|------------------|----------------------|-------------------------------------------|
+| reservation_name | string               | Reservation name                          |
+| start_time       | number               | Reservation start time                   |
+| duration         | number               | Reservation duration                     |
+| partition        | string               | Reservation partition                    |
+| craned_regex     | string               | Reserved nodes (regex)                   |
+| res_total        | ResourceView         | Total reserved resource information      |
+| res_avail        | ResourceView         | Available reserved resource information  |
+| res_alloc        | ResourceView         | Allocated reserved resource information  |
+| allowed_accounts | table(string list)   | Accounts allowed for the reservation     |
+| denied_accounts  | table(string list)   | Accounts denied for the reservation      |
+| allowed_users    | table(string list)   | Users allowed for the reservation        |
+| denied_users     | table(string list)   | Users denied for the reservation         |
 
 
 ## Lua Script Configuration
@@ -339,194 +339,6 @@ end
 
 function crane_job_modify(job_desc, job_rec, part_list, uid)
     crane.log_info("==== crane_job_modify ====")
-    return crane.SUCCESS
-end
-
--- meta (batch_meta / interactive_meta)
-if job_desc.bash_meta then
-    crane.log_info("bash_meta.sh_script: %s", job_desc.bash_meta.sh_script or "")
-    crane.log_info("bash_meta.output_file_pattern: %s", job_desc.bash_meta.output_file_pattern or "")
-    crane.log_info("bash_meta.error_file_pattern: %s", job_desc.bash_meta.error_file_pattern or "")
-    crane.log_info("bash_meta.interpreter: %s", job_desc.bash_meta.interpreter or "")
-end
-if job_desc.interactive_meta then
-    crane.log_info(
-        "interactive_meta.interactive_type: %s",
-        tostring(job_desc.interactive_meta.interactive_type or -1)
-    )
-end
-
--- requested_node_res_view
-crane.log_info("requested_node_res_view: %s", tostring(job_desc.requested_node_res_view))
-
--- Partition list (part_list)
-for pname, part in pairs(part_list) do
-    crane.log_info(
-        "Partition: %s, Total nodes: %s, Alive nodes: %s",
-        part.name,
-        tostring(part.total_nodes),
-        tostring(part.alive_nodes)
-    )
-    crane.log_debug(
-        "Partition state: %s, Default mem/cpu: %s, Max mem/cpu: %s",
-        tostring(part.state),
-        tostring(part.default_mem_per_cpu),
-        tostring(part.max_mem_per_cpu)
-    )
-    if part.allowed_accounts then
-        for _, acc in ipairs(part.allowed_accounts) do
-            crane.log_debug("Allowed account: %s", acc)
-        end
-    end
-    if part.denied_accounts then
-        for _, acc in ipairs(part.denied_accounts) do
-            crane.log_debug("Denied account: %s", acc)
-        end
-    end
-    crane.log_debug("nodelist: %s", tostring(part.nodelist))
-    crane.log_debug("res_total: %s", tostring(part.res_total))
-    crane.log_debug("res_avail: %s", tostring(part.res_avail))
-    crane.log_debug("res_in_use: %s", tostring(part.res_in_use))
-end
-
--- Global jobs
-if crane.jobs then
-    for job_id, job in crane.jobs:iter() do
-        crane.log_debug(
-            "Existing job: %s, User: %s, Status: %s, Priority: %s",
-            job.job_name,
-            job.username,
-            tostring(job.status),
-            tostring(job.priority)
-        )
-        crane.log_debug(
-            "Job ID: %s, Partition: %s",
-            tostring(job.job_id),
-            job.partition
-        )
-        crane.log_debug(
-            "time_limit: %s, start_time: %s, end_time: %s, submit_time: %s",
-            tostring(job.time_limit),
-            tostring(job.start_time),
-            tostring(job.end_time),
-            tostring(job.submit_time)
-        )
-        crane.log_debug(
-            "cmd_line: %s, cwd: %s, qos: %s, extra_attr: %s, reservation: %s, container: %s",
-            job.cmd_line,
-            job.cwd,
-            job.qos,
-            job.extra_attr,
-            job.reservation,
-            job.container
-        )
-        crane.log_debug(
-            "held: %s, exclusive: %s",
-            tostring(job.held),
-            tostring(job.exclusive)
-        )
-        crane.log_debug(
-            "req_nodes: %s, exclude_nodes: %s, execution_node: %s",
-            tostring(job.req_nodes),
-            tostring(job.exclude_nodes),
-            tostring(job.execution_node)
-        )
-        crane.log_debug("exit_code: %s", tostring(job.exit_code))
-    end
-end
-
--- Global reservations
-if crane.reservations then
-    for resv_name, resv in crane.reservations:iter() do
-        crane.log_debug(
-            "Reservation: %s, Partition: %s, Start time: %s, Duration: %s",
-            resv.reservation_name,
-            resv.partition,
-            tostring(resv.start_time),
-            tostring(resv.duration)
-        )
-        if resv.allowed_accounts then
-            for _, acc in ipairs(resv.allowed_accounts) do
-                crane.log_debug("Reservation allowed account: %s", acc)
-            end
-        end
-        if resv.denied_accounts then
-            for _, acc in ipairs(resv.denied_accounts) do
-                crane.log_debug("Reservation denied account: %s", acc)
-            end
-        end
-        if resv.allowed_users then
-            for _, user in ipairs(resv.allowed_users) do
-                crane.log_debug("Reservation allowed user: %s", user)
-            end
-        end
-        if resv.denied_users then
-            for _, user in ipairs(resv.denied_users) do
-                crane.log_debug("Reservation denied user: %s", user)
-            end
-        end
-        crane.log_debug("craned_regex: %s", tostring(resv.craned_regex))
-        crane.log_debug("res_total: %s", tostring(resv.res_total))
-        crane.log_debug("res_avail: %s", tostring(resv.res_avail))
-        crane.log_debug("res_alloc: %s", tostring(resv.res_alloc))
-    end
-end
-
--- Constants
-crane.log_debug("CraneErrCode.ERROR: %s", tostring(crane.ERROR))
-crane.log_debug("CraneErrCode.SUCCESS: %s", tostring(crane.SUCCESS))
-crane.log_debug(
-    "TaskStatus.Pending: %s, Running: %s, Completed: %s",
-    tostring(crane.Pending),
-    tostring(crane.Running),
-    tostring(crane.Completed)
-)
-crane.log_debug(
-    "TaskType.Batch: %s, Interactive: %s",
-    tostring(crane.Batch),
-    tostring(crane.Interactive)
-)
-
--- Field helper functions (read-only demo)
-local mt = getmetatable(job_desc)
-local env_val = _get_job_env_field_name(mt._job_desc, "PATH")
-crane.log_debug("_get_job_env_field_name PATH: %s", env_val or "NIL")
-local req_val = _get_job_req_field_name(mt._job_desc, "name")
-crane.log_debug("_get_job_req_field_name name: %s", req_val or "NIL")
-_set_job_env_field(job_desc, "MYVAR", "hello_lua")
-local myvar_val = _get_job_env_field_name(mt._job_desc, "MYVAR")
-crane.log_info("Verify MYVAR: %s", myvar_val or "NIL")
-_set_job_req_field(job_desc, "name", "new_job_name")
-local name_val2 = _get_job_req_field_name(mt._job_desc, "name")
-crane.log_info("Verify name: %s", name_val2 or "NIL")
-
--- Return success
-return crane.SUCCESS
-end
-
-function crane_job_modify(job_desc, job_rec, part_list, uid)
-    crane.log_info(
-        "Modify job (read-only access): %s, Original partition: %s",
-        job_desc.name,
-        job_desc.partition
-    )
-    -- Access job_rec fields (read-only)
-    if job_rec then
-        crane.log_info(
-            "Original job status: %s, Priority: %s, User: %s",
-            tostring(job_rec.status),
-            tostring(job_rec.priority),
-            job_rec.username
-        )
-        crane.log_info(
-            "Original job ID: %s, Partition: %s",
-            tostring(job_rec.job_id),
-            job_rec.partition
-        )
-    end
-
-    -- CraneErrCode demo
-    crane.log_debug("Modify job, error code: %s", tostring(crane.ERROR))
 
     return crane.SUCCESS
 end

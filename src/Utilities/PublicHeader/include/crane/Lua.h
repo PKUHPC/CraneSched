@@ -61,7 +61,7 @@ class LuaPool {
 
   bool Init() {
 #ifndef HAVE_LUA
-    CRANE_ERROR("Lua is not enable");
+    CRANE_ERROR("Lua is not enabled");
     return false;
 #endif
     m_thread_pool_ = std::make_unique<BS::thread_pool>(
@@ -76,11 +76,10 @@ class LuaPool {
     m_thread_pool_->detach_task([lua_script, promise]() {
       CraneRichError result;
       auto lua_env = std::make_unique<crane::LuaEnvironment>();
-      if (!lua_env->Init(lua_script))
+      if (!lua_env->Init(lua_script)) {
         result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
                                "Failed to init lua environment");
-
-      if (!lua_env->LoadLuaScript({}))
+      } else if (!lua_env->LoadLuaScript({}))
         result = FormatRichErr(CraneErrCode::ERR_LUA_FAILED,
                                "Failed to load lua script");
 

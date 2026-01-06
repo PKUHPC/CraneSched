@@ -140,7 +140,7 @@ cranectld 当前保存的被修改作业的数据结构。
 | username       | string       | 作业提交用户名  |
 | qos            | string       | 作业所属qos  |
 | req_res_view   | ResourceView | 需求资源信息   |
-| license_count  | table(map)   | 许可证信息    |
+| licenses_count | table(map)   | 许可证信息    |
 | req_nodes      | string       | 需求节点信息   |
 | exclude_nodes  | string       | 排除节点     |
 | extra_attr     | string       | 额外的属性    |
@@ -164,7 +164,7 @@ cranectld 当前保存的被修改作业的数据结构。
 | reservation_name | string             | 预约名称 |
 | start_time       | number             | 预约开始时间 |
 | duration         | number             | 预约时长 |
-| partiton         | string             | 预约分区 |
+| partition        | string             | 预约分区 |
 | craned_regex     | string             | 预约节点 |
 | res_total        | ResourceView       | 预约资源信息 |
 | res_avail        | ResourceView       | 预约可用资源信息 |
