@@ -237,6 +237,11 @@ class MongodbClient {
           "UpdateEntityOne does not support WCKEY. Use UpdateEntityOneByFields "
           "instead.");
       return false;
+      case EntityType::RESOURCE:
+      CRANE_ERROR(
+          "UpdateEntityOne does not support RESOURCE. Use UpdateEntityOneByFields "
+          "instead.");
+      return false;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =

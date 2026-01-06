@@ -105,7 +105,7 @@ class LicensesManager {
   void UpdateLicense_(const LicenseResourceInDb &license_resource,
                       uint32_t cluster_allowed, License *license);
 
-  absl::flat_hash_map<std::pair<LicenseId, std::string>,
+  absl::flat_hash_map<std::pair<LicenseId, std::string>, /* license_id, server */
                       std::unique_ptr<LicenseResourceInDb>>
       m_license_resource_map_;
 

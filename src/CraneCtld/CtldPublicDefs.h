@@ -1306,7 +1306,7 @@ struct LicenseResourceInDb {
       cluster_resources;
   uint32_t count{0};
   uint32_t flags;
-  int64_t last_update;
+  absl::Time last_update;
   std::string description;
 };
 
@@ -1316,10 +1316,9 @@ struct License {
   uint32_t used;        /* Number of license in use */
   uint32_t reserved;
   bool remote;
-  std::string server;
   uint32_t last_consumed;
   uint32_t last_deficit;
-  int64_t last_update;
+  absl::Time last_update;
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
