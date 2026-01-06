@@ -1836,8 +1836,7 @@ void MongodbClient::ViewToLicenseResource_(
     resource->count = ViewValueOr_(resource_view["count"], 0);
     resource->flags = ViewValueOr_(resource_view["flags"], 0);
     resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], 0);
-    resource->last_update =
-        ViewValueOr_(resource_view["last_update"], int64_t(0));
+    resource->last_update =absl::FromUnixSeconds(ViewValueOr_(resource_view["last_update"], int64_t(0)));
     resource->description =
         ViewValueOr_(resource_view["description"], std::string{});
 
@@ -1872,7 +1871,7 @@ MongodbClient::document MongodbClient::LicenseResourceToDocument_(
              resource.cluster_resources,
              resource.count,
              static_cast<int32_t>(resource.flags),
-             resource.last_update,
+             absl::ToUnixSeconds(resource.last_update),
              resource.description};
 
   return DocumentConstructor_(fields, values);

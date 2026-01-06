@@ -40,7 +40,6 @@ int LicensesManager::Init(
                     .used = 0,
                     .reserved = 0,
                     .remote = true,
-                    .server = resource.server,
                     .last_consumed = resource.last_consumed,
                     .last_deficit = 0,
                     .last_update = resource.last_update};
@@ -107,7 +106,7 @@ void LicensesManager::GetLicensesInfo(
       lic_info->set_remote(lic->remote);
       lic_info->set_lastconsumed(lic->last_consumed);
       lic_info->set_lastdeficit(lic->last_deficit);
-      lic_info->set_lastupdate(lic->last_update);
+      lic_info->set_lastupdate(absl::ToUnixSeconds(lic->last_update));
     }
   } else {
     for (auto& license_name : request->license_name_list()) {
@@ -124,7 +123,7 @@ void LicensesManager::GetLicensesInfo(
         lic_info->set_remote(lic->remote);
         lic_info->set_lastconsumed(lic->last_consumed);
         lic_info->set_lastdeficit(lic->last_deficit);
-        lic_info->set_lastupdate(lic->last_update);
+        lic_info->set_lastupdate(absl::ToUnixSeconds(lic->last_update));
       }
     }
   }
@@ -408,7 +407,6 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
                   .used = 0,
                   .reserved = 0,
                   .remote = true,
-                  .server = new_lic_resource.server,
                   .last_consumed = new_lic_resource.last_consumed,
                   .last_deficit = 0,
                   .last_update = new_lic_resource.last_update};
@@ -468,7 +466,6 @@ CraneExpectedRich<void> LicensesManager::ModifyLicenseResource(
                     .used = 0,
                     .reserved = 0,
                     .remote = true,
-                    .server = res_lic_resource.server,
                     .last_consumed = res_lic_resource.last_consumed,
                     .last_deficit = 0,
                     .last_update = res_lic_resource.last_update};
@@ -699,7 +696,7 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     }
   }
 
-  res_resource->last_update = absl::ToUnixMillis(absl::Now());
+  res_resource->last_update = absl::Now();
 
   uint32_t allocated = 0;
   if (res_resource->flags & crane::grpc::LicenseResource_Flag_Absolute)
