@@ -375,7 +375,10 @@ void SetCurrentThreadName(const std::string &name) {
     return;
   }
 
-  pthread_setname_np(pthread_self(), name.c_str());
+  auto err = pthread_setname_np(pthread_self(), name.c_str());
+  if (err != 0) {
+    CRANE_ERROR("Failed to set thread name: {}", std::strerror(err));
+  }
 }
 
 bool ConvertStringToInt64(const std::string &s, int64_t *val) {

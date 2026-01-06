@@ -947,8 +947,9 @@ void GlobalVariableInit() {
   PasswordEntry::InitializeEntrySize();
 
   // It is always ok to create thread pool first.
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+  g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency(),
+      [] { util::SetCurrentThreadName("BsThreadPool"); });
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 
@@ -1081,8 +1082,6 @@ void StartServer() {
 
   GlobalVariableInit();
 
-  // Set FD_CLOEXEC on stdin, stdout, stderr
-  util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
   g_ctld_client->StartGrpcCtldConnection();

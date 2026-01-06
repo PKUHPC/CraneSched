@@ -181,6 +181,12 @@ void CloseFdFrom(int fd_begin) {
   for (int i = fd_begin; i < fd_max; i++) close(i);
 }
 
+void CloseFdFromExcept(int fd_begin, const std::set<int>& skip_fds) {
+  int fd_max = GetFdOpenMax();
+  for (int i = fd_begin; i < fd_max; i++)
+    if (!skip_fds.contains(i)) close(i);
+}
+
 void SetCloseOnExecOnFdRange(int fd_begin, int fd_end) {
   int fd_max;
   int flag;
