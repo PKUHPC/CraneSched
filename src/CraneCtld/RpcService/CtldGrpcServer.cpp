@@ -333,7 +333,6 @@ grpc::Status CtldForInternalServiceImpl::CforedStream(
           if (result) {
             auto submit_result =
                 g_task_scheduler->SubmitTaskToScheduler(std::move(task));
-            std::expected<std::pair<job_id_t, step_id_t>, std::string> result;
             if (submit_result.has_value()) {
               CraneExpected<task_id_t> job_result = submit_result.value().get();
               if (job_result.has_value()) {

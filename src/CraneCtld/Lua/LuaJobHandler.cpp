@@ -223,8 +223,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     "cpus_per_task", &TaskInCtld::cpus_per_task,
     "included_nodes", sol::property(
           [](const TaskInCtld& t) {
-            return std::vector<std::string>(t.included_nodes.begin(),
-                                            t.included_nodes.end());
+            return t.included_nodes | std::ranges::to<std::vector>();
           },
           [](TaskInCtld& t, const std::vector<std::string>& nodes) {
             t.included_nodes.clear();
@@ -232,8 +231,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
           }),
       "excluded_nodes", sol::property(
           [](const TaskInCtld& t) {
-            return std::vector<std::string>(t.excluded_nodes.begin(),
-                                            t.excluded_nodes.end());
+            return t.excluded_nodes | std::ranges::to<std::vector>();
           },
           [](TaskInCtld& t, const std::vector<std::string>& nodes) {
             t.excluded_nodes.clear();
@@ -340,10 +338,10 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
             return tbl;
     }),
     "req_nodes", sol::property([](const TaskInfo& t) {
-      return std::vector<std::string>(t.req_nodes().begin(), t.req_nodes().end());
+      return t.req_nodes() | std::ranges::to<std::vector>();
     }),
     "exclude_nodes", sol::property([](const TaskInfo& t) {
-      return std::vector<std::string>(t.exclude_nodes().begin(), t.exclude_nodes().end());
+      return t.exclude_nodes() | std::ranges::to<std::vector>();
     }),
     "extra_attr", sol::property([](const TaskInfo& t) {
       return t.extra_attr();
@@ -379,7 +377,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
       return google::protobuf::util::TimeUtil::DurationToSeconds(t.elapsed_time());
     }),
     "execution_node", sol::property([](const TaskInfo& t) {
-      return std::vector<std::string>(t.execution_node().begin(), t.execution_node().end());
+      return t.execution_node() | std::ranges::to<std::vector>();
     }),
     "exclusive", sol::property([](const TaskInfo& t) {
       return t.exclusive();
@@ -466,19 +464,17 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     }),
     "allowed_accounts", sol::property(
       [](const ReservationInfo& r) {
-        return std::vector<std::string>(r.allowed_accounts().begin(),
-          r.allowed_accounts().end());
+        return r.allowed_accounts() | std::ranges::to<std::vector>();
     }),
     "denied_accounts", sol::property(
       [](const ReservationInfo& r) {
-        return std::vector<std::string>(r.denied_accounts().begin(),
-          r.denied_accounts().end());
+        return r.denied_accounts() | std::ranges::to<std::vector>();
       }),
       "allowed_users", sol::property([](const ReservationInfo& r) {
-        return std::vector<std::string>(r.allowed_users().begin(), r.allowed_users().end());
+        return r.allowed_users() | std::ranges::to<std::vector>();
       }),
       "denied_users", sol::property([](const ReservationInfo& r) {
-        return std::vector<std::string>(r.denied_users().begin(), r.denied_users().end());
+        return r.denied_users() | std::ranges::to<std::vector>();
     })
   );
 
