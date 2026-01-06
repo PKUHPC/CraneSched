@@ -237,9 +237,10 @@ class MongodbClient {
           "UpdateEntityOne does not support WCKEY. Use UpdateEntityOneByFields "
           "instead.");
       return false;
-      case EntityType::RESOURCE:
+    case EntityType::RESOURCE:
       CRANE_ERROR(
-          "UpdateEntityOne does not support RESOURCE. Use UpdateEntityOneByFields "
+          "UpdateEntityOne does not support RESOURCE. Use "
+          "UpdateEntityOneByFields "
           "instead.");
       return false;
     }
@@ -294,10 +295,11 @@ class MongodbClient {
       coll_name = m_wckey_collection_name_;
       break;
     default:
-        CRANE_ERROR(
-            "UpdateEntityOneByFields does not support RESOURCE. Use UpdateEntityOne "
-            "instead.");
-        return false;
+      CRANE_ERROR(
+          "UpdateEntityOneByFields does not support RESOURCE. Use "
+          "UpdateEntityOne "
+          "instead.");
+      return false;
     }
 
     auto count =
