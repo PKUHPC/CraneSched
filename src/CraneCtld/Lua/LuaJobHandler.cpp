@@ -156,13 +156,15 @@ void LuaJobHandler::RegisterGlobalFunctions_(
   lua_env.GetCraneTable().set_function(
       "get_job_env_field",
       [](TaskInCtld& job, const std::string& env_name) -> std::string {
-        return job.env[env_name];
+        auto iter = job.env.find(env_name);
+        if (iter == job.env.end()) return std::string{""};
+        return iter->second;
       });
 
   lua_env.GetCraneTable().set_function(
       "set_job_env_field",
       [](const std::string& name, const std::string& value, TaskInCtld* job) {
-        job->env.emplace(name, value);
+        job->env.insert_or_assign(name, value);
       });
 
   lua_env.GetCraneTable().set_function(
@@ -277,7 +279,7 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
           [](TaskInCtld& t, const sol::table& tbl) {
             t.licenses_count.clear();
             for (const auto& [name, value] : tbl) {
-              t.licenses_count.emplace(name.as<std::string>(),
+              t.licenses_count.insert_or_assign(name.as<std::string>(),
                                        value.as<uint32_t>());
             }
         }));
@@ -420,13 +422,11 @@ void LuaJobHandler::RegisterTypes_(const crane::LuaEnvironment& lua_env) {
     }),
     "allowed_accounts", sol::property(
       [](const PartitionInfo& p) {
-        return std::vector<std::string>(p.allowed_accounts().begin(),
-          p.allowed_accounts().end());
+        return p.allowed_accounts() | std::ranges::to<std::vector>();
       }),
     "denied_accounts", sol::property(
       [](const PartitionInfo& p) {
-        return std::vector<std::string>(p.denied_accounts().begin(),
-          p.denied_accounts().end());
+        return p.denied_accounts() | std::ranges::to<std::vector>();
       }),
     "default_mem_per_cpu", sol::property([](const PartitionInfo& p) {
       return p.default_mem_per_cpu();
@@ -506,7 +506,7 @@ void LuaJobHandler::PushPartitionList_(
     std::vector<crane::grpc::PartitionInfo>* part_list) {
   auto user = g_account_manager->GetExistedUserInfo(user_name);
   if (!user) {
-    CRANE_ERROR("username is null");
+    CRANE_ERROR("user {} is null", user_name);
     return;
   }
   std::string actual_account = account;
@@ -515,10 +515,10 @@ void LuaJobHandler::PushPartitionList_(
   auto partition_info_reply = g_meta_container->QueryAllPartitionInfo();
   part_list->reserve(partition_info_reply.partition_info_list_size());
   for (const auto& partition : partition_info_reply.partition_info_list()) {
-    if (!user->account_to_attrs_map.at(actual_account)
-             .allowed_partition_qos_map.contains(partition.name()))
-      continue;
-    if (partition.allowed_accounts_size() > 0 &&
+    auto iter = user->account_to_attrs_map.find(actual_account);
+    if (iter == user->account_to_attrs_map.end()) continue;
+    if (!iter->second.allowed_partition_qos_map.contains(partition.name())) continue;
+    if (!partition.allowed_accounts().empty() &&
         !std::ranges::contains(partition.allowed_accounts(), actual_account))
       continue;
 
