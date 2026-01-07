@@ -233,7 +233,6 @@ class AccountManager {
       Account* account, const std::unordered_set<std::string>& partition_list);
   std::vector<CraneExpectedRich<void>> CheckAddAccountAllowedQosNoLock_(
       Account* account, const std::unordered_set<std::string>& qos_list);
-  CraneExpected<void> CheckSetAccountDescriptionNoLock_(const Account* account);
   CraneExpectedRich<void> CheckSetAccountAllowedPartitionNoLock_(
       const Account& account,
       const std::unordered_set<std::string>& partition_list, bool force);

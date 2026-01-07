@@ -677,10 +677,6 @@ AccountManager::CheckModifyAccountOperations(
         continue;
       }
       SetAccountAllowedQos_(account, qos_list, modify_record);
-      if (!rich_result) {
-        rich_error_list.emplace_back(rich_result);
-        continue;
-      }
       *log += fmt::format("Set: qos_list: {}\n", fmt::join(qos_list, ","));
     } else {
       std::unordered_set<std::string> value_list(operation.value_list().begin(),
@@ -731,18 +727,12 @@ AccountManager::CheckModifyAccountOperations(
           std::unreachable();
         }
         }
+        break;
       }
       case crane::grpc::OperationType::Overwrite: {
         switch (operation.modify_field()) {
         case crane::grpc::ModifyField::Description: {
           auto val = operation.value_list()[0];
-          auto result = CheckSetAccountDescriptionNoLock_(account);
-          if (!result) {
-            auto rich_error =
-                std::unexpected{FormatRichErr(result.error(), val)};
-            rich_error_list.emplace_back(rich_error);
-            continue;
-          }
           account->description = val;
           *log += fmt::format("description: {}\n", val);
           break;
@@ -850,8 +840,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
 
   const Account* account = GetExistedAccountInfoNoLock_(account_name);
   if (!account) {
-    rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "")});
+    rich_error_list.emplace_back(std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account_name)});
     return rich_error_list;
   }
 
@@ -859,11 +849,13 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   std::string log = "";
   std::vector<ModifyRecord> modify_record;
   // check operations validity
+  CRANE_DEBUG("beforecheck: {}", fmt::join(res_account.allowed_partition, ","));
   auto check_result = CheckModifyAccountOperations(&res_account, operations,
                                                    &log, &modify_record, force);
   if (!check_result.empty()) {
     return check_result;
   }
+  CRANE_DEBUG("aftercheck: {}", fmt::join(res_account.allowed_partition, ","));
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -903,7 +895,8 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   }
   m_account_map_[account_name] =
       std::make_unique<Account>(std::move(res_account));
-
+  CRANE_DEBUG("query_account: {}",
+              fmt::join(m_account_map_[account_name]->allowed_partition, ","));
   return rich_error_list;
 }
 
@@ -1890,6 +1883,7 @@ AccountManager::CheckAddAccountAllowedPartitionNoLock_(
     if (!result) {
       rich_error_list.emplace_back(
           std::unexpected{FormatRichErr(result.error(), partition)});
+      continue;
     }
     if (ranges::contains(account->allowed_partition, partition)) {
       rich_error_list.emplace_back(std::unexpected{FormatRichErr(
@@ -1920,13 +1914,6 @@ AccountManager::CheckAddAccountAllowedQosNoLock_(
   }
 
   return rich_error_list;
-}
-
-CraneExpected<void> AccountManager::CheckSetAccountDescriptionNoLock_(
-    const Account* account) {
-  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
-
-  return {};
 }
 
 CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedPartitionNoLock_(
