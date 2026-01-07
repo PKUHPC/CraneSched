@@ -1070,7 +1070,7 @@ void CtldClient::HealthCheck_() {
 }
 
 bool CtldClient::CheckNodeState_() {
-  if (g_config.HealthCheck.NodeState == Config::HealthCheckConfig::ANY)
+  if (g_config.HealthCheck.NodeState & HealthCheckNodeStateEnum::ANY)
     return true;
 
   grpc::ClientContext context;
@@ -1083,19 +1083,22 @@ bool CtldClient::CheckNodeState_() {
     return false;
   }
 
-  switch (g_config.HealthCheck.NodeState) {
-  case Config::HealthCheckConfig::NONDRAINED_IDLE:
-    return !reply.drain() &&
-           reply.state() == crane::grpc::CranedResourceState::CRANE_IDLE;
-  case Config::HealthCheckConfig::IDLE:
-    return reply.state() == crane::grpc::CranedResourceState::CRANE_IDLE;
-  case Config::HealthCheckConfig::MIXED:
-    return reply.state() == crane::grpc::CranedResourceState::CRANE_MIX;
-  case Config::HealthCheckConfig::ALLOC:
-    return reply.state() == crane::grpc::CranedResourceState::CRANE_ALLOC;
-  case Config::HealthCheckConfig::ANY:
-    break;
-  }
+  using crane::grpc::CranedResourceState;
+  if ((g_config.HealthCheck.NodeState & HealthCheckNodeStateEnum::IDLE) &&
+      reply.state() == CranedResourceState::CRANE_IDLE)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState & HealthCheckNodeStateEnum::ALLOC) &&
+      reply.state() == CranedResourceState::CRANE_ALLOC)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState &  HealthCheckNodeStateEnum::MIXED) &&
+      reply.state() == CranedResourceState::CRANE_MIX)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState & HealthCheckNodeStateEnum::NONDRAINED_IDLE) &&
+      !reply.drain() && reply.state() ==  CranedResourceState::CRANE_IDLE)
+    return true;
 
   return false;
 }

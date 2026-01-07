@@ -426,14 +426,24 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
         g_config.HealthCheck.Interval = YamlValueOr<uint64_t>(health_check_config["Interval"], 0L);
-        g_config.HealthCheck.NodeState = absl::StripAsciiWhitespace(
-          absl::AsciiStrToLower(YamlValueOr(health_check_config["NodeState"], "any")));
-        if (g_config.HealthCheck.NodeState != "any" &&
-            g_config.HealthCheck.NodeState != "idle" &&
-            g_config.HealthCheck.NodeState != "mixed" && g_config.HealthCheck.NodeState != "alloc") {
-          CRANE_WARN("HealthCheckNodeState is not valid, reset to any");
-          g_config.HealthCheck.NodeState = "any";
-            }
+        std::vector<std::string> node_states = absl::StrSplit(absl::StripAsciiWhitespace(
+          absl::AsciiStrToLower(YamlValueOr(health_check_config["NodeState"], "any"))), ",");
+        for (const auto& state : node_states) {
+          if (state == "any")
+            g_config.HealthCheck.NodeState |=
+                Craned::HealthCheckNodeStateEnum::ANY;
+          else if (state == "idle")
+            g_config.HealthCheck.NodeState |= Craned::HealthCheckNodeStateEnum::IDLE;
+          else if (state == "alloc")
+            g_config.HealthCheck.NodeState |= Craned::HealthCheckNodeStateEnum::ALLOC;
+          else if (state == "mixed")
+            g_config.HealthCheck.NodeState |= Craned::HealthCheckNodeStateEnum::MIXED;
+          else if (state == "nondrained_idle")
+            g_config.HealthCheck.NodeState |= Craned::HealthCheckNodeStateEnum::NONDRAINED_IDLE;
+          else if (state == "start_only")
+            g_config.HealthCheck.NodeState |= Craned::HealthCheckNodeStateEnum::START_ONLY;
+        }
+
         g_config.HealthCheck.Cycle = YamlValueOr<bool>(health_check_config["Cycle"], false);
       }
 

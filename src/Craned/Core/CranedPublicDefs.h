@@ -120,10 +120,9 @@ struct Config {
   ContainerConfig Container;
 
   struct HealthCheckConfig {
-    enum NodeStateEnum { IDLE, ALLOC, MIXED, ANY, NONDRAINED_IDLE };
     std::string Program;
     uint64_t Interval{0};
-    NodeStateEnum NodeState;
+    uint32_t NodeState;
     bool Cycle;
   };
   HealthCheckConfig HealthCheck;
@@ -201,6 +200,17 @@ struct RunTimeStatus {
 };
 
 inline RunTimeStatus g_runtime_status{};
+
+
+enum HealthCheckNodeStateEnum : std::uint8_t {
+  ANY = 0,
+  IDLE = 1,
+  ALLOC = 2,
+  MIXED = 4,
+  NONDRAINED_IDLE = 8,
+  START_ONLY = 16
+};
+
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
