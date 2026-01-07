@@ -5,7 +5,7 @@
 View real-time task status:
 
 ```bash
-$ ceff <job_id[,job_id,...]>
+$   ceff <job_id[,job_id,...]>
 ```
 
 **ceff Output Example**
