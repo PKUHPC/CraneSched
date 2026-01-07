@@ -228,7 +228,7 @@ cacctmgr update resource name=${LICENSE} server=${SERVER} set lastconsumed=${con
 ```
 
 When `cacctmgr` updates `LastConsumed`, the new value is automatically pushed to the Crane controller. 
-The controller uses this value to compute the `LastDeficit`
+The controller uses this value to compute the `LastDeficit` 
 the number of licenses “missing” from the cluster’s perspective that must be reserved.
 
 For example, suppose a cluster is allocated 80 out of 100 available foobar licenses:

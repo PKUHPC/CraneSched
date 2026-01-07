@@ -70,8 +70,8 @@ int LicensesManager::Init(
                             lic.last_deficit);
       license_info.set_used(lic.used);
       license_info.set_reserved(lic.reserved);
-      license_info.set_lastdeficit(lic.last_deficit);
-      license_info.set_lastconsumed(lic.last_consumed);
+      license_info.set_last_deficit(lic.last_deficit);
+      license_info.set_last_consumed(lic.last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -104,9 +104,9 @@ void LicensesManager::GetLicensesInfo(
                          lic->last_deficit);
       lic_info->set_reserved(lic->reserved);
       lic_info->set_remote(lic->remote);
-      lic_info->set_lastconsumed(lic->last_consumed);
-      lic_info->set_lastdeficit(lic->last_deficit);
-      lic_info->set_lastupdate(absl::ToUnixSeconds(lic->last_update));
+      lic_info->set_last_consumed(lic->last_consumed);
+      lic_info->set_last_deficit(lic->last_deficit);
+      lic_info->set_last_update(absl::ToUnixSeconds(lic->last_update));
     }
   } else {
     for (auto& license_name : request->license_name_list()) {
@@ -121,9 +121,9 @@ void LicensesManager::GetLicensesInfo(
                            lic->last_deficit);
         lic_info->set_reserved(lic->reserved);
         lic_info->set_remote(lic->remote);
-        lic_info->set_lastconsumed(lic->last_consumed);
-        lic_info->set_lastdeficit(lic->last_deficit);
-        lic_info->set_lastupdate(absl::ToUnixSeconds(lic->last_update));
+        lic_info->set_last_consumed(lic->last_consumed);
+        lic_info->set_last_deficit(lic->last_deficit);
+        lic_info->set_last_update(absl::ToUnixSeconds(lic->last_update));
       }
     }
   }
@@ -267,8 +267,8 @@ bool LicensesManager::MallocLicense(
                             lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
-      license_info.set_lastdeficit(lic->last_deficit);
-      license_info.set_lastconsumed(lic->last_consumed);
+      license_info.set_last_deficit(lic->last_deficit);
+      license_info.set_last_consumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -286,6 +286,10 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
     if (iter == licenses_map->end()) continue;
     auto lic = iter->second.GetExclusivePtr();
     lic->used += count;
+    if (lic->remote) {
+      if (count > lic->last_deficit) lic->last_deficit = 0;
+      else lic->last_deficit -= count;
+    }
   }
 
   if (g_config.Plugin.Enabled) {
@@ -300,8 +304,8 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
                             lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
-      license_info.set_lastdeficit(lic->last_deficit);
-      license_info.set_lastconsumed(lic->last_consumed);
+      license_info.set_last_deficit(lic->last_deficit);
+      license_info.set_last_consumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -339,8 +343,8 @@ void LicensesManager::FreeLicense(
                             lic->last_deficit);
       license_info.set_used(lic->used);
       license_info.set_reserved(lic->reserved);
-      license_info.set_lastdeficit(lic->last_deficit);
-      license_info.set_lastconsumed(lic->last_consumed);
+      license_info.set_last_deficit(lic->last_deficit);
+      license_info.set_last_consumed(lic->last_consumed);
       license_infos.emplace_back(std::move(license_info));
     }
     g_plugin_client->UpdateLicensesHookAsync(license_infos);
@@ -603,13 +607,12 @@ CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
 CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
-        operators,
-    LicenseResourceInDb* res_resource) {
+        operators, LicenseResourceInDb* res_resource) {
   for (const auto& [field, value] : operators) {
     switch (field) {
     case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
       try {
-        res_resource->count = std::stoul(value);
+        res_resource->total_resource_count = std::stoul(value);
       } catch (std::exception& e) {
         CRANE_TRACE("Failed to parse 'count' from value '{}': {}", value,
                     e.what());
@@ -702,19 +705,19 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   if (res_resource->flags & crane::grpc::LicenseResource_Flag_Absolute)
     allocated = res_resource->allocated;
   else
-    allocated = (res_resource->count * res_resource->allocated) / 100;
+    allocated = (res_resource->total_resource_count * res_resource->allocated) / 100;
 
-  if (allocated > res_resource->count) {
+  if (allocated > res_resource->total_resource_count) {
     CRANE_TRACE(
         "License Resource {}@{}: Allocated resources {} exceed total "
         "available "
         "count {}",
         res_resource->name, res_resource->server, allocated,
-        res_resource->count);
+        res_resource->total_resource_count);
     return std::unexpected(
         FormatRichErr(CraneErrCode::ERR_INVALID_PARAM,
                       "Allocated resources {} exceed total available count {}",
-                      allocated, res_resource->count));
+                      allocated, res_resource->total_resource_count));
   }
 
   return {};
@@ -725,17 +728,17 @@ void LicensesManager::UpdateLicense_(
     License* lic) {
   if (license_resource.flags & crane::grpc::LicenseResource_Flag_Absolute)
     lic->total = cluster_allowed;
-  else  // when non-absolute, the iter->second is the percentage of the
+  else  // when non-absolute, the cluster_allowed is the percentage of the
         // resource.count
-    lic->total = (license_resource.count * cluster_allowed) / 100;
+    lic->total = (license_resource.total_resource_count * cluster_allowed) / 100;
   uint32_t external = 0;
-  if (license_resource.count < lic->total)
+  if (license_resource.total_resource_count < lic->total)
     CRANE_ERROR(
         "allocated more licenses than exist total ({} > {}). this should "
         "not happen.",
-        lic->total, license_resource.count);
+        lic->total, license_resource.total_resource_count);
   else
-    external = license_resource.count - lic->total;
+    external = license_resource.total_resource_count - lic->total;
   lic->last_consumed = license_resource.last_consumed;
   if (lic->last_consumed <= (external + lic->used)) {
     /*

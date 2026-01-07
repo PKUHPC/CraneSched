@@ -1945,7 +1945,7 @@ grpc::Status CraneCtldServiceImpl::QueryLicenseResource(
     mutable_license_resource->set_server(license_resource.server);
     mutable_license_resource->set_server_type(license_resource.server_type);
     mutable_license_resource->set_description(license_resource.description);
-    mutable_license_resource->set_count(license_resource.count);
+    mutable_license_resource->set_count(license_resource.total_resource_count);
     mutable_license_resource->set_type(license_resource.type);
     mutable_license_resource->set_last_consumed(license_resource.last_consumed);
     mutable_license_resource->set_allocated(license_resource.allocated);

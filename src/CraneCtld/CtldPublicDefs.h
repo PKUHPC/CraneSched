@@ -1300,25 +1300,26 @@ struct LicenseResourceInDb {
   std::string server;
   std::string server_type;
   crane::grpc::LicenseResource_Type type;
-  uint32_t allocated{0};
-  uint32_t last_consumed{0};
+  uint32_t allocated{0};     /* count allocated to the cluster_resources */
+  uint32_t last_consumed{0}; /* number from the server saying how many it
+                              * currently has consumed */
   std::unordered_map<std::string, uint32_t> /* cluster, allowed */
       cluster_resources;
-  uint32_t count{0};
-  uint32_t flags;
+  uint32_t total_resource_count{0}; /* count of resources managed on the server */
+  uint32_t flags;    /* resource attribute flags */
   absl::Time last_update;
   std::string description;
 };
 
 struct License {
-  LicenseId license_id; /* license id */
-  uint32_t total;       /* The total number of configured license */
-  uint32_t used;        /* Number of license in use */
-  uint32_t reserved;
-  bool remote;
-  uint32_t last_consumed;
-  uint32_t last_deficit;
-  absl::Time last_update;
+  LicenseId license_id;   /* license id */
+  uint32_t total;         /* The total number of configured license */
+  uint32_t used;          /* Number of license in use */
+  uint32_t reserved;      /* currently reserved licenses */
+  bool remote;            /* non-zero if remote (from database) */
+  uint32_t last_consumed; /* consumed count (for remote) */
+  uint32_t last_deficit;  /* last calculated deficit */
+  absl::Time last_update; /* last updated timestamp (for remote) */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
