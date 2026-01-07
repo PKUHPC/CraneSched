@@ -922,7 +922,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
                                 account_name, value);
           }
         }
-
         break;
       }
       case crane::grpc::ModifyField::Qos: {
@@ -931,6 +930,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
           *log += fmt::format("Del: account: {}, partition: {}, qos: {}\n",
                               account_name, partition, qos);
         }
+        break;
       }
       default:
         std::unreachable();
@@ -1082,7 +1082,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     return rich_error_list;
   }
 
-  User res_user(user);
+  User res_user(*user);
   std::string log = "";
   // check user
   auto check_result = CheckModifyUserOperations(
@@ -1090,7 +1090,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   if (!check_result.empty()) {
     return check_result;
   }
-
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateUser(res_user);
@@ -1105,7 +1104,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   }
 
   // Update the memory
-  m_user_map_[name] = std::make_unique<Ctld::User>(std::move(res_user));
+  m_user_map_[name] = std::make_unique<User>(std::move(res_user));
   return rich_error_list;
 }
 
