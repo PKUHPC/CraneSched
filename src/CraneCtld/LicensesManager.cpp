@@ -287,8 +287,10 @@ void LicensesManager::MallocLicenseWhenRecoverRunning(
     auto lic = iter->second.GetExclusivePtr();
     lic->used += count;
     if (lic->remote) {
-      if (count > lic->last_deficit) lic->last_deficit = 0;
-      else lic->last_deficit -= count;
+      if (count > lic->last_deficit)
+        lic->last_deficit = 0;
+      else
+        lic->last_deficit -= count;
     }
   }
 
@@ -607,7 +609,8 @@ CraneExpectedRich<void> LicensesManager::QueryLicenseResource(
 CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
     const std::vector<std::string>& clusters,
     const std::unordered_map<crane::grpc::LicenseResource_Field, std::string>&
-        operators, LicenseResourceInDb* res_resource) {
+        operators,
+    LicenseResourceInDb* res_resource) {
   for (const auto& [field, value] : operators) {
     switch (field) {
     case crane::grpc::LicenseResource_Field::LicenseResource_Field_Count:
@@ -705,7 +708,8 @@ CraneExpectedRich<void> LicensesManager::CheckAndUpdateFields_(
   if (res_resource->flags & crane::grpc::LicenseResource_Flag_Absolute)
     allocated = res_resource->allocated;
   else
-    allocated = (res_resource->total_resource_count * res_resource->allocated) / 100;
+    allocated =
+        (res_resource->total_resource_count * res_resource->allocated) / 100;
 
   if (allocated > res_resource->total_resource_count) {
     CRANE_TRACE(
@@ -730,7 +734,8 @@ void LicensesManager::UpdateLicense_(
     lic->total = cluster_allowed;
   else  // when non-absolute, the cluster_allowed is the percentage of the
         // resource.count
-    lic->total = (license_resource.total_resource_count * cluster_allowed) / 100;
+    lic->total =
+        (license_resource.total_resource_count * cluster_allowed) / 100;
   uint32_t external = 0;
   if (license_resource.total_resource_count < lic->total)
     CRANE_ERROR(

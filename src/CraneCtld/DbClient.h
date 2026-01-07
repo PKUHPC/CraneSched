@@ -238,8 +238,7 @@ class MongodbClient {
           "instead.");
       return false;
     case EntityType::RESOURCE:
-      CRANE_ERROR(
-          "UpdateEntityOne does not support RESOURCE.");
+      CRANE_ERROR("UpdateEntityOne does not support RESOURCE.");
       return false;
     }
 
@@ -293,8 +292,7 @@ class MongodbClient {
       coll_name = m_wckey_collection_name_;
       break;
     case EntityType::RESOURCE:
-      CRANE_ERROR(
-          "UpdateEntityOneByFields does not support RESOURCE.");
+      CRANE_ERROR("UpdateEntityOneByFields does not support RESOURCE.");
       return false;
     }
 

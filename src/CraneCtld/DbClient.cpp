@@ -1847,8 +1847,8 @@ void MongodbClient::ViewToLicenseResource_(
     for (auto&& elem :
          ViewValueOr_(resource_view["cluster_resources"],
                       bsoncxx::builder::basic::make_document().view())) {
-      resource->cluster_resources.emplace(
-          std::string(elem.key()), elem.get_int64().value);
+      resource->cluster_resources.emplace(std::string(elem.key()),
+                                          elem.get_int64().value);
     }
 
   } catch (const bsoncxx::exception& e) {
