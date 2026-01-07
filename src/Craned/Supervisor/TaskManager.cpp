@@ -1377,7 +1377,8 @@ CraneErrCode ContainerInstance::SetupIdMappedBindFs_(
       auto mount = std::make_unique<bindfs::IdMappedBindFs>(
           m.host_path(), m_parent_step_inst_->pwd, pwd.Uid(), pwd.Gid(),
           uid_offset, gid_offset, g_config.Container.BindFs.BindfsBinary,
-          g_config.Container.BindFs.FusermountBinary);
+          g_config.Container.BindFs.FusermountBinary,
+          g_config.Container.BindFs.MountBaseDir);
 
       m.set_host_path(mount->GetMountedPath());
       bindfs_mounts.emplace_back(std::move(mount));

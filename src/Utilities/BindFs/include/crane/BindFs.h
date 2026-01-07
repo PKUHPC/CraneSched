@@ -38,7 +38,8 @@ class IdMappedBindFs {
   IdMappedBindFs(std::filesystem::path source, const PasswordEntry& pwd,
                  uid_t kuid, gid_t kgid, uid_t uid_offset, gid_t gid_offset,
                  std::filesystem::path bindfs_bin = kBindFsBin,
-                 std::filesystem::path fusermount_bin = kFusermountBin);
+                 std::filesystem::path fusermount_bin = kFusermountBin,
+                 std::filesystem::path mount_base_dir = kBindFsMountBaseDir);
 
   IdMappedBindFs(const IdMappedBindFs&) = delete;
   IdMappedBindFs& operator=(const IdMappedBindFs&) = delete;
@@ -71,6 +72,7 @@ class IdMappedBindFs {
 
   std::filesystem::path m_bindfs_bin_;
   std::filesystem::path m_fusermount_bin_;
+  std::filesystem::path m_mount_base_dir_;
 
   std::filesystem::path m_source_;
   std::filesystem::path m_target_;
