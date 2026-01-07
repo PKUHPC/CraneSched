@@ -1549,7 +1549,7 @@ void MongodbClient::DocumentAppendItem_<
     const std::unordered_map<std::string, uint32_t>& value) {
   doc.append(kvp(key, [&value](sub_document sub_doc) {
     for (const auto& [k, v] : value) {
-      sub_doc.append(kvp(k, static_cast<int32_t>(v)));
+      sub_doc.append(kvp(k, static_cast<int64_t>(v)));
     }
   }));
 }
@@ -1847,8 +1847,8 @@ void MongodbClient::ViewToLicenseResource_(
     for (auto&& elem :
          ViewValueOr_(resource_view["cluster_resources"],
                       bsoncxx::builder::basic::make_document().view())) {
-      resource->cluster_resources.emplace(std::string(elem.key()),
-                                          elem.get_int32().value);
+      resource->cluster_resources.emplace(
+          std::string(elem.key()), elem.get_int64().value);
     }
 
   } catch (const bsoncxx::exception& e) {

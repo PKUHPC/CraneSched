@@ -215,7 +215,7 @@ struct Config {
   };
   KeepalivedConfig KeepalivedConfig;
 
-  bool AllLicenseResourceAbsolute{false};
+  bool AllLicenseResourcesAbsolute{false};
 };
 
 struct RunTimeStatus {

@@ -383,7 +383,7 @@ CraneExpectedRich<void> LicensesManager::AddLicenseResource(
     new_lic_resource.cluster_resources.emplace(cluster, 0);
   }
 
-  if (g_config.AllLicenseResourceAbsolute)
+  if (g_config.AllLicenseResourcesAbsolute)
     new_lic_resource.flags |= crane::grpc::LicenseResource_Flag_Absolute;
 
   auto result = CheckAndUpdateFields_(clusters, operators, &new_lic_resource);
