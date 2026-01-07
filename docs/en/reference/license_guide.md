@@ -47,7 +47,7 @@ cbatch -L fluent:2|ansys:1 script.sh
 ## Remote Licenses
 
 Remote licenses do not include any built-in integration with third-party license managers. 
-The `Server` and `ServerType` parameters specified during creation serve informational purposes only 
+The `Server` and `ServerType` parameters specified during creation serve informational purposes only. 
 they **do not** mean Crane will interact with those servers automatically.
 
 It is the system administrator’s responsibility to implement integration with external systems. 
