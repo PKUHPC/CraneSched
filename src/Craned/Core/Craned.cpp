@@ -671,6 +671,14 @@ void ParseConfig(int argc, char** argv) {
                   bindfs_config["BindfsBinary"].as<std::string>();
               g_config.Container.BindFs.FusermountBinary =
                   bindfs_config["FusermountBinary"].as<std::string>();
+              std::filesystem::path mount_base_dir = YamlValueOr(
+                  bindfs_config["MountBaseDir"],
+                  g_config.Container.BindFs.MountBaseDir.string());
+              if (mount_base_dir.is_relative()) {
+                mount_base_dir = g_config.CraneBaseDir / mount_base_dir;
+              }
+              g_config.Container.BindFs.MountBaseDir =
+                  std::move(mount_base_dir);
             }
           }
         }

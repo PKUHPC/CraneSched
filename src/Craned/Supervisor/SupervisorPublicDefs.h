@@ -60,6 +60,7 @@ struct Config {
       bool Enabled{false};
       std::filesystem::path BindfsBinary{"bindfs"};
       std::filesystem::path FusermountBinary{"fusermount3"};
+      std::filesystem::path MountBaseDir{"/mnt/crane"};
     };
     BindFsConfig BindFs;
   };

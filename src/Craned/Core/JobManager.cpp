@@ -630,6 +630,8 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInD* job, StepInstance* step) {
             g_config.Container.BindFs.BindfsBinary.string());
         bindfs_conf->set_fusermount_binary(
             g_config.Container.BindFs.FusermountBinary.string());
+        bindfs_conf->set_mount_base_dir(
+            g_config.Container.BindFs.MountBaseDir.string());
       }
     }
 
