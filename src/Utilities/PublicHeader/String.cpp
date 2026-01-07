@@ -590,7 +590,7 @@ int TimeStr2Mins(absl::string_view input) {
         !parse(parts[2], secs))
       return -1;
   } else if (parts.size() == 2) {
-    if (!parse(parts[0], mins) || !parse(parts[1], secs)) return -1;
+    if (!parse(parts[0], hours) || !parse(parts[1], mins)) return -1;
   } else if (parts.size() == 1) {
     if (!parse(parts[0], mins)) return -1;
   }
