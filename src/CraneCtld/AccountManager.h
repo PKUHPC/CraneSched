@@ -314,9 +314,9 @@ class AccountManager {
   CraneExpected<void> SetUserDefaultWckey_(const std::string& new_def_wckey,
                                            const std::string& user);
 
-  CraneExpected<void> DeleteUserAllowedQos_(User* user, const std::string& qos,
-                                            const std::string& account,
-                                            const std::string& partition);
+  CraneExpectedRich<void> CheckAndDeleteUserAllowedQos_(
+      User* user, const std::string& qos, const std::string& account,
+      const std::string& partition, const bool force);
 
   void SetAccountAllowedPartition_(
       Account* account, std::unordered_set<std::string>& partition_list,

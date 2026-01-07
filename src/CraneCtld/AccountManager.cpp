@@ -926,9 +926,14 @@ std::vector<CraneExpectedRich<void>> AccountManager::CheckModifyUserOperations(
       }
       case crane::grpc::ModifyField::Qos: {
         for (const auto& qos : operation.value_list()) {
-          DeleteUserAllowedQos_(res_user, qos, account_name, partition);
-          *log += fmt::format("Del: account: {}, partition: {}, qos: {}\n",
-                              account_name, partition, qos);
+          auto rich_result = CheckAndDeleteUserAllowedQos_(
+              res_user, qos, account_name, partition, force);
+          if (!rich_result) {
+            rich_error_list.emplace_back(rich_result);
+          } else {
+            *log += fmt::format("Del: account: {}, partition: {}, qos: {}\n",
+                                account_name, partition, qos);
+          }
         }
         break;
       }
@@ -1792,7 +1797,8 @@ AccountManager::CheckAndDeleteUserAllowedPartitionNoLock_(
     return std::unexpected{
         FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
   // modify the user
-  user->account_to_attrs_map.erase(partition);
+  user->account_to_attrs_map[account].allowed_partition_qos_map.erase(
+      partition);
   return {};
 }
 
@@ -2699,9 +2705,9 @@ CraneExpected<void> AccountManager::SetUserDefaultWckey_(
   return {};
 }
 
-CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
+CraneExpectedRich<void> AccountManager::CheckAndDeleteUserAllowedQos_(
     User* user, const std::string& qos, const std::string& account,
-    const std::string& partition) {
+    const std::string& partition, const bool force) {
   if (partition.empty()) {
     // Delete the qos of all partition
     for (auto& [par, pair] :
@@ -2715,12 +2721,20 @@ CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
     }
   } else {
     // Delete the qos of a specified partition
-    auto iter =
-        user->account_to_attrs_map[account].allowed_partition_qos_map.find(
-            partition);
+    auto& map_ = user->account_to_attrs_map[account].allowed_partition_qos_map;
+    auto iter = map_.find(partition);
+
+    if (iter == map_.end()) {
+      return std::unexpected{
+          FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
+    }
+
+    if (qos == iter->second.first && !force) {
+      return std::unexpected{
+          FormatRichErr(CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos)};
+    }
 
     iter->second.second.remove(qos);
-
     if (qos == iter->second.first) {
       iter->second.first =
           iter->second.second.empty() ? "" : iter->second.second.front();
