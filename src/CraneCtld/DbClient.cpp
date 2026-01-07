@@ -29,11 +29,8 @@ namespace Ctld {
 using bsoncxx::builder::basic::kvp;
 using namespace std::chrono_literals;
 
-struct TimeRange {
-  std::chrono::sys_seconds start;
-  std::chrono::sys_seconds end;
-  enum Type : uint8_t { HOUR = 0, DAY = 1, MONTH = 2 } type;
-};
+using TimeRange = std::pair<std::chrono::sys_seconds /*start*/,
+                            std::chrono::sys_seconds /*end*/>;
 
 // EfficientSplitTimeRange(start, end)
 //
@@ -59,10 +56,15 @@ struct TimeRange {
 //   Despite the name, we emit “remainder of current day”:
 //     [cur, min(next day boundary, end))
 //   This keeps behavior compatible with the existing hour rollup query path.
-std::vector<TimeRange> EfficientSplitTimeRange(std::chrono::sys_seconds start,
-                                               std::chrono::sys_seconds end) {
+// @returns idx: HOUR = 0, DAY = 1, MONTH = 2
+std::array<std::vector<TimeRange>, 3> EfficientSplitTimeRange(
+    std::chrono::sys_seconds start, std::chrono::sys_seconds end) {
   using namespace std::chrono;
-  std::vector<TimeRange> result;
+  std::array<std::vector<TimeRange>, 3> result;
+  const int HOUR = 0;
+  const int DAY = 1;
+  const int MONTH = 2;
+
   if (start >= end) return result;
 
   auto cur = start;
@@ -100,9 +102,8 @@ std::vector<TimeRange> EfficientSplitTimeRange(std::chrono::sys_seconds start,
         // `end`. If `end_month_start` == `month_start`, then `end` lies within
         // the `month_start`, and we cannot do a MONTH merge.
         if (end_month_start > month_start) {
-          result.push_back({sys_seconds{month_start},
-                            sys_seconds{end_month_start},
-                            TimeRange::Type::MONTH});
+          result[MONTH].push_back(
+              {sys_seconds{month_start}, sys_seconds{end_month_start}});
           cur = sys_seconds{end_month_start};
           continue;
         }
@@ -121,7 +122,7 @@ std::vector<TimeRange> EfficientSplitTimeRange(std::chrono::sys_seconds start,
           std::min(sys_seconds{next_month_start}, end_trunc_to_day);
 
       if (day_end > cur) {
-        result.push_back({cur, day_end, TimeRange::Type::DAY});
+        result[DAY].push_back({cur, day_end});
         cur = day_end;
         continue;
       }
@@ -134,7 +135,7 @@ std::vector<TimeRange> EfficientSplitTimeRange(std::chrono::sys_seconds start,
     // per day when we’re in the fallback path.
     sys_seconds next_day = cur_day_start + days{1};
     sys_seconds hour_end = std::min(next_day, end);
-    result.push_back({cur, hour_end, TimeRange::Type::HOUR});
+    result[HOUR].push_back({cur, hour_end});
     cur = hour_end;
   }
   return result;
@@ -1178,62 +1179,6 @@ std::optional<int64_t> MongodbClient::GetSummaryLastSuccessTimeSec(
   }
 }
 
-void MongodbClient::TriggerRetroactiveRollupFromMinEndTime(
-    int64_t min_end_time_sec) {
-  using namespace std::chrono;
-
-  auto to_sec = [](auto tp) -> int64_t {
-    return duration_cast<seconds>(tp.time_since_epoch()).count();
-  };
-  // We re-rollup from the hour that contains min_end_time to "now" (floored to
-  // hour). This guarantees day/month will include any newly appended hour data.
-  sys_seconds now_hour_tp =
-      time_point_cast<seconds>(floor<hours>(system_clock::now()));
-  sys_seconds min_end_tp = sys_seconds{seconds{min_end_time_sec}};
-
-  // Hour rollup: [floor(min_end), now_hour)
-  sys_seconds start_hour_tp =
-      time_point_cast<seconds>(floor<hours>(min_end_tp));
-  sys_seconds end_hour_tp = now_hour_tp;
-  if (start_hour_tp < end_hour_tp) {
-    AggregateJobSummaryByHour(to_sec(start_hour_tp), to_sec(end_hour_tp),
-                              m_task_collection_name_);
-  }
-
-  // Day rollup boundaries:
-  // - start: day boundary containing start_hour_tp
-  // - end:   next day boundary after (end_hour_tp - 1s)
-  sys_seconds start_day_tp = sys_seconds{floor<days>(start_hour_tp)};
-  sys_seconds end_minus_tp = end_hour_tp - seconds{1};
-  sys_seconds end_day_tp = sys_seconds{floor<days>(end_minus_tp)} + days{1};
-  if (start_day_tp < end_day_tp) {
-    AggregateJobSummaryByDayOrMonth(RollupType::HOUR, RollupType::DAY,
-                                    to_sec(start_day_tp), to_sec(end_day_tp));
-  }
-
-  // Month rollup boundaries:
-  // - start: first day of month containing start_hour_tp
-  // - end:   first day of the month after the month containing (end_hour_tp -
-  // 1s)
-  sys_days start_day = floor<days>(start_hour_tp);
-  year_month_day start_ymd{start_day};
-  sys_days start_month_day = sys_days{start_ymd.year() / start_ymd.month() / 1};
-  sys_seconds start_month_tp = sys_seconds{start_month_day};
-
-  sys_days end_minus_day = floor<days>(end_minus_tp);
-  year_month_day end_ymd{end_minus_day};
-  year_month next_month =
-      year_month{end_ymd.year(), end_ymd.month()} + months{1};
-  sys_days end_month_day = sys_days{next_month / 1};
-  sys_seconds end_month_tp = sys_seconds{end_month_day};
-
-  if (start_month_tp < end_month_tp) {
-    AggregateJobSummaryByDayOrMonth(RollupType::DAY, RollupType::MONTH,
-                                    to_sec(start_month_tp),
-                                    to_sec(end_month_tp));
-  }
-}
-
 void MongodbClient::TriggerRetroactiveRollupForAggregatedHours(
     const std::vector<std::chrono::sys_seconds>& end_times) {
   using namespace std::chrono;
@@ -1902,51 +1847,19 @@ void MongodbClient::AppendUnionWithRanges(
   }
 }
 
-uint32_t MongodbClient::GetCpusAlloc(const bsoncxx::document::view& doc) {
-  auto elem = doc["cpus_alloc"];
-  if (!elem) return 0;
-  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
-  if (elem.type() == bsoncxx::type::k_int64)
-    return static_cast<uint32_t>(elem.get_int64().value);
-  if (elem.type() == bsoncxx::type::k_double)
-    return static_cast<uint32_t>(elem.get_double().value);
-  return 0;
-}
-
-double MongodbClient::GetTotalCpuTime(const bsoncxx::document::view& doc) {
-  auto elem = doc["total_cpu_time"];
-  if (!elem) return 0.0;
-  if (elem.type() == bsoncxx::type::k_double) return elem.get_double().value;
-  if (elem.type() == bsoncxx::type::k_int32)
-    return static_cast<double>(elem.get_int32().value);
-  if (elem.type() == bsoncxx::type::k_int64)
-    return static_cast<double>(elem.get_int64().value);
-  return 0.0;
-}
-
-int MongodbClient::GetTotalCount(const bsoncxx::document::view& doc) {
-  auto elem = doc["total_count"];
-  if (!elem) return 0;
-  if (elem.type() == bsoncxx::type::k_int32) return elem.get_int32().value;
-  if (elem.type() == bsoncxx::type::k_int64)
-    return static_cast<int>(elem.get_int64().value);
-  return 0;
-}
-
-void MongodbClient::WriteReply(
+void MongodbClient::WriteJobSizeSummaryReply(
     const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>& agg_map,
     grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
     int max_data_size) {
   crane::grpc::QueryJobSizeSummaryReply reply;
   for (const auto& agg_val : agg_map) {
-    crane::grpc::JobSizeSummaryItem item;
-    item.set_cluster(g_config.CraneClusterName);
-    item.set_account(agg_val.first.account);
-    item.set_wckey(agg_val.first.wckey);
-    item.set_cpus_alloc(agg_val.first.cpus_alloc);
-    item.set_total_cpu_time(agg_val.second.total_cpu_time);
-    item.set_total_count(agg_val.second.total_count);
-    reply.add_item_list()->CopyFrom(item);
+    auto* item = reply.add_item_list();
+    item->set_cluster(g_config.CraneClusterName);
+    item->set_account(agg_val.first.account);
+    item->set_wckey(agg_val.first.wckey);
+    item->set_cpus_alloc(agg_val.first.cpus_alloc);
+    item->set_total_cpu_time(agg_val.second.total_cpu_time);
+    item->set_total_count(agg_val.second.total_count);
     if (reply.item_list_size() >= max_data_size) {
       stream->Write(reply);
       reply.clear_item_list();
@@ -1981,19 +1894,7 @@ void MongodbClient::QueryJobSummary(
   auto month_job_summ_table =
       (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
   auto ranges = EfficientSplitTimeRange(start_time, end_time);
-
-  // Directly classify ranges
-  std::vector<std::pair<sys_seconds, sys_seconds>> hour_ranges;
-  std::vector<std::pair<sys_seconds, sys_seconds>> day_ranges;
-  std::vector<std::pair<sys_seconds, sys_seconds>> month_ranges;
-  for (const auto& r : ranges) {
-    if (r.type == TimeRange::Type::HOUR)
-      hour_ranges.emplace_back(r.start, r.end);
-    else if (r.type == TimeRange::Type::DAY)
-      day_ranges.emplace_back(r.start, r.end);
-    else if (r.type == TimeRange::Type::MONTH)
-      month_ranges.emplace_back(r.start, r.end);
-  }
+  auto& [hour_ranges, day_ranges, month_ranges] = ranges;
 
   mongocxx::collection* entry_table = nullptr;
   mongocxx::pipeline pipeline;
@@ -2058,8 +1959,8 @@ void MongodbClient::QueryJobSummary(
       item.set_username(std::string(id["username"].get_string().value));
       item.set_qos(std::string(id["qos"].get_string().value));
       item.set_wckey(std::string(id["wckey"].get_string().value));
-      item.set_total_count(GetTotalCount(doc));
-      item.set_total_cpu_time(GetTotalCpuTime(doc));
+      item.set_total_count(ViewValueOr_(doc["total_count"], 0));
+      item.set_total_cpu_time(ViewValueOr_(doc["total_cpu_time"], 0.0));
 
       reply.add_item_list()->CopyFrom(item);
       if (reply.item_list_size() >= MaxJobSummaryBatchSize) {
@@ -2093,19 +1994,7 @@ void MongodbClient::QueryJobSizeSummary(
       request->filter_grouping_list().begin(),
       request->filter_grouping_list().end());
   auto ranges = EfficientSplitTimeRange(start_time, end_time);
-
-  // Directly classify ranges
-  std::vector<std::pair<sys_seconds, sys_seconds>> hour_ranges;
-  std::vector<std::pair<sys_seconds, sys_seconds>> day_ranges;
-  std::vector<std::pair<sys_seconds, sys_seconds>> month_ranges;
-  for (const auto& r : ranges) {
-    if (r.type == TimeRange::Type::HOUR)
-      hour_ranges.emplace_back(r.start, r.end);
-    else if (r.type == TimeRange::Type::DAY)
-      day_ranges.emplace_back(r.start, r.end);
-    else if (r.type == TimeRange::Type::MONTH)
-      month_ranges.emplace_back(r.start, r.end);
-  }
+  auto& [hour_ranges, day_ranges, month_ranges] = ranges;
 
   auto hour_job_summ_table =
       (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
@@ -2182,15 +2071,15 @@ void MongodbClient::QueryJobSizeSummary(
         JobSizeSummaryKey key{
             .account = std::string(id["account"].get_string().value),
             .wckey = std::string(id["wckey"].get_string().value),
-            .cpus_alloc = GetCpusAlloc(id)};
-        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
-        agg_map[key].total_count += GetTotalCount(doc);
+            .cpus_alloc = ViewValueOr_(id["cpus_alloc"], uint32_t{0})};
+        agg_map[key].total_cpu_time += ViewValueOr_(doc["total_cpu_time"], 0.0);
+        agg_map[key].total_count += ViewValueOr_(doc["total_count"], 0);
       }
-      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
+      WriteJobSizeSummaryReply(agg_map, stream, MaxJobSummaryBatchSize);
     } else {
       for (auto&& doc : cursor) {
         auto id = doc["_id"].get_document().view();
-        uint32_t cpus_alloc = GetCpusAlloc(id);
+        uint32_t cpus_alloc = ViewValueOr_(id["cpus_alloc"], uint32_t{0});
         int group_index = 0;
         for (const auto group : grouping_list) {
           if (cpus_alloc < group) break;
@@ -2201,10 +2090,10 @@ void MongodbClient::QueryJobSizeSummary(
             .account = std::string(id["account"].get_string().value),
             .wckey = std::string(id["wckey"].get_string().value),
             .cpus_alloc = bucket};
-        agg_map[key].total_cpu_time += GetTotalCpuTime(doc);
-        agg_map[key].total_count += GetTotalCount(doc);
+        agg_map[key].total_cpu_time += ViewValueOr_(doc["total_cpu_time"], 0.0);
+        agg_map[key].total_count += ViewValueOr_(doc["total_count"], 0);
       }
-      WriteReply(agg_map, stream, MaxJobSummaryBatchSize);
+      WriteJobSizeSummaryReply(agg_map, stream, MaxJobSummaryBatchSize);
     }
   } catch (const bsoncxx::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, e.what());
@@ -2863,15 +2752,6 @@ bsoncxx::builder::basic::document MongodbClient::DocumentConstructor_(
     std::tuple<Ts...> const& values) {
   return documentConstructor_(fields, values,
                               std::make_index_sequence<sizeof...(Ts)>{});
-}
-
-template <typename ViewValue, typename T>
-T MongodbClient::ViewValueOr_(const ViewValue& view_value,
-                              const T& default_value) {
-  if (view_value && view_value.type() == BsonFieldTrait<T>::bson_type)
-    return BsonFieldTrait<T>::get(view_value);
-
-  return default_value;
 }
 
 mongocxx::client* MongodbClient::GetClient_() {

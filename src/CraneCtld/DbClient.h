@@ -52,22 +52,6 @@ struct BsonFieldTrait<bool> {
 };
 
 template <>
-struct BsonFieldTrait<int64_t> {
-  static int64_t get(const bsoncxx::document::element& ele) {
-    return ele.get_int64().value;
-  }
-  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int64;
-};
-
-template <>
-struct BsonFieldTrait<int32_t> {
-  static int32_t get(const bsoncxx::document::element& ele) {
-    return ele.get_int32().value;
-  }
-  static constexpr bsoncxx::type bson_type = bsoncxx::type::k_int32;
-};
-
-template <>
 struct BsonFieldTrait<std::string> {
   static std::string get(const bsoncxx::document::element& ele) {
     return std::string(ele.get_string().value);
@@ -169,15 +153,11 @@ class MongodbClient {
   bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
                                        int64_t last_success_sec);
   std::optional<int64_t> GetSummaryLastSuccessTimeSec(RollupType rollup_type);
-  void TriggerRetroactiveRollupFromMinEndTime(int64_t min_end_time_sec);
   void TriggerRetroactiveRollupForAggregatedHours(
       const std::vector<std::chrono::sys_seconds>& end_times);
   void RollupSummary(RollupType rollup_type);
   void ClusterRollupUsage();
-  uint32_t GetCpusAlloc(const bsoncxx::document::view& doc);
-  double GetTotalCpuTime(const bsoncxx::document::view& doc);
-  int GetTotalCount(const bsoncxx::document::view& doc);
-  void WriteReply(
+  void WriteJobSizeSummaryReply(
       const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>&
           agg_map,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
@@ -441,8 +421,33 @@ class MongodbClient {
   document DocumentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
-  template <typename ViewValue, typename T>
-  T ViewValueOr_(const ViewValue& view_value, const T& default_value);
+  template <typename T>
+  T ViewValueOr_(const bsoncxx::document::element& view_value,
+                 const T& default_value) {
+    if (!view_value) {
+      return default_value;
+    }
+    if (view_value.type() == BsonFieldTrait<T>::bson_type)
+      return BsonFieldTrait<T>::get(view_value);
+
+    return default_value;
+  }
+
+  template <typename T>
+    requires std::is_arithmetic_v<T>
+  T ViewValueOr_(const bsoncxx::document::element& view_value,
+                 const T& default_value) {
+    switch (view_value.type()) {
+    case bsoncxx::type::k_int32:
+      return static_cast<T>(view_value.get_int32().value);
+    case bsoncxx::type::k_int64:
+      return static_cast<T>(view_value.get_int64().value);
+    case bsoncxx::type::k_double:
+      return static_cast<T>(view_value.get_double().value);
+    default:
+      return default_value;
+    }
+  }
 
   mongocxx::client* GetClient_();
   mongocxx::client_session* GetSession_();
