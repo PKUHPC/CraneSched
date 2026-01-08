@@ -1104,12 +1104,12 @@ message QueryJobSizeSummaryRequest {
   repeated string filter_users = 2;
   repeated string filter_qoss = 3;
   repeated string filter_wckeys = 4;
-  repeated uint32 filter_grouping_list = 5;
-  google.protobuf.Timestamp filter_start_time = 6;
-  google.protobuf.Timestamp filter_end_time = 7;
-  repeated uint32 filter_job_ids = 8;
-  repeated string filter_partitions = 9;
-  repeated string filter_nodename_list = 10;
+  repeated string filter_partitions = 5;
+  repeated string filter_nodename_list = 6;
+  google.protobuf.Timestamp filter_start_time = 7;
+  google.protobuf.Timestamp filter_end_time = 8;
+  repeated uint32 filter_grouping_list = 9;
+  repeated uint32 filter_job_ids = 10;
 }
 
 message QueryJobSizeSummaryReply {

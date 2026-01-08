@@ -55,7 +55,7 @@ using TimeRange = std::pair<std::chrono::sys_seconds /*start*/,
 //     [cur, min(next day boundary, end))
 //   This keeps behavior compatible with the existing hour rollup query path.
 // @returns idx: HOUR = 0, DAY = 1, MONTH = 2
-std::array<std::vector<TimeRange>, 3> EfficientSplitTimeRange(
+std::array<std::vector<TimeRange>, 3> SplitToTimeRange(
     std::chrono::sys_seconds start, std::chrono::sys_seconds end) {
   using namespace std::chrono;
   std::array<std::vector<TimeRange>, 3> result;
@@ -142,7 +142,7 @@ std::array<std::vector<TimeRange>, 3> EfficientSplitTimeRange(
 void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
                            const std::string& coll,
                            const bsoncxx::document::view& match_bson,
-                           bool first_is_match = true) {
+                           bool first_is_match) {
   using namespace bsoncxx::builder::basic;
   if (first_is_match) {
     pipeline.match(match_bson);
@@ -157,29 +157,28 @@ void AppendUnionWithRanges(mongocxx::pipeline& pipeline,
   }
 }
 
-bsoncxx::document::value GetJobSizeSummeryQueryFilter(
-    const std::string& time_field, const std::vector<TimeRange>& range,
-    const crane::grpc::QueryJobSizeSummaryRequest* request) {
-  auto to_epoch_sec = [](std::chrono::sys_seconds tp) -> int64_t {
-    return (tp.time_since_epoch().count());
-  };
-  bsoncxx::builder::basic::document match_doc;
-
-  // MongoDB requires `$or` to be a non-empty array. If the time ranges are
-  // empty, return a match document that matches nothing.
-  if (range.empty()) {
-    match_doc.append(kvp(
-        "_id", bsoncxx::builder::basic::make_document(kvp("$exists", false))));
-    return match_doc.extract();
-  }
-
+void SetJobSummeryQueryTimeFilter(const std::string& time_field,
+                                  const std::vector<TimeRange>& range,
+                                  bsoncxx::builder::basic::document& document) {
   bsoncxx::builder::basic::array time_array;
   for (auto& r : range)
     time_array.append(bsoncxx::builder::basic::make_document(
         kvp(time_field, bsoncxx::builder::basic::make_document(
-                            kvp("$gte", to_epoch_sec(r.first)),
-                            kvp("$lt", to_epoch_sec(r.second))))));
-  match_doc.append(kvp("$or", time_array));
+                            kvp("$gte", bsoncxx::types::b_date{r.first}),
+                            kvp("$lt", bsoncxx::types::b_date{r.second})))));
+  document.append(kvp("$or", time_array));
+}
+
+template <typename T>
+  requires std::is_same_v<std::remove_cvref_t<T>,
+                          crane::grpc::QueryJobSizeSummaryRequest> ||
+           std::is_same_v<std::remove_cvref_t<T>,
+                          crane::grpc::QueryJobSummaryRequest>
+bsoncxx::document::value GetJobSummeryQueryCommonFilter(const T* request) {
+  constexpr bool is_size_request =
+      std::is_same_v<std::remove_cvref_t<T>,
+                     crane::grpc::QueryJobSizeSummaryRequest>;
+  bsoncxx::builder::basic::document match_doc;
   // account
   if (request && request->filter_accounts_size() > 0) {
     bsoncxx::builder::basic::array arr;
@@ -209,72 +208,28 @@ bsoncxx::document::value GetJobSizeSummeryQueryFilter(
         kvp("wckey", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
   }
 
-  // partition
-  if (request && request->filter_partitions_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& partition : request->filter_partitions())
-      arr.append(partition);
-    match_doc.append(
-        kvp("partition_name",
-            bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+  if constexpr (is_size_request) {
+    // partition
+    if (request && request->filter_partitions_size() > 0) {
+      bsoncxx::builder::basic::array arr;
+      for (const auto& partition : request->filter_partitions())
+        arr.append(partition);
+      match_doc.append(
+          kvp("partition_name",
+              bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+    }
+
+    // nodename_list
+    if (request && request->filter_nodename_list_size() > 0) {
+      bsoncxx::builder::basic::array arr;
+      for (const auto& nodename : request->filter_nodename_list())
+        arr.append(nodename);
+      match_doc.append(
+          kvp("nodename_list",
+              bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+    }
   }
 
-  // nodename_list
-  if (request && request->filter_nodename_list_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& nodename : request->filter_nodename_list())
-      arr.append(nodename);
-    match_doc.append(
-        kvp("nodename_list",
-            bsoncxx::builder::basic::make_document(kvp("$in", arr))));
-  }
-
-  return match_doc.extract();
-}
-
-bsoncxx::document::value GetJobSummeryQueryFilter(
-    const std::string& time_field, const std::vector<TimeRange>& range,
-    const crane::grpc::QueryJobSummaryRequest* request) {
-  auto to_epoch_sec = [](std::chrono::sys_seconds tp) -> int64_t {
-    return tp.time_since_epoch().count();
-  };
-  bsoncxx::builder::basic::document match_doc;
-  bsoncxx::builder::basic::array time_array;
-  for (auto& r : range)
-    time_array.append(bsoncxx::builder::basic::make_document(
-        kvp(time_field, bsoncxx::builder::basic::make_document(
-                            kvp("$gte", to_epoch_sec(r.first)),
-                            kvp("$lt", to_epoch_sec(r.second))))));
-  match_doc.append(kvp("$or", time_array));
-
-  // account
-  if (request->filter_accounts_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& account : request->filter_accounts()) arr.append(account);
-    match_doc.append(kvp(
-        "account", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
-  }
-  // username
-  if (request->filter_users_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& user : request->filter_users()) arr.append(user);
-    match_doc.append(kvp(
-        "username", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
-  }
-  // qos
-  if (request->filter_qoss_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& qos : request->filter_qoss()) arr.append(qos);
-    match_doc.append(
-        kvp("qos", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
-  }
-  // wckey
-  if (request->filter_wckeys_size() > 0) {
-    bsoncxx::builder::basic::array arr;
-    for (const auto& wckey : request->filter_wckeys()) arr.append(wckey);
-    match_doc.append(
-        kvp("wckey", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
-  }
   return match_doc.extract();
 }
 
@@ -1441,39 +1396,51 @@ void MongodbClient::QueryJobSummary(
       (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
   auto month_job_summ_table =
       (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
-  auto ranges = EfficientSplitTimeRange(start_time, end_time);
+  auto ranges = SplitToTimeRange(start_time, end_time);
   auto& [hour_ranges, day_ranges, month_ranges] = ranges;
-
   mongocxx::collection* entry_table = nullptr;
   mongocxx::pipeline pipeline;
+
   try {
+    auto common_filter = GetJobSummeryQueryCommonFilter(request);
+    bool is_first_filter = true;
     if (!hour_ranges.empty()) {
-      entry_table = &hour_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_hour_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("hour", hour_ranges, request).view(), true);
-      AppendUnionWithRanges(
-          pipeline, m_day_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("day", day_ranges, request).view(), false);
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("month", month_ranges, request).view(),
-          false);
-    } else if (!day_ranges.empty()) {
-      entry_table = &day_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_day_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("day", day_ranges, request).view());
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("month", month_ranges, request).view(),
-          false);
-    } else if (!month_ranges.empty()) {
-      entry_table = &month_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSummeryQueryFilter("month", month_ranges, request).view());
-    } else {
+      if (is_first_filter) {
+        entry_table = &hour_job_summ_table;
+        is_first_filter = false;
+      }
+      document hour_filter;
+      hour_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("hour", hour_ranges, hour_filter);
+      AppendUnionWithRanges(pipeline, m_hour_job_summary_collection_name_,
+                            hour_filter.view(),
+                            entry_table == &hour_job_summ_table);
+    }
+    if (!day_ranges.empty()) {
+      if (is_first_filter) {
+        entry_table = &day_job_summ_table;
+        is_first_filter = false;
+      }
+      document day_filter;
+      day_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("day", day_ranges, day_filter);
+      AppendUnionWithRanges(pipeline, m_day_job_summary_collection_name_,
+                            day_filter.view(),
+                            entry_table == &day_job_summ_table);
+    }
+    if (!month_ranges.empty()) {
+      if (is_first_filter) {
+        entry_table = &month_job_summ_table;
+        is_first_filter = false;
+      }
+      document month_filter;
+      month_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("month", month_ranges, month_filter);
+      AppendUnionWithRanges(pipeline, m_month_job_summary_collection_name_,
+                            month_filter.view(),
+                            entry_table == &month_job_summ_table);
+    }
+    if (is_first_filter) {
       CRANE_LOGGER_INFO(m_logger_, "No time ranges to query.");
       return;
     }
@@ -1542,7 +1509,7 @@ void MongodbClient::QueryJobSizeSummary(
   std::vector<std::uint32_t> grouping_list(
       request->filter_grouping_list().begin(),
       request->filter_grouping_list().end());
-  auto ranges = EfficientSplitTimeRange(start_time, end_time);
+  auto ranges = SplitToTimeRange(start_time, end_time);
   auto& [hour_ranges, day_ranges, month_ranges] = ranges;
 
   auto hour_job_summ_table =
@@ -1551,42 +1518,51 @@ void MongodbClient::QueryJobSizeSummary(
       (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
   auto month_job_summ_table =
       (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+  document filter_builder;
 
   mongocxx::collection* entry_table = nullptr;
   mongocxx::pipeline pipeline;
 
   try {
+    auto common_filter = GetJobSummeryQueryCommonFilter(request);
+    bool is_first_filter = true;
     if (!hour_ranges.empty()) {
-      entry_table = &hour_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_hour_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("hour", hour_ranges, request).view(),
-          true);
-      AppendUnionWithRanges(
-          pipeline, m_day_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("day", day_ranges, request).view(),
-          false);
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("month", month_ranges, request).view(),
-          false);
-    } else if (!day_ranges.empty()) {
-      entry_table = &day_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_day_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("day", day_ranges, request).view(),
-          true);
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("month", month_ranges, request).view(),
-          false);
-    } else if (!month_ranges.empty()) {
-      entry_table = &month_job_summ_table;
-      AppendUnionWithRanges(
-          pipeline, m_month_job_summary_collection_name_,
-          GetJobSizeSummeryQueryFilter("month", month_ranges, request).view(),
-          true);
-    } else {
+      if (is_first_filter) {
+        entry_table = &hour_job_summ_table;
+        is_first_filter = false;
+      }
+      document hour_filter;
+      hour_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("hour", hour_ranges, hour_filter);
+      AppendUnionWithRanges(pipeline, m_hour_job_summary_collection_name_,
+                            hour_filter.view(),
+                            entry_table == &hour_job_summ_table);
+    }
+    if (!day_ranges.empty()) {
+      if (is_first_filter) {
+        entry_table = &day_job_summ_table;
+        is_first_filter = false;
+      }
+      document day_filter;
+      day_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("day", day_ranges, day_filter);
+      AppendUnionWithRanges(pipeline, m_day_job_summary_collection_name_,
+                            day_filter.view(),
+                            entry_table == &day_job_summ_table);
+    }
+    if (!month_ranges.empty()) {
+      if (is_first_filter) {
+        entry_table = &month_job_summ_table;
+        is_first_filter = false;
+      }
+      document month_filter;
+      month_filter.append(bsoncxx::builder::concatenate(common_filter.view()));
+      SetJobSummeryQueryTimeFilter("month", month_ranges, month_filter);
+      AppendUnionWithRanges(pipeline, m_month_job_summary_collection_name_,
+                            month_filter.view(),
+                            entry_table == &month_job_summ_table);
+    }
+    if (is_first_filter) {
       CRANE_INFO("No time ranges for job size summary to query");
       return;
     }
