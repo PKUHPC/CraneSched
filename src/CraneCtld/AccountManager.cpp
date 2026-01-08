@@ -849,14 +849,11 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   std::string log = "";
   std::vector<ModifyRecord> modify_record;
   // check operations validity
-  CRANE_DEBUG("beforecheck: {}", fmt::join(res_account.allowed_partition, ","));
   auto check_result = CheckModifyAccountOperations(&res_account, operations,
                                                    &log, &modify_record, force);
   if (!check_result.empty()) {
     return check_result;
   }
-  CRANE_DEBUG("aftercheck: {}", fmt::join(res_account.allowed_partition, ","));
-
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         for (auto& [name, modify_field, val] : modify_record) {
@@ -895,8 +892,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   }
   m_account_map_[account_name] =
       std::make_unique<Account>(std::move(res_account));
-  CRANE_DEBUG("query_account: {}",
-              fmt::join(m_account_map_[account_name]->allowed_partition, ","));
   return rich_error_list;
 }
 
@@ -1063,7 +1058,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) {
     rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(CraneErrCode::ERR_INVALID_USER, "")});
+        std::unexpected{FormatRichErr(CraneErrCode::ERR_INVALID_USER, name)});
     return rich_error_list;
   }
   const User* op_user = user_result.value();
@@ -2730,8 +2725,8 @@ CraneExpectedRich<void> AccountManager::CheckAndDeleteUserAllowedQos_(
     }
 
     if (qos == iter->second.first && !force) {
-      return std::unexpected{
-          FormatRichErr(CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos)};
+      return std::unexpected{FormatRichErr(
+          CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos)};
     }
 
     iter->second.second.remove(qos);
