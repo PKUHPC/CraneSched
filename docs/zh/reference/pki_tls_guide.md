@@ -15,7 +15,7 @@ dnf install libcurl-devel jq
 ```bash
 dnf install vault
 ```
-上述方法不能安装，参考 [Vault 安装](https://www.vaultproject.io/docs/install)下载并安装vault二进制包
+如果仓库中没有该软件包，请参考 [Vault 安装](https://www.vaultproject.io/docs/install)下载并安装vault二进制包
 
 ## Vault 配置与部署
 
@@ -142,7 +142,7 @@ bash vault.sh login
 
 ### 清理 Vault 数据并重置
 **_执行命令前请执行 `cacctmgr reset all` 重置所有账户的证书_**
-```
+```bash
 bash vault.sh clean_vault
 ```
 功能：清空 `Vault` 数据目录并重启 `Vault`。**_慎用，仅用于彻底重置 Vault_**。

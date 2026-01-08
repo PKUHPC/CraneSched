@@ -134,20 +134,28 @@ Function: Initialize the `PKI` certificate system and issue internal/external ce
 The default domain suffix is `crane.local`, which can be customized.
 
 ### Issue Internal Certificates
+```bash
 bash vault.sh issue_internal [domainSuffix]
+```
 Function: Issue TLS certificates for internal communication (`internal.pem`, `internal.key`).
 
 ### Issue External Certificates
+```bash
 bash vault.sh issue_external [domainSuffix]
+```
 Function: Issue TLS certificates for external communication (`external.pem`, `external.key`).
 
 ### Administrator Login to Vault
+```bash
 bash vault.sh login
+```
 Function: Login to `Vault` as `admin` user, facilitating subsequent CLI operations.
 
 ### Clean Vault Data and Reset
 **_Execute `cacctmgr reset all` to reset all account certificates before running this command_**
+```bash
 bash vault.sh clean_vault
+```
 Function: Clear the `Vault` data directory and restart `Vault`. **_Use with caution, only for completely resetting Vault_**.
 
 ### Notes
