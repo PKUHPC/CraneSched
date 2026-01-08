@@ -2339,7 +2339,7 @@ grpc::Status CraneCtldServiceImpl::ActiveAggregationManually(
     response->set_reason("Only the root user can perform this operation");
     return grpc::Status::OK;
   }
-  g_db_client->ClusterRollupUsage();
+  g_db_client->AggregateAllJobInfoAsync(std::nullopt);
   response->set_ok(true);
 
   return grpc::Status::OK;

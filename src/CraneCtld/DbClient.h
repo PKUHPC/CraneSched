@@ -81,6 +81,28 @@ class MongodbClient {
   using document = bsoncxx::builder::basic::document;
   using sub_array = bsoncxx::builder::basic::sub_array;
   using sub_document = bsoncxx::builder::basic::sub_document;
+  struct JobSummary {
+    enum class Type : std::uint8_t { HOUR, DAY, MONTH };
+
+    struct Key {
+      std::string account;
+      std::string wckey;
+      uint32_t cpus_alloc;
+
+      template <typename H>
+      friend H AbslHashValue(H h, const Key& key) {
+        return H::combine(std::move(h), key.account, key.wckey, key.cpus_alloc);
+      }
+      bool operator==(const Key& other) const {
+        return account == other.account && wckey == other.wckey &&
+               cpus_alloc == other.cpus_alloc;
+      }
+    };
+    struct Value {
+      double total_cpu_time = 0;
+      int32_t total_count = 0;
+    };
+  };
 
  public:
   enum class EntityType {
@@ -88,28 +110,6 @@ class MongodbClient {
     USER = 1,
     QOS = 2,
     WCKEY = 3,
-  };
-
-  enum class RollupType : std::uint8_t { HOUR, DAY, MONTH };
-
-  struct JobSizeSummaryKey {
-    std::string account;
-    std::string wckey;
-    uint32_t cpus_alloc;
-
-    template <typename H>
-    friend H AbslHashValue(H h, const JobSizeSummaryKey& key) {
-      return H::combine(std::move(h), key.account, key.wckey, key.cpus_alloc);
-    }
-    bool operator==(const JobSizeSummaryKey& other) const {
-      return account == other.account && wckey == other.wckey &&
-             cpus_alloc == other.cpus_alloc;
-    }
-  };
-
-  struct JobSizeSummaryResult {
-    double total_cpu_time = 0;
-    int32_t total_count = 0;
   };
 
   MongodbClient();  // Mongodb-c++ don't need to close the connection
@@ -149,65 +149,62 @@ class MongodbClient {
   bool CheckStepExisted(job_id_t job_id, step_id_t step_id);
 
   /* ----- Method of operating the job summary ----------- */
-  inline std::string RollupTypeToString(RollupType rollup_type);
-  bool UpdateSummaryLastSuccessTimeSec(RollupType rollup_type,
-                                       int64_t last_success_sec);
-  std::optional<int64_t> GetSummaryLastSuccessTimeSec(RollupType rollup_type);
-  void TriggerRetroactiveRollupForAggregatedHours(
-      const std::vector<std::chrono::sys_seconds>& end_times);
-  void RollupSummary(RollupType rollup_type);
-  void ClusterRollupUsage();
-  void WriteJobSizeSummaryReply(
-      const absl::flat_hash_map<JobSizeSummaryKey, JobSizeSummaryResult>&
-          agg_map,
-      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
-      int max_data_size);
+  /*
+   * Timer will aggregate finished jobs every hour, but when cluster go into
+   * some inconsistency, there maybe a new finished job inserted into db with
+   * end_time in the past. So we provide an async method to aggregate job
+   * summary for specified end_time(s).
+   *
+   * @param job_end_times: Optional vector of job end times to aggregate. If not
+   * set, aggregate all unaggregated jobs up to the latest available aggregate
+   * time.
+   *
+   * Assume it's 15:01 now, and the last successful aggregation was at 13:01.
+   * - If job_end_times is not provided, aggregate jobs ended in
+   *   [13:00:00 , 15:00:00) .
+   * - If job_end_times is provided as [14:30, 14:45], aggregate jobs ended
+   *   [14:00:00 , 15:00:00) .
+   */
+  void AggregateAllJobInfoAsync(
+      std::optional<std::vector<std::chrono::sys_seconds>>&& job_end_times);
   bool QueryJobSizeSummaryByJobIds(
       const crane::grpc::QueryJobSizeSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
-  bsoncxx::document::value JobQueryMatch(
-      const std::string& time_field,
-      std::pair<std::chrono::sys_seconds, std::chrono::sys_seconds> range,
-      const crane::grpc::QueryJobSummaryRequest* request);
   void QueryJobSummary(
       const crane::grpc::QueryJobSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSummaryReply>* stream);
-  bsoncxx::document::value JobSizeQueryMatch(
-      const std::string& time_field,
-      std::pair<std::chrono::sys_seconds, std::chrono::sys_seconds> range,
-      const crane::grpc::QueryJobSizeSummaryRequest* request);
   void QueryJobSizeSummary(
       const crane::grpc::QueryJobSizeSummaryRequest* request,
       grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream);
 
-  // Build a MongoDB aggregation pipeline that unions multiple time ranges.
-  //
-  // The caller chooses a "base" collection (the one used to create `pipeline`
-  // and `entry_table`) and then unions additional collections/ranges via
-  // `$unionWith`.
-  //
-  // - `ranges` are interpreted as half-open intervals [start, end) in
-  //   epoch-seconds (consistent with `$gte`/`$lt` matches).
-  // - `match_fn(range)` must return a BSON `$match` document for that range.
-  // - If `first_is_match` is true, the first range is appended as a plain
-  //   `pipeline.match(...)` (i.e. query the base collection directly).
-  //   Otherwise, all ranges are appended as `$unionWith` stages.
-  template <typename MatchFunc>
-  void AppendUnionWithRanges(
-      mongocxx::pipeline& pipeline, const std::string& coll,
-      const std::vector<std::pair<std::chrono::sys_seconds,
-                                  std::chrono::sys_seconds>>& ranges,
-      MatchFunc match_fn, bool first_is_match = true);
-  void AggregateJobSummaryByHour(int64_t start_sec, int64_t end_sec,
-                                 const std::string& task_collection_name);
-  void AggregateJobSummaryByDayOrMonth(RollupType src_type, RollupType dst_type,
-                                       int64_t period_start_sec,
-                                       int64_t period_end_sec);
+ private:
+  bool UpdateSummaryLastSuccessTimeSec_(JobSummary::Type aggregate_type,
+                                        int64_t last_success_sec);
+  static std::string JobSummaryTypeToString_(JobSummary::Type rollup_type);
+  std::optional<int64_t> GetSummaryLastSuccessTimeSec_(
+      JobSummary::Type summery_type);
+  void WriteJobSizeSummaryReply_(
+      const absl::flat_hash_map<JobSummary::Key, JobSummary::Value>& agg_map,
+      grpc::ServerWriter<::crane::grpc::QueryJobSizeSummaryReply>* stream,
+      int max_data_size);
+
+  void EvCleanAggregateRequestCb_();
+  void AggregatedForJobEndTime_(
+      const std::vector<std::chrono::sys_seconds>& end_times);
+  void AggregateJobs_();
+  void AggregateJobSummaryByType_(JobSummary::Type summery_type);
+  void AggregateJobSummaryByHour_(int64_t start_sec, int64_t end_sec,
+                                  const std::string& task_collection_name);
+  void AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
+                                        JobSummary::Type dst_type,
+                                        int64_t period_start_sec,
+                                        int64_t period_end_sec);
   void MongoDbSummaryThread_();
 
   /* ----- Method of operating the account table ----------- */
+ public:
   bool InsertUser(const User& new_user);
-  bool InsertWckey(const Ctld::Wckey& new_wckey);
+  bool InsertWckey(const Wckey& new_wckey);
   bool InsertAccount(const Account& new_account);
   bool InsertQos(const Qos& new_qos);
 
@@ -514,10 +511,13 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
-  std::thread m_roll_up_thread_;
   std::atomic_bool m_thread_stop_{false};
-  std::shared_ptr<uvw::timer_handle> m_roll_up_jobs_timer_handle;
+  std::shared_ptr<uvw::timer_handle> m_aggregate_jobs_timer_handle_;
+  ConcurrentQueue<std::optional<std::vector<std::chrono::sys_seconds>>>
+      m_aggregate_job_request_queue_;
+  std::shared_ptr<uvw::async_handle> m_aggregate_job_async_handle_;
   std::shared_ptr<uvw::loop> m_uvw_loop_;
+  std::thread m_job_aggregate_thread_;
 };
 
 template <>
