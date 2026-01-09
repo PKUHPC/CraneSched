@@ -668,7 +668,7 @@ bool MongodbClient::FetchJobStepRecords(
            ViewValueOr_(view["licenses_alloc"],
                         bsoncxx::builder::basic::make_document().view())) {
         mutable_licenses->emplace(std::string(elem.key()),
-                                  elem.get_int32().value);
+                                  elem.get_int64().value);
       }
 
       job_info_ptr->set_wckey(ViewValueOr_(view["wckey"], std::string("")));
