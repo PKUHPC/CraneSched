@@ -21,9 +21,9 @@ dnf install libcurl-devel jq
 dnf install vault
 ```
 
-The above method cannot be used for installation. 
-Please refer to [Vault Installation](https://www.vaultproject.io/docs/install) 
-to download and install the Vault binary package.
+If Vault is available and suitable in your system's package repository, you can install it using the above command.
+If Vault is not available in your repository or you require a specific version, please refer to [Vault Installation](https://www.vaultproject.io/docs/install)
+to download and install the official Vault binary package.
 
 ## Vault Configuration and Deployment
 
@@ -39,6 +39,7 @@ storage "raft" {
   node_id = "node1"
 }
 
+Warning: TLS must be enabled in production environments. Disabling TLS is only allowed for local testing when the network is secure. For more details, please refer to the official Vault documentation.
 listener "tcp" {
   address     = "127.0.0.1:8200"
   tls_disable = "true"
@@ -53,7 +54,7 @@ mkdir -p /etc/vault/data
 ```
 
 ### Configure systemd Service (Recommended)
-create `/etc/systemd/system/vault.service`:
+Create `/etc/systemd/system/vault.service`:
 ```service
 [Unit]
 Description=HashiCorp Vault
@@ -87,7 +88,7 @@ and certificate system initialization.
 
 **_vault.sh provides two initialization methods:_**
 
-1. One-click initialization (recommended)
+1. One-click initialization (**recommended**)
 ```bash
 bash vault.sh init [domainSuffix]
 ```
@@ -100,63 +101,42 @@ bash vault.sh init_vault
 bash vault.sh init_cert [domainSuffix]
 ```
 
-### Initialize All (Recommended for first-time deployment or after reset)
-```bash
-bash vault.sh init [domainSuffix]
-```
-Function: Initialize `Vault`, create administrator user, 
-initialize `PKI` certificate system, and issue internal/external certificates.
+- **Initialize All (Recommended for first-time deployment or after reset)**
+    - `bash vault.sh init [domainSuffix]`
+        - Function: Initialize `Vault`, create administrator user, initialize `PKI` certificate system, and issue internal/external certificates.
+        - The default domain suffix is `crane.local`, which can be customized, for example:
+            - `bash vault.sh init crane.com`
 
-The default domain suffix is `crane.local`, which can be customized, for example:
-```bash
-bash vault.sh init crane.com
-```
+- **Initialize Vault (First-time or after reset)**
+    - `bash vault.sh init_vault`
+        - Function: Initialize `Vault`, generate unseal key and `root token`, create administrator account.
 
-### Initialize Vault (First-time or after reset)
-```bash
-bash vault.sh init_vault
-```
-Function: Initialize `Vault`, generate unseal key and `root token`, 
-create administrator account.
+- **Unseal Vault (Required after service restart)**
+    - `bash vault.sh unseal_vault`
+        - Function: Automatically unseal `Vault` using the saved unseal key
 
-### Unseal Vault (Required after service restart)
-```bash
-bash vault.sh unseal_vault
-```
-Function: Automatically unseal `Vault` using the saved unseal key
+- **Initialize PKI Certificate System**
+    - `bash vault.sh init_cert [domainSuffix]`
+        - Function: Initialize the `PKI` certificate system and issue internal/external certificates.
+        - The default domain suffix is `crane.local`, which can be customized.
 
-### Initialize PKI Certificate System
-```bash
-bash vault.sh init_cert [domainSuffix]
-```
-Function: Initialize the `PKI` certificate system and issue internal/external certificates.
+- **Issue Internal Certificates**
+    - `bash vault.sh issue_internal [domainSuffix]`
+        - Function: Issue TLS certificates for internal communication (`internal.pem`, `internal.key`).
 
-The default domain suffix is `crane.local`, which can be customized.
+- **Issue External Certificates**
+    - `bash vault.sh issue_external [domainSuffix]`
+        - Function: Issue TLS certificates for external communication (`external.pem`, `external.key`).
 
-### Issue Internal Certificates
-```bash
-bash vault.sh issue_internal [domainSuffix]
-```
-Function: Issue TLS certificates for internal communication (`internal.pem`, `internal.key`).
+- **Administrator Login to Vault**
+    - `bash vault.sh login`
+        - Function: Login to `Vault` as `admin` user, facilitating subsequent CLI operations.
 
-### Issue External Certificates
-```bash
-bash vault.sh issue_external [domainSuffix]
-```
-Function: Issue TLS certificates for external communication (`external.pem`, `external.key`).
+- **Clean Vault Data and Reset**
+    - **_Execute `cacctmgr reset all` to reset all account certificates before running this command_**
+    - `bash vault.sh clean_vault`
+        - Function: Clear the `Vault` data directory and restart `Vault`. **_Use with caution, only for completely resetting Vault_**.
 
-### Administrator Login to Vault
-```bash
-bash vault.sh login
-```
-Function: Login to `Vault` as `admin` user, facilitating subsequent CLI operations.
-
-### Clean Vault Data and Reset
-**_Execute `cacctmgr reset all` to reset all account certificates before running this command_**
-```bash
-bash vault.sh clean_vault
-```
-Function: Clear the `Vault` data directory and restart `Vault`. **_Use with caution, only for completely resetting Vault_**.
 
 ### Notes
 1. `Vault` only needs to be initialized once. Do not repeatedly execute `init`, `init_vault`, otherwise you must first reset with `cacctmgr reset all` and `clean_vault` before reinitialization.
@@ -174,6 +154,10 @@ After initialization, 5 certificate files will be generated in the `/etc/crane/t
 2. `Craned` node: `ca.pem`, `internal.key`, `internal.pem`
 3. User login node: `ca.pem`, `external.pem`
 4. `Cfored` node: `ca.pem`, `internal.key`, `internal.pem`
+
+After deployment, please ensure the file permissions are correct: 
+external.key and internal.key should have permission 600, 
+while ca.pem, external.pem, and internal.pem should have permission 644.
 
 ### Configuration File `/etc/crane/crane.yaml`
 ```yaml
@@ -197,5 +181,5 @@ Vault:
   Port: 8200
   Username: admin
   Password: "123456"
-  Tls: false
+  Tls: false # Set to true when Vault is using TLS; it is recommended to enable this in production environments.
 ```

@@ -31,7 +31,8 @@ storage "raft" {
   node_id = "node1"
 }
 
-listener "tcp" {
+# 警告：必须在生产环境中启用 TLS，仅在本地测试且确保网络安全时才可临时关闭；详情请查阅Vault官方文档
+listener "tcp" {  
   address     = "127.0.0.1:8200"
   tls_disable = "true"
   # 真实环境中需配置
@@ -78,7 +79,7 @@ sudo systemctl enable vault
 
 **_vault.sh提供两种初始化方式：_**
 
-1. 一键初始化（建议使用）
+1. 一键初始化（**建议使用**）
 ```bash
 bash vault.sh init [domainSuffix]
 ```
@@ -91,61 +92,42 @@ bash vault.sh init_vault
 bash vault.sh init_cert [domainSuffix]
 ```
 
-### 初始化全部（推荐首次部署或重置后使用）
-```bash
-bash vault.sh init [domainSuffix]
-```
-功能： 初始化 `Vault`、创建管理员用户、初始化 `PKI` 证书系统、签发内部/外部证书。 
+**vault.sh 脚本所有功能介绍如下：**
+- **初始化全部（推荐首次部署或重置后使用）**
+    - `bash vault.sh init [domainSuffix]`
+        - 功能：初始化 Vault、创建管理员用户、初始化 PKI 证书系统、签发内部/外部证书。
+        - 默认域名后缀为 `crane.local`，可自定义，例如：
+            - `bash vault.sh init crane.com`
 
-默认域名后缀为`crane.local`,可自定义，例如：
-```bash
-bash vault.sh init crane.com
-```
+- **初始化 Vault（首次或重置后）**
+    - `bash vault.sh init_vault`
+        - 功能：初始化 Vault，生成解封密钥和 root token，创建管理员账号。
 
-### 初始化 Vault（首次或重置后）
-```bash
-bash vault.sh init_vault
-```
-功能：初始化 `Vault`，生成解封密钥和 `root token`，创建管理员账号。 
+- **解封 Vault（服务重启后需执行）**
+    - `bash vault.sh unseal_vault`
+        - 功能：自动使用保存的解封密钥解锁 Vault。
 
-### 解封 Vault（服务重启后需执行）
-```bash
-bash vault.sh unseal_vault
-```
-功能： 自动使用保存的解封密钥解锁 `Vault` 
+- **初始化 PKI 证书系统**
+    - `bash vault.sh init_cert [domainSuffix]`
+        - 功能：初始化 PKI 证书系统，并签发内部/外部证书。
+        - 默认域名后缀为 `crane.local`，可自定义。
 
-### 初始化 PKI 证书系统
-```bash
-bash vault.sh init_cert [domainSuffix]
-```
-功能： 初始化 `PKI` 证书系统，并签发内部/外部证书。
+- **签发内部证书**
+    - `bash vault.sh issue_internal [domainSuffix]`
+        - 功能：签发内部通信用 TLS 证书（`internal.pem`、`internal.key`）。
 
-默认域名后缀为 `crane.local`，可自定义。
+- **签发外部证书**
+    - `bash vault.sh issue_external [domainSuffix]`
+        - 功能：签发外部通信用 TLS 证书（`external.pem`、`external.key`）。
 
-### 签发内部证书
-```bash
-bash vault.sh issue_internal [domainSuffix]
-```
-功能：签发内部通信用 TLS 证书（`internal.pem`、`internal.key`）。 
+- **管理员登陆 Vault**
+    - `bash vault.sh login`
+        - 功能：以 admin 用户登录 Vault，便于后续 CLI 操作。
 
-### 签发外部证书
-```bash
-bash vault.sh issue_external [domainSuffix]
-```
-功能：签发外部通信用 TLS 证书（`external.pem`、`external.key`）。 
-
-### 管理员登陆 Vault
-```bash
-bash vault.sh login
-```
-功能：以 `admin` 用户登录 `Vault`，便于后续 CLI 操作。
-
-### 清理 Vault 数据并重置
-**_执行命令前请执行 `cacctmgr reset all` 重置所有账户的证书_**
-```bash
-bash vault.sh clean_vault
-```
-功能：清空 `Vault` 数据目录并重启 `Vault`。**_慎用，仅用于彻底重置 Vault_**。
+- **清理 Vault 数据并重置**
+    - **_执行命令前请执行 `cacctmgr reset all` 重置所有账户的证书_**
+    - `bash vault.sh clean_vault`
+        - 功能：清空 Vault 数据目录并重启 Vault。**_慎用，仅用于彻底重置 Vault_**。
 
 ### 注意事项
 1. `Vault` 只需初始化一次，勿重复执行 `init`、`init_vault`，否则需先 `cacctmgr reset all`、`clean_vault` 重置后才能重新初始化。
@@ -163,6 +145,8 @@ bash vault.sh clean_vault
 2. `Craned`所在节点：`ca.pem`、`internal.key`、`internal.pem`
 3. 用户登陆节点：`ca.pem`、`external.pem`
 4. `Cfored` 所在节点：`ca.pem`、`internal.key`、`internal.pem`
+
+部署后请确认文件权限正确：`external.key`与`internal.key`权限为600，`ca.pem`、`external.pem`、`internal.pem`权限为644
 
 ### 配置文件 `/etc/crane/crane.yaml`
 ```yaml
@@ -186,5 +170,5 @@ Vault:
   Port: 8200
   Username: admin
   Password: "123456"
-  Tls: false
+  Tls: false # 当Vault启用TLS时设置为true，建议生产环境中启用
 ```

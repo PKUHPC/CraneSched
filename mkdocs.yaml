@@ -63,6 +63,7 @@ nav:
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
+      - PKI+TLS Deployment: reference/pki_tls_guide.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
@@ -87,7 +88,6 @@ nav:
     - Pending Reason: reference/pending_reason.md
     - License Usage Guide: reference/license_guide.md
     - Keepalived Guide: reference/keepalived.md
-    - PKI+TLS Guide: reference/pki_tls_guide.md
     - Use Cases:
         - Overview: reference/use_cases.md
         - Multi-Node Parallel Job: reference/use_case_multi_node.md
