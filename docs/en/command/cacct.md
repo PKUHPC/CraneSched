@@ -401,3 +401,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [crun](crun.md) - Run interactive jobs and steps
 - [ccancel](ccancel.md) - Cancel jobs and steps
 - [ceff](ceff.md) - View job efficiency statistics
+- [creport](creport.md) - Query job-related statistics

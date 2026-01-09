@@ -392,3 +392,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [crun](crun.md) - 运行交互式作业和作业步
 - [ccancel](ccancel.md) - 取消作业和作业步
 - [ceff](ceff.md) - 查看作业效率统计
+- [creport](creport.md) - 查询作业相关统计信息

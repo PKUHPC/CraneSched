@@ -416,3 +416,4 @@ cqueue --step -j 100,200,300
 - [ccancel](ccancel.md) - 取消作业和作业步
 - [cacct](cacct.md) - 查询已完成的作业
 - [ccontrol](ccontrol.md) - 控制和查询作业/作业步
+- [creport](creport.md) - 查询作业相关统计信息
