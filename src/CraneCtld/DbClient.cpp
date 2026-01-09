@@ -1962,13 +1962,12 @@ void MongodbClient::AggregateJobSummaryByHour_(
       cur_start_tp = cur_end_tp;
       cur_end_tp += hours{1};
     }
+    UpdateSummaryLastSuccessTimeSec_(JobSummary::Type::HOUR,
+                                     to_sec(cur_start_tp));
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(m_logger_, "AggregateJobSummaryByHour error: {}",
                        e.what());
   }
-
-  UpdateSummaryLastSuccessTimeSec_(JobSummary::Type::HOUR,
-                                   to_sec(cur_start_tp));
 }
 
 void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
@@ -2083,13 +2082,13 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
         cur_end_day = sys_days{(ym + months{1}) / 1};
       }
     }
+    UpdateSummaryLastSuccessTimeSec_(dst_type,
+                                     to_sec(sys_seconds{cur_start_day}));
   } catch (const std::exception& e) {
     CRANE_LOGGER_ERROR(
         m_logger_, "[mongodb] Aggregate job day or month summary exception: {}",
         e.what());
   }
-  UpdateSummaryLastSuccessTimeSec_(dst_type,
-                                   to_sec(sys_seconds{cur_start_day}));
 }
 
 void MongodbClient::WriteJobSizeSummaryReply_(
