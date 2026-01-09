@@ -572,6 +572,7 @@ message TaskInfo {
   bool exclusive = 39;
   ResourceView allocated_res_view = 40;
   string wckey = 41;
+  uint32 ntasks = 42;
 }
 
 message StepInfo {
@@ -593,6 +594,7 @@ message StepInfo {
   uint32 node_num = 12;
   string cmd_line = 13;
   string cwd = 14;
+  uint32 ntasks = 15;
   ResourceView req_res_view = 17;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;

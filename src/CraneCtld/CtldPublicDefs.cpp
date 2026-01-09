@@ -397,6 +397,7 @@ void StepInCtld::SetFieldsOfStepInfo(
   step_info->mutable_end_time()->CopyFrom(m_runtime_attr_.end_time());
 
   step_info->set_node_num(node_num);
+  step_info->set_ntasks(ntasks);
 
   // *step_info->mutable_req_res_view() =
   //     static_cast<crane::grpc::ResourceView>(requested_node_res_view);
@@ -1711,6 +1712,8 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());
+
+  task_info->set_ntasks(ntasks);
 }
 
 int TaskInCtld::SchedulePendingSteps(
