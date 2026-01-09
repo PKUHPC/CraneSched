@@ -654,6 +654,10 @@ void CtldClient::Init() {
       m_health_check_thread_ = std::thread([this] {
         util::SetCurrentThreadName("HealthCheckThr");
         HealthCheck_();
+        if (g_config.HealthCheck.NodeState & START_ONLY) {
+          g_config.HealthCheck.Interval = 0L;
+          return ;
+        }
         std::mt19937 rng{std::random_device{}()};
         do {
           uint64_t interval = g_config.HealthCheck.Interval;

@@ -219,8 +219,6 @@ class CtldClient {
 
   bool SendStatusChanges_(std::list<StepStatusChangeQueueElem>&& changes);
 
-  void SendHealthCheckResult_(bool is_health) const;
-
   void HealthCheck_();
 
   bool CheckNodeState_();
