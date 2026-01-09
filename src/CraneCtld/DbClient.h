@@ -116,9 +116,6 @@ class MongodbClient {
   ~MongodbClient();
   bool Init();
   bool Connect();
-  bool InitTableIndexes();
-  void CreateCollectionIndex(mongocxx::collection& coll,
-                             const std::vector<std::string>& fields);
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
@@ -401,6 +398,10 @@ class MongodbClient {
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
+
+  void CreateCollectionIndex(mongocxx::collection& coll,
+                             const std::vector<std::string>& fields);
+  bool InitTableIndexes();
 
  private:
   bool CheckDefaultRootAccountUserAndInit_();

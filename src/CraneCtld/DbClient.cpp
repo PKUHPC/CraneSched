@@ -244,128 +244,6 @@ bsoncxx::document::value GetJobSummeryQueryCommonFilter(const T* request) {
 
 }  // namespace
 
-void MongodbClient::CreateCollectionIndex(
-    mongocxx::collection& coll, const std::vector<std::string>& fields) {
-  document index_builder;
-
-  for (const auto& field : fields) {
-    index_builder.append(kvp(field, 1));  // 1 for ascending order
-  }
-
-  auto fields_view = fields | std::views::transform([](const std::string& str) {
-                       return str + "_1";
-                     });
-  std::string idx_name = fmt::to_string(fmt::join(fields_view, "_"));
-  mongocxx::options::index index_options;
-  index_options.name(idx_name);
-  coll.create_index(index_builder.view(), index_options);
-}
-
-MongodbClient::MongodbClient() {
-  m_instance_ = std::make_unique<mongocxx::instance>();
-  m_db_name_ = g_config.DbName;
-  std::string authentication;
-
-  if (!g_config.DbUser.empty()) {
-    authentication =
-        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
-  }
-
-  g_runtime_status.db_logger = AddLogger(
-      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
-
-  m_logger_ = g_runtime_status.db_logger;
-
-  m_connect_uri_ = fmt::format(
-      "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
-      g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-
-  CRANE_LOGGER_TRACE(
-      m_logger_,
-      "Mongodb connect uri: "
-      "mongodb://{}:[passwd]@{}:{}/?replicaSet={}&maxPoolSize=1000",
-      g_config.DbUser, g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-
-  m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
-  m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
-  m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
-}
-
-MongodbClient::~MongodbClient() {
-  m_thread_stop_ = true;
-  if (m_job_aggregate_thread_.joinable()) m_job_aggregate_thread_.join();
-}
-
-bool MongodbClient::InitTableIndexes() {
-  try {
-    // Create index for the raw task table
-    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
-    CreateCollectionIndex(raw_table, {"time_end"});
-
-    // Create indexes for the hour summary table
-    auto hour_coll =
-        (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
-    CreateCollectionIndex(hour_coll, {"hour"});
-    CreateCollectionIndex(hour_coll, {"hour", "id_group"});
-    CreateCollectionIndex(
-        hour_coll, {"hour", "id_group", "account", "username", "qos", "wckey",
-                    "cpus_alloc", "partition_name", "nodename_list"});
-
-    // Create indexes for the day summary table
-    auto day_coll =
-        (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
-    CreateCollectionIndex(day_coll, {"day"});
-    CreateCollectionIndex(day_coll, {"day", "id_group"});
-    CreateCollectionIndex(
-        day_coll, {"day", "id_group", "account", "username", "qos", "wckey",
-                   "cpus_alloc", "partition_name", "nodename_list"});
-
-    // Create indexes for the month summary table
-    auto month_coll =
-        (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
-    CreateCollectionIndex(month_coll, {"month"});
-    CreateCollectionIndex(month_coll, {"month", "id_group"});
-    CreateCollectionIndex(
-        month_coll, {"month", "id_group", "account", "username", "qos", "wckey",
-                     "cpus_alloc", "partition_name", "nodename_list"});
-
-    return true;
-  } catch (const std::exception& e) {
-    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
-    return false;
-  }
-}
-
-bool MongodbClient::Init() {
-  if (!InitTableIndexes()) {
-    CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
-    return false;
-  }
-  m_uvw_loop_ = uvw::loop::create();
-  m_aggregate_jobs_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
-
-  m_aggregate_jobs_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        AggregateJobs_();
-      });
-  using namespace std::chrono;
-  auto now = time_point_cast<milliseconds>(system_clock::now());
-  auto next_hour = time_point_cast<milliseconds>(floor<hours>(now) + hours{1});
-  auto diff = next_hour - now;
-
-  m_aggregate_jobs_timer_handle_->start(diff, 1h);
-
-  m_aggregate_job_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_aggregate_job_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanAggregateRequestCb_();
-      });
-
-  m_job_aggregate_thread_ = std::thread([this] { MongoDbSummaryThread_(); });
-
-  return true;
-}
-
 bool MongodbClient::Connect() {
   try {
     m_connect_pool_ =
@@ -3830,6 +3708,128 @@ void MongodbClient::ViewToStepInfo_(const bsoncxx::document::view& view,
     *meta_info = std::move(
         static_cast<crane::grpc::ContainerTaskAdditionalMeta>(container_meta));
   }
+}
+
+void MongodbClient::CreateCollectionIndex(
+    mongocxx::collection& coll, const std::vector<std::string>& fields) {
+  document index_builder;
+
+  for (const auto& field : fields) {
+    index_builder.append(kvp(field, 1));  // 1 for ascending order
+  }
+
+  auto fields_view = fields | std::views::transform([](const std::string& str) {
+                       return str + "_1";
+                     });
+  std::string idx_name = fmt::to_string(fmt::join(fields_view, "_"));
+  mongocxx::options::index index_options;
+  index_options.name(idx_name);
+  coll.create_index(index_builder.view(), index_options);
+}
+
+bool MongodbClient::InitTableIndexes() {
+  try {
+    // Create index for the raw task table
+    auto raw_table = (*GetClient_())[m_db_name_][m_task_collection_name_];
+    CreateCollectionIndex(raw_table, {"time_end"});
+
+    // Create indexes for the hour summary table
+    auto hour_coll =
+        (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
+    CreateCollectionIndex(hour_coll, {"hour"});
+    CreateCollectionIndex(hour_coll, {"hour", "id_group"});
+    CreateCollectionIndex(
+        hour_coll, {"hour", "id_group", "account", "username", "qos", "wckey",
+                    "cpus_alloc", "partition_name", "nodename_list"});
+
+    // Create indexes for the day summary table
+    auto day_coll =
+        (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
+    CreateCollectionIndex(day_coll, {"day"});
+    CreateCollectionIndex(day_coll, {"day", "id_group"});
+    CreateCollectionIndex(
+        day_coll, {"day", "id_group", "account", "username", "qos", "wckey",
+                   "cpus_alloc", "partition_name", "nodename_list"});
+
+    // Create indexes for the month summary table
+    auto month_coll =
+        (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
+    CreateCollectionIndex(month_coll, {"month"});
+    CreateCollectionIndex(month_coll, {"month", "id_group"});
+    CreateCollectionIndex(
+        month_coll, {"month", "id_group", "account", "username", "qos", "wckey",
+                     "cpus_alloc", "partition_name", "nodename_list"});
+
+    return true;
+  } catch (const std::exception& e) {
+    CRANE_LOGGER_ERROR(m_logger_, "Create index error: {}", e.what());
+    return false;
+  }
+}
+
+bool MongodbClient::Init() {
+  if (!InitTableIndexes()) {
+    CRANE_LOGGER_ERROR(m_logger_, "Init table indexes failed!");
+    return false;
+  }
+  m_uvw_loop_ = uvw::loop::create();
+  m_aggregate_jobs_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+
+  m_aggregate_jobs_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        AggregateJobs_();
+      });
+  using namespace std::chrono;
+  auto now = time_point_cast<milliseconds>(system_clock::now());
+  auto next_hour = time_point_cast<milliseconds>(floor<hours>(now) + hours{1});
+  auto diff = next_hour - now;
+
+  m_aggregate_jobs_timer_handle_->start(diff, 1h);
+
+  m_aggregate_job_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_aggregate_job_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanAggregateRequestCb_();
+      });
+
+  m_job_aggregate_thread_ = std::thread([this] { MongoDbSummaryThread_(); });
+
+  return true;
+}
+
+MongodbClient::MongodbClient() {
+  m_instance_ = std::make_unique<mongocxx::instance>();
+  m_db_name_ = g_config.DbName;
+  std::string authentication;
+
+  if (!g_config.DbUser.empty()) {
+    authentication =
+        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
+  }
+
+  g_runtime_status.db_logger = AddLogger(
+      "mongodb", StrToLogLevel(g_config.CraneCtldDebugLevel).value(), true);
+
+  m_logger_ = g_runtime_status.db_logger;
+
+  m_connect_uri_ = fmt::format(
+      "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
+      g_config.DbHost, g_config.DbPort, g_config.DbRSName);
+
+  CRANE_LOGGER_TRACE(
+      m_logger_,
+      "Mongodb connect uri: "
+      "mongodb://{}:[passwd]@{}:{}/?replicaSet={}&maxPoolSize=1000",
+      g_config.DbUser, g_config.DbHost, g_config.DbPort, g_config.DbRSName);
+
+  m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
+  m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
+  m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
+}
+
+MongodbClient::~MongodbClient() {
+  m_thread_stop_ = true;
+  if (m_job_aggregate_thread_.joinable()) m_job_aggregate_thread_.join();
 }
 
 }  // namespace Ctld
