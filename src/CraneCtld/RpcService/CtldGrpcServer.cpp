@@ -194,9 +194,9 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
 }
 
 grpc::Status CtldForInternalServiceImpl::QueryNodeState(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryNodeStateRequest *request,
-    crane::grpc::QueryNodeStateReply *response) {
+    grpc::ServerContext* context,
+    const crane::grpc::QueryNodeStateRequest* request,
+    crane::grpc::QueryNodeStateReply* response) {
   g_meta_container->QueryNodeState(request->craned_id(), response);
 
   return grpc::Status::OK;

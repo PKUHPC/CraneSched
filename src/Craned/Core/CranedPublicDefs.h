@@ -201,7 +201,6 @@ struct RunTimeStatus {
 
 inline RunTimeStatus g_runtime_status{};
 
-
 enum HealthCheckNodeStateEnum : std::uint8_t {
   ANY = 1,
   IDLE = 2,
