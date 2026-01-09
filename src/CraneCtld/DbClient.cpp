@@ -1730,7 +1730,9 @@ void MongodbClient::AggregatedForJobEndTime_(
       sys_seconds hour_start_tp = floor<hours>(end_tp);
 
       // "Already aggregated" means the hour summary table has data for it.
-      auto filter = make_document(kvp("hour", to_epoch_sec(hour_start_tp)));
+      auto filter = make_document(
+          kvp("hour", bsoncxx::types::b_date{
+                          time_point_cast<milliseconds>(hour_start_tp)}));
       auto doc_opt = hour_summary_coll.find_one(filter.view());
       if (doc_opt) hours_to_update.emplace(hour_start_tp);
     }
@@ -1874,6 +1876,8 @@ void MongodbClient::AggregateJobSummaryByHour_(
     while (cur_end_tp <= end_tp) {
       auto cur_start = to_sec(cur_start_tp);
       auto cur_end = to_sec(cur_end_tp);
+      auto cur_start_date =
+          bsoncxx::types::b_date{time_point_cast<milliseconds>(cur_start_tp)};
       mongocxx::pipeline pipeline;
 
       // Match jobs whose 'time_end' falls within the current hour interval
@@ -1882,7 +1886,7 @@ void MongodbClient::AggregateJobSummaryByHour_(
                                                       kvp("$lt", cur_end)))));
 
       // Add the 'hour' field representing the current hour interval
-      pipeline.add_fields(make_document(kvp("hour", cur_start)));
+      pipeline.add_fields(make_document(kvp("hour", cur_start_date)));
 
       pipeline.add_fields(make_document(
           kvp("cpus_alloc",
@@ -2006,15 +2010,17 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
 
     auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
     while (sys_seconds{cur_end_day} <= period_end_tp) {
-      auto cur_start = to_sec(sys_seconds{cur_start_day});
-      auto cur_end = to_sec(sys_seconds{cur_end_day});
+      auto cur_start_date = bsoncxx::types::b_date{
+          time_point_cast<milliseconds>(sys_seconds{cur_start_day})};
+      auto cur_end_date = bsoncxx::types::b_date{
+          time_point_cast<milliseconds>(sys_seconds{cur_end_day})};
       std::string group_period_field_ref = "$" + period_field;
       mongocxx::pipeline pipeline;
       pipeline.match(make_document(
-          kvp(src_time_field,
-              make_document(kvp("$gte", cur_start), kvp("$lt", cur_end)))));
+          kvp(src_time_field, make_document(kvp("$gte", cur_start_date),
+                                            kvp("$lt", cur_end_date)))));
 
-      pipeline.add_fields(make_document(kvp(period_field, cur_start)));
+      pipeline.add_fields(make_document(kvp(period_field, cur_start_date)));
 
       pipeline.group(make_document(
           kvp("_id", make_document(kvp(period_field, group_period_field_ref),
