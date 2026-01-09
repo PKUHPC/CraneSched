@@ -1086,11 +1086,6 @@ message ExecInContainerStepReply {
   string url = 3;
 }
 
-message SendHealthCheckResultRequest {
-  string craned_id = 1;
-  bool healthy = 2;
-}
-
 message QueryNodeStateRequest {
   string craned_id = 1;
 }
@@ -1182,7 +1177,6 @@ service CraneCtldForInternal {
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
   rpc CranedPing(CranedPingRequest) returns (CranedPingReply);
 
-  rpc SendHealthCheckResult(SendHealthCheckResultRequest) returns (google.protobuf.Empty);
   rpc QueryNodeState(QueryNodeStateRequest) returns (QueryNodeStateReply);
 
   /* RPCs called from Cfored */
