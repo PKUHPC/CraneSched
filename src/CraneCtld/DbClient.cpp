@@ -1836,9 +1836,11 @@ void MongodbClient::ViewToLicenseResource_(
     resource->type = static_cast<crane::grpc::LicenseResource::Type>(
         ViewValueOr_(resource_view["type"], 0));
     resource->allocated = ViewValueOr_(resource_view["allocated"], int64_t(0));
-    resource->total_resource_count = ViewValueOr_(resource_view["count"], int64_t(0));
+    resource->total_resource_count =
+        ViewValueOr_(resource_view["count"], int64_t(0));
     resource->flags = ViewValueOr_(resource_view["flags"], 0);
-    resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], int64_t(0));
+    resource->last_consumed =
+        ViewValueOr_(resource_view["last_consumed"], int64_t(0));
     resource->last_update = absl::FromUnixSeconds(
         ViewValueOr_(resource_view["last_update"], int64_t(0)));
     resource->description =
