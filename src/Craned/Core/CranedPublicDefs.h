@@ -122,7 +122,7 @@ struct Config {
   struct HealthCheckConfig {
     std::string Program;
     uint64_t Interval{0};
-    uint32_t NodeState;
+    uint32_t NodeState{0};
     bool Cycle;
   };
   HealthCheckConfig HealthCheck;
