@@ -91,8 +91,6 @@ class CranedMetaContainer final {
 
   bool UpdateNodeDrainState(const std::string& craned_id, bool is_drain,
                             const std::string& reason);
-  void UpdateNodeStateWithHealthCheck_(const CranedId& craned_id,
-                                       bool is_health);
 
   void QueryNodeState(const CranedId& craned_id,
                       crane::grpc::QueryNodeStateReply* response);
