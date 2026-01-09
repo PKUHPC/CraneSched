@@ -205,11 +205,6 @@ class CtldForInternalServiceImpl final
       const crane::grpc::UpdateNodeDrainStateRequest *request,
       crane::grpc::UpdateNodeDrainStateReply *response) override;
 
-  grpc::Status SendHealthCheckResult(
-      grpc::ServerContext *context,
-      const crane::grpc::SendHealthCheckResultRequest *request,
-      google::protobuf::Empty *response) override;
-
   grpc::Status QueryNodeState(
       grpc::ServerContext *context,
       const crane::grpc::QueryNodeStateRequest *request,

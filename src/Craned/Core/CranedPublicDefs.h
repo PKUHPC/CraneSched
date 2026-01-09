@@ -203,12 +203,12 @@ inline RunTimeStatus g_runtime_status{};
 
 
 enum HealthCheckNodeStateEnum : std::uint8_t {
-  ANY = 0,
-  IDLE = 1,
-  ALLOC = 2,
-  MIXED = 4,
-  NONDRAINED_IDLE = 8,
-  START_ONLY = 16
+  ANY = 1,
+  IDLE = 2,
+  ALLOC = 4,
+  MIXED = 8,
+  NONDRAINED_IDLE = 16,
+  START_ONLY = 32
 };
 
 }  // namespace Craned

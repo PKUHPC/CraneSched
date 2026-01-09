@@ -893,43 +893,6 @@ void CranedMetaContainer::UpdateNodeState(const CranedId& craned_id, bool is_hea
   return true;
 }
 
-void CranedMetaContainer::UpdateNodeStateWithHealthCheck_(
-    const CranedId& craned_id, bool is_health) {
-
-  if (!is_health) LockResReduceEvents();
-
-  if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR(
-        "Health check: unknown craned_id '{}', cannot update drain state.",
-        craned_id);
-    if (!is_health) UnlockResReduceEvents();
-    return;
-  }
-
-  auto craned_meta = craned_meta_map_[craned_id];
-  if (!craned_meta->alive) {
-    CRANE_ERROR("craned '{}' is DOWN; refuse to change drain state.", craned_id);
-    if (!is_health) UnlockResReduceEvents();
-    return ;
-  }
-
-  // only update drain state when the reason is 'Node failed health check'
-  if (craned_meta->drain &&
-      craned_meta->state_reason == HealthCheckFailedReason) {
-    craned_meta->drain = !is_health;
-    if (is_health) craned_meta->state_reason.clear();
-    else UnlockResReduceEvents();
-  } else if (!craned_meta->drain && !is_health) {
-    craned_meta->drain = true;
-    craned_meta->state_reason = HealthCheckFailedReason;
-    AddResReduceEventsAndUnlock({std::make_pair(
-        absl::InfinitePast(), std::vector<CranedId>{craned_id})});
-  }
-
-  CRANE_TRACE("Health check: craned_id '{}' drain state changed to {}.",
-              craned_id, craned_meta->drain);
-}
-
 void CranedMetaContainer::QueryNodeState(
     const CranedId& craned_id, crane::grpc::QueryNodeStateReply* response) {
   if (!craned_meta_map_.Contains(craned_id)) {

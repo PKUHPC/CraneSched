@@ -193,16 +193,6 @@ grpc::Status CtldForInternalServiceImpl::UpdateNodeDrainState(
   return grpc::Status::OK;
 }
 
-grpc::Status CtldForInternalServiceImpl::SendHealthCheckResult(
-    grpc::ServerContext *context,
-    const crane::grpc::SendHealthCheckResultRequest *request,
-    google::protobuf::Empty *response) {
-  g_meta_container->UpdateNodeStateWithHealthCheck_(request->craned_id(),
-                                                    request->healthy());
-
-  return grpc::Status::OK;
-}
-
 grpc::Status CtldForInternalServiceImpl::QueryNodeState(
     grpc::ServerContext *context,
     const crane::grpc::QueryNodeStateRequest *request,

@@ -1243,7 +1243,6 @@ service CraneCtldForInternal {
 
   rpc UpdateNodeDrainState(UpdateNodeDrainStateRequest) returns (UpdateNodeDrainStateReply);
 
-  rpc SendHealthCheckResult(SendHealthCheckResultRequest) returns (google.protobuf.Empty);
   rpc QueryNodeState(QueryNodeStateRequest) returns (QueryNodeStateReply);
 
   /* RPCs called from Cfored */
