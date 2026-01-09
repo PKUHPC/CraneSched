@@ -1093,6 +1093,7 @@ message QueryJobSummaryRequest {
   repeated string filter_wckeys = 4;
   google.protobuf.Timestamp filter_start_time = 5;
   google.protobuf.Timestamp filter_end_time = 6;
+  repeated uint32 filter_gids = 7;
 }
 
 message QueryJobSummaryReply {
@@ -1110,6 +1111,7 @@ message QueryJobSizeSummaryRequest {
   google.protobuf.Timestamp filter_end_time = 8;
   repeated uint32 filter_grouping_list = 9;
   repeated uint32 filter_job_ids = 10;
+  repeated uint32 filter_gids = 11;
 }
 
 message QueryJobSizeSummaryReply {

@@ -193,6 +193,15 @@ bsoncxx::document::value GetJobSummeryQueryCommonFilter(const T* request) {
     match_doc.append(kvp(
         "username", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
   }
+
+  // submit gid (id_group)
+  if (request && request->filter_gids_size() > 0) {
+    bsoncxx::builder::basic::array arr;
+    for (const auto& gid : request->filter_gids())
+      arr.append(static_cast<int32_t>(gid));
+    match_doc.append(kvp(
+        "id_group", bsoncxx::builder::basic::make_document(kvp("$in", arr))));
+  }
   // qos
   if (request && request->filter_qoss_size() > 0) {
     bsoncxx::builder::basic::array arr;
@@ -297,25 +306,28 @@ bool MongodbClient::InitTableIndexes() {
     auto hour_coll =
         (*GetClient_())[m_db_name_][m_hour_job_summary_collection_name_];
     CreateCollectionIndex(hour_coll, {"hour"});
+    CreateCollectionIndex(hour_coll, {"hour", "id_group"});
     CreateCollectionIndex(
-        hour_coll, {"hour", "account", "username", "qos", "wckey", "cpus_alloc",
-                    "partition_name", "nodename_list"});
+        hour_coll, {"hour", "id_group", "account", "username", "qos", "wckey",
+                    "cpus_alloc", "partition_name", "nodename_list"});
 
     // Create indexes for the day summary table
     auto day_coll =
         (*GetClient_())[m_db_name_][m_day_job_summary_collection_name_];
     CreateCollectionIndex(day_coll, {"day"});
+    CreateCollectionIndex(day_coll, {"day", "id_group"});
     CreateCollectionIndex(
-        day_coll, {"day", "account", "username", "qos", "wckey", "cpus_alloc",
-                   "partition_name", "nodename_list"});
+        day_coll, {"day", "id_group", "account", "username", "qos", "wckey",
+                   "cpus_alloc", "partition_name", "nodename_list"});
 
     // Create indexes for the month summary table
     auto month_coll =
         (*GetClient_())[m_db_name_][m_month_job_summary_collection_name_];
     CreateCollectionIndex(month_coll, {"month"});
-    CreateCollectionIndex(month_coll,
-                          {"month", "account", "username", "qos", "wckey",
-                           "cpus_alloc", "partition_name", "nodename_list"});
+    CreateCollectionIndex(month_coll, {"month", "id_group"});
+    CreateCollectionIndex(
+        month_coll, {"month", "id_group", "account", "username", "qos", "wckey",
+                     "cpus_alloc", "partition_name", "nodename_list"});
 
     return true;
   } catch (const std::exception& e) {
@@ -1911,13 +1923,13 @@ void MongodbClient::AggregateJobSummaryByHour_(
       // partition_name and calculate total CPU time and total job count for
       // each group
       pipeline.group(make_document(
-          kvp("_id",
-              make_document(kvp("hour", "$hour"), kvp("account", "$account"),
-                            kvp("username", "$username"), kvp("qos", "$qos"),
-                            kvp("wckey", "$wckey"),
-                            kvp("cpus_alloc", "$cpus_alloc"),
-                            kvp("partition_name", "$partition_name"),
-                            kvp("nodename_list", "$nodename_list"))),
+          kvp("_id", make_document(
+                         kvp("hour", "$hour"), kvp("account", "$account"),
+                         kvp("username", "$username"), kvp("qos", "$qos"),
+                         kvp("wckey", "$wckey"), kvp("id_group", "$id_group"),
+                         kvp("cpus_alloc", "$cpus_alloc"),
+                         kvp("partition_name", "$partition_name"),
+                         kvp("nodename_list", "$nodename_list"))),
           kvp("total_cpu_time", make_document(kvp("$sum", "$cpus_time"))),
           kvp("total_count", make_document(kvp("$sum", 1)))));
 
@@ -1928,6 +1940,7 @@ void MongodbClient::AggregateJobSummaryByHour_(
               kvp("hour", "$_id.hour"), kvp("account", "$_id.account"),
               kvp("username", "$_id.username"), kvp("qos", "$_id.qos"),
               kvp("wckey", "$_id.wckey"), kvp("cpus_alloc", "$_id.cpus_alloc"),
+              kvp("id_group", "$_id.id_group"),
               kvp("partition_name", "$_id.partition_name"),
               kvp("nodename_list", "$_id.nodename_list"),
               kvp("total_cpu_time", "$total_cpu_time"),
@@ -1936,9 +1949,9 @@ void MongodbClient::AggregateJobSummaryByHour_(
       // Merge the aggregation results into the summary collection
       pipeline.merge(make_document(
           kvp("into", m_hour_job_summary_collection_name_),
-          kvp("on",
-              make_array("hour", "account", "username", "qos", "wckey",
-                         "cpus_alloc", "partition_name", "nodename_list")),
+          kvp("on", make_array("hour", "account", "username", "qos", "wckey",
+                               "id_group", "cpus_alloc", "partition_name",
+                               "nodename_list")),
           kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
 
       auto cursor = jobs.aggregate(pipeline);
@@ -2027,6 +2040,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
                                    kvp("account", "$account"),
                                    kvp("username", "$username"),
                                    kvp("qos", "$qos"), kvp("wckey", "$wckey"),
+                                   kvp("id_group", "$id_group"),
                                    kvp("cpus_alloc", "$cpus_alloc"),
                                    kvp("partition_name", "$partition_name"),
                                    kvp("nodename_list", "$nodename_list"))),
@@ -2040,6 +2054,7 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
                             kvp("username", "$_id.username"),
                             kvp("qos", "$_id.qos"), kvp("wckey", "$_id.wckey"),
                             kvp("cpus_alloc", "$_id.cpus_alloc"),
+                            kvp("id_group", "$_id.id_group"),
                             kvp("partition_name", "$_id.partition_name"),
                             kvp("nodename_list", "$_id.nodename_list"),
                             kvp("total_cpu_time", "$total_cpu_time"),
@@ -2047,9 +2062,9 @@ void MongodbClient::AggregateJobSummaryByDayOrMonth_(JobSummary::Type src_type,
 
       pipeline.merge(make_document(
           kvp("into", dst_coll_str),
-          kvp("on",
-              make_array(period_field, "account", "username", "qos", "wckey",
-                         "cpus_alloc", "partition_name", "nodename_list")),
+          kvp("on", make_array(period_field, "account", "username", "qos",
+                               "wckey", "id_group", "cpus_alloc",
+                               "partition_name", "nodename_list")),
           kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
 
       mongocxx::options::aggregate agg_opts;
