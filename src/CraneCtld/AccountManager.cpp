@@ -839,8 +839,14 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
   auto result =
       CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
   if (!result) {
-    rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(result.error(), "")});
+    if (result.error() == CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED) {
+      rich_error_list.emplace_back(
+          std::unexpected{FormatRichErr(result.error(), op_user->name)});
+    } else {
+      rich_error_list.emplace_back(
+          std::unexpected{FormatRichErr(result.error(), account_name)});
+    }
+
     return rich_error_list;
   }
   std::string actor_name = op_user->name;
@@ -1068,11 +1074,16 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user, user,
                                                     &actual_account, false);
   if (!result) {
-    rich_error_list.emplace_back(
-        std::unexpected{FormatRichErr(result.error(), "")});
+    if (result.error() == CraneErrCode::ERR_PERMISSION_USER) {
+      rich_error_list.emplace_back(
+          std::unexpected{FormatRichErr(result.error(), op_user->name)});
+    } else {
+      rich_error_list.emplace_back(
+          std::unexpected{FormatRichErr(result.error(), "")});
+    }
+
     return rich_error_list;
   }
-
   actor_name = op_user->name;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
@@ -1712,8 +1723,9 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
   for (const auto& [par, pair] : cache_allowed_partition_qos_map) {
     if (!ranges::contains(qos_list, pair.first)) {
       if (!force && !pair.first.empty())
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, pair.first));
+        return std::unexpected{
+            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS,
+                          fmt::to_string(fmt::join(qos_list, ",")))};
     }
   }
 
@@ -1802,7 +1814,7 @@ CraneExpectedRich<void> AccountManager::CheckAndModifyUserAdminLevelNoLock_(
   auto result = CheckIfUserHasHigherPrivThan_(op_user, user->admin_level);
   if (!result) {
     return std::unexpected{
-        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, "")};
+        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name)};
   }
   User::AdminLevel new_level;
   if (value == "none")
@@ -1818,7 +1830,7 @@ CraneExpectedRich<void> AccountManager::CheckAndModifyUserAdminLevelNoLock_(
 
   if (op_user.admin_level <= new_level) {
     return std::unexpected{
-        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, "")};
+        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name)};
   }
   // modify the user
   user->admin_level = new_level;
@@ -1830,7 +1842,7 @@ CraneExpectedRich<void> AccountManager::CheckAndModifyUserDefaultAccountNoLock_(
   auto result = CheckIfUserHasHigherPrivThan_(op_user, user->admin_level);
   if (!result) {
     return std::unexpected{
-        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, "")};
+        FormatRichErr(CraneErrCode::ERR_PERMISSION_USER, op_user.name)};
   }
   if (!user->account_to_attrs_map.contains(value)) {
     return std::unexpected{
@@ -2707,35 +2719,47 @@ CraneExpectedRich<void> AccountManager::CheckAndDeleteUserAllowedQos_(
     // Delete the qos of all partition
     for (auto& [par, pair] :
          user->account_to_attrs_map[account].allowed_partition_qos_map) {
-      if (ranges::contains(pair.second, qos)) {
-        pair.second.remove(qos);
-        if (pair.first == qos) {
-          pair.first = pair.second.empty() ? "" : pair.second.front();
-        }
+      auto result = CheckAndDeleteUserAllowedQosInSinglePartition(
+          user, qos, account, par, force);
+      if (!result) {
+        return result;
       }
     }
   } else {
-    // Delete the qos of a specified partition
-    auto& map_ = user->account_to_attrs_map[account].allowed_partition_qos_map;
-    auto iter = map_.find(partition);
+    return CheckAndDeleteUserAllowedQosInSinglePartition(user, qos, account,
+                                                         partition, force);
+  }
+  return {};
+}
 
-    if (iter == map_.end()) {
-      return std::unexpected{
-          FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
-    }
+CraneExpectedRich<void>
+AccountManager::CheckAndDeleteUserAllowedQosInSinglePartition(
+    User* user, const std::string& qos, const std::string& account,
+    const std::string& partition, const bool force) {
+  // Delete the qos of a specified partition
+  auto& map_ = user->account_to_attrs_map[account].allowed_partition_qos_map;
+  auto iter = map_.find(partition);
 
-    if (qos == iter->second.first && !force) {
-      return std::unexpected{FormatRichErr(
-          CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos)};
-    }
-
-    iter->second.second.remove(qos);
-    if (qos == iter->second.first) {
-      iter->second.first =
-          iter->second.second.empty() ? "" : iter->second.second.front();
-    }
+  if (iter == map_.end()) {
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition)};
   }
 
+  if (std::find(iter->second.second.begin(), iter->second.second.end(), qos) ==
+      iter->second.second.end()) {
+    return std::unexpected{FormatRichErr(CraneErrCode::ERR_QOS_MISSING, qos)};
+  }
+
+  if (qos == iter->second.first && !force) {
+    return std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_DEFAULT_QOS_MODIFICATION_DENIED, qos)};
+  }
+
+  iter->second.second.remove(qos);
+  if (qos == iter->second.first) {
+    iter->second.first =
+        iter->second.second.empty() ? "" : iter->second.second.front();
+  }
   return {};
 }
 
@@ -2798,6 +2822,10 @@ void AccountManager::SetAccountAllowedQos_(
     for (const auto& qos : add_qos) {
       modify_record->emplace_back(qos, ModifyField::Qos, std::optional<int>(1));
     }
+  }
+
+  if (account->default_qos.empty()) {
+    account->default_qos = account->allowed_qos_list.front();
   }
 
   return;
