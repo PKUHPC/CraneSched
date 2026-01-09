@@ -1835,10 +1835,10 @@ void MongodbClient::ViewToLicenseResource_(
         ViewValueOr_(resource_view["server_type"], std::string{});
     resource->type = static_cast<crane::grpc::LicenseResource::Type>(
         ViewValueOr_(resource_view["type"], 0));
-    resource->allocated = ViewValueOr_(resource_view["allocated"], 0);
-    resource->total_resource_count = ViewValueOr_(resource_view["count"], 0);
+    resource->allocated = ViewValueOr_(resource_view["allocated"], int64_t(0));
+    resource->total_resource_count = ViewValueOr_(resource_view["count"], int64_t(0));
     resource->flags = ViewValueOr_(resource_view["flags"], 0);
-    resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], 0);
+    resource->last_consumed = ViewValueOr_(resource_view["last_consumed"], int64_t(0));
     resource->last_update = absl::FromUnixSeconds(
         ViewValueOr_(resource_view["last_update"], int64_t(0)));
     resource->description =
@@ -1863,8 +1863,8 @@ MongodbClient::document MongodbClient::LicenseResourceToDocument_(
       "allocated", "last_consumed", "cluster_resources", "count",
       "flags",     "last_update",   "description"};
 
-  std::tuple<std::string, std::string, std::string, int32_t, int32_t, int32_t,
-             std::unordered_map<std::string, uint32_t>, int32_t, int32_t,
+  std::tuple<std::string, std::string, std::string, int32_t, int64_t, int64_t,
+             std::unordered_map<std::string, uint32_t>, int64_t, int32_t,
              int64_t, std::string>
       values{resource.name,
              resource.server,
