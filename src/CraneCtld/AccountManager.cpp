@@ -829,6 +829,13 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
 
   const User* op_user = user_result.value();
 
+  const Account* account = GetExistedAccountInfoNoLock_(account_name);
+  if (!account) {
+    rich_error_list.emplace_back(std::unexpected{
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account_name)});
+    return rich_error_list;
+  }
+
   auto result =
       CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
   if (!result) {
@@ -837,13 +844,6 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyAccount(
     return rich_error_list;
   }
   std::string actor_name = op_user->name;
-
-  const Account* account = GetExistedAccountInfoNoLock_(account_name);
-  if (!account) {
-    rich_error_list.emplace_back(std::unexpected{
-        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, account_name)});
-    return rich_error_list;
-  }
 
   Account res_account(*account);
   std::string log = "";
@@ -1713,7 +1713,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     if (!ranges::contains(qos_list, pair.first)) {
       if (!force && !pair.first.empty())
         return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, ""));
+            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, pair.first));
     }
   }
 
