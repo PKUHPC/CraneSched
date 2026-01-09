@@ -858,9 +858,8 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 void CranedMetaContainer::QueryNodeState(
     const CranedId& craned_id, crane::grpc::QueryNodeStateReply* response) {
   if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR(
-        "Health check: unknown craned_id '{}', QueryNodeState failed.",
-        craned_id);
+    CRANE_ERROR("Health check: unknown craned_id '{}', QueryNodeState failed.",
+                craned_id);
     response->set_ok(false);
     return;
   }
