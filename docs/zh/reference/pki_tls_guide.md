@@ -93,6 +93,7 @@ bash vault.sh init_cert [domainSuffix]
 ```
 
 **vault.sh 脚本所有功能介绍如下：**
+
 - **初始化全部（推荐首次部署或重置后使用）**
     - `bash vault.sh init [domainSuffix]`
         - 功能：初始化 Vault、创建管理员用户、初始化 PKI 证书系统、签发内部/外部证书。

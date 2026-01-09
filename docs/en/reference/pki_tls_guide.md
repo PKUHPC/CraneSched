@@ -101,6 +101,8 @@ bash vault.sh init_vault
 bash vault.sh init_cert [domainSuffix]
 ```
 
+The functions of the vault.sh script are described as follows:
+
 - **Initialize All (Recommended for first-time deployment or after reset)**
     - `bash vault.sh init [domainSuffix]`
         - Function: Initialize `Vault`, create administrator user, initialize `PKI` certificate system, and issue internal/external certificates.
