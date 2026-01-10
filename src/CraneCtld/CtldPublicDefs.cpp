@@ -946,7 +946,7 @@ crane::grpc::StepToD CommonStepInCtld::GetStepToD(
       step_to_d.mutable_container_meta()->CopyFrom(
           StepToCtld().container_meta());
     } else if (StepToCtld().has_batch_meta()) {
-      // cbatch --container primary step runs batch script under container job
+      // cbatch --pod primary step runs batch script under container job
       step_to_d.mutable_batch_meta()->CopyFrom(StepToCtld().batch_meta());
     }
   }

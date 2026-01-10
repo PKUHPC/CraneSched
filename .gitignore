@@ -2,6 +2,7 @@ generated
 cmake-build-*
 build/
 .cache/
+site/
 
 third_party/*
 
