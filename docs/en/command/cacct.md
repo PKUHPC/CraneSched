@@ -326,6 +326,22 @@ cacct -t failed,cancelled
 cacct -t time-limit-exceeded
 ```
 
+**Filter by job type:**
+
+```bash
+# View only container jobs
+cacct --type Container
+
+# View batch jobs
+cacct --type Batch
+
+# View interactive jobs
+cacct --type Interactive
+```
+
+!!! tip "Container Job Management"
+    For more container-specific operations beyond basic queries, see [ccon Command Manual](ccon.md).
+
 ### Output Control
 
 **Limit output to 10 lines:**
@@ -400,4 +416,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [cbatch](cbatch.md) - Submit batch jobs
 - [crun](crun.md) - Run interactive jobs and steps
 - [ccancel](ccancel.md) - Cancel jobs and steps
-- [ceff](ceff.md) - View job efficiency statistics
+- [ceff](ceff.md) - View job efficiency statistics- [ccon](ccon.md) - Container job management

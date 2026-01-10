@@ -79,10 +79,18 @@ cbatch cbatch_test.sh
 - **--mail-user string**: Mail address of notification receiver
 
 ### Container Support
-- **--container string**: Path to container image
-- **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
+
+Container-related options are used to create Pod jobs that support container execution. For detailed usage, see [ccon Command Manual](ccon.md) and [Container Quick Start](../reference/container/quickstart.md).
+
+- **--pod**: Enable container mode, creating the job as a Pod job. Once enabled, use `ccon run` within the script to start containers
+- **--pod-name string**: Pod name (defaults to job name)
+- **--pod-port string**: Pod port mapping, format: `HOST:CONTAINER` or `PORT`. Can be used multiple times
+- **--pod-user string**: Run Pod as specified UID[:GID] (default: current user when `--pod-userns=false`)
+- **--pod-userns**: Enable Pod user namespace (default: `true`, maps container user to root)
+- **--pod-host-network**: Use host network namespace (default: `false`)
 
 ### Miscellaneous
+- **--interpreter string**: Specify script interpreter (e.g., `/bin/bash`, `/usr/bin/python3`)
 - **-D, --chdir string**: Working directory of the job
 - **--extra-attr string**: Extra attributes of the job (JSON format)
 - **--repeat uint32**: Submit job multiple times (default: 1)
@@ -285,14 +293,34 @@ module load mpich/4.0
 mpirun -n 13 -machinefile crane.hosts helloWorld > log
 ```
 
-## Advanced Features
+### Container Jobs
 
-### Container Support
+Use the `--pod` option to create Pod jobs that support containers:
 
-Submit a job that runs in a container:
 ```bash
-cbatch --container /path/to/container.sif my_script.sh
+#!/bin/bash
+#CBATCH --pod
+#CBATCH -N 2
+#CBATCH -c 4
+#CBATCH --mem 8G
+#CBATCH -p GPU
+#CBATCH --gres gpu:1
+#CBATCH -J container_training
+
+# Start containers within the Pod
+ccon run -d -v /data:/data pytorch/pytorch:latest -- python /data/train.py
+
+# Wait for all containers to complete
+ccon wait
 ```
+
+Or specify container options via command line:
+
+```bash
+cbatch --pod --pod-name my-training --pod-host-network train_job.sh
+```
+
+## Advanced Features
 
 ### Delayed Start
 
