@@ -2,7 +2,7 @@
 
 本页介绍鹤思容器功能的对象模型与生命周期。阅读本文后，你将理解容器作业与容器作业步的关系、Pod 与容器元数据的职责，以及资源分配与继承机制。
 
-## 术语速查
+## 基本术语
 
 | 术语 | 说明 |
 | --- | --- |
@@ -10,7 +10,8 @@
 | 容器作业步 | 在容器作业内执行的作业步，携带容器元数据，对应 Pod 中的容器 |
 | Pod 元数据 | 作业级配置，定义 Pod 名称、命名空间选项、端口映射等 |
 | 容器元数据 | 作业步级配置，定义镜像、命令、环境变量、挂载等 |
-| CRI | 容器运行时接口，Craned 通过 CRI 与 containerd 等运行时交互 |
+| CRI | 容器运行时接口，鹤思通过 CRI 与 containerd 等运行时交互 |
+| CNI | 容器网络接口，鹤思通过 CNI 插件配置容器网络 |
 
 ---
 
@@ -21,57 +22,38 @@
 容器作业具有以下特征：
 
 - **资源承载**：作业级申请 CPU、内存、GPU 等资源，后续作业步在此范围内运行。
-- **Pod 生命周期**：作业开始时创建 Pod，作业结束时销毁 Pod。
+- **Pod 生命周期**：作业开始时创建 Pod，作业结束时销毁 Pod。Pod 内运行所有容器作业步。
 - **混合作业步**：容器作业内可同时包含容器作业步与非容器作业步（如批处理脚本、交互式命令）。
 
-### 创建方式
+在创建容器作业时，可以通过 ccon 提交一个容器作业步作为 Primary Step，也可以使用 cbatch --pod 提交一个批处理脚本作为 Primary Step，后续在脚本中使用 ccon 追加容器作业步。
 
-=== "cbatch --pod"
-
-    以批处理脚本为入口。作业开始时自动创建 Pod，脚本作为 Primary Step 运行。脚本内可使用 `ccon run` 追加容器作业步，或使用 `crun` 追加非容器作业步。
-
-    ```bash
-    cbatch --pod job.sh
-    ```
-
-=== "ccon run"
-
-    直接以容器作业步作为 Primary Step。适合只包含容器作业步的简单作业。
-
-    ```bash
-    ccon -p CPU run ubuntu:22.04 /bin/bash -c 'echo hello'
-    ```
+!!! note "作业类型识别"
+    容器作业的类型显示为 `Container`。其他类型的作业中不允许调用 ccon 提交容器作业步。
 
 ---
 
 ## 容器作业步
 
-**容器作业步**是容器作业内的执行单元，对应于 Pod 中的一个容器。每个容器作业步携带独立的容器元数据，可指定不同的镜像、命令和挂载配置。
+**容器作业步**是容器作业内的执行单元，对应于 Pod 中的容器。每个容器作业步携带独立的容器元数据，可指定不同的镜像、命令和挂载配置。
+
+容器作业步和 crun 提交的交互式作业步类似，如果您在提交时指定了多个节点，则每个节点都会创建对应的容器作业步实例。
 
 容器作业步遵循作业步的通用类型：
 
 | 类型 | Step ID | 说明 |
 | --- | --- | --- |
+| Daemon Step | 0 | 守护进程作业步，创建 Pod 并持续运行 |
 | Primary Step | 1 | 作业入口产生的第一个作业步 |
 | Common Step | ≥2 | 追加的作业步，可在作业运行期间动态创建 |
 
-### 追加容器作业步
-
-在容器作业的脚本或交互环境中，使用 `ccon run` 追加容器作业步：
-
-```bash
-# 在 cbatch --pod 脚本内
-ccon run python:3.11 python train.py --epochs 100
-
-# 后台运行
-ccon run -d nginx:latest
-```
-
-追加的容器作业步复用作业已分配的资源，无需重新调度。
+!!! note "Pod 的作用"
+    - Pod 在作业启动时的 Daemon Step 创建，并在作业结束时销毁。
+    - Pod 的作用是为容器提供统一的网络命名空间、资源隔离环境，并不进行任何实际计算任务。
+    - 用户不需要也无法直接操作 Pod。
 
 ---
 
-## Pod 元数据与容器元数据
+## 容器相关元数据
 
 鹤思容器功能将配置分为两层：
 
@@ -164,29 +146,35 @@ Pod 元数据是**作业级**配置，在提交容器作业时指定，定义 Po
 
 ```mermaid
 stateDiagram-v2
+    state "Failed" as FailedStartup
+    state "Failed" as FailedRuntime
+
     [*] --> Pending: 提交
-    Pending --> Running: 调度完成
+    Pending --> Configuring: 调度完成
+    Configuring --> Starting: Pod 启动
+    Configuring --> FailedStartup: Pod 启动失败
+    Starting --> Running: 启动容器
+    Starting --> FailedStartup: 容器启动失败
     Running --> Completing: 作业步结束
     Completing --> Completed: Pod 清理
-    Running --> Failed: 执行失败
+    Running --> FailedRuntime: 执行失败
     Running --> Cancelled: 用户取消
-    Completing --> [*]
-    Failed --> [*]
+    Running --> ETL: 超出时间限制
+    Completed --> [*]
+    FailedStartup --> [*]
+    FailedRuntime --> [*]
     Cancelled --> [*]
+    ETL --> [*]
 ```
 
-### 阶段说明
+**生命周期各阶段说明：**
 
 1. **Pending**：作业进入队列等待调度。
-2. **Running**：资源分配完成，节点侧创建 Pod，Primary Step 开始执行。
-3. **Completing**：所有作业步执行完毕，等待 Pod 清理。
-4. **Completed / Failed / Cancelled**：作业终态。
-
-### Pod 与作业步的关系
-
-- Pod 在作业进入 Running 状态时创建，在作业结束时销毁。
-- 容器作业步在 Pod 内运行，共享 Pod 的网络和命名空间配置。
-- 追加的容器作业步可在 Primary Step 运行期间动态创建。
+2. **Configuring**：调度完成，节点侧正在创建 Pod 并进行必要配置（网络、挂载、命名空间等）。
+3. **Starting**：Pod 已创建，容器运行时正在拉取镜像并启动容器；镜像拉取可能需要一定时间。
+4. **Running**：资源分配完成，容器启动并开始执行，Primary Step 开始运行。
+5. **Completing**：所有作业步执行完毕，等待 Pod 清理。
+6. **Completed / Failed / Cancelled / ExceedTimeLimit**：作业终态。
 
 ---
 
@@ -239,18 +227,21 @@ flowchart LR
     end
     subgraph 执行面
         Craned[Craned]
+        CSuper[CSupervisor]
         CRI[CRI Runtime]
     end
     CLI -->|gRPC| Ctld
     Ctld -->|任务下发| Craned
-    Craned -->|CRI 调用| CRI
+    Craned -->|下发与协调| CSuper
+    CSuper -->|CRI 调用 / cgroup 管理| CRI
 ```
 
 | 组件 | 职责 |
 | --- | --- |
 | CraneCtld | 接收提交请求、调度资源、校验权限与参数 |
-| Craned | 节点侧代理，创建 Pod 与容器，管理生命周期 |
-| CRI Runtime | 容器运行时（如 containerd），执行容器操作 |
+| Craned | 节点侧代理，负责接收任务下发并与 CSupervisor 协作，管理节点级资源与 CSupervisor 的创建 |
+| CSupervisor | 运行在节点上的监控与管理组件，监控每个 Step 的生命周期与 CGroup，并与 CRI 通信执行容器相关操作 |
+| CRI Runtime | 容器运行时（如 containerd），在 CSupervisor 的调用下执行容器操作 |
 
 ---
 

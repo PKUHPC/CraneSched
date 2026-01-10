@@ -539,7 +539,8 @@ Pod（容器作业）使用纯 JOBID 标识，如 `123`。
 
 ## 与 cbatch 配合使用
 
-### 创建 Pod 作业
+!!! info "Pod 相关选项"
+    完整的 Pod 相关选项，请参考 [cbatch 命令手册](cbatch.md) 和 [容器快速上手](../reference/container/quickstart.md)。
 
 使用 `cbatch --pod` 创建支持容器的作业，然后在脚本中使用 `ccon run` 启动容器：
 
@@ -551,10 +552,11 @@ Pod（容器作业）使用纯 JOBID 标识，如 `123`。
 #CBATCH --mem 8G
 #CBATCH -p GPU
 
-# 在作业内启动容器
-ccon run -d pytorch/pytorch:latest -- python train.py
+# 在作业内启动多个容器
+ccon -N 1 run -d alpine:latest -- echo "Hello from container"
+ccon -N 1 run -d pytorch/pytorch:latest -- python train.py
 
-# 等待容器完成
+# 等待容器作业步完成后自动退出
 ccon wait
 ```
 
@@ -563,17 +565,6 @@ ccon wait
 ```bash
 cbatch train_job.sh
 ```
-
-### cbatch Pod 相关选项
-
-| 选项 | 说明 |
-|:-----|:-----|
-| `--pod` | 启用容器模式，创建 Pod 作业 |
-| `--pod-name` | Pod 名称（默认使用作业名） |
-| `--pod-port` | Pod 端口映射，格式：`HOST:CONTAINER` 或 `PORT` |
-| `--pod-user` | 以指定 UID[:GID] 运行 Pod |
-| `--pod-userns` | 启用 Pod 用户命名空间（默认：true） |
-| `--pod-host-network` | 使用宿主机网络命名空间 |
 
 ## 另请参阅
 
