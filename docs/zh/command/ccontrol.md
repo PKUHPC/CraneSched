@@ -35,7 +35,7 @@ ccontrol <操作> <实体> [选项]
 - **-J/--json**: 以JSON格式输出结果
 - **-C/--config**: 指定配置文件路径（默认："/etc/crane/config.yaml"）
 
-## 命令参考
+## 命令手册
 
 ### Show 命令
 
