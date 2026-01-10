@@ -83,7 +83,7 @@ sudo systemctl enable vault
 ```
 
 ## Vault Initialization and Certificate System Initialization
-The `vault.sh` script is provided to complete the initialization 
+The `script/vault.sh` script is provided to complete the initialization 
 and certificate system initialization.
 
 **_vault.sh provides two initialization methods:_**
@@ -104,40 +104,58 @@ bash vault.sh init_cert [domainSuffix]
 The functions of the vault.sh script are described as follows:
 
 - **Initialize All (Recommended for first-time deployment or after reset)**
-    - `bash vault.sh init [domainSuffix]`
-        - Function: Initialize `Vault`, create administrator user, initialize `PKI` certificate system, and issue internal/external certificates.
-        - The default domain suffix is `crane.local`, which can be customized, for example:
-            - `bash vault.sh init crane.com`
+
+    `bash vault.sh init [domainSuffix]`
+
+    Function: Initialize `Vault`, create administrator user, initialize `PKI` certificate system, and issue internal/external certificates.
+
+    The default domain suffix is `crane.local`, which can be customized, for example: `bash vault.sh init crane.com`
 
 - **Initialize Vault (First-time or after reset)**
-    - `bash vault.sh init_vault`
-        - Function: Initialize `Vault`, generate unseal key and `root token`, create administrator account.
+
+    `bash vault.sh init_vault`
+
+    Function: Initialize `Vault`, generate unseal key and `root token`, create administrator account.
 
 - **Unseal Vault (Required after service restart)**
-    - `bash vault.sh unseal_vault`
-        - Function: Automatically unseal `Vault` using the saved unseal key
+
+    `bash vault.sh unseal_vault`
+
+    Function: Automatically unseal `Vault` using the saved unseal key
 
 - **Initialize PKI Certificate System**
-    - `bash vault.sh init_cert [domainSuffix]`
-        - Function: Initialize the `PKI` certificate system and issue internal/external certificates.
-        - The default domain suffix is `crane.local`, which can be customized.
+
+    `bash vault.sh init_cert [domainSuffix]`
+
+    Function: Initialize the `PKI` certificate system and issue internal/external certificates.
+
+    The default domain suffix is `crane.local`, which can be customized.
 
 - **Issue Internal Certificates**
-    - `bash vault.sh issue_internal [domainSuffix]`
-        - Function: Issue TLS certificates for internal communication (`internal.pem`, `internal.key`).
+
+    `bash vault.sh issue_internal [domainSuffix]`
+
+    Function: Issue TLS certificates for internal communication (`internal.pem`, `internal.key`).
 
 - **Issue External Certificates**
-    - `bash vault.sh issue_external [domainSuffix]`
-        - Function: Issue TLS certificates for external communication (`external.pem`, `external.key`).
+
+    `bash vault.sh issue_external [domainSuffix]`
+
+    Function: Issue TLS certificates for external communication (`external.pem`, `external.key`).
 
 - **Administrator Login to Vault**
-    - `bash vault.sh login`
-        - Function: Login to `Vault` as `admin` user, facilitating subsequent CLI operations.
+
+    `bash vault.sh login`
+
+    Function: Login to `Vault` as `admin` user, facilitating subsequent CLI operations.
 
 - **Clean Vault Data and Reset**
-    - **_Execute `cacctmgr reset all` to reset all account certificates before running this command_**
-    - `bash vault.sh clean_vault`
-        - Function: Clear the `Vault` data directory and restart `Vault`. **_Use with caution, only for completely resetting Vault_**.
+
+    `bash vault.sh clean_vault`
+
+    Function: Clear the `Vault` data directory and restart `Vault`. **_Use with caution, only for completely resetting Vault_**.
+
+    **_Execute `cacctmgr reset all` to reset all account certificates before running this command_**
 
 
 ### Notes

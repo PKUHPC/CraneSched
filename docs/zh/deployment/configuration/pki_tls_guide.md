@@ -1,4 +1,4 @@
-# Crane PKI+TLS 安全通信部署手册
+# Crane PKI+TLS 安全通信配置
 
 本文档指导管理员在 `Crane` 集群中，基于 `HashiCorp Vault` 实现 `PKI` 证书自动化管理，实现集群内外安全通信与用户无感知证书分发。
 
@@ -75,7 +75,7 @@ sudo systemctl enable vault
 ```
 
 ## Vault 初始化与证书系统初始化
-提供`vault.sh`脚本，用于完成初始化与证书系统初始化
+鹤思提供了`scrpit/vault.sh`脚本，用于完成初始化与证书系统初始化
 
 **_vault.sh提供两种初始化方式：_**
 
@@ -95,40 +95,58 @@ bash vault.sh init_cert [domainSuffix]
 **vault.sh 脚本所有功能介绍如下：**
 
 - **初始化全部（推荐首次部署或重置后使用）**
-    - `bash vault.sh init [domainSuffix]`
-        - 功能：初始化 Vault、创建管理员用户、初始化 PKI 证书系统、签发内部/外部证书。
-        - 默认域名后缀为 `crane.local`，可自定义，例如：
-            - `bash vault.sh init crane.com`
+
+    `bash vault.sh init [domainSuffix]`
+
+    功能：初始化 Vault、创建管理员用户、初始化 PKI 证书系统、签发内部/外部证书。
+
+    默认域名后缀为 `crane.local`，可自定义，例如：`bash vault.sh init crane.com`
 
 - **初始化 Vault（首次或重置后）**
-    - `bash vault.sh init_vault`
-        - 功能：初始化 Vault，生成解封密钥和 root token，创建管理员账号。
+
+    `bash vault.sh init_vault`
+
+    功能：初始化 Vault，生成解封密钥和 root token，创建管理员账号。
 
 - **解封 Vault（服务重启后需执行）**
-    - `bash vault.sh unseal_vault`
-        - 功能：自动使用保存的解封密钥解锁 Vault。
+
+    `bash vault.sh unseal_vault`
+
+    功能：自动使用保存的解封密钥解锁 Vault。
 
 - **初始化 PKI 证书系统**
-    - `bash vault.sh init_cert [domainSuffix]`
-        - 功能：初始化 PKI 证书系统，并签发内部/外部证书。
-        - 默认域名后缀为 `crane.local`，可自定义。
+
+    `bash vault.sh init_cert [domainSuffix]`
+
+    功能：初始化 PKI 证书系统，并签发内部/外部证书。
+    
+    默认域名后缀为 `crane.local`，可自定义。
 
 - **签发内部证书**
-    - `bash vault.sh issue_internal [domainSuffix]`
-        - 功能：签发内部通信用 TLS 证书（`internal.pem`、`internal.key`）。
+
+    `bash vault.sh issue_internal [domainSuffix]`
+    
+    功能：签发内部通信用 TLS 证书（`internal.pem`、`internal.key`）。
 
 - **签发外部证书**
-    - `bash vault.sh issue_external [domainSuffix]`
-        - 功能：签发外部通信用 TLS 证书（`external.pem`、`external.key`）。
+
+    `bash vault.sh issue_external [domainSuffix]`
+
+    功能：签发外部通信用 TLS 证书（`external.pem`、`external.key`）。
 
 - **管理员登陆 Vault**
-    - `bash vault.sh login`
-        - 功能：以 admin 用户登录 Vault，便于后续 CLI 操作。
+
+    `bash vault.sh login`
+
+    功能：以 admin 用户登录 Vault，便于后续 CLI 操作。
 
 - **清理 Vault 数据并重置**
-    - **_执行命令前请执行 `cacctmgr reset all` 重置所有账户的证书_**
-    - `bash vault.sh clean_vault`
-        - 功能：清空 Vault 数据目录并重启 Vault。**_慎用，仅用于彻底重置 Vault_**。
+
+    `bash vault.sh clean_vault`
+
+    功能：清空 Vault 数据目录并重启 Vault。**_慎用，仅用于彻底重置 Vault_**。
+
+    **_执行命令前请执行 `cacctmgr reset all` 重置所有账户的证书_**
 
 ### 注意事项
 1. `Vault` 只需初始化一次，勿重复执行 `init`、`init_vault`，否则需先 `cacctmgr reset all`、`clean_vault` 重置后才能重新初始化。
