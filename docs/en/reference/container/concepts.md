@@ -2,7 +2,7 @@
 
 This page introduces the object model and lifecycle of CraneSched Container Support. After reading, you will understand the relationship between container jobs and container steps, the roles of Pod and container metadata, and resource allocation and inheritance mechanisms.
 
-## Quick Reference
+## Basic Terminology
 
 | Term | Description |
 | --- | --- |
@@ -10,7 +10,8 @@ This page introduces the object model and lifecycle of CraneSched Container Supp
 | Container Step | A step executed within a container job, carries container metadata, corresponds to a container in the Pod |
 | Pod Metadata | Job-level configuration defining Pod name, namespace options, port mappings, etc. |
 | Container Metadata | Step-level configuration defining image, command, environment variables, mounts, etc. |
-| CRI | Container Runtime Interface, Craned interacts with runtimes like containerd via CRI |
+| CRI | Container Runtime Interface, CraneSched interacts with runtimes like containerd via CRI |
+| CNI | Container Network Interface, CraneSched configures container networks via CNI plugins |
 
 ---
 
@@ -21,26 +22,13 @@ A **Container Job** is the resource allocation unit for CraneSched Container Sup
 Container jobs have the following characteristics:
 
 - **Resource Hosting**: Job-level requests for CPU, memory, GPU, etc.; subsequent steps run within this allocation.
-- **Pod Lifecycle**: Pod is created when the job starts and destroyed when it ends.
+- **Pod Lifecycle**: Pod is created when the job starts and destroyed when it ends. All container steps run within the Pod.
 - **Mixed Steps**: Container jobs can include both container steps and non-container steps (e.g., batch scripts, interactive commands).
 
-### Creation Methods
+When creating a container job, you can use ccon to submit a container step as the Primary Step, or use cbatch --pod to submit a batch script as the Primary Step, then use ccon within the script to append container steps.
 
-=== "cbatch --pod"
-
-    Uses a batch script as the entry point. Pod is automatically created when the job starts, and the script runs as the Primary Step. Use `ccon run` within the script to append container steps, or `crun` for non-container steps.
-
-    ```bash
-    cbatch --pod job.sh
-    ```
-
-=== "ccon run"
-
-    Uses a container step directly as the Primary Step. Suitable for simple jobs containing only container steps.
-
-    ```bash
-    ccon -p CPU run ubuntu:22.04 /bin/bash -c 'echo hello'
-    ```
+!!! note "Job Type Recognition"
+    Container jobs display type as `Container`. Other job types do not allow calling ccon to submit container steps.
 
 ---
 
@@ -48,30 +36,24 @@ Container jobs have the following characteristics:
 
 A **Container Step** is the execution unit within a container job, corresponding to a container in the Pod. Each container step carries independent container metadata and can specify different images, commands, and mount configurations.
 
+Container steps are similar to interactive steps submitted by crun. If you specify multiple nodes during submission, a corresponding container step instance will be created on each node.
+
 Container steps follow the general step types:
 
 | Type | Step ID | Description |
 | --- | --- | --- |
+| Daemon Step | 0 | Daemon step, creates Pod and runs continuously |
 | Primary Step | 1 | The first step produced by the job entry |
 | Common Step | ≥2 | Appended steps, can be dynamically created during job execution |
 
-### Appending Container Steps
-
-Within a container job's script or interactive environment, use `ccon run` to append container steps:
-
-```bash
-# Within a cbatch --pod script
-ccon run python:3.11 python train.py --epochs 100
-
-# Run in background
-ccon run -d nginx:latest
-```
-
-Appended container steps reuse the job's allocated resources without re-scheduling.
+!!! note "Role of Pod"
+    - Pod is created during Daemon Step at job startup and destroyed when the job ends.
+    - Pod provides unified network namespace and resource isolation environment for containers, without performing any actual computation tasks.
+    - Users neither need to nor can directly operate Pod.
 
 ---
 
-## Pod Metadata and Container Metadata
+## Container-Related Metadata
 
 CraneSched Container Support separates configuration into two layers:
 
@@ -164,29 +146,35 @@ The container job lifecycle includes the following phases:
 
 ```mermaid
 stateDiagram-v2
+    state "Failed" as FailedStartup
+    state "Failed" as FailedRuntime
+
     [*] --> Pending: Submit
-    Pending --> Running: Scheduled
+    Pending --> Configuring: Scheduled
+    Configuring --> Starting: Pod startup
+    Configuring --> FailedStartup: Pod startup failed
+    Starting --> Running: Container startup
+    Starting --> FailedStartup: Container startup failed
     Running --> Completing: Steps finished
     Completing --> Completed: Pod cleanup
-    Running --> Failed: Execution failed
+    Running --> FailedRuntime: Execution failed
     Running --> Cancelled: User cancelled
-    Completing --> [*]
-    Failed --> [*]
+    Running --> ETL: Time limit exceeded
+    Completed --> [*]
+    FailedStartup --> [*]
+    FailedRuntime --> [*]
     Cancelled --> [*]
+    ETL --> [*]
 ```
 
-### Phase Description
+**Lifecycle Phase Description:**
 
 1. **Pending**: Job enters queue awaiting scheduling.
-2. **Running**: Resource allocation complete, Pod created on node, Primary Step begins execution.
-3. **Completing**: All steps finished, awaiting Pod cleanup.
-4. **Completed / Failed / Cancelled**: Job terminal states.
-
-### Pod and Step Relationship
-
-- Pod is created when the job enters Running state and destroyed when the job ends.
-- Container steps run within the Pod, sharing Pod network and namespace configuration.
-- Appended container steps can be dynamically created during Primary Step execution.
+2. **Configuring**: Scheduling complete, node is creating Pod and performing necessary configuration (network, mounts, namespaces, etc.).
+3. **Starting**: Pod created, container runtime is pulling image and starting container; image pull may take some time.
+4. **Running**: Resource allocation complete, container started and executing, Primary Step begins running.
+5. **Completing**: All steps finished, awaiting Pod cleanup.
+6. **Completed / Failed / Cancelled / ExceedTimeLimit**: Job terminal states.
 
 ---
 
@@ -239,18 +227,21 @@ flowchart LR
     end
     subgraph Execution Plane
         Craned[Craned]
+        CSuper[CSupervisor]
         CRI[CRI Runtime]
     end
     CLI -->|gRPC| Ctld
     Ctld -->|Task Dispatch| Craned
-    Craned -->|CRI Calls| CRI
+    Craned -->|Dispatch & Coordinate| CSuper
+    CSuper -->|CRI Calls / cgroup Management| CRI
 ```
 
 | Component | Responsibility |
 | --- | --- |
 | CraneCtld | Receives submission requests, schedules resources, validates permissions and parameters |
-| Craned | Node-side agent, creates Pods and containers, manages lifecycle |
-| CRI Runtime | Container runtime (e.g., containerd), executes container operations |
+| Craned | Node-side agent, receives task dispatch and cooperates with CSupervisor, manages node-level resources and CSupervisor creation |
+| CSupervisor | Monitoring and management component running on nodes, monitors lifecycle and cgroup of each Step, communicates with CRI to execute container operations |
+| CRI Runtime | Container runtime (e.g., containerd), executes container operations upon CSupervisor's invocation |
 
 ---
 

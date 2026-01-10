@@ -1,4 +1,4 @@
-# Container Support
+# CraneSched Container Support
 
 CraneSched Container Support provides a containerized runtime environment for cluster users alongside traditional process-based jobs. Using a "Container Job + Container Step" model, it allows resource reuse within a single job, submission of container steps, and collaborative execution with traditional batch/interactive steps.
 
@@ -47,7 +47,7 @@ CraneSched Container Support provides a containerized runtime environment for cl
 
 </div>
 
-## Basic Model
+## Basic Concepts
 
 - **Container Job**: Allocates resources, creates and maintains a Pod to host subsequent container steps. Container jobs can also include non-container steps (such as batch scripts or interactive steps).
 - **Container Step**: The actual execution unit appended within a container job, corresponding to at least one container in the Pod. Each container step can specify independent image, command, environment variables, and mount configurations.
@@ -55,6 +55,9 @@ CraneSched Container Support provides a containerized runtime environment for cl
 - **Container Metadata**: Step-level container configuration (e.g., command, environment variables, mounts) specified when submitting a container step, defining the container's specific behavior.
 
 ## Entry Points
+
+Container Support can be accessed via the ccon command and cbatch command. For detailed usage, please refer to the [ccon Command Manual](../../command/ccon.md) and [cbatch Command Manual](../../command/cbatch.md).
+
 
 === "cbatch --pod"
     Creates a container job using a batch script as the entry point. When the job starts, a Pod is automatically launched on allocated nodes. The script runs as the Primary Step, allowing container steps to be appended for complex container orchestration, and can be mixed with non-container steps, providing a Slurm-like batch script experience.
@@ -64,9 +67,9 @@ CraneSched Container Support provides a containerized runtime environment for cl
 
 ## Related Documentation
 
-- [Core Concepts and Lifecycle](concepts.md)
+- [Core Concepts](concepts.md)
 - [Quick Start](quickstart.md)
 - [Examples](examples.md)
-- [Troubleshooting](troubleshooting.md)
-- [ccon Command Reference](../../command/ccon.md)
+- [Runtime Operations and Troubleshooting](troubleshooting.md)
+- [ccon Command Manual](../../command/ccon.md)
 - [Container Deployment](../../deployment/container.md)
