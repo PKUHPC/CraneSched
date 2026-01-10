@@ -90,14 +90,16 @@ option(CRANE_WITH_LUA "Enable lua" OFF)
 
 # Options end here -------------------------------------------------------------------------------
 
-# Default install prefix to /usr when not explicitly provided to keep packaging paths consistent.
+# Default install prefix to /usr when not explicitly provided so the generated
+# systemd units and packaged binaries resolve to the same absolute paths.
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
     message(WARNING "CMAKE_INSTALL_PREFIX not set; defaulting to ${CMAKE_INSTALL_PREFIX}. Pass -DCMAKE_INSTALL_PREFIX=... to override.")
 endif ()
 message(STATUS "Installation prefix: ${CMAKE_INSTALL_PREFIX}")
 
-# Keep CPack packaging prefix aligned with the install prefix unless explicitly overridden.
+# Keep CPack packaging prefix aligned with the install prefix so RPM/DEB
+# packaging does not diverge from the configured paths.
 if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
     set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif ()

@@ -92,11 +92,11 @@ pdsh -w crane[01-04] "systemctl start craned"
 
 ```bash
 # 控制节点
-scp /usr/local/bin/cranectld cranectl:/usr/local/bin/
+scp /usr/bin/cranectld cranectl:/usr/bin/
 scp /etc/systemd/system/cranectld.service cranectl:/etc/systemd/system/
 
 # 计算节点
-pdcp -w crane[01-04] /usr/local/bin/craned /usr/local/bin/
+pdcp -w crane[01-04] /usr/bin/craned /usr/bin/
 pdcp -w crane[01-04] /usr/libexec/csupervisor /usr/libexec/
 pdcp -w crane[01-04] /etc/systemd/system/craned.service /etc/systemd/system/
 ```
