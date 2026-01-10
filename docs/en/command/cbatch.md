@@ -1,14 +1,14 @@
-# cbatch - Submit Batch Job
+# cbatch - Submit Batch Jobs
 
-**cbatch submits a batch script describing the entire computation process to the job scheduling system, assigns a job ID, and waits for the scheduler to allocate resources and execute it.**
+**cbatch primarily passes a script describing the entire computation process to the job scheduling system, assigns a job ID, and waits for the scheduler to allocate resources and execute it.**
 
-The CraneSched system requires users and accounts before submitting jobs. Please refer to the [cacctmgr tutorial](cacctmgr.md) for adding users and accounts.
+The CraneSched system requires users and accounts before submitting jobs. For adding users and accounts, see the [cacctmgr tutorial](cacctmgr.md).
 
 ## Quick Start
 
-Here's a simple single-node job example:
+First, let's introduce a simple single-node job example:
 
-The following job requests one node, one CPU core, and runs `hostname` on the compute node before exiting:
+The following job will request one node, one CPU core, and run `hostname` on the compute node before exiting:
 
 ```bash
 #!/bin/bash
@@ -30,7 +30,7 @@ Assuming the job script is saved as `cbatch_test.sh`, submit it using:
 cbatch cbatch_test.sh
 ```
 
-**cbatch Execution Results**
+**cbatch execution results:**
 
 ![cbatch](../../images/cbatch/cbatch_run1.png)
 
@@ -293,6 +293,45 @@ module load mpich/4.0
 mpirun -n 13 -machinefile crane.hosts helloWorld > log
 ```
 
+## Advanced Features
+
+### Delayed Start
+
+Schedule a job to start at a specific time:
+```bash
+cbatch --begin 2024-12-31T23:00:00 my_script.sh
+```
+
+### Held Jobs
+
+Submit a job in held state:
+```bash
+cbatch --hold my_script.sh
+```
+
+Use `ccontrol release <job_id>` to release held jobs.
+
+### Email Notifications
+
+Receive email notifications:
+```bash
+cbatch --mail-type=ALL --mail-user=user@example.com my_script.sh
+```
+
+### JSON Output
+
+Get submission result in JSON format:
+```bash
+cbatch --json my_script.sh
+```
+
+### Wrap Command
+
+Submit a simple command without creating a script file:
+```bash
+cbatch --wrap "echo Hello && sleep 10 && echo Done"
+```
+
 ### Container Jobs
 
 Use the `--pod` option to create Pod jobs that support containers:
@@ -320,44 +359,7 @@ Or specify container options via command line:
 cbatch --pod --pod-name my-training --pod-host-network train_job.sh
 ```
 
-## Advanced Features
-
-### Delayed Start
-
-Schedule a job to start at a specific time:
-```bash
-cbatch --begin 2024-12-31T23:00:00 my_script.sh
-```
-
-### Held Jobs
-
-Submit a job in held state:
-```bash
-cbatch --hold my_script.sh
-```
-
-Release the held job using `ccontrol release <job_id>`.
-
-### Email Notifications
-
-Receive email notifications:
-```bash
-cbatch --mail-type=ALL --mail-user=user@example.com my_script.sh
-```
-
-### JSON Output
-
-Get submission result in JSON format:
-```bash
-cbatch --json my_script.sh
-```
-
-### Wrap Command
-
-Submit a simple command without creating a script file:
-```bash
-cbatch --wrap "echo Hello && sleep 10 && echo Done"
-```
+For more container usage examples, see [Container Usage Examples](../reference/container/examples.md).
 
 ## See Also
 
@@ -365,3 +367,5 @@ cbatch --wrap "echo Hello && sleep 10 && echo Done"
 - [ccancel](ccancel.md) - Cancel jobs
 - [cacct](cacct.md) - View job accounting information
 - [ccontrol](ccontrol.md) - Control jobs and system resources
+- [ccon](ccon.md) - Container job management
+- [Container Overview](../reference/container/index.md) - Container feature introduction

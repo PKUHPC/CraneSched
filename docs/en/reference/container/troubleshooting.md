@@ -2,6 +2,35 @@
 
 This document summarizes common issues, error messages, and solutions for Container Support.
 
+## Logs and Diagnostics
+
+When encountering issues with Container Support, it is recommended to collect the following logs and diagnostic information to assist troubleshooting:
+
+### View Supervisor Logs
+
+```bash
+ls /var/crane/supervisor/
+cat /var/crane/supervisor/JOBID.STEPID.log
+```
+
+### Verify CRI Connection
+
+!!! note
+    Administrator access only.
+
+```bash
+# Test with crictl
+sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
+sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock images
+```
+
+### Check Container Runtime Status
+
+```bash
+systemctl status containerd
+journalctl -u containerd -f
+```
+
 ## Common Errors and Solutions
 
 ### Container Feature Not Enabled
@@ -9,7 +38,7 @@ This document summarizes common issues, error messages, and solutions for Contai
 **Symptom**
 
 ```
-Error: Container is not enabled in this craned.
+Error: Failed to pull image "myimage:latest" for ...
 ```
 
 **Cause**
@@ -28,71 +57,33 @@ Container:
 
 ---
 
-### Image Pull Failed
+### Invalid Step ID
 
 **Symptom**
 
 ```
-Error: Failed to pull image "myimage:latest" for ...
-```
-
-**Possible Causes**
-
-1. Image name typo
-2. Cannot access image registry
-3. Private registry requires authentication
-
-**Solutions**
-
-1. Verify image name:
-   ```bash
-   # Test if image exists
-   ctr images pull docker.io/library/alpine:latest
-   ```
-
-2. Check network connectivity:
-   ```bash
-   ping docker.io
-   curl -I https://registry-1.docker.io/v2/
-   ```
-
-3. For private registries, authenticate with `ccon login`:
-   ```bash
-   ccon login registry.example.com
-   ```
-
-4. Use `--pull-policy Never` to skip pulling (requires pre-imported image):
-   ```bash
-   ccon -p CPU run --pull-policy Never myimage:latest -- cmd
-   ```
-
----
-
-### Permission Denied (Inside Container)
-
-**Symptom**
-
-```
-Permission denied: '/data/file'
+Error: Invalid container ID format
 ```
 
 **Possible Cause**
 
-User namespace mapping prevents container user from accessing mounted host files.
+Container ID format is incorrect.
 
-**Solutions**
+**Solution**
 
-1. Disable user namespace with `--userns=false`:
-   ```bash
-   ccon -p CPU run --userns=false -v /data:/data myimage -- cmd
-   ```
+Use correct format `JOBID.STEPID`:
 
-2. Ensure administrator has enabled BindFs feature (see [Container Deployment](../../deployment/container.md))
+!!! note
+    Use `ccon ps -a` to view container ID list. Step ID 0 is for Daemon Step (Pod), which cannot be operated by users.
 
-3. Adjust host directory permissions:
-   ```bash
-   chmod -R o+rx /data/input
-   ```
+```bash
+# View container IDs
+ccon ps -a
+
+# Correct format
+ccon logs 123.1
+ccon attach 123.1
+```
 
 ---
 
@@ -107,8 +98,9 @@ Error: Failed to attach to container 123.1: connection refused
 **Possible Causes**
 
 1. Container has exited
-2. cfored service not running
-3. Network issues
+2. Job has been queued too long, CLI connection timeout
+3. CRI runtime (e.g., containerd) not configured to allow remote connections
+4. Network issues
 
 **Solutions**
 
@@ -116,75 +108,9 @@ Error: Failed to attach to container 123.1: connection refused
    ```bash
    ccon ps -a
    ```
+   If container has exited, check exit reason. If job is still queued, wait for successful scheduling before retrying.
 
-2. Verify cfored service is running:
-   ```bash
-   systemctl status cfored
-   ```
-
-3. Specify target node:
-   ```bash
-   ccon attach -n compute01 123.1
-   ```
-
----
-
-### Port Binding Failed
-
-**Symptom**
-
-```
-Error: Port 8080 is already in use
-```
-
-**Cause**
-
-Specified host port is already occupied.
-
-**Solutions**
-
-1. Use a different port:
-   ```bash
-   ccon -p CPU run -p 8081:80 nginx:latest
-   ```
-
-2. Let system auto-assign port (specify only container port):
-   ```bash
-   ccon -p CPU run -p 80 nginx:latest
-   ```
-
----
-
-### GPU Device Unavailable
-
-**Symptom**
-
-```
-Error: Requested GPU resources not available
-```
-
-**Possible Causes**
-
-1. No available GPU on node
-2. GPU resources occupied
-3. GRES configuration error
-
-**Solutions**
-
-1. Check available GPU resources:
-   ```bash
-   cinfo -N
-   ```
-
-2. Specify correct GPU type:
-   ```bash
-   ccon -p GPU --gres gpu:a100:1 run pytorch/pytorch:latest -- python train.py
-   ```
-
-3. Verify partition has GPU nodes:
-   ```bash
-   cinfo -p GPU
-   ```
+2. Verify Containerd has enabled remote container connection feature.
 
 ---
 
@@ -199,48 +125,16 @@ ccon logs 123.1
 
 **Possible Causes**
 
-1. Container outputs to file instead of stdout
+1. Process inside container is configured to output to file
 2. Container hasn't produced output yet
-3. Logs have been cleaned up
+3. Logs have been manually cleaned
+4. Log folder is not on shared storage, current node cannot access
 
 **Solutions**
 
-1. Verify program outputs to stdout/stderr:
-   ```bash
-   ccon exec 123.1 cat /app/logs/output.log
-   ```
-
-2. Use `-f` to follow real-time logs:
-   ```bash
-   ccon logs -f 123.1
-   ```
-
----
-
-### Invalid Step ID
-
-**Symptom**
-
-```
-Error: Invalid container ID format
-```
-
-**Cause**
-
-Container ID format is incorrect.
-
-**Solution**
-
-Use correct format `JOBID.STEPID`:
-
-```bash
-# View container IDs
-ccon ps -a
-
-# Correct format
-ccon logs 123.1
-ccon attach 123.0
-```
+1. Check if container failed to start
+2. Check if log files exist on the container's running node
+3. Verify if the process inside container produces output, and if output has been manually cleaned
 
 ---
 
@@ -256,7 +150,9 @@ Error: Command not found in container
 
 Specified command doesn't exist in container image.
 
-**Solutions**
+**Solution**
+
+For example with Bash, some container images don't have Bash, only Sh:
 
 1. Check available shells:
    ```bash
@@ -270,38 +166,99 @@ Specified command doesn't exist in container image.
 
 ---
 
-## Logs and Diagnostics
+### Image Pull Failed
 
-### View craned Logs
+**Symptom**
 
-```bash
-# View container-related logs
-grep -i "cri\|container\|pod" /var/crane/craned/craned.log
-
-# Real-time follow
-tail -f /var/crane/craned/craned.log | grep -i container
+```
+Error: Failed to pull image "myimage:latest" for ...
 ```
 
-### View Supervisor Logs
+**Possible Causes**
+
+1. Image name typo
+2. Network cannot access image registry
+3. Private registry requires authentication
+
+**Solutions**
+
+1. For private registries, authenticate with `ccon login`:
+   ```bash
+   ccon login registry.example.com
+   ```
+
+2. Use `--pull-policy Never` to skip pulling (if image already exists locally on node):
+   ```bash
+   ccon -p CPU run --pull-policy Never myimage:latest -- cmd
+   ```
+
+Administrators can use ctr/crictl tools to check CRI runtime's image pull status, for example:
 
 ```bash
-ls /var/crane/supervisor/
-cat /var/crane/supervisor/supervisor.log
+crictl images
 ```
 
-### Verify CRI Connection
+---
 
-```bash
-# Test with crictl
-sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
-sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock images
+### Permission Denied Inside Container
+
+**Symptom**
+
+```
+Permission denied: '/data/file'
 ```
 
-### Check Container Runtime Status
+**Possible Cause**
+
+User namespace mapping failure prevents container user from accessing mounted host files.
+
+**Solutions**
+
+1. Disable user namespace with `--userns=false`:
+   ```bash
+   ccon -p CPU run --userns=false -v /data:/data myimage -- cmd
+   ```
+
+2. System kernel version too low, or mounted directory's filesystem doesn't support ID-Mapped Mounts.
+    - Ask administrator to upgrade kernel.
+    - Ensure mounted directory is on a filesystem that supports ID-Mapped Mounts, or ask administrator to configure BindFs solution.
+
+---
+
+### GPU Device Unavailable
+
+**Symptom**
+
+Step submission requested GPU resources, GPU works on bare metal outside container, but GPU devices are not accessible inside container.
+
+**Possible Cause**
+
+Administrator has not correctly configured container runtime to enable GPU support.
+
+**Solution**
+
+Please refer to [Container Deployment](../../deployment/container.md) and contact GPU vendor for correct configuration method (e.g., NVIDIA Container Toolkit, Ascend Docker Toolkit, etc.).
+
+---
+
+### Port Binding Failed
+
+**Symptom**
+
+```
+Error: Port 8080 is already in use
+```
+
+**Cause**
+
+Specified host port is already occupied.
+
+**Solution**
+
+Use a different port:
 
 ```bash
-systemctl status containerd
-journalctl -u containerd -f
+ccon -p CPU run -p 8081:80 nginx:latest
 ```
 
 ## Error Code Reference
@@ -337,14 +294,16 @@ If the above solutions don't resolve your issue:
    ```
 
 4. **Contact administrator** with:
-   - Complete error output
-   - Command used
-   - Job ID
-   - Relevant log excerpts
+    - Command used
+    - Job ID
+    - Complete error output
+    - Relevant Supervisor log excerpts
 
 ## See Also
 
 - [Container Deployment](../../deployment/container.md) - Administrator configuration guide
 - [Core Concepts](concepts.md) - Understanding Pods and container steps
-- [ccon Command Reference](../../command/ccon.md) - Complete command reference
+- [ccon Command Manual](../../command/ccon.md) - Complete command reference
 - [Error Code Reference](../error_code.md) - System error codes
+
+````
