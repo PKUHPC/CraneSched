@@ -9,7 +9,7 @@ This document summarizes common issues, error messages, and solutions for Contai
 **Symptom**
 
 ```
-Error: Container feature is not enabled on this cluster
+Error: Container is not enabled in this craned.
 ```
 
 **Cause**
@@ -33,7 +33,7 @@ Container:
 **Symptom**
 
 ```
-Error: Failed to pull image "myimage:latest": rpc error: ...
+Error: Failed to pull image "myimage:latest" for ...
 ```
 
 **Possible Causes**
@@ -64,39 +64,6 @@ Error: Failed to pull image "myimage:latest": rpc error: ...
 4. Use `--pull-policy Never` to skip pulling (requires pre-imported image):
    ```bash
    ccon -p CPU run --pull-policy Never myimage:latest -- cmd
-   ```
-
----
-
-### Container Start Timeout
-
-**Symptom**
-
-```
-Error: Container failed to start within timeout
-```
-
-**Possible Causes**
-
-1. Image too large, pull timeout
-2. Container entrypoint failed
-3. Insufficient resources
-
-**Solutions**
-
-1. Pre-pull images to compute nodes:
-   ```bash
-   pdsh -w compute[01-10] "ctr -n k8s.io images pull myimage:latest"
-   ```
-
-2. Verify entrypoint command:
-   ```bash
-   ccon -p CPU run -it myimage:latest -- /bin/sh
-   ```
-
-3. Increase resource quota:
-   ```bash
-   ccon -p CPU --mem 4G -c 2 run myimage:latest -- cmd
    ```
 
 ---
@@ -341,13 +308,12 @@ journalctl -u containerd -f
 
 Container operations may return these error codes. See [Error Code Reference](../error_code.md) for the complete list.
 
-| Error Code | Description | Solution |
-|:-----------|:------------|:---------|
-| `ERR_NO_RESOURCE` | Insufficient resources | Reduce resource request or wait for release |
-| `ERR_INVALID_PARAM` | Invalid parameter | Check command parameter format |
-| `ERR_SUPERVISOR` | Supervisor internal error | Check Supervisor logs |
-| `ERR_SYSTEM_ERR` | System error | Check system logs |
-| `ERR_RPC_FAILURE` | RPC call failed | Check network and service status |
+| Error Code | Description | Possible Causes | Solution |
+|:-----------|:------------|:----------------|:---------|
+| `ERR_CRI_GENERIC` | CRI runtime error | Internal error from CRI runtime (containerd/CRI-O) | Check container runtime logs, verify image exists and container config is correct |
+| `ERR_CRI_DISABLED` | Container support disabled | Cluster has not configured container support | Contact administrator to enable container support (see [Container Deployment](../../deployment/container.md)) |
+| `ERR_CRI_CONTAINER_NOT_READY` | Container not ready | Job is pending or container has not finished starting | Please wait for job to enter Running state, check container status with `ccon ps` |
+| `ERR_CRI_MULTIPLE_NODES` | Multi-node operation unsupported | Attempted unsupported container operation on multi-node step | Some container operations only support single-node steps |
 
 ## Getting Help
 
