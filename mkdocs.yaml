@@ -10,7 +10,7 @@ repo_name: PKUHPC/CraneSched
 repo_url: https://github.com/PKUHPC/CraneSched
 
 # Copyright
-copyright: Copyright &copy; 2022 - 2025 PKUHPC
+copyright: Copyright &copy; 2022 - 2026 PKUHPC
 
 docs_dir: docs
 
@@ -63,6 +63,7 @@ nav:
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
+      - PKI+TLS Deployment: deployment/configuration/pki.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
@@ -142,6 +143,7 @@ plugins:
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
+            PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Plugins: 插件
         - locale: en
