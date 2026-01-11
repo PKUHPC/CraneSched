@@ -59,7 +59,7 @@ sudo apt install ./cranesched-plugin_*.deb
 这将安装：
 - `cplugind` 守护进程到 `/usr/bin/`
 - 插件共享对象到 `/usr/lib/crane/plugin/`：
-  - `dummy.so`、`energy.so`、`event.so`、`mail.so`、`monitor.so`、`powerControl.so`
+  - `dummy.so`、`mail.so`、`monitor.so`、`powerControl.so`
 - `cplugind.service` systemd 单元
 
 启用并启动服务：

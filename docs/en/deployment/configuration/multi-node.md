@@ -92,11 +92,11 @@ If you built from source instead of RPM packages:
 
 ```bash
 # Control node
-scp /usr/local/bin/cranectld cranectl:/usr/local/bin/
+scp /usr/bin/cranectld cranectl:/usr/bin/
 scp /etc/systemd/system/cranectld.service cranectl:/etc/systemd/system/
 
 # Compute nodes
-pdcp -w crane[01-04] /usr/local/bin/craned /usr/local/bin/
+pdcp -w crane[01-04] /usr/bin/craned /usr/bin/
 pdcp -w crane[01-04] /usr/libexec/csupervisor /usr/libexec/
 pdcp -w crane[01-04] /etc/systemd/system/craned.service /etc/systemd/system/
 ```

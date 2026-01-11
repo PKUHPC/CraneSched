@@ -7,7 +7,7 @@ if (CRANE_USE_GITEE_SOURCE)
     set(RE2_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/re2-2022-06-01.tar.gz")
     set(GRPC_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/grpc-1.51.0.tar.gz")
 else ()
-    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20250127.1/abseil-cpp-20250127.1.tar.gz")
+    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20250814.1/abseil-cpp-20250814.1.tar.gz")
     set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/v1.34.4/c-ares-1.34.4.tar.gz")
     set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protobuf-33.1.tar.gz")
     set(RE2_SRC_URL "https://github.com/google/re2/releases/download/2024-07-02/re2-2024-07-02.tar.gz")
@@ -21,7 +21,7 @@ FetchContent_Declare(absl
         OVERRIDE_FIND_PACKAGE
 
         URL ${ABSL_SRC_URL}
-        URL_HASH SHA256=B396401FD29E2E679CACE77867481D388C807671DC2ACC602A0259EEB79B7811
+        URL_HASH SHA256=1692F77D1739BACF3F94337188B78583CF09BAB7E420D2DC6C5605A4F86785A1
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(absl)

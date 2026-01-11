@@ -1,9 +1,8 @@
 # cacct - View Job Accounting Information
 
-cacct displays accounting information for jobs and steps in the cluster. It queries all job states including completed,
-failed, and cancelled jobs. The output automatically includes both jobs and their associated steps.
+cacct displays accounting information for jobs and steps in the cluster. It queries all job states, including completed, failed, and cancelled jobs. The output automatically includes jobs and their associated steps.
 
-View all job and step information in the cluster:
+View all jobs and steps in the cluster:
 
 ```bash
 cacct
@@ -13,168 +12,155 @@ cacct
 
 **-h, --help**
 
-:   **Applies to:** `job`, `step`  
-Display help information for cacct command.
+:   **Applies to:** `Job`, `Step`  
+Display help information for the cacct command.
 
 **-v, --version**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Display cacct version information.
 
 **-C, --config=&lt;path&gt;**
 
-:   **Applies to:** `job`, `step`  
-Path to configuration file. Default: "/etc/crane/config.yaml".
+:   **Applies to:** `Job`, `Step`  
+Configuration file path. Default: "/etc/crane/config.yaml".
 
 **-j, --job=&lt;jobid1,jobid2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When querying jobs, this filters by job ID.
-The output will include matching jobs and their associated steps. Supports step ID format `jobid.stepid` to query
-specific steps.
+:   **Applies to:** `Job`, `Step`  
+Specify job IDs to query (comma-separated list). For example, `-j=2,3,4`. When querying jobs, results will be filtered by job ID. The output will include matching jobs and their associated steps. Supports using job step ID format `jobid.stepid` to query specific steps.
 
 **-n, --name=&lt;name1,name2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Specify job names to query (comma-separated list for multiple names).
 
 **-u, --user=&lt;username1,username2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify users whose jobs to query (comma-separated list for multiple users). Filters jobs and steps by the specified
-usernames.
+:   **Applies to:** `Job`, `Step`  
+Specify users to query (comma-separated list for multiple users). Filter jobs and steps by the specified usernames.
 
 **-A, --account=&lt;account1,account2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify accounts to query (comma-separated list for multiple accounts). Filters jobs and steps by the specified
-accounts.
+:   **Applies to:** `Job`, `Step`  
+Specify accounts to query (comma-separated list for multiple accounts). Filter jobs and steps by the specified accounts.
 
 **-p, --partition=&lt;partition1,partition2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Specify partitions to view (comma-separated list for multiple partitions). Default: all partitions.
 
 **-q, --qos=&lt;qos1,qos2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Specify QoS to view (comma-separated list for multiple QoS). Default: all QoS levels.
 
 **-t, --state=&lt;state&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify job states to view. Supported states: 'pending' or 'p', 'running' or 'r', 'completed' or 'c', 'failed' or 'f', '
-cancelled' or 'x', 'time-limit-exceeded' or 't', and 'all'. Default: 'all'. Multiple states can be specified as a
-comma-separated list.
+:   **Applies to:** `Job`, `Step`  
+Specify job state to view. Supported states: 'pending' or 'p', 'running' or 'r', 'completed' or 'c', 'failed' or 'f', 'cancelled' or 'x', 'time-limit-exceeded' or 't', and 'all'. Default: 'all'. Multiple states can be specified as a comma-separated list.
 
 **-s, --submit-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`  
-Filter jobs by submission time range. Supports closed intervals (format: `2024-01-02T15:04:05~2024-01-11T11:12:41`) or
-half-open intervals (format: `2024-01-02T15:04:05~` for after a specific time, or `~2024-01-11T11:12:41` for before a
-specific time).
+:   **Applies to:** `Job`, `Step`  
+Filter jobs by submit time range. Supports closed intervals (format: `2024-01-02T15:04:05~2024-01-11T11:12:41`) or half-open intervals (format: `2024-01-02T15:04:05~` for after a specific time, or `~2024-01-11T11:12:41` for before a specific time).
 
 **-S, --start-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`  
-Filter jobs by start time range. Same format as submit-time.
+:   **Applies to:** `Job`, `Step`  
+Filter jobs by start time range. Format same as submit-time.
 
 **-E, --end-time=&lt;time_range&gt;**
 
-:   **Applies to:** `job`, `step`  
-Filter jobs by end time range. Same format as submit-time. For example, `~2023-03-14T10:00:00` filters jobs that ended
-before the specified time.
+:   **Applies to:** `Job`, `Step`  
+Filter jobs by end time range. Format same as submit-time. For example, `~2023-03-14T10:00:00` filters jobs that ended before the specified time.
 
 **-w, --nodelist=&lt;node1,node2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify node names to view (comma-separated list or patterns like node[1-10]). Default: all nodes.
+:   **Applies to:** `Job`, `Step`  
+Specify node names to view (comma-separated list or pattern such as node[1-10]). Default: all nodes.
 
 **--type=&lt;type1,type2,...&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify task types to view (comma-separated list). Valid values: 'Interactive', 'Batch', 'Container'. Default: all
-types.
+:   **Applies to:** `Job`, `Step`  
+Specify task types to view (comma-separated list). Valid values: 'Interactive', 'Batch', 'Container'. Default: all types.
 
 **-F, --full**
 
-:   **Applies to:** `job`, `step`  
-Display full information without field truncation. By default, only 30 characters per cell are displayed.
+:   **Applies to:** `Job`, `Step`  
+Display full information without truncating fields. By default, each cell displays only 30 characters.
 
 **-N, --noheader**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Hide table header in output.
 
 **-m, --max-lines=&lt;number&gt;**
 
-:   **Applies to:** `job`, `step`  
-Specify maximum number of output lines. For example, `-m=500` limits output to 500 lines. Default: 100 entries.
+:   **Applies to:** `Job`, `Step`  
+Specify the maximum number of output results. For example, `-m=500` limits output to 500 lines. Default: 100 lines.
 
 **--json**
 
-:   **Applies to:** `job`, `step`  
+:   **Applies to:** `Job`, `Step`  
 Output command execution results in JSON format instead of table format.
 
 **-o, --format=&lt;format_string&gt;**
 
-:   **Applies to:** `job`, `step`  
-Customize output format using format specifiers. Fields are identified by a percent sign (%) followed by a character or
-string. Format specification syntax: `%[.]<size><type>`. Without size: field uses natural width. With size only (`%5j`):
-minimum width, left-aligned. With dot and size (`%.5j`): minimum width, right-aligned. See Format Specifiers section
-below for available identifiers.
+:   **Applies to:** `Job`, `Step`  
+Customize output format using format specifiers. Fields are identified by a percent sign (%) followed by a character or string. Format specification syntax: `%[.]<size><type>`. Without size: field uses natural width. With size only (`%5j`): minimum width, left-aligned. With dot and size (`%.5j`): minimum width, right-aligned. See the Format Specifiers section below for available format identifiers.
 
 ## Default Output Fields
 
 When displaying default format, the following fields are shown:
 
-- **JobId**: Job or step identification (format: jobid for jobs, jobid.stepid for steps)
-- **JobName**: Job or step name
-- **Partition**: Partition where the job/step ran
-- **Account**: Account charged for the job/step
+- **JobId**: Job or job step identifier (format: jobid for jobs, jobid.stepid for steps)
+- **JobName**: Job or job step name
+- **Partition**: Partition where job/job step runs
+- **Account**: Account billed for job/job step
 - **AllocCPUs**: Number of allocated CPUs
-- **State**: Job/step state (e.g., COMPLETED, FAILED, CANCELLED)
-- **ExitCode**: Exit code (format: exitcode:signal, see [Exit Code reference](../reference/exit_code.md))
+- **State**: Job/job step state (e.g., COMPLETED, FAILED, CANCELLED)
+- **ExitCode**: Exit code (format: exitcode:signal, see [Exit Code Reference](../reference/exit_code.md))
 
 ## Format Specifiers
 
 The following format identifiers are supported (case-insensitive):
 
-| Identifier            | Description                                |
-|-----------------------|--------------------------------------------|
-| %a / %Account         | Account associated with the job/step       |
-| %C / %ReqCpus         | Number of requested CPUs                   |
-| %c / %AllocCpus       | Number of allocated CPUs                   |
-| %D / %ElapsedTime     | Elapsed time since job/step started        |
-| %E / %EndTime         | End time of the job/step                   |
-| %e / %ExitCode        | Exit code (format: exitcode:signal)        |
-| %h / %Held            | Hold status of the job                     |
-| %j / %JobID           | Job ID (or step ID in format jobid.stepid) |
-| %K / %Wckey           | Workload characterization key              |
-| %k / %Comment         | Comment for the job                        |
-| %L / %NodeList        | List of nodes the job/step ran on          |
-| %l / %TimeLimit       | Time limit for the job/step                |
-| %M / %ReqMemPerNode   | Requested memory per node                  |
-| %m / %AllocMemPerNode | Allocated memory per node                  |
-| %N / %NodeNum         | Number of nodes                            |
-| %n / %JobName         | Name of the job/step                       |
-| %P / %Partition       | Partition associated with the job/step     |
-| %p / %Priority        | Priority of the job                        |
-| %q / %Qos             | Quality of Service level                   |
-| %R / %Reason          | Reason for pending status                  |
-| %r / %ReqNodes        | Requested nodes                            |
-| %S / %StartTime       | Start time of the job/step                 |
-| %s / %SubmitTime      | Submission time of the job                 |
-| %t / %State           | Current state of the job/step              |
-| %T / %JobType         | Job type (e.g., Batch, Interactive)        |
-| %U / %UserName        | Username who submitted the job             |
-| %u / %Uid             | User ID                                    |
-| %x / %ExcludeNodes    | Nodes excluded from the job                |
-| %X / %Exclusive       | Exclusive status of the job                |
+| Identifier            | Description                                        |
+|-----------------------|-----------------------------------------------------|
+| %a / %Account         | Account associated with job/job step               |
+| %C / %ReqCpus         | Number of requested CPUs                            |
+| %c / %AllocCpus       | Number of allocated CPUs                            |
+| %D / %ElapsedTime     | Elapsed time since job/job step started             |
+| %E / %EndTime         | End time of job/job step                            |
+| %e / %ExitCode        | Exit code (format: exitcode:signal)                 |
+| %h / %Held            | Hold state of job                                   |
+| %j / %JobID           | Job ID (or job step ID in format jobid.stepid)      |
+| %K / %Wckey           | Workload characterization key                       |
+| %k / %Comment         | Comment for job                                     |
+| %L / %NodeList        | List of nodes where job/job step runs               |
+| %l / %TimeLimit       | Time limit for job/job step                         |
+| %M / %ReqMemPerNode   | Memory requested per node                           |
+| %m / %AllocMemPerNode | Memory allocated per node                           |
+| %N / %NodeNum         | Number of nodes                                     |
+| %n / %JobName         | Name of job/job step                                |
+| %P / %Partition       | Partition associated with job/job step              |
+| %p / %Priority        | Priority of job                                     |
+| %q / %Qos             | Quality of service level                            |
+| %R / %Reason          | Reason for pending state                            |
+| %r / %ReqNodes        | Requested nodes                                     |
+| %S / %StartTime       | Start time of job/job step                          |
+| %s / %SubmitTime      | Submit time of job                                  |
+| %t / %State           | Current state of job/job step                       |
+| %T / %JobType         | Job type (e.g., Batch, Interactive)                 |
+| %U / %UserName        | Username that submitted the job                     |
+| %u / %Uid             | User ID                                             |
+| %x / %ExcludeNodes    | Nodes excluded from job                             |
+| %X / %Exclusive       | Exclusive state of job                              |
 
 ## Usage Examples
 
-### Basic Query
+### Basic Queries
 
 **View all jobs and steps:**
 
@@ -200,7 +186,7 @@ cacct -N
 
 ![cacct](../../images/cacct/N.png)
 
-### Filtering by ID and Name
+### Filter by ID and Name
 
 **Query specific job IDs:**
 
@@ -226,7 +212,7 @@ cacct -n test
 
 ![cacct](../../images/cacct/ntest.png)
 
-### Filtering by User and Account
+### Filter by User and Account
 
 **Query jobs by user:**
 
@@ -244,7 +230,7 @@ cacct -A=CraneTest
 
 ![cacct](../../images/cacct/A.png)
 
-**Combine account and max-lines:**
+**Combine account and max lines:**
 
 ```bash
 cacct -A ROOT -m 10
@@ -252,9 +238,9 @@ cacct -A ROOT -m 10
 
 ![cacct](../../images/cacct/am.png)
 
-### Filtering by Partition and QoS
+### Filter by Partition and QoS
 
-**Query jobs in specific partition:**
+**Query jobs in a specific partition:**
 
 ```bash
 cacct -p GPU
@@ -320,11 +306,27 @@ cacct -t completed
 cacct -t failed,cancelled
 ```
 
-**View jobs that exceeded time limit:**
+**View timed-out jobs:**
 
 ```bash
 cacct -t time-limit-exceeded
 ```
+
+**Filter by job type:**
+
+```bash
+# View only container jobs
+cacct --type Container
+
+# View batch jobs
+cacct --type Batch
+
+# View interactive jobs
+cacct --type Interactive
+```
+
+!!! tip "Container Job Management"
+    In addition to basic queries, see [ccon command manual](ccon.md) for more container-specific operations.
 
 ### Output Control
 
@@ -352,31 +354,31 @@ cacct -o="%j %.10n %P %a %t"
 
 ![cacct](../../images/cacct/o.png)
 
-**Natural width for all fields:**
+**All fields using natural width:**
 
 ```bash
 cacct --format "%j %n %t"
 ```
 
-**Left-aligned with minimum widths:**
+**Left-aligned with minimum width:**
 
 ```bash
 cacct --format "%5j %20n %t"
 ```
 
-**Right-aligned with minimum widths:**
+**Right-aligned with minimum width:**
 
 ```bash
 cacct --format "%.5j %.20n %t"
 ```
 
-**Mixed formatting with labels:**
+**Mixed format with labels:**
 
 ```bash
 cacct -o="%.8j %20n %-10P %.15U %t"
 ```
 
-### Combined Filters
+### Combined Filtering
 
 **Multiple filters with full output:**
 
@@ -401,3 +403,4 @@ cacct -m 10 -E=2024-10-08T10:00:00~2024-10-10T10:00:00 -p CPU -t c
 - [crun](crun.md) - Run interactive jobs and steps
 - [ccancel](ccancel.md) - Cancel jobs and steps
 - [ceff](ceff.md) - View job efficiency statistics
+- [ccon](ccon.md) - Container job management

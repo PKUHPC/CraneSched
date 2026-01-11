@@ -392,6 +392,9 @@ cqueue --step -j 123
 cqueue --step --format "%i %n %t %e %L"
 ```
 
+!!! note "Querying Container Jobs"
+    Container jobs (Pods) and container steps are displayed with type `Container`. Use `cacct --type Container` to filter container jobs, or use `cqueue --step -j <pod_job_id>` to view container job steps. For more container operations, see [ccon Command Manual](ccon.md).
+
 **Query steps for specific user:**
 
 ```bash
@@ -423,4 +426,4 @@ cqueue --step -j 100,200,300
 - [calloc](calloc.md) - Allocate resources for interactive use
 - [ccancel](ccancel.md) - Cancel jobs and steps
 - [cacct](cacct.md) - Query completed jobs
-- [ccontrol](ccontrol.md) - Control and query jobs/steps
+- [ccontrol](ccontrol.md) - Control and query jobs/steps- [ccon](ccon.md) - Container job management

@@ -50,6 +50,7 @@ message InitSupervisorRequest {
     message BindFsConfig {
       string bindfs_binary = 1;
       string fusermount_binary = 2;
+      string mount_base_dir = 3;
     }
     BindFsConfig bindfs = 4;
   }

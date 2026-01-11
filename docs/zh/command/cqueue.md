@@ -384,6 +384,9 @@ cqueue --step -j 123
 cqueue --step --format "%i %n %t %e %L"
 ```
 
+!!! note "查询容器作业"
+    容器作业（Pod）和容器步骤的类型显示为 `Container`。使用 `cacct --type Container` 可过滤容器作业，或使用 `cqueue --step -j <pod_job_id>` 查看容器作业的步骤。更多容器操作参见 [ccon 命令手册](ccon.md)。
+
 **查询特定用户的作业步：**
 
 ```bash
@@ -416,3 +419,4 @@ cqueue --step -j 100,200,300
 - [ccancel](ccancel.md) - 取消作业和作业步
 - [cacct](cacct.md) - 查询已完成的作业
 - [ccontrol](ccontrol.md) - 控制和查询作业/作业步
+- [ccon](ccon.md) - 容器作业管理
