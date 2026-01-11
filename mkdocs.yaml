@@ -63,7 +63,7 @@ nav:
       - Database Configuration: deployment/configuration/database.md
       - PAM Module: deployment/configuration/pam.md
       - Multi-node Deployment: deployment/configuration/multi-node.md
-      - PKI+TLS Deployment: deployment/configuration/pki_tls_guide.md
+      - PKI+TLS Deployment: deployment/configuration/pki.md
   - Commands:
     - Job Submission:
         - cbatch: command/cbatch.md
@@ -129,7 +129,6 @@ plugins:
             Pending Reason: 作业排队原因
             License Usage Guide: 许可证使用指南
             Keepalived Guide: Keepalived 使用指南
-            PKI+TLS Guide: PKI+TLS 安全通信部署手册
             Use Cases: 使用案例
             Multi-Node Parallel Job: 多节点并行作业
             GPU-Accelerated Training: GPU 加速训练
@@ -144,7 +143,7 @@ plugins:
             Database Configuration: 数据库配置
             PAM Module: PAM 模块
             Multi-node Deployment: 多节点部署
-            PKI+TLS Deployment: PKI+TLS 安全通信
+            PKI+TLS Deployment: PKI + TLS 安全配置
             Container Support: 容器支持
             Plugins: 插件
         - locale: en
