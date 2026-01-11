@@ -362,6 +362,21 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                            const crane::grpc::QueryTxnLogRequest *request,
                            crane::grpc::QueryTxnLogReply *response) override;
 
+  grpc::Status AddOrModifyLicenseResource(
+      grpc::ServerContext *context,
+      const crane::grpc::AddOrModifyLicenseResourceRequest *request,
+      crane::grpc::AddOrModifyLicenseResourceReply *response) override;
+
+  grpc::Status DeleteLicenseResource(
+      grpc::ServerContext *context,
+      const crane::grpc::DeleteLicenseResourceRequest *request,
+      crane::grpc::DeleteLicenseResourceReply *response) override;
+
+  grpc::Status QueryLicenseResource(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLicenseResourceRequest *request,
+      crane::grpc::QueryLicenseResourceReply *response) override;
+
   grpc::Status QueryClusterInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryClusterInfoRequest *request,
