@@ -1,343 +1,364 @@
-# Container Deployment
+# Container Feature Deployment
 
-This guide explains how to enable and configure Container Support in CraneSched clusters, allowing users to run containerized jobs through the CRI (Container Runtime Interface).
+This guide explains how to enable and configure the container feature in CraneSched clusters, allowing users to run containerized jobs through the CRI (Container Runtime Interface).
 
-!!! warning "Experimental Feature"
-    Container Support is currently experimental. Thorough testing is recommended before production deployment.
-
-## Prerequisites
+## Environment Preparation
 
 ### Container Runtime
 
 CraneSched interacts with container runtimes via the CRI interface, supporting CRI-compatible runtimes like **containerd** and **CRI-O**.
 
+#### Install Container Runtime
+
 === "containerd (Recommended)"
+
+    We recommend referring to the [containerd official installation guide](https://github.com/containerd/containerd/blob/main/docs/getting-started.md) for the latest steps.
+
+    Some Linux distributions can install containerd via package managers, but the versions may be older. The following commands are for reference only:
 
     ```bash
     # Rocky Linux 9 / RHEL 9
-    sudo dnf install -y containerd
-    sudo systemctl enable --now containerd
+    dnf install -y containerd
+    systemctl enable --now containerd
 
     # Debian / Ubuntu
-    sudo apt install -y containerd
-    sudo systemctl enable --now containerd
+    apt install -y containerd
+    systemctl enable --now containerd
     ```
 
-    Verify installation:
+=== "CRI-O"
+
+    We recommend referring to the [CRI-O official installation guide](https://github.com/cri-o/cri-o/blob/main/install.md) for the latest steps.
+
+    Some Linux distributions can install CRI-O via package managers, but the versions may be older. The following commands are for reference only:
 
     ```bash
-    sudo ctr version
+    # Rocky Linux 9 / RHEL 9
+    dnf install -y cri-o
+    systemctl enable --now crio
+
+    # Debian / Ubuntu
+    apt install -y cri-o
+    systemctl enable --now crio
+    ```
+
+#### Enable CRI Support
+
+Container runtimes expose their interface through UNIX sockets. Most runtimes enable the CRI service by default:
+
+| Runtime | Default Socket Path |
+|:-------|:-------------------|
+| containerd | `/run/containerd/containerd.sock` |
+| CRI-O | `/run/crio/crio.sock` |
+
+Use the `crictl` tool to check the CRI interface status:
+
+=== "containerd"
+
+    ```bash
+    crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
     ```
 
 === "CRI-O"
 
     ```bash
-    # Rocky Linux 9 / RHEL 9
-    sudo dnf install -y cri-o
-    sudo systemctl enable --now crio
-
-    # Debian / Ubuntu
-    sudo apt install -y cri-o
-    sudo systemctl enable --now crio
+    crictl --runtime-endpoint unix:///run/crio/crio.sock version
     ```
 
-    Verify installation:
+Expected output (containerd example):
+
+```
+Version:  0.1.0
+RuntimeName:  containerd
+RuntimeVersion:  2.0.7
+RuntimeApiVersion:  v1
+```
+
+If errors occur, enable CRI support according to the runtime configuration documentation.
+
+#### Enable Remote Connections
+
+CraneSched allows users to connect to their running container jobs from any node in the cluster. Therefore, configure the container runtime to allow remote connections from other nodes in the cluster.
+
+!!! warning
+    Enabling remote connections may introduce security risks. Use firewalls and TLS certificates to restrict access.
+
+=== "containerd"
+    Generate the default containerd configuration (if none exists):
 
     ```bash
-    sudo crictl version
+    containerd config default
     ```
 
-### Runtime Socket
+    Find the following section in `/etc/containerd/config.toml`:
 
-Ensure the container runtime's CRI socket is accessible:
+    ```toml
+    [plugins.'io.containerd.grpc.v1.cri']
+      disable_tcp_service = false       # Enable TCP service
+      stream_server_address = '0.0.0.0' # Change to an address reachable within the cluster
+      enable_tls_streaming = false      # Enable TLS if needed
 
-| Runtime | Default Socket Path |
-|:--------|:-------------------|
-| containerd | `/run/containerd/containerd.sock` |
-| CRI-O | `/run/crio/crio.sock` |
+    # Configure TLS certificate paths as needed
+    [plugins.'io.containerd.grpc.v1.cri'.x509_key_pair_streaming]
+      tls_cert_file = ''
+      tls_key_file = ''
+    ```
 
-Check socket existence:
+    After configuration, restart the containerd service.
 
-```bash
-ls -la /run/containerd/containerd.sock
-# or
-ls -la /run/crio/crio.sock
-```
+    Refer to the [containerd configuration guide](https://github.com/containerd/containerd/blob/main/docs/cri/config.md) for more details.
+
+=== "CRI-O"
+    This section is TBD.
+
+#### Enable GPU Support
+
+!!! note
+    Enable this only when GPU/NPU resources are configured on cluster nodes. This feature depends on the container runtime and vendor plugins.
+
+=== "NVIDIA GPU"
+
+    Refer to the [NVIDIA Container Toolkit installation guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) to install the NVIDIA Container Toolkit.
+
+    After installation, follow the "Configuring containerd" or "Configuring CRI-O" sections in that document to enable GPU support.
+
+=== "Huawei Ascend NPU"
+
+    Refer to [MindCluster - Containerized Support Feature Guide](https://www.hiascend.com/document/detail/zh/mindcluster/72rc1/clustersched/dlug/dlruntime_ug_002.html) to install the Ascend NPU container runtime plugin.
+
+    After installation, follow the [Using in Containerd Client](https://www.hiascend.com/document/detail/zh/mindcluster/72rc1/clustersched/dlug/dlruntime_ug_006.html) tutorial to enable NPU support.
+
+=== "AMD GPU"
+
+    Refer to the [AMD Container Toolkit installation guide](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html) to install AMD Container Toolkit.
+
+    **Note:** CraneSched container support for AMD GPU is still under testing and evaluation.
+
+### Container Network Plugins
+
+CraneSched uses the Container Network Interface (CNI) to provide container network isolation and communication. Install a suitable CNI plugin based on the container runtime you choose.
+
+CraneSched provides the Crane Meta CNI plugin to flexibly integrate existing CNI plugins (such as Calico). The CNI plugins that have passed compatibility tests currently include Calico.
+
+#### Crane Meta CNI
+
+In the CraneSched-FrontEnd root directory, run `make tool` to build the Meta CNI plugin. The build output is located at `build/tool/meta-cni`.
+The Meta CNI plugin must be configured before use.
+
+!!! warning
+    Crane Meta CNI does not perform network configuration itself. It serves as a bridge between CraneSched and the actual CNI plugin. Different clusters and different CNI plugins require different Meta CNI configurations.
+
+The example configuration file is located at `tool/meta-cni/config/00-meta.example.conf`. Edit it to match your environment.
+
+After editing, place the file in `/etc/cni/net.d/` (the exact location is determined by the container runtime; keep the path consistent). Multiple configuration files may exist in this directory; the file with the lexicographically earliest name takes precedence.
+
+#### Example: Calico
+
+!!! warning
+    This section is still being improved. More details will be added later.
+
+**[Calico](https://github.com/projectcalico/calico)** is a popular CNI plugin that supports network policy and high-performance networking. CraneSched has completed compatibility testing with Calico.
+
+The following is a Meta CNI + Calico + Port Mapping + Bandwidth configuration. Write it to `/etc/cni/net.d/00-crane-calico.conf`. If there is no higher-priority configuration file, it will take effect on the next container startup.
+
+??? "Example configuration"
+      ```json
+      {
+      "cniVersion": "1.0.0",
+      "name": "crane-meta",
+      "type": "meta-cni",
+      "logLevel": "debug",
+      "timeoutSeconds": 10,
+      "resultMode": "chained",
+      "runtimeOverride": {
+         "args": [
+            "-K8S_POD_NAMESPACE",
+            "-K8S_POD_NAME",
+            "-K8S_POD_INFRA_CONTAINER_ID",
+            "-K8S_POD_UID"
+         ],
+         "envs": []
+      },
+      "delegates": [
+         {
+            "name": "calico",
+            "conf": {
+            "type": "calico",
+            "log_level": "info",
+            "datastore_type": "etcdv3",
+            "etcd_endpoints": "http://192.168.24.2:2379",
+            "etcd_key_file": "",
+            "etcd_cert_file": "",
+            "etcd_ca_cert_file": "",
+            "ipam": {
+               "type": "calico-ipam"
+            },
+            "policy": {
+               "type": "none"
+            },
+            "container_settings": {
+               "allow_ip_forwarding": true
+            },
+            "capabilities": {
+               "portMappings": true
+            }
+            }
+         },
+         {
+            "name": "portmap",
+            "conf": {
+            "type": "portmap",
+            "snat": true,
+            "capabilities": {
+               "portMappings": true
+            }
+            }
+         },
+         {
+            "name": "bandwidth",
+            "conf": {
+            "type": "bandwidth",
+            "capabilities": {
+               "bandwidth": true
+            }
+            }
+         }
+      ]
+      }
+      ```
+    Some fields in this configuration file depend on your actual cluster deployment. Adjust them as needed.
 
 ### Optional Dependencies
 
-For user namespace mapping (BindFs) functionality, install additional packages:
+#### BindFs
 
-```bash
-# Rocky Linux 9 / RHEL 9
-sudo dnf install -y bindfs fuse3
+!!! note
+    This is required only when running containers with user namespaces (`--userns`, "Fake Root") and the underlying filesystem of the mount directory does not support ID Mapped Mounts.
 
-# Debian / Ubuntu
-sudo apt install -y bindfs fuse3
+!!! warning
+    Since BindFs is based on FUSE, it may introduce performance overhead. Enable it only when necessary.
+
+[BindFs](https://bindfs.org/) is a FUSE-based filesystem tool that maps real user IDs to container user IDs on filesystems that do not support ID Mapped Mounts. Install it with the following commands:
+
+=== "RHEL/Fedora/CentOS"
+
+    ```bash
+    dnf install -y bindfs fuse3
+    ```
+
+=== "Debian / Ubuntu"
+
+    ```bash
+    apt install -y bindfs fuse3
+    ```
+
+After installation, enable BindFs in the [Container Configuration](#container-configuration) section below.
+
+## Deployment Steps
+
+### Modify Configuration File
+
+Edit `/etc/crane/config.yaml` and add the following container configuration:
+
+!!! note
+    For the complete container configuration options, see [Container Configuration](#container-configuration).
+
+```yaml
+Container:
+  Enabled: true
+  TempDir: supervisor/containers/
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  ImageEndpoint: /run/containerd/containerd.sock
 ```
 
-## Configuration
+After editing, save and distribute the configuration file to all nodes.
 
-Configure container options in `/etc/crane/config.yaml`. Here's a complete example with field descriptions:
+### Restart CraneSched Services
+
+Restart CraneSched services on all nodes to apply the new configuration:
+
+```bash
+pdsh -w crane01 "systemctl restart cranectld"
+pdsh -w crane[02-04] "systemctl restart craned"
+```
+
+### Verify Container Feature
+
+Run a test container on any node that can submit jobs:
+
+```bash
+# Submit a simple container job
+ccon run -p CPU alpine:latest -- echo "Hello from container"
+
+# Check job status
+ccon ps -a
+```
+
+## Container Configuration
+
+Configure container-related options in `/etc/crane/config.yaml`. Below is a complete example and field description:
 
 ```yaml
 Container:
   # Enable container feature
   Enabled: true
-  
+
   # Container temporary data directory (relative to CraneBaseDir)
   TempDir: supervisor/containers/
-  
+
   # CRI runtime service socket
   RuntimeEndpoint: /run/containerd/containerd.sock
-  
+
   # CRI image service socket (usually same as RuntimeEndpoint)
   ImageEndpoint: /run/containerd/containerd.sock
-  
+
   # BindFs configuration (optional, for user namespace mapping)
   BindFs:
     Enabled: false
-    BindfsBinary: bindfs
-    FusermountBinary: fusermount3
+    BindfsBinary: /usr/bin/bindfs
+    FusermountBinary: /usr/bin/fusermount3
     MountBaseDir: /mnt/crane
 ```
 
-### Configuration Fields
-
-#### Core Configuration
+### Core Configuration
 
 | Field | Type | Default | Description |
-|:------|:-----|:--------|:------------|
-| `Enabled` | bool | `false` | Whether to enable container feature. Set to `true` to enable |
+|:-----|:-----|:-------|:-----|
+| `Enabled` | bool | `false` | Whether to enable the container feature. Set to `true` to enable |
 | `TempDir` | string | `supervisor/containers/` | Temporary data directory during container runtime, relative to `CraneBaseDir`. Stores container metadata, logs, etc. |
-| `RuntimeEndpoint` | string | — | **Required**. Unix socket path for CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
-| `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for CRI image service, used for image pulling and management. Usually same as `RuntimeEndpoint` |
+| `RuntimeEndpoint` | string | - | **Required**. Unix socket path for the CRI runtime service, used for container lifecycle management (create, start, stop, etc.) |
+| `ImageEndpoint` | string | Same as `RuntimeEndpoint` | Unix socket path for the CRI image service, used for image pulling and management. Usually the same as `RuntimeEndpoint` |
 
-#### BindFs Configuration
+### BindFs Configuration
 
 BindFs implements user ID mapping mounts from host directories to containers, resolving permission issues under user namespaces.
 
 | Field | Type | Default | Description |
-|:------|:-----|:--------|:------------|
-| `BindFs.Enabled` | bool | `false` | Whether to enable BindFs functionality |
-| `BindFs.BindfsBinary` | string | `bindfs` | bindfs executable path |
-| `BindFs.FusermountBinary` | string | `fusermount3` | fusermount executable path (for unmounting FUSE filesystems) |
-| `BindFs.MountBaseDir` | string | `/mnt/crane` | Base directory for BindFs mount points. Can be absolute path or relative to `CraneBaseDir` |
-
-!!! tip "When BindFs is Needed"
-    When running containers with user namespace (`--userns`) and mounting host directories, BindFs automatically handles UID/GID mapping, ensuring container users can properly access mounted files.
-
-## Deployment Steps
-
-### 1. Install Container Runtime
-
-Install and start the container runtime on all compute nodes (see Prerequisites).
-
-### 2. Verify Runtime Connection
-
-Test runtime functionality using `crictl` or `ctr`:
-
-```bash
-# containerd
-sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
-
-# CRI-O
-sudo crictl --runtime-endpoint unix:///run/crio/crio.sock version
-```
-
-Expected output:
-
-```
-Version:  0.1.0
-RuntimeName:  containerd
-RuntimeVersion:  v1.7.x
-RuntimeApiVersion:  v1
-```
-
-### 3. Prepare Configuration
-
-Edit `/etc/crane/config.yaml`, add container configuration:
-
-```yaml
-Container:
-  Enabled: true
-  TempDir: supervisor/containers/
-  RuntimeEndpoint: /run/containerd/containerd.sock
-  ImageEndpoint: /run/containerd/containerd.sock
-```
-
-### 4. Distribute Configuration
-
-Sync configuration file to all nodes:
-
-```bash
-pdcp -w compute[01-10] /etc/crane/config.yaml /etc/crane/
-```
-
-### 5. Restart Services
-
-Restart craned service on compute nodes to load new configuration:
-
-```bash
-pdsh -w compute[01-10] "systemctl restart craned"
-```
-
-### 6. Verify Container Feature
-
-Run a test container from any job submission node:
-
-```bash
-# Submit simple container job
-ccon run -p CPU alpine:latest -- echo "Hello from container"
-
-# Check job status
-cqueue
-```
-
-On success, should output:
-
-```
-Hello from container
-```
+|:-----|:-----|:-------|:-----|
+| `BindFs.Enabled` | bool | `false` | Whether to enable BindFs |
+| `BindFs.BindfsBinary` | string | `bindfs` | Path to the bindfs executable |
+| `BindFs.FusermountBinary` | string | `fusermount3` | Path to the fusermount executable (used to unmount FUSE filesystems) |
+| `BindFs.MountBaseDir` | string | `/mnt/crane` | Base directory for BindFs mount points. Can be an absolute path or relative to `CraneBaseDir` |
 
 ## Image Management
 
-### Image Sources
+CraneSched does not directly manage image storage. The container runtime is responsible for pulling and storing images.
 
 Container images can be obtained from:
 
-- **Public Registries**: Docker Hub, GHCR, Quay.io, etc.
-- **Private Registries**: Enterprise internal Registry
-- **Local Images**: Pre-imported via `ctr` or `crictl`
+- **Public registries**: Docker Hub, GHCR, Quay.io, etc.
+- **Private registries**: Enterprise internal registry
+- **Local images**: Pre-imported via `ctr` or `crictl`
 
-### Pre-pull Images
-
-To reduce job startup latency, pre-pull common images on compute nodes:
-
-```bash
-# Using containerd
-pdsh -w compute[01-10] "ctr -n k8s.io images pull docker.io/library/python:3.11"
-
-# Using crictl
-pdsh -w compute[01-10] "crictl pull python:3.11"
-```
-
-### Private Registry Authentication
-
-For private registry access, users can configure authentication via `ccon login`:
-
-```bash
-ccon login registry.example.com
-```
+We recommend deploying an image accelerator or private registry in the cluster to improve pull speed.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### craned Startup Failure: RuntimeEndpoint Not Configured
-
-**Error Message**: `RuntimeEndpoint is not configured.`
-
-**Solution**: Ensure `RuntimeEndpoint` is properly configured when `Container.Enabled` is `true` in `config.yaml`.
-
-#### Cannot Connect to Container Runtime
-
-**Error Message**: `Failed to get CRI version: ...`
-
-**Troubleshooting Steps**:
-
-1. Check container runtime service status:
-   ```bash
-   systemctl status containerd
-   ```
-
-2. Check socket permissions:
-   ```bash
-   ls -la /run/containerd/containerd.sock
-   ```
-
-3. Manually test CRI connection:
-   ```bash
-   sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
-   ```
-
-#### Image Pull Failed
-
-**Troubleshooting Steps**:
-
-1. Check network connectivity:
-   ```bash
-   ping docker.io
-   ```
-
-2. Check DNS resolution:
-   ```bash
-   nslookup registry-1.docker.io
-   ```
-
-3. View craned logs:
-   ```bash
-   journalctl -u craned -f
-   ```
-
-#### BindFs Mount Failed
-
-**Troubleshooting Steps**:
-
-1. Verify bindfs and fuse3 are installed:
-   ```bash
-   which bindfs fusermount3
-   ```
-
-2. Check if `MountBaseDir` exists with correct permissions:
-   ```bash
-   ls -la /mnt/crane
-   ```
-
-3. Ensure FUSE kernel module is loaded:
-   ```bash
-   lsmod | grep fuse
-   ```
-
-### Log Locations
-
-Container-related logs are located at:
-
-- **craned logs**: `/var/crane/craned/craned.log` (or configured path under `CraneBaseDir`)
-- **Supervisor logs**: `/var/crane/supervisor/`
-- **Container temp data**: `/var/crane/supervisor/containers/` (or configured `TempDir`)
-
-View craned container-related logs:
-
-```bash
-grep -i "cri\|container" /var/crane/craned/craned.log
-```
-
-## Rolling Back Container Feature
-
-To disable container feature:
-
-1. Edit `/etc/crane/config.yaml`:
-   ```yaml
-   Container:
-     Enabled: false
-   ```
-
-2. Sync configuration and restart services:
-   ```bash
-   pdcp -w compute[01-10] /etc/crane/config.yaml /etc/crane/
-   pdsh -w compute[01-10] "systemctl restart craned"
-   ```
-
-3. Verify container feature is disabled:
-   ```bash
-   ccon run -p CPU alpine:latest -- echo "test"
-   # Should return error: container feature not enabled
-   ```
+Refer to the [Container Troubleshooting Guide](../reference/container/troubleshooting.md) for common issues and solutions.
 
 ## Related Documentation
 
-- [Container Support Overview](../reference/container/index.md): Understand overall positioning and advantages of container features
+- [Container Feature Overview](../reference/container/index.md): Understand the overall positioning and advantages of the container feature
 - [Core Concepts](../reference/container/concepts.md): Understand container jobs, Pods, resource models, and other concepts
-- [Quick Start](../reference/container/quickstart.md): Quick experience with container job submission
+- [Quick Start](../reference/container/quickstart.md): Quickly try container job submission
 - [Cluster Configuration](./configuration/config.md): Complete configuration file documentation

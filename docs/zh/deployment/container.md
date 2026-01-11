@@ -2,81 +2,301 @@
 
 本指南说明如何在鹤思集群中启用和配置容器功能，允许用户通过 CRI（容器运行时接口）在集群中运行容器化作业。
 
-!!! warning "实验性功能"
-    容器功能目前处于实验阶段。建议在生产环境部署前充分测试。
-
-## 前置条件
+## 环境准备
 
 ### 容器运行时
 
 鹤思通过 CRI 接口与容器运行时交互，支持 **containerd** 和 **CRI-O** 等兼容 CRI 的运行时。
 
+#### 安装容器运行时
+
 === "containerd（推荐）"
+
+    我们推荐您参阅 [containerd 官方安装指南](https://github.com/containerd/containerd/blob/main/docs/getting-started.md) 以获取最新的安装步骤。
+
+    部分 Linux 发行版可通过包管理器直接安装 containerd，但可能版本较旧，以下命令仅供参考：
 
     ```bash
     # Rocky Linux 9 / RHEL 9
-    sudo dnf install -y containerd
-    sudo systemctl enable --now containerd
+    dnf install -y containerd
+    systemctl enable --now containerd
 
     # Debian / Ubuntu
-    sudo apt install -y containerd
-    sudo systemctl enable --now containerd
-    ```
-
-    验证安装：
-
-    ```bash
-    sudo ctr version
+    apt install -y containerd
+    systemctl enable --now containerd
     ```
 
 === "CRI-O"
 
+    我们推荐您参阅 [CRI-O 官方安装指南](https://github.com/cri-o/cri-o/blob/main/install.md) 以获取最新的安装步骤。
+
+    部分 Linux 发行版可通过包管理器直接安装 CRI-O，但可能版本较旧，以下命令仅供参考：
+
     ```bash
     # Rocky Linux 9 / RHEL 9
-    sudo dnf install -y cri-o
-    sudo systemctl enable --now crio
+    dnf install -y cri-o
+    systemctl enable --now crio
 
     # Debian / Ubuntu
-    sudo apt install -y cri-o
-    sudo systemctl enable --now crio
+    apt install -y cri-o
+    systemctl enable --now crio
     ```
 
-    验证安装：
+#### 启用 CRI 支持
 
-    ```bash
-    sudo crictl version
-    ```
-
-### 运行时套接字
-
-确保容器运行时的 CRI 套接字可访问：
+容器运行时通过 UNIX 套接字暴露接口，大部分容器运行时在默认配置下已经启用 CRI 服务：
 
 | 运行时 | 默认套接字路径 |
 |:-------|:---------------|
 | containerd | `/run/containerd/containerd.sock` |
 | CRI-O | `/run/crio/crio.sock` |
 
-检查套接字存在：
+使用 crictl 工具检查 CRI 接口状态：
 
-```bash
-ls -la /run/containerd/containerd.sock
-# 或
-ls -la /run/crio/crio.sock
+=== "containerd"
+
+    ```bash
+    crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
+    ```
+
+=== "CRI-O"
+
+    ```bash
+    crictl --runtime-endpoint unix:///run/crio/crio.sock version
+    ```
+
+预期输出（以 containerd 为例）：
+
 ```
+Version:  0.1.0
+RuntimeName:  containerd
+RuntimeVersion:  2.0.7
+RuntimeApiVersion:  v1
+```
+
+如果出现错误，请按容器运行时的配置文档启用 CRI 支持。
+
+#### 启用远程连接
+
+鹤思系统允许用户在集群任意节点上连接到本用户正在运行的容器作业。因此，需配置容器运行时允许来自本集群其他节点的远程连接。
+
+!!! warning
+    启用远程连接可能带来安全风险。建议通过防火墙和 TLS 证书限制访问。
+
+=== "containerd"
+    生成 Containerd 默认配置（如当前无配置）：
+   
+    ```bash
+    containerd config default
+    ```
+
+    找到 `/etc/containerd/config.toml` 中的以下部分：
+    
+    ```toml
+    [plugins.'io.containerd.grpc.v1.cri']
+      disable_tcp_service = false       # 启用 TCP 服务
+      stream_server_address = '0.0.0.0' # 修改为集群内可访问的地址
+      enable_tls_streaming = false      # 根据需要启用 TLS
+
+    # 根据情况配置 TLS 证书路径
+    [plugins.'io.containerd.grpc.v1.cri'.x509_key_pair_streaming]
+      tls_cert_file = ''
+      tls_key_file = ''
+    ```
+
+    配置完毕后，请重启 containerd 服务。
+    
+    请参考 [Containerd 配置指南](https://github.com/containerd/containerd/blob/main/docs/cri/config.md) 获取更多细节。
+
+=== "CRI-O"
+    此部分内容待补充。
+
+
+#### 启用 GPU 支持
+
+!!! note
+    仅在集群节点配置 GPU/NPU 资源时，才需启用此功能。该功能依赖容器运行时和来自硬件厂商的插件支持。
+
+=== "NVIDIA GPU"
+
+    请参阅 [NVIDIA Container Toolkit 安装指南](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) 安装 NVIDIA Container Toolkit。
+    
+    安装完成后，请参考上述文档中 “Configuring containerd” 或 “Configuring CRI-O” 部分启用 GPU 支持。
+
+=== "华为昇腾 NPU"
+    
+    请参阅 [MindCluster - 容器化支持特性指南](https://www.hiascend.com/document/detail/zh/mindcluster/72rc1/clustersched/dlug/dlruntime_ug_002.html) 安装昇腾 NPU 容器运行时插件。
+
+    安装完成后，请参考 [在 Containerd 客户端中使用](https://www.hiascend.com/document/detail/zh/mindcluster/72rc1/clustersched/dlug/dlruntime_ug_006.html) 教程启用 NPU 支持。
+
+
+=== "AMD GPU"
+
+    请参阅 [AMD Container Toolkit 安装指南](https://instinct.docs.amd.com/projects/container-toolkit/en/latest/index.html) 安装 AMD Container Toolkit。
+
+    **注意：** 鹤思对 AMD GPU 的容器支持情况尚在测试和评估中。
+
+### 容器网络插件
+
+鹤思系统通过调用容器网络接口（CNI），实现容器网络隔离与通信。请根据所选容器运行时安装恰当的 CNI 插件。
+
+鹤思提供 Crane Meta CNI 插件，用于灵活地适配现有的 CNI 插件（如 Calico）。目前通过兼容性测试的 CNI 插件有：Calico。
+
+#### 鹤思 Meta CNI
+
+在 CraneSched-FrontEnd 根目录下，执行 make tool 可构建 Meta CNI 插件，编译后的产物在：build/tool/meta-cni。
+Meta CNI 需要经过配置才能正常使用。
+
+!!! warning
+    鹤思 Meta CNI 本身不进行网络配置，仅作为桥梁连接鹤思系统与实际的 CNI 插件。不同的集群、不同的 CNI 插件，需要不同的 Meta CNI 配置。
+
+示例配置文件位于 tool/meta-cni/config/00-meta.example.conf，请根据实际情况进行编写。
+
+填写配置文件后，将其放置到 /etc/cni/net.d/ 中（具体位置由容器运行时决定，请保持路径一致）。此目录下可能同时存在多个配置文件，字典序靠前的配置文件优先生效。
+
+#### 案例：Calico
+
+!!! warning
+    此部分文档尚在完善中，后续将补充更多细节。
+
+**[Calico](https://github.com/projectcalico/calico)** 是一个流行的容器网络插件，支持网络策略和高性能网络通信。鹤思已完成对 Calico 的兼容性测试。
+
+以下是 Meta CNI + Calico + Port Mapping + Bandwidth 配置，请将其写入 `/etc/cni/net.d/00-crane-calico.conf`。如没有更优先的配置文件，该配置将在下一次启动容器时生效。
+
+??? "示例配置"
+      ```json
+      {
+      "cniVersion": "1.0.0",
+      "name": "crane-meta",
+      "type": "meta-cni",
+      "logLevel": "debug",
+      "timeoutSeconds": 10,
+      "resultMode": "chained",
+      "runtimeOverride": {
+         "args": [
+            "-K8S_POD_NAMESPACE",
+            "-K8S_POD_NAME",
+            "-K8S_POD_INFRA_CONTAINER_ID",
+            "-K8S_POD_UID"
+         ],
+         "envs": []
+      },
+      "delegates": [
+         {
+            "name": "calico",
+            "conf": {
+            "type": "calico",
+            "log_level": "info",
+            "datastore_type": "etcdv3",
+            "etcd_endpoints": "http://192.168.24.2:2379",
+            "etcd_key_file": "",
+            "etcd_cert_file": "",
+            "etcd_ca_cert_file": "",
+            "ipam": {
+               "type": "calico-ipam"
+            },
+            "policy": {
+               "type": "none"
+            },
+            "container_settings": {
+               "allow_ip_forwarding": true
+            },
+            "capabilities": {
+               "portMappings": true
+            }
+            }
+         },
+         {
+            "name": "portmap",
+            "conf": {
+            "type": "portmap",
+            "snat": true,
+            "capabilities": {
+               "portMappings": true
+            }
+            }
+         },
+         {
+            "name": "bandwidth",
+            "conf": {
+            "type": "bandwidth",
+            "capabilities": {
+               "bandwidth": true
+            }
+            }
+         }
+      ]
+      }
+      ```
+    该配置文件中部分内容和实际集群部署相关，请根据实际情况调整。
 
 ### 可选依赖
 
-若需启用用户命名空间映射功能（BindFs），需要额外安装：
+#### BindFs
 
-```bash
-# Rocky Linux 9 / RHEL 9
-sudo dnf install -y bindfs fuse3
+!!! note
+    仅在需要使用用户命名空间（`--userns`, 即 “Fake Root”）运行容器，且欲挂载目录的底层文件系统不支持 ID Mapped Mounts 时，才需要安装 BindFs。
 
-# Debian / Ubuntu
-sudo apt install -y bindfs fuse3
+!!! warning
+    由于 BindFs 基于 FUSE，可引入性能开销，建议仅在必要时启用。
+
+[BindFs](https://bindfs.org/) 是一个基于 FUSE 的文件系统工具，用于在不支持 ID Mapped Mounts 的文件系统上实现真实用户 ID 和容器内用户 ID 的映射。可按照以下命令安装：
+
+=== "RHEL/Fedora/CentOS"
+
+    ```bash
+    dnf install -y bindfs fuse3
+    ```
+
+=== "Debian / Ubuntu"
+   
+    ```bash
+    apt install -y bindfs fuse3
+    ```
+
+完成安装后，请参照下文的[容器配置说明](#容器配置说明)部分启用 BindFs 功能。
+
+## 部署步骤
+
+### 修改配置文件
+
+编辑 `/etc/crane/config.yaml`，添加以下容器配置：
+
+!!! note
+    完整的容器配置选项请参见[容器配置说明](#容器配置说明)。
+
+```yaml
+Container:
+  Enabled: true
+  TempDir: supervisor/containers/
+  RuntimeEndpoint: /run/containerd/containerd.sock
+  ImageEndpoint: /run/containerd/containerd.sock
 ```
 
-## 配置说明
+修改配置文件后，保存并将其分发至各节点。
+
+### 重启鹤思服务
+
+重启在所有节点上的鹤思服务以应用新配置：
+
+```bash
+pdsh -w crane01 "systemctl restart cranectld"
+pdsh -w crane[02-04] "systemctl restart craned"
+```
+
+### 验证容器功能
+
+在任意可提交作业的节点上运行测试容器：
+
+```bash
+# 提交简单容器作业
+ccon run -p CPU alpine:latest -- echo "Hello from container"
+
+# 查看作业状态
+ccon ps -a
+```
+
+## 容器配置说明
 
 在 `/etc/crane/config.yaml` 中配置容器相关选项。以下是完整配置示例及字段说明：
 
@@ -102,9 +322,7 @@ Container:
     MountBaseDir: /mnt/crane
 ```
 
-### 配置字段详解
-
-#### 核心配置
+### 核心配置
 
 | 字段 | 类型 | 默认值 | 说明 |
 |:-----|:-----|:-------|:-----|
@@ -113,7 +331,7 @@ Container:
 | `RuntimeEndpoint` | string | — | **必填**。CRI 运行时服务的 Unix 套接字路径，用于容器生命周期管理（创建、启动、停止等） |
 | `ImageEndpoint` | string | 同 `RuntimeEndpoint` | CRI 镜像服务的 Unix 套接字路径，用于镜像拉取与管理。大多数情况下与 `RuntimeEndpoint` 相同 |
 
-#### BindFs 配置
+### BindFs 配置
 
 BindFs 用于实现宿主机目录到容器内的用户 ID 映射挂载，解决用户命名空间下的权限问题。
 
@@ -124,85 +342,9 @@ BindFs 用于实现宿主机目录到容器内的用户 ID 映射挂载，解决
 | `BindFs.FusermountBinary` | string | `fusermount3` | fusermount 可执行文件路径（用于卸载 FUSE 文件系统） |
 | `BindFs.MountBaseDir` | string | `/mnt/crane` | BindFs 挂载点的基础目录。可以是绝对路径，或相对于 `CraneBaseDir` 的相对路径 |
 
-!!! tip "何时需要 BindFs"
-    当使用用户命名空间（`--userns`）运行容器，且需要挂载宿主机目录时，BindFs 可以自动处理 UID/GID 映射，确保容器内用户能正确访问挂载的文件。
-
-## 部署步骤
-
-### 1. 安装容器运行时
-
-在所有计算节点上安装并启动容器运行时（参见前置条件）。
-
-### 2. 验证运行时连接
-
-使用 `crictl` 或 `ctr` 测试运行时是否正常工作：
-
-```bash
-# containerd
-sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
-
-# CRI-O
-sudo crictl --runtime-endpoint unix:///run/crio/crio.sock version
-```
-
-预期输出：
-
-```
-Version:  0.1.0
-RuntimeName:  containerd
-RuntimeVersion:  v1.7.x
-RuntimeApiVersion:  v1
-```
-
-### 3. 准备配置文件
-
-编辑 `/etc/crane/config.yaml`，添加容器配置：
-
-```yaml
-Container:
-  Enabled: true
-  TempDir: supervisor/containers/
-  RuntimeEndpoint: /run/containerd/containerd.sock
-  ImageEndpoint: /run/containerd/containerd.sock
-```
-
-### 4. 分发配置
-
-将配置文件同步到所有节点：
-
-```bash
-pdcp -w compute[01-10] /etc/crane/config.yaml /etc/crane/
-```
-
-### 5. 重启服务
-
-重启计算节点上的 craned 服务以加载新配置：
-
-```bash
-pdsh -w compute[01-10] "systemctl restart craned"
-```
-
-### 6. 验证容器功能
-
-在任意可提交作业的节点上运行测试容器：
-
-```bash
-# 提交简单容器作业
-ccon run -p CPU alpine:latest -- echo "Hello from container"
-
-# 查看作业状态
-cqueue
-```
-
-成功时应输出：
-
-```
-Hello from container
-```
-
 ## 镜像管理
 
-### 镜像来源
+鹤思系统并不直接管理镜像存储，容器运行时负责镜像的拉取与存储。
 
 容器镜像可从以下位置获取：
 
@@ -210,130 +352,11 @@ Hello from container
 - **私有仓库**：企业内部 Registry
 - **本地镜像**：通过 `ctr` 或 `crictl` 预先导入
 
-### 预拉取镜像
-
-为减少作业启动延迟，建议在计算节点预拉取常用镜像：
-
-```bash
-# 使用 containerd
-pdsh -w compute[01-10] "ctr -n k8s.io images pull docker.io/library/python:3.11"
-
-# 使用 crictl
-pdsh -w compute[01-10] "crictl pull python:3.11"
-```
-
-### 私有仓库认证
-
-若需访问私有仓库，用户可通过 `ccon login` 配置认证：
-
-```bash
-ccon login registry.example.com
-```
+建议您在集群中部署恰当的镜像加速器或私有 Registry 以提升拉取速度。
 
 ## 故障排除
 
-### 常见问题
-
-#### craned 启动失败：RuntimeEndpoint 未配置
-
-**错误信息**：`RuntimeEndpoint is not configured.`
-
-**解决方法**：确保 `config.yaml` 中 `Container.Enabled` 为 `true` 时，`RuntimeEndpoint` 已正确配置。
-
-#### 无法连接到容器运行时
-
-**错误信息**：`Failed to get CRI version: ...`
-
-**排查步骤**：
-
-1. 检查容器运行时服务状态：
-   ```bash
-   systemctl status containerd
-   ```
-
-2. 检查套接字权限：
-   ```bash
-   ls -la /run/containerd/containerd.sock
-   ```
-
-3. 手动测试 CRI 连接：
-   ```bash
-   sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock version
-   ```
-
-#### 镜像拉取失败
-
-**排查步骤**：
-
-1. 检查网络连接：
-   ```bash
-   ping docker.io
-   ```
-
-2. 检查 DNS 解析：
-   ```bash
-   nslookup registry-1.docker.io
-   ```
-
-3. 查看 craned 日志：
-   ```bash
-   journalctl -u craned -f
-   ```
-
-#### BindFs 挂载失败
-
-**排查步骤**：
-
-1. 确认 bindfs 和 fuse3 已安装：
-   ```bash
-   which bindfs fusermount3
-   ```
-
-2. 检查 `MountBaseDir` 是否存在并有正确权限：
-   ```bash
-   ls -la /mnt/crane
-   ```
-
-3. 确保 FUSE 内核模块已加载：
-   ```bash
-   lsmod | grep fuse
-   ```
-
-### 日志位置
-
-容器相关日志位于：
-
-- **craned 日志**：`/var/crane/craned/craned.log`（或 `CraneBaseDir` 下的配置路径）
-- **Supervisor 日志**：`/var/crane/supervisor/`
-- **容器临时数据**：`/var/crane/supervisor/containers/`（或配置的 `TempDir`）
-
-查看 craned 容器相关日志：
-
-```bash
-grep -i "cri\|container" /var/crane/craned/craned.log
-```
-
-## 回滚容器功能
-
-若需禁用容器功能：
-
-1. 编辑 `/etc/crane/config.yaml`：
-   ```yaml
-   Container:
-     Enabled: false
-   ```
-
-2. 同步配置并重启服务：
-   ```bash
-   pdcp -w compute[01-10] /etc/crane/config.yaml /etc/crane/
-   pdsh -w compute[01-10] "systemctl restart craned"
-   ```
-
-3. 验证容器功能已禁用：
-   ```bash
-   ccon run -p CPU alpine:latest -- echo "test"
-   # 应返回错误：容器功能未启用
-   ```
+请参阅[容器故障排除指南](../reference/container/troubleshooting.md)获取常见问题的解决方案。
 
 ## 相关文档
 
