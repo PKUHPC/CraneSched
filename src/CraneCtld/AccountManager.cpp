@@ -1645,7 +1645,7 @@ AccountManager::CheckAddUserAllowedQosNoLock_(
       // When the user has no partition, QoS cannot be added.
       if (attrs_in_account_map.allowed_partition_qos_map.empty()) {
         rich_error_list.emplace_back(std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_USER_EMPTY_PARTITION, partition)));
+            FormatRichErr(CraneErrCode::ERR_USER_EMPTY_PARTITION, user->name)));
         break;
       }
 
