@@ -266,14 +266,17 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
         "Task is pending or container is not ready.",
         "Invalid memory format",
         "Step resource request exceeds job resource",
-        
+
 
         // 85 - 89
        "The specified wckey does not exist",
         "The wckey already exists in crane",
         "The entered cluster does not exist",
         "Cannot delete the default wckey. Please set a different default wckey first",
-        "No default wckey is set. Please specify a wckey or set a default wckey"
+        "No default wckey is set. Please specify a wckey or set a default wckey",
+
+        // 90-94
+        "Lua script validation failed"
     };
 // clang-format on
 }  // namespace Internal

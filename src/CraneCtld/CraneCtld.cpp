@@ -33,6 +33,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "LicensesManager.h"
+#include "Lua/LuaJobHandler.h"
 #include "RpcService/CranedKeeper.h"
 #include "RpcService/CtldGrpcServer.h"
 #include "Security/VaultClient.h"
@@ -280,6 +281,9 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
+
+      g_config.JobSubmitLuaScript =
+          YamlValueOr(config["JobSubmitLuaScript"], "");
 
       g_config.CranedListenConf.CranedListenPort =
           YamlValueOr(config["CranedListenPort"], kCranedDefaultPort);
@@ -928,6 +932,11 @@ void InitializeCtldGlobalVariables() {
   g_meta_container->InitFromConfig(g_config);
 
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
+
+  if (!g_config.JobSubmitLuaScript.empty()) {
+    g_lua_pool = std::make_unique<crane::LuaPool>();
+    if (!g_lua_pool->Init()) std::exit(1);
+  }
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();

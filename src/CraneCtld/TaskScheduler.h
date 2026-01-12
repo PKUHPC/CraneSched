@@ -779,6 +779,13 @@ class TaskScheduler {
   CraneErrCode ChangeTaskExtraAttrs(task_id_t task_id,
                                     const std::string& new_extra_attr);
 
+  std::optional<std::future<CraneRichError>> JobSubmitLuaCheck(
+      TaskInCtld* task);
+
+  void JobModifyLuaCheck(const crane::grpc::ModifyTaskRequest& request,
+                         crane::grpc::ModifyTaskReply* response,
+                         std::list<task_id_t>* task_ids);
+
   CraneExpected<std::future<CraneExpected<task_id_t>>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 

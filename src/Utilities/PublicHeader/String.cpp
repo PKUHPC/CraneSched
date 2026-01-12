@@ -550,4 +550,55 @@ std::string StepStatusToString(const crane::grpc::TaskStatus &status) {
   return std::string(Internal::CraneStepStatusStrArr[static_cast<int>(status)]);
 }
 
+int TimeStr2Mins(absl::string_view input) {
+  input = absl::StripAsciiWhitespace(input);
+
+  if (input.empty() || absl::EqualsIgnoreCase(input, "-1") ||
+      absl::EqualsIgnoreCase(input, "INFINITE") ||
+      absl::EqualsIgnoreCase(input, "UNLIMITED")) {
+    return -1;
+  }
+
+  for (char c : input) {
+    if (!(absl::ascii_isdigit(c) || c == ':' || c == '-' ||
+          absl::ascii_isspace(c))) {
+      return -1;
+    }
+  }
+
+  int days = 0, hours = 0, mins = 0, secs = 0;
+  std::vector<absl::string_view> parts;
+
+  size_t dash_pos = input.find('-');
+  absl::string_view time_part = input;
+  if (dash_pos != absl::string_view::npos) {
+    absl::string_view day_str = input.substr(0, dash_pos);
+    if (!absl::SimpleAtoi(absl::StripAsciiWhitespace(day_str), &days))
+      return -1;
+    time_part = input.substr(dash_pos + 1);
+  }
+
+  for (auto p : absl::StrSplit(time_part, ':')) {
+    parts.push_back(absl::StripAsciiWhitespace(p));
+  }
+
+  if (parts.size() > 3 || parts.empty()) return -1;
+
+  auto parse = [](absl::string_view sv, int &out) {
+    return absl::SimpleAtoi(sv, &out);
+  };
+
+  if (parts.size() == 3) {
+    if (!parse(parts[0], hours) || !parse(parts[1], mins) ||
+        !parse(parts[2], secs))
+      return -1;
+  } else if (parts.size() == 2) {
+    if (!parse(parts[0], hours) || !parse(parts[1], mins)) return -1;
+  } else if (parts.size() == 1) {
+    if (!parse(parts[0], mins)) return -1;
+  }
+
+  return (days * 1440) + hours * 60 + mins + (secs > 0 ? 1 : 0);
+}
+
 }  // namespace util

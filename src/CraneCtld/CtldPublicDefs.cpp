@@ -1384,6 +1384,9 @@ void TaskInCtld::SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
 
   uid = val.uid();
   password_entry = std::make_unique<PasswordEntry>(uid);
+  if (password_entry && password_entry->Valid()) {
+    SetUsername(password_entry->Username());
+  }
 
   // Note: gid is egid, which may be different from the
   // primary group of the user in `password_entry`.
@@ -1551,6 +1554,11 @@ void TaskInCtld::SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
 
   task_info->mutable_licenses_count()->insert(licenses_count.begin(),
                                               licenses_count.end());
+
+  auto* mutable_env = task_info->mutable_env();
+  for (auto const& [k, v] : env) {
+    (*mutable_env)[k] = v;
+  }
 }
 
 }  // namespace Ctld
