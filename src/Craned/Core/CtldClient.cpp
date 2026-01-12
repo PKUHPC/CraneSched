@@ -651,7 +651,8 @@ void CtldClient::Init() {
 
   g_ctld_client_sm->SetActionReadyCb([this]() {
     bool expected = false;
-    if (g_config.HealthCheck.Interval > 0L && m_health_check_init_.compare_exchange_strong(expected, true)) {
+    if (g_config.HealthCheck.Interval > 0L &&
+        m_health_check_init_.compare_exchange_strong(expected, true)) {
       m_health_check_init_ = true;
       m_health_check_thread_ = std::thread([this] {
         util::SetCurrentThreadName("HealthCheckThr");
@@ -1011,7 +1012,6 @@ void CtldClient::HealthCheck_() {
   auto fut = std::async(std::launch::async,
                         [pid, &status]() { return waitpid(pid, &status, 0); });
 
-
   if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTime)) ==
       std::future_status::ready) {
     if (fut.get() == pid) {
@@ -1047,7 +1047,7 @@ void CtldClient::HealthCheck_() {
   } else {
     exit_code = status;
   }
-  std::string is_success = exit_code ==  0 ? "success" : "failed";
+  std::string is_success = exit_code == 0 ? "success" : "failed";
 
   subprocess_destroy(&subprocess);
 
