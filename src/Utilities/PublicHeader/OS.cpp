@@ -516,11 +516,12 @@ std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
       bool child_exited = false;
 
       if (args.timeout_sec == 0) {
-        fut.get();
-        child_exited = true;
+        if (fut.get() == pid)
+          child_exited = true;
       } else if (fut.wait_for(std::chrono::seconds(remaining_time)) ==
                  std::future_status::ready) {
-        child_exited = true;
+        if (fut.get() == pid)
+          child_exited = true;
       }
 
       if (!child_exited) {
@@ -530,7 +531,16 @@ std::optional<std::string> RunPrologOrEpiLog(const RunPrologEpilogArgs& args) {
         return std::nullopt;
       }
 
-      if (status != 0) {
+      int exit_code = 0;
+      if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+      } else if (WIFSIGNALED(status)) {
+        exit_code = 128 + WTERMSIG(status);
+      } else {
+        exit_code = status;
+      }
+
+      if (exit_code != 0) {
         CRANE_TRACE("{} Failed (exit code:{}).", script, status);
         if (args.is_prolog) return std::nullopt;
         is_failed = true;

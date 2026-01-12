@@ -726,6 +726,8 @@ void CtldClient::StepStatusChangeAsync(job_id_t job_id, step_id_t step_id,
 void CtldClient::UpdateNodeDrainState(bool is_drain,
                                       const std::string& reason) {
   grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
   crane::grpc::UpdateNodeDrainStateRequest request;
   crane::grpc::UpdateNodeDrainStateReply reply;
   request.set_craned_id(g_config.CranedIdOfThisNode);

@@ -1384,23 +1384,25 @@ void JobManager::CleanUpJobAndStepsAsync(std::vector<JobInD>&& jobs,
     }
 
     if (!g_config.JobLifecycleHook.Epilogs.empty()) {
-      CRANE_TRACE("#{}: Running epilogs...", job_id);
-      RunPrologEpilogArgs run_epilog_args{
-          .scripts = g_config.JobLifecycleHook.Epilogs,
-          .envs = job.GetJobEnvMap(),
-          .run_uid = 0,
-          .run_gid = 0,
-          .is_prolog = false,
-          .output_size = g_config.JobLifecycleHook.MaxOutputSize};
-      if (g_config.JobLifecycleHook.EpilogTimeout > 0)
-        run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
-      else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
-        run_epilog_args.timeout_sec =
-            g_config.JobLifecycleHook.PrologEpilogTimeout;
+      g_thread_pool->detach_task([job_id, env_map = job.GetJobEnvMap()]() {
+        CRANE_TRACE("#{}: Running epilogs...", job_id);
+        RunPrologEpilogArgs run_epilog_args{
+            .scripts = g_config.JobLifecycleHook.Epilogs,
+            .envs = env_map,
+            .run_uid = 0,
+            .run_gid = 0,
+            .is_prolog = false,
+            .output_size = g_config.JobLifecycleHook.MaxOutputSize};
+        if (g_config.JobLifecycleHook.EpilogTimeout > 0)
+          run_epilog_args.timeout_sec = g_config.JobLifecycleHook.EpilogTimeout;
+        else if (g_config.JobLifecycleHook.PrologEpilogTimeout > 0)
+          run_epilog_args.timeout_sec =
+              g_config.JobLifecycleHook.PrologEpilogTimeout;
 
-      if (!util::os::RunPrologOrEpiLog(run_epilog_args)) {
-        g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
-      }
+        if (!util::os::RunPrologOrEpiLog(run_epilog_args)) {
+          g_ctld_client->UpdateNodeDrainState(true, "Epilog failed");
+        }
+      });
     }
 
     m_completing_job_.emplace(job_id, std::move(job));

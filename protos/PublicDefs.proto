@@ -291,7 +291,6 @@ message StepToCtld {
   string excludes = 34;
   string nodelist = 35;
   optional uint64 mem_per_cpu = 36;
-  string container = 26;
   string task_prolog = 27;
   string task_epilog = 28;
 }
