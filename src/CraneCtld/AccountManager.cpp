@@ -1087,6 +1087,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
       rich_error_list.emplace_back(std::unexpected{
           FormatRichErr(result.error(),
                         fmt::format("user: {}, account: {}", name, account))});
+    } else if (result.error() ==
+               CraneErrCode::ERR_USER_ACCESS_TO_ACCOUNT_DENIED) {
+      rich_error_list.emplace_back(
+          std::unexpected{FormatRichErr(result.error(), op_user->name)});
     } else {
       rich_error_list.emplace_back(
           std::unexpected{FormatRichErr(result.error(), "")});
