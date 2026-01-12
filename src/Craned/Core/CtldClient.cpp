@@ -383,6 +383,7 @@ CtldClient::~CtldClient() {
   CRANE_TRACE("Waiting for CtldClient thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  if (m_health_check_thread_.joinable()) m_health_check_thread_.join();
 }
 
 void CtldClient::Init() {
@@ -647,6 +648,29 @@ void CtldClient::Init() {
       [this](CtldClientStateMachine::RegisterArg const& arg) {
         CranedRegister_(arg.token, arg.lost_jobs, arg.lost_steps);
       });
+
+  g_ctld_client_sm->SetActionReadyCb([this]() {
+    if (g_config.HealthCheck.Interval > 0L && !m_health_check_init_) {
+      m_health_check_init_ = true;
+      m_health_check_thread_ = std::thread([this] {
+        util::SetCurrentThreadName("HealthCheckThr");
+        HealthCheck_();
+        if (g_config.HealthCheck.NodeState & START_ONLY) return;
+        std::mt19937 rng{std::random_device{}()};
+        do {
+          uint64_t interval = g_config.HealthCheck.Interval;
+          int delay = interval;
+          if (g_config.HealthCheck.Cycle) {
+            std::uniform_int_distribution<int> dist(1, interval);
+            delay = dist(rng);
+          }
+          std::this_thread::sleep_for(std::chrono::seconds(delay));
+          if (m_stopping_ || !m_stub_) return;
+          if (CheckNodeState_()) HealthCheck_();
+        } while (true);
+      });
+    }
+  });
 }
 
 void CtldClient::InitGrpcChannel(const std::string& server_address) {
@@ -951,6 +975,93 @@ bool CtldClient::SendStatusChanges_(
     }
   }
   return true;
+}
+
+void CtldClient::HealthCheck_() {
+  subprocess_s subprocess{};
+  std::vector<const char*> argv = {g_config.HealthCheck.Program.c_str(),
+                                   nullptr};
+
+  if (subprocess_create(argv.data(), 0, &subprocess) != 0) {
+    CRANE_ERROR("HealthCheck subprocess creation failed: {}.", strerror(errno));
+    return;
+  }
+
+  pid_t pid = subprocess.child;
+  int result = 0;
+
+  auto fut = std::async(std::launch::async,
+                        [pid, &result]() { return waitpid(pid, &result, 0); });
+
+  bool child_exited = false;
+  if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTime)) ==
+      std::future_status::ready) {
+    if (fut.get() == pid) {
+      child_exited = true;
+    }
+  }
+
+  auto read_stream = [](std::FILE* f) {
+    std::string out;
+    char buf[4096];
+    while (std::fgets(buf, sizeof(buf), f)) out.append(buf);
+    return out;
+  };
+
+  if (!child_exited) {
+    kill(pid, SIGKILL);
+    waitpid(pid, &result, 0);
+    std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
+    std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
+    CRANE_ERROR("HealthCheck: Timeout. stdout: {}, stderr: {}", stdout_str,
+                stderr_str);
+    subprocess_destroy(&subprocess);
+    return;
+  }
+
+  std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
+  std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
+  std::string is_success = result == 0 ? "success" : "failed";
+
+  subprocess_destroy(&subprocess);
+
+  CRANE_DEBUG("HealthCheck: {} (exit code: {}). stdout: {}, stderr: {}",
+              is_success, result, stdout_str, stderr_str);
+}
+
+bool CtldClient::CheckNodeState_() {
+  if (g_config.HealthCheck.NodeState & ANY) return true;
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCranedRpcTimeoutSeconds));
+  crane::grpc::QueryNodeStateRequest req;
+  crane::grpc::QueryNodeStateReply reply;
+  req.set_craned_id(g_config.CranedIdOfThisNode);
+  auto result = m_stub_->QueryNodeState(&context, req, &reply);
+  if (!result.ok() || !reply.ok()) {
+    CRANE_ERROR("QueryNodeState failed");
+    return false;
+  }
+
+  using crane::grpc::CranedResourceState;
+  if ((g_config.HealthCheck.NodeState & IDLE) &&
+      reply.state() == CranedResourceState::CRANE_IDLE)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState & ALLOC) &&
+      reply.state() == CranedResourceState::CRANE_ALLOC)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState & MIXED) &&
+      reply.state() == CranedResourceState::CRANE_MIX)
+    return true;
+
+  if ((g_config.HealthCheck.NodeState & NONDRAINED_IDLE) && !reply.drain() &&
+      reply.state() == CranedResourceState::CRANE_IDLE)
+    return true;
+
+  return false;
 }
 
 bool CtldClient::Ping_() {
