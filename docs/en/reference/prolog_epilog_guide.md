@@ -44,12 +44,12 @@ echo "print This message has been printed with TaskProlog"
 
 # Failure Handling
 
-- **If a Prolog fails (non-zero exit)** → the node is set to **DRAIN** and the job is **requeued**.
+- **If a Prolog fails (non-zero exit)** → the node is set to **DRAIN** and the job is **failed**.
 - **If an Epilog fails** → the node is set to **DRAIN**.
-- **If CranectldProlog fails** → the job is **requeued**. Interactive jobs (`calloc`, `crun`) are **canceled**.
+- **If CranectldProlog fails** → the job is **failed**.
 - **If CranectldEpilog fails** → a **log is written**.
-- **If task prolog fails** → the **task is canceled**.
-- **If crun prolog fails** → the **step is canceled**.
+- **If task prolog fails** → the **task is failed**.
+- **If crun prolog fails** → the **step will not be executed; the frontend will directly return a failure.**.
 - **If task epilog or crun epilog fails** → a **log is written**.
 
 ---
@@ -66,7 +66,7 @@ Configuration Example:
 JobLifecycleHook:
   Prolog: /path/to/prolog.sh
   PrologTimeout: 60
-  # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
+  # PrologFlags: Contain  # Contain, RunInJob, Serial
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60
   PrologEpilogTimeout: 120
@@ -85,8 +85,9 @@ JobLifecycleHook:
 ### **Contain**
 Runs Prolog inside job cgroup at allocation time.
 
-### **ForceRequeueOnFail**
-Requeue batch jobs that fail due to Prolog errors, even if not requested.
+[//]: # (### **ForceRequeueOnFail**)
+
+[//]: # (Requeue batch jobs that fail due to Prolog errors, even if not requested.)
 
 ### **RunInJob**
 Runs Prolog/Epilog inside extern csupervisor, included in job cgroup.  

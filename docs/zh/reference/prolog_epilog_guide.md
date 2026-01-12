@@ -61,16 +61,13 @@ echo "print This message has been printed with TaskProlog"
 
 ## 故障处理
 
-- 如果 `Prolog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态且作业会被重新排队。
+- 如果 `Prolog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态且作业会设为失败。
   如果 `Epilog` 失败（返回非零退出码），该节点会被置为 `DRAIN` 状态。
-- 如果 `CraneCtldProlog` 失败（返回非零退出码），
-  作业会被重新排队。只有批处理作业能被重新排队。交互式作业（`calloc` 和 `crun`）
-  在 `CraneCtldProlog` 失败时会被取消。
+- 如果 `CraneCtldProlog` 失败（返回非零退出码）， 作业会设为失败。
   如果 `CraneCtldEpilog` 失败（返回非零退出码），仅会记录日志。
-- 如果 `task prolog` 失败（返回非零退出码），
-  该任务会被取消。如果 `crun prolog` 失败（返回非零退出码），
-  该步骤会被取消。如果 `task epilog` 或 `crun epilog` 失败（返回非零退出码），
-  仅会记录日志。
+- 如果 `task prolog` 失败（返回非零退出码）， 该任务会设为失败。
+- 如果 `crun prolog` 失败（返回非零退出码）， 该步骤不会运行，前端直接返回失败。
+- 如果 `task epilog` 或 `crun epilog` 失败（返回非零退出码）， 仅会记录日志。
 
 ## Prolog 和 Epilog 配置
 * PrologTimeout: Prolog 脚本的运行超时时间（秒）。
@@ -84,7 +81,7 @@ echo "print This message has been printed with TaskProlog"
 JobLifecycleHook:
   Prolog: /path/to/prolog.sh
   PrologTimeout: 60
-  # PrologFlags: Alloc  # Alloc, Contain, NoHold, RunInJob, Serial
+  # PrologFlags: Contain #Contain, RunInJob, Serial
   Epilog: /path/to/epilog.sh
   EpilogTimeout: 60 
   PrologEpilogTimeout: 120
@@ -102,8 +99,9 @@ JobLifecycleHook:
 - **Contain**  
   在作业分配时，Prolog 脚本会在作业的cgroup下执行。
 
-- **ForceRequeueOnFail**  
-  当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。
+[//]: # (- **ForceRequeueOnFail**  )
+
+[//]: # (  当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。)
 
 - **RunInJob**  
   使 Prolog/Epilog 在 extern csupervisor 进程中运行。
