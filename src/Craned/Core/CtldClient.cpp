@@ -661,9 +661,9 @@ void CtldClient::Init() {
         std::mt19937 rng{std::random_device{}()};
         do {
           uint64_t interval = g_config.HealthCheck.Interval;
-          int delay = interval;
+          uint64_t delay = interval;
           if (g_config.HealthCheck.Cycle) {
-            std::uniform_int_distribution<int> dist(1, interval);
+            std::uniform_int_distribution<uint64_t> dist(1, interval);
             delay = dist(rng);
           }
           std::this_thread::sleep_for(std::chrono::seconds(delay));
@@ -1039,17 +1039,20 @@ void CtldClient::HealthCheck_() {
 
   std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
   std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
-  std::string is_success;
-  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-    is_success = "success";
+  int exit_code = -1;
+  if (WIFEXITED(status)) {
+    exit_code = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    exit_code = 128 + WTERMSIG(status);
   } else {
-    is_success = "failed";
+    exit_code = status;
   }
+  std::string is_success = exit_code ==  0 ? "success" : "failed";
 
   subprocess_destroy(&subprocess);
 
   CRANE_DEBUG("HealthCheck: {} (exit code: {}). stdout: {}, stderr: {}",
-              is_success, status, stdout_str, stderr_str);
+              is_success, exit_code, stdout_str, stderr_str);
 }
 
 bool CtldClient::CheckNodeState_() {
