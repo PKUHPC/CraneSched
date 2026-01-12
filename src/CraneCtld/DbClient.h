@@ -238,11 +238,6 @@ class MongodbClient {
       JobSummary::Type src_type, JobSummary::Type dst_type,
       std::chrono::sys_seconds period_start_tp,
       std::chrono::sys_seconds period_end_tp);
-  bool AggregateJobSummaryByDayOrMonthOptimized_(
-      mongocxx::collection& src_coll, const std::string& src_time_field,
-      const std::string& dst_coll_str, const std::string& period_field,
-      std::chrono::sys_seconds period_start_tp,
-      std::chrono::sys_seconds period_end_tp, JobSummary::Type dst_type);
   void MongoDbSummaryThread_();
 
   /* ----- Method of operating the account table ----------- */

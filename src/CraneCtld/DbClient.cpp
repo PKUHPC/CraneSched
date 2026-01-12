@@ -2294,107 +2294,6 @@ bool MongodbClient::AggregateJobSummaryByHour_(
   }
 }
 
-bool MongodbClient::AggregateJobSummaryByDayOrMonthOptimized_(
-    mongocxx::collection& src_coll, const std::string& src_time_field,
-    const std::string& dst_coll_str, const std::string& period_field,
-    std::chrono::sys_seconds period_start_tp,
-    std::chrono::sys_seconds period_end_tp, JobSummary::Type dst_type) {
-  try {
-    using namespace std::chrono;
-    using bsoncxx::builder::basic::kvp;
-    using bsoncxx::builder::basic::make_array;
-    using bsoncxx::builder::basic::make_document;
-
-    auto start_date =
-        bsoncxx::types::b_date{time_point_cast<milliseconds>(period_start_tp)};
-    auto end_date =
-        bsoncxx::types::b_date{time_point_cast<milliseconds>(period_end_tp)};
-
-    mongocxx::pipeline pipeline;
-
-    pipeline.match(make_document(
-        kvp(src_time_field,
-            make_document(kvp("$gte", start_date), kvp("$lt", end_date)))));
-
-    std::string dateTruncUnit =
-        (dst_type == JobSummary::Type::DAY) ? "day" : "month";
-
-    auto add_period_stage = make_document(
-        kvp("$addFields",
-            make_document(kvp(
-                period_field,
-                make_document(kvp(
-                    "$dateTrunc",
-                    make_document(
-                        kvp("date", "$" + src_time_field),  // "$hour" 或 "$day"
-                        kvp("unit", dateTruncUnit),         // "day" 或 "month"
-                        kvp("timezone", "UTC"))))))));
-    pipeline.append_stage(add_period_stage.view());
-
-    std::string period_field_ref = "$" + period_field;
-    pipeline.group(make_document(
-        kvp("_id",
-            make_document(kvp(period_field, period_field_ref),
-                          kvp("account", "$account"),
-                          kvp("username", "$username"), kvp("qos", "$qos"),
-                          kvp("wckey", "$wckey"), kvp("id_group", "$id_group"),
-                          kvp("cpus_alloc", "$cpus_alloc"),
-                          kvp("partition_name", "$partition_name"),
-                          kvp("nodelist", "$nodelist"))),
-        kvp("total_cpu_time", make_document(kvp("$sum", "$total_cpu_time"))),
-        kvp("total_count", make_document(kvp("$sum", "$total_count"))),
-        kvp("nodename_list", make_document(kvp("$first", "$nodename_list")))));
-
-    pipeline.replace_root(make_document(
-        kvp("newRoot",
-            make_document(kvp(period_field, "$_id." + period_field),
-                          kvp("account", "$_id.account"),
-                          kvp("username", "$_id.username"),
-                          kvp("qos", "$_id.qos"), kvp("wckey", "$_id.wckey"),
-                          kvp("cpus_alloc", "$_id.cpus_alloc"),
-                          kvp("id_group", "$_id.id_group"),
-                          kvp("partition_name", "$_id.partition_name"),
-                          kvp("nodelist", "$_id.nodelist"),
-                          kvp("nodename_list", "$nodename_list"),
-                          kvp("total_cpu_time", "$total_cpu_time"),
-                          kvp("total_count", "$total_count")))));
-
-    pipeline.merge(make_document(
-        kvp("into", dst_coll_str),
-        kvp("on",
-            make_array(period_field, "account", "username", "qos", "wckey",
-                       "id_group", "cpus_alloc", "partition_name", "nodelist")),
-        kvp("whenMatched", "replace"), kvp("whenNotMatched", "insert")));
-
-    mongocxx::options::aggregate agg_opts;
-    agg_opts.allow_disk_use(true);
-    agg_opts.max_time(milliseconds{g_config.JobAggregationTimeoutMs});
-    agg_opts.batch_size(g_config.JobAggregationBatchSize);
-    agg_opts.comment(
-        {fmt::format("CraneSched_{}_{:%Y%m%d_%H%M%S}_to_{:%Y%m%d_%H%M%S}",
-                     __func__, period_start_tp, period_end_tp)});
-
-    auto cursor = src_coll.aggregate(pipeline, agg_opts);
-    for (auto&& doc : cursor) {}
-
-    UpdateJobSummaryLastSuccessTime_(dst_type, period_end_tp);
-
-    CRANE_LOGGER_INFO(
-        m_logger_,
-        "AggregateJobSummaryByDayOrMonth (dateTrunc) from {} to {} success.",
-        period_start_tp, period_end_tp);
-    return true;
-
-  } catch (const std::exception& e) {
-    std::string type_name =
-        (dst_type == JobSummary::Type::DAY) ? "Day" : "Month";
-    CRANE_LOGGER_ERROR(m_logger_,
-                       "AggregateJobSummaryBy{}OrMonthOptimized error: {}",
-                       type_name, e.what());
-    return false;
-  }
-}
-
 bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
     JobSummary::Type src_type, JobSummary::Type dst_type,
     std::chrono::sys_seconds period_start_tp,
@@ -2443,22 +2342,6 @@ bool MongodbClient::AggregateJobSummaryByDayOrMonth_(
     }
 
     auto src_coll = (*GetClient_())[m_db_name_][src_coll_str];
-
-    // if (MongoVersionAtLeast_(5, 0)) {
-    //   // Check if thread should stop before optimized aggregation
-    //   if (m_thread_stop_) {
-    //     CRANE_LOGGER_INFO(m_logger_,
-    //                       "Day/Month aggregation (optimized) aborted: thread
-    //                       stopping");
-    //     return false;
-    //   }
-    //
-    //   return AggregateJobSummaryByDayOrMonthOptimized_(
-    //       src_coll, src_time_field, dst_coll_str, period_field,
-    //       period_start_tp, period_end_tp, dst_type);
-    // }
-
-    // MongoDB < 5.0: 使用循环方式聚合
     while (sys_seconds{cur_end_day} <= period_end_tp) {
       // Check if thread should stop before processing next period
       if (m_thread_stop_) {
