@@ -650,10 +650,12 @@ void CtldClient::Init() {
       });
 
   g_ctld_client_sm->SetActionReadyCb([this]() {
-    if (g_config.HealthCheck.Interval > 0L && !m_health_check_init_) {
+    bool expected = false;
+    if (g_config.HealthCheck.Interval > 0L && m_health_check_init_.compare_exchange_strong(expected, true)) {
       m_health_check_init_ = true;
       m_health_check_thread_ = std::thread([this] {
         util::SetCurrentThreadName("HealthCheckThr");
+        CRANE_TRACE("HealthCheckThr start");
         HealthCheck_();
         if (g_config.HealthCheck.NodeState & START_ONLY) return;
         std::mt19937 rng{std::random_device{}()};
@@ -1003,12 +1005,13 @@ void CtldClient::HealthCheck_() {
   }
 
   pid_t pid = subprocess.child;
-  int result = 0;
+  int status = 0;
+  bool child_exited = false;
 
   auto fut = std::async(std::launch::async,
-                        [pid, &result]() { return waitpid(pid, &result, 0); });
+                        [pid, &status]() { return waitpid(pid, &status, 0); });
 
-  bool child_exited = false;
+
   if (fut.wait_for(std::chrono::milliseconds(MaxHealthCheckWaitTime)) ==
       std::future_status::ready) {
     if (fut.get() == pid) {
@@ -1025,7 +1028,7 @@ void CtldClient::HealthCheck_() {
 
   if (!child_exited) {
     kill(pid, SIGKILL);
-    waitpid(pid, &result, 0);
+    waitpid(pid, &status, 0);
     std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
     std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
     CRANE_ERROR("HealthCheck: Timeout. stdout: {}, stderr: {}", stdout_str,
@@ -1036,12 +1039,17 @@ void CtldClient::HealthCheck_() {
 
   std::string stdout_str = read_stream(subprocess_stdout(&subprocess));
   std::string stderr_str = read_stream(subprocess_stderr(&subprocess));
-  std::string is_success = result == 0 ? "success" : "failed";
+  std::string is_success;
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+    is_success = "success";
+  } else {
+    is_success = "failed";
+  }
 
   subprocess_destroy(&subprocess);
 
   CRANE_DEBUG("HealthCheck: {} (exit code: {}). stdout: {}, stderr: {}",
-              is_success, result, stdout_str, stderr_str);
+              is_success, status, stdout_str, stderr_str);
 }
 
 bool CtldClient::CheckNodeState_() {
