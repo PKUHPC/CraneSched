@@ -106,7 +106,7 @@ JobLifecycleHook:
   当批处理作业因 Prolog 失败而无法启动时，即使作业请求不重排队，也会自动将其重新排队。
 
 - **RunInJob**  
-  使 Prolog/Epilog 在 extern cranestepd 进程中运行。
+  使 Prolog/Epilog 在 extern csupervisor 进程中运行。
   这将把其包含为作业的进程之一。
   如果配置了 cgroup，则会被包含在 cgroup 中。
   设置 RunInJob 标志会隐式地设置 Contain 标志。

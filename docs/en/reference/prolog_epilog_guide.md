@@ -14,10 +14,10 @@ The table below describes the prolog and epilog programs available during job st
 | Parameter                                     | Location        | Invoked by  | User                        | Execution Timing            |
 |-----------------------------------------------|-----------------|-------------|-----------------------------|-----------------------------|
 | CrunProlog (config.yaml or `crun --prolog`)   | crun launch node| crun        | User running crun           | Before job step launch      |
-| TaskProlog (config.yaml)                      | Compute node    | cranestepd->csupervisor  | User running crun           | Before job step launch      |
-| `crun --task-prolog`                          | Compute node    | cranestepd->csupervisor  | User running crun           | Before job step launch      |
-| TaskEpilog (config.yaml)                      | Compute node    | cranestepd->csupervisor  | User running crun           | When job step completes     |
-| `crun --task-epilog`                          | Compute node    | cranestepd->csupervisor  | User running crun           | When job step completes     |
+| TaskProlog (config.yaml)                      | Compute node    | csupervisor  | User running crun           | Before job step launch      |
+| `crun --task-prolog`                          | Compute node    | csupervisor | User running crun           | Before job step launch      |
+| TaskEpilog (config.yaml)                      | Compute node    | csupervisor | User running crun           | When job step completes     |
+| `crun --task-epilog`                          | Compute node    | csupervisor | User running crun           | When job step completes     |
 | CrunEpilog (config.yaml or `crun --epilog`)   | crun launch node| crun        | User running crun           | When job step completes     |
 
 By default, the `Prolog` script only runs on a node when it receives its first job step from a new allocation. It does not run at the moment the allocation is granted. If no job step from an allocation ever runs on a node, that node will not run the `Prolog` for that allocation. This behavior can be changed with the `PrologFlags` parameter.  
@@ -89,7 +89,7 @@ Runs Prolog inside job cgroup at allocation time.
 Requeue batch jobs that fail due to Prolog errors, even if not requested.
 
 ### **RunInJob**
-Runs Prolog/Epilog inside extern cranestepd, included in job cgroup.  
+Runs Prolog/Epilog inside extern csupervisor, included in job cgroup.  
 Implies **Contain**.
 
 ### **Serial**
