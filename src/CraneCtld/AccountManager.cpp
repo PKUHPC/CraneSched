@@ -789,6 +789,12 @@ AccountManager::CheckModifyAccountOperations(
             }
 
             modify_record->emplace_back(qos, ModifyField::Qos, std::nullopt);
+            account->allowed_qos_list.remove(qos);
+            if (account->default_qos == qos) {
+              account->default_qos = account->allowed_qos_list.empty()
+                                         ? ""
+                                         : account->allowed_qos_list.front();
+            }
           }
 
           *log +=
@@ -1077,6 +1083,10 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyUser(
     if (result.error() == CraneErrCode::ERR_PERMISSION_USER) {
       rich_error_list.emplace_back(
           std::unexpected{FormatRichErr(result.error(), op_user->name)});
+    } else if (result.error() == CraneErrCode::ERR_USER_ACCOUNT_MISMATCH) {
+      rich_error_list.emplace_back(std::unexpected{
+          FormatRichErr(result.error(),
+                        fmt::format("user: {}, account: {}", name, account))});
     } else {
       rich_error_list.emplace_back(
           std::unexpected{FormatRichErr(result.error(), "")});
@@ -1138,7 +1148,7 @@ std::vector<CraneExpectedRich<void>> AccountManager::ModifyQos(
     auto result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     if (!result) {
       rich_error_list.emplace_back(
-          std::unexpected{FormatRichErr(result.error(), "")});
+          std::unexpected{FormatRichErr(result.error(), op_user->name)});
       return rich_error_list;
     }
   }
